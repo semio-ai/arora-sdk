@@ -21,25 +21,25 @@ use engine_schema::ty::{
   }
 };
 
-use tokio::fs::{copy, read_to_string};
+use tokio::{fs::{copy, read_to_string, File}, io::AsyncReadExt, io::AsyncWriteExt};
 use url::Url;
 use uuid::Uuid;
 
 #[derive(Debug, Parser)]
-struct Build {
+struct Generate {
   #[clap(short, long)]
   language: String,
 }
 
 #[derive(Debug, Parser)]
 struct ExportType {
-  #[clap(short, long)]
+  #[clap(short, long, name = "input-file")]
   input_file: String,
 
-  #[clap(short, long)]
+  #[clap(short, long, name = "no-resolution")]
   no_resolution: bool,
 
-  #[clap(short, long)]
+  #[clap(short, long, name = "output-directory")]
   output_directory: String,
 }
 
@@ -57,7 +57,7 @@ struct ExportModule {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-  Build(Build),
+  Generate(Generate),
   #[clap(name = "export-type")]
   ExportType(ExportType),
   #[clap(name = "export-module")]
@@ -77,7 +77,7 @@ struct Args {
   command: Commands,
 }
 
-async fn build(cmd: Build, registry: Registry) -> anyhow::Result<()> {
+async fn generate(cmd: Generate, registry: Registry) -> anyhow::Result<()> {
   Ok(())
 }
 
@@ -90,16 +90,20 @@ async fn export_type(cmd: ExportType, registry: Registry) -> anyhow::Result<()> 
       Uuid::new_v4()
     };
 
-    let low_type = LowType {
+    LowType {
       id,
       name: high_type.name,
       description: high_type.description,
       kind: match high_type.kind {
         HighTypeKind::Structure(high_structure) => {
+          let mut low_fields = HashMap::new();
           for (id, field) in high_structure.fields.iter() {
             match registry.lookup_type(&field.ty).await {
-              Ok(id) => {
-
+              Ok(ty_id) => {
+                low_fields.insert(*id, LowStructureField {
+                  name: field.name.clone(),
+                  ty_id,
+                });
               },
               Err(err) => {
                 eprintln!("Failed to lookup type {}: {}", field.ty, err);
@@ -107,14 +111,20 @@ async fn export_type(cmd: ExportType, registry: Registry) -> anyhow::Result<()> 
               }
             }
           }
+          LowTypeKind::Structure(LowStructure {
+            fields: low_fields,
+          })
         },
         HighTypeKind::Enumeration(high_enumeration) => {
-          let low_values = HashMap::new();
+          let mut low_values = HashMap::new();
           
           for (id, value) in high_enumeration.values.iter() {
             match registry.lookup_type(&value.ty).await {
-              Ok(id) => {
-
+              Ok(ty_id) => {
+                low_values.insert(*id, LowEnumerationValue {
+                  name: value.name.clone(),
+                  ty_id,
+                });
               },
               Err(err) => {
                 eprintln!("Failed to lookup type {}: {}", value.ty, err);
@@ -122,9 +132,30 @@ async fn export_type(cmd: ExportType, registry: Registry) -> anyhow::Result<()> 
               }
             }
           }
+
+          LowTypeKind::Enumeration(LowEnumeration {
+            values: low_values,
+          })
         }
       },
-    };
+    }
+  } else {
+    serde_yaml::from_str(&read_to_string(cmd.input_file).await?)?
+  };
+
+  let output_path = Path::new(&cmd.output_directory)
+    .join(format!("types/by-uuid/{}.yaml", low_type.id));
+
+  let mut output_file = File::create(&output_path).await?;
+  output_file.write_all(serde_yaml::to_string(&low_type)?.as_bytes()).await?;
+
+
+  let name_output_path = Path::new(&cmd.output_directory)
+    .join(format!("types/by-name/{}", low_type.name));
+
+  let mut name_output_file = File::create(&name_output_path).await?;
+  name_output_file.write_all(format!("{}", low_type.id).as_bytes()).await?;
+
   Ok(())
 }
 
@@ -143,22 +174,15 @@ async fn main() -> anyhow::Result<()> {
   };
 
   match args.command {
-    Commands::Build(build) => {
-      println!("Building {}", build.language);
+    Commands::Generate(generate) => {
+      println!("Building {}", generate.language);
     },
-    Commands::ExportType(export_type) => {
-      
-      } else {
-        serde_yaml::from_str(&read_to_string(input_file).await?)?
-      };
-
-      let mut output_path = Path::new(&output_directory).to_path_buf();
-      output_path.push("");
-      output_path.push();
-      copy(, )
+    Commands::ExportType(export_type_data) => {
+      println!("Exporting type {}", export_type_data.input_file);
+      export_type(export_type_data, registry).await?;
     },
-    Commands::ExportModule { configuration_file, executable_file, output_directory } => {
-      println!("Exporting module to {}", output_directory);
+    Commands::ExportModule(export_module_data) => {
+      println!("Exporting module to {}", export_module_data.output_directory);
     }
   }
 

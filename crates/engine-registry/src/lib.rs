@@ -4,7 +4,7 @@ use tokio::{fs::{read_to_string, File}, io::AsyncReadExt};
 use uuid::Uuid;
 use url::Url;
 
-const BASE_URL: &'static str = "https://github.com/semio-ai/engine-registry/blob/master";
+const BASE_URL: &'static str = "https://github.com/semio-ai/engine-registry/blob/master/";
 
 pub struct Registry {
   base_uri: Url,
@@ -43,17 +43,18 @@ impl Registry {
   }
 
   pub async fn get_type(&self, id: Uuid) -> anyhow::Result<String> {
-    let uri = self.base_uri.join(&format!("/types/by-uuid/{id}.yaml"))?;
+    let uri = self.base_uri.join(&format!("types/by-uuid/{id}.yaml"))?;
     Ok(Self::get_text(uri).await?)
   }
 
   pub async fn lookup_type(&self, name: &str) -> anyhow::Result<Uuid> {
-    let uri = self.base_uri.join(&format!("{BASE_URL}/types/by-name/{name}"))?;
+    let uri = self.base_uri.join(&format!("types/by-name/{name}"))?;
+    println!("{} - {}", self.base_uri, uri);
     Ok(Uuid::parse_str(&Self::get_text(uri).await?)?)
   }
 
   pub async fn get_module_header(&self, id: Uuid) -> anyhow::Result<Header> {
-    let uri = self.base_uri.join(&format!("/modules/by-uuid/{id}/header.yaml"))?;
+    let uri = self.base_uri.join(&format!("modules/by-uuid/{id}/header.yaml"))?;
     let text = Self::get_text(uri).await?;
     let header: Header = serde_yaml::from_str(&text)?;
     Ok(header)
@@ -62,7 +63,7 @@ impl Registry {
   pub async fn get_module(&self, id: Uuid) -> anyhow::Result<ModuleDefinition> {
     let header = self.get_module_header(id).await?;
 
-    let uri = self.base_uri.join(&format!("/modules/by-uuid/{id}/executable.bin"))?;
+    let uri = self.base_uri.join(&format!("modules/by-uuid/{id}/executable.bin"))?;
     let executable = Self::get_bytes(uri).await?;
 
     Ok(ModuleDefinition {

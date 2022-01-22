@@ -28,6 +28,7 @@ pub struct Enumeration {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum TypeKind {
   Structure(Structure),
   Enumeration(Enumeration),
