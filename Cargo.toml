@@ -2,6 +2,7 @@
 
 members = [
   "crates/engine",
+  "crates/engine-buffers",
   "crates/engine-schema",
   "crates/engine-module-cli",
   "crates/engine-module-cpp",

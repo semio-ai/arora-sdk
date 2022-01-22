@@ -77,8 +77,6 @@ pub struct Header {
   pub dependencies: Vec<Dependency>,
   /// MIME type of executable data (allows the same executor to support different formats
   pub executable_mime: String,
-  /// Artifact path
-  pub artifact_path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
