@@ -1,0 +1,10 @@
+[workspace]
+
+members = [
+  "crates/engine",
+  "crates/engine-schema",
+  "crates/engine-module-cli",
+  "crates/engine-module-cpp",
+  "crates/engine-registry",
+  "crates/engine-cli",
+]
