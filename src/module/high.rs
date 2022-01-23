@@ -25,7 +25,9 @@ pub struct Parameter {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Function {
+pub struct ImportFunction {
+  /// Module ID
+  pub module: String,
   /// Function ID
   pub id: Uuid,
   /// Function name
@@ -37,7 +39,31 @@ pub struct Function {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Node {
+pub struct ImportNode {
+  /// Module ID
+  pub module: String,
+  /// Node ID
+  pub id: Uuid,
+  /// The node's name
+  pub name: String,
+  /// Parameters
+  pub parameters: Vec<Parameter>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ExportFunction {
+  /// Function ID
+  pub id: Uuid,
+  /// Function name
+  pub name: String,
+  /// Function parameters
+  pub parameters: Vec<Parameter>,
+  /// The return type
+  pub ret: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ExportNode {
   /// Node ID
   pub id: Uuid,
   /// The node's name
@@ -48,11 +74,20 @@ pub struct Node {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum Symbol {
+pub enum ImportSymbol {
   /// A function
-  Function(Function),
+  Function(ImportFunction),
   /// A behavior tree node
-  Node(Node),
+  Node(ImportNode),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ExportSymbol {
+  /// A function
+  Function(ExportFunction),
+  /// A behavior tree node
+  Node(ExportNode),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -83,11 +118,9 @@ pub struct ModuleDefinition {
   /// The executor (e.g., WebAssembly, Python, JavaScript, etc.)
   pub executor: Executor,
   /// Exported symbols
-  pub exports: Vec<Symbol>,
+  pub exports: Vec<ExportSymbol>,
   /// Imported symbols
-  pub imports: Vec<Symbol>,
-  /// Required dependencies
-  pub dependencies: Vec<Dependency>,
+  pub imports: Vec<ImportSymbol>,
   /// MIME type of executable data (allows the same executor to support different formats
   pub executable_mime: String,
 }
