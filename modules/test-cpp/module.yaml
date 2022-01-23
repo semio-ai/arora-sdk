@@ -1,0 +1,26 @@
+id: 325c5e47-32db-4e23-a38f-7a2849647e0c
+author: Semio
+description: Test C++ module
+license: Proprietary
+name: test-cpp
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
+    name: test
+    parameters:
+      - id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
+        name: a
+        type: s32
+      - id: 63086e48-804f-403a-8862-3358ddedc08d
+        name: b
+        type: s32
+    ret: s32
+imports: []
+dependencies: []
+executable_mime: application/wasm

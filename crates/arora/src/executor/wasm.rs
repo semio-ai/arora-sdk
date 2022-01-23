@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use arora_schema::module::low::{ModuleDefinition, Symbol};
+use arora_schema::module::low::{ModuleDefinition, ImportSymbol, ExportSymbol};
 
 use crate::{
   actor::{Actor, Addr},
@@ -55,11 +55,11 @@ impl WebAssemblyExecutor {
     let mut externs = Vec::new();
     for import in module_definition.header.imports.iter() {
       match import {
-        Symbol::Function(f) => {
+        ImportSymbol::Function(f) => {
           let func = Func::wrap(&mut store, Self::call);
           externs.push(Extern::Func(func));
         }
-        Symbol::Node(n) => {}
+        ImportSymbol::Node(n) => {}
       }
     }
 

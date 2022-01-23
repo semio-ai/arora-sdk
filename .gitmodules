@@ -1,0 +1,6 @@
+[submodule "deps/emsdk"]
+	path = deps/emsdk
+	url = https://github.com/emscripten-core/emsdk.git
+[submodule "deps/binaryen"]
+	path = deps/binaryen
+	url = https://github.com/WebAssembly/binaryen.git

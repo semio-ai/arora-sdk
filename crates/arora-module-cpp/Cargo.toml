@@ -10,3 +10,8 @@ arora-module-core = { path = "../arora-module-core" }
 arora-schema = { path = "../arora-schema" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "*"
+clap = { version = "3.0.10", features = ["derive"] }
+convert_case = "0.5"
+arora-vfs = { path = "../arora-vfs" }
+uuid = { version = "0.8", features = ["serde", "v4"] }
+derive_more = "*"

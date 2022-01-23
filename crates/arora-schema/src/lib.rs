@@ -4,7 +4,7 @@ pub mod ty;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Display)]
+#[derive(Serialize, Deserialize, Debug, Display, Clone)]
 #[display(fmt = "{}.{}.{}", major, minor, patch)]
 pub struct SemanticVersion {
   major: u32,

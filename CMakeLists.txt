@@ -13,8 +13,15 @@ else()
   set(CARGO_BUILD_FLAGS --release)
 endif()
 
+set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli")
+
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_custom_target(arora-wasm ALL
+  COMMAND cargo build --package arora-buffers --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
@@ -35,3 +42,5 @@ install(
 )
 
 add_subdirectory(libs)
+add_subdirectory(deps)
+add_subdirectory(modules)

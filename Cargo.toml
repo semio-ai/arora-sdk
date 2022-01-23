@@ -10,4 +10,5 @@ members = [
   "crates/arora-registry",
   "crates/arora-cli",
   "crates/arora-util",
+  "crates/arora-vfs",
 ]

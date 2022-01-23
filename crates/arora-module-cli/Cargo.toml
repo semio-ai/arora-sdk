@@ -16,3 +16,6 @@ anyhow = "*"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 url = "2"
 arora-module-core = { path = "../arora-module-core" }
+arora-vfs = { path = "../arora-vfs" }
+log = "0.4"
+env_logger = "0.9"

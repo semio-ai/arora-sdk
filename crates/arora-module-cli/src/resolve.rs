@@ -2,19 +2,23 @@ use arora_registry::Registry;
 use arora_schema::module::{
   low::{
     Header as LowHeader,
-    Dependency as LowDependency,
-    Symbol as LowSymbol,
-    Function as LowFunction,
-    Node as LowNode,
+    ImportSymbol as LowImportSymbol,
+    ImportFunction as LowImportFunction,
+    ImportNode as LowImportNode,
+    ExportSymbol as LowExportSymbol,
+    ExportFunction as LowExportFunction,
+    ExportNode as LowExportNode,
     Parameter as LowParameter,
     Executor as LowExecutor,
   },
   high::{
     ModuleDefinition as HighModuleDefinition,
-    Dependency as HighDependency,
-    Symbol as HighSymbol,
-    Function as HighFunction,
-    Node as HighNode,
+    ImportSymbol as HighImportSymbol,
+    ImportFunction as HighImportFunction,
+    ImportNode as HighImportNode,
+    ExportSymbol as HighExportSymbol,
+    ExportFunction as HighExportFunction,
+    ExportNode as HighExportNode,
     Parameter as HighParameter,
     Executor as HighExecutor,
   }
@@ -44,36 +48,60 @@ pub async fn resolve_parameter(parameter: HighParameter, registry: &mut Registry
   })
 }
 
-pub async fn resolve_dependency(dependency: HighDependency, registry: &mut Registry) -> anyhow::Result<LowDependency> {
-  Ok(LowDependency {
-    id: resolve_module_id(&dependency.name, registry).await?,
-    min_version: dependency.min_version,
-    max_version: dependency.max_version,
-  })
-}
-
-pub async fn resolve_symbol(symbol: HighSymbol, registry: &mut Registry) -> anyhow::Result<LowSymbol> {
+pub async fn resolve_import_symbol(symbol: HighImportSymbol, registry: &mut Registry) -> anyhow::Result<LowImportSymbol> {
   Ok(match symbol {
-    HighSymbol::Function(function) => {
+    HighImportSymbol::Function(function) => {
       let mut parameters = Vec::new();
       for parameter in function.parameters {
         parameters.push(resolve_parameter(parameter, registry).await?);
       }
       
-      LowSymbol::Function(LowFunction {
+      LowImportSymbol::Function(LowImportFunction {
+        module: resolve_module_id(&function.module, registry).await?,
         id: function.id,
         name: function.name,
         parameters,
         ret: resolve_type_id(&function.ret, registry).await?,
       })
     },
-    HighSymbol::Node(node) => {
+    HighImportSymbol::Node(node) => {
       let mut parameters = Vec::new();
       for parameter in node.parameters {
         parameters.push(resolve_parameter(parameter, registry).await?);
       }
       
-      LowSymbol::Node(LowNode {
+      LowImportSymbol::Node(LowImportNode {
+        module: resolve_module_id(&node.module, registry).await?,
+        id: node.id,
+        name: node.name,
+        parameters
+      })
+    }
+  })
+}
+
+pub async fn resolve_export_symbol(symbol: HighExportSymbol, registry: &mut Registry) -> anyhow::Result<LowExportSymbol> {
+  Ok(match symbol {
+    HighExportSymbol::Function(function) => {
+      let mut parameters = Vec::new();
+      for parameter in function.parameters {
+        parameters.push(resolve_parameter(parameter, registry).await?);
+      }
+      
+      LowExportSymbol::Function(LowExportFunction {
+        id: function.id,
+        name: function.name,
+        parameters,
+        ret: resolve_type_id(&function.ret, registry).await?,
+      })
+    },
+    HighExportSymbol::Node(node) => {
+      let mut parameters = Vec::new();
+      for parameter in node.parameters {
+        parameters.push(resolve_parameter(parameter, registry).await?);
+      }
+      
+      LowExportSymbol::Node(LowExportNode {
         id: node.id,
         name: node.name,
         parameters
@@ -83,19 +111,14 @@ pub async fn resolve_symbol(symbol: HighSymbol, registry: &mut Registry) -> anyh
 }
 
 pub async fn resolve_module_header(module_definition: HighModuleDefinition, registry: &mut Registry) -> anyhow::Result<LowHeader> {
-  let mut dependencies = Vec::new();
-  for dependency in module_definition.dependencies {
-    dependencies.push(resolve_dependency(dependency, registry).await?);
-  }
-
   let mut imports = Vec::new();
   for import in module_definition.imports {
-    imports.push(resolve_symbol(import, registry).await?);
+    imports.push(resolve_import_symbol(import, registry).await?);
   }
 
   let mut exports = Vec::new();
   for export in module_definition.exports {
-    exports.push(resolve_symbol(export, registry).await?);
+    exports.push(resolve_export_symbol(export, registry).await?);
   }
   
   Ok(LowHeader {
@@ -103,7 +126,6 @@ pub async fn resolve_module_header(module_definition: HighModuleDefinition, regi
     version: module_definition.version,
     author: module_definition.author,
     description: module_definition.description,
-    dependencies,
     executable_mime: module_definition.executable_mime,
     executor: LowExecutor {
       name: module_definition.executor.name,

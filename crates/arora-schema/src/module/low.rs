@@ -4,7 +4,7 @@ use crate::SemanticVersion;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Executor {
   /// The executor name (e.g., WebAssembly, Python, Javascript, etc.)
   pub name: String,
@@ -12,7 +12,7 @@ pub struct Executor {
   pub max_version: Option<SemanticVersion>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Parameter {
   /// ID
   pub id: Uuid,
@@ -26,8 +26,8 @@ pub struct Parameter {
   pub mutable: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Function {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ExportFunction {
   /// Function ID
   pub id: Uuid,
   /// Function name
@@ -38,8 +38,19 @@ pub struct Function {
   pub ret: Uuid,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Node {
+impl ExportFunction {
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+    for param in &self.parameters {
+      deps.insert(param.ty_id);
+    }
+    deps.insert(self.ret);
+    deps
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ExportNode {
   /// Node ID
   pub id: Uuid,
   /// The node's name
@@ -48,26 +59,135 @@ pub struct Node {
   pub parameters: Vec<Parameter>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum Symbol {
-  /// A function
-  Function(Function),
-  /// A behavior tree node
-  Node(Node),
+impl ExportNode {
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+    for param in &self.parameters {
+      deps.insert(param.ty_id);
+    }
+    deps
+  }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Dependency {
-  /// Module id
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ImportFunction {
+  /// Module ID
+  pub module: Uuid,
+  /// Function ID
   pub id: Uuid,
-  /// Minimum version
-  pub min_version: Option<SemanticVersion>,
-  /// Maximum version
-  pub max_version: Option<SemanticVersion>,
+  /// Function name
+  pub name: String,
+  /// Function parameters
+  pub parameters: Vec<Parameter>,
+  /// The return type
+  pub ret: Uuid,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl ImportFunction {
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+    for param in &self.parameters {
+      deps.insert(param.ty_id);
+    }
+    deps.insert(self.ret);
+    deps
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ImportNode {
+  /// Module ID
+  pub module: Uuid,
+  /// Node ID
+  pub id: Uuid,
+  /// The node's name
+  pub name: String,
+  /// Parameters
+  pub parameters: Vec<Parameter>,
+}
+
+impl ImportNode {
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+    for param in &self.parameters {
+      deps.insert(param.ty_id);
+    }
+    deps
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ExportSymbol {
+  /// A function
+  Function(ExportFunction),
+  /// A behavior tree node
+  Node(ExportNode),
+}
+
+impl ExportSymbol {
+  pub fn id(&self) -> &Uuid {
+    match self {
+      Self::Function(f) => &f.id,
+      Self::Node(n) => &n.id,
+    }
+  }
+
+  pub fn name(&self) -> &String {
+    match self {
+      Self::Function(f) => &f.name,
+      Self::Node(n) => &n.name,
+    }
+  }
+
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    match self {
+      Self::Function(f) => f.type_dependencies(),
+      Self::Node(n) => n.type_dependencies(),
+    }
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ImportSymbol {
+  /// A function
+  Function(ImportFunction),
+  /// A behavior tree node
+  Node(ImportNode),
+}
+
+impl ImportSymbol {
+  pub fn module(&self) -> &Uuid {
+    match self {
+      Self::Function(f) => &f.module,
+      Self::Node(n) => &n.module,
+    }
+  }
+
+  pub fn id(&self) -> &Uuid {
+    match self {
+      Self::Function(f) => &f.id,
+      Self::Node(n) => &n.id,
+    }
+  }
+
+  pub fn name(&self) -> &String {
+    match self {
+      Self::Function(f) => &f.name,
+      Self::Node(n) => &n.name,
+    }
+  }
+
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    match self {
+      Self::Function(f) => f.type_dependencies(),
+      Self::Node(n) => n.type_dependencies(),
+    }
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Header {
   /// The module's ID
   pub id: Uuid,
@@ -84,11 +204,9 @@ pub struct Header {
   /// The executor (e.g., WebAssembly, Python, JavaScript, etc.)
   pub executor: Executor,
   /// Exported symbols
-  pub exports: Vec<Symbol>,
+  pub exports: Vec<ExportSymbol>,
   /// Imported symbols
-  pub imports: Vec<Symbol>,
-  /// Required dependencies
-  pub dependencies: Vec<Dependency>,
+  pub imports: Vec<ImportSymbol>,
   /// MIME type of executable data (allows the same executor to support different formats
   pub executable_mime: String,
 }
@@ -96,21 +214,49 @@ pub struct Header {
 impl Header {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
+    
     for export in &self.exports {
       match export {
-        Symbol::Function(function) => {
+        ExportSymbol::Function(function) => {
           deps.insert(function.ret);
           for parameter in &function.parameters {
             deps.insert(parameter.ty_id);
           }
         }
-        Symbol::Node(node) => {
+        ExportSymbol::Node(node) => {
           for parameter in &node.parameters {
             deps.insert(parameter.ty_id);
           }
         }
       }
     }
+
+    for import in &self.imports {
+      match import {
+        ImportSymbol::Function(function) => {
+          deps.insert(function.ret);
+          for parameter in &function.parameters {
+            deps.insert(parameter.ty_id);
+          }
+        }
+        ImportSymbol::Node(node) => {
+          for parameter in &node.parameters {
+            deps.insert(parameter.ty_id);
+          }
+        }
+      }
+    }
+
+    deps
+  }
+
+  pub fn module_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+
+    for import in &self.imports {
+      deps.insert(import.module().clone());
+    }
+
     deps
   }
 }

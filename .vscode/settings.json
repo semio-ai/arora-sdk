@@ -2,5 +2,6 @@
   "cmake.configureOnOpen": false,
   "C_Cpp.default.includePath": [
     "${workspaceRoot}/target/include",
-  ]
+  ],
+  "C_Cpp.default.cppStandard": "c++20"
 }

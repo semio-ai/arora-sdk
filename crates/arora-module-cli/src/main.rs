@@ -68,6 +68,7 @@ enum Commands {
 #[clap(author, version, about, long_about = None)]
 #[clap(global_setting(AppSettings::PropagateVersion))]
 #[clap(global_setting(AppSettings::UseLongFormatForHelpSubcommand))]
+#[clap(global_setting(AppSettings::TrailingVarArg))]
 struct Args {
   #[clap(short, long)]
   registry_uri: Option<String>,
@@ -162,6 +163,9 @@ async fn export_module(cmd: ExportModule, registry: Registry) -> anyhow::Result<
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+  env_logger::builder()
+    .init();
+
   let args = Args::parse();
 
   let mut registry = if let Some(uri) = args.registry_uri {
@@ -172,11 +176,9 @@ async fn main() -> anyhow::Result<()> {
 
   match args.command {
     Commands::Generate(cmd) => {
-      println!("Building {}", cmd.language);
       generate(cmd, &mut registry).await?;
     },
     Commands::ExportType(export_type_data) => {
-      println!("Exporting type {}", export_type_data.input_file);
       export_type(export_type_data, &mut registry).await?;
     },
     Commands::ExportModule(export_module_data) => {

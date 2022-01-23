@@ -1,35 +1,34 @@
-use arora_schema::{ty::low::Type, module::low::Symbol};
-use serde::{Serialize, Deserialize};
+use arora_schema::{ty::low::Type, module::low::{ImportSymbol, ExportSymbol, Header}};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
 use bytes::{Buf, BufMut};
-pub use clap::Parser;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Asset {
   Type(Type),
-  ImportSymbol(Symbol),
-  ExportSymbol(Symbol),
+  ImportSymbol(ImportSymbol),
+  ExportSymbol(ExportSymbol),
+  Header(Header),
 }
 
-pub struct AssetWriter<'a, W: AsyncWrite + Unpin> {
-  writer: &'a mut W
+pub struct Writer<'a, W: AsyncWrite + Unpin> {
+  writer: &'a mut W,
 }
 
-impl<'a, W: AsyncWrite + Unpin> AssetWriter<'a, W> {
+impl<'a, W: AsyncWrite + Unpin> Writer<'a, W> {
   pub fn new(writer: &'a mut W) -> Self {
     Self {
       writer
     }
   }
 
-  pub async fn write(&mut self, asset: Asset) -> tokio::io::Result<()> {
+  pub async fn write<T: Serialize>(&mut self, value: T) -> tokio::io::Result<()> {
     let mut size = [0u8; 4];
-    let serialized = serde_json::to_string(&asset).unwrap();
+    let serialized = serde_json::to_string(&value).unwrap();
     (&mut size[..]).put_u32(serialized.len() as u32);
     self.writer.write_all(&size).await?;
     self.writer.write_all(serialized.as_bytes()).await?;
-    println!("{:?}", asset);
     Ok(())
   }
 
@@ -41,18 +40,18 @@ impl<'a, W: AsyncWrite + Unpin> AssetWriter<'a, W> {
   }
 }
 
-pub struct AssetReader<'a, R: AsyncRead + Unpin> {
+pub struct Reader<'a, R: AsyncRead + Unpin> {
   reader: &'a mut R
 }
 
-impl<'a, R: AsyncRead + Unpin> AssetReader<'a, R> {
+impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
   pub fn new(reader: &'a mut R) -> Self {
     Self {
       reader
     }
   }
 
-  pub async fn read(&mut self) -> tokio::io::Result<Option<Asset>> {
+  pub async fn read<T: DeserializeOwned>(&mut self) -> tokio::io::Result<Option<T>> {
     let mut size = [0u8; 4];
     self.reader.read_exact(&mut size).await?;
     let size = (&size[..]).get_u32() as usize;
@@ -62,14 +61,7 @@ impl<'a, R: AsyncRead + Unpin> AssetReader<'a, R> {
 
     let mut buf = vec![0u8; size];
     self.reader.read_exact(&mut buf).await?;
-    let asset: Asset = serde_json::from_slice(&buf).unwrap();
-    Ok(Some(asset))
+    let value: T = serde_json::from_slice(&buf).unwrap();
+    Ok(Some(value))
   }
-}
-
-#[derive(Parser, Debug)]
-#[clap(long_about = None)]
-pub struct Args {
-  #[clap(long)]
-  pub output_directory: String,
 }
