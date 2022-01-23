@@ -361,6 +361,17 @@ pub extern "C" fn arora_buffer_reader_free(reader: *mut BufferReader) {
   }
 }
 
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_next_type(reader: *mut BufferReader) -> i16 {
+  unsafe {
+    let reader = &mut *reader;
+    match reader.next_type() {
+      Some(value) => value as i16,
+      None => -1,
+    }
+  }
+}
+
 #[repr(C)]
 pub struct GetStructureResult {
   pub id: *const u8,
