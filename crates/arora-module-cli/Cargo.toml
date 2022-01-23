@@ -1,0 +1,18 @@
+[package]
+name = "arora-module-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "3.0.10", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
+arora-registry = { path = "../arora-registry" }
+arora-schema = { path = "../arora-schema" }
+tokio = { version = "1", features = ["full"] }
+anyhow = "*"
+uuid = { version = "0.8", features = ["serde", "v4"] }
+url = "2"
+arora-module-core = { path = "../arora-module-core" }

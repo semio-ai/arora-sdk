@@ -1,0 +1,16 @@
+[package]
+name = "arora-registry"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+uuid = { version = "0.8", features = ["serde", "v4"] }
+serde = { version = "1.0", features = ["derive"] }
+arora-schema = { path = "../arora-schema" }
+reqwest = "0.11"
+serde_yaml = "0.8"
+anyhow = "*"
+url = "2"
+tokio = { version = "1", features = ["full"] }

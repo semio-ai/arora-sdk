@@ -1,11 +1,13 @@
 [workspace]
 
 members = [
-  "crates/engine",
-  "crates/engine-buffers",
-  "crates/engine-schema",
-  "crates/engine-module-cli",
-  "crates/engine-module-cpp",
-  "crates/engine-registry",
-  "crates/engine-cli",
+  "crates/arora",
+  "crates/arora-buffers",
+  "crates/arora-schema",
+  "crates/arora-module-core",
+  "crates/arora-module-cli",
+  "crates/arora-module-cpp",
+  "crates/arora-registry",
+  "crates/arora-cli",
+  "crates/arora-util",
 ]
