@@ -7,10 +7,18 @@ pub trait ToPrettyString {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ArrayKind {
+  None,
+  Fixed(usize),
+  Dynamic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeRef {
   pub reference: bool,
   pub constant: bool,
   pub pointer: bool,
+  
   pub ty: String,
   pub arguments: Option<Vec<TypeRef>>,
 }
@@ -143,7 +151,7 @@ impl ToPrettyString for Block {
       s.push_str(&statement.to_pretty_string(indent + 1));
     }
     s.push_str(&indent_string(indent));
-    s.push_str("}");
+    s.push_str("}\n");
     s
   }
 }
@@ -207,6 +215,22 @@ impl ToPrettyString for Namespace {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From)]
+pub struct Extern {
+  pub name: String,
+  pub block: Block,
+}
+
+impl ToPrettyString for Extern {
+  fn to_pretty_string(&self, indent: usize) -> String {
+    let mut s = String::new();
+    s.push_str(&indent_string(indent));
+    s.push_str(&format!("extern \"{}\" ", self.name));
+    s.push_str(&self.block.to_pretty_string(indent));
+    s
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From)]
 pub enum Declaration {
   FunctionPrototype(FunctionPrototype),
   FunctionImplementation(FunctionImplementation),
@@ -216,6 +240,7 @@ pub enum Declaration {
   NewLine(NewLine),
   Statement(Statement),
   Variable(Variable),
+  Extern(Extern),
 }
 
 impl ToPrettyString for Declaration {
@@ -229,6 +254,7 @@ impl ToPrettyString for Declaration {
       Declaration::NewLine(newline) => newline.to_pretty_string(indent),
       Declaration::Statement(statement) => statement.to_pretty_string(indent),
       Declaration::Variable(variable) => variable.to_pretty_string(indent),
+      Declaration::Extern(extern_) => extern_.to_pretty_string(indent),
     }
   }
 }
@@ -275,11 +301,11 @@ impl ToPrettyString for Statement {
         s.push_str("if (");
         s.push_str(&expression.to_pretty_string(0));
         s.push_str(")\n");
-        s.push_str(&block.to_pretty_string(indent + 1));
+        s.push_str(&block.to_pretty_string(indent));
         if let Some(else_block) = else_block {
           s.push_str(&indent_string(indent));
           s.push_str("else\n");
-          s.push_str(&else_block.to_pretty_string(indent + 1));
+          s.push_str(&else_block.to_pretty_string(indent));
         }
         s
       }
@@ -325,9 +351,27 @@ impl ToPrettyString for Statement {
   }
 }
 
+pub trait ToExpression {
+  fn to_expression(&self) -> Expression;
+}
+
+impl ToExpression for String {
+  fn to_expression(&self) -> Expression {
+    Expression::Identifier(self.clone())
+  }
+}
+
+impl ToExpression for &str {
+  fn to_expression(&self) -> Expression {
+    Expression::Identifier(self.to_string())
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expression {
   Identifier(String),
+  IntegerLiteral(i64),
+  StringLiteral(String),
   Equal(Box<Expression>, Box<Expression>),
   NotEqual(Box<Expression>, Box<Expression>),
   LessThan(Box<Expression>, Box<Expression>),
@@ -339,6 +383,88 @@ pub enum Expression {
   ColonColon(Box<Expression>, Box<Expression>),
   Parenthesized(Box<Expression>),
   ArrayAccess(Box<Expression>, Box<Expression>),
+  InitializerList(Vec<Expression>),
+  LogicalAnd(Box<Expression>, Box<Expression>),
+  LogicalOr(Box<Expression>, Box<Expression>),
+  PreIncrement(Box<Expression>),
+  PreDecrement(Box<Expression>),
+  Assign(Box<Expression>, Box<Expression>),
+}
+
+impl ToExpression for Expression {
+  fn to_expression(&self) -> Expression {
+    self.clone()
+  }
+}
+
+impl Expression {
+  pub fn into_statement(self) -> Statement {
+    Statement::Expression(self)
+  }
+
+  pub fn call<E: ToExpression, I: IntoIterator<Item = E>>(&self, args: I) -> Expression {
+    Expression::Call(Box::new(self.clone()), args.into_iter().map(|a| a.to_expression()).collect())
+  }
+
+  pub fn dot(&self, member: Expression) -> Expression {
+    Expression::Dot(Box::new(self.clone()), Box::new(member))
+  }
+
+  pub fn array_access(&self, index: Expression) -> Expression {
+    Expression::ArrayAccess(Box::new(self.clone()), Box::new(index))
+  }
+
+  pub fn arrow(&self, member: Expression) -> Expression {
+    Expression::Arrow(Box::new(self.clone()), Box::new(member))
+  }
+
+  pub fn colon_colon(&self, member: Expression) -> Expression {
+    Expression::ColonColon(Box::new(self.clone()), Box::new(member))
+  }
+
+  pub fn parenthesized(&self) -> Expression {
+    Expression::Parenthesized(Box::new(self.clone()))
+  }
+
+  pub fn equal(&self, other: Expression) -> Expression {
+    Expression::Equal(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn not_equal(&self, other: Expression) -> Expression {
+    Expression::NotEqual(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn less_than(&self, other: Expression) -> Expression {
+    Expression::LessThan(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn less_than_or_equal(&self, other: Expression) -> Expression {
+    Expression::LessThanOrEqual(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn greater_than(&self, other: Expression) -> Expression {
+    Expression::GreaterThan(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn logical_and(&self, other: Expression) -> Expression {
+    Expression::LogicalAnd(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn logical_or(&self, other: Expression) -> Expression {
+    Expression::LogicalOr(Box::new(self.clone()), Box::new(other))
+  }
+
+  pub fn pre_increment(&self) -> Expression {
+    Expression::PreIncrement(Box::new(self.clone()))
+  }
+
+  pub fn pre_decrement(&self) -> Expression {
+    Expression::PreDecrement(Box::new(self.clone()))
+  }
+
+  pub fn assign(&self, other: Expression) -> Expression {
+    Expression::Assign(Box::new(self.clone()), Box::new(other))
+  }
 }
 
 impl ToPrettyString for Expression {
@@ -347,6 +473,8 @@ impl ToPrettyString for Expression {
     s.push_str(&indent_string(indent));
     s.push_str(&match self {
       Expression::Identifier(identifier) => identifier.to_string(),
+      Expression::IntegerLiteral(value) => value.to_string(),
+      Expression::StringLiteral(string) => format!("\"{}\"", string),
       Expression::Equal(left, right) => format!("{} == {}", left.to_pretty_string(0), right.to_pretty_string(0)),
       Expression::NotEqual(left, right) => format!("{} != {}", left.to_pretty_string(0), right.to_pretty_string(0)),
       Expression::LessThan(left, right) => format!("{} < {}", left.to_pretty_string(0), right.to_pretty_string(0)),
@@ -358,6 +486,12 @@ impl ToPrettyString for Expression {
       Expression::ColonColon(left, right) => format!("{}::{}", left.to_pretty_string(0), right.to_pretty_string(0)),
       Expression::Parenthesized(expr) => format!("({})", expr.to_pretty_string(0)),
       Expression::ArrayAccess(left, right) => format!("{}[{}]", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::InitializerList(exprs) => format!("{{ {} }}", exprs.iter().map(|expr| expr.to_pretty_string(0)).collect::<Vec<String>>().join(", ")),
+      Expression::LogicalAnd(left, right) => format!("{} && {}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::LogicalOr(left, right) => format!("{} || {}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::PreIncrement(expr) => format!("++{}", expr.to_pretty_string(0)),
+      Expression::PreDecrement(expr) => format!("--{}", expr.to_pretty_string(0)),
+      Expression::Assign(left, right) => format!("{} = {}", left.to_pretty_string(0), right.to_pretty_string(0)),
     });
     s
   }
@@ -369,6 +503,7 @@ pub struct Variable {
   pub name: String,
   pub ty: TypeRef,
   pub value: Option<Expression>,
+  pub array: ArrayKind,
 }
 
 impl ToPrettyString for Variable {
@@ -377,12 +512,28 @@ impl ToPrettyString for Variable {
     s.push_str(&self.ty.to_pretty_string(indent));
     s.push_str(" ");
     s.push_str(&self.name);
+    match self.array {
+      ArrayKind::None => (),
+      ArrayKind::Fixed(c) => s.push_str(&format!("[{}]", c)),
+      ArrayKind::Dynamic => s.push_str("[]"),
+    }
     if let Some(value) = &self.value {
       s.push_str(" = ");
       s.push_str(&value.to_pretty_string(0));
     }
     s.push_str(";\n");
     s
+  }
+}
+
+impl Default for Variable {
+  fn default() -> Self {
+    Variable {
+      name: String::new(),
+      ty: TypeRef::default(),
+      value: None,
+      array: ArrayKind::None,
+    }
   }
 }
 

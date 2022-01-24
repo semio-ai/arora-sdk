@@ -1,20 +1,20 @@
 use bytes::{BufMut, Buf};
 
-const TYPE_UNIT: u8 = 0;
-const TYPE_BOOLEAN: u8 = 1;
-const TYPE_U8: u8 = 2;
-const TYPE_U16: u8 = 3;
-const TYPE_U32: u8 = 4;
-const TYPE_U64: u8 = 5;
-const TYPE_S8: u8 = 6;
-const TYPE_S16: u8 = 7;
-const TYPE_S32: u8 = 8;
-const TYPE_S64: u8 = 9;
-const TYPE_R32: u8 = 10;
-const TYPE_R64: u8 = 11;
-const TYPE_STRING: u8 = 12;
-const TYPE_STRUCTURE: u8 = 13;
-const TYPE_ENUMERATION: u8 = 14;
+pub const TYPE_UNIT: u8 = 0;
+pub const TYPE_BOOLEAN: u8 = 1;
+pub const TYPE_U8: u8 = 2;
+pub const TYPE_U16: u8 = 3;
+pub const TYPE_U32: u8 = 4;
+pub const TYPE_U64: u8 = 5;
+pub const TYPE_S8: u8 = 6;
+pub const TYPE_S16: u8 = 7;
+pub const TYPE_S32: u8 = 8;
+pub const TYPE_S64: u8 = 9;
+pub const TYPE_R32: u8 = 10;
+pub const TYPE_R64: u8 = 11;
+pub const TYPE_STRING: u8 = 12;
+pub const TYPE_STRUCTURE: u8 = 13;
+pub const TYPE_ENUMERATION: u8 = 14;
 
 
 pub struct BufferWriter {
@@ -405,6 +405,14 @@ pub extern "C" fn arora_buffer_reader_get_enumeration_value(reader: *mut BufferR
       id: id.as_ptr(),
       value_id: value_id.as_ptr(),
     }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_structure_field(reader: *mut BufferReader) -> *const u8 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_structure_field().as_ptr()
   }
 }
 

@@ -2,6 +2,8 @@
   "cmake.configureOnOpen": false,
   "C_Cpp.default.includePath": [
     "${workspaceRoot}/target/include",
+    "${workspaceRoot}/libs/cpp/include",
+    "${workspaceRoot}/build/modules/test-cpp/arora/include",
   ],
   "C_Cpp.default.cppStandard": "c++20"
 }

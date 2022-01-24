@@ -7,9 +7,11 @@ set(TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
 if (DEBUG)
   set(NATIVE_LIB_DIR "${TARGET_DIR}/debug")
+  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/debug")
   set(CARGO_BUILD_FLAGS)
 else()
   set(NATIVE_LIB_DIR "${TARGET_DIR}/release")
+  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/release")
   set(CARGO_BUILD_FLAGS --release)
 endif()
 

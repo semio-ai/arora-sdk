@@ -1,6 +1,6 @@
 use std::{path::Path, str::FromStr, sync::Arc, collections::HashMap};
 use arora_vfs::{Entry, Directory, File};
-use ast::{TranslationUnit, PreprocessorDirective, Namespace, Declaration, FunctionPrototype, TypeRef, Parameter, NewLine, IncludeStyle, FunctionImplementation, Block, Expression, Statement};
+use ast::{TranslationUnit, PreprocessorDirective, Namespace, Declaration, FunctionPrototype, TypeRef, Parameter, NewLine, IncludeStyle, FunctionImplementation, Block, Expression, Statement, ArrayKind, Extern};
 use clap::Parser;
 
 use arora_module_core::{Reader, Asset, Writer};
@@ -14,7 +14,7 @@ use convert_case::{Case, Casing};
 use uuid::Uuid;
 
 pub mod ast;
-use ast::ToPrettyString;
+use ast::{ToPrettyString, ToExpression};
 
 use crate::ast::Variable;
 
@@ -290,22 +290,86 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   })
 }
 
+fn uuid_initializer_list(uuid: &Uuid) -> Expression {
+  let id_bytes = uuid.as_bytes();
+  Expression::InitializerList(
+    vec![
+      Expression::IntegerLiteral(id_bytes[0] as i64),
+      Expression::IntegerLiteral(id_bytes[1] as i64),
+      Expression::IntegerLiteral(id_bytes[2] as i64),
+      Expression::IntegerLiteral(id_bytes[3] as i64),
+      Expression::IntegerLiteral(id_bytes[4] as i64),
+      Expression::IntegerLiteral(id_bytes[5] as i64),
+      Expression::IntegerLiteral(id_bytes[6] as i64),
+      Expression::IntegerLiteral(id_bytes[7] as i64),
+      Expression::IntegerLiteral(id_bytes[8] as i64),
+      Expression::IntegerLiteral(id_bytes[9] as i64),
+      Expression::IntegerLiteral(id_bytes[10] as i64),
+      Expression::IntegerLiteral(id_bytes[11] as i64),
+      Expression::IntegerLiteral(id_bytes[12] as i64),
+      Expression::IntegerLiteral(id_bytes[13] as i64),
+      Expression::IntegerLiteral(id_bytes[14] as i64),
+      Expression::IntegerLiteral(id_bytes[15] as i64),
+    ]
+  )
+}
+
 fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<TranslationUnit> {
   let header = context.headers.get(&id).unwrap();
 
 
   let mut declarations = Vec::new();
   declarations.push(PreprocessorDirective::Include(format!("{}.hpp", &header.name), IncludeStyle::Local).into());
+  declarations.push(PreprocessorDirective::Include(format!("cassert"), IncludeStyle::System).into());
+  declarations.push(Extern {
+    name: "C".to_string(),
+    block: Block {
+      statements: vec! [
+        PreprocessorDirective::Include(format!("arora/buffers.h"), IncludeStyle::System).into(),
+        PreprocessorDirective::Include(format!("arora/util.h"), IncludeStyle::System).into()
+      ]
+    }
+  }.into());
+  declarations.push(PreprocessorDirective::Include(format!("arora/buffer/deserialize.hpp"), IncludeStyle::System).into());
 
   declarations.push(NewLine { count: 1 }.into());
+
+  declarations.push(Declaration::Variable(
+    Variable {
+      name: format!("{}_MODULE_UUID", identifier_name(&header.name)).to_uppercase(),
+      ty: TypeRef {
+        ty: "std::uint8_t".to_string(),
+        constant: true,
+        ..Default::default()
+      },
+      value: uuid_initializer_list(&header.id).into(),
+      array: ArrayKind::Fixed(16),
+      ..Default::default()
+    }
+  ));
 
   for export in context.exports.values() {
     let name = export.name().clone();
     let name = context.args.method_style.convert(&name);
+
     match export {
       ExportSymbol::Function(f) => {
         let mut sorted_parameters: Vec<&LowParameter> = f.parameters.iter().collect();
         sorted_parameters.sort_by(|a, b| a.id.cmp(&b.id));
+
+        declarations.push(Declaration::Variable(
+          Variable {
+            name: format!("{}_UUID", identifier_name(&f.name)).to_uppercase(),
+            ty: TypeRef {
+              ty: "std::uint8_t".to_string(),
+              constant: true,
+              ..Default::default()
+            },
+            value: uuid_initializer_list(&f.id).into(),
+            array: ArrayKind::Fixed(16),
+            ..Default::default()
+          }
+        ));
 
         let mut function_declarations: Vec<Declaration> = Vec::new();
 
@@ -316,59 +380,173 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
             pointer: true,
             ..Default::default()
           },
-          value: Some(Expression::Call(
-            Expression::Identifier("arora_buffer_reader_new".to_string()).into(),
-            vec![
-              Expression::Identifier("arg".to_string()),
-              Expression::Identifier("length".to_string()),
-            ]
-          ))
+          value: Some("arora_buffer_reader_new".to_expression().call([ "arg", "length" ])).into(),
+          ..Default::default()
         }));
 
-        function_declarations.push(Statement::Expression(Expression::Call(
-          Expression::Identifier("arora_buffer_reader_next_type".to_string()).into(),
-          vec![
-            Expression::Identifier("reader".to_string()).into(),
-          ]
-        )).into());
+        function_declarations.push(
+          "assert".to_expression().call([
+            "arora_buffer_reader_next_type"
+            .to_expression()
+            .call([ "reader" ])
+            .equal("ARORA_BUFFER_TYPE_STRUCTURE".to_expression())
+          ]).into_statement().into()
+        );
+
+        function_declarations.push(Variable {
+          name: "structure_metadata".to_string(),
+          ty: TypeRef {
+            ty: "arora_get_structure_result".to_string(),
+            ..Default::default()
+          },
+          value: "arora_buffer_reader_get_structure".to_expression().call([ "reader" ]).into(),
+          ..Default::default()
+        }.into());
+
+        for parameter in sorted_parameters.iter() {
+          function_declarations.push(Variable {
+            name: parameter.name.clone(),
+            ty: optional(TypeRef {
+              ty: type_name(context, &parameter.ty_id).to_string(),
+              ..Default::default()
+            }, true, false),
+            ..Default::default()
+          }.into());
+        }
+
+        let mut read_declarations: Vec<Declaration> = Vec::new();
+
+        read_declarations.push(Variable {
+          name: "field_index".to_string(),
+          ty: TypeRef {
+            ty: "std::uint32_t".to_string(),
+            ..Default::default()
+          },
+          value: Some("0".to_expression()),
+          ..Default::default()
+        }.into());
+
+
+        read_declarations.push(Variable {
+          name: "field".to_string(),
+          ty: TypeRef {
+            ty: "std::uint8_t".to_string(),
+            pointer: true,
+            constant: true,
+            ..Default::default()
+          },
+          value: Some("arora_buffer_reader_get_structure_field".to_expression().call([
+            "reader",
+          ])),
+          ..Default::default()
+        }.into());
+
+        for parameter in sorted_parameters.iter() {
+
+          let mut field_declarations: Vec<Declaration> = Vec::new();
+
+          field_declarations.push(
+            parameter.name.to_expression()
+              .assign(format!("arora::buffer::deserialize<{}>()(reader)", type_name(context, &parameter.ty_id)).to_expression())
+              .into_statement()
+              .into()
+          );
+
+          field_declarations.push("field_index".to_expression().pre_increment().into_statement().into());
+          field_declarations.push("field".to_expression().assign("arora_buffer_reader_get_structure_field".to_expression().call([
+            "reader",
+          ])).into_statement().into());
+
+
+          read_declarations.push(Statement::If(
+            "field_index".to_expression().less_than("structure_metadata.field_count".to_expression()).logical_and(
+            "arora_uuid_compare".to_expression().call([
+              "field",
+              &format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase()
+            ]).equal("0".to_expression())),
+            Block {
+              statements: field_declarations,
+            },
+            None
+          ).into());
+        }
+        
+        
+        function_declarations.push(
+          Statement::If(
+            Expression::Dot("structure_metadata".to_expression().into(), "field_count".to_expression().into()).greater_than("0".to_expression()).logical_and(
+            "arora_uuid_compare".to_expression().call([
+              Expression::Dot("structure_metadata".to_expression().into(), "id".to_expression().into()),
+              format!("{}_UUID", identifier_name(&f.name)).to_uppercase().to_expression()
+            ]).equal("0".to_expression())).into(),
+            Block {
+              statements: read_declarations
+            },
+            None
+          ).into()
+        );
+
+        function_declarations.push("arora_buffer_reader_free".to_expression().call([ "reader" ]).into_statement().into());
+
+        function_declarations.push(
+          identifier_name(&header.name).to_expression().colon_colon(f.name.to_expression())
+            .call(f.parameters.iter().map(|p| p.name.to_expression()))
+            .into_statement()
+            .into()
+        );
 
 
 
         for parameter in sorted_parameters.iter() {
-          if PRIMITIVE_IDS.contains(&parameter.ty_id) {
-            continue;
-          }
-
-          let dep_header = context.types.get(&parameter.ty_id).unwrap();
+          declarations.push(Declaration::Variable(
+            Variable {
+              name: format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase(),
+              ty: TypeRef {
+                ty: "std::uint8_t".to_string(),
+                constant: true,
+                ..Default::default()
+              },
+              value: uuid_initializer_list(&parameter.id).into(),
+              array: ArrayKind::Fixed(16),
+              ..Default::default()
+            }
+          ));
         }
 
-        declarations.push(FunctionImplementation {
-          name: format!("arora_function_{}", identifier_uuid(&f.id)),
-          ret: TypeRef {
-            ty: "std::uint8_t".to_string(),
-            pointer: true,
-            ..Default::default()
-          },
-          parameters: vec! [
-            Parameter {
-              name: "arg".to_string(),
-              type_ref: TypeRef {
+        declarations.push(Extern {
+          name: "C".to_string(),
+          block: Block {
+            statements: vec![
+              FunctionImplementation {
+                name: format!("arora_function_{}", identifier_uuid(&f.id)),
+                ret: TypeRef {
                 ty: "std::uint8_t".to_string(),
                 pointer: true,
                 ..Default::default()
-              }
-            },
-            Parameter {
-              name: "length".to_string(),
-              type_ref: TypeRef {
-                ty: "std::uint32_t".to_string(),
-                ..Default::default()
-              }
-            }
-          ],
-          body: Block {
-            statements: function_declarations
-          },
+              },
+              parameters: vec! [
+                Parameter {
+                  name: "arg".to_string(),
+                  type_ref: TypeRef {
+                    ty: "std::uint8_t".to_string(),
+                    pointer: true,
+                    ..Default::default()
+                  }
+                },
+                Parameter {
+                  name: "length".to_string(),
+                  type_ref: TypeRef {
+                    ty: "std::uint32_t".to_string(),
+                    ..Default::default()
+                  }
+                }
+              ],
+              body: Block {
+                statements: function_declarations
+              },
+            }.into()
+            ]
+          }
         }.into());
       },
       ExportSymbol::Node(n) => {
