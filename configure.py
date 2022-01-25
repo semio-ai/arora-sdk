@@ -42,4 +42,4 @@ print(f"Running cmake...")
 subprocess.run(["cmake", "..", f"-DWASI_SDK_PREFIX={current_dir}/wasi-sdk-14.0", f"-DCMAKE_TOOLCHAIN_FILE={current_dir}/cmake/WASI.toolchain"], cwd="build")
 
 
-printf("Configuration complete. Run 'make' in the build folder to build arora.")
+print("Configuration complete. Run 'make' in the build folder to build arora.")
