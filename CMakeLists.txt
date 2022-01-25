@@ -1,5 +1,10 @@
+
+
 project(arora)
 cmake_minimum_required(VERSION 3.0)
+
+set (CMAKE_CXX_STANDARD 20)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option (DEBUG "Build debug version" OFF)
 
@@ -43,23 +48,12 @@ add_library(arora-util INTERFACE)
 target_link_libraries(arora-util INTERFACE arora_util)
 add_dependencies(arora-util arora-util-build)
 
-set (WASI_SDK_PATH ${CMAKE_BINARY_DIR}/deps/wasi-sdk-prefix/src/wasi-sdk)
 
-set (CMAKE_C_COMPILER ${WASI_SDK_PATH}/bin/clang${CMAKE_EXECUTABLE_SUFFIX})
-set (CMAKE_CXX_COMPILER ${WASI_SDK_PATH}/bin/clang++${CMAKE_EXECUTABLE_SUFFIX})
-
-set (CMAKE_CXX_STANDARD 20)
-set (CMAKE_CXX_STANDARD_REQUIRED ON)
-
-set (TRIPLE wasm32-wasi)
-
-set(CMAKE_C_COMPILER_TARGET ${TRIPLE})
-set(CMAKE_CXX_COMPILER_TARGET ${TRIPLE})
 
 set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}")
 
 
-add_compile_options(--sysroot=${WASI_SDK_PATH}/share/wasi-sysroot)
+add_compile_options(--sysroot=${WASI_SDK_PREFIX}/share/wasi-sysroot)
 
 install(
   FILES
@@ -79,7 +73,6 @@ install(
 
 set (WASI_SDK_PATH ${CMAKE_BINARY_DIR}/deps/wasi-sdk-prefix/src/wasi-sdk)
 
-add_subdirectory(deps)
 
 add_subdirectory(libs)
 add_subdirectory(modules)
