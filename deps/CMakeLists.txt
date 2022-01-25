@@ -4,7 +4,14 @@ set (MAKE_CONCURRENCY 10)
 
 set (WASI_VERSION 14)
 set (WASI_VERSION_FULL 14.0)
-set (WASI_PLATFORM mingw)
+
+if (${CMAKE_HOST_SYSTEM_NAME} MATCHES "Windows")
+  set (WASI_PLATFORM mingw)
+elseif (${CMAKE_HOST_SYSTEM_NAME} MATCHES "Darwin")
+  set (WASI_PLATFORM macos)
+elseif (${CMAKE_HOST_SYSTEM_NAME} MATCHES "Linux")
+  set (WASI_PLATFORM linux)
+endif()
 
 
 ExternalProjecT_Add(wasi-sdk

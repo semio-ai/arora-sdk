@@ -61,14 +61,22 @@ async fn main() -> anyhow::Result<()> {
   let arg = writer.finalize().to_vec().into_boxed_slice();
 
   let start_time = std::time::Instant::now();
+  let mut handles = Vec::new();
   for i in 0..20000 {
-    let res = module
-      .dispatch(Dispatch {
-        method_id,
-        arg: arg.clone(),
-      })
-      .await.expect("failed to dispatch");
+    let module = module.clone();
+    let arg = arg.clone();
+    handles.push(tokio::spawn(async move {
+      module
+        .dispatch(Dispatch {
+          method_id,
+          arg,
+        })
+        .await.expect("failed to dispatch")
+    }));
   }
+
+  futures::future::join_all(handles).await;
+
   let end_time = std::time::Instant::now();
 
   println!("{:?}", end_time - start_time);

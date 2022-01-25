@@ -15,22 +15,35 @@ else()
   set(CARGO_BUILD_FLAGS --release)
 endif()
 
-set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
-add_custom_target(arora-buffers ALL
+add_custom_target(arora-buffers-build ALL
   COMMAND cargo build --package arora-buffers --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
+link_directories(${WASM_LIB_DIR})
 
-add_custom_target(arora-util ALL
+set (CMAKE_SKIP_RPATH ON)
+
+
+add_library(arora-buffers INTERFACE)
+target_link_libraries(arora-buffers INTERFACE arora_buffers)
+add_dependencies(arora-buffers arora-buffers-build)
+
+add_custom_target(arora-util-build ALL
   COMMAND cargo build --package arora-util --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
+
+add_library(arora-util INTERFACE)
+target_link_libraries(arora-util INTERFACE arora_util)
+add_dependencies(arora-util arora-util-build)
+
+set (WASI_SDK_PATH ${CMAKE_BINARY_DIR}/deps/wasi-sdk-prefix/src/wasi-sdk)
 
 set (CMAKE_C_COMPILER ${WASI_SDK_PATH}/bin/clang${CMAKE_EXECUTABLE_SUFFIX})
 set (CMAKE_CXX_COMPILER ${WASI_SDK_PATH}/bin/clang++${CMAKE_EXECUTABLE_SUFFIX})
@@ -42,6 +55,9 @@ set (TRIPLE wasm32-wasi)
 
 set(CMAKE_C_COMPILER_TARGET ${TRIPLE})
 set(CMAKE_CXX_COMPILER_TARGET ${TRIPLE})
+
+set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}")
+
 
 add_compile_options(--sysroot=${WASI_SDK_PATH}/share/wasi-sysroot)
 
