@@ -11,11 +11,12 @@ pub enum DispatchError {
   Internal,
 }
 
-pub type DispatchResult = Result<(), DispatchError>;
+pub type DispatchResult = Result<Box<[u8]>, DispatchError>;
 
 #[derive(Debug)]
 pub struct Dispatch {
   pub method_id: Uuid,
+  pub arg: Box<[u8]>,
 }
 
 pub type DispatchRequest = Request<Dispatch, DispatchResult>;

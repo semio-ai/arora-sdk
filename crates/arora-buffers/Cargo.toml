@@ -13,6 +13,8 @@ crate-type = [ "staticlib", "rlib" ]
 
 [dependencies]
 bytes = "1"
+uuid = "0.8"
+
 
 [build-dependencies]
 cbindgen = "0.20.0"

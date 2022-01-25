@@ -263,10 +263,10 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         namespace_declarations.push(FunctionPrototype {
           name: name,
-          ret: optional(TypeRef {
+          ret: TypeRef {
             ty: type_name(context, &f.ret).to_string(),
             ..Default::default()
-          }, true, false),
+          },
           parameters,
         }.into());
       },
@@ -331,6 +331,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
     }
   }.into());
   declarations.push(PreprocessorDirective::Include(format!("arora/buffer/deserialize.hpp"), IncludeStyle::System).into());
+  declarations.push(PreprocessorDirective::Include(format!("arora/buffer/serialize.hpp"), IncludeStyle::System).into());
 
   declarations.push(NewLine { count: 1 }.into());
 
@@ -441,6 +442,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           ..Default::default()
         }.into());
 
+        let mut i = 0;
         for parameter in sorted_parameters.iter() {
 
           let mut field_declarations: Vec<Declaration> = Vec::new();
@@ -453,9 +455,13 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           );
 
           field_declarations.push("field_index".to_expression().pre_increment().into_statement().into());
-          field_declarations.push("field".to_expression().assign("arora_buffer_reader_get_structure_field".to_expression().call([
-            "reader",
-          ])).into_statement().into());
+          
+          if i < sorted_parameters.len() - 1 {
+            field_declarations.push("field".to_expression().assign("arora_buffer_reader_get_structure_field".to_expression().call([
+              "reader",
+            ])).into_statement().into());
+          }
+          
 
 
           read_declarations.push(Statement::If(
@@ -469,6 +475,8 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
             },
             None
           ).into());
+
+          i += 1;
         }
         
         
@@ -488,14 +496,75 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push("arora_buffer_reader_free".to_expression().call([ "reader" ]).into_statement().into());
 
+        function_declarations.push(Variable {
+          name: "__arora_return__".to_string(),
+          ty: TypeRef {
+            ty: type_name(context, &f.ret).to_string(),
+            ..Default::default()
+          },
+          value: Some(identifier_name(&header.name).to_expression().colon_colon(f.name.to_expression())
+              .call(f.parameters.iter().map(|p| p.name.to_expression()))),
+          ..Default::default()
+        }.into());
+
+        function_declarations.push(Variable {
+          name: "writer".to_string(),
+          ty: TypeRef {
+            ty: "arora_buffer_writer".to_string(),
+            pointer: true,
+            ..Default::default()
+          },
+          value: Some("arora_buffer_writer_new".to_expression().call::<String, _>([])),
+          ..Default::default()
+        }.into());
+
+        let mut field_count = 1;
+        for parameter in sorted_parameters.iter() {
+          if !parameter.mutable {
+            continue;
+          }
+
+          field_count += 1;
+        }
+        
+        // Return is always written first by convention
+        function_declarations.push("arora_buffer_writer_begin_structure".to_expression().call([
+          "writer".to_string(),
+          format!("{}_UUID", identifier_name(&f.name).to_uppercase()),
+          field_count.to_string()
+        ]).into_statement().into());
+
+        // Return value is written under the method's UUID
+        function_declarations.push("arora_buffer_writer_add_structure_field".to_expression().call([
+          "writer".to_string(),
+          format!("{}_UUID", identifier_name(&f.name).to_uppercase())
+        ]).into_statement().into());
+
         function_declarations.push(
-          identifier_name(&header.name).to_expression().colon_colon(f.name.to_expression())
-            .call(f.parameters.iter().map(|p| p.name.to_expression()))
-            .into_statement()
-            .into()
+            format!("arora::buffer::serialize<{}>()(writer, __arora_return__)", type_name(context, &f.ret)).to_expression().into_statement().into()
         );
 
+        for parameter in sorted_parameters.iter() {
+          if !parameter.mutable {
+            continue;
+          }
 
+          function_declarations.push(
+            "arora_buffer_writer_add_structure_field".to_expression().call([
+              "writer".to_string(),
+              format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase()
+            ]).into_statement().into()
+          );
+
+          function_declarations.push(
+            format!("arora::buffer::serialize<{}>()(writer, {})", type_name(context, &parameter.ty_id), parameter.name).to_expression().into_statement().into()
+          );
+        }
+
+        // Free the writer
+        function_declarations.push("arora_buffer_writer_free".to_expression().call([ "writer" ]).into_statement().into());
+
+        function_declarations.push("return arora_buffer_writer_finalize(writer, 0)".to_expression().into_statement().into());
 
         for parameter in sorted_parameters.iter() {
           declarations.push(Declaration::Variable(
@@ -513,15 +582,21 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           ));
         }
 
+        let function_name = format!("arora_function_{}", identifier_uuid(&f.id));
+
         declarations.push(Extern {
           name: "C".to_string(),
           block: Block {
             statements: vec![
               FunctionImplementation {
-                name: format!("arora_function_{}", identifier_uuid(&f.id)),
+                attributes: Some(vec![
+                  format!("export_name(\"{}\")", function_name).into(),
+                ]),
+                name: function_name,
                 ret: TypeRef {
                 ty: "std::uint8_t".to_string(),
                 pointer: true,
+                constant: true,
                 ..Default::default()
               },
               parameters: vec! [

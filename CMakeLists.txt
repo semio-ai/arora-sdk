@@ -22,8 +22,13 @@ add_custom_target(arora ALL
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
-add_custom_target(arora-wasm ALL
-  COMMAND cargo build --package arora-buffers --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
+add_custom_target(arora-buffers ALL
+  COMMAND RUSTFLAGS=-Crelocation-model=pic cargo build --package arora-buffers --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
+add_custom_target(arora-util ALL
+  COMMAND RUSTFLAGS=-Crelocation-model=pic cargo build --package arora-util --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
@@ -43,6 +48,9 @@ install(
   DESTINATION bin
 )
 
-add_subdirectory(libs)
+set (WASI_SDK_PATH ${CMAKE_BINARY_DIR}/deps/wasi-sdk-prefix/src/wasi-sdk)
+
 add_subdirectory(deps)
+
+add_subdirectory(libs)
 add_subdirectory(modules)

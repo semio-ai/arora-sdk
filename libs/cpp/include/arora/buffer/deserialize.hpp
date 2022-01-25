@@ -13,6 +13,8 @@ namespace arora
 {
   namespace buffer
   {
+    void skip(arora_buffer_reader *const reader, const std::uint8_t type);
+
     template<typename T>
     struct deserialize
     {
@@ -24,7 +26,16 @@ namespace arora
     {
       std::optional<bool> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_boolean(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_BOOLEAN)
+        {
+          return arora_buffer_reader_get_boolean(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -33,7 +44,16 @@ namespace arora
     {
       std::optional<std::uint8_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_u8(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_U8)
+        {
+          return arora_buffer_reader_get_u8(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -42,7 +62,16 @@ namespace arora
     {
       std::optional<std::uint16_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_u16(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_U16)
+        {
+          return arora_buffer_reader_get_u16(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -51,7 +80,16 @@ namespace arora
     {
       std::optional<std::uint32_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_u32(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_U32)
+        {
+          return arora_buffer_reader_get_u32(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -60,7 +98,16 @@ namespace arora
     {
       std::optional<std::uint64_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_u64(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_U64)
+        {
+          return arora_buffer_reader_get_u64(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -69,7 +116,16 @@ namespace arora
     {
       std::optional<std::int8_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_s8(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_S8)
+        {
+          return arora_buffer_reader_get_s8(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -78,7 +134,16 @@ namespace arora
     {
       std::optional<std::int16_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_s16(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_S16)
+        {
+          return arora_buffer_reader_get_s16(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -87,7 +152,16 @@ namespace arora
     {
       std::optional<std::int32_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_s32(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_S32)
+        {
+          return arora_buffer_reader_get_s32(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -96,7 +170,16 @@ namespace arora
     {
       std::optional<std::int64_t> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_s64(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_S64)
+        {
+          return arora_buffer_reader_get_s64(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -105,7 +188,16 @@ namespace arora
     {
       std::optional<float> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_r32(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_R32)
+        {
+          return arora_buffer_reader_get_r32(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -114,7 +206,16 @@ namespace arora
     {
       std::optional<double> operator () (arora_buffer_reader *const reader) const
       {
-        return arora_buffer_reader_get_r64(reader);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_R64)
+        {
+          return arora_buffer_reader_get_r64(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
 
@@ -123,12 +224,22 @@ namespace arora
     {
       std::optional<std::string_view> operator () (arora_buffer_reader *const reader) const
       {
-        std::uint32_t length = 0;
-        const std::uint8_t *const data = arora_buffer_reader_get_string(reader, &length);
-        if (data == nullptr) return std::nullopt;
-        return std::string_view(reinterpret_cast<const char *>(data), length);
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == ARORA_BUFFER_TYPE_STRING)
+        {
+          std::uint32_t length = 0;
+          const std::uint8_t *const data = arora_buffer_reader_get_string(reader, &length);
+          if (data == nullptr) return std::nullopt;
+          return std::string_view(reinterpret_cast<const char *>(data), length);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::nullopt;
+        }
       }
     };
+
   }
 }
 

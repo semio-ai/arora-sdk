@@ -47,6 +47,8 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
   let module_definition: HighModuleDefinition = serde_yaml::from_str(&read_to_string(cmd.configuration_file).await?)?;
   let header = resolve_module_header(module_definition, registry).await?;
 
+  let header_yaml = serde_yaml::to_string(&header)?;
+
   let mut generator_path = std::env::current_exe()?;
   generator_path.pop();
   generator_path.push(format!("arora-module-{}{}", cmd.language, std::env::consts::EXE_SUFFIX));
@@ -115,11 +117,16 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
       print_entry(vfs, 0);
       return Ok(());
     } else {
-      vfs.sync(cmd.output_directory.into()).await?;
+      vfs.sync(cmd.output_directory.clone().into()).await?;
     }
   } else {
     anyhow::bail!("Failed to read virtual filesystem");
   }
+
+  let mut module_low = std::path::PathBuf::new();
+  module_low.push(cmd.output_directory);
+  module_low.push("module.yaml");
+  tokio::fs::write(module_low, header_yaml).await?;
 
   Ok(())
 }

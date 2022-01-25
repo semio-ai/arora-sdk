@@ -1,4 +1,6 @@
 use bytes::{BufMut, Buf};
+use uuid::Uuid;
+use std::collections::VecDeque;
 
 pub const TYPE_UNIT: u8 = 0;
 pub const TYPE_BOOLEAN: u8 = 1;
@@ -16,12 +18,20 @@ pub const TYPE_STRING: u8 = 12;
 pub const TYPE_STRUCTURE: u8 = 13;
 pub const TYPE_ENUMERATION: u8 = 14;
 
-
 pub struct BufferWriter {
   backing: Vec<u8>,
 }
 
 impl BufferWriter {
+  pub fn new() -> Self {
+    let mut backing = Vec::new();
+    // size placeholder
+    backing.put_u32(0);
+    Self {
+      backing,
+    }
+  }
+
   pub fn begin_structure(&mut self, id: &[u8], field_count: u32) {
     assert_eq!(id.len(), 16);
 
@@ -111,15 +121,26 @@ impl BufferWriter {
   }
 
   pub fn finalize(&mut self) -> &[u8] {
+    let size = self.backing.len() as u32;
+    self.backing[0..4].copy_from_slice(&size.to_be_bytes());
     &self.backing
   }
 }
 
 pub struct BufferReader<'a> {
+  size: u32,
   backing: &'a [u8],
 }
 
 impl<'a> BufferReader<'a> {
+  pub fn new(mut backing: &'a [u8]) -> Self {
+    let size = backing.get_u32();
+    Self {
+      size,
+      backing,
+    }
+  }
+
   pub fn next_type(&mut self) -> Option<u8> {
     if self.backing.len() == 0 {
       return None;
@@ -206,9 +227,7 @@ impl<'a> BufferReader<'a> {
 
 #[no_mangle]
 pub extern "C" fn arora_buffer_writer_new() -> *mut BufferWriter {
-  Box::into_raw(Box::new(BufferWriter {
-    backing: Vec::new(),
-  }))
+  Box::into_raw(Box::new(BufferWriter::new()))
 }
 
 #[no_mangle]
@@ -243,6 +262,14 @@ pub extern "C" fn arora_buffer_writer_add_structure_field(writer: *mut BufferWri
     let writer = &mut *writer;
     let id = std::slice::from_raw_parts(id, 16);
     writer.add_structure_field(id);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_boolean(writer: *mut BufferWriter, value: bool) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_boolean(value);
   }
 }
 
@@ -327,10 +354,10 @@ pub extern "C" fn arora_buffer_writer_add_r64(writer: *mut BufferWriter, value: 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, value: *const u8) {
+pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, value: *const u8, size: u32) {
   unsafe {
     let writer = &mut *writer;
-    let value = std::slice::from_raw_parts(value, std::usize::MAX);
+    let value = std::slice::from_raw_parts(value, size as usize);
     writer.add_string(std::str::from_utf8(value).unwrap());
   }
 }
@@ -340,7 +367,9 @@ pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length
   unsafe {
     let writer = &mut *writer;
     let backing = writer.finalize();
-    *length = backing.len();
+    if !length.is_null() {
+      *length = backing.len();
+    }
     backing.as_ptr()
   }
 }
@@ -348,9 +377,7 @@ pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length
 #[no_mangle]
 pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8, size: usize) -> *mut BufferReader<'a> {
   unsafe {
-    Box::into_raw(Box::new(BufferReader {
-      backing: std::slice::from_raw_parts(buffer, size),
-    }))
+    Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(buffer, size))))
   }
 }
 
@@ -383,6 +410,7 @@ pub extern "C" fn arora_buffer_reader_get_structure(reader: *mut BufferReader) -
   unsafe {
     let reader = &mut *reader;
     let (id, field_count) = reader.get_structure();
+    println!("arora_buffer_reader_get_structure {:?} {}", id, field_count);
     GetStructureResult {
       id: id.as_ptr(),
       field_count,
@@ -514,3 +542,70 @@ pub extern "C" fn arora_buffer_reader_get_string(reader: *mut BufferReader, leng
   }
 }
 
+pub struct BufferPrinter<'a> {
+  reader: BufferReader<'a>,
+}
+
+impl <'a> BufferPrinter<'a> {
+  pub fn new(reader: BufferReader<'a>) -> BufferPrinter<'a> {
+    BufferPrinter {
+      reader,
+    }
+  }
+
+  pub fn print(&mut self, indent: usize) {
+    match self.reader.next_type() {
+      Some(TYPE_STRUCTURE) => {
+        let (id, field_count) = self.reader.get_structure();
+        println!("{}Structure {:?} {}", "  ".repeat(indent), id, field_count);
+        for _ in 0..field_count {
+          let field_id = Uuid::from_slice(self.reader.get_structure_field()).unwrap();
+          println!("{}  Field {:?}", "  ".repeat(indent), field_id);
+          self.print(indent + 2);
+        }
+      },
+      Some(TYPE_ENUMERATION) => {
+        let (id, value_id) = self.reader.get_enumeration_value();
+        println!("{}Enumeration {:?} {:?}", "  ".repeat(indent), id, value_id);
+      },
+      Some(TYPE_BOOLEAN) => {
+        println!("{}Boolean {}", "  ".repeat(indent), self.reader.get_boolean());
+      },
+      Some(TYPE_U8) => {
+        println!("{}U8 {}", "  ".repeat(indent), self.reader.get_u8());
+      },
+      Some(TYPE_U16) => {
+        println!("{}U16 {}", "  ".repeat(indent), self.reader.get_u16());
+      },
+      Some(TYPE_U32) => {
+        println!("{}U32 {}", "  ".repeat(indent), self.reader.get_u32());
+      },
+      Some(TYPE_U64) => {
+        println!("{}U64 {}", "  ".repeat(indent), self.reader.get_u64());
+      },
+      Some(TYPE_S8) => {
+        println!("{}S8 {}", "  ".repeat(indent), self.reader.get_s8());
+      },
+      Some(TYPE_S16) => {
+        println!("{}S16 {}", "  ".repeat(indent), self.reader.get_s16());
+      },
+      Some(TYPE_S32) => {
+        println!("{}S32 {}", "  ".repeat(indent), self.reader.get_s32());
+      },
+      Some(TYPE_S64) => {
+        println!("{}S64 {}", "  ".repeat(indent), self.reader.get_s64());
+      },
+      Some(TYPE_R32) => {
+        println!("{}R32 {}", "  ".repeat(indent), self.reader.get_r32());
+      },
+      Some(TYPE_R64) => {
+        println!("{}R64 {}", "  ".repeat(indent), self.reader.get_r64());
+      },
+      Some(TYPE_STRING) => {
+        let length = self.reader.get_string().len();
+        println!("{}String {}", "  ".repeat(indent), length);
+      },
+      _ => {}
+    }
+  }
+}

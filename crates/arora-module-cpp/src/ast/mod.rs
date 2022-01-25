@@ -115,12 +115,21 @@ pub struct FunctionImplementation {
   pub parameters: Vec<Parameter>,
   pub ret: TypeRef,
   pub body: Block,
+  pub attributes: Option<Vec<String>>,
 }
 
 impl ToPrettyString for FunctionImplementation {
   fn to_pretty_string(&self, indent: usize) -> String {
     let mut s = String::new();
-    s.push_str(&self.ret.to_pretty_string(indent));
+    s.push_str(&indent_string(indent));
+    if let Some(attributes) = &self.attributes {
+      s.push_str("__attribute__((");
+      for attribute in attributes {
+        s.push_str(&format!("{} ", attribute));
+      }
+      s.push_str(")) ");
+    }
+    s.push_str(&self.ret.to_pretty_string(0));
     s.push_str(" ");
     s.push_str(&self.name);
     s.push_str("(");
@@ -389,6 +398,7 @@ pub enum Expression {
   PreIncrement(Box<Expression>),
   PreDecrement(Box<Expression>),
   Assign(Box<Expression>, Box<Expression>),
+  AddAssign(Box<Expression>, Box<Expression>),
 }
 
 impl ToExpression for Expression {
@@ -465,6 +475,10 @@ impl Expression {
   pub fn assign(&self, other: Expression) -> Expression {
     Expression::Assign(Box::new(self.clone()), Box::new(other))
   }
+
+  pub fn add_assign(&self, other: Expression) -> Expression {
+    Expression::AddAssign(Box::new(self.clone()), Box::new(other))
+  }
 }
 
 impl ToPrettyString for Expression {
@@ -492,6 +506,7 @@ impl ToPrettyString for Expression {
       Expression::PreIncrement(expr) => format!("++{}", expr.to_pretty_string(0)),
       Expression::PreDecrement(expr) => format!("--{}", expr.to_pretty_string(0)),
       Expression::Assign(left, right) => format!("{} = {}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::AddAssign(left, right) => format!("{} += {}", left.to_pretty_string(0), right.to_pretty_string(0)),
     });
     s
   }

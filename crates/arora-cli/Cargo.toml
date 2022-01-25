@@ -13,3 +13,4 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "3.0.10", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+arora-buffers = { path = "../arora-buffers" }

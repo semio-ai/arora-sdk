@@ -5,6 +5,7 @@ use arora::{
   schema::module::low::{Header, ModuleDefinition},
 };
 
+use arora_buffers::{BufferReader, BufferPrinter};
 use clap::Parser;
 
 use tokio::{
@@ -32,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     .build()
     .spawn();
 
-  let header: Header = serde_yaml::from_str(&read_to_string(args.header).await?)?;
+  let header: Header = serde_yaml::from_str(&read_to_string(args.header).await?)?; 
 
   let mut executable_file = File::open(args.exe).await?;
 
@@ -46,13 +47,34 @@ async fn main() -> anyhow::Result<()> {
       header,
       executable,
     })
-    .await?;
+    .await.expect("failed to load module");
 
-  module
-    .dispatch(Dispatch {
-      method_id: Uuid::new_v4(),
-    })
-    .await?;
+  let mut writer = arora_buffers::BufferWriter::new();
+
+  let method_id = Uuid::parse_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap();
+
+  writer.begin_structure(method_id.as_bytes(), 2);
+  writer.add_structure_field(Uuid::parse_str("63086e48-804f-403a-8862-3358ddedc08d").unwrap().as_bytes());
+  writer.add_s32(10);
+  writer.add_structure_field(Uuid::parse_str("b41899c3-66dc-40d4-ab61-d1ccf5231c88").unwrap().as_bytes());
+  writer.add_s32(20);
+  let arg = writer.finalize().to_vec().into_boxed_slice();
+
+  let start_time = std::time::Instant::now();
+  for i in 0..20000 {
+    let res = module
+      .dispatch(Dispatch {
+        method_id,
+        arg: arg.clone(),
+      })
+      .await.expect("failed to dispatch");
+  }
+  let end_time = std::time::Instant::now();
+
+  println!("{:?}", end_time - start_time);
+
+
+  
 
   Ok(())
 }
