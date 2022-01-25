@@ -1,9 +1,21 @@
-# Semio arora
+# Semio Arora
 
-Semio arora is a C library (written in Rust) and associated tooling for executing behavior trees in a sandboxed environment.
+Semio Arora is a C library (written in Rust) and associated tooling for executing behavior trees in a sandboxed environment.
 
 ## Prerequisites
-  - `clang`
+  - Rust. You may need to add first the generic WebAssembly target:
+    ```bash
+    rustup target add wasm32-unknown-unknown
+    ```
+  - Python
+
+## Build
+
+```bash
+./configure.py
+cd build
+make
+```
 
 ## Modules
 

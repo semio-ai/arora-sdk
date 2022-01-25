@@ -1,5 +1,3 @@
-
-
 project(arora)
 cmake_minimum_required(VERSION 3.0)
 
@@ -49,11 +47,7 @@ target_link_libraries(arora-util INTERFACE arora_util)
 add_dependencies(arora-util arora-util-build)
 
 
-
 set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}")
-
-
-add_compile_options(--sysroot=${WASI_SDK_PREFIX}/share/wasi-sysroot)
 
 install(
   FILES
@@ -70,9 +64,6 @@ install(
     WORLD_EXECUTE
   DESTINATION bin
 )
-
-set (WASI_SDK_PATH ${CMAKE_BINARY_DIR}/deps/wasi-sdk-prefix/src/wasi-sdk)
-
 
 add_subdirectory(libs)
 add_subdirectory(modules)

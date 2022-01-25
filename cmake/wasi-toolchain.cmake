@@ -14,6 +14,8 @@ else()
 	set(WASI_HOST_EXE_SUFFIX "")
 endif()
 
+# WASI_SDK_PREFIX must be set by the caller
+set(CMAKE_SYSROOT ${WASI_SDK_PREFIX}/share/wasi-sysroot)
 set(CMAKE_C_COMPILER ${WASI_SDK_PREFIX}/bin/clang${WASI_HOST_EXE_SUFFIX})
 set(CMAKE_CXX_COMPILER ${WASI_SDK_PREFIX}/bin/clang++${WASI_HOST_EXE_SUFFIX})
 set(CMAKE_AR ${WASI_SDK_PREFIX}/bin/llvm-ar${WASI_HOST_EXE_SUFFIX})
