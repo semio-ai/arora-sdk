@@ -62,7 +62,8 @@ async fn main() -> anyhow::Result<()> {
 
   let start_time = std::time::Instant::now();
   let mut handles = Vec::new();
-  for i in 0..20000 {
+  let nof_iterations = 20000;
+  for _i in 1..nof_iterations {
     let module = module.clone();
     let arg = arg.clone();
     handles.push(tokio::spawn(async move {
@@ -78,11 +79,13 @@ async fn main() -> anyhow::Result<()> {
   futures::future::join_all(handles).await;
 
   let end_time = std::time::Instant::now();
+  let total_duration = end_time - start_time;
+  let duration = total_duration / nof_iterations;
 
-  println!("{:?}", end_time - start_time);
-
-
-  
+  println!(
+    "{:?} for {:?} iterations ({:?} per iteration)",
+    total_duration, nof_iterations, duration
+  );
 
   Ok(())
 }
