@@ -19,4 +19,11 @@ make
 
 ## Modules
 
-Modules are the building blocks of Semio arora. Each module exports symbols for other modules to use.
+Modules are the building blocks of Semio Arora. Each module exports symbols for other modules to use.
+They can be implemented in C++ and in Rust, compiled into WebAssembly libraries.
+The symbols available in a compiled module is described in a `module.yaml` file.
+See [test-cpp](modules/test-cpp/module.yaml) or [test-wasm](modules/test-wasm/module.yaml)
+for working examples.
+
+Authors of modules should write a `module.yaml` file and
+use `arora-module-cli` to generate the adequate sources to implement it.
