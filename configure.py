@@ -32,20 +32,22 @@ print(f"Extracting WASI SDK...")
 tarfile.open(f"{tmp}/wasi-sdk-{wasi_version}.tar.gz", "r:gz").extractall()
 
 current_dir = getcwd()
+wasi_sdk_prefix = f"{current_dir}/wasi-sdk-14.0"
+print(f"WASI SDK was put in {wasi_sdk_prefix}")
 
-print(f"Creating build directory...")
+print(f"Creating 'build' directory...")
 # Check if build directory already exists
 if not exists(f"build"):
   makedirs(f"build")
 
 print(f"Running cmake...")
-subprocess.run(
-    ["cmake",
+cmake_command = [
+    "cmake",
     "..",
-    f"-DWASI_SDK_PREFIX={current_dir}/wasi-sdk-14.0",
-    f"-DCMAKE_TOOLCHAIN_FILE={current_dir}/cmake/wasi-toolchain.cmake"],
-    cwd="build"
-  )
-
+    f"-DWASI_SDK_PREFIX={wasi_sdk_prefix}",
+    f"-DCMAKE_TOOLCHAIN_FILE={wasi_sdk_prefix}/share/cmake/wasi-sdk.cmake"
+  ]
+print(' '.join(cmake_command))
+subprocess.run(cmake_command, cwd="build")
 
 print("Configuration complete. Run 'make' in the build folder to build arora.")
