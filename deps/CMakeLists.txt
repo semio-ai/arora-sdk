@@ -2,15 +2,9 @@ include(ExternalProject)
 
 set (MAKE_CONCURRENCY 10)
 
-ExternalProject_Add(binaryen
-  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/binaryen"
-  BINARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/binaryen"
-  INSTALL_COMMAND ""
-)
-
 set (WASI_VERSION 14)
 set (WASI_VERSION_FULL 14.0)
-set (WASI_PLATFORM linux)
+set (WASI_PLATFORM mingw)
 
 
 ExternalProjecT_Add(wasi-sdk
