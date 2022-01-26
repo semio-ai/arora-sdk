@@ -1,0 +1,23 @@
+[package]
+name = "arora-behavior-tree"
+version = "0.0.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+path = "src/behavior_tree.rs"
+
+[dependencies]
+arora = { path = "../arora" }
+arora-buffers = { path = "../arora-buffers" }
+arora-index = { path = "../arora-index" }
+arora-schema = { path = "../arora-schema" }
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }
+derive_more = "*"
+
+[dev-dependencies]
+anyhow = "*"
+serde_yaml = "0.8"
+tokio = { version = "1", features = ["full"] }
