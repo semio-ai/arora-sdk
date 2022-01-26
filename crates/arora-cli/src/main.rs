@@ -50,18 +50,26 @@ async fn main() -> anyhow::Result<()> {
   let mut writer = arora_buffers::BufferWriter::new();
 
   let method_id = Uuid::parse_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap();
+  let a = 20;
+  let b = 10;
 
   writer.begin_structure(method_id.as_bytes(), 2);
+  // We can set parameters in the order we like. Here we put b first.
   writer.add_structure_field(Uuid::parse_str("63086e48-804f-403a-8862-3358ddedc08d").unwrap().as_bytes());
-  writer.add_s32(10);
+  writer.add_s32(b);
   writer.add_structure_field(Uuid::parse_str("b41899c3-66dc-40d4-ab61-d1ccf5231c88").unwrap().as_bytes());
-  writer.add_s32(20);
+  writer.add_s32(a);
   let arg = writer.finalize().to_vec().into_boxed_slice();
 
   let start_time = std::time::Instant::now();
   let nof_iterations = 20000000;
   for _i in 1..nof_iterations {
-    engine.dispatch(&module_id, &method_id, &arg)?;
+    let raw_result = engine.dispatch(&module_id, &method_id, &arg)?;
+    let mut reader = arora_buffers::BufferReader::new(&raw_result);
+    let result = reader.get_s32();
+    if result != a + b {
+      panic!("bad result");
+    }
   }
 
 
