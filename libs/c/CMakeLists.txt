@@ -2,6 +2,7 @@
 
 add_library(arora-c INTERFACE)
 target_include_directories(arora-c INTERFACE "${TARGET_DIR}/include")
+target_link_libraries(arora-c INTERFACE arora-buffers arora-util)
 
 install(
   FILES

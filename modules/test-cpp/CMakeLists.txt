@@ -6,7 +6,8 @@ add_custom_target(module-cli ALL
 )
 
 add_executable(test-cpp src/main.cpp ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp)
-target_include_directories(test-cpp PUBLIC ${TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
-target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp)
+target_include_directories(test-cpp PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
+target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp arora-c)
+add_dependencies(test-cpp arora)
 target_compile_options(test-cpp PRIVATE -fPIC -O3 -flto)
 target_link_options(test-cpp PRIVATE -Wl,--no-entry -Wl,--export=malloc -Wl,--export=free)
