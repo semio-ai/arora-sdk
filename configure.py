@@ -31,7 +31,7 @@ urllib.request.urlretrieve(url, f"{tmp}/wasi-sdk-{wasi_version}.tar.gz")
 print(f"Extracting WASI SDK...")
 tarfile.open(f"{tmp}/wasi-sdk-{wasi_version}.tar.gz", "r:gz").extractall()
 
-current_dir = getcwd()
+current_dir = getcwd().replace("\\", "/")
 wasi_sdk_prefix = f"{current_dir}/wasi-sdk-14.0"
 print(f"WASI SDK was put in {wasi_sdk_prefix}")
 
@@ -47,6 +47,11 @@ cmake_command = [
     f"-DWASI_SDK_PREFIX={wasi_sdk_prefix}",
     f"-DCMAKE_TOOLCHAIN_FILE={wasi_sdk_prefix}/share/cmake/wasi-sdk.cmake"
   ]
+
+if wasi_platform == "mingw":
+  cmake_command.append("-G")
+  cmake_command.append("Ninja")
+
 print(' '.join(cmake_command))
 subprocess.run(cmake_command, cwd="build")
 

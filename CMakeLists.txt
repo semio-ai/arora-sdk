@@ -47,13 +47,13 @@ target_link_libraries(arora-util INTERFACE arora_util)
 add_dependencies(arora-util arora-util-build)
 
 
-set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}")
+set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 
 install(
   FILES
-    ${NATIVE_LIB_DIR}/arora-cli${CMAKE_EXECUTABLE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cli${CMAKE_EXECUTABLE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cpp${CMAKE_EXECUTABLE_SUFFIX}
+    ${NATIVE_LIB_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}
+    ${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}
+    ${NATIVE_LIB_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}
   PERMISSIONS
     OWNER_EXECUTE
     OWNER_READ
