@@ -1,7 +1,6 @@
 use arora::{
   actor::Actor,
   engine::{Engine, EngineBuilder},
-  module::Dispatch,
   schema::module::low::{Header, ModuleDefinition},
 };
 
@@ -28,12 +27,12 @@ pub struct Args {
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
 
-  let arora = EngineBuilder::new()
+  let mut engine = EngineBuilder::new()
     .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
-    .build()
-    .spawn();
+    .build();
 
   let header: Header = serde_yaml::from_str(&read_to_string(args.header).await?)?; 
+  let module_id = header.id.clone();
 
   let mut executable_file = File::open(args.exe).await?;
 
@@ -41,13 +40,12 @@ async fn main() -> anyhow::Result<()> {
   executable_file.read_to_end(&mut executable).await?;
   let executable = executable.into_boxed_slice();
 
-  let module = arora
+  engine
     .load_module(ModuleDefinition {
       schema_version: 0,
       header,
       executable,
-    })
-    .await.expect("failed to load module");
+    }).expect("failed to load module");
 
   let mut writer = arora_buffers::BufferWriter::new();
 
@@ -61,22 +59,11 @@ async fn main() -> anyhow::Result<()> {
   let arg = writer.finalize().to_vec().into_boxed_slice();
 
   let start_time = std::time::Instant::now();
-  let mut handles = Vec::new();
-  let nof_iterations = 20000;
+  let nof_iterations = 20000000;
   for _i in 1..nof_iterations {
-    let module = module.clone();
-    let arg = arg.clone();
-    handles.push(tokio::spawn(async move {
-      module
-        .dispatch(Dispatch {
-          method_id,
-          arg,
-        })
-        .await.expect("failed to dispatch")
-    }));
+    engine.dispatch(&module_id, &method_id, &arg)?;
   }
 
-  futures::future::join_all(handles).await;
 
   let end_time = std::time::Instant::now();
   let total_duration = end_time - start_time;
@@ -86,6 +73,8 @@ async fn main() -> anyhow::Result<()> {
     "{:?} for {:?} iterations ({:?} per iteration)",
     total_duration, nof_iterations, duration
   );
+
+  println!("{:?} calls per second", nof_iterations as f64 / total_duration.as_secs_f64());
 
   Ok(())
 }
