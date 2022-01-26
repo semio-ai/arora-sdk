@@ -24,7 +24,7 @@ pub struct BufferWriter {
 
 impl BufferWriter {
   pub fn new() -> Self {
-    let mut backing = Vec::new();
+    let mut backing = Vec::with_capacity(128);
     // size placeholder
     backing.put_u32(0);
     Self {
@@ -410,7 +410,6 @@ pub extern "C" fn arora_buffer_reader_get_structure(reader: *mut BufferReader) -
   unsafe {
     let reader = &mut *reader;
     let (id, field_count) = reader.get_structure();
-    println!("arora_buffer_reader_get_structure {:?} {}", id, field_count);
     GetStructureResult {
       id: id.as_ptr(),
       field_count,

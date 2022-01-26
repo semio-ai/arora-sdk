@@ -12,3 +12,7 @@ members = [
   "crates/arora-util",
   "crates/arora-vfs",
 ]
+
+[profile.release]
+lto = "thin"
+debug = 1

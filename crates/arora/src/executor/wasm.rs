@@ -6,20 +6,16 @@ use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 use bytes::{Buf, BufMut};
 
 use crate::{
-  actor::{Actor, Addr},
-  module::{Dispatch, DispatchError, DispatchResult, ModuleMsg},
+  module::{Module, DispatchError},
 };
 
-use super::{
-  Executor, ExecutorMsg, LoadModule, LoadModuleError, LoadModuleResult, UnloadModule,
-  UnloadModuleError,
-};
+use super::{Executor, LoadModuleError,UnloadModuleError,};
 use derive_more::{Display, Error, From};
 
 use tokio::sync::mpsc;
 use wasmtime::{
   Caller, Config, Engine as WasmEngine, Extern, Func, FuncType, Instance as WasmInstance,
-  Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, 
+  Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, InstanceLimits, ModuleLimits, 
 };
 
 #[derive(Debug, Error, Display, From)]
@@ -34,9 +30,18 @@ pub struct WebAssemblyExecutor {
 impl WebAssemblyExecutor {
   pub fn new() -> Result<Self, InitializationError> {
     let mut config = Config::new();
-    config.async_support(true);
+    // config.async_support(true);
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-    config.allocation_strategy(wasmtime::InstanceAllocationStrategy::OnDemand);
+    config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling {
+      instance_limits: InstanceLimits {
+        ..Default::default()
+      },
+      module_limits: ModuleLimits {
+        ..Default::default()
+      },
+      strategy: wasmtime::PoolingAllocationStrategy::NextAvailable
+    });
+    // config.profiler(wasmtime::ProfilingStrategy::VTune).unwrap();
 
     Ok(Self {
       engine: WasmEngine::new(&config)?,
@@ -48,13 +53,14 @@ impl WebAssemblyExecutor {
 
     })
   }
+}
 
-  async fn load_module(
-    &mut self,
-    data: LoadModule,
-    self_addr: &Addr<ExecutorMsg>,
-  ) -> LoadModuleResult {
-    let module_definition = data.module_definition;
+impl Executor for WebAssemblyExecutor {
+  fn name(&self) -> &'static str {
+    "wasm"
+  }
+
+  fn load_module(&mut self, module_definition: ModuleDefinition) -> Result<Box<dyn Module>, LoadModuleError> {
 
     let module = WasmModule::from_binary(&self.engine, &module_definition.executable)
       .map_err(|e| LoadModuleError::MalformedExecutable)?;
@@ -86,62 +92,28 @@ impl WebAssemblyExecutor {
     }
 
 
-    let instance = linker.instantiate_async(&mut store, &module).await
+    let instance = linker.instantiate(&mut store, &module)
       .map_err(|e| {
         println!("{:?}", e);
         LoadModuleError::Internal
       })?;
 
     Ok(
-      WebAssemblyModule::new(
+      Box::new(WebAssemblyModule::new(
         module_definition.header.exports,
-        self_addr.clone(),
         module,
         store,
         instance
-      ).map_err(|_| LoadModuleError::Internal)?.spawn(),
+      ).map_err(|_| LoadModuleError::Internal)?),
     )
   }
 
-  async fn unload_module(&mut self, data: UnloadModule) -> Result<(), UnloadModuleError> {
+  fn unload_module(&mut self, module_id: Uuid) -> Result<(), UnloadModuleError> {
     Ok(())
-  }
-
-  async fn run(mut self, mut rx: mpsc::Receiver<ExecutorMsg>, self_addr: Addr<ExecutorMsg>) {
-    while let Some(msg) = rx.recv().await {
-      match msg {
-        ExecutorMsg::LoadModule(request) => {
-          let (data, reply) = request.split();
-          let _ = reply.send(self.load_module(data, &self_addr).await);
-        }
-        ExecutorMsg::UnloadModule(request) => {
-          let (data, reply) = request.split();
-          let _ = reply.send(self.unload_module(data).await);
-        }
-      }
-    }
-  }
-}
-
-impl Executor for WebAssemblyExecutor {
-  fn name(&self) -> &'static str {
-    "wasm"
-  }
-}
-
-impl Actor for WebAssemblyExecutor {
-  type Msg = ExecutorMsg;
-
-  fn spawn(self) -> Addr<Self::Msg> {
-    let (tx, rx) = mpsc::channel(100);
-    let addr = Addr::new(tx);
-    tokio::spawn(Self::run(self, rx, addr.clone()));
-    addr
   }
 }
 
 struct WebAssemblyModule {
-  executor: Addr<ExecutorMsg>,
   module: WasmModule,
   store: Store<WasiCtx>,
   instance: WasmInstance,
@@ -155,7 +127,7 @@ struct WebAssemblyModule {
 }
 
 impl WebAssemblyModule {
-  pub fn new(exports: Vec<ExportSymbol>, executor: Addr<ExecutorMsg>, module: WasmModule, mut store: Store<WasiCtx>, instance: WasmInstance) -> Result<Self, wasmtime_wasi::Error> {
+  pub fn new(exports: Vec<ExportSymbol>, module: WasmModule, mut store: Store<WasiCtx>, instance: WasmInstance) -> Result<Self, wasmtime_wasi::Error> {
     let malloc = instance.get_typed_func::<(u32,), u32, _>(&mut store, "malloc")?;
     let free = instance.get_typed_func::<(u32,), (), _>(&mut store, "free")?;
 
@@ -168,7 +140,6 @@ impl WebAssemblyModule {
     let memory = instance.get_memory(&mut store, "memory").unwrap();
 
     Ok(Self {
-      executor,
       module,
       store,
       instance,
@@ -180,47 +151,48 @@ impl WebAssemblyModule {
     })
   }
 
-  async fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
-    Ok(self.malloc.call_async(&mut self.store, (size,)).await
+  fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
+    Ok(self.malloc.call(&mut self.store, (size,))
       .map_err(|e| {
         println!("{:?}", e);
         DispatchError::Trap
       })?
     )
   }
-  
-  async fn dispatch(&mut self, data: Dispatch) -> DispatchResult {
+}
+
+impl Module for WebAssemblyModule {
+  fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
 
     if let Some((addr, size)) = self.current_arg_memory {
       // Allocate memory for the argument in the WASM module
-      if size < data.arg.len() {
+      if size < arg.len() {
         self.current_arg_memory = Some((
-          self.malloc(data.arg.len() as u32).await? as usize,
-          data.arg.len(),
+          self.malloc(arg.len() as u32)? as usize,
+          arg.len(),
         ));
       }
     } else {
       self.current_arg_memory = Some((
-        self.malloc(data.arg.len() as u32).await? as usize,
-        data.arg.len(),
+        self.malloc(arg.len() as u32)? as usize,
+        arg.len(),
       ));
     }
     
     let (addr, _) = self.current_arg_memory.unwrap();
 
     // Copy the argument into the WASM module
-    self.memory.write(&mut self.store, addr as usize, &data.arg)
+    self.memory.write(&mut self.store, addr as usize, &arg)
       .map_err(|e| {
         println!("{:?}", e);
         DispatchError::Trap
       })?;
 
 
-    let func = self.arora_functions.get(&data.method_id).unwrap();
+    let func = self.arora_functions.get(method_id).unwrap();
     
     let result = func
-      .call_async(&mut self.store, (addr as u32, data.arg.len() as u32))
-      .await
+      .call(&mut self.store, (addr as u32, arg.len() as u32))
       .map_err(|e| {
         println!("{:?}", e);
         DispatchError::Trap
@@ -245,7 +217,7 @@ impl WebAssemblyModule {
       })?;
 
     // Free the result
-    self.free.call_async(&mut self.store, (result,)).await
+    self.free.call(&mut self.store, (result,))
       .map_err(|e| {
         println!("{:?}", e);
         DispatchError::Trap
@@ -253,25 +225,5 @@ impl WebAssemblyModule {
 
     Ok(result_buffer.into_boxed_slice())
   }
-
-  async fn run(mut self, mut rx: mpsc::Receiver<ModuleMsg>) {
-    while let Some(msg) = rx.recv().await {
-      match msg {
-        ModuleMsg::Dispatch(request) => {
-          let (data, reply) = request.split();
-          let _ = reply.send(self.dispatch(data).await);
-        }
-      }
-    }
-  }
 }
 
-impl Actor for WebAssemblyModule {
-  type Msg = ModuleMsg;
-
-  fn spawn(self) -> Addr<Self::Msg> {
-    let (tx, rx) = mpsc::channel(100);
-    tokio::spawn(Self::run(self, rx));
-    Addr::new(tx)
-  }
-}
