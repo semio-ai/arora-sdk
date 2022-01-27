@@ -10,6 +10,21 @@ pub struct Executor {
   pub max_version: Option<SemanticVersion>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum TypeRef {
+  Scalar {
+    id: String
+  },
+  Array {
+    id: String
+  },
+  Map {
+    key_id: String,
+    value_id: String
+  },
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Parameter {
   /// ID
@@ -18,7 +33,7 @@ pub struct Parameter {
   pub name: String,
   /// The type
   #[serde(rename = "type")]
-  pub ty: String,
+  pub ty: TypeRef,
   /// Mutability
   #[serde(default)]
   pub mutable: bool,
@@ -35,7 +50,7 @@ pub struct ImportFunction {
   /// Function parameters
   pub parameters: Vec<Parameter>,
   /// The return type
-  pub ret: String,
+  pub ret: TypeRef,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -47,7 +62,7 @@ pub struct ExportFunction {
   /// Function parameters
   pub parameters: Vec<Parameter>,
   /// The return type
-  pub ret: String,
+  pub ret: TypeRef,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
