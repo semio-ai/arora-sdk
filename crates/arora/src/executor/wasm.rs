@@ -87,7 +87,6 @@ impl Executor for WebAssemblyExecutor {
             .map_err(|_| LoadModuleError::Internal)?;
           
         }
-        ImportSymbol::Node(n) => {}
       }
     }
 
