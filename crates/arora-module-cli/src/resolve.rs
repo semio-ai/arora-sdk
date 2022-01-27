@@ -8,6 +8,7 @@ use arora_schema::module::{
     ExportFunction as LowExportFunction,
     Parameter as LowParameter,
     Executor as LowExecutor,
+    TypeRef as LowTypeRef,
   },
   high::{
     ModuleDefinition as HighModuleDefinition,
@@ -17,6 +18,7 @@ use arora_schema::module::{
     ExportFunction as HighExportFunction,
     Parameter as HighParameter,
     Executor as HighExecutor,
+    TypeRef as HighTypeRef,
   }
 };
 use uuid::Uuid;
@@ -35,11 +37,19 @@ pub async fn resolve_module_id(name: &str, registry: &mut Registry) -> anyhow::R
   })
 }
 
+pub async fn resolve_type_ref(type_ref: &HighTypeRef, registry: &mut Registry) -> anyhow::Result<LowTypeRef> {
+  match type_ref {
+    HighTypeRef::Scalar { id } => Ok(LowTypeRef::Scalar { id: resolve_type_id(id, registry).await? }),
+    HighTypeRef::Array { id } => Ok(LowTypeRef::Array { id: resolve_type_id(id, registry).await? }),
+    _ => Err(anyhow::anyhow!("Unsupported type ref: {:?}", type_ref))
+  }
+}
+
 pub async fn resolve_parameter(parameter: HighParameter, registry: &mut Registry) -> anyhow::Result<LowParameter> {
   Ok(LowParameter {
     id: parameter.id,
     name: parameter.name,
-    ty_id: resolve_type_id(&parameter.ty, registry).await?,
+    ty: resolve_type_ref(&parameter.ty, registry).await?,
     mutable: parameter.mutable,
   })
 }
@@ -57,7 +67,7 @@ pub async fn resolve_import_symbol(symbol: HighImportSymbol, registry: &mut Regi
         id: function.id,
         name: function.name,
         parameters,
-        ret: resolve_type_id(&function.ret, registry).await?,
+        ret: resolve_type_ref(&function.ret, registry).await?,
       })
     }
   })
@@ -75,7 +85,7 @@ pub async fn resolve_export_symbol(symbol: HighExportSymbol, registry: &mut Regi
         id: function.id,
         name: function.name,
         parameters,
-        ret: resolve_type_id(&function.ret, registry).await?,
+        ret: resolve_type_ref(&function.ret, registry).await?,
       })
     }
   })

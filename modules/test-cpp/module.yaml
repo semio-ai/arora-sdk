@@ -16,11 +16,17 @@ exports:
     parameters:
       - id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
         name: a
-        type: s32
+        type:
+          kind: scalar
+          id: s32
       - id: 63086e48-804f-403a-8862-3358ddedc08d
         name: b
-        type: s32
-    ret: s32
+        type:
+          kind: scalar
+          id: s32
+    ret:
+      kind: scalar
+      id: s32
 imports: []
 dependencies: []
 executable_mime: application/wasm

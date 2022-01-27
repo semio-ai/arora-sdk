@@ -149,6 +149,16 @@ impl ToPrettyString for FunctionImplementation {
 
 pub struct Block {
   pub statements: Vec<Declaration>,
+  pub semicolon: bool
+}
+
+impl Default for Block {
+  fn default() -> Self {
+    Self {
+      statements: Vec::new(),
+      semicolon: false,
+    }
+  }
 }
 
 impl ToPrettyString for Block {
@@ -160,7 +170,11 @@ impl ToPrettyString for Block {
       s.push_str(&statement.to_pretty_string(indent + 1));
     }
     s.push_str(&indent_string(indent));
-    s.push_str("}\n");
+    if self.semicolon {
+      s.push_str("};\n");
+    } else {
+      s.push_str("}\n");
+    }
     s
   }
 }
@@ -239,6 +253,76 @@ impl ToPrettyString for Extern {
   }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Struct {
+  pub name: String,
+  pub block: Block,
+}
+
+impl ToPrettyString for Struct {
+  fn to_pretty_string(&self, indent: usize) -> String {
+    let mut s = String::new();
+    s.push_str(&indent_string(indent));
+    s.push_str(&format!("struct {} ", self.name));
+    s.push_str(&self.block.to_pretty_string(indent));
+    s
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Class {
+  pub name: String,
+  pub block: Block,
+}
+
+impl ToPrettyString for Class {
+  fn to_pretty_string(&self, indent: usize) -> String {
+    let mut s = String::new();
+    s.push_str(&indent_string(indent));
+    s.push_str(&format!("class {} ", self.name));
+    s.push_str(&self.block.to_pretty_string(indent));
+    s
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Enum {
+  pub name: String,
+  pub members: Vec<String>,
+}
+
+impl ToPrettyString for Enum {
+  fn to_pretty_string(&self, indent: usize) -> String {
+    let mut s = String::new();
+    s.push_str(&indent_string(indent));
+    s.push_str(&format!("enum {} {{\n", self.name));
+    for member in &self.members {
+      s.push_str(&indent_string(indent + 1));
+      s.push_str(&format!("{},\n", member));
+    }
+    s.push_str(&indent_string(indent));
+    s.push_str("};\n");
+
+    s
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Union {
+  pub name: String,
+  pub block: Block,
+}
+
+impl ToPrettyString for Union {
+  fn to_pretty_string(&self, indent: usize) -> String {
+    let mut s = String::new();
+    s.push_str(&indent_string(indent));
+    s.push_str(&format!("union {} ", self.name));
+    s.push_str(&self.block.to_pretty_string(indent));
+    s
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From)]
 pub enum Declaration {
   FunctionPrototype(FunctionPrototype),
@@ -249,6 +333,10 @@ pub enum Declaration {
   NewLine(NewLine),
   Statement(Statement),
   Variable(Variable),
+  Struct(Struct),
+  Class(Class),
+  Enum(Enum),
+  Union(Union),
   Extern(Extern),
 }
 
@@ -264,6 +352,10 @@ impl ToPrettyString for Declaration {
       Declaration::Statement(statement) => statement.to_pretty_string(indent),
       Declaration::Variable(variable) => variable.to_pretty_string(indent),
       Declaration::Extern(extern_) => extern_.to_pretty_string(indent),
+      Declaration::Struct(struct_) => struct_.to_pretty_string(indent),
+      Declaration::Class(class_) => class_.to_pretty_string(indent),
+      Declaration::Enum(enum_) => enum_.to_pretty_string(indent),
+      Declaration::Union(union_) => union_.to_pretty_string(indent),
     }
   }
 }
