@@ -270,9 +270,6 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           parameters,
         }.into());
       },
-      ExportSymbol::Node(n) => {
-
-      },
     }
     
   }
@@ -623,9 +620,6 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
             ]
           }
         }.into());
-      },
-      ExportSymbol::Node(n) => {
-
       },
     }
   }

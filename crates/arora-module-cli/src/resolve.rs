@@ -4,10 +4,8 @@ use arora_schema::module::{
     Header as LowHeader,
     ImportSymbol as LowImportSymbol,
     ImportFunction as LowImportFunction,
-    ImportNode as LowImportNode,
     ExportSymbol as LowExportSymbol,
     ExportFunction as LowExportFunction,
-    ExportNode as LowExportNode,
     Parameter as LowParameter,
     Executor as LowExecutor,
   },
@@ -15,10 +13,8 @@ use arora_schema::module::{
     ModuleDefinition as HighModuleDefinition,
     ImportSymbol as HighImportSymbol,
     ImportFunction as HighImportFunction,
-    ImportNode as HighImportNode,
     ExportSymbol as HighExportSymbol,
     ExportFunction as HighExportFunction,
-    ExportNode as HighExportNode,
     Parameter as HighParameter,
     Executor as HighExecutor,
   }
@@ -63,19 +59,6 @@ pub async fn resolve_import_symbol(symbol: HighImportSymbol, registry: &mut Regi
         parameters,
         ret: resolve_type_id(&function.ret, registry).await?,
       })
-    },
-    HighImportSymbol::Node(node) => {
-      let mut parameters = Vec::new();
-      for parameter in node.parameters {
-        parameters.push(resolve_parameter(parameter, registry).await?);
-      }
-      
-      LowImportSymbol::Node(LowImportNode {
-        module: resolve_module_id(&node.module, registry).await?,
-        id: node.id,
-        name: node.name,
-        parameters
-      })
     }
   })
 }
@@ -93,18 +76,6 @@ pub async fn resolve_export_symbol(symbol: HighExportSymbol, registry: &mut Regi
         name: function.name,
         parameters,
         ret: resolve_type_id(&function.ret, registry).await?,
-      })
-    },
-    HighExportSymbol::Node(node) => {
-      let mut parameters = Vec::new();
-      for parameter in node.parameters {
-        parameters.push(resolve_parameter(parameter, registry).await?);
-      }
-      
-      LowExportSymbol::Node(LowExportNode {
-        id: node.id,
-        name: node.name,
-        parameters
       })
     }
   })
