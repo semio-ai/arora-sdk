@@ -50,26 +50,6 @@ impl ExportFunction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ExportNode {
-  /// Node ID
-  pub id: Uuid,
-  /// The node's name
-  pub name: String,
-  /// Parameters
-  pub parameters: Vec<Parameter>,
-}
-
-impl ExportNode {
-  pub fn type_dependencies(&self) -> HashSet<Uuid> {
-    let mut deps = HashSet::new();
-    for param in &self.parameters {
-      deps.insert(param.ty_id);
-    }
-    deps
-  }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ImportFunction {
   /// Module ID
   pub module: Uuid,
@@ -95,55 +75,28 @@ impl ImportFunction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ImportNode {
-  /// Module ID
-  pub module: Uuid,
-  /// Node ID
-  pub id: Uuid,
-  /// The node's name
-  pub name: String,
-  /// Parameters
-  pub parameters: Vec<Parameter>,
-}
-
-impl ImportNode {
-  pub fn type_dependencies(&self) -> HashSet<Uuid> {
-    let mut deps = HashSet::new();
-    for param in &self.parameters {
-      deps.insert(param.ty_id);
-    }
-    deps
-  }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ExportSymbol {
   /// A function
   Function(ExportFunction),
-  /// A behavior tree node
-  Node(ExportNode),
 }
 
 impl ExportSymbol {
   pub fn id(&self) -> &Uuid {
     match self {
       Self::Function(f) => &f.id,
-      Self::Node(n) => &n.id,
     }
   }
 
   pub fn name(&self) -> &String {
     match self {
       Self::Function(f) => &f.name,
-      Self::Node(n) => &n.name,
     }
   }
 
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     match self {
       Self::Function(f) => f.type_dependencies(),
-      Self::Node(n) => n.type_dependencies(),
     }
   }
 }
@@ -153,36 +106,30 @@ impl ExportSymbol {
 pub enum ImportSymbol {
   /// A function
   Function(ImportFunction),
-  /// A behavior tree node
-  Node(ImportNode),
 }
 
 impl ImportSymbol {
   pub fn module(&self) -> &Uuid {
     match self {
       Self::Function(f) => &f.module,
-      Self::Node(n) => &n.module,
     }
   }
 
   pub fn id(&self) -> &Uuid {
     match self {
       Self::Function(f) => &f.id,
-      Self::Node(n) => &n.id,
     }
   }
 
   pub fn name(&self) -> &String {
     match self {
       Self::Function(f) => &f.name,
-      Self::Node(n) => &n.name,
     }
   }
 
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     match self {
       Self::Function(f) => f.type_dependencies(),
-      Self::Node(n) => n.type_dependencies(),
     }
   }
 }
@@ -223,11 +170,6 @@ impl Header {
             deps.insert(parameter.ty_id);
           }
         }
-        ExportSymbol::Node(node) => {
-          for parameter in &node.parameters {
-            deps.insert(parameter.ty_id);
-          }
-        }
       }
     }
 
@@ -236,11 +178,6 @@ impl Header {
         ImportSymbol::Function(function) => {
           deps.insert(function.ret);
           for parameter in &function.parameters {
-            deps.insert(parameter.ty_id);
-          }
-        }
-        ImportSymbol::Node(node) => {
-          for parameter in &node.parameters {
             deps.insert(parameter.ty_id);
           }
         }
