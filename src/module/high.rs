@@ -39,18 +39,6 @@ pub struct ImportFunction {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ImportNode {
-  /// Module ID
-  pub module: String,
-  /// Node ID
-  pub id: Uuid,
-  /// The node's name
-  pub name: String,
-  /// Parameters
-  pub parameters: Vec<Parameter>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct ExportFunction {
   /// Function ID
   pub id: Uuid,
@@ -63,22 +51,10 @@ pub struct ExportFunction {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ExportNode {
-  /// Node ID
-  pub id: Uuid,
-  /// The node's name
-  pub name: String,
-  /// Parameters
-  pub parameters: Vec<Parameter>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ImportSymbol {
   /// A function
   Function(ImportFunction),
-  /// A behavior tree node
-  Node(ImportNode),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -86,8 +62,6 @@ pub enum ImportSymbol {
 pub enum ExportSymbol {
   /// A function
   Function(ExportFunction),
-  /// A behavior tree node
-  Node(ExportNode),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
