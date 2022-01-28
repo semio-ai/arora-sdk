@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
+use crate::module::low::TypeRef;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StructureField {
   pub name: String,
-  #[serde(rename = "type_id")]
-  pub ty_id: Uuid
+  #[serde(rename = "type")]
+  pub type_ref: TypeRef
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,8 +20,8 @@ pub struct Structure {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnumerationValue {
   pub name: String,
-  #[serde(rename = "type_id")]
-  pub ty_id: Uuid
+  #[serde(rename = "type")]
+  pub type_ref: TypeRef
 }
 
 #[derive(Debug, Serialize, Deserialize)]
