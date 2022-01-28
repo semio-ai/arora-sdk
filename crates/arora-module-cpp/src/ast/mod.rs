@@ -195,6 +195,7 @@ pub struct FunctionImplementation {
   pub static_: bool,
   pub constant: bool,
   pub noexcept: bool,
+  pub inline: bool,
 }
 
 impl Default for FunctionImplementation {
@@ -211,6 +212,7 @@ impl Default for FunctionImplementation {
       static_: false,
       constant: false,
       noexcept: false,
+      inline: false,
     }
   }
 }
@@ -234,7 +236,11 @@ impl ToPrettyString for FunctionImplementation {
         }
         s.push_str(&template_argument);
       }
-      s.push_str("> ");
+      s.push_str(">\n");
+    }
+
+    if self.inline {
+      s.push_str("inline ");
     }
 
     if self.static_ {

@@ -1,5 +1,5 @@
 add_library(arora-cpp STATIC src/arora/buffer/deserialize.cpp)
-target_include_directories(arora-cpp PRIVATE ${TARGET_DIR}/include)
+target_include_directories(arora-cpp PRIVATE ${RUST_TARGET_DIR}/include)
 target_include_directories(arora-cpp PUBLIC include)
 target_link_directories(arora-cpp PUBLIC ${WASM_LIB_DIR})
 target_link_libraries(arora-cpp PRIVATE arora-buffers arora-c)

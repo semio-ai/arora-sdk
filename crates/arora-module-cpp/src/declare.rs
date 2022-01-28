@@ -83,7 +83,7 @@ pub fn serialize(type_name: &str, value: &Expression) -> Statement {
   format!("arora::buffer::serialize<{}>(writer, {})", type_name, value.to_pretty_string(0)).to_expression().into_statement()
 }
 
-pub fn deserialize(identifier: &str, type_name: &str) -> Expression {
+pub fn deserialize(type_name: &str) -> Expression {
   format!("arora::buffer::deserialize<{}>(reader)", type_name).to_expression()
 }
 
@@ -577,8 +577,8 @@ pub fn ty_impl(context: &Context, ty: &Type) -> Vec<Declaration> {
   }
 }
 
-pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> Struct {
-  let mut statements = Vec::new();
+pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> FunctionImplementation {
+  let mut function_statements = Vec::<Declaration>::new();
   
   let mut sorted_field_ids = ty.fields
     .keys()
@@ -590,20 +590,31 @@ pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> 
 
   }
   
-  Struct {
+  FunctionImplementation {
     name: "arora::buffer::deserialize".to_string(),
-    block: Block {
-      statements,
-      semicolon: true,
+    ret: Some(ty::optional(&TypeRef {
+      ty: name.to_string(),
+      ..Default::default()
+    })),
+    operator: true,
+    parameters: vec! [
+      Parameter {
+        name: "reader".to_string(),
+        type_ref: ty::ARORA_BUFFER_READER_PTR.clone(),
+      }
+    ],
+    body: Block {
+      statements: function_statements,
+      semicolon: false,
     },
-    template_arguments: Some(vec! []),
-    specialization: Some(vec! [ name.to_string() ])
+    template_arguments: Some(vec![]),
+    specialization: Some(vec![name.to_string()]),
+    inline: true,
+    ..Default::default()
   }
 }
 
-pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &Enumeration) -> Struct {
-  let mut statements = Vec::new();
-
+pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &Enumeration) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
 
   function_statements.push(Variable {
@@ -673,8 +684,8 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
   function_statements.push(Statement::Return(constant::NULL_OPTION.clone()).into());
   
 
-  statements.push(FunctionImplementation {
-    name: "operator ()".to_string(),
+  FunctionImplementation {
+    name: "arora::buffer::deserialize".to_string(),
     ret: Some(ty::optional(&TypeRef {
       ty: name.to_string(),
       ..Default::default()
@@ -690,21 +701,14 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
       statements: function_statements,
       semicolon: false,
     },
+    template_arguments: Some(vec![]),
+    specialization: Some(vec![name.to_string()]),
+    inline: true,
     ..Default::default()
-  }.into());
-  
-  Struct {
-    name: "arora::buffer::deserialize".to_string(),
-    block: Block {
-      statements,
-      semicolon: true,
-    },
-    template_arguments: Some(vec! []),
-    specialization: Some(vec! [ name.to_string() ])
   }
 }
 
-pub fn deserializer(context: &Context, ty: &Type) -> Struct {
+pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
   match ty.kind {
     TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),
     TypeKind::Enumeration(ref enumeration) => enumeration_deserializer(&context, &ty.id, &ty.name, enumeration),

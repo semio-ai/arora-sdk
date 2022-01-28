@@ -12,20 +12,16 @@ add_executable(test-cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
 )
-target_include_directories(test-cpp PUBLIC ${TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
+target_include_directories(test-cpp PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
 target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp PRIVATE -fPIC -O3 -flto)
 target_link_options(test-cpp PRIVATE -Wl,--no-entry -Wl,--export=malloc -Wl,--export=free)
 
 if(BUILD_TESTING)
-  if(CMAKE_BUILD_TYPE EQUAL "Debug")
-    set(RUST_TARGET_SUBDIR "debug")
-  else()
-    set(RUST_TARGET_SUBDIR "release")
-  endif()
-
   add_test(
     NAME test-call-cpp-wasm-from-engine
-    COMMAND ${PROJECT_SOURCE_DIR}/target/${RUST_TARGET_SUBDIR}/arora-cli --header ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
+    COMMAND ${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}/arora-cli
+      --header ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+      --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
   )
 endif()

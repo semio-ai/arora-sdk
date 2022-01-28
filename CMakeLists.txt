@@ -6,21 +6,21 @@ include(CTest)
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option (DEBUG "Build debug version" OFF)
-option (REGISTRY_URI "Registry URI" "https://raw.githubusercontent.com/semio-ai/arora-registry/master/")
+option (USE_RUST_DEBUG "Use Rust debug build" OFF)
+set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/master/" CACHE STRING "Registry URI")
 
-set(TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
+set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
-if (DEBUG)
-  set(NATIVE_LIB_DIR "${TARGET_DIR}/debug")
-  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/debug")
+if (USE_RUST_DEBUG)
+  set(RUST_TARGET_SUBDIR "debug")
   set(CARGO_BUILD_FLAGS)
 else()
-  set(NATIVE_LIB_DIR "${TARGET_DIR}/release")
-  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/release")
+  set(RUST_TARGET_SUBDIR "release")
   set(CARGO_BUILD_FLAGS --release)
 endif()
 
+set(NATIVE_LIB_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")
+set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}

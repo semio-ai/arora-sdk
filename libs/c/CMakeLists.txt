@@ -11,4 +11,4 @@ install(
   DESTINATION lib
 )
 
-install(DIRECTORY "${TARGET_DIR}/include/arora" DESTINATION include)
+install(DIRECTORY "${RUST_TARGET_DIR}/include/arora" DESTINATION include)
