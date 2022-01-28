@@ -15,6 +15,12 @@ namespace arora
       {
       }
 
+      View(const T *const begin, const T *const end)
+        : data_(begin)
+        , size_(std::distance(begin, end))
+      {
+      }
+
       const T *data() const
       {
         return data_;

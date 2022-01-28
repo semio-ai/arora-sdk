@@ -10,16 +10,13 @@ extern "C" {
 #include <ranges>
 #include <string_view>
 #include <string>
+#include "types.hpp"
 #include "View.hpp"
 
 namespace arora
 {
   namespace buffer
   {
-    // Templated helpers for writing to Arora buffers.
-    template<typename T>
-    int arora_buffer_type_of();
-
     template<typename T>
     void arora_buffer_writer_add_bulk(arora_buffer_writer *const writer, const T *const data, std::size_t size);
     
