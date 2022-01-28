@@ -20,6 +20,16 @@ namespace arora
         return data_;
       }
 
+      const T *begin() const
+      {
+        return data_;
+      }
+
+      const T *end() const
+      {
+        return data_ + size_;
+      }
+
       std::size_t size() const
       {
         return size_;
@@ -51,3 +61,5 @@ namespace arora
     };
   }
 }
+
+#endif

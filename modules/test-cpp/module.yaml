@@ -18,7 +18,7 @@ exports:
         name: a
         type:
           kind: scalar
-          id: s32
+          id: Status
       - id: 63086e48-804f-403a-8862-3358ddedc08d
         name: b
         type:

@@ -3,6 +3,16 @@ use arora_schema::ty::{UNIT_ID, BOOLEAN_ID, U8_ID, U16_ID, U32_ID, U64_ID, S8_ID
 use crate::{ast::TypeRef, Context};
 
 lazy_static::lazy_static! {
+  pub static ref VOID: TypeRef = TypeRef {
+    ty: "void".to_string(),
+    ..Default::default()
+  };
+  
+  pub static ref BOOL: TypeRef = TypeRef {
+    ty: "bool".to_string(),
+    ..Default::default()
+  };
+  
   pub static ref U8: TypeRef = TypeRef {
     ty: "uint8_t".to_string(),
     ..Default::default()
@@ -46,6 +56,11 @@ lazy_static::lazy_static! {
 
   pub static ref ARORA_GET_STRUCTURE_RESULT: TypeRef = TypeRef {
     ty: "arora_get_structure_result".to_string(),
+    ..Default::default()
+  };
+
+  pub static ref ARORA_GET_ENUMERATION_VALUE_RESULT: TypeRef = TypeRef {
+    ty: "arora_get_enumeration_value_result".to_string(),
     ..Default::default()
   };
 }
@@ -94,5 +109,61 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::T
       let value_ty = context.types.get(&value_id).unwrap();
       format!("std::unordered_map<{}, {}>", key_ty.name, value_ty.name)
     },
+  }
+}
+
+pub fn optional(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    ..Default::default()
+  }
+}
+
+pub fn optional_const(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    constant: true,
+    ..Default::default()
+  }
+}
+
+pub fn optional_ptr(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    constant: true,
+    pointer: true,
+    ..Default::default()
+  }
+}
+
+pub fn optional_const_ptr(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    constant: true,
+    pointer: true,
+    ..Default::default()
+  }
+}
+
+pub fn optional_const_ref(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    constant: true,
+    reference: true,
+    ..Default::default()
+  }
+}
+
+pub fn optional_ref(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    reference: true,
+    ..Default::default()
   }
 }

@@ -5,6 +5,7 @@ set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option (DEBUG "Build debug version" OFF)
+option (REGISTRY_URI "Registry URI" "https://raw.githubusercontent.com/semio-ai/arora-registry/master/")
 
 set(TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 

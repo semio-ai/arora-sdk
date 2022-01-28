@@ -484,6 +484,13 @@ pub extern "C" fn arora_buffer_writer_free(writer: *mut BufferWriter) {
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_unit(writer: *mut BufferWriter) {
+  unsafe {
+    (*writer).add_unit();
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_begin_structure(writer: *mut BufferWriter, id: *const u8, field_count: u32) {
   unsafe {
     let writer = &mut *writer;
@@ -656,6 +663,15 @@ pub extern "C" fn arora_buffer_writer_add_u64_raw(writer: *mut BufferWriter, val
   unsafe {
     let writer = &mut *writer;
     writer.add_u64_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u64_raw_bulk(writer: *mut BufferWriter, values: *const u64, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_u64_raw_bulk(values);
   }
 }
 
