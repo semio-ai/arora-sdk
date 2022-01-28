@@ -62,4 +62,4 @@ namespace arora
   }
 }
 
-#endif
+#endif // _ARORA_BUFFER_VIEW_HPP_

@@ -83,8 +83,8 @@ pub fn serialize(type_name: &str, value: &Expression) -> Statement {
   format!("arora::buffer::serialize<{}>(writer, {})", type_name, value.to_pretty_string(0)).to_expression().into_statement()
 }
 
-pub fn deserialize(type_name: &str) -> Expression {
-  format!("arora::buffer::deserialize<{}>()(reader)", type_name).to_expression()
+pub fn deserialize(identifier: &str, type_name: &str) -> Expression {
+  format!("arora::buffer::deserialize<{}>(reader)", type_name).to_expression()
 }
 
 // ARORA_BUFFER_READER_GET_STRUCTURE_FIELD
