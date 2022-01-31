@@ -4,7 +4,6 @@ use arora::{
   schema::module::low::{Header, ModuleDefinition},
 };
 
-use arora_buffers::{BufferReader};
 use clap::Parser;
 
 use tokio::{

@@ -1,6 +1,4 @@
 use bytes::{BufMut, Buf};
-use uuid::Uuid;
-use std::collections::VecDeque;
 
 pub const TYPE_UNIT: u8 = 0;
 pub const TYPE_BOOLEAN: u8 = 1;
