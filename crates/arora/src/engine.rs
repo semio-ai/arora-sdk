@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
@@ -69,6 +69,7 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
 
 pub type UnloadModuleResult = Result<(), UnloadModuleError>;
 
+#[derive(Debug)]
 pub struct UnloadModule {
   module_id: Uuid,
 }

@@ -2,6 +2,7 @@ use std::{future::Future, ops::Deref};
 
 use tokio::sync::{mpsc, oneshot};
 
+#[derive(Debug)]
 pub struct Addr<Msg: Send>(mpsc::Sender<Msg>);
 
 impl<Msg: Send> Addr<Msg> {
@@ -30,6 +31,8 @@ pub enum ReplyError {
   SendError,
 }
 
+
+#[derive(Debug)]
 pub struct Request<I, O: Send> {
   pub data: I,
   pub reply: oneshot::Sender<O>,
