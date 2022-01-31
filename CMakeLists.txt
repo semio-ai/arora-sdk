@@ -68,5 +68,12 @@ install(
   DESTINATION bin
 )
 
+if(BUILD_TESTING)
+  add_test(
+    NAME cargo_test
+    COMMAND cargo test
+  )
+endif()
+
 add_subdirectory(libs)
 add_subdirectory(modules)
