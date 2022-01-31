@@ -60,6 +60,7 @@ pub struct ExportFunction {
   /// Function name
   pub name: String,
   /// Function parameters
+  #[serde(default)]
   pub parameters: Vec<Parameter>,
   /// The return type
   pub ret: TypeRef,
