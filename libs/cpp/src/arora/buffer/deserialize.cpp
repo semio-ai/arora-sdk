@@ -62,12 +62,12 @@ void arora::buffer::skip(arora_buffer_reader *const reader, const std::uint8_t t
     case ARORA_BUFFER_TYPE_ARRAY:
     {
       arora_get_array_result res = arora_buffer_reader_get_array(reader);
-      arora::buffer::skipArray(reader, res.ty, res.element_count);
+      arora::buffer::skip_array(reader, res.ty, res.element_count);
     }
   }
 }
 
-void arora::buffer::skipArray(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count)
+void arora::buffer::skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count)
 {
   switch (array_type)
   {

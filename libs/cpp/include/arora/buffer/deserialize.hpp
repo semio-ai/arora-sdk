@@ -19,7 +19,7 @@ namespace arora
   namespace buffer
   {
     void skip(arora_buffer_reader *const reader, const std::uint8_t type);
-    void skipArray(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
+    void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
 
     template<typename T>
     T arora_buffer_reader_get(arora_buffer_reader *const reader);
@@ -54,7 +54,7 @@ namespace arora
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
       if (res.ty != arora_buffer_type_of<T>)
       {
-        skipArray(reader, res.ty, res.element_count);
+        skip_array(reader, res.ty, res.element_count);
         return std::nullopt;
       }
 
@@ -186,7 +186,7 @@ namespace arora
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
       if (res.ty != ARORA_BUFFER_TYPE_STRING)
       {
-        skipArray(reader, res.ty, res.element_count);
+        skip_array(reader, res.ty, res.element_count);
         return std::nullopt;
       }
 

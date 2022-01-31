@@ -17,8 +17,8 @@ lazy_static::lazy_static! {
   pub static ref ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE: Expression = "arora_buffer_writer_add_enumeration_value".to_expression();
   pub static ref ARORA_UUID_COMPARE: Expression = "arora_uuid_compare".to_expression();
   pub static ref ARORA_BUFFER_SKIP: Expression = "arora::buffer::skip".to_expression();
-  pub static ref ARORA_BUFFER_SKIP_ARRAY: Expression = "arora::buffer::skipArray".to_expression();
-  pub static ref ARORA_BUFFER_SERIALIZE_UNIT: Expression = "arora::buffer::serializeUnit".to_expression();
+  pub static ref ARORA_BUFFER_SKIP_ARRAY: Expression = "arora::buffer::skip_array".to_expression();
+  pub static ref ARORA_BUFFER_SERIALIZE_UNIT: Expression = "arora::buffer::serialize_unit".to_expression();
 
   pub static ref SIZEOF : Expression = "sizeof".to_expression();
   pub static ref STD_MAX: Expression = "std::max".to_expression();
