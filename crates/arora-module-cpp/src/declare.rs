@@ -59,6 +59,10 @@ pub fn arora_buffer_writer_free() -> Statement {
   func::ARORA_BUFFER_WRITER_FREE.call([ "writer" ]).into_statement()
 }
 
+pub fn arora_buffer_writer_finalize() -> Expression {
+  func::ARORA_BUFFER_WRITER_FINALIZE.call([ "writer".to_expression(), 0u8.to_expression() ])
+}
+
 pub fn arora_buffer_reader_free() -> Statement {
   func::ARORA_BUFFER_READER_FREE.call([ "reader" ]).into_statement()
 }
@@ -709,6 +713,98 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
 }
 
 pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
+  match ty.kind {
+    TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),
+    TypeKind::Enumeration(ref enumeration) => enumeration_deserializer(&context, &ty.id, &ty.name, enumeration),
+    _ => panic!("deserializer: not implemented for {:?}", ty)
+  }
+}
+
+pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> FunctionImplementation {
+  let mut function_statements = Vec::<Declaration>::new();
+  
+  let mut sorted_field_ids = ty.fields
+    .keys()
+    .collect::<Vec<_>>();
+  sorted_field_ids.sort_by(|a, b| a.cmp(b));
+
+  for field_id in sorted_field_ids {
+    let field = ty.fields.get(field_id).unwrap();
+
+  }
+  
+  FunctionImplementation {
+    name: "arora::buffer::serialize".to_string(),
+    ret: Some(ty::VOID.clone()),
+    parameters: vec! [
+      Parameter {
+        name: "writer".to_string(),
+        type_ref: ty::ARORA_BUFFER_WRITER_PTR.clone(),
+      }
+    ],
+    body: Block {
+      statements: function_statements,
+      semicolon: false,
+    },
+    template_arguments: Some(vec![]),
+    specialization: Some(vec![name.to_string()]),
+    inline: true,
+    ..Default::default()
+  }
+}
+
+pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enumeration) -> FunctionImplementation {
+  let mut function_statements = Vec::<Declaration>::new();
+
+  let mut switch_cases = Vec::new();
+
+  for (id, value) in &ty.values {
+    switch_cases.push(("Type".to_expression().colon_colon(value.name.as_str()), Block {
+      statements: vec![],
+      semicolon: false,
+    }));
+  }
+
+  function_statements.push(Statement::Switch(
+    "value".to_expression().dot("get_type").call::<String, _>(vec! []),
+    switch_cases
+  ).into());
+  
+
+  FunctionImplementation {
+    name: "arora::buffer::serialize".to_string(),
+    ret: Some(ty::optional(&TypeRef {
+      ty: name.to_string(),
+      ..Default::default()
+    })),
+    operator: true,
+    parameters: vec! [
+      Parameter {
+        name: "writer".to_string(),
+        type_ref: ty::ARORA_BUFFER_WRITER_PTR.clone(),
+      },
+      Parameter {
+        name: "value".to_string(),
+        type_ref: TypeRef {
+          ty: name.to_string(),
+          reference: true,
+          constant: true,
+          ..Default::default()
+        },
+      }
+    ],
+    body: Block {
+      statements: function_statements,
+      semicolon: false,
+    },
+    template_arguments: Some(vec![]),
+    specialization: Some(vec![name.to_string()]),
+    inline: true,
+    ..Default::default()
+  }
+}
+
+pub fn serializer(context: &Context, ty: &Type) -> FunctionImplementation {
   match ty.kind {
     TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),
     TypeKind::Enumeration(ref enumeration) => enumeration_deserializer(&context, &ty.id, &ty.name, enumeration),

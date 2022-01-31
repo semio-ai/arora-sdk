@@ -666,6 +666,7 @@ pub enum Statement {
   Continue,
   If(Expression, Block, Option<Block>),
   While(Expression, Block),
+  Switch(Expression, Vec<(Expression, Block)>),
   Case(Expression),
   Default,
   Goto(String),
@@ -699,9 +700,28 @@ impl ToPrettyString for Statement {
         s.push_str("while (");
         s.push_str(&expression.to_pretty_string(0));
         s.push_str(")\n");
-        s.push_str(&block.to_pretty_string(indent + 1));
+        s.push_str(&block.to_pretty_string(indent));
         s
-      }
+      },
+      Statement::Switch(expression, cases) => {
+        let mut s = String::new();
+        s.push_str(&indent_string(indent));
+        s.push_str("switch (");
+        s.push_str(&expression.to_pretty_string(0));
+        s.push_str(")\n");
+        s.push_str(&indent_string(indent));
+        s.push_str("{\n");
+        for (case, block) in cases {
+          s.push_str(&indent_string(indent + 1));
+          s.push_str("case ");
+          s.push_str(&case.to_pretty_string(0));
+          s.push_str(":\n");
+          s.push_str(&block.to_pretty_string(indent + 2));
+        }
+        s.push_str(&indent_string(indent));
+        s.push_str("}\n");
+        s
+      },
       Statement::Case(expression) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));

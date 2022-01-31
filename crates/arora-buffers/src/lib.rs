@@ -291,10 +291,13 @@ impl BufferWriter {
     self.backing.put_slice(ty_id);
   }
 
-  pub fn finalize(&mut self) -> &[u8] {
+  pub fn finalize(&mut self) -> Box<[u8]> {
     let size = self.backing.len() as u32;
     self.backing[0..4].copy_from_slice(&size.to_be_bytes());
-    &self.backing
+    let mut backing = Vec::new();
+    std::mem::swap(&mut self.backing, &mut backing);
+    let ret = backing.into_boxed_slice();
+    ret
   }
 }
 
@@ -838,6 +841,7 @@ pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, valu
 pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *const u8 {
   unsafe {
     let writer = &mut *writer;
+    
     let backing = writer.finalize();
     if !length.is_null() {
       *length = backing.len();

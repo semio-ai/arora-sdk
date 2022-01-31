@@ -140,6 +140,7 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
     declare::ty(context, ty).into(),
     Declaration::new_line(1),
     declare::deserializer(context, ty).into(),
+    declare::serializer(context, ty).into(),
     Declaration::new_line(1),
     Declaration::endif(),
   ]);
@@ -372,10 +373,18 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           ..Default::default()
         }.into());
 
+        read_declarations.push(Variable {
+          name: "current_res".to_string(),
+          ty: ty::U8.clone(),
+          value: Some(0u64.to_expression()),
+          ..Default::default()
+        }.into());
+
         let field = "field".to_expression();
         let field_index = "field_index".to_expression();
         let structure_metadata = "structure_metadata".to_expression();
         let field_count = "field_count".to_expression();
+        let current_res = "current_res".to_expression();
 
 
         let mut i = 0;
@@ -395,13 +404,24 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           if i < sorted_parameters.len() - 1 {
             field_declarations.push(field.clone().assign(declare::arora_buffer_reader_get_structure_field()).into_statement().into());
           }
-          
-          read_declarations.push(Statement::If(
-            field_index.clone().less_than(structure_metadata.dot(field_count.clone())).logical_and(
+
+          read_declarations.push(Statement::While(field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(current_res.assign(
             func::ARORA_UUID_COMPARE.call([
               field.clone(),
               id::parameter_uuid(&export.name(), &parameter.name).to_expression()
-            ]).equal("0".to_expression())),
+            ])).parenthesized()).less_than("0".to_expression()),
+            Block {
+              statements: vec! [
+                field_index.clone().pre_increment().into_statement().into(),
+                field.clone().assign(declare::arora_buffer_reader_get_structure_field()).into_statement().into()
+              ],
+              semicolon: false,
+            }
+          ).into());
+          
+          read_declarations.push(Statement::If(
+            field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(
+            current_res.equal("0".to_expression())),
             Block {
               statements: field_declarations,
               ..Default::default()
@@ -470,10 +490,17 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           function_declarations.push(declare::serialize(&ty::type_name(context, &parameter.ty), &parameter.name.to_expression()).into());
         }
 
+        function_declarations.push(Variable {
+          name: "__arora_return_buffer__".to_string(),
+          ty: ty::U8_CONST_PTR.clone(),
+          value: Some(declare::arora_buffer_writer_finalize()),
+          ..Default::default()
+        }.into());
+
         // Free the writer
         function_declarations.push(declare::arora_buffer_writer_free().into());
 
-        function_declarations.push("return arora_buffer_writer_finalize(writer, 0)".to_expression().into_statement().into());
+        function_declarations.push("return __arora_return_buffer__".to_expression().into_statement().into());
 
         for parameter in sorted_parameters.iter() {
           declarations.push(declare::uuid_variable(id::parameter_uuid(&export.name(), &parameter.name), &parameter.id).into());
