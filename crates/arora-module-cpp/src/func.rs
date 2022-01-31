@@ -1,4 +1,4 @@
-use crate::ast::{TypeRef, Expression, ToExpression};
+use crate::ast::{Expression, ToExpression};
 
 lazy_static::lazy_static! {
   pub static ref ASSERT: Expression = "assert".to_expression();

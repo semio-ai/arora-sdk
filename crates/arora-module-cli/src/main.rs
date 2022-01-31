@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, any, collections::HashMap};
+use std::{path::Path, collections::HashMap};
 
 use clap::{Parser, Subcommand, AppSettings};
 use arora_registry::Registry;
@@ -15,24 +15,20 @@ use arora_schema::{
     high::{
       Type as HighType,
       TypeKind as HighTypeKind,
-      Structure as HighStructure,
-      Enumeration as HighEnumeration,
-      StructureField as HighStructureField,
-      EnumerationValue as HighEnumerationValue
     }
   },
   module::low::{TypeRef as LowTypeRef},
   module::high::{TypeRef as HighTypeRef},
 };
 
-use tokio::{fs::{copy, read_to_string, File}, io::AsyncReadExt, io::AsyncWriteExt};
+use tokio::{fs::{read_to_string, File}, io::AsyncWriteExt};
 use url::Url;
 use uuid::Uuid;
 
 mod generate;
 mod resolve;
 
-use generate::{Generate, generate};
+use generate::generate;
 
 #[derive(Debug, Parser)]
 struct ExportType {
