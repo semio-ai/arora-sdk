@@ -753,21 +753,34 @@ pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> Fu
   }
 }
 
-pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enumeration) -> FunctionImplementation {
-  let mut function_statements = Vec::<Declaration>::new();
-
-  let mut switch_cases = Vec::new();
-
-  for (id, value) in &ty.values {
-    let enum_type_enum = name.to_expression().colon_colon("Type");
-    switch_cases.push((enum_type_enum.colon_colon(value.name.as_str()), Block {
-      statements: vec![],
-      semicolon: false,
-    }));
+pub fn enumeration_serializer(context: &Context, enum_type_id: &Uuid, enum_type_name: &str, enum_type: &Enumeration) -> FunctionImplementation {
+  let writer_name = "writer".to_string();
+  let value_name = "value".to_string();
+  let writer = writer_name.to_expression();
+  let value = value_name.to_expression();
+  let enum_type_enum = enum_type_name.to_expression().colon_colon("Type");
+  let mut switch_cases = Vec::<(Expression, Block)>::new();
+  for (enum_value_id, enum_value) in &enum_type.values {
+    let mut case_statements: Vec<Declaration> = Vec::new();
+    case_statements.push(Declaration::Statement(Statement::Expression(
+      func::ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE.call([
+        writer.clone(),
+        id::type_uuid(enum_type_name).to_expression(),
+        id::value_uuid(enum_type_name, &enum_value.name).to_expression()
+      ])
+    )));
+    switch_cases.push((
+      enum_type_enum.colon_colon(enum_value.name.to_expression()),
+      Block {
+        statements: case_statements,
+        semicolon: false,
+      }
+    ));
   }
 
+  let mut function_statements = Vec::<Declaration>::new();
   function_statements.push(Statement::Switch(
-    "value".to_expression().dot("get_type").call::<String, _>(vec! []),
+    value.dot("get_type").call::<String, _>(vec! []),
     switch_cases
   ).into());
   
@@ -777,13 +790,13 @@ pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enu
     operator: true,
     parameters: vec! [
       Parameter {
-        name: "writer".to_string(),
+        name: writer_name,
         type_ref: ty::ARORA_BUFFER_WRITER_PTR.clone(),
       },
       Parameter {
-        name: "value".to_string(),
+        name: value_name,
         type_ref: TypeRef {
-          ty: name.to_string(),
+          ty: enum_type_name.to_string(),
           reference: true,
           constant: true,
           ..Default::default()
@@ -795,7 +808,7 @@ pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enu
       semicolon: false,
     },
     template_arguments: Some(vec![]),
-    specialization: Some(vec![name.to_string()]),
+    specialization: Some(vec![enum_type_name.to_string()]),
     inline: true,
     ..Default::default()
   }
