@@ -759,7 +759,8 @@ pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enu
   let mut switch_cases = Vec::new();
 
   for (id, value) in &ty.values {
-    switch_cases.push(("Type".to_expression().colon_colon(value.name.as_str()), Block {
+    let enum_type_enum = name.to_expression().colon_colon("Type");
+    switch_cases.push((enum_type_enum.colon_colon(value.name.as_str()), Block {
       statements: vec![],
       semicolon: false,
     }));
@@ -770,13 +771,9 @@ pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enu
     switch_cases
   ).into());
   
-
   FunctionImplementation {
     name: "arora::buffer::serialize".to_string(),
-    ret: Some(ty::optional(&TypeRef {
-      ty: name.to_string(),
-      ..Default::default()
-    })),
+    ret: Some(ty::VOID.clone()),
     operator: true,
     parameters: vec! [
       Parameter {
@@ -806,8 +803,8 @@ pub fn enumeration_serializer(context: &Context, id: &Uuid, name: &str, ty: &Enu
 
 pub fn serializer(context: &Context, ty: &Type) -> FunctionImplementation {
   match ty.kind {
-    TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),
-    TypeKind::Enumeration(ref enumeration) => enumeration_deserializer(&context, &ty.id, &ty.name, enumeration),
+    TypeKind::Structure(ref structure) => structure_serializer(context, &ty.name, structure),
+    TypeKind::Enumeration(ref enumeration) => enumeration_serializer(&context, &ty.id, &ty.name, enumeration),
     _ => panic!("deserializer: not implemented for {:?}", ty)
   }
 }
