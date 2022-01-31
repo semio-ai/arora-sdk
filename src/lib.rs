@@ -12,6 +12,7 @@ pub struct SemanticVersion {
   patch: u32,
 }
 
+#[cfg(test)]
 mod tests {
   use std::str::FromStr;
   use uuid::Uuid;
