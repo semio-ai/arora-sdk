@@ -21,7 +21,7 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine
     COMMAND ${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}/arora-cli
-      --header ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+      --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
   )
 endif()
