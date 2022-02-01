@@ -133,11 +133,11 @@ pub struct BufferReader<'a> {
 }
 
 impl<'a> BufferReader<'a> {
-  pub fn new(mut backing: &'a [u8]) -> Self {
-    let size = backing.get_u32();
+  pub fn new(mut buffer: &'a [u8]) -> Self {
+    let size = buffer.get_u32();
     Self {
       size,
-      backing,
+      backing: buffer,
     }
   }
 

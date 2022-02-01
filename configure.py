@@ -45,7 +45,8 @@ cmake_command = [
     "cmake",
     "..",
     f"-DWASI_SDK_PREFIX={wasi_sdk_prefix}",
-    f"-DCMAKE_TOOLCHAIN_FILE={wasi_sdk_prefix}/share/cmake/wasi-sdk.cmake"
+    f"-DCMAKE_TOOLCHAIN_FILE={wasi_sdk_prefix}/share/cmake/wasi-sdk.cmake",
+    f"-DCMAKE_SYSROOT={wasi_sdk_prefix}/share/wasi-sysroot"
   ]
 
 if wasi_platform == "mingw":
