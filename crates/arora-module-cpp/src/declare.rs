@@ -67,12 +67,12 @@ pub fn arora_buffer_reader_free() -> Statement {
   func::ARORA_BUFFER_READER_FREE.call([ "reader" ]).into_statement()
 }
 
-pub fn arora_buffer_writer_begin_structure(uuid_identifier: &str, field_count: u32) -> Statement {
-  func::ARORA_BUFFER_WRITER_BEGIN_STRUCTURE.call([ "writer", uuid_identifier, &field_count.to_string() ]).into_statement()
+pub fn arora_buffer_writer_begin_structure(uuid_identifier: &str, field_count: Expression) -> Statement {
+  func::ARORA_BUFFER_WRITER_BEGIN_STRUCTURE.call([ "writer".to_expression(), uuid_identifier.to_expression(), field_count ]).into_statement()
 }
 
-pub fn arora_buffer_writer_add_structure_field(field_identifier: &str) -> Statement {
-  func::ARORA_BUFFER_WRITER_ADD_STRUCTURE_FIELD.call([ "writer", &field_identifier ]).into_statement()
+pub fn arora_buffer_writer_add_structure_field(field_identifier: Expression) -> Statement {
+  func::ARORA_BUFFER_WRITER_ADD_STRUCTURE_FIELD.call([ "writer".to_expression(), field_identifier ]).into_statement()
 }
 
 pub fn arora_buffer_skip() -> Expression {
@@ -111,10 +111,67 @@ pub fn arora_buffer_reader_get_structure() -> Expression {
 }
 
 pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
+  let mut declarations = Vec::new();
+  for (id, field) in &ty.fields {
+    declarations.push(FunctionPrototype {
+      name: field.name.clone(),
+      parameters: vec![],
+      ret: Some(ty::optional_const_ref(&TypeRef {
+        ty: ty::type_name(context, &field.type_ref),
+        ..Default::default()
+      })),
+      constant: true,
+      noexcept: true,
+      ..Default::default()
+    }.into());
+
+    declarations.push(FunctionPrototype {
+      name: format!("set_{}", &field.name),
+      parameters: vec![
+        Parameter {
+          name: "value".to_string(),
+          type_ref: ty::optional_const_ref(&TypeRef {
+            ty: ty::type_name(context, &field.type_ref),
+            ..Default::default()
+          }),
+        }
+      ],
+      ret: Some(ty::VOID.clone()),
+      ..Default::default()
+    }.into());
+
+    declarations.push(FunctionPrototype {
+      name: format!("set_{}", &field.name),
+      parameters: vec![
+        Parameter {
+          name: "value".to_string(),
+          type_ref: ty::optional_move(&TypeRef {
+            ty: ty::type_name(context, &field.type_ref),
+            ..Default::default()
+          }),
+        }
+      ],
+      ret: Some(ty::VOID.clone()),
+      ..Default::default()
+    }.into());
+  }
+
+  declarations.push(Declaration::private());
+
+  for (id, field) in &ty.fields {
+    declarations.push(Variable {
+      name: format!("{}_", &field.name),
+      ty: ty::optional(&TypeRef {
+        ty: ty::type_name(context, &field.type_ref),
+        ..Default::default()
+      }),
+      ..Default::default()
+    }.into());
+  }
+
   Struct {
     block: Block {
-      statements: vec! [
-      ],
+      statements: declarations,
       semicolon: true
     },
     name: name.to_string(),
@@ -147,11 +204,34 @@ pub fn enumeration_constants(id: &Uuid, name: &str, ty: &Enumeration) -> Vec<Dec
   ret
 }
 
+pub fn structure_constants(id: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+  let mut ret = Vec::new();
+
+  ret.push(Variable {
+    name: id::type_uuid(&name),
+    ty: ty::U8_CONST.clone(),
+    extern_: true,
+    array: ArrayKind::Fixed(16u64.to_expression()),
+    ..Default::default()
+  }.into());
+
+  for (_, value) in ty.fields.iter() {
+    ret.push(Variable {
+      name: id::field_uuid(&name, &value.name),
+      ty: ty::U8_CONST.clone(),
+      extern_: true,
+      array: ArrayKind::Fixed(16u64.to_expression()),
+      ..Default::default()
+    }.into());
+  }
+
+  ret
+}
+
 pub fn type_constants(id: &Uuid, ty: &Type) -> Vec<Declaration> {
-  
   match &ty.kind {
     TypeKind::Structure(v) => {
-      vec![]
+      structure_constants(id, &ty.name, v)
     },
     TypeKind::Enumeration(v) => {
       enumeration_constants(id, &ty.name, v)
@@ -183,11 +263,35 @@ pub fn enumeration_constants_impl(id: &Uuid, name: &str, ty: &Enumeration) -> Ve
   ret
 }
 
+pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+  let mut ret = Vec::new();
+
+  ret.push(Variable {
+    name: id::type_uuid(&name),
+    ty: ty::U8_CONST.clone(),
+    value: Some(uuid_initializer_list(id)),
+    array: ArrayKind::Fixed(16u64.to_expression()),
+    ..Default::default()
+  }.into());
+
+  for (id, value) in ty.fields.iter() {
+    ret.push(Variable {
+      name: id::value_uuid(&name, &value.name),
+      ty: ty::U8_CONST.clone(),
+      value: Some(uuid_initializer_list(id)),
+      array: ArrayKind::Fixed(16u64.to_expression()),
+      ..Default::default()
+    }.into());
+  }
+
+  ret
+}
+
 pub fn type_constants_impl(id: &Uuid, ty: &Type) -> Vec<Declaration> {
   
   match &ty.kind {
     TypeKind::Structure(v) => {
-      vec![]
+      structure_constants_impl(id, &ty.name, v)
     },
     TypeKind::Enumeration(v) => {
       enumeration_constants_impl(id, &ty.name, v)
@@ -570,30 +674,221 @@ pub fn enumeration_impl(context: &Context, id: &Uuid, name: &str, ty: &Enumerati
   ret
 }
 
+pub fn structure_impl(context: &Context, id: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+  let mut ret = Vec::new();
+  
+  for (id, field) in ty.fields.iter() {
+    ret.push(FunctionImplementation {
+      name: format!("{}::{}", name, field.name.to_lowercase()),
+      ret: Some(ty::optional_const_ref(&TypeRef {
+        ty: ty::type_name(context, &field.type_ref),
+        ..Default::default()
+      })),
+      body: Block {
+        statements: vec![
+          Statement::Return(format!("{}_", field.name).to_expression().into()).into()
+        ],
+        semicolon: false
+      },
+      constant: true,
+      noexcept: true,
+      ..Default::default()
+    }.into());
+
+    ret.push(FunctionImplementation {
+      name: format!("{}::set_{}", name, field.name.to_lowercase()),
+      parameters: vec! [
+        Parameter {
+          name: "value".to_string(),
+          type_ref: ty::optional_const_ref(&TypeRef {
+            ty: ty::type_name(context, &field.type_ref),
+            ..Default::default()
+          })
+        }
+      ],
+      ret: Some(ty::VOID.clone()),
+      body: Block {
+        statements: vec![
+          format!("{}_", field.name).to_expression().assign("value").into_statement().into()
+        ],
+        semicolon: false
+      },
+      ..Default::default()
+    }.into());
+    ret.push(FunctionImplementation {
+      name: format!("{}::set_{}", name, field.name.to_lowercase()),
+      parameters: vec! [
+        Parameter {
+          name: "value".to_string(),
+          type_ref: ty::optional_move(&TypeRef {
+            ty: ty::type_name(context, &field.type_ref),
+            ..Default::default()
+          })
+        }
+      ],
+      ret: Some(ty::VOID.clone()),
+      body: Block {
+        statements: vec![
+          format!("{}_", field.name).to_expression().assign("value").into_statement().into()
+        ],
+        semicolon: false
+      },
+      ..Default::default()
+    }.into());
+  }
+
+  ret
+} 
+
 pub fn ty_impl(context: &Context, ty: &Type) -> Vec<Declaration> {
   match &ty.kind {
     TypeKind::Enumeration(value) => {
       enumeration_impl(context, &ty.id, &ty.name, &value)
     },
     TypeKind::Structure(value) => {
-      vec![]
+      structure_impl(context, &ty.id, &ty.name, &value)
     },
   }
 }
 
 pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
+
+  function_statements.push(
+    Statement::If(
+      arora_buffer_reader_next_type().equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone()),
+      Block {
+        statements: vec![
+          Statement::Return(constant::NULL_OPTION.clone()).into()
+        ],
+        semicolon: false
+      },
+      None
+    ).into()
+  );
+
+  let structure_metadata = "structure_metadata".to_expression();
+  let field_count = "field_count".to_expression();
+
+
+
+  function_statements.push(Variable {
+    name: "structure_metadata".to_string(),
+    ty: ty::ARORA_GET_STRUCTURE_RESULT.clone(),
+    value: Some(arora_buffer_reader_get_structure()),
+    ..Default::default()
+  }.into());
+
+  function_statements.push(
+    Statement::If(
+      structure_metadata.dot(field_count.clone()).greater_than("0".to_expression()).logical_and(
+      func::ARORA_UUID_COMPARE.call([
+        Expression::Dot("structure_metadata".to_expression().into(), "id".to_expression().into()),
+        id::type_uuid(&name).to_expression()
+      ]).not_equal("0".to_expression())).into(),
+      Block {
+        statements: vec! [
+          Statement::Return(constant::NULL_OPTION.clone()).into()
+        ],
+        ..Default::default()
+      },
+      None
+    ).into()
+  );
+
+  function_statements.push(Variable {
+    name: "__arora_result__".to_string(),
+    ty: TypeRef {
+      ty: name.to_string(),
+      ..Default::default()
+    },
+    ..Default::default()
+  }.into());
+
+
+  
   
   let mut sorted_field_ids = ty.fields
     .keys()
     .collect::<Vec<_>>();
   sorted_field_ids.sort_by(|a, b| a.cmp(b));
 
-  for field_id in sorted_field_ids {
+
+  function_statements.push(Variable {
+    name: "field_index".to_string(),
+    ty: ty::U32.clone(),
+    value: Some("0".to_expression()),
+    ..Default::default()
+  }.into());
+
+
+  function_statements.push(Variable {
+    name: "field".to_string(),
+    ty: ty::U8_CONST_PTR.clone(),
+    value: Some(arora_buffer_reader_get_structure_field()),
+    ..Default::default()
+  }.into());
+
+  function_statements.push(Variable {
+    name: "current_res".to_string(),
+    ty: ty::U8.clone(),
+    value: Some(0u64.to_expression()),
+    ..Default::default()
+  }.into());
+
+  let field_value = "field".to_expression();
+  let field_index = "field_index".to_expression();
+  let current_res = "current_res".to_expression();
+
+
+  let mut i = 0;
+  for field_id in sorted_field_ids.iter() {
     let field = ty.fields.get(field_id).unwrap();
 
+    let mut field_declarations: Vec<Declaration> = Vec::new();
+
+    let type_name = ty::type_name(context, &field.type_ref);
+
+    field_declarations.push(
+      "__arora_result__".to_expression().dot(format!("set_{}", field.name)).call([ deserialize(&type_name) ]).into_statement().into()
+    );
+
+    field_declarations.push(field_index.clone().pre_increment().into_statement().into());
+    
+    if i < sorted_field_ids.len() - 1 {
+      field_declarations.push(field_value.clone().assign(arora_buffer_reader_get_structure_field()).into_statement().into());
+    }
+
+    function_statements.push(Statement::While(field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(current_res.assign(
+      func::ARORA_UUID_COMPARE.call([
+        field_value.clone(),
+        id::field_uuid(name, &field.name).to_expression()
+      ])).parenthesized()).less_than("0".to_expression()),
+      Block {
+        statements: vec! [
+          field_index.clone().pre_increment().into_statement().into(),
+          field_value.clone().assign(arora_buffer_reader_get_structure_field()).into_statement().into()
+        ],
+        semicolon: false,
+      }
+    ).into());
+    
+    function_statements.push(Statement::If(
+      field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(
+      current_res.equal("0".to_expression())),
+      Block {
+        statements: field_declarations,
+        ..Default::default()
+      },
+      None
+    ).into());
+
+    i += 1;
   }
+
+  function_statements.push(Statement::Return("__arora_result__".to_expression()).into());
   
+
   FunctionImplementation {
     name: "arora::buffer::deserialize".to_string(),
     ret: Some(ty::optional(&TypeRef {
@@ -721,6 +1016,9 @@ pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
 }
 
 pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> FunctionImplementation {
+  let value_name = "value".to_string();
+  let field_count = "field_count".to_string();
+
   let mut function_statements = Vec::<Declaration>::new();
   
   let mut sorted_field_ids = ty.fields
@@ -728,9 +1026,48 @@ pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> Fu
     .collect::<Vec<_>>();
   sorted_field_ids.sort_by(|a, b| a.cmp(b));
 
+  function_statements.push(Variable {
+    name: field_count.clone(),
+    ty: ty::U32.clone(),
+    value: Some(0u32.to_expression()),
+    ..Default::default()
+  }.into());
+
+  // Count fields that are available
+  for field_id in sorted_field_ids.iter() {
+    let field = ty.fields.get(field_id).unwrap();
+    function_statements.push(Statement::If(
+      value_name.to_expression().dot(field.name.as_str()).call::<String, _>([]).logical_not().logical_not(),
+      Block {
+        statements: vec! [
+          field_count.to_expression().pre_increment().into_statement().into(),
+        ],
+        semicolon: false,
+      },
+      None
+    ).into());
+  }
+
+  function_statements.push(arora_buffer_writer_begin_structure(&id::type_uuid(&name), field_count.to_expression()).into());
+
   for field_id in sorted_field_ids {
     let field = ty.fields.get(field_id).unwrap();
-
+    let value_accessor = value_name.to_expression().dot(field.name.as_str());
+    function_statements.push(Statement::If(
+      value_accessor.call::<String, _>([]).logical_not().logical_not(),
+      Block {
+        statements: vec! [
+          arora_buffer_writer_add_structure_field(id::field_uuid(name, &field.name).to_expression()).into(),
+          format!("arora::buffer::serialize<{}>", ty::type_name(context, &field.type_ref))
+            .to_expression()
+            .call([ "writer".to_expression(), value_accessor.call::<String, _>([]).dereference() ])
+            .into_statement()
+            .into(),
+        ],
+        semicolon: false,
+      },
+      None
+    ).into());
   }
   
   FunctionImplementation {
@@ -740,6 +1077,15 @@ pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> Fu
       Parameter {
         name: "writer".to_string(),
         type_ref: ty::ARORA_BUFFER_WRITER_PTR.clone(),
+      },
+      Parameter {
+        name: value_name,
+        type_ref: TypeRef {
+          ty: name.to_string(),
+          reference: true,
+          constant: true,
+          ..Default::default()
+        },
       }
     ],
     body: Block {

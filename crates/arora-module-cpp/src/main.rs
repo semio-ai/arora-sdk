@@ -135,6 +135,15 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
     Declaration::include_system("new"),
     Declaration::new_line(1),
   ];
+  
+  ty.type_dependencies().iter().for_each(|dep| {
+    if PRIMITIVE_IDS.contains(dep) {
+      return;
+    }
+      
+    let dep_header = context.types.get(dep).unwrap();
+    include_declarations.push(PreprocessorDirective::Include(format!("types/{}.hpp", dep_header.name), IncludeStyle::Local).into());
+  });
   include_declarations.extend_from_slice(&declare::type_constants(id, ty));
   include_declarations.extend([
     declare::ty(context, ty).into(),
@@ -473,10 +482,10 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         }
         
         // Return is always written first by convention
-        function_declarations.push(declare::arora_buffer_writer_begin_structure(&id::function_uuid(&f.name), field_count).into());
+        function_declarations.push(declare::arora_buffer_writer_begin_structure(&id::function_uuid(&f.name), field_count.to_expression()).into());
 
         // Return value is written under the method's UUID
-        function_declarations.push(declare::arora_buffer_writer_add_structure_field(&id::function_uuid(&f.name)).into());
+        function_declarations.push(declare::arora_buffer_writer_add_structure_field(id::function_uuid(&f.name).to_expression()).into());
 
         function_declarations.push(declare::serialize(&ty::type_name(context, &f.ret), &"__arora_return__".to_expression()).into());
 
@@ -485,7 +494,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
             continue;
           }
 
-          function_declarations.push(declare::arora_buffer_writer_add_structure_field(&id::parameter_uuid(&export.name(), &parameter.name)).into());
+          function_declarations.push(declare::arora_buffer_writer_add_structure_field(id::parameter_uuid(&export.name(), &parameter.name).to_expression()).into());
 
           function_declarations.push(declare::serialize(&ty::type_name(context, &parameter.ty), &parameter.name.to_expression()).into());
         }

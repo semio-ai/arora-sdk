@@ -167,3 +167,12 @@ pub fn optional_ref(ty: &TypeRef) -> TypeRef {
     ..Default::default()
   }
 }
+
+pub fn optional_move(ty: &TypeRef) -> TypeRef {
+  TypeRef {
+    ty: "std::optional".to_string(),
+    arguments: Some(vec![ty.clone()]),
+    move_: true,
+    ..Default::default()
+  }
+}

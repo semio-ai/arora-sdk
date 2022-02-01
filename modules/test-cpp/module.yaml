@@ -23,7 +23,7 @@ exports:
         name: b
         type:
           kind: scalar
-          id: s32
+          id: TestStructure1
     ret:
       kind: scalar
       id: s32
