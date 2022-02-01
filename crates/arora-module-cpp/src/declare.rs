@@ -105,6 +105,11 @@ pub fn assert(expression: Expression) -> Statement {
   func::ASSERT.call([ expression ]).into_statement()
 }
 
+// ARORA_BUFFER_READER_NEW
+pub fn arora_buffer_reader_new(identifier: Expression) -> Expression {
+  func::ARORA_BUFFER_READER_NEW.call([ identifier ])
+}
+
 // ARORA_BUFFER_READER_GET_STRUCTURE
 pub fn arora_buffer_reader_get_structure() -> Expression {
   func::ARORA_BUFFER_READER_GET_STRUCTURE.call([ "reader" ])
