@@ -35,7 +35,7 @@ pub enum NameStyle {
 
 impl NameStyle {
   pub fn convert(&self, name: &str) -> String {
-    let name = name.replace('_', " ");
+    let name = name.replace('-', " ").replace('_', " ");
     match self {
       Self::UpperCamelCase => name.to_case(Case::UpperCamel),
       Self::LowerCamelCase => name.to_case(Case::Camel),
@@ -63,7 +63,7 @@ pub struct Args {
   #[clap(short, long, name = "self-id")]
   pub self_id: String,
 
-  #[clap(short, long, name = "method-style", default_value = "camel")]
+  #[clap(short, long, name = "method-style", default_value = "snake")]
   pub method_style: NameStyle,
 
   #[clap(short, long, name = "variable-style", default_value = "snake")]
