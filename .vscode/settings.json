@@ -9,6 +9,7 @@
     "${workspaceRoot}/target/include",
     "${workspaceRoot}/libs/cpp/include",
     "${workspaceRoot}/build/modules/test-cpp/arora/include",
+    "${workspaceRoot}/build/modules/test-cpp-2/arora/include",
   ],
   "C_Cpp.default.cppStandard": "c++20",
   "editor.tokenColorCustomizations": {
