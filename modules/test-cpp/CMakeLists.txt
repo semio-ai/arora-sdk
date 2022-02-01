@@ -5,6 +5,8 @@ add_custom_target(module-cli ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+  DEPENDS
+    arora
 )
 
 add_executable(test-cpp
