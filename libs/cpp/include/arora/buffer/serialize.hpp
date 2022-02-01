@@ -26,7 +26,7 @@ namespace arora
     template<std::ranges::contiguous_range R>
     void serialize(arora_buffer_writer *const writer, const R &range) {
       uintptr_t size = std::size(range); // also casting to Arora buffer size type.
-      const auto *const data = range.cdata(); // if it was supported, I'd use std::ranges::cdata instead.
+      const auto *const data = range.data(); // if it was supported, I'd use std::ranges::cdata instead.
       using T = std::ranges::range_value_t<R>;
       arora_buffer_writer_add_array_primitive(writer, arora_buffer_type_of<T>(), size);
       arora_buffer_writer_add_bulk<T>(writer, data, size);
