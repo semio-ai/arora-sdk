@@ -97,9 +97,10 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
     Declaration::new_line(1),
   ]);
 
+  source_declarations.extend_from_slice(&declare::type_constants_impl(id, &ty));
   source_declarations.extend_from_slice(&declare::ty_impl(context, &ty));
 
-  let mut source_content = TranslationUnit {
+  let source_content = TranslationUnit {
     declarations: source_declarations,
   }.to_pretty_string(0);
 
@@ -179,6 +180,7 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
     .ok_or_else(|| anyhow::anyhow!("Module {} not found", id))?;
   let imports = context.grouped_import_symbols.get(&id)
     .ok_or_else(|| anyhow::anyhow!("Module {} not found", id))?;
+
 
   let id_name = identifier_name(&header.name);
 
@@ -513,8 +515,7 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   let mut namespace_declarations: Vec<Declaration> = Vec::new();
 
   for export in context.exports.values() {
-    let name = export.name().clone();
-    let name = context.args.method_style.convert(&name);
+    let name = identifier_name(&export.name());
     match export {
       ExportSymbol::Function(f) => {
         let mut parameters = Vec::new();

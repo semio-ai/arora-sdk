@@ -281,7 +281,7 @@ pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &Structure) -> Vec<De
 
   for (id, value) in ty.fields.iter() {
     ret.push(Variable {
-      name: id::value_uuid(&name, &value.name),
+      name: id::field_uuid(&name, &value.name),
       ty: ty::U8_CONST.clone(),
       value: Some(uuid_initializer_list(id)),
       array: ArrayKind::Fixed(16u64.to_expression()),
@@ -515,7 +515,6 @@ pub fn enumeration_impl(context: &Context, id: &Uuid, name: &str, ty: &Enumerati
   let mut ret = Vec::new();
 
   
-  ret.extend_from_slice(&enumeration_constants_impl(id, name, ty));
 
   ret.push(Declaration::new_line(1));
 
@@ -1057,6 +1056,7 @@ pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> Fu
 
   for field_id in sorted_field_ids {
     let field = ty.fields.get(field_id).unwrap();
+    eprintln!("FIELD: {:?}", field);
     let value_accessor = value_name.to_expression().dot(field.name.as_str());
     function_statements.push(Statement::If(
       value_accessor.call::<String, _>([]).logical_not().logical_not(),

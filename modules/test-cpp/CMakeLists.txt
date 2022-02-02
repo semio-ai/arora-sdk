@@ -5,6 +5,8 @@ add_custom_target(module-cli ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/TestStructure1.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
   DEPENDS
     arora
 )
@@ -13,6 +15,7 @@ add_executable(test-cpp
   src/main.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
 )
 target_include_directories(test-cpp PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
 target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp)

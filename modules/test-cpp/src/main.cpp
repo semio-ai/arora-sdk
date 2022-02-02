@@ -2,7 +2,7 @@
 
 std::int32_t test_cpp::test(
   const std::optional<Status> &a,
-  const std::optional<std::int32_t> &b
+  const std::optional<TestStructure1> &b
 )
 {
   return a->is_success() ? 1 : 0;
