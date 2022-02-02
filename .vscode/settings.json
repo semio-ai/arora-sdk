@@ -9,10 +9,10 @@
     "${workspaceRoot}/target/include",
     "${workspaceRoot}/libs/cpp/include",
     "${workspaceRoot}/build/modules/test-cpp/arora/include",
+    "${workspaceRoot}/build/modules/test-cpp-2/arora/include",
   ],
   "C_Cpp.default.cppStandard": "c++20",
   "editor.tokenColorCustomizations": {
-    "comments": "",
     "textMateRules": []
   },
   "files.associations": {
@@ -109,6 +109,26 @@
     "memory_resource": "cpp",
     "utility": "cpp",
     "cinttypes": "cpp",
-    "valarray": "cpp"
-  }
+    "valarray": "cpp",
+    "filesystem": "cpp",
+    "list": "cpp",
+    "xfacet": "cpp",
+    "xhash": "cpp",
+    "xiosbase": "cpp",
+    "xlocale": "cpp",
+    "xlocbuf": "cpp",
+    "xlocinfo": "cpp",
+    "xlocmes": "cpp",
+    "xlocmon": "cpp",
+    "xlocnum": "cpp",
+    "xloctime": "cpp",
+    "xmemory": "cpp",
+    "xstddef": "cpp",
+    "xstring": "cpp",
+    "xtr1common": "cpp",
+    "xtree": "cpp",
+    "xutility": "cpp",
+    "__functional_base": "cpp"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }

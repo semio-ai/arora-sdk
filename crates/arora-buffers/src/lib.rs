@@ -1,6 +1,4 @@
 use bytes::{BufMut, Buf};
-use uuid::Uuid;
-use std::collections::VecDeque;
 
 pub const TYPE_UNIT: u8 = 0;
 pub const TYPE_BOOLEAN: u8 = 1;
@@ -17,6 +15,10 @@ pub const TYPE_R64: u8 = 11;
 pub const TYPE_STRING: u8 = 12;
 pub const TYPE_STRUCTURE: u8 = 13;
 pub const TYPE_ENUMERATION: u8 = 14;
+pub const TYPE_ARRAY: u8 = 15;
+pub const TYPE_MAP: u8 = 16;
+
+const ALIGNMENT: usize = 8; 
 
 pub struct BufferWriter {
   backing: Vec<u8>,
@@ -26,32 +28,44 @@ impl BufferWriter {
   pub fn new() -> Self {
     let mut backing = Vec::with_capacity(128);
     // size placeholder
-    backing.put_u32(0);
+    backing.put_u32_le(0);
     Self {
       backing,
     }
   }
 
+  fn align(&mut self) {
+    let alignment_buffer = ALIGNMENT - self.backing.len() % ALIGNMENT;
+    for _ in 0..alignment_buffer {
+      self.backing.put_u8(0);
+    }
+  }
+
+  pub fn begin_structure_raw(&mut self, field_count: u32) {
+    self.backing.put_u32(field_count);
+  }
+
   pub fn begin_structure(&mut self, id: &[u8], field_count: u32) {
     assert_eq!(id.len(), 16);
-
     self.backing.put_u8(TYPE_STRUCTURE);
     self.backing.put_slice(&id);
-    self.backing.put_u32(field_count);
+    self.begin_structure_raw(field_count);
+  }
+
+  pub fn add_enumeration_value_raw(&mut self, value_id: &[u8]) {
+    assert_eq!(value_id.len(), 16);
+    self.backing.put_slice(&value_id);
   }
 
   pub fn add_enumeration_value(&mut self, id: &[u8], value_id: &[u8]) {
     assert_eq!(id.len(), 16);
-    assert_eq!(value_id.len(), 16);
-
     self.backing.put_u8(TYPE_ENUMERATION);
     self.backing.put_slice(&id);
-    self.backing.put_slice(&value_id);
+    self.add_enumeration_value_raw(value_id);
   }
 
   pub fn add_structure_field(&mut self, id: &[u8]) {
     assert_eq!(id.len(), 16);
-
     self.backing.put_slice(&id);
   }
 
@@ -59,71 +73,226 @@ impl BufferWriter {
     self.backing.put_u8(TYPE_UNIT);
   }
 
+  pub fn add_boolean_raw(&mut self, value: bool) {
+    self.backing.put_u8(if value { 1 } else { 0 });
+  }
+
   pub fn add_boolean(&mut self, value: bool) {
     self.backing.put_u8(TYPE_BOOLEAN);
-    self.backing.put_u8(if value { 1 } else { 0 });
+    self.add_boolean_raw(value);
+  }
+
+  pub fn add_boolean_raw_bulk(&mut self, values: &[bool]) {
+    self.align();
+    for value in values {
+      self.add_boolean_raw(*value);
+    }
+  }
+
+  pub fn add_u8_raw(&mut self, value: u8) {
+    self.backing.put_u8(value);
   }
 
   pub fn add_u8(&mut self, value: u8) {
     self.backing.put_u8(TYPE_U8);
-    self.backing.put_u8(value);
+    self.add_u8_raw(value);
+  }
+
+  pub fn add_u8_raw_bulk(&mut self, values: &[u8]) {
+    self.align();
+    for value in values {
+      self.add_u8_raw(*value);
+    }
+  }
+
+  pub fn add_u16_raw(&mut self, value: u16) {
+    self.backing.put_u16_le(value);
   }
 
   pub fn add_u16(&mut self, value: u16) {
     self.backing.put_u8(TYPE_U16);
-    self.backing.put_u16(value);
+    self.add_u16_raw(value);
+  }
+
+  pub fn add_u16_raw_bulk(&mut self, values: &[u16]) {
+    self.align();
+    for value in values {
+      self.add_u16_raw(*value);
+    }
+  }
+
+  pub fn add_u32_raw(&mut self, value: u32) {
+    self.backing.put_u32_le(value);
   }
 
   pub fn add_u32(&mut self, value: u32) {
     self.backing.put_u8(TYPE_U32);
-    self.backing.put_u32(value);
+    self.add_u32_raw(value);
+  }
+
+  pub fn add_u32_raw_bulk(&mut self, values: &[u32]) {
+    self.align();
+    for value in values {
+      self.add_u32_raw(*value);
+    }
+  }
+
+  pub fn add_u64_raw(&mut self, value: u64) {
+    self.backing.put_u64_le(value);
   }
 
   pub fn add_u64(&mut self, value: u64) {
     self.backing.put_u8(TYPE_U64);
-    self.backing.put_u64(value);
+    self.add_u64_raw(value);
+  }
+
+  pub fn add_u64_raw_bulk(&mut self, values: &[u64]) {
+    self.align();
+    for value in values {
+      self.add_u64_raw(*value);
+    }
+  }
+
+  pub fn add_s8_raw(&mut self, value: i8) {
+    self.backing.put_i8(value);
   }
 
   pub fn add_s8(&mut self, value: i8) {
     self.backing.put_u8(TYPE_S8);
-    self.backing.put_i8(value);
+    self.add_s8_raw(value);
+  }
+
+  pub fn add_s8_raw_bulk(&mut self, values: &[i8]) {
+    self.align();
+    for value in values {
+      self.add_s8_raw(*value);
+    }
+  }
+
+  pub fn add_s16_raw(&mut self, value: i16) {
+    self.backing.put_i16_le(value);
   }
 
   pub fn add_s16(&mut self, value: i16) {
     self.backing.put_u8(TYPE_S16);
-    self.backing.put_i16(value);
+    self.add_s16_raw(value);
+  }
+
+  pub fn add_s16_raw_bulk(&mut self, values: &[i16]) {
+    self.align();
+    for value in values {
+      self.add_s16_raw(*value);
+    }
+  }
+
+  pub fn add_s32_raw(&mut self, value: i32) {
+    self.backing.put_i32_le(value);
   }
 
   pub fn add_s32(&mut self, value: i32) {
     self.backing.put_u8(TYPE_S32);
-    self.backing.put_i32(value);
+    self.add_s32_raw(value);
+  }
+
+  pub fn add_s32_raw_bulk(&mut self, values: &[i32]) {
+    self.align();
+    for value in values {
+      self.add_s32_raw(*value);
+    }
+  }
+
+  pub fn add_s64_raw(&mut self, value: i64) {
+    self.backing.put_i64_le(value);
   }
 
   pub fn add_s64(&mut self, value: i64) {
     self.backing.put_u8(TYPE_S64);
-    self.backing.put_i64(value);
+    self.add_s64_raw(value);
+  }
+
+  pub fn add_s64_raw_bulk(&mut self, values: &[i64]) {
+    self.align();
+    for value in values {
+      self.add_s64_raw(*value);
+    }
+  }
+
+  pub fn add_r32_raw(&mut self, value: f32) {
+    self.backing.put_f32(value);
   }
 
   pub fn add_r32(&mut self, value: f32) {
     self.backing.put_u8(TYPE_R32);
-    self.backing.put_f32(value);
+    self.add_r32_raw(value);
   }
 
-  pub fn add_r64(&mut self, value: f64) {
+  pub fn add_r32_raw_bulk(&mut self, values: &[f32]) {
+    self.align();
+    for value in values {
+      self.add_r32_raw(*value);
+    }
+  }
+
+  pub fn add_r64_raw(&mut self, value: f64) {
     self.backing.put_u8(TYPE_R64);
     self.backing.put_f64(value);
   }
 
-  pub fn add_string(&mut self, value: &str) {
-    self.backing.put_u8(TYPE_STRING);
-    self.backing.put_u32(value.len() as u32);
+  pub fn add_r64(&mut self, value: f64) {
+    self.backing.put_u8(TYPE_R64);
+    self.add_r64_raw(value);
+  }
+
+  pub fn add_r64_raw_bulk(&mut self, values: &[f64]) {
+    self.align();
+    for value in values {
+      self.add_r64_raw(*value);
+    }
+  }
+
+  pub fn add_string_raw(&mut self, value: &str) {
+    self.backing.put_u32_le(value.len() as u32);
     self.backing.put_slice(value.as_bytes());
   }
 
-  pub fn finalize(&mut self) -> &[u8] {
+  pub fn add_string(&mut self, value: &str) {
+    self.backing.put_u8(TYPE_STRING);
+    self.add_string_raw(value);
+  }
+
+  pub fn add_string_raw_bulk(&mut self, values: &[&str]) {
+    self.align();
+    for value in values {
+      self.add_string_raw(value);
+    }
+  }
+
+  pub fn add_array_primitive(&mut self, ty: u8, element_count: u32) {
+    self.backing.put_u8(TYPE_ARRAY);
+    self.backing.put_u8(ty);
+    self.backing.put_u32_le(element_count);
+  }
+
+  pub fn add_array_structure(&mut self, ty_id: &[u8], element_count: u32) {
+    assert_eq!(ty_id.len(), 16);
+    self.backing.put_u8(TYPE_ARRAY);
+    self.backing.put_u8(TYPE_STRUCTURE);
+    self.backing.put_u32_le(element_count);
+    self.backing.put_slice(ty_id);
+  }
+
+  pub fn add_array_enumeration(&mut self, ty_id: &[u8], element_count: u32) {
+    assert_eq!(ty_id.len(), 16);
+    self.backing.put_u8(TYPE_ARRAY);
+    self.backing.put_u8(TYPE_ENUMERATION);
+    self.backing.put_u32_le(element_count);
+    self.backing.put_slice(ty_id);
+  }
+
+  pub fn finalize(&mut self) -> Box<[u8]> {
     let size = self.backing.len() as u32;
-    self.backing[0..4].copy_from_slice(&size.to_be_bytes());
-    &self.backing
+    self.backing[0..4].copy_from_slice(&size.to_le_bytes());
+    std::mem::take(&mut self.backing).into_boxed_slice()
   }
 }
 
@@ -134,11 +303,16 @@ pub struct BufferReader<'a> {
 
 impl<'a> BufferReader<'a> {
   pub fn new(mut buffer: &'a [u8]) -> Self {
-    let size = buffer.get_u32();
+    let size = buffer.get_u32_le();
     Self {
       size,
       backing: buffer,
     }
+  }
+
+  pub fn align(&mut self) {
+    let remainder = self.backing.len() % ALIGNMENT;
+    self.backing = &self.backing[remainder..];
   }
 
   pub fn next_type(&mut self) -> Option<u8> {
@@ -156,48 +330,103 @@ impl<'a> BufferReader<'a> {
     self.backing.get_u8() != 0
   }
 
+  pub unsafe fn get_boolean_bulk(&mut self, count: usize) -> &'a [bool] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count])
+  }
+
   pub fn get_u8(&mut self) -> u8 {
     self.backing.get_u8()
   }
 
+  pub fn get_u8_bulk(&mut self, count: usize) -> &'a [u8] {
+    self.align();
+    &self.backing[0..count]
+  }
+
   pub fn get_u16(&mut self) -> u16 {
-    self.backing.get_u16()
+    self.backing.get_u16_le()
+  }
+
+  pub unsafe fn get_u16_bulk(&mut self, count: usize) -> &'a [u16] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 2])
   }
 
   pub fn get_u32(&mut self) -> u32 {
-    self.backing.get_u32()
+    self.backing.get_u32_le()
+  }
+
+  pub unsafe fn get_u32_bulk(&mut self, count: usize) -> &'a [u32] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 4])
   }
 
   pub fn get_u64(&mut self) -> u64 {
-    self.backing.get_u64()
+    self.backing.get_u64_le()
+  }
+
+  pub unsafe fn get_u64_bulk(&mut self, count: usize) -> &'a [u64] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 8])
   }
 
   pub fn get_s8(&mut self) -> i8 {
     self.backing.get_i8()
   }
 
+  pub unsafe fn get_s8_bulk(&mut self, count: usize) -> &'a [i8] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count])
+  }
+
   pub fn get_s16(&mut self) -> i16 {
-    self.backing.get_i16()
+    self.backing.get_i16_le()
+  }
+
+  pub unsafe fn get_s16_bulk(&mut self, count: usize) -> &'a [i16] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 2])
   }
 
   pub fn get_s32(&mut self) -> i32 {
-    self.backing.get_i32()
+    self.backing.get_i32_le()
+  }
+
+  pub unsafe fn get_s32_bulk(&mut self, count: usize) -> &'a [i32] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 4])
   }
 
   pub fn get_s64(&mut self) -> i64 {
-    self.backing.get_i64()
+    self.backing.get_i64_le()
+  }
+
+  pub unsafe fn get_s64_bulk(&mut self, count: usize) -> &'a [i64] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 8])
   }
 
   pub fn get_r32(&mut self) -> f32 {
-    self.backing.get_f32()
+    self.backing.get_f32_le()
+  }
+
+  pub unsafe fn get_r32_bulk(&mut self, count: usize) -> &'a [f32] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 4])
   }
 
   pub fn get_r64(&mut self) -> f64 {
-    self.backing.get_f64()
+    self.backing.get_f64_le()
+  }
+
+  pub unsafe fn get_r64_bulk(&mut self, count: usize) -> &'a [f64] {
+    self.align();
+    std::mem::transmute(&self.backing[0..count * 8])
   }
 
   pub fn get_string(&mut self) -> &'a str {
-    let len = self.backing.get_u32();
+    let len = self.backing.get_u32_le();
     let ret = std::str::from_utf8(&self.backing[0..len as usize]).unwrap();
     self.backing.advance(len as usize);
     ret
@@ -206,8 +435,13 @@ impl<'a> BufferReader<'a> {
   pub fn get_structure(&mut self) -> (&'a [u8], u32) {
     let id = &self.backing[0..16];
     self.backing.advance(16);
-    let field_count = self.backing.get_u32();
+    let field_count = self.backing.get_u32_le();
     (id, field_count)
+  }
+
+  pub fn get_structure_raw(&mut self) -> u32 {
+    let field_count = self.backing.get_u32_le();
+    field_count
   }
 
   pub fn get_structure_field(&mut self) -> &'a [u8] {
@@ -223,6 +457,16 @@ impl<'a> BufferReader<'a> {
     self.backing.advance(16);
     (id, value_id)
   }
+  
+  pub fn get_enumeration_value_raw(&mut self) -> &'a [u8] {
+    let id = &self.backing[0..16];
+    self.backing.advance(16);
+    id
+  }
+
+  pub fn get_array(&mut self) -> (u8, u32) {
+    (self.backing.get_u8(), self.backing.get_u32_le())
+  }
 }
 
 #[no_mangle]
@@ -234,6 +478,13 @@ pub extern "C" fn arora_buffer_writer_new() -> *mut BufferWriter {
 pub extern "C" fn arora_buffer_writer_free(writer: *mut BufferWriter) {
   unsafe {
     Box::from_raw(writer);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_unit(writer: *mut BufferWriter) {
+  unsafe {
+    (*writer).add_unit();
   }
 }
 
@@ -266,10 +517,59 @@ pub extern "C" fn arora_buffer_writer_add_structure_field(writer: *mut BufferWri
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_array_primitive(writer: *mut BufferWriter, element_type: u8, element_count: u32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_array_primitive(element_type, element_count);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_array_structure(writer: *mut BufferWriter, id: *const u8, element_count: u32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_array_structure(std::slice::from_raw_parts(id, 16), element_count);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_array_enumeration(writer: *mut BufferWriter, id: *const u8, element_count: u32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_array_enumeration(std::slice::from_raw_parts(id, 16), element_count);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_begin_structure_raw(writer: *mut BufferWriter, field_count: u32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.begin_structure_raw(field_count);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_boolean(writer: *mut BufferWriter, value: bool) {
   unsafe {
     let writer = &mut *writer;
     writer.add_boolean(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_boolean_raw(writer: *mut BufferWriter, value: bool) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_boolean_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_boolean_raw_bulk(writer: *mut BufferWriter, values: *const bool, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_boolean_raw_bulk(values);
   }
 }
 
@@ -282,10 +582,44 @@ pub extern "C" fn arora_buffer_writer_add_u8(writer: *mut BufferWriter, value: u
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u8_raw(writer: *mut BufferWriter, value: u8) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_u8_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u8_raw_bulk(writer: *mut BufferWriter, values: *const u8, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_u8_raw_bulk(values);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_u16(writer: *mut BufferWriter, value: u16) {
   unsafe {
     let writer = &mut *writer;
     writer.add_u16(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u16_raw(writer: *mut BufferWriter, value: u16) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_u16_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u16_raw_bulk(writer: *mut BufferWriter, values: *const u16, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_u16_raw_bulk(values);
   }
 }
 
@@ -298,10 +632,44 @@ pub extern "C" fn arora_buffer_writer_add_u32(writer: *mut BufferWriter, value: 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u32_raw(writer: *mut BufferWriter, value: u32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_u32_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u32_raw_bulk(writer: *mut BufferWriter, values: *const u32, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_u32_raw_bulk(values);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_u64(writer: *mut BufferWriter, value: u64) {
   unsafe {
     let writer = &mut *writer;
     writer.add_u64(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u64_raw(writer: *mut BufferWriter, value: u64) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_u64_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_u64_raw_bulk(writer: *mut BufferWriter, values: *const u64, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_u64_raw_bulk(values);
   }
 }
 
@@ -314,10 +682,44 @@ pub extern "C" fn arora_buffer_writer_add_s8(writer: *mut BufferWriter, value: i
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s8_raw(writer: *mut BufferWriter, value: i8) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_s8_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s8_raw_bulk(writer: *mut BufferWriter, values: *const i8, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_s8_raw_bulk(values);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_s16(writer: *mut BufferWriter, value: i16) {
   unsafe {
     let writer = &mut *writer;
     writer.add_s16(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s16_raw(writer: *mut BufferWriter, value: i16) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_s16_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s16_raw_bulk(writer: *mut BufferWriter, values: *const i16, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_s16_raw_bulk(values);
   }
 }
 
@@ -330,10 +732,44 @@ pub extern "C" fn arora_buffer_writer_add_s32(writer: *mut BufferWriter, value: 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s32_raw(writer: *mut BufferWriter, value: i32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_s32_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s32_raw_bulk(writer: *mut BufferWriter, values: *const i32, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_s32_raw_bulk(values);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_s64(writer: *mut BufferWriter, value: i64) {
   unsafe {
     let writer = &mut *writer;
     writer.add_s64(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s64_raw(writer: *mut BufferWriter, value: i64) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_s64_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_s64_raw_bulk(writer: *mut BufferWriter, values: *const i64, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_s64_raw_bulk(values);
   }
 }
 
@@ -346,10 +782,44 @@ pub extern "C" fn arora_buffer_writer_add_r32(writer: *mut BufferWriter, value: 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_r32_raw(writer: *mut BufferWriter, value: f32) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_r32_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_r32_raw_bulk(writer: *mut BufferWriter, values: *const f32, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_r32_raw_bulk(values);
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_writer_add_r64(writer: *mut BufferWriter, value: f64) {
   unsafe {
     let writer = &mut *writer;
     writer.add_r64(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_r64_raw(writer: *mut BufferWriter, value: f64) {
+  unsafe {
+    let writer = &mut *writer;
+    writer.add_r64_raw(value);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(writer: *mut BufferWriter, values: *const f64, count: usize) {
+  unsafe {
+    let writer = &mut *writer;
+    let values = std::slice::from_raw_parts(values, count);
+    writer.add_r64_raw_bulk(values);
   }
 }
 
@@ -363,21 +833,24 @@ pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, valu
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *const u8 {
+pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *mut u8 {
   unsafe {
     let writer = &mut *writer;
+    
     let backing = writer.finalize();
     if !length.is_null() {
       *length = backing.len();
     }
-    backing.as_ptr()
+    Box::into_raw(backing) as *mut u8
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8, size: usize) -> *mut BufferReader<'a> {
+pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8) -> *mut BufferReader<'a> {
+  let size_buf: &[u8] = unsafe { std::slice::from_raw_parts(buffer, 4) };
+  let size = u32::from_be_bytes(size_buf.try_into().unwrap());
   unsafe {
-    Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(buffer, size))))
+    Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(buffer, size as usize))))
   }
 }
 
@@ -417,6 +890,15 @@ pub extern "C" fn arora_buffer_reader_get_structure(reader: *mut BufferReader) -
   }
 }
 
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_structure_raw(reader: *mut BufferReader) -> u32 {
+  unsafe {
+    let reader = &mut *reader;
+    let field_count = reader.get_structure_raw();
+    field_count
+  }
+}
+
 #[repr(C)]
 pub struct GetEnumerationValueResult {
   pub id: *const u8,
@@ -431,6 +913,24 @@ pub extern "C" fn arora_buffer_reader_get_enumeration_value(reader: *mut BufferR
     GetEnumerationValueResult {
       id: id.as_ptr(),
       value_id: value_id.as_ptr(),
+    }
+  }
+}
+
+#[repr(C)]
+pub struct GetArrayResult {
+  pub ty: u8,
+  pub element_count: u32,
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_array(reader: *mut BufferReader) -> GetArrayResult {
+  unsafe {
+    let reader = &mut *reader;
+    let (ty, element_count) = reader.get_array();
+    GetArrayResult {
+      ty,
+      element_count,
     }
   }
 }
@@ -460,10 +960,26 @@ pub extern "C" fn arora_buffer_reader_get_u8(reader: *mut BufferReader) -> u8 {
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_u8_bulk(reader: *mut BufferReader, count: usize) -> *const u8 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_u8_bulk(count).as_ptr()
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_reader_get_u16(reader: *mut BufferReader) -> u16 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u16()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_u16_bulk(reader: *mut BufferReader, count: usize) -> *const u16 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_u16_bulk(count).as_ptr()
   }
 }
 
@@ -476,10 +992,26 @@ pub extern "C" fn arora_buffer_reader_get_u32(reader: *mut BufferReader) -> u32 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_u32_bulk(reader: *mut BufferReader, count: usize) -> *const u32 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_u32_bulk(count).as_ptr()
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_reader_get_u64(reader: *mut BufferReader) -> u64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u64()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_u64_bulk(reader: *mut BufferReader, count: usize) -> *const u64 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_u64_bulk(count).as_ptr()
   }
 }
 
@@ -492,10 +1024,26 @@ pub extern "C" fn arora_buffer_reader_get_s8(reader: *mut BufferReader) -> i8 {
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_s8_bulk(reader: *mut BufferReader, count: usize) -> *const i8 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_s8_bulk(count).as_ptr()
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_reader_get_s16(reader: *mut BufferReader) -> i16 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s16()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_s16_bulk(reader: *mut BufferReader, count: usize) -> *const i16 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_s16_bulk(count).as_ptr()
   }
 }
 
@@ -508,10 +1056,26 @@ pub extern "C" fn arora_buffer_reader_get_s32(reader: *mut BufferReader) -> i32 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_s32_bulk(reader: *mut BufferReader, count: usize) -> *const i32 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_s32_bulk(count).as_ptr()
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_reader_get_s64(reader: *mut BufferReader) -> i64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s64()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_s64_bulk(reader: *mut BufferReader, count: usize) -> *const i64 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_s64_bulk(count).as_ptr()
   }
 }
 
@@ -524,10 +1088,26 @@ pub extern "C" fn arora_buffer_reader_get_r32(reader: *mut BufferReader) -> f32 
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_r32_bulk(reader: *mut BufferReader, count: usize) -> *const f32 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_r32_bulk(count).as_ptr()
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_reader_get_r64(reader: *mut BufferReader) -> f64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_r64()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_r64_bulk(reader: *mut BufferReader, count: usize) -> *const f64 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_r64_bulk(count).as_ptr()
   }
 }
 
@@ -541,70 +1121,271 @@ pub extern "C" fn arora_buffer_reader_get_string(reader: *mut BufferReader, leng
   }
 }
 
-pub struct BufferPrinter<'a> {
-  reader: BufferReader<'a>,
+#[no_mangle]
+pub extern "C" fn arora_buffer_free(buffer: *mut u8) {
+  unsafe {
+    let _ = Box::from_raw(buffer);
+  }
 }
 
-impl <'a> BufferPrinter<'a> {
-  pub fn new(reader: BufferReader<'a>) -> BufferPrinter<'a> {
-    BufferPrinter {
-      reader,
+use std::borrow::Cow;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructureField<'a> {
+  pub id: Cow<'a, [u8]>,
+  pub value: Value<'a>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Structure<'a> {
+  pub id: Cow<'a, [u8]>,
+  pub fields: Vec<StructureField<'a>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructureRaw<'a> {
+  pub fields: Vec<StructureField<'a>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Enumeration<'a> {
+  pub id: Cow<'a, [u8]>,
+  pub variant_id: Cow<'a, [u8]>,
+  pub value: Box<Value<'a>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumerationRaw<'a> {
+  pub variant_id: Cow<'a, [u8]>,
+  pub value: Box<Value<'a>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Value<'a> {
+  Unit,
+  Boolean(bool),
+  U8(u8),
+  U16(u16),
+  U32(u32),
+  U64(u64),
+  S8(i8),
+  S16(i16),
+  S32(i32),
+  S64(i64),
+  R32(f32),
+  R64(f64),
+  String(Cow<'a, str>),
+  Structure(Structure<'a>),
+  Enumeration(Enumeration<'a>),
+  ArrayBoolean(Cow<'a, [bool]>),
+  ArrayU8(Cow<'a, [u8]>),
+  ArrayU16(Cow<'a, [u16]>),
+  ArrayU32(Cow<'a, [u32]>),
+  ArrayU64(Cow<'a, [u64]>),
+  ArrayS8(Cow<'a, [i8]>),
+  ArrayS16(Cow<'a, [i16]>),
+  ArrayS32(Cow<'a, [i32]>),
+  ArrayS64(Cow<'a, [i64]>),
+  ArrayR32(Cow<'a, [f32]>),
+  ArrayR64(Cow<'a, [f64]>),
+  ArrayString(Vec<Cow<'a, str>>),
+  ArrayStructure(Cow<'a, [u8]>, Vec<StructureRaw<'a>>),
+  ArrayEnumeration(Cow<'a, [u8]>, Vec<EnumerationRaw<'a>>),
+}
+
+impl<'a> Value<'a> {
+  unsafe fn deserialize_reader(reader: &mut BufferReader<'a>) -> Value<'a> {
+    match reader.next_type() {
+      Some(TYPE_U8) => Value::U8(reader.get_u8()),
+      Some(TYPE_U16) => Value::U16(reader.get_u16()),
+      Some(TYPE_U32) => Value::U32(reader.get_u32()),
+      Some(TYPE_U64) => Value::U64(reader.get_u64()),
+      Some(TYPE_S8) => Value::S8(reader.get_s8()),
+      Some(TYPE_S16) => Value::S16(reader.get_s16()),
+      Some(TYPE_S32) => Value::S32(reader.get_s32()),
+      Some(TYPE_S64) => Value::S64(reader.get_s64()),
+      Some(TYPE_R32) => Value::R32(reader.get_r32()),
+      Some(TYPE_R64) => Value::R64(reader.get_r64()),
+      Some(TYPE_STRING) => Value::String(reader.get_string().into()),
+      Some(TYPE_STRUCTURE) => {
+        let (id, field_count) = reader.get_structure();
+        let mut fields = Vec::with_capacity(field_count as usize);
+        for _ in 0..field_count {
+          let field_id = reader.get_structure_field();
+          fields.push(StructureField {
+            id: field_id.into(),
+            value: Value::deserialize_reader(reader),
+          });
+        }
+        Value::Structure(Structure {
+          id: id.into(),
+          fields: fields,
+        })  
+      },
+      Some(TYPE_ARRAY) => {
+        let (ty, count) = reader.get_array();
+        match ty {
+          TYPE_BOOLEAN => Value::ArrayBoolean(reader.get_boolean_bulk(count as usize).into()),
+          TYPE_U8 => Value::ArrayU8(reader.get_u8_bulk(count as usize).into()),
+          TYPE_U16 => Value::ArrayU16(reader.get_u16_bulk(count as usize).into()),
+          TYPE_U32 => Value::ArrayU32(reader.get_u32_bulk(count as usize).into()),
+          TYPE_U64 => Value::ArrayU64(reader.get_u64_bulk(count as usize).into()),
+          TYPE_S8 => Value::ArrayS8(reader.get_s8_bulk(count as usize).into()),
+          TYPE_S16 => Value::ArrayS16(reader.get_s16_bulk(count as usize).into()),
+          TYPE_S32 => Value::ArrayS32(reader.get_s32_bulk(count as usize).into()),
+          TYPE_S64 => Value::ArrayS64(reader.get_s64_bulk(count as usize).into()),
+          TYPE_R32 => Value::ArrayR32(reader.get_r32_bulk(count as usize).into()),
+          TYPE_R64 => Value::ArrayR64(reader.get_r64_bulk(count as usize).into()),
+          TYPE_STRING => Value::ArrayString({
+            let mut strings = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+              strings.push(reader.get_string().into());
+            }
+            strings
+          }),
+          TYPE_STRUCTURE => {
+            let mut structures = Vec::with_capacity(count as usize);
+            let structure_id = reader.get_structure_field();
+            for _ in 0..count {
+              let field_count = reader.get_structure_raw();
+              let mut fields = Vec::with_capacity(field_count as usize);
+              for _ in 0..field_count {
+                let field_id = reader.get_structure_field();
+                fields.push(StructureField {
+                  id: field_id.into(),
+                  value: Value::deserialize_reader(reader),
+                });
+              }
+              structures.push(StructureRaw {
+                fields: fields,
+              });
+            }
+            Value::ArrayStructure(structure_id.into(), structures)
+          },
+          TYPE_ENUMERATION => {
+            let mut enumerations = Vec::with_capacity(count as usize);
+            let enumeration_id = reader.get_structure_field();
+            for _ in 0..count {
+              let variant_id = reader.get_enumeration_value_raw();
+              enumerations.push(EnumerationRaw {
+                variant_id: variant_id.into(),
+                value: Box::new(Value::deserialize_reader(reader)),
+              });
+            }
+            Value::ArrayEnumeration(enumeration_id.into(), enumerations)
+          }
+          _ => panic!("unsupported array type"),
+        }
+      },
+      _ => panic!("Invalid type")
     }
   }
 
-  pub fn print(&mut self, indent: usize) {
-    match self.reader.next_type() {
-      Some(TYPE_STRUCTURE) => {
-        let (id, field_count) = self.reader.get_structure();
-        println!("{}Structure {:?} {}", "  ".repeat(indent), id, field_count);
-        for _ in 0..field_count {
-          let field_id = Uuid::from_slice(self.reader.get_structure_field()).unwrap();
-          println!("{}  Field {:?}", "  ".repeat(indent), field_id);
-          self.print(indent + 2);
+  pub unsafe fn deserialize(data: &'a [u8]) -> Value<'a> {
+    let mut reader = BufferReader::new(data);
+    Self::deserialize_reader(&mut reader)
+  }
+
+  fn serialize_writer(&self, writer: &mut BufferWriter) {
+    match self {
+      Value::Unit => writer.add_unit(),
+      Value::Boolean(b) => writer.add_boolean(*b),
+      Value::U8(v) => writer.add_u8(*v),
+      Value::U16(v) => writer.add_u16(*v),
+      Value::U32(v) => writer.add_u32(*v),
+      Value::U64(v) => writer.add_u64(*v),
+      Value::S8(v) => writer.add_s8(*v),
+      Value::S16(v) => writer.add_s16(*v),
+      Value::S32(v) => writer.add_s32(*v),
+      Value::S64(v) => writer.add_s64(*v),
+      Value::R32(v) => writer.add_r32(*v),
+      Value::R64(v) => writer.add_r64(*v),
+      Value::String(v) => writer.add_string(v),
+      Value::Structure(v) => {
+        writer.begin_structure(&v.id, v.fields.len() as u32);
+        for field in &v.fields {
+          writer.add_structure_field(&field.id);
+          field.value.serialize_writer(writer);
         }
       },
-      Some(TYPE_ENUMERATION) => {
-        let (id, value_id) = self.reader.get_enumeration_value();
-        println!("{}Enumeration {:?} {:?}", "  ".repeat(indent), id, value_id);
+      Value::Enumeration(v) => {
+        writer.add_enumeration_value(&v.id, &v.variant_id);
+        v.value.serialize_writer(writer);
       },
-      Some(TYPE_BOOLEAN) => {
-        println!("{}Boolean {}", "  ".repeat(indent), self.reader.get_boolean());
+      Value::ArrayBoolean(v) => {
+        writer.add_array_primitive(TYPE_BOOLEAN, v.len() as u32);
+        writer.add_boolean_raw_bulk(v);
       },
-      Some(TYPE_U8) => {
-        println!("{}U8 {}", "  ".repeat(indent), self.reader.get_u8());
+      Value::ArrayU8(v) => {
+        writer.add_array_primitive(TYPE_U8, v.len() as u32);
+        writer.add_u8_raw_bulk(v);
       },
-      Some(TYPE_U16) => {
-        println!("{}U16 {}", "  ".repeat(indent), self.reader.get_u16());
+      Value::ArrayU16(v) => {
+        writer.add_array_primitive(TYPE_U16, v.len() as u32);
+        writer.add_u16_raw_bulk(v);
       },
-      Some(TYPE_U32) => {
-        println!("{}U32 {}", "  ".repeat(indent), self.reader.get_u32());
+      Value::ArrayU32(v) => {
+        writer.add_array_primitive(TYPE_U32, v.len() as u32);
+        writer.add_u32_raw_bulk(v);
       },
-      Some(TYPE_U64) => {
-        println!("{}U64 {}", "  ".repeat(indent), self.reader.get_u64());
+      Value::ArrayU64(v) => {
+        writer.add_array_primitive(TYPE_U64, v.len() as u32);
+        writer.add_u64_raw_bulk(v);
       },
-      Some(TYPE_S8) => {
-        println!("{}S8 {}", "  ".repeat(indent), self.reader.get_s8());
+      Value::ArrayS8(v) => {
+        writer.add_array_primitive(TYPE_S8, v.len() as u32);
+        writer.add_s8_raw_bulk(v);
       },
-      Some(TYPE_S16) => {
-        println!("{}S16 {}", "  ".repeat(indent), self.reader.get_s16());
+      Value::ArrayS16(v) => {
+        writer.add_array_primitive(TYPE_S16, v.len() as u32);
+        writer.add_s16_raw_bulk(v);
       },
-      Some(TYPE_S32) => {
-        println!("{}S32 {}", "  ".repeat(indent), self.reader.get_s32());
+      Value::ArrayS32(v) => {
+        writer.add_array_primitive(TYPE_S32, v.len() as u32);
+        writer.add_s32_raw_bulk(v);
       },
-      Some(TYPE_S64) => {
-        println!("{}S64 {}", "  ".repeat(indent), self.reader.get_s64());
+      Value::ArrayS64(v) => {
+        writer.add_array_primitive(TYPE_S64, v.len() as u32);
+        writer.add_s64_raw_bulk(v);
       },
-      Some(TYPE_R32) => {
-        println!("{}R32 {}", "  ".repeat(indent), self.reader.get_r32());
+      Value::ArrayR32(v) => {
+        writer.add_array_primitive(TYPE_R32, v.len() as u32);
+        writer.add_r32_raw_bulk(v);
       },
-      Some(TYPE_R64) => {
-        println!("{}R64 {}", "  ".repeat(indent), self.reader.get_r64());
+      Value::ArrayR64(v) => {
+        writer.add_array_primitive(TYPE_R64, v.len() as u32);
+        writer.add_r64_raw_bulk(v);
       },
-      Some(TYPE_STRING) => {
-        let length = self.reader.get_string().len();
-        println!("{}String {}", "  ".repeat(indent), length);
+      Value::ArrayString(v) => {
+        writer.add_array_primitive(TYPE_STRING, v.len() as u32);
+        for s in v {
+          writer.add_string(s);
+        }
       },
-      _ => {}
+      Value::ArrayStructure(id, v) => {
+        writer.add_array_structure(id, v.len() as u32);
+        for structure in v {
+          writer.begin_structure_raw(structure.fields.len() as u32);
+          for field in &structure.fields {
+            writer.add_structure_field(&field.id);
+            field.value.serialize_writer(writer);
+          }
+        }
+      },
+      Value::ArrayEnumeration(id, v) => {
+        writer.add_array_enumeration(id, v.len() as u32);
+        for enumeration in v {
+          writer.add_enumeration_value_raw(&enumeration.variant_id);
+          enumeration.value.serialize_writer(writer);
+        }
+      },
     }
+  }
+
+  pub fn serialize(&self) -> Box<[u8]> {
+    let mut writer = BufferWriter::new();
+    self.serialize_writer(&mut writer);
+    writer.finalize()
   }
 }

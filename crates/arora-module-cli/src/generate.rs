@@ -7,11 +7,10 @@ use clap::Parser;
 
 use tokio::fs::read_to_string;
 use arora_schema::module::{
-  high::{ModuleDefinition as HighModuleDefinition},
-  low::{Header as LowHeader},
+  high::{ModuleDefinition as HighModuleDefinition}
 };
 
-use log::{debug, error, info};
+use log::debug;
 
 use crate::resolve::resolve_module_header;
 

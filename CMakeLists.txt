@@ -1,27 +1,37 @@
 project(arora)
 cmake_minimum_required(VERSION 3.0)
 
+include(CTest)
+
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option (DEBUG "Build debug version" OFF)
+option (USE_RUST_DEBUG "Use Rust debug build" OFF)
+set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/master/" CACHE STRING "Registry URI")
 
-set(TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
+set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
-if (DEBUG)
-  set(NATIVE_LIB_DIR "${TARGET_DIR}/debug")
-  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/debug")
+if (USE_RUST_DEBUG)
+  set(RUST_TARGET_SUBDIR "debug")
   set(CARGO_BUILD_FLAGS)
 else()
-  set(NATIVE_LIB_DIR "${TARGET_DIR}/release")
-  set(WASM_LIB_DIR "${TARGET_DIR}/wasm32-unknown-unknown/release")
+  set(RUST_TARGET_SUBDIR "release")
   set(CARGO_BUILD_FLAGS --release)
 endif()
 
+set(RUST_BINARY_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")
+set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR}")
+
+set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  BYPRODUCTS
+    ${ARORA_MODULE_CLI}
+    ${ARORA_MODULE_CPP}
 )
 
 add_custom_target(arora-buffers-build ALL
@@ -31,7 +41,6 @@ add_custom_target(arora-buffers-build ALL
 link_directories(${WASM_LIB_DIR})
 
 set (CMAKE_SKIP_RPATH ON)
-
 
 add_library(arora-buffers INTERFACE)
 target_link_libraries(arora-buffers INTERFACE arora_buffers)
@@ -46,14 +55,11 @@ add_library(arora-util INTERFACE)
 target_link_libraries(arora-util INTERFACE arora_util)
 add_dependencies(arora-util arora-util-build)
 
-
-set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
-
 install(
   FILES
-    ${NATIVE_LIB_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}
+    ${ARORA_CLI}
+    ${ARORA_MODULE_CLI}
+    ${ARORA_MODULE_CPP}
   PERMISSIONS
     OWNER_EXECUTE
     OWNER_READ
@@ -64,6 +70,13 @@ install(
     WORLD_EXECUTE
   DESTINATION bin
 )
+
+if(BUILD_TESTING)
+  add_test(
+    NAME cargo_test
+    COMMAND cargo test
+  )
+endif()
 
 add_subdirectory(libs)
 add_subdirectory(modules)

@@ -15,3 +15,4 @@ convert_case = "0.5"
 arora-vfs = { path = "../arora-vfs" }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 derive_more = "*"
+lazy_static = "*"

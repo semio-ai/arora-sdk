@@ -7,14 +7,19 @@ Semio Arora is a C library (written in Rust) and associated tooling for executin
     ```bash
     rustup target add wasm32-unknown-unknown
     ```
-  - Python
+  - Python 3
+  - CMake 3
+  
+### Windows
+
+  - Ninja
 
 ## Build
 
 ```bash
 ./configure.py
 cd build
-make
+make # or ninja on Windows
 ```
 
 ## Modules
@@ -27,3 +32,6 @@ for working examples.
 
 Authors of modules should write a `module.yaml` file and
 use `arora-module-cli` to generate the adequate sources to implement it.
+`arora-module-cli` also produces a `module.yaml` file with named symbols stripped.
+This is called a "header", and it is used by the runtime to identify the symbols.
+Use `arora-cli --header <module.yaml> --exe <binary>` to try loading a module.

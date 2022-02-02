@@ -1,0 +1,32 @@
+id: 23a75559-025c-4be8-8b48-0784e30dc9ec
+author: Semio
+description: Test C++ module 2
+license: Proprietary
+name: test-cpp-2
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: b213a552-77ad-465a-a26d-352e8eccfd63
+    name: test_2
+    parameters:
+      - id: 55dbec70-1c3a-433e-a6e6-27446b7f065e
+        name: a
+        type:
+          kind: scalar
+          id: u32
+      - id: abf9ca4e-e03f-431a-a32b-4911f809c399
+        name: b
+        type:
+          kind: scalar
+          id: u32
+    ret:
+      kind: scalar
+      id: Status
+imports: []
+dependencies: []
+executable_mime: application/wasm

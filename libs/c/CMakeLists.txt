@@ -6,9 +6,9 @@ target_link_libraries(arora-c INTERFACE arora-buffers arora-util)
 
 install(
   FILES
-    "${NATIVE_LIB_DIR}/libarora_buffers${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    "${NATIVE_LIB_DIR}/libarora_util${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    "${RUST_BINARY_DIR}/libarora_buffers${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    "${RUST_BINARY_DIR}/libarora_util${CMAKE_STATIC_LIBRARY_SUFFIX}"
   DESTINATION lib
 )
 
-install(DIRECTORY "${TARGET_DIR}/include/arora" DESTINATION include)
+install(DIRECTORY "${RUST_TARGET_DIR}/include/arora" DESTINATION include)

@@ -1,34 +1,34 @@
-use std::{path::{Path, PathBuf}, any, collections::HashMap};
+use std::{path::Path, collections::HashMap};
 
 use clap::{Parser, Subcommand, AppSettings};
 use arora_registry::Registry;
-use arora_schema::ty::{
-  low::{
-    Type as LowType,
-    TypeKind as LowTypeKind,
-    Structure as LowStructure,
-    Enumeration as LowEnumeration,
-    StructureField as LowStructureField,
-    EnumerationValue as LowEnumerationValue
+use arora_schema::{
+  ty::{
+    low::{
+      Type as LowType,
+      TypeKind as LowTypeKind,
+      Structure as LowStructure,
+      Enumeration as LowEnumeration,
+      StructureField as LowStructureField,
+      EnumerationValue as LowEnumerationValue
+    },
+    high::{
+      Type as HighType,
+      TypeKind as HighTypeKind,
+    }
   },
-  high::{
-    Type as HighType,
-    TypeKind as HighTypeKind,
-    Structure as HighStructure,
-    Enumeration as HighEnumeration,
-    StructureField as HighStructureField,
-    EnumerationValue as HighEnumerationValue
-  }
+  module::low::{TypeRef as LowTypeRef},
+  module::high::{TypeRef as HighTypeRef},
 };
 
-use tokio::{fs::{copy, read_to_string, File}, io::AsyncReadExt, io::AsyncWriteExt};
+use tokio::{fs::{read_to_string, File}, io::AsyncWriteExt};
 use url::Url;
 use uuid::Uuid;
 
 mod generate;
 mod resolve;
 
-use generate::{Generate, generate};
+use generate::generate;
 
 #[derive(Debug, Parser)]
 struct ExportType {
@@ -77,6 +77,17 @@ struct Args {
   command: Commands,
 }
 
+async fn lookup_type_ref(type_ref: &HighTypeRef, registry: &mut Registry) -> anyhow::Result<LowTypeRef> {
+  Ok(match type_ref {
+    HighTypeRef::Scalar { id } => LowTypeRef::Scalar { id: registry.lookup_type(&id).await? },
+    HighTypeRef::Array { id } => LowTypeRef::Array { id: registry.lookup_type(&id).await? },
+    HighTypeRef::Map { key_id, value_id } => LowTypeRef::Map {
+      key_id: registry.lookup_type(&key_id).await?,
+      value_id: registry.lookup_type(&value_id).await?,
+    },
+  })
+}
+
 
 
 async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result<()> {
@@ -96,15 +107,15 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
         HighTypeKind::Structure(high_structure) => {
           let mut low_fields = HashMap::new();
           for (id, field) in high_structure.fields.iter() {
-            match registry.lookup_type(&field.ty).await {
-              Ok(ty_id) => {
+            match lookup_type_ref(&field.ty, registry).await {
+              Ok(type_ref) => {
                 low_fields.insert(*id, LowStructureField {
                   name: field.name.clone(),
-                  ty_id,
+                  type_ref,
                 });
               },
               Err(err) => {
-                eprintln!("Failed to lookup type {}: {}", field.ty, err);
+                eprintln!("Failed to lookup type {:?}: {}", field.ty, err);
                 std::process::exit(1);
               }
             }
@@ -117,15 +128,15 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
           let mut low_values = HashMap::new();
           
           for (id, value) in high_enumeration.values.iter() {
-            match registry.lookup_type(&value.ty).await {
-              Ok(ty_id) => {
+            match lookup_type_ref(&value.ty, registry).await {
+              Ok(type_ref) => {
                 low_values.insert(*id, LowEnumerationValue {
                   name: value.name.clone(),
-                  ty_id,
+                  type_ref,
                 });
               },
               Err(err) => {
-                eprintln!("Failed to lookup type {}: {}", value.ty, err);
+                eprintln!("Failed to lookup type {:?}: {}", &value.ty, err);
                 std::process::exit(1);
               }
             }

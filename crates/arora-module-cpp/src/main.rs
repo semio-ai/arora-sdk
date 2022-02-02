@@ -6,7 +6,7 @@ use clap::Parser;
 use arora_module_core::{Reader, Asset, Writer};
 
 use arora_schema::{
-  ty::{low::{Type}, PRIMITIVE_IDS, UNIT_ID, BOOLEAN_ID, U8_ID, U16_ID, U32_ID, U64_ID, S8_ID, S16_ID, S32_ID, S64_ID, R32_ID, R64_ID, STRING_ID},
+  ty::{low::{Type}, PRIMITIVE_IDS, UNIT_ID, BOOLEAN_ID, U8_ID, U16_ID, U32_ID, U64_ID, S8_ID, S16_ID, S32_ID, S64_ID, R32_ID, R64_ID, STRING_ID, ARRAY_ID},
   module::low::{ImportSymbol, ExportSymbol, Header, Parameter as LowParameter}
 };
 use tokio::io::{stdin, stdout, AsyncWriteExt};
@@ -15,6 +15,12 @@ use uuid::Uuid;
 
 pub mod ast;
 use ast::{ToPrettyString, ToExpression};
+
+pub mod ty;
+pub mod func;
+pub mod constant;
+pub mod id;
+pub mod declare;
 
 use crate::ast::Variable;
 
@@ -29,7 +35,7 @@ pub enum NameStyle {
 
 impl NameStyle {
   pub fn convert(&self, name: &str) -> String {
-    let name = name.replace('_', " ");
+    let name = name.replace('-', " ").replace('_', " ");
     match self {
       Self::UpperCamelCase => name.to_case(Case::UpperCamel),
       Self::LowerCamelCase => name.to_case(Case::Camel),
@@ -57,7 +63,7 @@ pub struct Args {
   #[clap(short, long, name = "self-id")]
   pub self_id: String,
 
-  #[clap(short, long, name = "method-style", default_value = "camel")]
+  #[clap(short, long, name = "method-style", default_value = "snake")]
   pub method_style: NameStyle,
 
   #[clap(short, long, name = "variable-style", default_value = "snake")]
@@ -85,7 +91,18 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   let mut source = Directory::new();
   let mut source_types = Directory::new();
 
-  let mut source_content = new_cpp_file();
+  let mut source_declarations = Vec::new();
+  source_declarations.extend_from_slice(&[
+    Declaration::include_local(format!("types/{}.hpp", &ty.name)),
+    Declaration::new_line(1),
+  ]);
+
+  source_declarations.extend_from_slice(&declare::type_constants_impl(id, &ty));
+  source_declarations.extend_from_slice(&declare::ty_impl(context, &ty));
+
+  let source_content = TranslationUnit {
+    declarations: source_declarations,
+  }.to_pretty_string(0);
 
   source_types.insert(format!("{}.cpp", ty.name), File::new(source_content));
 
@@ -94,7 +111,57 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   let mut include = Directory::new();
   let mut include_types = Directory::new();
 
-  let mut include_content = new_cpp_file();
+  let guard_name = include_guard_name(&format!("TYPES_{}", ty.name));
+
+  let mut include_declarations = vec! [
+    Declaration::ifndef(&guard_name),
+    Declaration::define(&guard_name),
+    Declaration::new_line(1),
+    Extern {
+      name: "C".to_string(),
+      block: Block {
+        statements: vec! [
+          Declaration::include_system("arora/buffers.h"),
+          Declaration::include_system("arora/util.h")
+        ],
+        ..Default::default()
+      }
+    }.into(),
+    Declaration::new_line(1),
+    Declaration::include_system("arora/buffer/deserialize.hpp"),
+    Declaration::include_system("arora/buffer/serialize.hpp"),
+    Declaration::new_line(1),
+    Declaration::include_system("cmath"),
+    Declaration::include_system("cstdint"),
+    Declaration::new_line(1),
+  ];
+  
+  ty.type_dependencies().iter().for_each(|dep| {
+    if PRIMITIVE_IDS.contains(dep) {
+      return;
+    }
+      
+    let dep_header = context.types.get(dep).unwrap();
+    include_declarations.push(PreprocessorDirective::Include(format!("types/{}.hpp", dep_header.name), IncludeStyle::Local).into());
+  });
+  include_declarations.extend_from_slice(&declare::type_constants(id, ty));
+  include_declarations.extend([
+    declare::ty(context, ty).into(),
+    Declaration::new_line(1),
+    declare::type_of(ty).into(),
+    Declaration::new_line(1),
+    declare::deserializer(context, ty).into(),
+    Declaration::new_line(1),
+    declare::serializer(context, ty).into(),
+    Declaration::new_line(1),
+    Declaration::endif(),
+  ]);
+  
+  let include_content = TranslationUnit {
+    declarations: include_declarations
+  }.to_pretty_string(0);
+
+  
 
   include_types.insert(format!("{}.hpp", ty.name), File::new(include_content));
 
@@ -108,22 +175,274 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   Ok(root.into())
 }
 
+
+
 async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
   let header = context.headers.get(&id)
     .ok_or_else(|| anyhow::anyhow!("Module {} not found", id))?;
   let imports = context.grouped_import_symbols.get(&id)
     .ok_or_else(|| anyhow::anyhow!("Module {} not found", id))?;
 
+
+  let id_name = identifier_name(&header.name);
+
   let mut source = Directory::new();
 
-  let mut source_content = new_cpp_file();
+  let mut source_declarations = Vec::new();
 
+  source_declarations.extend_from_slice(&[
+    Declaration::include_local(format!("{}.hpp", &header.name)),
+    Declaration::include_system("arora/arora.hpp"),
+    Declaration::new_line(1),
+  ]);
+  source_declarations.push(declare::uuid_variable(id::module_uuid(&header.name), &header.id).into());
+
+
+  // Create UUID variables (used in function implementations)
+  for import in imports {
+    match import {
+      ImportSymbol::Function(func) => {
+        source_declarations.push(declare::uuid_variable(id::function_uuid(&func.name), &func.id).into());
+        for parameter in func.parameters.iter() {
+          source_declarations.push(declare::uuid_variable(id::parameter_uuid(&func.name, &parameter.name), &parameter.id).into());
+        }
+      },
+      _ => panic!("Unimplemented"),
+    }
+    source_declarations.push(Declaration::new_line(1));
+  }
+
+  let mut extern_declarations = Vec::new();
+
+  // Write out the actual function implementations
+  for import in imports {
+    match import {
+      ImportSymbol::Function(func) => {
+        let mut sorted_parameters: Vec<&LowParameter> = func.parameters.iter().collect();
+        sorted_parameters.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut parameters = Vec::new();
+        
+
+        for parameter in func.parameters.iter() {
+          parameters.push(Parameter {
+            type_ref: TypeRef {
+              ty: ty::type_name(context, &parameter.ty),
+              constant: !parameter.mutable,
+              reference: true,
+              ..Default::default()
+            },
+            name: parameter.name.clone(),
+          });
+        }
+
+        let mut function_declarations = vec! [
+          declare::arora_buffer_writer().into(),
+          declare::arora_buffer_writer_begin_structure(&id::function_uuid(&func.name), (func.parameters.len() as u32).to_expression()).into(),
+        ];
+
+        for parameter in sorted_parameters {
+          function_declarations.push(declare::arora_buffer_writer_add_structure_field(id::parameter_uuid(&func.name, &parameter.name).to_expression()).into());
+          function_declarations.push(
+            format!("arora::buffer::serialize<{}>", ty::type_name(context, &parameter.ty))
+              .to_expression()
+              .call([ "writer".to_expression(), parameter.name.to_expression() ])
+              .into_statement()
+              .into()
+          );
+        }
+
+        function_declarations.extend_from_slice(&[
+          // const std::uint8_t *__arora_arg__ = arora_buffer_writer_finalize(writer);
+          Variable {
+            name: "__arora_arg__".to_string(),
+            ty: ty::U8_CONST_PTR.clone(),
+            value: Some(declare::arora_buffer_writer_finalize()),
+            ..Default::default()
+          }.into(),
+          // std::uint8_t  *__arora_result__ = arora_dispatch(MODULE_UUID, FUNCTION_UUID, __arora_arg__);
+          Variable {
+            name: "__arora_result__".to_string(),
+            ty: ty::U8_PTR.clone(),
+            value: Some(func::ARORA_DISPATCH.call([
+              id::module_uuid(&header.name).to_expression(),
+              id::function_uuid(&func.name).to_expression(),
+              "__arora_arg__".to_expression()
+            ])),
+            ..Default::default()
+          }.into(),
+          // assert(__arora_result__ != NULL);
+          func::ASSERT.call([
+            "__arora_result__".to_expression().not_equal("0".to_expression())
+          ]).into_statement().into(),
+          // arora_buffer_reader *reader = arora_buffer_reader_new();
+          Variable {
+            name: "reader".to_string(),
+            ty: ty::ARORA_BUFFER_READER_PTR.clone(),
+            value: Some(declare::arora_buffer_reader_new("__arora_result__".to_expression())),
+            ..Default::default()
+          }.into(),
+          // const std::uint8_t __arora_result_type__ = arora_buffer_reader_next_type(reader);
+          Variable {
+            name: "__arora_result_type__".to_string(),
+            ty: ty::U8.clone(),
+            value: Some(declare::arora_buffer_reader_next_type()),
+            ..Default::default()
+          }.into(),
+          // assert(__arora_result_type__ == ARORA_BUFFER_TYPE_STRUCTURE);
+          func::ASSERT.call([
+            "__arora_result_type__".to_expression().equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone())
+          ]).into_statement().into(),
+          // arora_get_structure_result structure_metadata = arora_buffer_reader_get_structure(reader); 
+          Variable {
+            name: "structure_metadata".to_string(),
+            ty: ty::ARORA_GET_STRUCTURE_RESULT.clone(),
+            value: Some(declare::arora_buffer_reader_get_structure()),
+            ..Default::default()
+          }.into(),
+          // assert(arora_uuid_compare(structure_metadata.id, FUNCTION_UUID) == 0);
+          func::ASSERT.call([
+            func::ARORA_UUID_COMPARE.call([
+              "structure_metadata".to_expression().dot("id"),
+              id::function_uuid(&func.name).to_expression()
+            ]).equal("0".to_expression())
+          ]).into_statement().into(),
+          // assert(structure_metadata.field_count > 0);
+          func::ASSERT.call([
+            "structure_metadata".to_expression().dot("field_count").to_expression().greater_than("0".to_expression())
+          ]).into_statement().into(),
+          // const std::uint8_t *field_id = arora_buffer_reader_get_structure_field(reader);
+          Variable {
+            name: "field_id".to_string(),
+            ty: ty::U8_CONST_PTR.clone(),
+            value: Some(declare::arora_buffer_reader_get_structure_field()),
+            ..Default::default()
+          }.into(),
+          // assert(arora_uuid_compare(field_id, FUNCTION_UUID) == 0);
+          func::ASSERT.call([
+            func::ARORA_UUID_COMPARE.call([
+              "field_id".to_expression(),
+              id::function_uuid(&func.name).to_expression()
+            ]).equal("0".to_expression())
+          ]).into_statement().into(),
+          // const std::optional<RETURN_TYPE> __arora_return__ = arora::buffer::deserialize<RETURN_TYPE>(reader);
+          Variable {
+            name: "__arora_return__".to_string(),
+            ty: ty::optional_const(&TypeRef {
+              ty: ty::type_name(context, &func.ret),
+              constant: true,
+              ..Default::default()
+            }),
+            value: Some(format!("arora::buffer::deserialize<{}>", ty::type_name(context, &func.ret)).to_expression().call([ "reader".to_expression() ])),
+            ..Default::default()
+          }.into(),
+          // arora_buffer_reader_free(reader);
+          func::ARORA_BUFFER_READER_FREE.call([ "reader".to_expression() ]).into_statement().into(),
+          // free(__arora_result__);
+          func::FREE.call([ "__arora_result__".to_expression() ]).into_statement().into(),
+          // return __arora_result__;
+          Statement::Return("__arora_return__".to_expression()).into(),
+        ]);
+
+
+        extern_declarations.push(FunctionImplementation {
+          name: format!("{}::{}", &id_name, identifier_name(&import.name())),
+          parameters,
+          ret: Some(ty::optional(&TypeRef {
+            ty: ty::type_name(context, &func.ret),
+            ..Default::default()
+          })),
+          body: Block {
+            statements: function_declarations,
+            semicolon: false,
+          },
+          ..Default::default()
+        }.into());
+      },
+      _ => panic!("Unimplemented"),
+    }
+    
+  }
+
+  source_declarations.extend_from_slice(&extern_declarations);
+
+  let source_content = TranslationUnit {
+    declarations: source_declarations,
+  }.to_pretty_string(0);
 
   source.insert(format!("{}.cpp", header.name), File::new(source_content));
 
   let mut include = Directory::new();
 
-  let mut include_content = new_cpp_file();
+  let include_guard = include_guard_name(&header.name);
+
+  let mut include_declarations = vec! [
+    Declaration::ifndef(&include_guard),
+    Declaration::define(&include_guard),
+    Declaration::new_line(1),
+    Declaration::include_system("cmath"),
+    Declaration::include_system("cstdint"),
+    Declaration::new_line(1),
+  ];
+
+  for import in imports {
+    for ty in import.type_dependencies().iter() {
+      if PRIMITIVE_IDS.contains(ty) {
+        continue;
+      }
+
+      let dep_header = context.types.get(ty).unwrap();
+      include_declarations.push(PreprocessorDirective::Include(format!("types/{}.hpp", dep_header.name), IncludeStyle::Local).into());
+    }
+  }
+
+  let mut namespace_declarations = vec! [];
+
+  for import in imports {
+    match import {
+      ImportSymbol::Function(func) => {
+        let mut parameters = Vec::new();
+
+        for parameter in func.parameters.iter() {
+          parameters.push(Parameter {
+            type_ref: TypeRef {
+              ty: ty::type_name(context, &parameter.ty),
+              constant: !parameter.mutable,
+              reference: true,
+              ..Default::default()
+            },
+            name: parameter.name.clone(),
+          });
+        }
+
+        namespace_declarations.push(FunctionPrototype {
+          name: import.name().to_string(),
+          parameters,
+          ret: Some(ty::optional(&TypeRef {
+            ty: ty::type_name(context, &func.ret),
+            ..Default::default()
+          })),
+          ..Default::default()
+        }.into());
+      },
+      _ => panic!("Unimplemented"),
+    }
+    
+  }
+
+  include_declarations.push(Namespace {
+    name: id_name.clone(),
+    declarations: namespace_declarations
+  }.into());
+
+  include_declarations.extend_from_slice(&[
+    Declaration::new_line(1),
+    Declaration::endif(),
+  ]);
+
+  let include_content = TranslationUnit {
+    declarations: include_declarations,
+  }.to_pretty_string(0);
 
   include.insert(format!("{}.hpp", header.name), File::new(include_content));
 
@@ -133,13 +452,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
 
   // Write out a C++ header 
   Ok(root.into())
-}
-
-fn new_cpp_file() -> String {
-  let mut source_content = String::new();
-  source_content.push_str(AUTOGENERATED_WARNING);
-  source_content.push_str("\n");
-  source_content
 }
 
 fn include_guard_name(name: &str) -> String {
@@ -154,53 +466,6 @@ fn identifier_name(name: &str) -> String {
 
 fn identifier_uuid(uuid: &Uuid) -> String {
   uuid.to_string().replace("-", "_")
-}
-
-fn include_guard_begin(name: &str) -> String {
-  let mut ret = String::new();
-  
-  let name = include_guard_name(name);
-  
-  ret.push_str("#ifndef ");
-  ret.push_str(&name);
-  ret.push_str("\n");
-  ret.push_str("#define ");
-  ret.push_str(&name);
-  ret.push_str("\n");
-
-  ret
-}
-
-fn include_guard_end(name: &str) -> String {
-  let name = include_guard_name(name);
-
-  let mut ret = String::new();
-  ret.push_str("\n");
-  ret.push_str("#endif // ");
-  ret.push_str(&name);
-  ret
-}
-
-fn type_name<'a>(context: &'a Context<'a>, id: &Uuid) -> &'a str {
-  match *id {
-    x if x == *UNIT_ID => "void",
-    x if x == *BOOLEAN_ID => "bool",
-    x if x == *U8_ID => "std::uint8_t",
-    x if x == *U16_ID => "std::uint16_t",
-    x if x == *U32_ID => "std::uint32_t",
-    x if x == *U64_ID => "std::uint64_t",
-    x if x == *S8_ID => "std::int8_t",
-    x if x == *S16_ID => "std::int16_t",
-    x if x == *S32_ID => "std::int32_t",
-    x if x == *S64_ID => "std::int64_t",
-    x if x == *R32_ID => "float",
-    x if x == *R64_ID => "double",
-    x if x == *STRING_ID => "std::string",
-    x => {
-      let ty = context.types.get(&x).unwrap();
-      &ty.name
-    }
-  }
 }
 
 fn optional(type_ref: TypeRef, mutable: bool, reference: bool) -> TypeRef {
@@ -246,8 +511,7 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   let mut namespace_declarations: Vec<Declaration> = Vec::new();
 
   for export in context.exports.values() {
-    let name = export.name().clone();
-    let name = context.args.method_style.convert(&name);
+    let name = identifier_name(&export.name());
     match export {
       ExportSymbol::Function(f) => {
         let mut parameters = Vec::new();
@@ -255,7 +519,7 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           parameters.push(Parameter {
             name: parameter.name.clone(),
             type_ref: optional(TypeRef {
-              ty: type_name(context, &parameter.ty_id).to_string(),
+              ty: ty::type_name(context, &parameter.ty).to_string(),
               ..Default::default()
             }, parameter.mutable, true),
           });
@@ -263,11 +527,12 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         namespace_declarations.push(FunctionPrototype {
           name: name,
-          ret: TypeRef {
-            ty: type_name(context, &f.ret).to_string(),
+          ret: Some(TypeRef {
+            ty: ty::type_name(context, &f.ret).to_string(),
             ..Default::default()
-          },
+          }),
           parameters,
+          ..Default::default()
         }.into());
       },
     }
@@ -287,29 +552,7 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   })
 }
 
-fn uuid_initializer_list(uuid: &Uuid) -> Expression {
-  let id_bytes = uuid.as_bytes();
-  Expression::InitializerList(
-    vec![
-      Expression::IntegerLiteral(id_bytes[0] as i64),
-      Expression::IntegerLiteral(id_bytes[1] as i64),
-      Expression::IntegerLiteral(id_bytes[2] as i64),
-      Expression::IntegerLiteral(id_bytes[3] as i64),
-      Expression::IntegerLiteral(id_bytes[4] as i64),
-      Expression::IntegerLiteral(id_bytes[5] as i64),
-      Expression::IntegerLiteral(id_bytes[6] as i64),
-      Expression::IntegerLiteral(id_bytes[7] as i64),
-      Expression::IntegerLiteral(id_bytes[8] as i64),
-      Expression::IntegerLiteral(id_bytes[9] as i64),
-      Expression::IntegerLiteral(id_bytes[10] as i64),
-      Expression::IntegerLiteral(id_bytes[11] as i64),
-      Expression::IntegerLiteral(id_bytes[12] as i64),
-      Expression::IntegerLiteral(id_bytes[13] as i64),
-      Expression::IntegerLiteral(id_bytes[14] as i64),
-      Expression::IntegerLiteral(id_bytes[15] as i64),
-    ]
-  )
-}
+
 
 fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<TranslationUnit> {
   let header = context.headers.get(&id).unwrap();
@@ -324,7 +567,8 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
       statements: vec! [
         PreprocessorDirective::Include(format!("arora/buffers.h"), IncludeStyle::System).into(),
         PreprocessorDirective::Include(format!("arora/util.h"), IncludeStyle::System).into()
-      ]
+      ],
+      ..Default::default()
     }
   }.into());
   declarations.push(PreprocessorDirective::Include(format!("arora/buffer/deserialize.hpp"), IncludeStyle::System).into());
@@ -332,19 +576,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
   declarations.push(NewLine { count: 1 }.into());
 
-  declarations.push(Declaration::Variable(
-    Variable {
-      name: format!("{}_MODULE_UUID", identifier_name(&header.name)).to_uppercase(),
-      ty: TypeRef {
-        ty: "std::uint8_t".to_string(),
-        constant: true,
-        ..Default::default()
-      },
-      value: uuid_initializer_list(&header.id).into(),
-      array: ArrayKind::Fixed(16),
-      ..Default::default()
-    }
-  ));
+  declarations.push(declare::uuid_variable(id::module_uuid(&header.name), &header.id).into());
 
   for export in context.exports.values() {
     let name = export.name().clone();
@@ -355,49 +587,22 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         let mut sorted_parameters: Vec<&LowParameter> = f.parameters.iter().collect();
         sorted_parameters.sort_by(|a, b| a.id.cmp(&b.id));
 
-        declarations.push(Declaration::Variable(
-          Variable {
-            name: format!("{}_UUID", identifier_name(&f.name)).to_uppercase(),
-            ty: TypeRef {
-              ty: "std::uint8_t".to_string(),
-              constant: true,
-              ..Default::default()
-            },
-            value: uuid_initializer_list(&f.id).into(),
-            array: ArrayKind::Fixed(16),
-            ..Default::default()
-          }
-        ));
+        declarations.push(declare::uuid_variable(id::function_uuid(&f.name), &f.id).into());
 
         let mut function_declarations: Vec<Declaration> = Vec::new();
 
-        function_declarations.push(Declaration::Variable(Variable {
-          name: "reader".to_string(),
-          ty: TypeRef {
-            ty: "arora_buffer_reader".to_string(),
-            pointer: true,
-            ..Default::default()
-          },
-          value: Some("arora_buffer_reader_new".to_expression().call([ "arg", "length" ])).into(),
-          ..Default::default()
-        }));
+        function_declarations.push(declare::arora_buffer_reader("arg").into());
 
         function_declarations.push(
-          "assert".to_expression().call([
-            "arora_buffer_reader_next_type"
-            .to_expression()
-            .call([ "reader" ])
-            .equal("ARORA_BUFFER_TYPE_STRUCTURE".to_expression())
-          ]).into_statement().into()
+          declare::assert(
+            declare::arora_buffer_reader_next_type().equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone())
+          ).into()
         );
 
         function_declarations.push(Variable {
           name: "structure_metadata".to_string(),
-          ty: TypeRef {
-            ty: "arora_get_structure_result".to_string(),
-            ..Default::default()
-          },
-          value: "arora_buffer_reader_get_structure".to_expression().call([ "reader" ]).into(),
+          ty: ty::ARORA_GET_STRUCTURE_RESULT.clone(),
+          value: Some(declare::arora_buffer_reader_get_structure()),
           ..Default::default()
         }.into());
 
@@ -405,7 +610,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           function_declarations.push(Variable {
             name: parameter.name.clone(),
             ty: optional(TypeRef {
-              ty: type_name(context, &parameter.ty_id).to_string(),
+              ty: ty::type_name(context, &parameter.ty).to_string(),
               ..Default::default()
             }, true, false),
             ..Default::default()
@@ -416,10 +621,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         read_declarations.push(Variable {
           name: "field_index".to_string(),
-          ty: TypeRef {
-            ty: "std::uint32_t".to_string(),
-            ..Default::default()
-          },
+          ty: ty::U32.clone(),
           value: Some("0".to_expression()),
           ..Default::default()
         }.into());
@@ -427,48 +629,63 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         read_declarations.push(Variable {
           name: "field".to_string(),
-          ty: TypeRef {
-            ty: "std::uint8_t".to_string(),
-            pointer: true,
-            constant: true,
-            ..Default::default()
-          },
-          value: Some("arora_buffer_reader_get_structure_field".to_expression().call([
-            "reader",
-          ])),
+          ty: ty::U8_CONST_PTR.clone(),
+          value: Some(declare::arora_buffer_reader_get_structure_field()),
           ..Default::default()
         }.into());
+
+        read_declarations.push(Variable {
+          name: "current_res".to_string(),
+          ty: ty::U8.clone(),
+          value: Some(0u64.to_expression()),
+          ..Default::default()
+        }.into());
+
+        let field = "field".to_expression();
+        let field_index = "field_index".to_expression();
+        let structure_metadata = "structure_metadata".to_expression();
+        let field_count = "field_count".to_expression();
+        let current_res = "current_res".to_expression();
+
 
         let mut i = 0;
         for parameter in sorted_parameters.iter() {
 
           let mut field_declarations: Vec<Declaration> = Vec::new();
 
+          let name = parameter.name.to_expression();
+          let type_name = ty::type_name(context, &parameter.ty);
+
           field_declarations.push(
-            parameter.name.to_expression()
-              .assign(format!("arora::buffer::deserialize<{}>()(reader)", type_name(context, &parameter.ty_id)).to_expression())
-              .into_statement()
-              .into()
+            name.assign(declare::deserialize(&type_name)).into_statement().into()
           );
 
-          field_declarations.push("field_index".to_expression().pre_increment().into_statement().into());
+          field_declarations.push(field_index.clone().pre_increment().into_statement().into());
           
           if i < sorted_parameters.len() - 1 {
-            field_declarations.push("field".to_expression().assign("arora_buffer_reader_get_structure_field".to_expression().call([
-              "reader",
-            ])).into_statement().into());
+            field_declarations.push(field.clone().assign(declare::arora_buffer_reader_get_structure_field()).into_statement().into());
           }
+
+          read_declarations.push(Statement::While(field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(current_res.assign(
+            func::ARORA_UUID_COMPARE.call([
+              field.clone(),
+              id::parameter_uuid(&export.name(), &parameter.name).to_expression()
+            ])).parenthesized()).less_than("0".to_expression()),
+            Block {
+              statements: vec! [
+                field_index.clone().pre_increment().into_statement().into(),
+                field.clone().assign(declare::arora_buffer_reader_get_structure_field()).into_statement().into()
+              ],
+              semicolon: false,
+            }
+          ).into());
           
-
-
           read_declarations.push(Statement::If(
-            "field_index".to_expression().less_than("structure_metadata.field_count".to_expression()).logical_and(
-            "arora_uuid_compare".to_expression().call([
-              "field",
-              &format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase()
-            ]).equal("0".to_expression())),
+            field_index.less_than(structure_metadata.dot(field_count.clone())).logical_and(
+            current_res.equal("0".to_expression())),
             Block {
               statements: field_declarations,
+              ..Default::default()
             },
             None
           ).into());
@@ -479,24 +696,25 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         
         function_declarations.push(
           Statement::If(
-            Expression::Dot("structure_metadata".to_expression().into(), "field_count".to_expression().into()).greater_than("0".to_expression()).logical_and(
-            "arora_uuid_compare".to_expression().call([
+            structure_metadata.dot(field_count.clone()).greater_than("0".to_expression()).logical_and(
+            func::ARORA_UUID_COMPARE.call([
               Expression::Dot("structure_metadata".to_expression().into(), "id".to_expression().into()),
-              format!("{}_UUID", identifier_name(&f.name)).to_uppercase().to_expression()
+              id::function_uuid(&f.name).to_expression()
             ]).equal("0".to_expression())).into(),
             Block {
-              statements: read_declarations
+              statements: read_declarations,
+              ..Default::default()
             },
             None
           ).into()
         );
 
-        function_declarations.push("arora_buffer_reader_free".to_expression().call([ "reader" ]).into_statement().into());
+        function_declarations.push(func::ARORA_BUFFER_READER_FREE.call([ "reader" ]).into_statement().into());
 
         function_declarations.push(Variable {
           name: "__arora_return__".to_string(),
           ty: TypeRef {
-            ty: type_name(context, &f.ret).to_string(),
+            ty: ty::type_name(context, &f.ret).to_string(),
             ..Default::default()
           },
           value: Some(identifier_name(&header.name).to_expression().colon_colon(f.name.to_expression())
@@ -504,16 +722,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           ..Default::default()
         }.into());
 
-        function_declarations.push(Variable {
-          name: "writer".to_string(),
-          ty: TypeRef {
-            ty: "arora_buffer_writer".to_string(),
-            pointer: true,
-            ..Default::default()
-          },
-          value: Some("arora_buffer_writer_new".to_expression().call::<String, _>([])),
-          ..Default::default()
-        }.into());
+        function_declarations.push(declare::arora_buffer_writer().into());
 
         let mut field_count = 1;
         for parameter in sorted_parameters.iter() {
@@ -525,58 +734,37 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         }
         
         // Return is always written first by convention
-        function_declarations.push("arora_buffer_writer_begin_structure".to_expression().call([
-          "writer".to_string(),
-          format!("{}_UUID", identifier_name(&f.name).to_uppercase()),
-          field_count.to_string()
-        ]).into_statement().into());
+        function_declarations.push(declare::arora_buffer_writer_begin_structure(&id::function_uuid(&f.name), field_count.to_expression()).into());
 
         // Return value is written under the method's UUID
-        function_declarations.push("arora_buffer_writer_add_structure_field".to_expression().call([
-          "writer".to_string(),
-          format!("{}_UUID", identifier_name(&f.name).to_uppercase())
-        ]).into_statement().into());
+        function_declarations.push(declare::arora_buffer_writer_add_structure_field(id::function_uuid(&f.name).to_expression()).into());
 
-        function_declarations.push(
-            format!("arora::buffer::serialize<{}>()(writer, __arora_return__)", type_name(context, &f.ret)).to_expression().into_statement().into()
-        );
+        function_declarations.push(declare::serialize(&ty::type_name(context, &f.ret), &"__arora_return__".to_expression()).into());
 
         for parameter in sorted_parameters.iter() {
           if !parameter.mutable {
             continue;
           }
 
-          function_declarations.push(
-            "arora_buffer_writer_add_structure_field".to_expression().call([
-              "writer".to_string(),
-              format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase()
-            ]).into_statement().into()
-          );
+          function_declarations.push(declare::arora_buffer_writer_add_structure_field(id::parameter_uuid(&export.name(), &parameter.name).to_expression()).into());
 
-          function_declarations.push(
-            format!("arora::buffer::serialize<{}>()(writer, {})", type_name(context, &parameter.ty_id), parameter.name).to_expression().into_statement().into()
-          );
+          function_declarations.push(declare::serialize(&ty::type_name(context, &parameter.ty), &parameter.name.to_expression()).into());
         }
 
-        // Free the writer
-        function_declarations.push("arora_buffer_writer_free".to_expression().call([ "writer" ]).into_statement().into());
+        function_declarations.push(Variable {
+          name: "__arora_return_buffer__".to_string(),
+          ty: ty::U8_CONST_PTR.clone(),
+          value: Some(declare::arora_buffer_writer_finalize()),
+          ..Default::default()
+        }.into());
 
-        function_declarations.push("return arora_buffer_writer_finalize(writer, 0)".to_expression().into_statement().into());
+        // Free the writer
+        function_declarations.push(declare::arora_buffer_writer_free().into());
+
+        function_declarations.push("return __arora_return_buffer__".to_expression().into_statement().into());
 
         for parameter in sorted_parameters.iter() {
-          declarations.push(Declaration::Variable(
-            Variable {
-              name: format!("{}_PARAMETER_{}_UUID", export.name(), parameter.name).to_uppercase(),
-              ty: TypeRef {
-                ty: "std::uint8_t".to_string(),
-                constant: true,
-                ..Default::default()
-              },
-              value: uuid_initializer_list(&parameter.id).into(),
-              array: ArrayKind::Fixed(16),
-              ..Default::default()
-            }
-          ));
+          declarations.push(declare::uuid_variable(id::parameter_uuid(&export.name(), &parameter.name), &parameter.id).into());
         }
 
         let function_name = format!("arora_function_{}", identifier_uuid(&f.id));
@@ -590,34 +778,21 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
                   format!("export_name(\"{}\")", function_name).into(),
                 ]),
                 name: function_name,
-                ret: TypeRef {
-                ty: "std::uint8_t".to_string(),
-                pointer: true,
-                constant: true,
-                ..Default::default()
-              },
-              parameters: vec! [
-                Parameter {
-                  name: "arg".to_string(),
-                  type_ref: TypeRef {
-                    ty: "std::uint8_t".to_string(),
-                    pointer: true,
-                    ..Default::default()
+                ret: Some(ty::U8_CONST_PTR.clone()),
+                parameters: vec! [
+                  Parameter {
+                    name: "arg".to_string(),
+                    type_ref: ty::U8_CONST_PTR.clone(),
                   }
+                ],
+                body: Block {
+                  statements: function_declarations,
+                  ..Default::default()
                 },
-                Parameter {
-                  name: "length".to_string(),
-                  type_ref: TypeRef {
-                    ty: "std::uint32_t".to_string(),
-                    ..Default::default()
-                  }
-                }
-              ],
-              body: Block {
-                statements: function_declarations
-              },
-            }.into()
-            ]
+                ..Default::default()
+            }.into(),
+            ],
+            ..Default::default()
           }
         }.into());
       },
@@ -641,9 +816,6 @@ async fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   );
 
   let mut include = Directory::new();
-
-  // namespace
-  
 
   include.insert(
     format!("{}.hpp", header.name), 

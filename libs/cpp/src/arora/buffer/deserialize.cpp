@@ -59,5 +59,89 @@ void arora::buffer::skip(arora_buffer_reader *const reader, const std::uint8_t t
       }
       break;
     }
+    case ARORA_BUFFER_TYPE_ARRAY:
+    {
+      arora_get_array_result res = arora_buffer_reader_get_array(reader);
+      arora::buffer::skip_array(reader, res.ty, res.element_count);
+    }
+  }
+}
+
+void arora::buffer::skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count)
+{
+  switch (array_type)
+  {
+    case ARORA_BUFFER_TYPE_U8:
+    {
+      arora_buffer_reader_get_u8_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_U16:
+    {
+      arora_buffer_reader_get_u16_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_U32:
+    {
+      arora_buffer_reader_get_u32_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_U64:
+    {
+      arora_buffer_reader_get_u64_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_S8:
+    {
+      arora_buffer_reader_get_s8_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_S16:
+    {
+      arora_buffer_reader_get_s16_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_S32:
+    {
+      arora_buffer_reader_get_s32_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_S64:
+    {
+      arora_buffer_reader_get_s64_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_R32:
+    {
+      arora_buffer_reader_get_r32_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_R64:
+    {
+      arora_buffer_reader_get_r64_bulk(reader, element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_STRING:
+    {
+      for (std::uint32_t i = 0; i < element_count; ++i)
+      {
+        std::uint32_t len = 0;
+        arora_buffer_reader_get_string(reader, &len);
+      }
+      break;
+    }
+    case ARORA_BUFFER_TYPE_STRUCTURE:
+    {
+      arora_buffer_reader_get_structure_field(reader);
+      for (std::uint32_t i = 0; i < element_count; ++i)
+      {
+        std::uint32_t field_count = arora_buffer_reader_get_structure_raw(reader);
+        for (std::uint32_t i = 0; i < field_count; ++i)
+        {
+          arora::buffer::skip(reader, arora_buffer_reader_next_type(reader));
+        }
+      }
+      break;
+    }
   }
 }

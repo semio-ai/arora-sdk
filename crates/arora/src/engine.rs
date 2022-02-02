@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug, sync::{Arc, RwLock, atomic::AtomicPtr}, pin::Pin};
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
@@ -28,11 +28,8 @@ impl EngineBuilder {
     self
   }
 
-  pub fn build(self) -> Engine {
-    Engine {
-      executors: self.executors,
-      modules: HashMap::new(),
-    }
+  pub fn build(self) -> Pin<Box<Engine>> {
+    Engine::new(self.executors)
   }
 }
 
@@ -69,6 +66,7 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
 
 pub type UnloadModuleResult = Result<(), UnloadModuleError>;
 
+#[derive(Debug)]
 pub struct UnloadModule {
   module_id: Uuid,
 }
@@ -85,6 +83,22 @@ pub struct Engine {
 }
 
 impl Engine {
+  fn new(executors: HashMap<&'static str, Box<dyn Executor>>) -> Pin<Box<Engine>> {
+    let mut ret = Box::pin(Engine {
+      executors,
+      modules: HashMap::new(),
+    });
+
+    {
+      let engine = &mut *ret.as_mut() as *mut Engine;
+      for (id, executor) in ret.executors.iter_mut() {
+        executor.set_engine(engine as *mut Engine);
+      }
+    }
+    
+    ret
+  }
+
   pub fn load_module(&mut self, module_definition: ModuleDefinition) -> Result<(), LoadModuleError> {
     let module_id = module_definition.header.id;
     let executor_name = module_definition.header.executor.name.as_str();
@@ -116,3 +130,4 @@ impl Engine {
   }
 }
 
+pub type EngineRef = *mut Engine;

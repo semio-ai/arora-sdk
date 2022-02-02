@@ -41,7 +41,13 @@ impl Registry {
 
   async fn get_text(url: Url) -> anyhow::Result<String> {
     if url.scheme() == "file" {
-      Ok(read_to_string(url.path()).await?)
+      let path = if cfg!(windows) {
+        &url.path()[1..]
+      } else {
+        url.path()
+      };
+      eprintln!("FILE URI {}", path);
+      Ok(read_to_string(path).await?)
     } else {
       Ok(reqwest::get(url).await?.text().await?)
     }
