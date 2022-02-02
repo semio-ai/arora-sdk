@@ -5,6 +5,7 @@ use arora::{
   schema::module::low::{Header, ModuleDefinition},
 };
 
+use arora_buffers::Value;
 use clap::Parser;
 
 use tokio::{
@@ -47,7 +48,18 @@ async fn main() -> anyhow::Result<()> {
       executable,
     }).expect("failed to load module");
 
-  let mut writer = arora_buffers::BufferWriter::new();
+  engine
+    .load_module(ModuleDefinition {
+      schema_version: 0,
+      header: serde_yaml::from_str(&read_to_string("modules/test-cpp-2/arora/module.yaml").await?)?,
+      executable: {
+        let mut file = File::open("modules/test-cpp-2/test-cpp-2").await?;
+        let mut executable = Vec::new();
+        file.read_to_end(&mut executable).await?;
+        executable.into_boxed_slice()
+      },
+    }).expect("failed to load module");
+
 
   let method_id = Uuid::parse_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap();
   let b = Uuid::parse_str("63086e48-804f-403a-8862-3358ddedc08d").unwrap();
@@ -97,10 +109,11 @@ async fn main() -> anyhow::Result<()> {
   let arg = arg.serialize();
 
   let start_time = std::time::Instant::now();
-  let nof_iterations = 20000000;
+  let nof_iterations = 20;
   for _i in 1..nof_iterations {
     let raw_result = engine.dispatch(&module_id, &method_id, &arg)?;
-    
+    // let result = unsafe { Value::deserialize(&raw_result) };
+    // println!("{:#?}", result);
   }
 
 

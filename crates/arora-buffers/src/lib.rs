@@ -28,7 +28,7 @@ impl BufferWriter {
   pub fn new() -> Self {
     let mut backing = Vec::with_capacity(128);
     // size placeholder
-    backing.put_u32(0);
+    backing.put_u32_le(0);
     Self {
       backing,
     }
@@ -277,7 +277,7 @@ impl BufferWriter {
     assert_eq!(ty_id.len(), 16);
     self.backing.put_u8(TYPE_ARRAY);
     self.backing.put_u8(TYPE_STRUCTURE);
-    self.backing.put_u32(element_count);
+    self.backing.put_u32_le(element_count);
     self.backing.put_slice(ty_id);
   }
 
@@ -285,17 +285,14 @@ impl BufferWriter {
     assert_eq!(ty_id.len(), 16);
     self.backing.put_u8(TYPE_ARRAY);
     self.backing.put_u8(TYPE_ENUMERATION);
-    self.backing.put_u32(element_count);
+    self.backing.put_u32_le(element_count);
     self.backing.put_slice(ty_id);
   }
 
   pub fn finalize(&mut self) -> Box<[u8]> {
     let size = self.backing.len() as u32;
-    self.backing[0..4].copy_from_slice(&size.to_be_bytes());
-    let mut backing = Vec::new();
-    std::mem::swap(&mut self.backing, &mut backing);
-    let ret = backing.into_boxed_slice();
-    ret
+    self.backing[0..4].copy_from_slice(&size.to_le_bytes());
+    std::mem::take(&mut self.backing).into_boxed_slice()
   }
 }
 
@@ -306,7 +303,7 @@ pub struct BufferReader<'a> {
 
 impl<'a> BufferReader<'a> {
   pub fn new(mut buffer: &'a [u8]) -> Self {
-    let size = buffer.get_u32();
+    let size = buffer.get_u32_le();
     Self {
       size,
       backing: buffer,
@@ -348,7 +345,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_u16(&mut self) -> u16 {
-    self.backing.get_u16()
+    self.backing.get_u16_le()
   }
 
   pub unsafe fn get_u16_bulk(&mut self, count: usize) -> &'a [u16] {
@@ -357,7 +354,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_u32(&mut self) -> u32 {
-    self.backing.get_u32()
+    self.backing.get_u32_le()
   }
 
   pub unsafe fn get_u32_bulk(&mut self, count: usize) -> &'a [u32] {
@@ -366,7 +363,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_u64(&mut self) -> u64 {
-    self.backing.get_u64()
+    self.backing.get_u64_le()
   }
 
   pub unsafe fn get_u64_bulk(&mut self, count: usize) -> &'a [u64] {
@@ -384,7 +381,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_s16(&mut self) -> i16 {
-    self.backing.get_i16()
+    self.backing.get_i16_le()
   }
 
   pub unsafe fn get_s16_bulk(&mut self, count: usize) -> &'a [i16] {
@@ -393,7 +390,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_s32(&mut self) -> i32 {
-    self.backing.get_i32()
+    self.backing.get_i32_le()
   }
 
   pub unsafe fn get_s32_bulk(&mut self, count: usize) -> &'a [i32] {
@@ -402,7 +399,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_s64(&mut self) -> i64 {
-    self.backing.get_i64()
+    self.backing.get_i64_le()
   }
 
   pub unsafe fn get_s64_bulk(&mut self, count: usize) -> &'a [i64] {
@@ -411,7 +408,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_r32(&mut self) -> f32 {
-    self.backing.get_f32()
+    self.backing.get_f32_le()
   }
 
   pub unsafe fn get_r32_bulk(&mut self, count: usize) -> &'a [f32] {
@@ -420,7 +417,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_r64(&mut self) -> f64 {
-    self.backing.get_f64()
+    self.backing.get_f64_le()
   }
 
   pub unsafe fn get_r64_bulk(&mut self, count: usize) -> &'a [f64] {
@@ -429,7 +426,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_string(&mut self) -> &'a str {
-    let len = self.backing.get_u32();
+    let len = self.backing.get_u32_le();
     let ret = std::str::from_utf8(&self.backing[0..len as usize]).unwrap();
     self.backing.advance(len as usize);
     ret
@@ -438,12 +435,12 @@ impl<'a> BufferReader<'a> {
   pub fn get_structure(&mut self) -> (&'a [u8], u32) {
     let id = &self.backing[0..16];
     self.backing.advance(16);
-    let field_count = self.backing.get_u32();
+    let field_count = self.backing.get_u32_le();
     (id, field_count)
   }
 
   pub fn get_structure_raw(&mut self) -> u32 {
-    let field_count = self.backing.get_u32();
+    let field_count = self.backing.get_u32_le();
     field_count
   }
 
@@ -468,7 +465,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_array(&mut self) -> (u8, u32) {
-    (self.backing.get_u8(), self.backing.get_u32())
+    (self.backing.get_u8(), self.backing.get_u32_le())
   }
 }
 
@@ -836,7 +833,7 @@ pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, valu
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *const u8 {
+pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *mut u8 {
   unsafe {
     let writer = &mut *writer;
     
@@ -844,7 +841,7 @@ pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length
     if !length.is_null() {
       *length = backing.len();
     }
-    backing.as_ptr()
+    Box::into_raw(backing) as *mut u8
   }
 }
 
@@ -1121,6 +1118,13 @@ pub extern "C" fn arora_buffer_reader_get_string(reader: *mut BufferReader, leng
     let string = reader.get_string();
     *length = string.len() as u32;
     string.as_ptr()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_free(buffer: *mut u8) {
+  unsafe {
+    let _ = Box::from_raw(buffer);
   }
 }
 
