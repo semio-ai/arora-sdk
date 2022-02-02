@@ -28,7 +28,10 @@ async fn main() -> anyhow::Result<()> {
     .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
     .build();
 
-  let header: Header = serde_yaml::from_str(&read_to_string(args.header).await?)?; 
+  let header: Header = serde_yaml::from_str(
+    &read_to_string(args.header).await
+    .expect("header file could not be read")
+  ).expect("header file contains invalid yaml"); 
   let module_id = header.id.clone();
 
   let mut executable_file = File::open(args.exe).await?;
@@ -47,7 +50,9 @@ async fn main() -> anyhow::Result<()> {
   engine
     .load_module(ModuleDefinition {
       schema_version: 0,
-      header: serde_yaml::from_str(&read_to_string("modules/test-cpp-2/arora/module.yaml").await?)?,
+      header: serde_yaml::from_str(&read_to_string("modules/test-cpp-2/arora/module.yaml").await
+          .expect("second header file could not be read")
+        ).expect("second header file could not be parsed"),
       executable: {
         let mut file = File::open("modules/test-cpp-2/test-cpp-2").await?;
         let mut executable = Vec::new();

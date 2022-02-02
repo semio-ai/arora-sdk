@@ -31,8 +31,9 @@ target_link_options(test-cpp PRIVATE -Wl,--no-entry -Wl,--export=malloc -Wl,--ex
 if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine
-    COMMAND ${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}/arora-cli
+    COMMAND ${ARORA_CLI}
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()

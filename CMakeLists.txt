@@ -19,11 +19,12 @@ else()
   set(CARGO_BUILD_FLAGS --release)
 endif()
 
-set(NATIVE_LIB_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")
+set(RUST_BINARY_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")
 set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR}")
 
-set(ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
-set(ARORA_MODULE_CPP "${NATIVE_LIB_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
@@ -56,9 +57,9 @@ add_dependencies(arora-util arora-util-build)
 
 install(
   FILES
-    ${NATIVE_LIB_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}
-    ${NATIVE_LIB_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}
+    ${ARORA_CLI}
+    ${ARORA_MODULE_CLI}
+    ${ARORA_MODULE_CPP}
   PERMISSIONS
     OWNER_EXECUTE
     OWNER_READ
