@@ -13,49 +13,49 @@ namespace arora
   {
     // Templated helpers for writing to Arora buffers.
     template<typename T>
-    int arora_buffer_type_of();
+    int arora_buffer_type_of() noexcept;
 
     template<std::ranges::contiguous_range R>
-    int arora_buffer_type_of() { return ARORA_BUFFER_TYPE_ARRAY; }
+    int arora_buffer_type_of() noexcept { return ARORA_BUFFER_TYPE_ARRAY; }
 
     template<>
-    inline int arora_buffer_type_of<void>() { return ARORA_BUFFER_TYPE_UNIT; }
+    inline int arora_buffer_type_of<void>() noexcept { return ARORA_BUFFER_TYPE_UNIT; }
 
     template<>
-    inline int arora_buffer_type_of<bool>() { return ARORA_BUFFER_TYPE_BOOLEAN; }
+    inline int arora_buffer_type_of<bool>() noexcept { return ARORA_BUFFER_TYPE_BOOLEAN; }
 
     template<>
-    inline int arora_buffer_type_of<std::uint8_t>() { return ARORA_BUFFER_TYPE_U8; }
+    inline int arora_buffer_type_of<std::uint8_t>() noexcept { return ARORA_BUFFER_TYPE_U8; }
 
     template<>
-    inline int arora_buffer_type_of<std::uint16_t>() { return ARORA_BUFFER_TYPE_U16; }
+    inline int arora_buffer_type_of<std::uint16_t>() noexcept { return ARORA_BUFFER_TYPE_U16; }
 
     template<>
-    inline int arora_buffer_type_of<std::uint32_t>() { return ARORA_BUFFER_TYPE_U32; }
+    inline int arora_buffer_type_of<std::uint32_t>() noexcept { return ARORA_BUFFER_TYPE_U32; }
 
     template<>
-    inline int arora_buffer_type_of<std::uint64_t>() { return ARORA_BUFFER_TYPE_U64; }
+    inline int arora_buffer_type_of<std::uint64_t>() noexcept { return ARORA_BUFFER_TYPE_U64; }
 
     template<>
-    inline int arora_buffer_type_of<std::int8_t>() { return ARORA_BUFFER_TYPE_S8; }
+    inline int arora_buffer_type_of<std::int8_t>() noexcept { return ARORA_BUFFER_TYPE_S8; }
 
     template<>
-    inline int arora_buffer_type_of<std::int16_t>() { return ARORA_BUFFER_TYPE_S16; }
+    inline int arora_buffer_type_of<std::int16_t>() noexcept { return ARORA_BUFFER_TYPE_S16; }
 
     template<>
-    inline int arora_buffer_type_of<std::int32_t>() { return ARORA_BUFFER_TYPE_S32; }
+    inline int arora_buffer_type_of<std::int32_t>() noexcept { return ARORA_BUFFER_TYPE_S32; }
 
     template<>
-    inline int arora_buffer_type_of<std::int64_t>() { return ARORA_BUFFER_TYPE_S64; }
+    inline int arora_buffer_type_of<std::int64_t>() noexcept { return ARORA_BUFFER_TYPE_S64; }
 
     template<>
-    inline int arora_buffer_type_of<float>() { return ARORA_BUFFER_TYPE_R32; }
+    inline int arora_buffer_type_of<float>() noexcept { return ARORA_BUFFER_TYPE_R32; }
 
     template<>
-    inline int arora_buffer_type_of<double>() { return ARORA_BUFFER_TYPE_R64; }
+    inline int arora_buffer_type_of<double>() noexcept { return ARORA_BUFFER_TYPE_R64; }
 
     template<>
-    inline int arora_buffer_type_of<std::string>() { return ARORA_BUFFER_TYPE_STRING; }
+    inline int arora_buffer_type_of<std::string>() noexcept { return ARORA_BUFFER_TYPE_STRING; }
   }
 }
 

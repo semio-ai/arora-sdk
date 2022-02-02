@@ -19,10 +19,10 @@ namespace arora
   namespace buffer
   {
     template<typename T>
-    std::optional<T> deserialize(arora_buffer_reader *const reader);
+    std::optional<T> deserialize(arora_buffer_reader *const reader) noexcept;
 
     template<typename T>
-    T arora_buffer_reader_get(arora_buffer_reader *const reader);
+    T arora_buffer_reader_get(arora_buffer_reader *const reader) noexcept;
 
     template<typename T>
     const T *arora_buffer_reader_get_bulk(arora_buffer_reader *const reader, std::size_t count) {
@@ -37,7 +37,7 @@ namespace arora
     void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
 
     template<typename T>
-    std::optional<T> deserialize(arora_buffer_reader *const reader) {
+    std::optional<T> deserialize(arora_buffer_reader *const reader) noexcept {
         const std::uint8_t type = arora_buffer_reader_next_type(reader);
         if (type == arora_buffer_type_of<T>())
         {
@@ -51,7 +51,7 @@ namespace arora
     }
 
     template<std::ranges::contiguous_range R>
-    std::optional<R> deserialize(arora_buffer_reader *const reader) {
+    std::optional<R> deserialize(arora_buffer_reader *const reader) noexcept {
       const std::uint8_t type = arora_buffer_reader_next_type(reader);
       if (type != arora_buffer_type_of<R>())
       {
@@ -72,61 +72,61 @@ namespace arora
     }
 
     template<>
-    inline bool arora_buffer_reader_get<bool>(arora_buffer_reader *const reader) {
+    inline bool arora_buffer_reader_get<bool>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_boolean(reader);
     }
     
     template<>
-    inline std::uint8_t arora_buffer_reader_get<std::uint8_t>(arora_buffer_reader *const reader) {
+    inline std::uint8_t arora_buffer_reader_get<std::uint8_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_u8(reader);
     }
     
     template<>
-    inline std::uint16_t arora_buffer_reader_get<std::uint16_t>(arora_buffer_reader *const reader) {
+    inline std::uint16_t arora_buffer_reader_get<std::uint16_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_u16(reader);
     }
     
     template<>
-    inline std::uint32_t arora_buffer_reader_get<std::uint32_t>(arora_buffer_reader *const reader) {
+    inline std::uint32_t arora_buffer_reader_get<std::uint32_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_u32(reader);
     }
     
     template<>
-    inline std::uint64_t arora_buffer_reader_get<std::uint64_t>(arora_buffer_reader *const reader) {
+    inline std::uint64_t arora_buffer_reader_get<std::uint64_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_u64(reader);
     }
     template<>
-    inline std::int8_t arora_buffer_reader_get<std::int8_t>(arora_buffer_reader *const reader) {
+    inline std::int8_t arora_buffer_reader_get<std::int8_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_s8(reader);
     }
     
     template<>
-    inline std::int16_t arora_buffer_reader_get<std::int16_t>(arora_buffer_reader *const reader) {
+    inline std::int16_t arora_buffer_reader_get<std::int16_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_s16(reader);
     }
     
     template<>
-    inline std::int32_t arora_buffer_reader_get<std::int32_t>(arora_buffer_reader *const reader) {
+    inline std::int32_t arora_buffer_reader_get<std::int32_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_s32(reader);
     }
     
     template<>
-    inline std::int64_t arora_buffer_reader_get<std::int64_t>(arora_buffer_reader *const reader) {
+    inline std::int64_t arora_buffer_reader_get<std::int64_t>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_s64(reader);
     }
 
     template<>
-    inline float arora_buffer_reader_get<float>(arora_buffer_reader *const reader) {
+    inline float arora_buffer_reader_get<float>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_r32(reader);
     }
     
     template<>
-    inline double arora_buffer_reader_get<double>(arora_buffer_reader *const reader) {
+    inline double arora_buffer_reader_get<double>(arora_buffer_reader *const reader) noexcept {
       return arora_buffer_reader_get_r64(reader);
     }
     
     template<>
-    inline std::string_view arora_buffer_reader_get<std::string_view>(arora_buffer_reader *const reader) {
+    inline std::string_view arora_buffer_reader_get<std::string_view>(arora_buffer_reader *const reader) noexcept {
           std::uint32_t length = 0;
           const std::uint8_t *const data = arora_buffer_reader_get_string(reader, &length);
           assert(data != nullptr);
@@ -183,7 +183,7 @@ namespace arora
     }
     
     template<>
-    inline std::optional<std::vector<std::string_view>> deserialize<std::vector<std::string_view>>(arora_buffer_reader *const reader)
+    inline std::optional<std::vector<std::string_view>> deserialize<std::vector<std::string_view>>(arora_buffer_reader *const reader) noexcept
     {
       const std::uint8_t type = arora_buffer_reader_next_type(reader);
       if (type != ARORA_BUFFER_TYPE_ARRAY)

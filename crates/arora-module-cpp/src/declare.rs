@@ -899,6 +899,7 @@ pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> 
         type_ref: ty::ARORA_BUFFER_READER_PTR.clone(),
       }
     ],
+    noexcept: true,
     body: Block {
       statements: function_statements,
       semicolon: false,
@@ -992,6 +993,7 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
         type_ref: ty::ARORA_BUFFER_READER_PTR.clone(),
       }
     ],
+    noexcept: true,
     body: Block {
       statements: function_statements,
       semicolon: false,
@@ -1018,6 +1020,7 @@ pub fn type_of(ty: &Type) -> FunctionImplementation {
     }),
     name: "arora::buffer::arora_buffer_type_of".to_string(),
     specialization: Some(vec![ty.name.clone()]),
+    noexcept: true,
     body: Block {
       statements: vec![
         Declaration::Statement(Statement::Return(buffer_type_constant.clone()))
@@ -1110,6 +1113,7 @@ pub fn structure_serializer(context: &Context, name: &str, ty: &Structure) -> Fu
         },
       }
     ],
+    noexcept: true,
     body: Block {
       statements: function_statements,
       semicolon: false,
@@ -1170,6 +1174,7 @@ pub fn enumeration_serializer(context: &Context, enum_type_id: &Uuid, enum_type_
         },
       }
     ],
+    noexcept: true,
     body: Block {
       statements: function_statements,
       semicolon: false,
