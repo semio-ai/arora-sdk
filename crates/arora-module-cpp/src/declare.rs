@@ -391,7 +391,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
               name: "value".to_string(),
               type_ref: TypeRef {
                 ty: ty::type_name(context, &value.type_ref),
-                move_: true,
+                rvalue_reference: true,
                 ..Default::default()
               }
             }
@@ -588,7 +588,7 @@ pub fn enumeration_impl(context: &Context, id: &Uuid, name: &str, ty: &Enumerati
               name: "value".to_string(),
               type_ref: TypeRef {
                 ty: ty::type_name(context, &value.type_ref),
-                move_: true,
+                rvalue_reference: true,
                 ..Default::default()
               }
             }
@@ -774,8 +774,6 @@ pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> 
   let structure_metadata = "structure_metadata".to_expression();
   let field_count = "field_count".to_expression();
 
-
-
   function_statements.push(Variable {
     name: "structure_metadata".to_string(),
     ty: ty::ARORA_GET_STRUCTURE_RESULT.clone(),
@@ -809,9 +807,6 @@ pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> 
     ..Default::default()
   }.into());
 
-
-  
-  
   let mut sorted_field_ids = ty.fields
     .keys()
     .collect::<Vec<_>>();
@@ -892,14 +887,12 @@ pub fn structure_deserializer(context: &Context, name: &str, ty: &Structure) -> 
 
   function_statements.push(Statement::Return("__arora_result__".to_expression()).into());
   
-
   FunctionImplementation {
     name: "arora::buffer::deserialize".to_string(),
     ret: Some(ty::optional(&TypeRef {
       ty: name.to_string(),
       ..Default::default()
     })),
-    operator: true,
     parameters: vec! [
       Parameter {
         name: "reader".to_string(),
@@ -993,7 +986,6 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
       ty: name.to_string(),
       ..Default::default()
     })),
-    operator: true,
     parameters: vec! [
       Parameter {
         name: "reader".to_string(),
@@ -1138,7 +1130,6 @@ pub fn enumeration_serializer(context: &Context, enum_type_id: &Uuid, enum_type_
   FunctionImplementation {
     name: "arora::buffer::serialize".to_string(),
     ret: Some(ty::VOID.clone()),
-    operator: true,
     parameters: vec! [
       Parameter {
         name: writer_name,

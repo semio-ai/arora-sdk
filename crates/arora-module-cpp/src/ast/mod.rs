@@ -16,7 +16,7 @@ pub enum ArrayKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeRef {
   pub reference: bool,
-  pub move_: bool,
+  pub rvalue_reference: bool,
   pub constant: bool,
   pub pointer: bool,
   
@@ -29,7 +29,7 @@ impl Default for TypeRef {
     Self {
       reference: false,
       constant: false,
-      move_: false,
+      rvalue_reference: false,
       pointer: false,
       arguments: None,
       ty: String::new(),
@@ -58,7 +58,7 @@ impl ToPrettyString for TypeRef {
     if self.reference {
       s.push_str(" &");
     }
-    if self.move_ {
+    if self.rvalue_reference {
       s.push_str(" &&");
     }
     if self.pointer {
@@ -196,6 +196,7 @@ pub struct FunctionImplementation {
   pub constant: bool,
   pub noexcept: bool,
   pub inline: bool,
+  pub assignment: Option<Expression>,
 }
 
 impl Default for FunctionImplementation {
@@ -213,6 +214,7 @@ impl Default for FunctionImplementation {
       constant: false,
       noexcept: false,
       inline: false,
+      assignment: None,
     }
   }
 }
@@ -250,6 +252,12 @@ impl ToPrettyString for FunctionImplementation {
     if let Some(ret) = &self.ret {
       s.push_str(&ret.to_pretty_string(0));
       s.push_str(" ");
+    } else {
+      s.push_str("void ");
+    }
+
+    if self.operator {
+      s.push_str("operator");
     }
     s.push_str(&self.name);
 
@@ -278,8 +286,13 @@ impl ToPrettyString for FunctionImplementation {
     if self.noexcept {
       s.push_str(" noexcept");
     }
-    s.push_str("\n");
-    s.push_str(&self.body.to_pretty_string(indent));
+    
+    if let Some(assignment) = &self.assignment {
+      s.push_str(&format!(" = {};\n", assignment.to_pretty_string(0)));
+    } else {
+      s.push_str("\n");
+      s.push_str(&self.body.to_pretty_string(indent));
+    }
     s
   }
 }
@@ -668,7 +681,7 @@ pub enum Statement {
   While(Expression, Block),
   Switch(Expression, Vec<(Expression, Block)>),
   Case(Expression),
-  Default,
+  Default, // the default switch case
   Goto(String),
   Label(String),
 }
@@ -797,6 +810,7 @@ pub enum Expression {
   AddAssign(Box<Expression>, Box<Expression>),
   Dereference(Box<Expression>),
   Reference(Box<Expression>),
+  Default, // The default keyword, alone
 }
 
 impl ToExpression for Expression {
@@ -920,6 +934,7 @@ impl ToPrettyString for Expression {
       Expression::AddAssign(left, right) => format!("{} += {}", left.to_pretty_string(0), right.to_pretty_string(0)),
       Expression::Dereference(expr) => format!("*{}", expr.to_pretty_string(0)),
       Expression::Reference(expr) => format!("&{}", expr.to_pretty_string(0)),
+      Expression::Default => "default".to_string(),
     });
     s
   }
