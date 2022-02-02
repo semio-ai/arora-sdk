@@ -13,14 +13,44 @@ pub struct Executor {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum TypeRef {
+  Scalar {
+    id: Uuid
+  },
+  Array {
+    id: Uuid
+  },
+  Map {
+    key_id: Uuid,
+    value_id: Uuid
+  },
+}
+
+impl TypeRef {
+  pub fn type_dependencies(&self) -> HashSet<Uuid> {
+    let mut deps = HashSet::new();
+    match self {
+      TypeRef::Scalar { id } => deps.insert(*id),
+      TypeRef::Array {id } => deps.insert(*id),
+      TypeRef::Map { key_id, value_id } => {
+        deps.insert(*key_id);
+        deps.insert(*value_id)
+      }
+    };
+    deps
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Parameter {
   /// ID
   pub id: Uuid,
   /// Name
   pub name: String,
   /// The type ID
-  #[serde(rename = "type_id")]
-  pub ty_id: Uuid,
+  #[serde(rename = "type")]
+  pub ty: TypeRef,
   /// Mutability
   #[serde(default)]
   pub mutable: bool,
@@ -33,18 +63,19 @@ pub struct ExportFunction {
   /// Function name
   pub name: String,
   /// Function parameters
+  #[serde(default)]
   pub parameters: Vec<Parameter>,
   /// The return type
-  pub ret: Uuid,
+  pub ret: TypeRef,
 }
 
 impl ExportFunction {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
     for param in &self.parameters {
-      deps.insert(param.ty_id);
+      deps = deps.union(&param.ty.type_dependencies()).cloned().collect();
     }
-    deps.insert(self.ret);
+    deps = deps.union(&self.ret.type_dependencies()).cloned().collect();
     deps
   }
 }
@@ -60,16 +91,16 @@ pub struct ImportFunction {
   /// Function parameters
   pub parameters: Vec<Parameter>,
   /// The return type
-  pub ret: Uuid,
+  pub ret: TypeRef,
 }
 
 impl ImportFunction {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
     for param in &self.parameters {
-      deps.insert(param.ty_id);
+      deps = deps.union(&param.ty.type_dependencies()).cloned().collect();
     }
-    deps.insert(self.ret);
+    deps = deps.union(&self.ret.type_dependencies()).cloned().collect();
     deps
   }
 }
@@ -165,9 +196,9 @@ impl Header {
     for export in &self.exports {
       match export {
         ExportSymbol::Function(function) => {
-          deps.insert(function.ret);
+          deps = deps.union(&function.ret.type_dependencies()).cloned().collect();
           for parameter in &function.parameters {
-            deps.insert(parameter.ty_id);
+            deps = deps.union(&parameter.ty.type_dependencies()).cloned().collect();
           }
         }
       }
@@ -176,9 +207,9 @@ impl Header {
     for import in &self.imports {
       match import {
         ImportSymbol::Function(function) => {
-          deps.insert(function.ret);
+          deps = deps.union(&function.ret.type_dependencies()).cloned().collect();
           for parameter in &function.parameters {
-            deps.insert(parameter.ty_id);
+            deps = deps.union(&parameter.ty.type_dependencies()).cloned().collect();
           }
         }
       }
