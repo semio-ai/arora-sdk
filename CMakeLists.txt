@@ -22,9 +22,15 @@ endif()
 set(NATIVE_LIB_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")
 set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR}")
 
+set(ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_CPP "${NATIVE_LIB_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
+
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  BYPRODUCTS
+    ${ARORA_MODULE_CLI}
+    ${ARORA_MODULE_CPP}
 )
 
 add_custom_target(arora-buffers-build ALL
@@ -34,7 +40,6 @@ add_custom_target(arora-buffers-build ALL
 link_directories(${WASM_LIB_DIR})
 
 set (CMAKE_SKIP_RPATH ON)
-
 
 add_library(arora-buffers INTERFACE)
 target_link_libraries(arora-buffers INTERFACE arora_buffers)
@@ -48,9 +53,6 @@ add_custom_target(arora-util-build ALL
 add_library(arora-util INTERFACE)
 target_link_libraries(arora-util INTERFACE arora_util)
 add_dependencies(arora-util arora-util-build)
-
-
-set (ARORA_MODULE_CLI "${NATIVE_LIB_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 
 install(
   FILES

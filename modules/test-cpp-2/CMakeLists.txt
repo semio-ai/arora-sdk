@@ -1,4 +1,4 @@
-add_custom_target(module-cli-2 ALL
+add_custom_target(generate-test-cpp-2 ALL
   COMMAND ${ARORA_MODULE_CLI} --registry-uri ${REGISTRY_URI} generate -l cpp -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp-2.hpp
