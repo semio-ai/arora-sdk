@@ -19,6 +19,9 @@ jobs:
 
     steps:
 
+    - name: Setup Rust Target Platform
+      run: rustup target add wasm32-unknown-unknown
+
     - uses: actions/checkout@v2
 
     - name: Configure
