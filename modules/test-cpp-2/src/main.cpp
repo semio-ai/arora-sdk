@@ -5,7 +5,7 @@ Status test_cpp_2::test_2(
   const std::optional<std::uint32_t> &b
 )
 {
-  return Status::running();
+  return Status::success();
 }
 
 int main(int argc, char *argv[])

@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use wasmtime::{
   Caller, Config, Engine as WasmEngine, Extern, Func, FuncType, Instance as WasmInstance,
   Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, InstanceLimits, ModuleLimits, LinearMemory, AsContext, 
-  AsContextMut
+  AsContextMut, StoreContextMut
 };
 
 #[derive(Debug, Error, Display, From)]
@@ -116,14 +116,45 @@ struct WebAssemblyModule {
 impl WebAssemblyModule {
   fn arora_dispatch(engine: usize, mut caller: Caller<'_, WasiCtx>, module_id: u32, method_id: u32, arg: u32) -> u32 {
     println!("arora_dispatch: module_id: {}, method_id: {}, arg: {}", module_id, method_id, arg);
+
+    // yuck yuck yuck
+    // All of this shouldn't necessary. We should fix it.
     let engine = unsafe { &mut *(engine as *mut Engine) };
+    let caller2 = unsafe { &mut *(&mut caller as *mut Caller<'_, WasiCtx>) };
+    let caller3 = unsafe { &mut *(&mut caller as *mut Caller<'_, WasiCtx>) };
 
     let context = caller.as_context_mut();
+
+    let memory = caller2.data_mut().table().get_mut::<Memory>(8374).unwrap();
+    let malloc = caller3.data_mut().table().get_mut::<TypedFunc<(u32,), u32>>(8375).unwrap();
     
-    let memory = caller.data_mut().table().get_mut::<Memory>(8374).unwrap();
+    // Extract module_uuid
+    let mut module_uuid = [0u8; 16];
+    memory.read(&caller.as_context(), module_id as usize, &mut module_uuid).unwrap();
+    let module_uuid = Uuid::from_slice(&module_uuid).unwrap();
 
+    // Extract method_uuid
+    let mut method_uuid = [0u8; 16];
+    memory.read(&caller.as_context(), method_id as usize, &mut method_uuid).unwrap();
+    let method_uuid = Uuid::from_slice(&method_uuid).unwrap();
 
-    0
+    let mut arg_size_buffer = [0u8; 4];
+    memory.read(&caller.as_context(), arg as usize, &mut arg_size_buffer).unwrap();
+
+    let arg_size = arg_size_buffer.as_slice().get_u32_le();
+
+    let mut arg_buffer = Vec::with_capacity(arg_size as usize + 4);
+
+    arg_buffer.resize(arg_size as usize + 4, 0u8);
+    memory.read(&caller.as_context(), arg as usize, &mut arg_buffer).unwrap();
+
+    let result = engine.dispatch(&module_uuid, &method_uuid, arg_buffer.as_slice()).unwrap();
+
+    let result_addr = malloc.call(&mut caller.as_context_mut(), (result.len() as u32,)).unwrap();
+
+    memory.write(&mut caller.as_context_mut(), result_addr as usize, &result).unwrap();
+
+    result_addr
   }
 
   pub fn new(engine: EngineRef, exports: Vec<ExportSymbol>, module: WasmModule, mut store: Store<WasiCtx>, mut linker: Linker<WasiCtx>) -> Result<Self, wasmtime_wasi::Error> {
@@ -149,6 +180,7 @@ impl WebAssemblyModule {
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
     store.data_mut().table().insert_at(8374, Box::new(memory));
+    store.data_mut().table().insert_at(8375, Box::new(malloc));
 
 
 
