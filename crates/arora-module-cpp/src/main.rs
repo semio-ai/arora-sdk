@@ -362,13 +362,7 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
     
   }
 
-  source_declarations.push(Extern {
-    name: "C".to_string(),
-    block: Block {
-      statements: extern_declarations,
-      ..Default::default()
-    }
-  }.into());
+  source_declarations.extend_from_slice(&extern_declarations);
 
   let source_content = TranslationUnit {
     declarations: source_declarations,

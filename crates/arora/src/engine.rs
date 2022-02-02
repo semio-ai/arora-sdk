@@ -92,7 +92,7 @@ impl Engine {
     {
       let engine = &mut *ret.as_mut() as *mut Engine;
       for (id, executor) in ret.executors.iter_mut() {
-        executor.set_engine(Arc::new(AtomicPtr::new(engine)));
+        executor.set_engine(engine as *mut Engine);
       }
     }
     
@@ -130,4 +130,4 @@ impl Engine {
   }
 }
 
-pub type EngineRef = Arc<AtomicPtr<Engine>>;
+pub type EngineRef = *mut Engine;

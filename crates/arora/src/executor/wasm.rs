@@ -15,7 +15,8 @@ use derive_more::{Display, Error, From};
 use tokio::sync::mpsc;
 use wasmtime::{
   Caller, Config, Engine as WasmEngine, Extern, Func, FuncType, Instance as WasmInstance,
-  Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, InstanceLimits, ModuleLimits, 
+  Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, InstanceLimits, ModuleLimits, LinearMemory, AsContext, 
+  AsContextMut
 };
 
 #[derive(Debug, Error, Display, From)]
@@ -83,7 +84,7 @@ impl Executor for WebAssemblyExecutor {
 
     Ok(
       Box::new(WebAssemblyModule::new(
-        self.arora_engine.as_ref().unwrap().clone(),
+        self.arora_engine.unwrap(),
         module_definition.header.exports,
         module,
         store,
@@ -113,18 +114,25 @@ struct WebAssemblyModule {
 }
 
 impl WebAssemblyModule {
-  fn arora_dispatch(engine: &EngineRef, caller: Caller<'_, WasiCtx>, module_id: u32, method_id: u32, arg: u32) -> u32 {
+  fn arora_dispatch(engine: usize, mut caller: Caller<'_, WasiCtx>, module_id: u32, method_id: u32, arg: u32) -> u32 {
     println!("arora_dispatch: module_id: {}, method_id: {}, arg: {}", module_id, method_id, arg);
+    let engine = unsafe { &mut *(engine as *mut Engine) };
+
+    let context = caller.as_context_mut();
+    
+    let memory = caller.data_mut().table().get_mut::<Memory>(8374).unwrap();
+
+
     0
   }
 
   pub fn new(engine: EngineRef, exports: Vec<ExportSymbol>, module: WasmModule, mut store: Store<WasiCtx>, mut linker: Linker<WasiCtx>) -> Result<Self, wasmtime_wasi::Error> {
-    let arora_dispatch_engine = engine.clone();
+    let arora_dispatch_engine = engine as usize;
     linker.func_wrap(
-      "",
+      "env",
       "arora_dispatch",
       move |caller: Caller<'_, WasiCtx>, module_id, method_id, arg|
-        WebAssemblyModule::arora_dispatch(&arora_dispatch_engine, caller, module_id, method_id, arg)
+        WebAssemblyModule::arora_dispatch(arora_dispatch_engine, caller, module_id, method_id, arg)
     )?;
     
     let instance = linker.instantiate(&mut store, &module)?;
@@ -140,6 +148,9 @@ impl WebAssemblyModule {
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
+    store.data_mut().table().insert_at(8374, Box::new(memory));
+
+
 
     Ok(Self {
       engine,
