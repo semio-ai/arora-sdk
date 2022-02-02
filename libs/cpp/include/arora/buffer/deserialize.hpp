@@ -18,14 +18,23 @@ namespace arora
 {
   namespace buffer
   {
-    void skip(arora_buffer_reader *const reader, const std::uint8_t type);
-    void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
+    template<typename T>
+    std::optional<T> deserialize(arora_buffer_reader *const reader);
 
     template<typename T>
     T arora_buffer_reader_get(arora_buffer_reader *const reader);
 
     template<typename T>
-    const T *arora_buffer_reader_get_bulk(arora_buffer_reader *const reader, std::size_t count);
+    const T *arora_buffer_reader_get_bulk(arora_buffer_reader *const reader, std::size_t count) {
+      auto* data = new T[count];
+      for (std::size_t i = 0; i < count; ++i) {
+        data[i] = deserialize<T>(reader).value();
+      }
+      return data;
+    }
+
+    void skip(arora_buffer_reader *const reader, const std::uint8_t type);
+    void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
 
     template<typename T>
     std::optional<T> deserialize(arora_buffer_reader *const reader) {
@@ -44,7 +53,7 @@ namespace arora
     template<std::ranges::contiguous_range R>
     std::optional<R> deserialize(arora_buffer_reader *const reader) {
       const std::uint8_t type = arora_buffer_reader_next_type(reader);
-      if (type != arora_buffer_type_of<R>)
+      if (type != arora_buffer_type_of<R>())
       {
         skip(reader, type);
         return std::nullopt;
@@ -52,13 +61,13 @@ namespace arora
 
       using T = std::ranges::range_value_t<R>;
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
-      if (res.ty != arora_buffer_type_of<T>)
+      if (res.ty != arora_buffer_type_of<T>())
       {
         skip_array(reader, res.ty, res.element_count);
         return std::nullopt;
       }
 
-      const auto * const data = arora_buffer_reader_get_u8_bulk(reader, res.element_count);
+      const auto * const data = arora_buffer_reader_get_bulk<T>(reader, res.element_count);
       return R(data, data + res.element_count);
     }
 

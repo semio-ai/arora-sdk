@@ -15,9 +15,11 @@ namespace arora
     template<typename T>
     int arora_buffer_type_of();
 
+    template<std::ranges::contiguous_range R>
+    int arora_buffer_type_of() { return ARORA_BUFFER_TYPE_ARRAY; }
+
     template<>
     inline int arora_buffer_type_of<void>() { return ARORA_BUFFER_TYPE_UNIT; }
-
 
     template<>
     inline int arora_buffer_type_of<bool>() { return ARORA_BUFFER_TYPE_BOOLEAN; }

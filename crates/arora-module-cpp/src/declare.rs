@@ -1003,6 +1003,31 @@ pub fn enumeration_deserializer(context: &Context, id: &Uuid, name: &str, ty: &E
   }
 }
 
+pub fn type_of(ty: &Type) -> FunctionImplementation {
+  let buffer_type_constant = match ty.kind {
+    TypeKind::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
+    TypeKind::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
+  };
+  
+  FunctionImplementation {
+    template_arguments: Some(vec![]),
+    inline: true,
+    ret: Some(TypeRef {
+      ty: "int".to_string(),
+      ..Default::default()
+    }),
+    name: "arora::buffer::arora_buffer_type_of".to_string(),
+    specialization: Some(vec![ty.name.clone()]),
+    body: Block {
+      statements: vec![
+        Declaration::Statement(Statement::Return(buffer_type_constant.clone()))
+      ],
+      semicolon: false,
+    },
+    ..Default::default()
+  }
+}
+
 pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
   match ty.kind {
     TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),

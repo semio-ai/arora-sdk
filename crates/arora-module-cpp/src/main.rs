@@ -133,7 +133,6 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
     Declaration::new_line(1),
     Declaration::include_system("cmath"),
     Declaration::include_system("cstdint"),
-    Declaration::include_system("new"),
     Declaration::new_line(1),
   ];
   
@@ -149,7 +148,10 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   include_declarations.extend([
     declare::ty(context, ty).into(),
     Declaration::new_line(1),
+    declare::type_of(ty).into(),
+    Declaration::new_line(1),
     declare::deserializer(context, ty).into(),
+    Declaration::new_line(1),
     declare::serializer(context, ty).into(),
     Declaration::new_line(1),
     Declaration::endif(),

@@ -18,10 +18,15 @@ namespace arora
   namespace buffer
   {
     template<typename T>
-    void arora_buffer_writer_add_bulk(arora_buffer_writer *const writer, const T *const data, std::size_t size);
-    
-    template<typename T>
     void serialize(arora_buffer_writer *const writer, const T &value);
+
+    template<typename T>
+    void arora_buffer_writer_add_bulk(arora_buffer_writer *const writer, const T *const data, std::size_t size) {
+      auto end = data + size;
+      for (auto* it = data; it < end; ++it) {
+        serialize(writer, *data);
+      }
+    }
 
     template<std::ranges::contiguous_range R>
     void serialize(arora_buffer_writer *const writer, const R &range) {
@@ -108,6 +113,55 @@ namespace arora
     inline void serialize<std::string_view>(arora_buffer_writer *const writer, const std::string_view &value)
     {
       arora_buffer_writer_add_string(writer, reinterpret_cast<const std::uint8_t *>(value.data()), value.size());
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::uint8_t>(arora_buffer_writer *const writer, const std::uint8_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_u8_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::uint16_t>(arora_buffer_writer *const writer, const std::uint16_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_u16_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::uint32_t>(arora_buffer_writer *const writer, const std::uint32_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_u32_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::uint64_t>(arora_buffer_writer *const writer, const std::uint64_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_u64_raw_bulk(writer, data, size);
+    }
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::int8_t>(arora_buffer_writer *const writer, const std::int8_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_s8_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::int16_t>(arora_buffer_writer *const writer, const std::int16_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_s16_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::int32_t>(arora_buffer_writer *const writer, const std::int32_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_s32_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<std::int64_t>(arora_buffer_writer *const writer, const std::int64_t *const data, std::size_t size) {
+      return arora_buffer_writer_add_s64_raw_bulk(writer, data, size);
+    }
+
+    template<>
+    inline void arora_buffer_writer_add_bulk<float>(arora_buffer_writer *const writer, const float *const data, std::size_t size) {
+      return arora_buffer_writer_add_r32_raw_bulk(writer, data, size);
+    }
+    
+    template<>
+    inline void arora_buffer_writer_add_bulk<double>(arora_buffer_writer *const writer, const double *const data, std::size_t size) {
+      return arora_buffer_writer_add_r64_raw_bulk(writer, data, size);
     }
   }
 }
