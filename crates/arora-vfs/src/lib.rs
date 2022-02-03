@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc, pin::Pin, future::Future, path::PathBuf};
-use serde::{Serialize, Deserialize};
-use tokio::{io, fs};
-use io::{AsyncWriteExt, AsyncReadExt};
-use sha2::{Sha256, Digest};
+use io::{AsyncReadExt, AsyncWriteExt};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use tokio::{fs, io};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct File {
@@ -11,18 +11,22 @@ pub struct File {
 
 impl File {
   pub fn new<T: AsRef<[u8]>>(data: T) -> Self {
-    Self { data: data.as_ref().into() }
+    Self {
+      data: data.as_ref().into(),
+    }
   }
 
   pub async fn sync(self: Arc<File>, path: PathBuf) -> io::Result<()> {
     let mut hasher = Sha256::new();
     hasher.update(&self.data);
     let hash = hasher.finalize();
-    
+
     let real_hash = if path.exists() {
       let mut current = Vec::new();
-      fs::File::open(&path).await?
-        .read_to_end(&mut current).await?;
+      fs::File::open(&path)
+        .await?
+        .read_to_end(&mut current)
+        .await?;
       let mut hasher = Sha256::new();
       hasher.update(&current);
       Some(hasher.finalize())
@@ -34,7 +38,6 @@ impl File {
       return Ok(());
     }
 
-    
     fs::File::create(&path).await?.write_all(&self.data).await?;
     Ok(())
   }
@@ -47,7 +50,9 @@ pub struct Directory {
 
 impl Directory {
   pub fn new() -> Self {
-    Self { entries: HashMap::new() }
+    Self {
+      entries: HashMap::new(),
+    }
   }
 
   pub fn get(&self, name: &str) -> Option<Arc<Entry>> {
@@ -55,7 +60,9 @@ impl Directory {
   }
 
   pub fn insert<N: AsRef<str>, E: Into<Entry>>(&mut self, name: N, entry: E) {
-    self.entries.insert(name.as_ref().to_string(), entry.into().into());
+    self
+      .entries
+      .insert(name.as_ref().to_string(), entry.into().into());
   }
 
   pub fn remove(&mut self, name: &str) {
@@ -83,16 +90,19 @@ impl Directory {
         match **entry {
           Entry::File(_) => {
             panic!("Merging files is unsupported");
-          },
+          }
           Entry::Directory(ref directory) => {
             if let Entry::Directory(ref other_directory) = **other_entry {
               let directory = directory.clone();
               let other_directory = other_directory.clone();
-              entries.insert(name.clone(), Entry::Directory(directory.merge_with(other_directory)).into());
+              entries.insert(
+                name.clone(),
+                Entry::Directory(directory.merge_with(other_directory)).into(),
+              );
             } else {
               panic!("Tried to merge a directory with a file");
             }
-          },
+          }
         }
       } else {
         entries.insert(name.clone(), entry.clone());

@@ -1,4 +1,3 @@
-
 use arora::{
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
@@ -29,9 +28,11 @@ async fn main() -> anyhow::Result<()> {
     .build();
 
   let header: Header = serde_yaml::from_str(
-    &read_to_string(args.header).await
-    .expect("header file could not be read")
-  ).expect("header file contains invalid yaml"); 
+    &read_to_string(args.header)
+      .await
+      .expect("header file could not be read"),
+  )
+  .expect("header file contains invalid yaml");
   let module_id = header.id.clone();
 
   let mut executable_file = File::open(args.exe).await?;
@@ -45,22 +46,26 @@ async fn main() -> anyhow::Result<()> {
       schema_version: 0,
       header,
       executable,
-    }).expect("failed to load module");
+    })
+    .expect("failed to load module");
 
   engine
     .load_module(ModuleDefinition {
       schema_version: 0,
-      header: serde_yaml::from_str(&read_to_string("modules/test-cpp-2/arora/module.yaml").await
-          .expect("second header file could not be read")
-        ).expect("second header file could not be parsed"),
+      header: serde_yaml::from_str(
+        &read_to_string("modules/test-cpp-2/arora/module.yaml")
+          .await
+          .expect("second header file could not be read"),
+      )
+      .expect("second header file could not be parsed"),
       executable: {
         let mut file = File::open("modules/test-cpp-2/test-cpp-2").await?;
         let mut executable = Vec::new();
         file.read_to_end(&mut executable).await?;
         executable.into_boxed_slice()
       },
-    }).expect("failed to load module");
-
+    })
+    .expect("failed to load module");
 
   let method_id = Uuid::parse_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap();
   let b = Uuid::parse_str("63086e48-804f-403a-8862-3358ddedc08d").unwrap();
@@ -75,12 +80,12 @@ async fn main() -> anyhow::Result<()> {
 
   let arg = arora_buffers::Value::Structure(arora_buffers::Structure {
     id: method_id.as_bytes().as_slice().into(),
-    fields: vec! [
+    fields: vec![
       arora_buffers::StructureField {
         id: b.as_bytes().as_slice().into(),
         value: arora_buffers::Value::Structure(arora_buffers::Structure {
           id: a.as_bytes().as_slice().into(),
-          fields: vec! [
+          fields: vec![
             arora_buffers::StructureField {
               id: integer_array.as_bytes().as_slice().into(),
               value: arora_buffers::Value::S32(1),
@@ -91,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
                 id: status_enumeration.as_bytes().as_slice().into(),
                 variant_id: success.as_bytes().as_slice().into(),
                 value: arora_buffers::Value::Unit.into(),
-              })
+              }),
             },
           ],
         }),
@@ -102,9 +107,9 @@ async fn main() -> anyhow::Result<()> {
           id: status_enumeration.as_bytes().as_slice().into(),
           variant_id: success.as_bytes().as_slice().into(),
           value: arora_buffers::Value::Unit.into(),
-        })
-      }
-    ]
+        }),
+      },
+    ],
   });
 
   let arg = arg.serialize();
@@ -117,7 +122,6 @@ async fn main() -> anyhow::Result<()> {
     // println!("{:#?}", result);
   }
 
-
   let end_time = std::time::Instant::now();
   let total_duration = end_time - start_time;
   let duration = total_duration / nof_iterations;
@@ -127,7 +131,10 @@ async fn main() -> anyhow::Result<()> {
     total_duration, nof_iterations, duration
   );
 
-  println!("{:?} calls per second", nof_iterations as f64 / total_duration.as_secs_f64());
+  println!(
+    "{:?} calls per second",
+    nof_iterations as f64 / total_duration.as_secs_f64()
+  );
 
   Ok(())
 }

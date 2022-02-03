@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use arora_module_core::{Writer, Reader, Asset};
+use arora_module_core::{Asset, Reader, Writer};
 use arora_registry::Registry;
 use arora_vfs::Entry;
 use clap::Parser;
 
+use arora_schema::module::high::ModuleDefinition as HighModuleDefinition;
 use tokio::fs::read_to_string;
-use arora_schema::module::{
-  high::{ModuleDefinition as HighModuleDefinition}
-};
 
 use log::debug;
 
@@ -36,21 +34,25 @@ fn print_entry(entry: Arc<Entry>, i: usize) {
         println!("{} {}", " ".repeat(i), name);
         print_entry(entry.clone(), i + 2);
       }
-    },
-    Entry::File(ref file) => {
-    },
+    }
+    Entry::File(ref file) => {}
   }
 }
 
 pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<()> {
-  let module_definition: HighModuleDefinition = serde_yaml::from_str(&read_to_string(cmd.configuration_file).await?)?;
+  let module_definition: HighModuleDefinition =
+    serde_yaml::from_str(&read_to_string(cmd.configuration_file).await?)?;
   let header = resolve_module_header(module_definition, registry).await?;
 
   let header_yaml = serde_yaml::to_string(&header)?;
 
   let mut generator_path = std::env::current_exe()?;
   generator_path.pop();
-  generator_path.push(format!("arora-module-{}{}", cmd.language, std::env::consts::EXE_SUFFIX));
+  generator_path.push(format!(
+    "arora-module-{}{}",
+    cmd.language,
+    std::env::consts::EXE_SUFFIX
+  ));
 
   let mut command = tokio::process::Command::new(&generator_path)
     .args(&["--self-id", &header.id.to_string()])
@@ -60,20 +62,18 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
     .spawn()
     .map_err(|_| anyhow::anyhow!("Failed to start generator {:?}", &generator_path))?;
 
-
   let mut stdin = command.stdin.as_mut().unwrap();
   let mut stdout = command.stdout.as_mut().unwrap();
 
   let mut writer = Writer::new(&mut stdin);
   let mut reader = Reader::new(&mut stdout);
-  
+
   writer.write(Asset::Header(header.clone())).await?;
 
   for module in header.module_dependencies() {
     let dep_header = registry.get_module_header(&module).await?;
     writer.write(Asset::Header(dep_header.clone())).await?;
   }
-
 
   for ty in header.type_dependencies().iter() {
     if arora_schema::ty::PRIMITIVE_IDS.contains(ty) {
@@ -93,12 +93,9 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
     writer.write(Asset::ExportSymbol(symbol)).await?;
   }
 
-
   writer.end().await?;
 
-
   let vfs = reader.read::<Arc<Entry>>().await?;
-  
 
   assert!(reader.read::<Entry>().await?.is_none());
 

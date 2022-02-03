@@ -1,4 +1,7 @@
-use arora_schema::ty::{UNIT_ID, BOOLEAN_ID, U8_ID, U16_ID, U32_ID, U64_ID, S8_ID, S16_ID, S32_ID, S64_ID, R32_ID, R64_ID, STRING_ID};
+use arora_schema::ty::{
+  BOOLEAN_ID, R32_ID, R64_ID, S16_ID, S32_ID, S64_ID, S8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
+  U8_ID, UNIT_ID,
+};
 
 use crate::{ast::TypeRef, Context};
 
@@ -7,12 +10,12 @@ lazy_static::lazy_static! {
     ty: "void".to_string(),
     ..Default::default()
   };
-  
+
   pub static ref BOOL: TypeRef = TypeRef {
     ty: "bool".to_string(),
     ..Default::default()
   };
-  
+
   pub static ref U8: TypeRef = TypeRef {
     ty: "uint8_t".to_string(),
     ..Default::default()
@@ -108,7 +111,7 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::T
       let key_ty = context.types.get(&key_id).unwrap();
       let value_ty = context.types.get(&value_id).unwrap();
       format!("std::unordered_map<{}, {}>", key_ty.name, value_ty.name)
-    },
+    }
   }
 }
 

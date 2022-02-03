@@ -4,8 +4,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
   actor::{Actor, Addr, Request},
-  module::{Module},
-  schema::module::low::ModuleDefinition, engine::{Engine, EngineRef},
+  engine::{Engine, EngineRef},
+  module::Module,
+  schema::module::low::ModuleDefinition,
 };
 use derive_more::{Display, Error, From};
 use tokio::sync::oneshot;
@@ -27,6 +28,9 @@ pub trait Executor {
   fn set_engine(&mut self, engine: EngineRef);
 
   fn name(&self) -> &'static str;
-  fn load_module(&mut self, module_definition: ModuleDefinition) -> Result<Box<dyn Module>, LoadModuleError>;
+  fn load_module(
+    &mut self,
+    module_definition: ModuleDefinition,
+  ) -> Result<Box<dyn Module>, LoadModuleError>;
   fn unload_module(&mut self, module_id: Uuid) -> Result<(), UnloadModuleError>;
 }

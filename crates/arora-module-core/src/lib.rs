@@ -1,8 +1,11 @@
-use arora_schema::{ty::low::Type, module::low::{ImportSymbol, ExportSymbol, Header}};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use arora_schema::{
+  module::low::{ExportSymbol, Header, ImportSymbol},
+  ty::low::Type,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
 use bytes::{Buf, BufMut};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Asset {
@@ -18,9 +21,7 @@ pub struct Writer<'a, W: AsyncWrite + Unpin> {
 
 impl<'a, W: AsyncWrite + Unpin> Writer<'a, W> {
   pub fn new(writer: &'a mut W) -> Self {
-    Self {
-      writer
-    }
+    Self { writer }
   }
 
   pub async fn write<T: Serialize>(&mut self, value: T) -> tokio::io::Result<()> {
@@ -41,14 +42,12 @@ impl<'a, W: AsyncWrite + Unpin> Writer<'a, W> {
 }
 
 pub struct Reader<'a, R: AsyncRead + Unpin> {
-  reader: &'a mut R
+  reader: &'a mut R,
 }
 
 impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
   pub fn new(reader: &'a mut R) -> Self {
-    Self {
-      reader
-    }
+    Self { reader }
   }
 
   pub async fn read<T: DeserializeOwned>(&mut self) -> tokio::io::Result<Option<T>> {
@@ -68,9 +67,9 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
 
 #[cfg(test)]
 mod tests {
+  use arora_schema::module::high::ModuleDefinition;
   use std::str::FromStr;
   use uuid::Uuid;
-  use arora_schema::module::high::ModuleDefinition;
 
   #[test]
   fn parse_uuid() {

@@ -31,7 +31,6 @@ pub enum ReplyError {
   SendError,
 }
 
-
 #[derive(Debug)]
 pub struct Request<I, O: Send> {
   pub data: I,
