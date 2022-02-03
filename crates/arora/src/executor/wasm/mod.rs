@@ -1,23 +1,26 @@
-use std::{collections::HashMap, future::Future, pin::Pin, cell::RefCell, rc::Rc};
+use std::collections::HashMap;
 
 use arora_schema::module::low::{ModuleDefinition, ImportSymbol, ExportSymbol};
 use uuid::Uuid;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
-use bytes::{Buf, BufMut};
+use bytes::{Buf};
 
 use crate::{
-  module::{Module, DispatchError}, engine::{Engine, EngineRef},
+  module::{Module, DispatchError}, engine::{Engine, EngineRef}, executor::wasm::guest::AroraBuffer,
 };
 
 use super::{Executor, LoadModuleError,UnloadModuleError,};
 use derive_more::{Display, Error, From};
 
-use tokio::sync::mpsc;
 use wasmtime::{
-  Caller, Config, Engine as WasmEngine, Extern, Func, FuncType, Instance as WasmInstance,
-  Module as WasmModule, Store, WasmParams, Linker, TypedFunc, Memory, InstanceLimits, ModuleLimits, LinearMemory, AsContext, 
-  AsContextMut, StoreContextMut
+  Caller, Config, Engine as WasmEngine, Extern, Instance as WasmInstance,
+  Module as WasmModule, Store, Linker, TypedFunc, Memory, InstanceLimits,
+  ModuleLimits, AsContextMut
 };
+
+mod guest;
+
+use guest::{ReadWasmMemory, WriteWasmMemory};
 
 #[derive(Debug, Error, Display, From)]
 pub enum InitializationError {
@@ -99,7 +102,6 @@ impl Executor for WebAssemblyExecutor {
 }
 
 struct WebAssemblyModule {
-  engine: EngineRef,
   module: WasmModule,
   store: Store<WasiCtx>,
   instance: WasmInstance,
@@ -117,42 +119,35 @@ impl WebAssemblyModule {
   fn arora_dispatch(engine: usize, mut caller: Caller<'_, WasiCtx>, module_id: u32, method_id: u32, arg: u32) -> u32 {
     println!("arora_dispatch: module_id: {}, method_id: {}, arg: {}", module_id, method_id, arg);
 
+    let memory = caller
+      .get_export("memory")
+      .map(Extern::into_memory)
+      .flatten()
+      .unwrap();
+    
+
     // yuck yuck yuck
     // All of this shouldn't necessary. We should fix it.
     let engine = unsafe { &mut *(engine as *mut Engine) };
-    let caller2 = unsafe { &mut *(&mut caller as *mut Caller<'_, WasiCtx>) };
-    let caller3 = unsafe { &mut *(&mut caller as *mut Caller<'_, WasiCtx>) };
 
-    let context = caller.as_context_mut();
+    let malloc = caller
+      .data_mut()
+      .table()
+      .get_mut::<TypedFunc<(u32,), u32>>(8375)
+      .unwrap()
+      .clone();
 
-    let memory = caller2.data_mut().table().get_mut::<Memory>(8374).unwrap();
-    let malloc = caller3.data_mut().table().get_mut::<TypedFunc<(u32,), u32>>(8375).unwrap();
-    
-    // Extract module_uuid
-    let mut module_uuid = [0u8; 16];
-    memory.read(&caller.as_context(), module_id as usize, &mut module_uuid).unwrap();
-    let module_uuid = Uuid::from_slice(&module_uuid).unwrap();
+    let mut context = caller.as_context_mut();
 
-    // Extract method_uuid
-    let mut method_uuid = [0u8; 16];
-    memory.read(&caller.as_context(), method_id as usize, &mut method_uuid).unwrap();
-    let method_uuid = Uuid::from_slice(&method_uuid).unwrap();
+    let module_id = Uuid::read_wasm_memory(&context, memory, module_id);
+    let method_id = Uuid::read_wasm_memory(&context, memory, method_id);
+    let arg = AroraBuffer::read_wasm_memory(&context, memory, arg);
 
-    let mut arg_size_buffer = [0u8; 4];
-    memory.read(&caller.as_context(), arg as usize, &mut arg_size_buffer).unwrap();
+    let result = engine.dispatch(&module_id, &method_id, arg.as_ref()).unwrap();
 
-    let arg_size = arg_size_buffer.as_slice().get_u32_le();
+    let result_addr = malloc.call(&mut context, (result.len() as u32,)).unwrap();
 
-    let mut arg_buffer = Vec::with_capacity(arg_size as usize + 4);
-
-    arg_buffer.resize(arg_size as usize + 4, 0u8);
-    memory.read(&caller.as_context(), arg as usize, &mut arg_buffer).unwrap();
-
-    let result = engine.dispatch(&module_uuid, &method_uuid, arg_buffer.as_slice()).unwrap();
-
-    let result_addr = malloc.call(&mut caller.as_context_mut(), (result.len() as u32,)).unwrap();
-
-    memory.write(&mut caller.as_context_mut(), result_addr as usize, &result).unwrap();
+    memory.write(&mut context, result_addr as usize, &result).unwrap();
 
     result_addr
   }
@@ -179,13 +174,11 @@ impl WebAssemblyModule {
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
-    store.data_mut().table().insert_at(8374, Box::new(memory));
     store.data_mut().table().insert_at(8375, Box::new(malloc));
 
 
 
     Ok(Self {
-      engine,
       module,
       store,
       instance,
