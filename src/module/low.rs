@@ -15,16 +15,9 @@ pub struct Executor {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TypeRef {
-  Scalar {
-    id: Uuid
-  },
-  Array {
-    id: Uuid
-  },
-  Map {
-    key_id: Uuid,
-    value_id: Uuid
-  },
+  Scalar { id: Uuid },
+  Array { id: Uuid },
+  Map { key_id: Uuid, value_id: Uuid },
 }
 
 impl TypeRef {
@@ -32,7 +25,7 @@ impl TypeRef {
     let mut deps = HashSet::new();
     match self {
       TypeRef::Scalar { id } => deps.insert(*id),
-      TypeRef::Array {id } => deps.insert(*id),
+      TypeRef::Array { id } => deps.insert(*id),
       TypeRef::Map { key_id, value_id } => {
         deps.insert(*key_id);
         deps.insert(*value_id)
@@ -192,13 +185,19 @@ pub struct Header {
 impl Header {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
-    
+
     for export in &self.exports {
       match export {
         ExportSymbol::Function(function) => {
-          deps = deps.union(&function.ret.type_dependencies()).cloned().collect();
+          deps = deps
+            .union(&function.ret.type_dependencies())
+            .cloned()
+            .collect();
           for parameter in &function.parameters {
-            deps = deps.union(&parameter.ty.type_dependencies()).cloned().collect();
+            deps = deps
+              .union(&parameter.ty.type_dependencies())
+              .cloned()
+              .collect();
           }
         }
       }
@@ -207,9 +206,15 @@ impl Header {
     for import in &self.imports {
       match import {
         ImportSymbol::Function(function) => {
-          deps = deps.union(&function.ret.type_dependencies()).cloned().collect();
+          deps = deps
+            .union(&function.ret.type_dependencies())
+            .cloned()
+            .collect();
           for parameter in &function.parameters {
-            deps = deps.union(&parameter.ty.type_dependencies()).cloned().collect();
+            deps = deps
+              .union(&parameter.ty.type_dependencies())
+              .cloned()
+              .collect();
           }
         }
       }

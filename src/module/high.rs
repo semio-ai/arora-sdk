@@ -13,16 +13,9 @@ pub struct Executor {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TypeRef {
-  Scalar {
-    id: String
-  },
-  Array {
-    id: String
-  },
-  Map {
-    key_id: String,
-    value_id: String
-  },
+  Scalar { id: String },
+  Array { id: String },
+  Map { key_id: String, value_id: String },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -96,7 +89,7 @@ pub struct ModuleDefinition {
   pub id: Uuid,
 
   pub name: String,
-  
+
   /// Author name
   pub author: String,
   /// Optional description
