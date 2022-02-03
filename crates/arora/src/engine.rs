@@ -69,25 +69,15 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
   }
 }
 
-pub type UnloadModuleResult = Result<(), UnloadModuleError>;
-
-#[derive(Debug)]
-pub struct UnloadModule {
-  module_id: Uuid,
-}
-
-pub type UnloadModuleRequest = Request<UnloadModule, UnloadModuleResult>;
-
-pub struct Lookup {
-  module_id: Uuid,
-}
-
+/// [`Engine`] is the main encapsulation of the Arora runtime.
+/// It consists of a set of [`Executor`]s and [`Module`]s.
 pub struct Engine {
   executors: HashMap<&'static str, Box<dyn Executor>>,
   modules: HashMap<Uuid, Box<dyn Module>>,
 }
 
 impl Engine {
+  /// Create a new [`Engine`] with the given [`Executor`]s.
   fn new(executors: HashMap<&'static str, Box<dyn Executor>>) -> Pin<Box<Engine>> {
     let mut ret = Box::pin(Engine {
       executors,
@@ -104,6 +94,7 @@ impl Engine {
     ret
   }
 
+  /// Load a [`Module`] from the given [`ModuleDefinition`].
   pub fn load_module(
     &mut self,
     module_definition: ModuleDefinition,
@@ -130,6 +121,7 @@ impl Engine {
     Ok(())
   }
 
+  /// Dispatch a method call to a module. `arg` must be a raw Arora Buffer.
   pub fn dispatch(
     &mut self,
     module_id: &Uuid,
