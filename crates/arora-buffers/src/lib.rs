@@ -1,4 +1,4 @@
-use bytes::{BufMut, Buf};
+use bytes::{Buf, BufMut};
 
 pub const TYPE_UNIT: u8 = 0;
 pub const TYPE_BOOLEAN: u8 = 1;
@@ -18,7 +18,7 @@ pub const TYPE_ENUMERATION: u8 = 14;
 pub const TYPE_ARRAY: u8 = 15;
 pub const TYPE_MAP: u8 = 16;
 
-const ALIGNMENT: usize = 8; 
+const ALIGNMENT: usize = 8;
 
 pub struct BufferWriter {
   backing: Vec<u8>,
@@ -29,9 +29,7 @@ impl BufferWriter {
     let mut backing = Vec::with_capacity(128);
     // size placeholder
     backing.put_u32_le(0);
-    Self {
-      backing,
-    }
+    Self { backing }
   }
 
   fn align(&mut self) {
@@ -323,8 +321,7 @@ impl<'a> BufferReader<'a> {
     Some(self.backing.get_u8())
   }
 
-  pub fn get_unit(&mut self) {
-  }
+  pub fn get_unit(&mut self) {}
 
   pub fn get_boolean(&mut self) -> bool {
     self.backing.get_u8() != 0
@@ -457,7 +454,7 @@ impl<'a> BufferReader<'a> {
     self.backing.advance(16);
     (id, value_id)
   }
-  
+
   pub fn get_enumeration_value_raw(&mut self) -> &'a [u8] {
     let id = &self.backing[0..16];
     self.backing.advance(16);
@@ -489,7 +486,11 @@ pub extern "C" fn arora_buffer_writer_add_unit(writer: *mut BufferWriter) {
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_begin_structure(writer: *mut BufferWriter, id: *const u8, field_count: u32) {
+pub extern "C" fn arora_buffer_writer_begin_structure(
+  writer: *mut BufferWriter,
+  id: *const u8,
+  field_count: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     let id = std::slice::from_raw_parts(id, 16);
@@ -498,7 +499,11 @@ pub extern "C" fn arora_buffer_writer_begin_structure(writer: *mut BufferWriter,
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_enumeration_value(writer: *mut BufferWriter, id: *const u8, value_id: *const u8) {
+pub extern "C" fn arora_buffer_writer_add_enumeration_value(
+  writer: *mut BufferWriter,
+  id: *const u8,
+  value_id: *const u8,
+) {
   unsafe {
     let writer = &mut *writer;
     let id = std::slice::from_raw_parts(id, 16);
@@ -508,7 +513,10 @@ pub extern "C" fn arora_buffer_writer_add_enumeration_value(writer: *mut BufferW
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_structure_field(writer: *mut BufferWriter, id: *const u8) {
+pub extern "C" fn arora_buffer_writer_add_structure_field(
+  writer: *mut BufferWriter,
+  id: *const u8,
+) {
   unsafe {
     let writer = &mut *writer;
     let id = std::slice::from_raw_parts(id, 16);
@@ -517,7 +525,11 @@ pub extern "C" fn arora_buffer_writer_add_structure_field(writer: *mut BufferWri
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_array_primitive(writer: *mut BufferWriter, element_type: u8, element_count: u32) {
+pub extern "C" fn arora_buffer_writer_add_array_primitive(
+  writer: *mut BufferWriter,
+  element_type: u8,
+  element_count: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     writer.add_array_primitive(element_type, element_count);
@@ -525,7 +537,11 @@ pub extern "C" fn arora_buffer_writer_add_array_primitive(writer: *mut BufferWri
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_array_structure(writer: *mut BufferWriter, id: *const u8, element_count: u32) {
+pub extern "C" fn arora_buffer_writer_add_array_structure(
+  writer: *mut BufferWriter,
+  id: *const u8,
+  element_count: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     writer.add_array_structure(std::slice::from_raw_parts(id, 16), element_count);
@@ -533,7 +549,11 @@ pub extern "C" fn arora_buffer_writer_add_array_structure(writer: *mut BufferWri
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_array_enumeration(writer: *mut BufferWriter, id: *const u8, element_count: u32) {
+pub extern "C" fn arora_buffer_writer_add_array_enumeration(
+  writer: *mut BufferWriter,
+  id: *const u8,
+  element_count: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     writer.add_array_enumeration(std::slice::from_raw_parts(id, 16), element_count);
@@ -541,7 +561,10 @@ pub extern "C" fn arora_buffer_writer_add_array_enumeration(writer: *mut BufferW
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_begin_structure_raw(writer: *mut BufferWriter, field_count: u32) {
+pub extern "C" fn arora_buffer_writer_begin_structure_raw(
+  writer: *mut BufferWriter,
+  field_count: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     writer.begin_structure_raw(field_count);
@@ -565,7 +588,11 @@ pub extern "C" fn arora_buffer_writer_add_boolean_raw(writer: *mut BufferWriter,
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_boolean_raw_bulk(writer: *mut BufferWriter, values: *const bool, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_boolean_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const bool,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -590,7 +617,11 @@ pub extern "C" fn arora_buffer_writer_add_u8_raw(writer: *mut BufferWriter, valu
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_u8_raw_bulk(writer: *mut BufferWriter, values: *const u8, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_u8_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const u8,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -615,7 +646,11 @@ pub extern "C" fn arora_buffer_writer_add_u16_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_u16_raw_bulk(writer: *mut BufferWriter, values: *const u16, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_u16_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const u16,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -640,7 +675,11 @@ pub extern "C" fn arora_buffer_writer_add_u32_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_u32_raw_bulk(writer: *mut BufferWriter, values: *const u32, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_u32_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const u32,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -665,7 +704,11 @@ pub extern "C" fn arora_buffer_writer_add_u64_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_u64_raw_bulk(writer: *mut BufferWriter, values: *const u64, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_u64_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const u64,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -690,7 +733,11 @@ pub extern "C" fn arora_buffer_writer_add_s8_raw(writer: *mut BufferWriter, valu
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s8_raw_bulk(writer: *mut BufferWriter, values: *const i8, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_s8_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const i8,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -715,7 +762,11 @@ pub extern "C" fn arora_buffer_writer_add_s16_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s16_raw_bulk(writer: *mut BufferWriter, values: *const i16, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_s16_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const i16,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -740,7 +791,11 @@ pub extern "C" fn arora_buffer_writer_add_s32_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s32_raw_bulk(writer: *mut BufferWriter, values: *const i32, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_s32_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const i32,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -765,7 +820,11 @@ pub extern "C" fn arora_buffer_writer_add_s64_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s64_raw_bulk(writer: *mut BufferWriter, values: *const i64, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_s64_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const i64,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -790,7 +849,11 @@ pub extern "C" fn arora_buffer_writer_add_r32_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r32_raw_bulk(writer: *mut BufferWriter, values: *const f32, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_r32_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const f32,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -815,7 +878,11 @@ pub extern "C" fn arora_buffer_writer_add_r64_raw(writer: *mut BufferWriter, val
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(writer: *mut BufferWriter, values: *const f64, count: usize) {
+pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(
+  writer: *mut BufferWriter,
+  values: *const f64,
+  count: usize,
+) {
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
@@ -824,7 +891,11 @@ pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(writer: *mut BufferWriter
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, value: *const u8, size: u32) {
+pub extern "C" fn arora_buffer_writer_add_string(
+  writer: *mut BufferWriter,
+  value: *const u8,
+  size: u32,
+) {
   unsafe {
     let writer = &mut *writer;
     let value = std::slice::from_raw_parts(value, size as usize);
@@ -833,10 +904,13 @@ pub extern "C" fn arora_buffer_writer_add_string(writer: *mut BufferWriter, valu
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_finalize(writer: *mut BufferWriter, length: *mut usize) -> *mut u8 {
+pub extern "C" fn arora_buffer_writer_finalize(
+  writer: *mut BufferWriter,
+  length: *mut usize,
+) -> *mut u8 {
   unsafe {
     let writer = &mut *writer;
-    
+
     let backing = writer.finalize();
     if !length.is_null() {
       *length = backing.len();
@@ -850,7 +924,10 @@ pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8) -> *mut BufferR
   let size_buf: &[u8] = unsafe { std::slice::from_raw_parts(buffer, 4) };
   let size = u32::from_be_bytes(size_buf.try_into().unwrap());
   unsafe {
-    Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(buffer, size as usize))))
+    Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(
+      buffer,
+      size as usize,
+    ))))
   }
 }
 
@@ -879,7 +956,9 @@ pub struct GetStructureResult {
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_structure(reader: *mut BufferReader) -> GetStructureResult {
+pub extern "C" fn arora_buffer_reader_get_structure(
+  reader: *mut BufferReader,
+) -> GetStructureResult {
   unsafe {
     let reader = &mut *reader;
     let (id, field_count) = reader.get_structure();
@@ -906,7 +985,9 @@ pub struct GetEnumerationValueResult {
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_enumeration_value(reader: *mut BufferReader) -> GetEnumerationValueResult {
+pub extern "C" fn arora_buffer_reader_get_enumeration_value(
+  reader: *mut BufferReader,
+) -> GetEnumerationValueResult {
   unsafe {
     let reader = &mut *reader;
     let (id, value_id) = reader.get_enumeration_value();
@@ -928,10 +1009,7 @@ pub extern "C" fn arora_buffer_reader_get_array(reader: *mut BufferReader) -> Ge
   unsafe {
     let reader = &mut *reader;
     let (ty, element_count) = reader.get_array();
-    GetArrayResult {
-      ty,
-      element_count,
-    }
+    GetArrayResult { ty, element_count }
   }
 }
 
@@ -960,7 +1038,10 @@ pub extern "C" fn arora_buffer_reader_get_u8(reader: *mut BufferReader) -> u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_u8_bulk(reader: *mut BufferReader, count: usize) -> *const u8 {
+pub extern "C" fn arora_buffer_reader_get_u8_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const u8 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u8_bulk(count).as_ptr()
@@ -976,7 +1057,10 @@ pub extern "C" fn arora_buffer_reader_get_u16(reader: *mut BufferReader) -> u16 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_u16_bulk(reader: *mut BufferReader, count: usize) -> *const u16 {
+pub extern "C" fn arora_buffer_reader_get_u16_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const u16 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u16_bulk(count).as_ptr()
@@ -992,7 +1076,10 @@ pub extern "C" fn arora_buffer_reader_get_u32(reader: *mut BufferReader) -> u32 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_u32_bulk(reader: *mut BufferReader, count: usize) -> *const u32 {
+pub extern "C" fn arora_buffer_reader_get_u32_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const u32 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u32_bulk(count).as_ptr()
@@ -1008,7 +1095,10 @@ pub extern "C" fn arora_buffer_reader_get_u64(reader: *mut BufferReader) -> u64 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_u64_bulk(reader: *mut BufferReader, count: usize) -> *const u64 {
+pub extern "C" fn arora_buffer_reader_get_u64_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const u64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_u64_bulk(count).as_ptr()
@@ -1024,7 +1114,10 @@ pub extern "C" fn arora_buffer_reader_get_s8(reader: *mut BufferReader) -> i8 {
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s8_bulk(reader: *mut BufferReader, count: usize) -> *const i8 {
+pub extern "C" fn arora_buffer_reader_get_s8_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const i8 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s8_bulk(count).as_ptr()
@@ -1040,7 +1133,10 @@ pub extern "C" fn arora_buffer_reader_get_s16(reader: *mut BufferReader) -> i16 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s16_bulk(reader: *mut BufferReader, count: usize) -> *const i16 {
+pub extern "C" fn arora_buffer_reader_get_s16_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const i16 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s16_bulk(count).as_ptr()
@@ -1056,7 +1152,10 @@ pub extern "C" fn arora_buffer_reader_get_s32(reader: *mut BufferReader) -> i32 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s32_bulk(reader: *mut BufferReader, count: usize) -> *const i32 {
+pub extern "C" fn arora_buffer_reader_get_s32_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const i32 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s32_bulk(count).as_ptr()
@@ -1072,7 +1171,10 @@ pub extern "C" fn arora_buffer_reader_get_s64(reader: *mut BufferReader) -> i64 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s64_bulk(reader: *mut BufferReader, count: usize) -> *const i64 {
+pub extern "C" fn arora_buffer_reader_get_s64_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const i64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_s64_bulk(count).as_ptr()
@@ -1088,7 +1190,10 @@ pub extern "C" fn arora_buffer_reader_get_r32(reader: *mut BufferReader) -> f32 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r32_bulk(reader: *mut BufferReader, count: usize) -> *const f32 {
+pub extern "C" fn arora_buffer_reader_get_r32_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const f32 {
   unsafe {
     let reader = &mut *reader;
     reader.get_r32_bulk(count).as_ptr()
@@ -1104,7 +1209,10 @@ pub extern "C" fn arora_buffer_reader_get_r64(reader: *mut BufferReader) -> f64 
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r64_bulk(reader: *mut BufferReader, count: usize) -> *const f64 {
+pub extern "C" fn arora_buffer_reader_get_r64_bulk(
+  reader: *mut BufferReader,
+  count: usize,
+) -> *const f64 {
   unsafe {
     let reader = &mut *reader;
     reader.get_r64_bulk(count).as_ptr()
@@ -1112,7 +1220,10 @@ pub extern "C" fn arora_buffer_reader_get_r64_bulk(reader: *mut BufferReader, co
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_string(reader: *mut BufferReader, length: *mut u32) -> *const u8 {
+pub extern "C" fn arora_buffer_reader_get_string(
+  reader: *mut BufferReader,
+  length: *mut u32,
+) -> *const u8 {
   unsafe {
     let reader = &mut *reader;
     let string = reader.get_string();
@@ -1128,8 +1239,8 @@ pub extern "C" fn arora_buffer_free(buffer: *mut u8) {
   }
 }
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructureField<'a> {
@@ -1221,8 +1332,8 @@ impl<'a> Value<'a> {
         Value::Structure(Structure {
           id: id.into(),
           fields: fields,
-        })  
-      },
+        })
+      }
       Some(TYPE_ARRAY) => {
         let (ty, count) = reader.get_array();
         match ty {
@@ -1257,12 +1368,10 @@ impl<'a> Value<'a> {
                   value: Value::deserialize_reader(reader),
                 });
               }
-              structures.push(StructureRaw {
-                fields: fields,
-              });
+              structures.push(StructureRaw { fields: fields });
             }
             Value::ArrayStructure(structure_id.into(), structures)
-          },
+          }
           TYPE_ENUMERATION => {
             let mut enumerations = Vec::with_capacity(count as usize);
             let enumeration_id = reader.get_structure_field();
@@ -1277,8 +1386,8 @@ impl<'a> Value<'a> {
           }
           _ => panic!("unsupported array type"),
         }
-      },
-      _ => panic!("Invalid type")
+      }
+      _ => panic!("Invalid type"),
     }
   }
 
@@ -1308,61 +1417,61 @@ impl<'a> Value<'a> {
           writer.add_structure_field(&field.id);
           field.value.serialize_writer(writer);
         }
-      },
+      }
       Value::Enumeration(v) => {
         writer.add_enumeration_value(&v.id, &v.variant_id);
         v.value.serialize_writer(writer);
-      },
+      }
       Value::ArrayBoolean(v) => {
         writer.add_array_primitive(TYPE_BOOLEAN, v.len() as u32);
         writer.add_boolean_raw_bulk(v);
-      },
+      }
       Value::ArrayU8(v) => {
         writer.add_array_primitive(TYPE_U8, v.len() as u32);
         writer.add_u8_raw_bulk(v);
-      },
+      }
       Value::ArrayU16(v) => {
         writer.add_array_primitive(TYPE_U16, v.len() as u32);
         writer.add_u16_raw_bulk(v);
-      },
+      }
       Value::ArrayU32(v) => {
         writer.add_array_primitive(TYPE_U32, v.len() as u32);
         writer.add_u32_raw_bulk(v);
-      },
+      }
       Value::ArrayU64(v) => {
         writer.add_array_primitive(TYPE_U64, v.len() as u32);
         writer.add_u64_raw_bulk(v);
-      },
+      }
       Value::ArrayS8(v) => {
         writer.add_array_primitive(TYPE_S8, v.len() as u32);
         writer.add_s8_raw_bulk(v);
-      },
+      }
       Value::ArrayS16(v) => {
         writer.add_array_primitive(TYPE_S16, v.len() as u32);
         writer.add_s16_raw_bulk(v);
-      },
+      }
       Value::ArrayS32(v) => {
         writer.add_array_primitive(TYPE_S32, v.len() as u32);
         writer.add_s32_raw_bulk(v);
-      },
+      }
       Value::ArrayS64(v) => {
         writer.add_array_primitive(TYPE_S64, v.len() as u32);
         writer.add_s64_raw_bulk(v);
-      },
+      }
       Value::ArrayR32(v) => {
         writer.add_array_primitive(TYPE_R32, v.len() as u32);
         writer.add_r32_raw_bulk(v);
-      },
+      }
       Value::ArrayR64(v) => {
         writer.add_array_primitive(TYPE_R64, v.len() as u32);
         writer.add_r64_raw_bulk(v);
-      },
+      }
       Value::ArrayString(v) => {
         writer.add_array_primitive(TYPE_STRING, v.len() as u32);
         for s in v {
           writer.add_string(s);
         }
-      },
+      }
       Value::ArrayStructure(id, v) => {
         writer.add_array_structure(id, v.len() as u32);
         for structure in v {
@@ -1372,14 +1481,14 @@ impl<'a> Value<'a> {
             field.value.serialize_writer(writer);
           }
         }
-      },
+      }
       Value::ArrayEnumeration(id, v) => {
         writer.add_array_enumeration(id, v.len() as u32);
         for enumeration in v {
           writer.add_enumeration_value_raw(&enumeration.variant_id);
           enumeration.value.serialize_writer(writer);
         }
-      },
+      }
     }
   }
 

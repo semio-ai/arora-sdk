@@ -19,7 +19,7 @@ pub struct TypeRef {
   pub rvalue_reference: bool,
   pub constant: bool,
   pub pointer: bool,
-  
+
   pub ty: String,
   pub arguments: Option<Vec<TypeRef>>,
 }
@@ -76,7 +76,6 @@ fn indent_string(indent: usize) -> String {
   s
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Parameter {
   pub name: String,
@@ -85,7 +84,12 @@ pub struct Parameter {
 
 impl ToPrettyString for Parameter {
   fn to_pretty_string(&self, indent: usize) -> String {
-    format!("{}{} {}", indent_string(indent), &self.type_ref.to_pretty_string(0), self.name)
+    format!(
+      "{}{} {}",
+      indent_string(indent),
+      &self.type_ref.to_pretty_string(0),
+      self.name
+    )
   }
 }
 
@@ -168,7 +172,11 @@ impl ToPrettyString for FunctionPrototype {
       if i > 0 {
         s.push_str(", ");
       }
-      s.push_str(&format!("{} {}", parameter.type_ref.to_pretty_string(0), parameter.name));
+      s.push_str(&format!(
+        "{} {}",
+        parameter.type_ref.to_pretty_string(0),
+        parameter.name
+      ));
     }
     s.push_str(")");
     if self.constant {
@@ -277,7 +285,11 @@ impl ToPrettyString for FunctionImplementation {
       if i > 0 {
         s.push_str(", ");
       }
-      s.push_str(&format!("{} {}", parameter.type_ref.to_pretty_string(0), parameter.name));
+      s.push_str(&format!(
+        "{} {}",
+        parameter.type_ref.to_pretty_string(0),
+        parameter.name
+      ));
     }
     s.push_str(")");
     if self.constant {
@@ -286,7 +298,7 @@ impl ToPrettyString for FunctionImplementation {
     if self.noexcept {
       s.push_str(" noexcept");
     }
-    
+
     if let Some(assignment) = &self.assignment {
       s.push_str(&format!(" = {};\n", assignment.to_pretty_string(0)));
     } else {
@@ -301,7 +313,7 @@ impl ToPrettyString for FunctionImplementation {
 
 pub struct Block {
   pub statements: Vec<Declaration>,
-  pub semicolon: bool
+  pub semicolon: bool,
 }
 
 impl Default for Block {
@@ -690,7 +702,11 @@ impl ToPrettyString for Statement {
   fn to_pretty_string(&self, indent: usize) -> String {
     match self {
       Statement::Expression(expression) => format!("{};\n", expression.to_pretty_string(indent)),
-      Statement::Return(expression) => format!("{}return {};\n", &indent_string(indent), expression.to_pretty_string(0)),
+      Statement::Return(expression) => format!(
+        "{}return {};\n",
+        &indent_string(indent),
+        expression.to_pretty_string(0)
+      ),
       Statement::Break => format!("{}break;\n", &indent_string(indent)),
       Statement::Continue => format!("{}continue;\n", &indent_string(indent)),
       Statement::If(expression, block, else_block) => {
@@ -715,7 +731,7 @@ impl ToPrettyString for Statement {
         s.push_str(")\n");
         s.push_str(&block.to_pretty_string(indent));
         s
-      },
+      }
       Statement::Switch(expression, cases) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
@@ -734,7 +750,7 @@ impl ToPrettyString for Statement {
         s.push_str(&indent_string(indent));
         s.push_str("}\n");
         s
-      },
+      }
       Statement::Case(expression) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
@@ -748,7 +764,7 @@ impl ToPrettyString for Statement {
         s.push_str(&indent_string(indent));
         s.push_str("default:\n");
         s
-      },
+      }
       Statement::Goto(label) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
@@ -756,14 +772,14 @@ impl ToPrettyString for Statement {
         s.push_str(&label);
         s.push_str(";\n");
         s
-      },
+      }
       Statement::Label(label) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
         s.push_str(&label);
         s.push_str(":\n");
         s
-      },
+      }
     }
   }
 }
@@ -825,7 +841,10 @@ impl Expression {
   }
 
   pub fn call<E: ToExpression, I: IntoIterator<Item = E>>(&self, args: I) -> Expression {
-    Expression::Call(Box::new(self.clone()), args.into_iter().map(|a| a.to_expression()).collect())
+    Expression::Call(
+      Box::new(self.clone()),
+      args.into_iter().map(|a| a.to_expression()).collect(),
+    )
   }
 
   pub fn dot<E: ToExpression>(&self, member: E) -> Expression {
@@ -913,25 +932,90 @@ impl ToPrettyString for Expression {
       Expression::Identifier(identifier) => identifier.to_string(),
       Expression::IntegerLiteral(value) => value.to_string(),
       Expression::StringLiteral(string) => format!("\"{}\"", string),
-      Expression::Equal(left, right) => format!("{} == {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::NotEqual(left, right) => format!("{} != {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::LessThan(left, right) => format!("{} < {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::LessThanOrEqual(left, right) => format!("{} <= {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::GreaterThan(left, right) => format!("{} > {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::Arrow(left, right) => format!("{}->{}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::Dot(left, right) => format!("{}.{}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::Call(left, args) => format!("{}({})", left.to_pretty_string(0), args.iter().map(|arg| arg.to_pretty_string(0)).collect::<Vec<String>>().join(", ")),
-      Expression::ColonColon(left, right) => format!("{}::{}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::Equal(left, right) => format!(
+        "{} == {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::NotEqual(left, right) => format!(
+        "{} != {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::LessThan(left, right) => format!(
+        "{} < {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::LessThanOrEqual(left, right) => format!(
+        "{} <= {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::GreaterThan(left, right) => format!(
+        "{} > {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::Arrow(left, right) => format!(
+        "{}->{}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::Dot(left, right) => {
+        format!("{}.{}", left.to_pretty_string(0), right.to_pretty_string(0))
+      }
+      Expression::Call(left, args) => format!(
+        "{}({})",
+        left.to_pretty_string(0),
+        args
+          .iter()
+          .map(|arg| arg.to_pretty_string(0))
+          .collect::<Vec<String>>()
+          .join(", ")
+      ),
+      Expression::ColonColon(left, right) => format!(
+        "{}::{}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
       Expression::Parenthesized(expr) => format!("({})", expr.to_pretty_string(0)),
-      Expression::ArrayAccess(left, right) => format!("{}[{}]", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::InitializerList(exprs) => format!("{{ {} }}", exprs.iter().map(|expr| expr.to_pretty_string(0)).collect::<Vec<String>>().join(", ")),
-      Expression::LogicalAnd(left, right) => format!("{} && {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::LogicalOr(left, right) => format!("{} || {}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::ArrayAccess(left, right) => format!(
+        "{}[{}]",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::InitializerList(exprs) => format!(
+        "{{ {} }}",
+        exprs
+          .iter()
+          .map(|expr| expr.to_pretty_string(0))
+          .collect::<Vec<String>>()
+          .join(", ")
+      ),
+      Expression::LogicalAnd(left, right) => format!(
+        "{} && {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::LogicalOr(left, right) => format!(
+        "{} || {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
       Expression::LogicalNot(expr) => format!("!{}", expr.to_pretty_string(0)),
       Expression::PreIncrement(expr) => format!("++{}", expr.to_pretty_string(0)),
       Expression::PreDecrement(expr) => format!("--{}", expr.to_pretty_string(0)),
-      Expression::Assign(left, right) => format!("{} = {}", left.to_pretty_string(0), right.to_pretty_string(0)),
-      Expression::AddAssign(left, right) => format!("{} += {}", left.to_pretty_string(0), right.to_pretty_string(0)),
+      Expression::Assign(left, right) => format!(
+        "{} = {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
+      Expression::AddAssign(left, right) => format!(
+        "{} += {}",
+        left.to_pretty_string(0),
+        right.to_pretty_string(0)
+      ),
       Expression::Dereference(expr) => format!("*{}", expr.to_pretty_string(0)),
       Expression::Reference(expr) => format!("&{}", expr.to_pretty_string(0)),
       Expression::Default => "default".to_string(),
@@ -939,7 +1023,6 @@ impl ToPrettyString for Expression {
     s
   }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Variable {
@@ -984,7 +1067,6 @@ impl Default for Variable {
     }
   }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TranslationUnit {

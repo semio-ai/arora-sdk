@@ -14,9 +14,9 @@ pub struct SemanticVersion {
 
 #[cfg(test)]
 mod tests {
+  use crate::module::high::{ExportSymbol, ModuleDefinition};
   use std::str::FromStr;
   use uuid::Uuid;
-  use crate::module::high::{ModuleDefinition, ExportSymbol};
 
   #[test]
   fn parse_uuid() {
@@ -41,7 +41,7 @@ ret:
       _ => panic!("Parsed function export symbol not recognized"),
     }
   }
-  
+
   #[test]
   fn parse_function() {
     let function_string = "\

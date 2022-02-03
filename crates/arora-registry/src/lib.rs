@@ -1,10 +1,15 @@
+use std::{any::Any, collections::HashMap};
 
-use std::{collections::HashMap, any::Any};
-
-use arora_schema::{module::low::{Header, ModuleDefinition}, ty::low::Type};
-use tokio::{fs::{read_to_string, File}, io::AsyncReadExt};
-use uuid::Uuid;
+use arora_schema::{
+  module::low::{Header, ModuleDefinition},
+  ty::low::Type,
+};
+use tokio::{
+  fs::{read_to_string, File},
+  io::AsyncReadExt,
+};
 use url::Url;
+use uuid::Uuid;
 
 const BASE_URL: &'static str = "https://raw.githubusercontent.com/semio-ai/arora-registry/master/";
 
@@ -35,7 +40,14 @@ impl Registry {
       file.read_to_end(&mut data).await?;
       Ok(data.into_boxed_slice())
     } else {
-      Ok(reqwest::get(url).await?.bytes().await?.to_vec().into_boxed_slice())
+      Ok(
+        reqwest::get(url)
+          .await?
+          .bytes()
+          .await?
+          .to_vec()
+          .into_boxed_slice(),
+      )
     }
   }
 
@@ -72,7 +84,9 @@ impl Registry {
   }
 
   pub async fn get_module_header(&self, id: &Uuid) -> anyhow::Result<Header> {
-    let uri = self.base_uri.join(&format!("modules/by-uuid/{id}/header.yaml"))?;
+    let uri = self
+      .base_uri
+      .join(&format!("modules/by-uuid/{id}/header.yaml"))?;
     let text = Self::get_text(uri).await?;
     let header: Header = serde_yaml::from_str(&text)?;
     Ok(header)
@@ -81,7 +95,9 @@ impl Registry {
   pub async fn get_module(&self, id: &Uuid) -> anyhow::Result<ModuleDefinition> {
     let header = self.get_module_header(id).await?;
 
-    let uri = self.base_uri.join(&format!("modules/by-uuid/{id}/executable.bin"))?;
+    let uri = self
+      .base_uri
+      .join(&format!("modules/by-uuid/{id}/executable.bin"))?;
     let executable = Self::get_bytes(uri).await?;
 
     Ok(ModuleDefinition {
@@ -92,7 +108,9 @@ impl Registry {
   }
 
   pub async fn lookup_module(&self, name: &str) -> anyhow::Result<Uuid> {
-    let uri = self.base_uri.join(&format!("{BASE_URL}/modules/by-name/{name}"))?;
+    let uri = self
+      .base_uri
+      .join(&format!("{BASE_URL}/modules/by-name/{name}"))?;
     Ok(Uuid::parse_str(&Self::get_text(uri).await?)?)
   }
 }

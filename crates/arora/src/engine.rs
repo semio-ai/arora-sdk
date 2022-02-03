@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt::Debug, sync::{Arc, RwLock, atomic::AtomicPtr}, pin::Pin};
+use std::{
+  collections::HashMap,
+  fmt::Debug,
+  pin::Pin,
+  sync::{atomic::AtomicPtr, Arc, RwLock},
+};
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
@@ -6,7 +11,7 @@ use uuid::Uuid;
 use crate::{
   actor::{Actor, Addr, Request},
   executor::{self, Executor},
-  module::{Module, DispatchError},
+  module::{DispatchError, Module},
   schema::module::low::ModuleDefinition,
 };
 
@@ -95,11 +100,14 @@ impl Engine {
         executor.set_engine(engine as *mut Engine);
       }
     }
-    
+
     ret
   }
 
-  pub fn load_module(&mut self, module_definition: ModuleDefinition) -> Result<(), LoadModuleError> {
+  pub fn load_module(
+    &mut self,
+    module_definition: ModuleDefinition,
+  ) -> Result<(), LoadModuleError> {
     let module_id = module_definition.header.id;
     let executor_name = module_definition.header.executor.name.as_str();
 
@@ -115,12 +123,19 @@ impl Engine {
       .get_mut(executor_name)
       .ok_or_else(|| LoadModuleError::ExecutorNotFound)?;
 
-    self.modules.insert(module_id, executor.load_module(module_definition)?);
+    self
+      .modules
+      .insert(module_id, executor.load_module(module_definition)?);
 
     Ok(())
   }
 
-  pub fn dispatch(&mut self, module_id: &Uuid, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+  pub fn dispatch(
+    &mut self,
+    module_id: &Uuid,
+    method_id: &Uuid,
+    arg: &[u8],
+  ) -> Result<Box<[u8]>, DispatchError> {
     let module = self
       .modules
       .get_mut(&module_id)

@@ -1,14 +1,14 @@
 use std::borrow::Cow;
 
 use uuid::Uuid;
-use wasmtime::{Memory, AsContext, AsContextMut};
+use wasmtime::{AsContext, AsContextMut, Memory};
 
 pub struct AroraBuffer<'a>(pub Cow<'a, [u8]>);
 
 impl AsRef<[u8]> for AroraBuffer<'_> {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
+  fn as_ref(&self) -> &[u8] {
+    &self.0
+  }
 }
 
 pub trait ReadWasmMemory {
@@ -16,7 +16,12 @@ pub trait ReadWasmMemory {
 }
 
 pub trait WriteWasmMemory {
-  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(&self, context: &mut C, memory: Memory, offset: u32);
+  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
+    &self,
+    context: &mut C,
+    memory: Memory,
+    offset: u32,
+  );
 }
 
 impl ReadWasmMemory for Uuid {
@@ -28,8 +33,15 @@ impl ReadWasmMemory for Uuid {
 }
 
 impl WriteWasmMemory for Uuid {
-  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(&self, context: &mut C, memory: Memory, offset: u32) {
-    memory.write(context, offset as usize, self.as_bytes()).unwrap();
+  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
+    &self,
+    context: &mut C,
+    memory: Memory,
+    offset: u32,
+  ) {
+    memory
+      .write(context, offset as usize, self.as_bytes())
+      .unwrap();
   }
 }
 
@@ -42,7 +54,12 @@ impl<const N: usize> ReadWasmMemory for [u8; N] {
 }
 
 impl<const N: usize> WriteWasmMemory for [u8; N] {
-  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(&self, context: &mut C, memory: Memory, offset: u32) {
+  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
+    &self,
+    context: &mut C,
+    memory: Memory,
+    offset: u32,
+  ) {
     memory.write(context, offset as usize, self).unwrap();
   }
 }
@@ -56,8 +73,15 @@ impl ReadWasmMemory for u32 {
 }
 
 impl WriteWasmMemory for u32 {
-  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(&self, context: &mut C, memory: Memory, offset: u32) {
-    self.to_le_bytes().write_wasm_memory(context, memory, offset);
+  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
+    &self,
+    context: &mut C,
+    memory: Memory,
+    offset: u32,
+  ) {
+    self
+      .to_le_bytes()
+      .write_wasm_memory(context, memory, offset);
   }
 }
 
@@ -68,13 +92,20 @@ impl<'a> ReadWasmMemory for AroraBuffer<'a> {
     let mut buffer = Vec::with_capacity(size as usize + 4);
     buffer.resize(size as usize + 4, 0u8);
     memory.read(&context, offset as usize, &mut buffer).unwrap();
-    
+
     AroraBuffer(Cow::Owned(buffer))
   }
 }
 
 impl<'a> WriteWasmMemory for AroraBuffer<'a> {
-  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(&self, context: &mut C, memory: Memory, offset: u32) {
-    memory.write(context, offset as usize, self.as_ref()).unwrap();
+  fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
+    &self,
+    context: &mut C,
+    memory: Memory,
+    offset: u32,
+  ) {
+    memory
+      .write(context, offset as usize, self.as_ref())
+      .unwrap();
   }
 }

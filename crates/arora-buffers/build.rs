@@ -13,7 +13,10 @@ fn main() {
     .rename_item("BufferWriter", "arora_buffer_writer")
     .rename_item("BufferReader", "arora_buffer_reader")
     .rename_item("GetStructureResult", "arora_get_structure_result")
-    .rename_item("GetEnumerationValueResult", "arora_get_enumeration_value_result")
+    .rename_item(
+      "GetEnumerationValueResult",
+      "arora_get_enumeration_value_result",
+    )
     .rename_item("GetArrayResult", "arora_get_array_result")
     .rename_item("TYPE_UNIT", "ARORA_BUFFER_TYPE_UNIT")
     .rename_item("TYPE_BOOLEAN", "ARORA_BUFFER_TYPE_BOOLEAN")

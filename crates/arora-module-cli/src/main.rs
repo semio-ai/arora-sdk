@@ -1,27 +1,24 @@
-use std::{path::Path, collections::HashMap};
+use std::{collections::HashMap, path::Path};
 
-use clap::{Parser, Subcommand, AppSettings};
 use arora_registry::Registry;
 use arora_schema::{
+  module::high::TypeRef as HighTypeRef,
+  module::low::TypeRef as LowTypeRef,
   ty::{
+    high::{Type as HighType, TypeKind as HighTypeKind},
     low::{
-      Type as LowType,
+      Enumeration as LowEnumeration, EnumerationValue as LowEnumerationValue,
+      Structure as LowStructure, StructureField as LowStructureField, Type as LowType,
       TypeKind as LowTypeKind,
-      Structure as LowStructure,
-      Enumeration as LowEnumeration,
-      StructureField as LowStructureField,
-      EnumerationValue as LowEnumerationValue
     },
-    high::{
-      Type as HighType,
-      TypeKind as HighTypeKind,
-    }
   },
-  module::low::{TypeRef as LowTypeRef},
-  module::high::{TypeRef as HighTypeRef},
 };
+use clap::{AppSettings, Parser, Subcommand};
 
-use tokio::{fs::{read_to_string, File}, io::AsyncWriteExt};
+use tokio::{
+  fs::{read_to_string, File},
+  io::AsyncWriteExt,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -60,9 +57,8 @@ enum Commands {
   #[clap(name = "export-type")]
   ExportType(ExportType),
   #[clap(name = "export-module")]
-  ExportModule(ExportModule)
+  ExportModule(ExportModule),
 }
-
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -77,18 +73,23 @@ struct Args {
   command: Commands,
 }
 
-async fn lookup_type_ref(type_ref: &HighTypeRef, registry: &mut Registry) -> anyhow::Result<LowTypeRef> {
+async fn lookup_type_ref(
+  type_ref: &HighTypeRef,
+  registry: &mut Registry,
+) -> anyhow::Result<LowTypeRef> {
   Ok(match type_ref {
-    HighTypeRef::Scalar { id } => LowTypeRef::Scalar { id: registry.lookup_type(&id).await? },
-    HighTypeRef::Array { id } => LowTypeRef::Array { id: registry.lookup_type(&id).await? },
+    HighTypeRef::Scalar { id } => LowTypeRef::Scalar {
+      id: registry.lookup_type(&id).await?,
+    },
+    HighTypeRef::Array { id } => LowTypeRef::Array {
+      id: registry.lookup_type(&id).await?,
+    },
     HighTypeRef::Map { key_id, value_id } => LowTypeRef::Map {
       key_id: registry.lookup_type(&key_id).await?,
       value_id: registry.lookup_type(&value_id).await?,
     },
   })
 }
-
-
 
 async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result<()> {
   let low_type = if !cmd.no_resolution {
@@ -109,32 +110,36 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
           for (id, field) in high_structure.fields.iter() {
             match lookup_type_ref(&field.ty, registry).await {
               Ok(type_ref) => {
-                low_fields.insert(*id, LowStructureField {
-                  name: field.name.clone(),
-                  type_ref,
-                });
-              },
+                low_fields.insert(
+                  *id,
+                  LowStructureField {
+                    name: field.name.clone(),
+                    type_ref,
+                  },
+                );
+              }
               Err(err) => {
                 eprintln!("Failed to lookup type {:?}: {}", field.ty, err);
                 std::process::exit(1);
               }
             }
           }
-          LowTypeKind::Structure(LowStructure {
-            fields: low_fields,
-          })
-        },
+          LowTypeKind::Structure(LowStructure { fields: low_fields })
+        }
         HighTypeKind::Enumeration(high_enumeration) => {
           let mut low_values = HashMap::new();
-          
+
           for (id, value) in high_enumeration.values.iter() {
             match lookup_type_ref(&value.ty, registry).await {
               Ok(type_ref) => {
-                low_values.insert(*id, LowEnumerationValue {
-                  name: value.name.clone(),
-                  type_ref,
-                });
-              },
+                low_values.insert(
+                  *id,
+                  LowEnumerationValue {
+                    name: value.name.clone(),
+                    type_ref,
+                  },
+                );
+              }
               Err(err) => {
                 eprintln!("Failed to lookup type {:?}: {}", &value.ty, err);
                 std::process::exit(1);
@@ -142,9 +147,7 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
             }
           }
 
-          LowTypeKind::Enumeration(LowEnumeration {
-            values: low_values,
-          })
+          LowTypeKind::Enumeration(LowEnumeration { values: low_values })
         }
       },
     }
@@ -152,18 +155,21 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
     serde_yaml::from_str(&read_to_string(cmd.input_file).await?)?
   };
 
-  let output_path = Path::new(&cmd.output_directory)
-    .join(format!("types/by-uuid/{}.yaml", low_type.id));
+  let output_path =
+    Path::new(&cmd.output_directory).join(format!("types/by-uuid/{}.yaml", low_type.id));
 
   let mut output_file = File::create(&output_path).await?;
-  output_file.write_all(serde_yaml::to_string(&low_type)?.as_bytes()).await?;
+  output_file
+    .write_all(serde_yaml::to_string(&low_type)?.as_bytes())
+    .await?;
 
-
-  let name_output_path = Path::new(&cmd.output_directory)
-    .join(format!("types/by-name/{}", low_type.name));
+  let name_output_path =
+    Path::new(&cmd.output_directory).join(format!("types/by-name/{}", low_type.name));
 
   let mut name_output_file = File::create(&name_output_path).await?;
-  name_output_file.write_all(format!("{}", low_type.id).as_bytes()).await?;
+  name_output_file
+    .write_all(format!("{}", low_type.id).as_bytes())
+    .await?;
 
   Ok(())
 }
@@ -174,8 +180,7 @@ async fn export_module(cmd: ExportModule, registry: Registry) -> anyhow::Result<
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-  env_logger::builder()
-    .init();
+  env_logger::builder().init();
 
   let args = Args::parse();
 
@@ -188,12 +193,15 @@ async fn main() -> anyhow::Result<()> {
   match args.command {
     Commands::Generate(cmd) => {
       generate(cmd, &mut registry).await?;
-    },
+    }
     Commands::ExportType(export_type_data) => {
       export_type(export_type_data, &mut registry).await?;
-    },
+    }
     Commands::ExportModule(export_module_data) => {
-      println!("Exporting module to {}", export_module_data.output_directory);
+      println!(
+        "Exporting module to {}",
+        export_module_data.output_directory
+      );
     }
   }
 
