@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::module::high::TypeRef;
@@ -9,24 +9,24 @@ use crate::module::high::TypeRef;
 pub struct StructureField {
   pub name: String,
   #[serde(rename = "type")]
-  pub ty: TypeRef
+  pub ty: TypeRef,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Structure {
-  pub fields: HashMap<Uuid, StructureField>
+  pub fields: HashMap<Uuid, StructureField>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnumerationValue {
   pub name: String,
   #[serde(rename = "type")]
-  pub ty: TypeRef
+  pub ty: TypeRef,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Enumeration {
-  pub values: HashMap<Uuid, EnumerationValue>
+  pub values: HashMap<Uuid, EnumerationValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,5 +40,5 @@ pub enum TypeKind {
 pub struct Type {
   pub name: String,
   pub description: String,
-  pub kind: TypeKind
+  pub kind: TypeKind,
 }
