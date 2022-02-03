@@ -5,6 +5,7 @@
     "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/wasi-sdk-14.0/share/cmake/wasi-sdk.cmake",
     "-DCMAKE_SYSROOT=${workspaceFolder}/wasi-sdk-14.0/share/wasi-sysroot"
   ],
+  "cmake.buildDirectory": "${workspaceFolder}/build-vscode",
   "C_Cpp.default.includePath": [
     "${workspaceRoot}/target/include",
     "${workspaceRoot}/libs/cpp/include",
