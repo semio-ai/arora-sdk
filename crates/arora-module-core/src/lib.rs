@@ -33,7 +33,7 @@ impl<'a, W: AsyncWrite + Unpin> Writer<'a, W> {
     Ok(())
   }
 
-  pub async fn end(mut self) -> tokio::io::Result<()> {
+  pub async fn end(self) -> tokio::io::Result<()> {
     let mut size = [0u8; 4];
     (&mut size[..]).put_u32(0);
     self.writer.write_all(&size).await?;
