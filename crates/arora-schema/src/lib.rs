@@ -38,7 +38,6 @@ ret:
     let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
-      _ => panic!("Parsed function export symbol not recognized"),
     }
   }
 
@@ -65,7 +64,6 @@ ret:
     let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
-      _ => panic!("Parsed function export symbol not recognized"),
     }
   }
 

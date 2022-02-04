@@ -1,8 +1,7 @@
 use arora_registry::Registry;
 use arora_schema::module::{
   high::{
-    Executor as HighExecutor, ExportFunction as HighExportFunction,
-    ExportSymbol as HighExportSymbol, ImportFunction as HighImportFunction,
+    ExportSymbol as HighExportSymbol,
     ImportSymbol as HighImportSymbol, ModuleDefinition as HighModuleDefinition,
     Parameter as HighParameter, TypeRef as HighTypeRef,
   },

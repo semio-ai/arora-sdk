@@ -687,9 +687,6 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   declarations.push(declare::uuid_variable(id::module_uuid(&header.name), &header.id).into());
 
   for export in context.exports.values() {
-    let name = export.name().clone();
-    let name = context.args.method_style.convert(&name);
-
     match export {
       ExportSymbol::Function(f) => {
         let mut sorted_parameters: Vec<&LowParameter> = f.parameters.iter().collect();

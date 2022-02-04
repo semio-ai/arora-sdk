@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
   ast::{
     ArrayKind, Block, Declaration, Enum, Expression, FunctionImplementation, FunctionPrototype,
-    Parameter, Statement, Struct, ToExpression, ToPrettyString, TranslationUnit, TypeRef, Union,
+    Parameter, Statement, Struct, ToExpression, ToPrettyString, TypeRef,
     Variable,
   },
   constant, func, id, ty, Context,
@@ -146,7 +146,7 @@ pub fn arora_buffer_reader_get_structure() -> Expression {
 
 pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
   let mut declarations = Vec::new();
-  for (id, field) in &ty.fields {
+  for (_, field) in &ty.fields {
     declarations.push(
       FunctionPrototype {
         name: field.name.clone(),
@@ -197,7 +197,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
 
   declarations.push(Declaration::private());
 
-  for (id, field) in &ty.fields {
+  for (_, field) in &ty.fields {
     declarations.push(
       Variable {
         name: format!("{}_", &field.name),
@@ -222,7 +222,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
   }
 }
 
-pub fn enumeration_constants(id: &Uuid, name: &str, ty: &Enumeration) -> Vec<Declaration> {
+pub fn enumeration_constants(_: &Uuid, name: &str, ty: &Enumeration) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -252,7 +252,7 @@ pub fn enumeration_constants(id: &Uuid, name: &str, ty: &Enumeration) -> Vec<Dec
   ret
 }
 
-pub fn structure_constants(id: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+pub fn structure_constants(_: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -365,7 +365,7 @@ pub fn is_unit(ty: &arora_schema::module::low::TypeRef) -> bool {
 
 pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
   let mut enumeration_values = Vec::new();
-  for (id, value) in ty.values.iter() {
+  for (_, value) in ty.values.iter() {
     enumeration_values.push(value.name.clone());
   }
 
@@ -571,7 +571,7 @@ pub fn ty(context: &Context, ty: &Type) -> Struct {
 
 pub fn enumeration_impl(
   context: &Context,
-  id: &Uuid,
+  _: &Uuid,
   name: &str,
   ty: &Enumeration,
 ) -> Vec<Declaration> {
@@ -1042,7 +1042,7 @@ pub fn structure_deserializer(
 
 pub fn enumeration_deserializer(
   context: &Context,
-  id: &Uuid,
+  _: &Uuid,
   name: &str,
   ty: &Enumeration,
 ) -> FunctionImplementation {
@@ -1328,8 +1328,8 @@ pub fn structure_serializer(
 }
 
 pub fn enumeration_serializer(
-  context: &Context,
-  enum_type_id: &Uuid,
+  _: &Context,
+  _: &Uuid,
   enum_type_name: &str,
   enum_type: &Enumeration,
 ) -> FunctionImplementation {
@@ -1339,7 +1339,7 @@ pub fn enumeration_serializer(
   let value = value_name.to_expression();
   let enum_type_enum = enum_type_name.to_expression().colon_colon("Type");
   let mut switch_cases = Vec::<(Expression, Block)>::new();
-  for (enum_value_id, enum_value) in &enum_type.values {
+  for (_, enum_value) in &enum_type.values {
     let mut case_statements: Vec<Declaration> = Vec::new();
     case_statements.push(Declaration::Statement(Statement::Expression(
       func::ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE.call([
