@@ -295,15 +295,12 @@ impl BufferWriter {
 }
 
 pub struct BufferReader<'a> {
-  size: u32,
   backing: &'a [u8],
 }
 
 impl<'a> BufferReader<'a> {
-  pub fn new(mut buffer: &'a [u8]) -> Self {
-    let size = buffer.get_u32_le();
+  pub fn new(buffer: &'a [u8]) -> Self {
     Self {
-      size,
       backing: buffer,
     }
   }

@@ -750,13 +750,13 @@ pub fn enumeration_impl(
 
 pub fn structure_impl(
   context: &Context,
-  id: &Uuid,
+  _: &Uuid,
   name: &str,
   ty: &Structure,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
-  for (id, field) in ty.fields.iter() {
+  for (_, field) in ty.fields.iter() {
     ret.push(
       FunctionImplementation {
         name: format!("{}::{}", name, field.name.to_lowercase()),

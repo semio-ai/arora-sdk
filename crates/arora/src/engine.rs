@@ -2,14 +2,11 @@ use std::{
   collections::HashMap,
   fmt::Debug,
   pin::Pin,
-  sync::{atomic::AtomicPtr, Arc, RwLock},
 };
 
-use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::{
-  actor::{Actor, Addr, Request},
   executor::{self, Executor},
   module::{DispatchError, Module},
   schema::module::low::ModuleDefinition,
@@ -86,7 +83,7 @@ impl Engine {
 
     {
       let engine = &mut *ret.as_mut() as *mut Engine;
-      for (id, executor) in ret.executors.iter_mut() {
+      for (_, executor) in ret.executors.iter_mut() {
         executor.set_engine(engine as *mut Engine);
       }
     }

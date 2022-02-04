@@ -1,15 +1,11 @@
 pub mod wasm;
 
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
-  actor::{Actor, Addr, Request},
-  engine::{Engine, EngineRef},
+  engine::EngineRef,
   module::Module,
   schema::module::low::ModuleDefinition,
 };
 use derive_more::{Display, Error, From};
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug, Display, Error, From, Clone)]

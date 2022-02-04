@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use arora_schema::module::low::{ExportSymbol, ImportSymbol, ModuleDefinition};
+use arora_schema::module::low::{ExportSymbol, ModuleDefinition};
 use bytes::Buf;
 use uuid::Uuid;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
@@ -21,7 +21,7 @@ use wasmtime::{
 
 mod guest;
 
-use guest::{ReadWasmMemory, WriteWasmMemory};
+use guest::ReadWasmMemory;
 
 #[derive(Debug, Error, Display, From)]
 pub enum InitializationError {
@@ -70,14 +70,14 @@ impl Executor for WebAssemblyExecutor {
     module_definition: ModuleDefinition,
   ) -> Result<Box<dyn Module>, LoadModuleError> {
     let module = WasmModule::from_binary(&self.engine, &module_definition.executable)
-      .map_err(|e| LoadModuleError::MalformedExecutable)?;
+      .map_err(|_| LoadModuleError::MalformedExecutable)?;
 
     let ctx = WasiCtxBuilder::new().inherit_stdio().build();
 
-    let mut store = Store::new(&self.engine, ctx);
+    let store = Store::new(&self.engine, ctx);
 
     let mut linker = Linker::new(&self.engine);
-    wasmtime_wasi::add_to_linker(&mut linker, |s| s).map_err(|e| LoadModuleError::Internal)?;
+    wasmtime_wasi::add_to_linker(&mut linker, |s| s).map_err(|_| LoadModuleError::Internal)?;
 
     Ok(Box::new(
       WebAssemblyModule::new(
@@ -220,7 +220,7 @@ impl WebAssemblyModule {
 
 impl Module for WebAssemblyModule {
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    if let Some((addr, size)) = self.current_arg_memory {
+    if let Some((_, size)) = self.current_arg_memory {
       // Allocate memory for the argument in the WASM module
       if size < arg.len() {
         self.current_arg_memory = Some((self.malloc(arg.len() as u32)? as usize, arg.len()));
