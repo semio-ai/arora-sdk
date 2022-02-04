@@ -1,6 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 use uuid::Uuid;
+
+use crate::module::low::TypeRef;
 
 pub mod high;
 pub mod low;
@@ -40,5 +42,25 @@ lazy_static::lazy_static! {
     ids.insert(ARRAY_ID.clone());
     ids.insert(MAP_ID.clone());
     ids
+  };
+  
+  pub static ref PRIMITIVE_LOW_TYPE_REFS: HashMap<Uuid, TypeRef> = {
+    let mut types: HashMap<Uuid, TypeRef> = HashMap::new();
+    let make_scalar = |id: &Uuid| TypeRef::Scalar { id: id.clone() };
+    let mut insert_scalar_id = |id: &Uuid| types.insert(id.clone(), make_scalar(id));
+    insert_scalar_id(&UNIT_ID);
+    insert_scalar_id(&BOOLEAN_ID);
+    insert_scalar_id(&S8_ID);
+    insert_scalar_id(&S16_ID);
+    insert_scalar_id(&S32_ID);
+    insert_scalar_id(&S64_ID);
+    insert_scalar_id(&U8_ID);
+    insert_scalar_id(&U16_ID);
+    insert_scalar_id(&U32_ID);
+    insert_scalar_id(&U64_ID);
+    insert_scalar_id(&R32_ID);
+    insert_scalar_id(&R64_ID);
+    types.insert(STRING_ID.clone(), TypeRef::Array { id: U8_ID.clone() });
+    types
   };
 }
