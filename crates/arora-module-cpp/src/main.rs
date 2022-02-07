@@ -153,7 +153,7 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
       return;
     }
 
-    let dep_header = context.types.get(dep).unwrap();
+    let dep_header = context.types.get(dep).expect(format!("unknown type {}", dep).as_str());
     include_declarations.push(
       PreprocessorDirective::Include(
         format!("types/{}.hpp", dep_header.name),

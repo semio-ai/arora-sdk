@@ -85,7 +85,7 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::T
       x if *x == *R64_ID => "double".to_string(),
       x if *x == *STRING_ID => "std::string_view".to_string(),
       x => {
-        let ty = context.types.get(&x).unwrap();
+        let ty = context.types.get(&x).expect(format!("encountered unknown type {}", x).as_str());
         ty.name.clone()
       }
     },
