@@ -34,6 +34,7 @@ pub struct Enumeration {
 pub enum TypeKind {
   Structure(Structure),
   Enumeration(Enumeration),
+  Primitive(TypeRef),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
