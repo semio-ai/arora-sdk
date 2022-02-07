@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, fmt::Display};
 
 use arora_schema::{
-  module::low::{Header, ImportFunction, TypeRef, ExportSymbol}, ty::{PRIMITIVE_IDS, PRIMITIVE_LOW_TYPE_REFS},
+  module::low::{Header, ImportFunction, ExportSymbol}, ty::{PRIMITIVE_TYPES, low::Type},
 };
 
 use derive_more::{Display, Error};
@@ -10,20 +10,22 @@ use uuid::Uuid;
 
 /// Local index of assets provided by modules.
 pub struct Index {
-  modules: HashMap<Uuid, Header>,
-  types: HashMap<Uuid, TypeRef>,
-  functions: HashMap<Uuid, ImportFunction>,
+  pub modules: HashMap<Uuid, Header>,
+  pub types: HashMap<Uuid, Type>,
+  pub functions: HashMap<Uuid, ImportFunction>,
 }
 
 impl Index {
   pub fn new() -> Self {
     Self {
       modules: HashMap::new(),
-      types: PRIMITIVE_LOW_TYPE_REFS.clone(),
+      types: PRIMITIVE_TYPES.clone(),
       functions: HashMap::new(),
     }
   }
 
+  /// Add a module, and its exported functions into the index.
+  /// Dependent types must have been added to the module beforehand.
   pub fn add_module(&mut self, header: &Header) -> Result<(), UnresolvedTypesError> {
     self.modules.insert(header.id.clone(), header.clone());
     let mut unresolved_types = HashSet::<Uuid>::new();
@@ -59,12 +61,19 @@ impl Index {
     }
   }
 
+  pub fn add_type(&mut self, ty: Type) {
+    self.types.insert(ty.id.clone(), ty);
+    ()
+  }
+
+  pub fn find_type(&self, type_id: &Uuid) -> Result<&Type, UnresolvedTypesError> {
+    self.types.get(type_id)
+      .ok_or(UnresolvedTypesError { type_ids: vec![type_id.clone()] })
+  }
+
   pub fn find_function(&self, function_id: &Uuid) -> Result<&ImportFunction, UnresolvedFunctionError> {
-    if let Some(function) = self.functions.get(function_id) {
-      Ok(function)
-    } else {
-      Err(UnresolvedFunctionError { function_id: function_id.clone() })
-    }
+    self.functions.get(function_id)
+      .ok_or(UnresolvedFunctionError { function_id: function_id.clone() })
   }
 }
 
@@ -102,16 +111,103 @@ mod tests {
   }
 
   #[test]
-  pub fn add_a_module() -> Result<()> {
+  pub fn add_type() -> Result<()> {
     let mut index = Index::new();
-    let header: Header = serde_yaml::from_str(A_HEADER_YAML)?;
-    index.add_module(&header)?;
+    let status_type: Type = serde_yaml::from_str(STATUS_ENUM_YAML)?;
+    index.add_type(status_type);
+    return Ok(());
+  }
+
+  #[test]
+  pub fn add_two_types() -> Result<()> {
+    let index = new_index_with_types()?;
+    let status_type = index.find_type(&Uuid::from_str("325a5767-e344-4532-860e-0749bcf2e428")?)?;
+    debug_assert_eq!("Status", status_type.name);
+    let structure_type = index.find_type(&Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?)?;
+    debug_assert_eq!("TestStructure1", structure_type.name);
+    return Ok(());
+  }
+
+  #[test]
+  pub fn add_two_types_wrong_order() -> Result<()> {
+    let mut index = Index::new();
+    let status_type: Type = serde_yaml::from_str(STATUS_ENUM_YAML)?;
+    let structure_type: Type = serde_yaml::from_str(SOME_STRUCTURE_YAML)?;
+    index.add_type(structure_type);
+    index.add_type(status_type);
+    return Ok(());
+  }
+
+  fn new_index_with_types() -> Result<Index> {
+    let mut index = Index::new();
+    let status_type: Type = serde_yaml::from_str(STATUS_ENUM_YAML)?;
+    index.add_type(status_type);
+    let structure_type: Type = serde_yaml::from_str(SOME_STRUCTURE_YAML)?;
+    index.add_type(structure_type);
+    Ok(index)
+  }
+
+  #[test]
+  pub fn add_a_module() -> Result<()> {
+    let index = new_index_with_some_module()?;
     let function = index.find_function(&Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99")?)?;
-    assert!(function.name == "test");
+    debug_assert_eq!(function.name, "test");
     Ok(())
   }
 
-  pub const A_HEADER_YAML: &'static str = "\
+  fn new_index_with_some_module() -> Result<Index> {
+    let mut index = new_index_with_types()?;
+    let header: Header = serde_yaml::from_str(SOME_HEADER_YAML)?;
+    index.add_module(&header)?;
+    Ok(index)
+  }
+
+  pub const STATUS_ENUM_YAML: &'static str = "\
+---
+name: Status
+id: 325a5767-e344-4532-860e-0749bcf2e428
+description: Behavior Tree status value (success, failure, running)
+kind:
+  type: enumeration
+  values:
+    766e9e9a-446d-4e46-83e6-14b7ca101169:
+      name: Success
+      type:
+        kind: scalar
+        id: 00000000-0000-0000-0000-000000000000
+    2468f46c-bb60-425c-9a4d-9ad326ccc7e2:
+      name: Failure
+      type:
+        kind: scalar
+        id: 00000000-0000-0000-0000-000000000000
+    acd79ec6-0c44-401a-82f8-5da5422d3eec:
+      name: Running
+      type:
+        kind: scalar
+        id: 00000000-0000-0000-0000-000000000000
+";
+
+  pub const SOME_STRUCTURE_YAML: &'static str = "\
+---
+name: TestStructure1
+id: 7f9aedf8-dbde-4020-b5f4-c28a6635ae7c
+description: Test Structure 1
+kind:
+  type: structure
+  fields:
+    7d94a956-e50d-4cc4-9714-f62e1f9b134e:
+      name: status
+      type:
+        kind: array
+        id: 325a5767-e344-4532-860e-0749bcf2e428
+    5ffa9104-1e5c-4026-943f-8db38bd34563:
+      name: integer_array
+      type:
+        kind: array
+        id: 00000000-0000-0000-0000-000000000004
+";
+
+  pub const SOME_HEADER_YAML: &'static str = "\
 ---
 id: 325c5e47-32db-4e23-a38f-7a2849647e0c
 name: test-cpp
