@@ -286,6 +286,7 @@ pub fn type_constants(id: &Uuid, ty: &Type) -> Vec<Declaration> {
   match &ty.kind {
     TypeKind::Structure(v) => structure_constants(id, &ty.name, v),
     TypeKind::Enumeration(v) => enumeration_constants(id, &ty.name, v),
+    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   }
 }
 
@@ -353,6 +354,7 @@ pub fn type_constants_impl(id: &Uuid, ty: &Type) -> Vec<Declaration> {
   match &ty.kind {
     TypeKind::Structure(v) => structure_constants_impl(id, &ty.name, v),
     TypeKind::Enumeration(v) => enumeration_constants_impl(id, &ty.name, v),
+    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   }
 }
 
@@ -566,6 +568,7 @@ pub fn ty(context: &Context, ty: &Type) -> Struct {
   match &ty.kind {
     TypeKind::Enumeration(value) => enumeration(context, &ty.name, &value),
     TypeKind::Structure(value) => structure(context, &ty.name, &value),
+    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   }
 }
 
@@ -832,6 +835,7 @@ pub fn ty_impl(context: &Context, ty: &Type) -> Vec<Declaration> {
   match &ty.kind {
     TypeKind::Enumeration(value) => enumeration_impl(context, &ty.id, &ty.name, &value),
     TypeKind::Structure(value) => structure_impl(context, &ty.id, &ty.name, &value),
+    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   }
 }
 
@@ -1177,6 +1181,7 @@ pub fn type_of(ty: &Type) -> FunctionImplementation {
   let buffer_type_constant = match ty.kind {
     TypeKind::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
     TypeKind::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
+    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   };
 
   FunctionImplementation {

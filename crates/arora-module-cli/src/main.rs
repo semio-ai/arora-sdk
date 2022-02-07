@@ -100,56 +100,62 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
       Uuid::new_v4()
     };
 
+    let kind = match high_type.kind {
+      HighTypeKind::Structure(high_structure) => {
+        let mut low_fields = HashMap::new();
+        for (id, field) in high_structure.fields.iter() {
+          match lookup_type_ref(&field.ty, registry).await {
+            Ok(type_ref) => {
+              low_fields.insert(
+                *id,
+                LowStructureField {
+                  name: field.name.clone(),
+                  type_ref,
+                },
+              );
+            }
+            Err(err) => {
+              eprintln!("Failed to lookup type {:?}: {}", field.ty, err);
+              std::process::exit(1);
+            }
+          }
+        }
+        LowTypeKind::Structure(LowStructure { fields: low_fields })
+      }
+      HighTypeKind::Enumeration(high_enumeration) => {
+        let mut low_values = HashMap::new();
+
+        for (id, value) in high_enumeration.values.iter() {
+          match lookup_type_ref(&value.ty, registry).await {
+            Ok(type_ref) => {
+              low_values.insert(
+                *id,
+                LowEnumerationValue {
+                  name: value.name.clone(),
+                  type_ref,
+                },
+              );
+            }
+            Err(err) => {
+              eprintln!("Failed to lookup type {:?}: {}", &value.ty, err);
+              std::process::exit(1);
+            }
+          }
+        }
+
+        LowTypeKind::Enumeration(LowEnumeration { values: low_values })
+      }
+      HighTypeKind::Primitive(_) =>  {
+        eprintln!("Forbidden to register primitive type {}", &high_type.name);
+        std::process::exit(1);
+      }
+    };
+
     LowType {
       id,
       name: high_type.name,
       description: high_type.description,
-      kind: match high_type.kind {
-        HighTypeKind::Structure(high_structure) => {
-          let mut low_fields = HashMap::new();
-          for (id, field) in high_structure.fields.iter() {
-            match lookup_type_ref(&field.ty, registry).await {
-              Ok(type_ref) => {
-                low_fields.insert(
-                  *id,
-                  LowStructureField {
-                    name: field.name.clone(),
-                    type_ref,
-                  },
-                );
-              }
-              Err(err) => {
-                eprintln!("Failed to lookup type {:?}: {}", field.ty, err);
-                std::process::exit(1);
-              }
-            }
-          }
-          LowTypeKind::Structure(LowStructure { fields: low_fields })
-        }
-        HighTypeKind::Enumeration(high_enumeration) => {
-          let mut low_values = HashMap::new();
-
-          for (id, value) in high_enumeration.values.iter() {
-            match lookup_type_ref(&value.ty, registry).await {
-              Ok(type_ref) => {
-                low_values.insert(
-                  *id,
-                  LowEnumerationValue {
-                    name: value.name.clone(),
-                    type_ref,
-                  },
-                );
-              }
-              Err(err) => {
-                eprintln!("Failed to lookup type {:?}: {}", &value.ty, err);
-                std::process::exit(1);
-              }
-            }
-          }
-
-          LowTypeKind::Enumeration(LowEnumeration { values: low_values })
-        }
-      },
+      kind: kind,
     }
   } else {
     serde_yaml::from_str(&read_to_string(cmd.input_file).await?)?

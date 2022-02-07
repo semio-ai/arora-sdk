@@ -54,6 +54,7 @@ impl Enumeration {
 pub enum TypeKind {
   Structure(Structure),
   Enumeration(Enumeration),
+  Primitive(TypeRef),
 }
 
 impl TypeKind {
@@ -61,6 +62,7 @@ impl TypeKind {
     match self {
       Self::Structure(s) => s.type_dependencies(),
       Self::Enumeration(e) => e.type_dependencies(),
+      Self::Primitive(_) => HashSet::new(),
     }
   }
 }
