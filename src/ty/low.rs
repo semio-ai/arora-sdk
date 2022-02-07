@@ -5,14 +5,14 @@ use uuid::Uuid;
 
 use crate::module::low::TypeRef;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StructureField {
   pub name: String,
   #[serde(rename = "type")]
   pub type_ref: TypeRef,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Structure {
   pub fields: HashMap<Uuid, StructureField>,
 }
@@ -27,14 +27,14 @@ impl Structure {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnumerationValue {
   pub name: String,
   #[serde(rename = "type")]
   pub type_ref: TypeRef,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Enumeration {
   pub values: HashMap<Uuid, EnumerationValue>,
 }
@@ -49,7 +49,7 @@ impl Enumeration {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TypeKind {
   Structure(Structure),
@@ -65,7 +65,7 @@ impl TypeKind {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Type {
   pub name: String,
   pub id: Uuid,
