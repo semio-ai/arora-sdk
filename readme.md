@@ -22,6 +22,20 @@ cd build
 make # or ninja on Windows
 ```
 
+## Debug
+
+To build rust crates in debug, you can configure it with:
+
+```bash
+./configure.py USE_RUST_DEBUG=1
+```
+
+To get backtraces from fatal errors in code generation tools, try:
+
+```bash
+RUST_BACKTRACE=& cmake --build build/
+```
+
 ## Modules
 
 Modules are the building blocks of Semio Arora. Each module exports symbols for other modules to use.
