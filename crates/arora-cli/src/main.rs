@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
   let start_time = std::time::Instant::now();
   let nof_iterations = 20;
   for _i in 1..nof_iterations {
-    let raw_result = engine.dispatch(&module_id, &method_id, &arg)?;
+    /*let raw_result =*/ engine.dispatch(&module_id, &method_id, &arg)?;
     // let result = unsafe { Value::deserialize(&raw_result) };
     // println!("{:#?}", result);
   }
