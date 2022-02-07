@@ -1263,7 +1263,6 @@ pub fn structure_serializer(
 
   for field_id in sorted_field_ids {
     let field = ty.fields.get(field_id).unwrap();
-    eprintln!("FIELD: {:?}", field);
     let value_accessor = value_name.to_expression().dot(field.name.as_str());
     function_statements.push(
       Statement::If(
