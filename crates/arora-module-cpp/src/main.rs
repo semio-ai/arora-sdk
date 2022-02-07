@@ -1,20 +1,17 @@
 use arora_vfs::{Directory, Entry, File};
 use ast::{
-  ArrayKind, Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
+  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
   IncludeStyle, Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit,
   TypeRef,
 };
 use clap::Parser;
-use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use arora_module_core::{Asset, Reader, Writer};
 
 use arora_schema::{
   module::low::{ExportSymbol, Header, ImportSymbol, Parameter as LowParameter},
-  ty::{
-    low::Type, ARRAY_ID, BOOLEAN_ID, PRIMITIVE_IDS, R32_ID, R64_ID, S16_ID, S32_ID, S64_ID, S8_ID,
-    STRING_ID, U16_ID, U32_ID, U64_ID, U8_ID, UNIT_ID,
-  },
+  ty::{low::Type, PRIMITIVE_IDS},
 };
 use convert_case::{Case, Casing};
 use tokio::io::{stdin, stdout, AsyncWriteExt};
@@ -232,7 +229,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           );
         }
       }
-      _ => panic!("Unimplemented"),
     }
     source_declarations.push(Declaration::new_line(1));
   }
@@ -436,7 +432,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           .into(),
         );
       }
-      _ => panic!("Unimplemented"),
     }
   }
 
@@ -511,7 +506,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           .into(),
         );
       }
-      _ => panic!("Unimplemented"),
     }
   }
 
