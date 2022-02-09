@@ -4,12 +4,14 @@ use std::{
   pin::Pin,
 };
 
+use arora_buffers::uuid::deserialize;
+use arora_schema::value::Value;
 use uuid::Uuid;
 
 use crate::{
   executor::{self, Executor},
   module::{DispatchError, Module},
-  schema::module::low::ModuleDefinition,
+  schema::module::low::ModuleDefinition, call::{Caller, Call, serialize_to_arg},
 };
 
 use derive_more::{Display, Error, From};
@@ -122,16 +124,23 @@ impl Engine {
   pub fn dispatch(
     &mut self,
     module_id: &Uuid,
-    method_id: &Uuid,
+    function_id: &Uuid,
     arg: &[u8],
   ) -> Result<Box<[u8]>, DispatchError> {
     let module = self
       .modules
       .get_mut(&module_id)
-      .ok_or_else(|| DispatchError::MethodNotFound)?;
+      .ok_or_else(|| DispatchError::FunctionNotFound)?;
 
-    module.dispatch(&method_id, &arg)
+    module.dispatch(&function_id, &arg)
   }
 }
 
 pub type EngineRef = *mut Engine;
+
+impl Caller for Engine {
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, DispatchError> {
+    self.dispatch(&module, &call.id.clone(), serialize_to_arg(call).as_ref())
+      .map(|result| deserialize(result.as_ref()))
+  }
+}

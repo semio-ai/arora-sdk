@@ -1,5 +1,6 @@
 pub mod module;
 pub mod ty;
+pub mod value;
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
