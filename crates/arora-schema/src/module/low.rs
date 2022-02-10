@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::SemanticVersion;
+use crate::{SemanticVersion, ty::UNIT_ID};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -59,7 +59,12 @@ pub struct ExportFunction {
   #[serde(default)]
   pub parameters: Vec<Parameter>,
   /// The return type
+  #[serde(default = "default_return_type")]
   pub ret: TypeRef,
+}
+
+fn default_return_type() -> TypeRef {
+  TypeRef::Scalar { id: *UNIT_ID }
 }
 
 impl ExportFunction {
