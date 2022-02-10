@@ -35,7 +35,7 @@ fn print_entry(entry: Arc<Entry>, i: usize) {
         print_entry(entry.clone(), i + 2);
       }
     }
-    Entry::File(ref file) => {}
+    Entry::File(_) => {}
   }
 }
 
