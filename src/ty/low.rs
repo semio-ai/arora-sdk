@@ -5,14 +5,14 @@ use uuid::Uuid;
 
 use crate::module::low::TypeRef;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StructureField {
   pub name: String,
   #[serde(rename = "type")]
   pub type_ref: TypeRef,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Structure {
   pub fields: HashMap<Uuid, StructureField>,
 }
@@ -27,14 +27,14 @@ impl Structure {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnumerationValue {
   pub name: String,
   #[serde(rename = "type")]
   pub type_ref: TypeRef,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Enumeration {
   pub values: HashMap<Uuid, EnumerationValue>,
 }
@@ -49,11 +49,12 @@ impl Enumeration {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TypeKind {
   Structure(Structure),
   Enumeration(Enumeration),
+  Primitive(TypeRef),
 }
 
 impl TypeKind {
@@ -61,11 +62,12 @@ impl TypeKind {
     match self {
       Self::Structure(s) => s.type_dependencies(),
       Self::Enumeration(e) => e.type_dependencies(),
+      Self::Primitive(_) => HashSet::new(),
     }
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Type {
   pub name: String,
   pub id: Uuid,
