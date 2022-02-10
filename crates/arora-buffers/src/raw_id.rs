@@ -131,6 +131,13 @@ impl<'a> Value<'a> {
           id: id.into(),
           fields: fields,
         })
+      },
+      Some(TYPE_ENUMERATION) => {
+        Value::Enumeration(Enumeration {
+          id: reader.get_structure_field().into(),
+          variant_id: reader.get_enumeration_value_raw().into(),
+          value: Box::new(Value::deserialize_reader(reader)),
+        })
       }
       Some(TYPE_ARRAY) => {
         let (ty, count) = reader.get_array();
