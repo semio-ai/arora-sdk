@@ -1,3 +1,4 @@
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -7,7 +8,7 @@ use uuid::Uuid;
 pub enum Value {
   #[serde(rename = "unit")]
   Unit,
-  #[serde(rename = "book")]
+  #[serde(rename = "bool")]
   Boolean(bool),
   #[serde(rename = "u8")]
   U8(u8),
@@ -17,13 +18,13 @@ pub enum Value {
   U32(u32),
   #[serde(rename = "u64")]
   U64(u64),
-  #[serde(rename = "s8")]
+  #[serde(rename = "i8")]
   S8(i8),
-  #[serde(rename = "s16")]
+  #[serde(rename = "i16")]
   S16(i16),
-  #[serde(rename = "s32")]
+  #[serde(rename = "i32")]
   S32(i32),
-  #[serde(rename = "s64")]
+  #[serde(rename = "i64")]
   S64(i64),
   #[serde(rename = "f32")]
   R32(f32),
@@ -45,13 +46,13 @@ pub enum Value {
   ArrayU32(Vec<u32>),
   #[serde(rename = "u64[]")]
   ArrayU64(Vec<u64>),
-  #[serde(rename = "s8[]")]
+  #[serde(rename = "i8[]")]
   ArrayS8(Vec<i8>),
-  #[serde(rename = "s16[]")]
+  #[serde(rename = "i16[]")]
   ArrayS16(Vec<i16>),
-  #[serde(rename = "s32[]")]
+  #[serde(rename = "i32[]")]
   ArrayS32(Vec<i32>),
-  #[serde(rename = "s64[]")]
+  #[serde(rename = "i64[]")]
   ArrayS64(Vec<i64>),
   #[serde(rename = "f32[]")]
   ArrayR32(Vec<f32>),
@@ -101,3 +102,9 @@ pub struct EnumerationWithoutId {
   pub variant_id: Uuid,
   pub value: Box<Value>,
 }
+
+/// A common error type for conversion erros from and to [`Value`].
+#[derive(Display, Debug)]
+pub struct ConversionError {}
+
+impl std::error::Error for ConversionError {}
