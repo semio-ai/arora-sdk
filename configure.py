@@ -1,13 +1,13 @@
 #!/usr/bin/python3
-
+import argparse
 from genericpath import exists
-import subprocess
 from os import getcwd, makedirs, path, stat
 import platform
+import subprocess
+import sys
+import tarfile
 import tempfile
 import urllib.request
-import tarfile
-
 
 wasi_version = "14"
 wasi_version_full = f"{wasi_version}.0"
@@ -57,6 +57,8 @@ cmake_command = [
     f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file}",
   ]
 cmake_command.extend(cmake_extra_args)
+if len(sys.argv) > 1:
+  cmake_command.extend(sys.argv[1:])
 print(' '.join(cmake_command))
 subprocess.check_call(cmake_command, cwd="build")
 

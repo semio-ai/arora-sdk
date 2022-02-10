@@ -1,17 +1,11 @@
 {
-  "cmake.configureOnOpen": true,
+  "cmake.configureOnOpen": false,
   "cmake.configureArgs": [
     "-DWASI_SDK_PREFIX=${workspaceFolder}/wasi-sdk-14.0",
     "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/wasi-sdk-14.0/share/cmake/wasi-sdk.cmake",
-    "-DCMAKE_SYSROOT=${workspaceFolder}/wasi-sdk-14.0/share/wasi-sysroot"
+    "-DCMAKE_SYSROOT=${workspaceFolder}/wasi-sdk-14.0/share/wasi-sysroot",
   ],
-  "C_Cpp.default.includePath": [
-    "${workspaceRoot}/target/include",
-    "${workspaceRoot}/libs/cpp/include",
-    "${workspaceRoot}/build/modules/test-cpp/arora/include",
-    "${workspaceRoot}/build/modules/test-cpp-2/arora/include",
-  ],
-  "C_Cpp.default.cppStandard": "c++20",
+  "cmake.buildDirectory": "${workspaceFolder}/build-vscode",
   "editor.tokenColorCustomizations": {
     "textMateRules": []
   },
@@ -130,5 +124,4 @@
     "xutility": "cpp",
     "__functional_base": "cpp"
   },
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }

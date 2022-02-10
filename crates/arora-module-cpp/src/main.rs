@@ -1,20 +1,17 @@
 use arora_vfs::{Directory, Entry, File};
 use ast::{
-  ArrayKind, Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
+  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
   IncludeStyle, Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit,
   TypeRef,
 };
 use clap::Parser;
-use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use arora_module_core::{Asset, Reader, Writer};
 
 use arora_schema::{
   module::low::{ExportSymbol, Header, ImportSymbol, Parameter as LowParameter},
-  ty::{
-    low::Type, ARRAY_ID, BOOLEAN_ID, PRIMITIVE_IDS, R32_ID, R64_ID, S16_ID, S32_ID, S64_ID, S8_ID,
-    STRING_ID, U16_ID, U32_ID, U64_ID, U8_ID, UNIT_ID,
-  },
+  ty::{low::Type, PRIMITIVE_IDS},
 };
 use convert_case::{Case, Casing};
 use tokio::io::{stdin, stdout, AsyncWriteExt};
@@ -153,7 +150,7 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
       return;
     }
 
-    let dep_header = context.types.get(dep).unwrap();
+    let dep_header = context.types.get(dep).expect(format!("unknown type {}", dep).as_str());
     include_declarations.push(
       PreprocessorDirective::Include(
         format!("types/{}.hpp", dep_header.name),
@@ -232,7 +229,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           );
         }
       }
-      _ => panic!("Unimplemented"),
     }
     source_declarations.push(Declaration::new_line(1));
   }
@@ -436,7 +432,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           .into(),
         );
       }
-      _ => panic!("Unimplemented"),
     }
   }
 
@@ -511,7 +506,6 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
           .into(),
         );
       }
-      _ => panic!("Unimplemented"),
     }
   }
 
@@ -687,9 +681,6 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   declarations.push(declare::uuid_variable(id::module_uuid(&header.name), &header.id).into());
 
   for export in context.exports.values() {
-    let name = export.name().clone();
-    let name = context.args.method_style.convert(&name);
-
     match export {
       ExportSymbol::Function(f) => {
         let mut sorted_parameters: Vec<&LowParameter> = f.parameters.iter().collect();

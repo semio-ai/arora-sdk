@@ -1,22 +1,48 @@
+mod call;
+use call::{Call, serialize, Value};
+
+use anyhow::bail;
 use arora::{
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
 };
-use clap::Parser;
+use arora_index::Index;
+use arora_registry::Registry;
+use clap::{Error, ErrorKind, Parser};
 use tokio::{
   fs::{read_to_string, File},
-  io::AsyncReadExt,
+  io::AsyncReadExt
 };
-use uuid::Uuid;
+use url::Url;
 
+// Command-line arguments.
+//=====================================================================
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Args {
+  /// URI to the registry of existing types.
   #[clap(short, long)]
-  pub header: String,
+  pub registry_uri: Option<String>,
+  
+  /// Headers of modules to load. Order must match --exe arguments.
+  #[clap(short, long)]
+  pub header: Vec<String>,
 
+  /// Binaries of modules to load. Order must match --header arguments.
   #[clap(short, long)]
-  pub exe: String,
+  pub exe: Vec<String>,
+
+  /// If set, performs a call described in yaml.
+  #[clap(short, long)]
+  pub call: Option<String>,
+
+  /// Measure time taken to perform the tasks, and print them.
+  #[clap(short, long)]
+  pub benchmark: bool,
+  
+  /// Number of times to perform a call. Still performs the call is set to 0. Ignored if --call is not set.
+  #[clap(short = 'n', long, default_value = "1")]
+  pub repeat: u32,
 }
 
 #[tokio::main]
@@ -27,27 +53,61 @@ async fn main() -> anyhow::Result<()> {
     .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
     .build();
 
-  let header: Header = serde_yaml::from_str(
-    &read_to_string(args.header)
-      .await
-      .expect("header file could not be read"),
-  )
-  .expect("header file contains invalid yaml");
-  let module_id = header.id.clone();
+  let mut index = Index::new();
 
-  let mut executable_file = File::open(args.exe).await?;
+  if args.header.len() != args.exe.len() {
+    bail!(Error::raw(
+      ErrorKind::WrongNumberOfValues,
+      format!(
+        "mismatching number of headers ({}) and executables ({}) provided",
+        args.header.len(),
+        args.exe.len())
+      )
+    );
+  }
 
-  let mut executable = Vec::new();
-  executable_file.read_to_end(&mut executable).await?;
-  let executable = executable.into_boxed_slice();
+  let registry = args.registry_uri.map(|uri| {
+    Registry::new_with_base_uri(Url::parse(&uri)
+      .expect(format!("malformed registry URI: {}", uri).as_str()))
+  });
 
-  engine
+  for i in 0..args.header.len() {
+    let header_path = &args.header[i];
+    let header: Header = serde_yaml::from_str(
+      &read_to_string(header_path)
+        .await
+        .expect(format!("header file {} could not be read", header_path).as_str()),
+    ).expect(format!("header file {} contains invalid yaml", header_path).as_str());
+
+    for type_id in header.type_dependencies() {
+      if index.find_type(&type_id).is_ok() {
+        continue;
+      }
+      if let Some(ref registry) = registry {
+        let ty = registry.get_type(&type_id).await?;
+        index.add_type(ty);
+      } else {
+        bail!("header provided in {} depends on type {} which is unknown", header_path, type_id);
+      }
+    }
+
+    let mut executable_file = File::open(&args.exe[i]).await?;
+    let mut executable = Vec::new();
+    executable_file.read_to_end(&mut executable).await?;
+    let executable = executable.into_boxed_slice();
+    
+    index.add_module(&header)?;
+
+    let module_name = header.name.clone();
+    engine
     .load_module(ModuleDefinition {
       schema_version: 0,
       header,
       executable,
     })
-    .expect("failed to load module");
+    .expect(format!("failed to load module {}", module_name).as_str());
+  }
+
 
   engine
     .load_module(ModuleDefinition {
@@ -67,74 +127,40 @@ async fn main() -> anyhow::Result<()> {
     })
     .expect("failed to load module");
 
-  let method_id = Uuid::parse_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap();
-  let b = Uuid::parse_str("63086e48-804f-403a-8862-3358ddedc08d").unwrap();
-  let a = Uuid::parse_str("b41899c3-66dc-40d4-ab61-d1ccf5231c88").unwrap();
+  if let Some(call_yaml) = args.call {
+    let call: Call = serde_yaml::from_str(&call_yaml)?;
+    let module = index.find_function(&call.id)?;
+    let arg = serialize(&Value::Structure(call.clone()));
 
-  let integer_array = Uuid::parse_str("5ffa9104-1e5c-4026-943f-8db38bd34563").unwrap();
-  let status = Uuid::parse_str("7d94a956-e50d-4cc4-9714-f62e1f9b134e").unwrap();
+    let start_time = if args.benchmark {
+      Some(std::time::Instant::now())
+    } else {
+      None
+    };
 
-  let status_enumeration = Uuid::parse_str("325a5767-e344-4532-860e-0749bcf2e428").unwrap();
+    let nof_iterations = args.repeat;
+    for _i in 1..nof_iterations {
+      /*let raw_result =*/ engine.dispatch(&module.id, &call.id, arg.as_ref())?;
+      // let result = unsafe { Value::deserialize(&raw_result) };
+      // println!("{:#?}", result);
+    }
+  
+    if args.benchmark {
+      let end_time = std::time::Instant::now();
+      let total_duration = end_time - start_time.unwrap();
+      let duration = total_duration / nof_iterations;
 
-  let success = Uuid::parse_str("766e9e9a-446d-4e46-83e6-14b7ca101169").unwrap();
+      println!(
+        "{:?} for {:?} calls ({:?} per call)",
+        total_duration, nof_iterations, duration
+      );
 
-  let arg = arora_buffers::Value::Structure(arora_buffers::Structure {
-    id: method_id.as_bytes().as_slice().into(),
-    fields: vec![
-      arora_buffers::StructureField {
-        id: b.as_bytes().as_slice().into(),
-        value: arora_buffers::Value::Structure(arora_buffers::Structure {
-          id: a.as_bytes().as_slice().into(),
-          fields: vec![
-            arora_buffers::StructureField {
-              id: integer_array.as_bytes().as_slice().into(),
-              value: arora_buffers::Value::S32(1),
-            },
-            arora_buffers::StructureField {
-              id: status.as_bytes().as_slice().into(),
-              value: arora_buffers::Value::Enumeration(arora_buffers::Enumeration {
-                id: status_enumeration.as_bytes().as_slice().into(),
-                variant_id: success.as_bytes().as_slice().into(),
-                value: arora_buffers::Value::Unit.into(),
-              }),
-            },
-          ],
-        }),
-      },
-      arora_buffers::StructureField {
-        id: a.as_bytes().as_slice().into(),
-        value: arora_buffers::Value::Enumeration(arora_buffers::Enumeration {
-          id: status_enumeration.as_bytes().as_slice().into(),
-          variant_id: success.as_bytes().as_slice().into(),
-          value: arora_buffers::Value::Unit.into(),
-        }),
-      },
-    ],
-  });
-
-  let arg = arg.serialize();
-
-  let start_time = std::time::Instant::now();
-  let nof_iterations = 20;
-  for _i in 1..nof_iterations {
-    let raw_result = engine.dispatch(&module_id, &method_id, &arg)?;
-    // let result = unsafe { Value::deserialize(&raw_result) };
-    // println!("{:#?}", result);
+      println!(
+        "{:?} calls per second",
+        nof_iterations as f64 / total_duration.as_secs_f64()
+      );
+    }
   }
-
-  let end_time = std::time::Instant::now();
-  let total_duration = end_time - start_time;
-  let duration = total_duration / nof_iterations;
-
-  println!(
-    "{:?} for {:?} iterations ({:?} per iteration)",
-    total_duration, nof_iterations, duration
-  );
-
-  println!(
-    "{:?} calls per second",
-    nof_iterations as f64 / total_duration.as_secs_f64()
-  );
 
   Ok(())
 }

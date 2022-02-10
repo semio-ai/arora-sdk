@@ -11,12 +11,15 @@ set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/mast
 
 set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
+set(CARGO_BUILD_FLAGS --lib --bins)
 if (USE_RUST_DEBUG)
   set(RUST_TARGET_SUBDIR "debug")
-  set(CARGO_BUILD_FLAGS)
 else()
   set(RUST_TARGET_SUBDIR "release")
-  set(CARGO_BUILD_FLAGS --release)
+  list(APPEND CARGO_BUILD_FLAGS --release)
+endif()
+if (BUILD_TESTING)
+  list(APPEND CARGO_BUILD_FLAGS --tests)
 endif()
 
 set(RUST_BINARY_DIR "${RUST_TARGET_DIR}/${RUST_TARGET_SUBDIR}")

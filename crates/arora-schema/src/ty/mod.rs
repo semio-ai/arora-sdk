@@ -1,6 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 use uuid::Uuid;
+
+use crate::module::low::TypeRef;
+use crate::ty::low::{Type, TypeKind};
 
 pub mod high;
 pub mod low;
@@ -40,5 +43,52 @@ lazy_static::lazy_static! {
     ids.insert(ARRAY_ID.clone());
     ids.insert(MAP_ID.clone());
     ids
+  };
+  
+  pub static ref PRIMITIVE_LOW_TYPE_REFS: HashMap<Uuid, TypeRef> = {
+    let mut types: HashMap<Uuid, TypeRef> = HashMap::new();
+    let make_scalar = |id: &Uuid| TypeRef::Scalar { id: id.clone() };
+    let mut insert_scalar_id = |id: &Uuid| types.insert(id.clone(), make_scalar(id));
+    insert_scalar_id(&UNIT_ID);
+    insert_scalar_id(&BOOLEAN_ID);
+    insert_scalar_id(&S8_ID);
+    insert_scalar_id(&S16_ID);
+    insert_scalar_id(&S32_ID);
+    insert_scalar_id(&S64_ID);
+    insert_scalar_id(&U8_ID);
+    insert_scalar_id(&U16_ID);
+    insert_scalar_id(&U32_ID);
+    insert_scalar_id(&U64_ID);
+    insert_scalar_id(&R32_ID);
+    insert_scalar_id(&R64_ID);
+    insert_scalar_id(&STRING_ID); // Technically not a scalar, but a primitive type at least.
+    types
+  };
+
+  pub static ref PRIMITIVE_TYPES: HashMap<Uuid, Type> = {
+    let mut types: HashMap<Uuid, Type> = HashMap::new();
+    let mut insert_primitive_type = |id: &Uuid, name: &str, description: &str| {
+      types.insert(id.clone(), Type {
+        name: name.to_string(),
+        id: id.clone(),
+        description: description.to_string(),
+        kind: TypeKind::Primitive(PRIMITIVE_LOW_TYPE_REFS.get(id).unwrap().clone()),
+      });
+      ()
+    };
+    insert_primitive_type(&UNIT_ID, "unit", "a.k.a. \"nothing\"");
+    insert_primitive_type(&BOOLEAN_ID, "boolean", "either true or false");
+    insert_primitive_type(&S8_ID, "s8", "8-bit signed integer");
+    insert_primitive_type(&S16_ID, "s16", "16-bit signed integer");
+    insert_primitive_type(&S32_ID, "s32", "32-bit signed integer");
+    insert_primitive_type(&S64_ID, "s64", "64-bit signed integer");
+    insert_primitive_type(&U8_ID, "u8", "8-bit unsigned integer");
+    insert_primitive_type(&U16_ID, "u16", "16-bit unsigned integer");
+    insert_primitive_type(&U32_ID, "u32", "32-bit unsigned integer");
+    insert_primitive_type(&U64_ID, "u64", "64-bit unsigned integer");
+    insert_primitive_type(&R32_ID, "r32", "32-bit floating point decimal, a.k.a. \"float\"");
+    insert_primitive_type(&R64_ID, "r64", "64-bit floating point decimal, a.k.a. \"double\"");
+    insert_primitive_type(&STRING_ID, "str", "a string of u8 characters");
+    types
   };
 }

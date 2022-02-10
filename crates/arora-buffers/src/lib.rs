@@ -295,15 +295,12 @@ impl BufferWriter {
 }
 
 pub struct BufferReader<'a> {
-  size: u32,
   backing: &'a [u8],
 }
 
 impl<'a> BufferReader<'a> {
-  pub fn new(mut buffer: &'a [u8]) -> Self {
-    let size = buffer.get_u32_le();
+  pub fn new(buffer: &'a [u8]) -> Self {
     Self {
-      size,
       backing: buffer,
     }
   }
@@ -1274,34 +1271,63 @@ pub struct EnumerationRaw<'a> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value<'a> {
+  #[serde(rename = "unit")]
   Unit,
+  #[serde(rename = "book")]
   Boolean(bool),
+  #[serde(rename = "u8")]
   U8(u8),
+  #[serde(rename = "u16")]
   U16(u16),
+  #[serde(rename = "u32")]
   U32(u32),
+  #[serde(rename = "u64")]
   U64(u64),
+  #[serde(rename = "i8")]
   S8(i8),
+  #[serde(rename = "i16")]
   S16(i16),
+  #[serde(rename = "i32")]
   S32(i32),
+  #[serde(rename = "i64")]
   S64(i64),
+  #[serde(rename = "f32")]
   R32(f32),
+  #[serde(rename = "f64")]
   R64(f64),
+  #[serde(rename = "str")]
   String(Cow<'a, str>),
+  #[serde(rename = "struct")]
   Structure(Structure<'a>),
+  #[serde(rename = "enum")]
   Enumeration(Enumeration<'a>),
+  #[serde(rename = "bool[]")]
   ArrayBoolean(Cow<'a, [bool]>),
+  #[serde(rename = "u8[]")]
   ArrayU8(Cow<'a, [u8]>),
+  #[serde(rename = "u16[]")]
   ArrayU16(Cow<'a, [u16]>),
+  #[serde(rename = "u32[]")]
   ArrayU32(Cow<'a, [u32]>),
+  #[serde(rename = "u64[]")]
   ArrayU64(Cow<'a, [u64]>),
+  #[serde(rename = "i8[]")]
   ArrayS8(Cow<'a, [i8]>),
+  #[serde(rename = "i16[]")]
   ArrayS16(Cow<'a, [i16]>),
+  #[serde(rename = "i32[]")]
   ArrayS32(Cow<'a, [i32]>),
+  #[serde(rename = "i64[]")]
   ArrayS64(Cow<'a, [i64]>),
+  #[serde(rename = "f32[]")]
   ArrayR32(Cow<'a, [f32]>),
+  #[serde(rename = "f64[]")]
   ArrayR64(Cow<'a, [f64]>),
+  #[serde(rename = "str[]")]
   ArrayString(Vec<Cow<'a, str>>),
+  #[serde(rename = "struct[]")]
   ArrayStructure(Cow<'a, [u8]>, Vec<StructureRaw<'a>>),
+  #[serde(rename = "enum[]")]
   ArrayEnumeration(Cow<'a, [u8]>, Vec<EnumerationRaw<'a>>),
 }
 
@@ -1497,4 +1523,41 @@ impl<'a> Value<'a> {
     self.serialize_writer(&mut writer);
     writer.finalize()
   }
+}
+
+// Tests.
+//=====================================================================
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use anyhow::{Result, bail};
+  use std::str::FromStr;
+
+  #[test]
+  pub fn u8_yaml() -> Result<()> {
+    if let Value::U8(value) = serde_yaml::from_str(U8_YAML)? {
+      assert_eq!(42, value);
+    } else {
+      bail!("parsed value was not an u8");
+    }
+    Ok(())
+  }
+
+  #[test]
+  pub fn array_f32_yaml() -> Result<()> {
+    if let Value::ArrayR32(values) = serde_yaml::from_str(ARRAY_F32_YAML)? {
+      assert_eq!(vec![3.14159, 2.718, 1.618], values.to_vec());
+    } else {
+      bail!("parsed value was not an array of f32");
+    }
+    Ok(())
+  }
+
+  pub const U8_YAML: &'static str = "\
+u8: 42
+";
+
+  pub const ARRAY_F32_YAML: &'static str = "\
+f32[]: [3.14159, 2.718, 1.618]
+";
 }

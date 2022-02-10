@@ -1,8 +1,5 @@
 use derive_more::{Display, Error, From};
-use tokio::sync::oneshot;
 use uuid::Uuid;
-
-use crate::actor::{Actor, Addr, Request};
 
 #[derive(Display, Debug, From, Error)]
 pub enum DispatchError {
