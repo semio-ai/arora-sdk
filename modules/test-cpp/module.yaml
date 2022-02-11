@@ -45,6 +45,6 @@ exports:
           id: TestStructure1
     ret:
       kind: scalar
-      id: s32
+      id: i32
 dependencies: []
 executable_mime: application/wasm

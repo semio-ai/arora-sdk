@@ -1,5 +1,5 @@
 use arora_schema::ty::{
-  BOOLEAN_ID, R32_ID, R64_ID, S16_ID, S32_ID, S64_ID, S8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
+  BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
   U8_ID, UNIT_ID,
 };
 
@@ -77,12 +77,12 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::T
       x if *x == *U16_ID => "std::uint16_t".to_string(),
       x if *x == *U32_ID => "std::uint32_t".to_string(),
       x if *x == *U64_ID => "std::uint64_t".to_string(),
-      x if *x == *S8_ID => "std::int8_t".to_string(),
-      x if *x == *S16_ID => "std::int16_t".to_string(),
-      x if *x == *S32_ID => "std::int32_t".to_string(),
-      x if *x == *S64_ID => "std::int64_t".to_string(),
-      x if *x == *R32_ID => "float".to_string(),
-      x if *x == *R64_ID => "double".to_string(),
+      x if *x == *I8_ID => "std::int8_t".to_string(),
+      x if *x == *I16_ID => "std::int16_t".to_string(),
+      x if *x == *I32_ID => "std::int32_t".to_string(),
+      x if *x == *I64_ID => "std::int64_t".to_string(),
+      x if *x == *F32_ID => "float".to_string(),
+      x if *x == *F64_ID => "double".to_string(),
       x if *x == *STRING_ID => "std::string_view".to_string(),
       x => {
         let ty = context.types.get(&x).expect(format!("encountered unknown type {}", x).as_str());
@@ -95,12 +95,12 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::T
       x if *x == *U16_ID => "arora::buffer::View<std::uint16_t>".to_string(),
       x if *x == *U32_ID => "arora::buffer::View<std::uint32_t>".to_string(),
       x if *x == *U64_ID => "arora::buffer::View<std::uint64_t>".to_string(),
-      x if *x == *S8_ID => "arora::buffer::View<std::int8_t>".to_string(),
-      x if *x == *S16_ID => "arora::buffer::View<std::int16_t>".to_string(),
-      x if *x == *S32_ID => "arora::buffer::View<std::int32_t>".to_string(),
-      x if *x == *S64_ID => "arora::buffer::View<std::int64_t>".to_string(),
-      x if *x == *R32_ID => "arora::buffer::View<float>".to_string(),
-      x if *x == *R64_ID => "arora::buffer::View<double>".to_string(),
+      x if *x == *I8_ID => "arora::buffer::View<std::int8_t>".to_string(),
+      x if *x == *I16_ID => "arora::buffer::View<std::int16_t>".to_string(),
+      x if *x == *I32_ID => "arora::buffer::View<std::int32_t>".to_string(),
+      x if *x == *I64_ID => "arora::buffer::View<std::int64_t>".to_string(),
+      x if *x == *F32_ID => "arora::buffer::View<float>".to_string(),
+      x if *x == *F64_ID => "arora::buffer::View<double>".to_string(),
       x if *x == *STRING_ID => "std::vector<std::string_view>".to_string(),
       x => {
         let ty = context.types.get(&x).unwrap();

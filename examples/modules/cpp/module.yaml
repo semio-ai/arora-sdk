@@ -2,6 +2,6 @@ name: example-cpp
 version: 0.1.0
 description: An example C++ module
 types:
-  - s32
+  - i32
 exports:
-  - "add_two_integers(a: s32, b: s32): s32"
+  - "add_two_integers(a: i32, b: i32): i32"

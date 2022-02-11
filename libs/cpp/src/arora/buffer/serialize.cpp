@@ -38,37 +38,37 @@ void arora::buffer::serialize<std::uint64_t>(arora_buffer_writer *const writer, 
 template<>
 void arora::buffer::serialize<std::int8_t>(arora_buffer_writer *const writer, const std::int8_t &value)
 {
-  arora_buffer_writer_add_s8(writer, value);
+  arora_buffer_writer_add_i8(writer, value);
 }
 
 template<>
 void arora::buffer::serialize<std::int16_t>(arora_buffer_writer *const writer, const std::int16_t &value)
 {
-  arora_buffer_writer_add_s16(writer, value);
+  arora_buffer_writer_add_i16(writer, value);
 }
 
 template<>
 void arora::buffer::serialize<std::int32_t>(arora_buffer_writer *const writer, const std::int32_t &value)
 {
-  arora_buffer_writer_add_s32(writer, value);
+  arora_buffer_writer_add_i32(writer, value);
 }
 
 template<>
 void arora::buffer::serialize<std::int64_t>(arora_buffer_writer *const writer, const std::int64_t &value)
 {
-  arora_buffer_writer_add_s64(writer, value);
+  arora_buffer_writer_add_i64(writer, value);
 }
 
 template<>
 void arora::buffer::serialize<float>(arora_buffer_writer *const writer, const float &value)
 {
-  arora_buffer_writer_add_r32(writer, value);
+  arora_buffer_writer_add_f32(writer, value);
 }
 
 template<>
 void arora::buffer::serialize<double>(arora_buffer_writer *const writer, const double &value)
 {
-  arora_buffer_writer_add_r64(writer, value);
+  arora_buffer_writer_add_f64(writer, value);
 }
 
 template<>
@@ -156,85 +156,85 @@ void arora::buffer::serialize<std::vector<std::uint64_t>>(arora_buffer_writer *c
 template<>
 void arora::buffer::serialize<arora::buffer::View<std::int8_t>>(arora_buffer_writer *const writer, const View<std::int8_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S8, value.size());
-  arora_buffer_writer_add_s8_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I8, value.size());
+  arora_buffer_writer_add_i8_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<std::int8_t>>(arora_buffer_writer *const writer, const std::vector<std::int8_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S8, value.size());
-  arora_buffer_writer_add_s8_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I8, value.size());
+  arora_buffer_writer_add_i8_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<arora::buffer::View<std::int16_t>>(arora_buffer_writer *const writer, const View<std::int16_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S16, value.size());
-  arora_buffer_writer_add_s16_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I16, value.size());
+  arora_buffer_writer_add_i16_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<std::int16_t>>(arora_buffer_writer *const writer, const std::vector<std::int16_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S16, value.size());
-  arora_buffer_writer_add_s16_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I16, value.size());
+  arora_buffer_writer_add_i16_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<arora::buffer::View<std::int32_t>>(arora_buffer_writer *const writer, const View<std::int32_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S32, value.size());
-  arora_buffer_writer_add_s32_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I32, value.size());
+  arora_buffer_writer_add_i32_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<std::int32_t>>(arora_buffer_writer *const writer, const std::vector<std::int32_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S32, value.size());
-  arora_buffer_writer_add_s32_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I32, value.size());
+  arora_buffer_writer_add_i32_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<arora::buffer::View<std::int64_t>>(arora_buffer_writer *const writer, const View<std::int64_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S64, value.size());
-  arora_buffer_writer_add_s64_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I64, value.size());
+  arora_buffer_writer_add_i64_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<std::int64_t>>(arora_buffer_writer *const writer, const std::vector<std::int64_t> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_S64, value.size());
-  arora_buffer_writer_add_s64_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_I64, value.size());
+  arora_buffer_writer_add_i64_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<arora::buffer::View<float>>(arora_buffer_writer *const writer, const View<float> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_R32, value.size());
-  arora_buffer_writer_add_r32_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_F32, value.size());
+  arora_buffer_writer_add_f32_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<float>>(arora_buffer_writer *const writer, const std::vector<float> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_R32, value.size());
-  arora_buffer_writer_add_r32_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_F32, value.size());
+  arora_buffer_writer_add_f32_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<arora::buffer::View<double>>(arora_buffer_writer *const writer, const View<double> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_R64, value.size());
-  arora_buffer_writer_add_r64_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_F64, value.size());
+  arora_buffer_writer_add_f64_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>
 void arora::buffer::serialize<std::vector<double>>(arora_buffer_writer *const writer, const std::vector<double> &value)
 {
-  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_R64, value.size());
-  arora_buffer_writer_add_r64_raw_bulk(writer, value.data(), value.size());
+  arora_buffer_writer_add_array_primitive(writer, ARORA_BUFFER_TYPE_F64, value.size());
+  arora_buffer_writer_add_f64_raw_bulk(writer, value.data(), value.size());
 }
 
 template<>

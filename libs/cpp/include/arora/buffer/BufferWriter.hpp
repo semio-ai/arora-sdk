@@ -19,10 +19,10 @@ namespace arora
       void add_u16(const std::uint16_t value);
       void add_u32(const std::uint32_t value);
       void add_u64(const std::uint64_t value);
-      void add_s8(const std::int8_t value);
-      void add_s16(const std::int16_t value);
-      void add_s32(const std::int32_t value);
-      void add_s64(const std::int64_t value);
+      void add_i8(const std::int8_t value);
+      void add_i16(const std::int16_t value);
+      void add_i32(const std::int32_t value);
+      void add_i64(const std::int64_t value);
       void add_f32(const float value);
       void add_f64(const double value);
       void add_string(const std::string_view &value);

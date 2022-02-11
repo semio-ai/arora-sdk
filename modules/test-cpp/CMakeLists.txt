@@ -55,7 +55,7 @@ fields:
                 value: unit
       - id: 5ffa9104-1e5c-4026-943f-8db38bd34563
         value:
-          s32: 113"
+          i32: 113"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()

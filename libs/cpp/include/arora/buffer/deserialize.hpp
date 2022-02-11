@@ -97,32 +97,32 @@ namespace arora
     }
     template<>
     inline std::int8_t arora_buffer_reader_get<std::int8_t>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_s8(reader);
+      return arora_buffer_reader_get_i8(reader);
     }
     
     template<>
     inline std::int16_t arora_buffer_reader_get<std::int16_t>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_s16(reader);
+      return arora_buffer_reader_get_i16(reader);
     }
     
     template<>
     inline std::int32_t arora_buffer_reader_get<std::int32_t>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_s32(reader);
+      return arora_buffer_reader_get_i32(reader);
     }
     
     template<>
     inline std::int64_t arora_buffer_reader_get<std::int64_t>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_s64(reader);
+      return arora_buffer_reader_get_i64(reader);
     }
 
     template<>
     inline float arora_buffer_reader_get<float>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_r32(reader);
+      return arora_buffer_reader_get_f32(reader);
     }
     
     template<>
     inline double arora_buffer_reader_get<double>(arora_buffer_reader *const reader) noexcept {
-      return arora_buffer_reader_get_r64(reader);
+      return arora_buffer_reader_get_f64(reader);
     }
     
     template<>
@@ -154,32 +154,32 @@ namespace arora
     }
     template<>
     inline const std::int8_t *arora_buffer_reader_get_bulk<std::int8_t>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_s8_bulk(reader, count);
+      return arora_buffer_reader_get_i8_bulk(reader, count);
     }
     
     template<>
     inline const std::int16_t *arora_buffer_reader_get_bulk<std::int16_t>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_s16_bulk(reader, count);
+      return arora_buffer_reader_get_i16_bulk(reader, count);
     }
     
     template<>
     inline const std::int32_t *arora_buffer_reader_get_bulk<std::int32_t>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_s32_bulk(reader, count);
+      return arora_buffer_reader_get_i32_bulk(reader, count);
     }
     
     template<>
     inline const std::int64_t *arora_buffer_reader_get_bulk<std::int64_t>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_s64_bulk(reader, count);
+      return arora_buffer_reader_get_i64_bulk(reader, count);
     }
 
     template<>
     inline const float *arora_buffer_reader_get_bulk<float>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_r32_bulk(reader, count);
+      return arora_buffer_reader_get_f32_bulk(reader, count);
     }
     
     template<>
     inline const double *arora_buffer_reader_get_bulk<double>(arora_buffer_reader *const reader, std::size_t count) {
-      return arora_buffer_reader_get_r64_bulk(reader, count);
+      return arora_buffer_reader_get_f64_bulk(reader, count);
     }
     
     template<>

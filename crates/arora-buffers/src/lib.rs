@@ -9,12 +9,12 @@ pub const TYPE_U8: u8 = 2;
 pub const TYPE_U16: u8 = 3;
 pub const TYPE_U32: u8 = 4;
 pub const TYPE_U64: u8 = 5;
-pub const TYPE_S8: u8 = 6;
-pub const TYPE_S16: u8 = 7;
-pub const TYPE_S32: u8 = 8;
-pub const TYPE_S64: u8 = 9;
-pub const TYPE_R32: u8 = 10;
-pub const TYPE_R64: u8 = 11;
+pub const TYPE_I8: u8 = 6;
+pub const TYPE_I16: u8 = 7;
+pub const TYPE_I32: u8 = 8;
+pub const TYPE_I64: u8 = 9;
+pub const TYPE_F32: u8 = 10;
+pub const TYPE_F64: u8 = 11;
 pub const TYPE_STRING: u8 = 12;
 pub const TYPE_STRUCTURE: u8 = 13;
 pub const TYPE_ENUMERATION: u8 = 14;
@@ -154,100 +154,100 @@ impl BufferWriter {
     }
   }
 
-  pub fn add_s8_raw(&mut self, value: i8) {
+  pub fn add_i8_raw(&mut self, value: i8) {
     self.backing.put_i8(value);
   }
 
-  pub fn add_s8(&mut self, value: i8) {
-    self.backing.put_u8(TYPE_S8);
-    self.add_s8_raw(value);
+  pub fn add_i8(&mut self, value: i8) {
+    self.backing.put_u8(TYPE_I8);
+    self.add_i8_raw(value);
   }
 
-  pub fn add_s8_raw_bulk(&mut self, values: &[i8]) {
+  pub fn add_i8_raw_bulk(&mut self, values: &[i8]) {
     self.align();
     for value in values {
-      self.add_s8_raw(*value);
+      self.add_i8_raw(*value);
     }
   }
 
-  pub fn add_s16_raw(&mut self, value: i16) {
+  pub fn add_i16_raw(&mut self, value: i16) {
     self.backing.put_i16_le(value);
   }
 
-  pub fn add_s16(&mut self, value: i16) {
-    self.backing.put_u8(TYPE_S16);
-    self.add_s16_raw(value);
+  pub fn add_i16(&mut self, value: i16) {
+    self.backing.put_u8(TYPE_I16);
+    self.add_i16_raw(value);
   }
 
-  pub fn add_s16_raw_bulk(&mut self, values: &[i16]) {
+  pub fn add_i16_raw_bulk(&mut self, values: &[i16]) {
     self.align();
     for value in values {
-      self.add_s16_raw(*value);
+      self.add_i16_raw(*value);
     }
   }
 
-  pub fn add_s32_raw(&mut self, value: i32) {
+  pub fn add_i32_raw(&mut self, value: i32) {
     self.backing.put_i32_le(value);
   }
 
-  pub fn add_s32(&mut self, value: i32) {
-    self.backing.put_u8(TYPE_S32);
-    self.add_s32_raw(value);
+  pub fn add_i32(&mut self, value: i32) {
+    self.backing.put_u8(TYPE_I32);
+    self.add_i32_raw(value);
   }
 
-  pub fn add_s32_raw_bulk(&mut self, values: &[i32]) {
+  pub fn add_i32_raw_bulk(&mut self, values: &[i32]) {
     self.align();
     for value in values {
-      self.add_s32_raw(*value);
+      self.add_i32_raw(*value);
     }
   }
 
-  pub fn add_s64_raw(&mut self, value: i64) {
+  pub fn add_i64_raw(&mut self, value: i64) {
     self.backing.put_i64_le(value);
   }
 
-  pub fn add_s64(&mut self, value: i64) {
-    self.backing.put_u8(TYPE_S64);
-    self.add_s64_raw(value);
+  pub fn add_i64(&mut self, value: i64) {
+    self.backing.put_u8(TYPE_I64);
+    self.add_i64_raw(value);
   }
 
-  pub fn add_s64_raw_bulk(&mut self, values: &[i64]) {
+  pub fn add_i64_raw_bulk(&mut self, values: &[i64]) {
     self.align();
     for value in values {
-      self.add_s64_raw(*value);
+      self.add_i64_raw(*value);
     }
   }
 
-  pub fn add_r32_raw(&mut self, value: f32) {
+  pub fn add_f32_raw(&mut self, value: f32) {
     self.backing.put_f32(value);
   }
 
-  pub fn add_r32(&mut self, value: f32) {
-    self.backing.put_u8(TYPE_R32);
-    self.add_r32_raw(value);
+  pub fn add_f32(&mut self, value: f32) {
+    self.backing.put_u8(TYPE_F32);
+    self.add_f32_raw(value);
   }
 
-  pub fn add_r32_raw_bulk(&mut self, values: &[f32]) {
+  pub fn add_f32_raw_bulk(&mut self, values: &[f32]) {
     self.align();
     for value in values {
-      self.add_r32_raw(*value);
+      self.add_f32_raw(*value);
     }
   }
 
-  pub fn add_r64_raw(&mut self, value: f64) {
-    self.backing.put_u8(TYPE_R64);
+  pub fn add_f64_raw(&mut self, value: f64) {
+    self.backing.put_u8(TYPE_F64);
     self.backing.put_f64(value);
   }
 
-  pub fn add_r64(&mut self, value: f64) {
-    self.backing.put_u8(TYPE_R64);
-    self.add_r64_raw(value);
+  pub fn add_f64(&mut self, value: f64) {
+    self.backing.put_u8(TYPE_F64);
+    self.add_f64_raw(value);
   }
 
-  pub fn add_r64_raw_bulk(&mut self, values: &[f64]) {
+  pub fn add_f64_raw_bulk(&mut self, values: &[f64]) {
     self.align();
     for value in values {
-      self.add_r64_raw(*value);
+      self.add_f64_raw(*value);
     }
   }
 
@@ -368,56 +368,56 @@ impl<'a> BufferReader<'a> {
     std::mem::transmute(&self.backing[0..count * 8])
   }
 
-  pub fn get_s8(&mut self) -> i8 {
+  pub fn get_i8(&mut self) -> i8 {
     self.backing.get_i8()
   }
 
-  pub unsafe fn get_s8_bulk(&mut self, count: usize) -> &'a [i8] {
+  pub unsafe fn get_i8_bulk(&mut self, count: usize) -> &'a [i8] {
     self.align();
     std::mem::transmute(&self.backing[0..count])
   }
 
-  pub fn get_s16(&mut self) -> i16 {
+  pub fn get_i16(&mut self) -> i16 {
     self.backing.get_i16_le()
   }
 
-  pub unsafe fn get_s16_bulk(&mut self, count: usize) -> &'a [i16] {
+  pub unsafe fn get_i16_bulk(&mut self, count: usize) -> &'a [i16] {
     self.align();
     std::mem::transmute(&self.backing[0..count * 2])
   }
 
-  pub fn get_s32(&mut self) -> i32 {
+  pub fn get_i32(&mut self) -> i32 {
     self.backing.get_i32_le()
   }
 
-  pub unsafe fn get_s32_bulk(&mut self, count: usize) -> &'a [i32] {
+  pub unsafe fn get_i32_bulk(&mut self, count: usize) -> &'a [i32] {
     self.align();
     std::mem::transmute(&self.backing[0..count * 4])
   }
 
-  pub fn get_s64(&mut self) -> i64 {
+  pub fn get_i64(&mut self) -> i64 {
     self.backing.get_i64_le()
   }
 
-  pub unsafe fn get_s64_bulk(&mut self, count: usize) -> &'a [i64] {
+  pub unsafe fn get_i64_bulk(&mut self, count: usize) -> &'a [i64] {
     self.align();
     std::mem::transmute(&self.backing[0..count * 8])
   }
 
-  pub fn get_r32(&mut self) -> f32 {
+  pub fn get_f32(&mut self) -> f32 {
     self.backing.get_f32_le()
   }
 
-  pub unsafe fn get_r32_bulk(&mut self, count: usize) -> &'a [f32] {
+  pub unsafe fn get_f32_bulk(&mut self, count: usize) -> &'a [f32] {
     self.align();
     std::mem::transmute(&self.backing[0..count * 4])
   }
 
-  pub fn get_r64(&mut self) -> f64 {
+  pub fn get_f64(&mut self) -> f64 {
     self.backing.get_f64_le()
   }
 
-  pub unsafe fn get_r64_bulk(&mut self, count: usize) -> &'a [f64] {
+  pub unsafe fn get_f64_bulk(&mut self, count: usize) -> &'a [f64] {
     self.align();
     std::mem::transmute(&self.backing[0..count * 8])
   }
@@ -717,23 +717,23 @@ pub extern "C" fn arora_buffer_writer_add_u64_raw_bulk(
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s8(writer: *mut BufferWriter, value: i8) {
+pub extern "C" fn arora_buffer_writer_add_i8(writer: *mut BufferWriter, value: i8) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s8(value);
+    writer.add_i8(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s8_raw(writer: *mut BufferWriter, value: i8) {
+pub extern "C" fn arora_buffer_writer_add_i8_raw(writer: *mut BufferWriter, value: i8) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s8_raw(value);
+    writer.add_i8_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s8_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_i8_raw_bulk(
   writer: *mut BufferWriter,
   values: *const i8,
   count: usize,
@@ -741,28 +741,28 @@ pub extern "C" fn arora_buffer_writer_add_s8_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_s8_raw_bulk(values);
+    writer.add_i8_raw_bulk(values);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s16(writer: *mut BufferWriter, value: i16) {
+pub extern "C" fn arora_buffer_writer_add_i16(writer: *mut BufferWriter, value: i16) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s16(value);
+    writer.add_i16(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s16_raw(writer: *mut BufferWriter, value: i16) {
+pub extern "C" fn arora_buffer_writer_add_i16_raw(writer: *mut BufferWriter, value: i16) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s16_raw(value);
+    writer.add_i16_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s16_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_i16_raw_bulk(
   writer: *mut BufferWriter,
   values: *const i16,
   count: usize,
@@ -770,28 +770,28 @@ pub extern "C" fn arora_buffer_writer_add_s16_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_s16_raw_bulk(values);
+    writer.add_i16_raw_bulk(values);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s32(writer: *mut BufferWriter, value: i32) {
+pub extern "C" fn arora_buffer_writer_add_i32(writer: *mut BufferWriter, value: i32) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s32(value);
+    writer.add_i32(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s32_raw(writer: *mut BufferWriter, value: i32) {
+pub extern "C" fn arora_buffer_writer_add_i32_raw(writer: *mut BufferWriter, value: i32) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s32_raw(value);
+    writer.add_i32_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s32_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_i32_raw_bulk(
   writer: *mut BufferWriter,
   values: *const i32,
   count: usize,
@@ -799,28 +799,28 @@ pub extern "C" fn arora_buffer_writer_add_s32_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_s32_raw_bulk(values);
+    writer.add_i32_raw_bulk(values);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s64(writer: *mut BufferWriter, value: i64) {
+pub extern "C" fn arora_buffer_writer_add_i64(writer: *mut BufferWriter, value: i64) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s64(value);
+    writer.add_i64(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s64_raw(writer: *mut BufferWriter, value: i64) {
+pub extern "C" fn arora_buffer_writer_add_i64_raw(writer: *mut BufferWriter, value: i64) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_s64_raw(value);
+    writer.add_i64_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_s64_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_i64_raw_bulk(
   writer: *mut BufferWriter,
   values: *const i64,
   count: usize,
@@ -828,28 +828,28 @@ pub extern "C" fn arora_buffer_writer_add_s64_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_s64_raw_bulk(values);
+    writer.add_i64_raw_bulk(values);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r32(writer: *mut BufferWriter, value: f32) {
+pub extern "C" fn arora_buffer_writer_add_f32(writer: *mut BufferWriter, value: f32) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_r32(value);
+    writer.add_f32(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r32_raw(writer: *mut BufferWriter, value: f32) {
+pub extern "C" fn arora_buffer_writer_add_f32_raw(writer: *mut BufferWriter, value: f32) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_r32_raw(value);
+    writer.add_f32_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r32_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_f32_raw_bulk(
   writer: *mut BufferWriter,
   values: *const f32,
   count: usize,
@@ -857,28 +857,28 @@ pub extern "C" fn arora_buffer_writer_add_r32_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_r32_raw_bulk(values);
+    writer.add_f32_raw_bulk(values);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r64(writer: *mut BufferWriter, value: f64) {
+pub extern "C" fn arora_buffer_writer_add_f64(writer: *mut BufferWriter, value: f64) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_r64(value);
+    writer.add_f64(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r64_raw(writer: *mut BufferWriter, value: f64) {
+pub extern "C" fn arora_buffer_writer_add_f64_raw(writer: *mut BufferWriter, value: f64) {
   unsafe {
     let writer = &mut *writer;
-    writer.add_r64_raw(value);
+    writer.add_f64_raw(value);
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(
+pub extern "C" fn arora_buffer_writer_add_f64_raw_bulk(
   writer: *mut BufferWriter,
   values: *const f64,
   count: usize,
@@ -886,7 +886,7 @@ pub extern "C" fn arora_buffer_writer_add_r64_raw_bulk(
   unsafe {
     let writer = &mut *writer;
     let values = std::slice::from_raw_parts(values, count);
-    writer.add_r64_raw_bulk(values);
+    writer.add_f64_raw_bulk(values);
   }
 }
 
@@ -1106,116 +1106,116 @@ pub extern "C" fn arora_buffer_reader_get_u64_bulk(
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s8(reader: *mut BufferReader) -> i8 {
+pub extern "C" fn arora_buffer_reader_get_i8(reader: *mut BufferReader) -> i8 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s8()
+    reader.get_i8()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s8_bulk(
+pub extern "C" fn arora_buffer_reader_get_i8_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const i8 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s8_bulk(count).as_ptr()
+    reader.get_i8_bulk(count).as_ptr()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s16(reader: *mut BufferReader) -> i16 {
+pub extern "C" fn arora_buffer_reader_get_i16(reader: *mut BufferReader) -> i16 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s16()
+    reader.get_i16()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s16_bulk(
+pub extern "C" fn arora_buffer_reader_get_i16_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const i16 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s16_bulk(count).as_ptr()
+    reader.get_i16_bulk(count).as_ptr()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s32(reader: *mut BufferReader) -> i32 {
+pub extern "C" fn arora_buffer_reader_get_i32(reader: *mut BufferReader) -> i32 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s32()
+    reader.get_i32()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s32_bulk(
+pub extern "C" fn arora_buffer_reader_get_i32_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const i32 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s32_bulk(count).as_ptr()
+    reader.get_i32_bulk(count).as_ptr()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s64(reader: *mut BufferReader) -> i64 {
+pub extern "C" fn arora_buffer_reader_get_i64(reader: *mut BufferReader) -> i64 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s64()
+    reader.get_i64()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_s64_bulk(
+pub extern "C" fn arora_buffer_reader_get_i64_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const i64 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_s64_bulk(count).as_ptr()
+    reader.get_i64_bulk(count).as_ptr()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r32(reader: *mut BufferReader) -> f32 {
+pub extern "C" fn arora_buffer_reader_get_f32(reader: *mut BufferReader) -> f32 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_r32()
+    reader.get_f32()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r32_bulk(
+pub extern "C" fn arora_buffer_reader_get_f32_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const f32 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_r32_bulk(count).as_ptr()
+    reader.get_f32_bulk(count).as_ptr()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r64(reader: *mut BufferReader) -> f64 {
+pub extern "C" fn arora_buffer_reader_get_f64(reader: *mut BufferReader) -> f64 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_r64()
+    reader.get_f64()
   }
 }
 
 #[no_mangle]
-pub extern "C" fn arora_buffer_reader_get_r64_bulk(
+pub extern "C" fn arora_buffer_reader_get_f64_bulk(
   reader: *mut BufferReader,
   count: usize,
 ) -> *const f64 {
   unsafe {
     let reader = &mut *reader;
-    reader.get_r64_bulk(count).as_ptr()
+    reader.get_f64_bulk(count).as_ptr()
   }
 }
 

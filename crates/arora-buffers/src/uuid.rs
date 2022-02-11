@@ -5,8 +5,8 @@ use crate::{
   BufferReader, BufferWriter,
   TYPE_BOOLEAN,
   TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
-  TYPE_S8, TYPE_S16, TYPE_S32, TYPE_S64,
-  TYPE_R32, TYPE_R64,
+  TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64,
+  TYPE_F32, TYPE_F64,
   TYPE_STRING, TYPE_STRUCTURE, TYPE_ENUMERATION, TYPE_ARRAY
 };
 
@@ -18,12 +18,12 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
     Value::U16(v) => writer.add_u16(*v),
     Value::U32(v) => writer.add_u32(*v),
     Value::U64(v) => writer.add_u64(*v),
-    Value::S8(v) => writer.add_s8(*v),
-    Value::S16(v) => writer.add_s16(*v),
-    Value::S32(v) => writer.add_s32(*v),
-    Value::S64(v) => writer.add_s64(*v),
-    Value::R32(v) => writer.add_r32(*v),
-    Value::R64(v) => writer.add_r64(*v),
+    Value::I8(v) => writer.add_i8(*v),
+    Value::I16(v) => writer.add_i16(*v),
+    Value::I32(v) => writer.add_i32(*v),
+    Value::I64(v) => writer.add_i64(*v),
+    Value::F32(v) => writer.add_f32(*v),
+    Value::F64(v) => writer.add_f64(*v),
     Value::String(v) => writer.add_string(v),
     Value::Structure(v) => {
       writer.begin_structure(v.id.as_bytes(), v.fields.len() as u32);
@@ -56,29 +56,29 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
       writer.add_array_primitive(TYPE_U64, v.len() as u32);
       writer.add_u64_raw_bulk(v);
     }
-    Value::ArrayS8(v) => {
-      writer.add_array_primitive(TYPE_S8, v.len() as u32);
-      writer.add_s8_raw_bulk(v);
+    Value::ArrayI8(v) => {
+      writer.add_array_primitive(TYPE_I8, v.len() as u32);
+      writer.add_i8_raw_bulk(v);
     }
-    Value::ArrayS16(v) => {
-      writer.add_array_primitive(TYPE_S16, v.len() as u32);
-      writer.add_s16_raw_bulk(v);
+    Value::ArrayI16(v) => {
+      writer.add_array_primitive(TYPE_I16, v.len() as u32);
+      writer.add_i16_raw_bulk(v);
     }
-    Value::ArrayS32(v) => {
-      writer.add_array_primitive(TYPE_S32, v.len() as u32);
-      writer.add_s32_raw_bulk(v);
+    Value::ArrayI32(v) => {
+      writer.add_array_primitive(TYPE_I32, v.len() as u32);
+      writer.add_i32_raw_bulk(v);
     }
-    Value::ArrayS64(v) => {
-      writer.add_array_primitive(TYPE_S64, v.len() as u32);
-      writer.add_s64_raw_bulk(v);
+    Value::ArrayI64(v) => {
+      writer.add_array_primitive(TYPE_I64, v.len() as u32);
+      writer.add_i64_raw_bulk(v);
     }
-    Value::ArrayR32(v) => {
-      writer.add_array_primitive(TYPE_R32, v.len() as u32);
-      writer.add_r32_raw_bulk(v);
+    Value::ArrayF32(v) => {
+      writer.add_array_primitive(TYPE_F32, v.len() as u32);
+      writer.add_f32_raw_bulk(v);
     }
-    Value::ArrayR64(v) => {
-      writer.add_array_primitive(TYPE_R64, v.len() as u32);
-      writer.add_r64_raw_bulk(v);
+    Value::ArrayF64(v) => {
+      writer.add_array_primitive(TYPE_F64, v.len() as u32);
+      writer.add_f64_raw_bulk(v);
     }
     Value::ArrayString(v) => {
       writer.add_array_primitive(TYPE_STRING, v.len() as u32);
@@ -112,12 +112,12 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
     Some(TYPE_U16) => Value::U16(reader.get_u16()),
     Some(TYPE_U32) => Value::U32(reader.get_u32()),
     Some(TYPE_U64) => Value::U64(reader.get_u64()),
-    Some(TYPE_S8) => Value::S8(reader.get_s8()),
-    Some(TYPE_S16) => Value::S16(reader.get_s16()),
-    Some(TYPE_S32) => Value::S32(reader.get_s32()),
-    Some(TYPE_S64) => Value::S64(reader.get_s64()),
-    Some(TYPE_R32) => Value::R32(reader.get_r32()),
-    Some(TYPE_R64) => Value::R64(reader.get_r64()),
+    Some(TYPE_I8) => Value::I8(reader.get_i8()),
+    Some(TYPE_I16) => Value::I16(reader.get_i16()),
+    Some(TYPE_I32) => Value::I32(reader.get_i32()),
+    Some(TYPE_I64) => Value::I64(reader.get_i64()),
+    Some(TYPE_F32) => Value::F32(reader.get_f32()),
+    Some(TYPE_F64) => Value::F64(reader.get_f64()),
     Some(TYPE_STRING) => Value::String(reader.get_string().into()),
     Some(TYPE_STRUCTURE) => {
       let (id, field_count) = reader.get_structure();
@@ -143,12 +143,12 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
           TYPE_U16 => Value::ArrayU16(reader.get_u16_bulk(count as usize).into()),
           TYPE_U32 => Value::ArrayU32(reader.get_u32_bulk(count as usize).into()),
           TYPE_U64 => Value::ArrayU64(reader.get_u64_bulk(count as usize).into()),
-          TYPE_S8 => Value::ArrayS8(reader.get_s8_bulk(count as usize).into()),
-          TYPE_S16 => Value::ArrayS16(reader.get_s16_bulk(count as usize).into()),
-          TYPE_S32 => Value::ArrayS32(reader.get_s32_bulk(count as usize).into()),
-          TYPE_S64 => Value::ArrayS64(reader.get_s64_bulk(count as usize).into()),
-          TYPE_R32 => Value::ArrayR32(reader.get_r32_bulk(count as usize).into()),
-          TYPE_R64 => Value::ArrayR64(reader.get_r64_bulk(count as usize).into()),
+          TYPE_I8 => Value::ArrayI8(reader.get_i8_bulk(count as usize).into()),
+          TYPE_I16 => Value::ArrayI16(reader.get_i16_bulk(count as usize).into()),
+          TYPE_I32 => Value::ArrayI32(reader.get_i32_bulk(count as usize).into()),
+          TYPE_I64 => Value::ArrayI64(reader.get_i64_bulk(count as usize).into()),
+          TYPE_F32 => Value::ArrayF32(reader.get_f32_bulk(count as usize).into()),
+          TYPE_F64 => Value::ArrayF64(reader.get_f64_bulk(count as usize).into()),
           TYPE_STRING => Value::ArrayString({
             let mut strings = Vec::with_capacity(count as usize);
             for _ in 0..count {

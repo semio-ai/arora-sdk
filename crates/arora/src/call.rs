@@ -30,10 +30,10 @@ mod tests {
     assert_eq!(call.id, Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99")?);
     if let Value::Structure(Structure { id, fields }) = &call.fields[1].value.as_ref() {
       assert_eq!(*id, Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?);
-      if let Value::S32(v) = fields[1].value.as_ref() {
+      if let Value::I32(v) = fields[1].value.as_ref() {
         assert_eq!(*v, 113);
       } else {
-        bail!("expected s32 value under second field of struct arg");
+        bail!("expected i32 value under second field of struct arg");
       }
     } else {
       bail!("expected a string under arg 55dbec70-1c3a-433e-a6e6-27446b7f065e");
@@ -72,7 +72,7 @@ fields:
                 value: unit
       - id: 5ffa9104-1e5c-4026-943f-8db38bd34563
         value:
-          s32: 113
+          i32: 113
 ";
 
   pub const CALL_TEST_2: &'static str = "\

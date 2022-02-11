@@ -19,17 +19,17 @@ pub enum Value {
   #[serde(rename = "u64")]
   U64(u64),
   #[serde(rename = "i8")]
-  S8(i8),
+  I8(i8),
   #[serde(rename = "i16")]
-  S16(i16),
+  I16(i16),
   #[serde(rename = "i32")]
-  S32(i32),
+  I32(i32),
   #[serde(rename = "i64")]
-  S64(i64),
+  I64(i64),
   #[serde(rename = "f32")]
-  R32(f32),
+  F32(f32),
   #[serde(rename = "f64")]
-  R64(f64),
+  F64(f64),
   #[serde(rename = "str")]
   String(String),
   #[serde(rename = "struct")]
@@ -47,17 +47,17 @@ pub enum Value {
   #[serde(rename = "u64[]")]
   ArrayU64(Vec<u64>),
   #[serde(rename = "i8[]")]
-  ArrayS8(Vec<i8>),
+  ArrayI8(Vec<i8>),
   #[serde(rename = "i16[]")]
-  ArrayS16(Vec<i16>),
+  ArrayI16(Vec<i16>),
   #[serde(rename = "i32[]")]
-  ArrayS32(Vec<i32>),
+  ArrayI32(Vec<i32>),
   #[serde(rename = "i64[]")]
-  ArrayS64(Vec<i64>),
+  ArrayI64(Vec<i64>),
   #[serde(rename = "f32[]")]
-  ArrayR32(Vec<f32>),
+  ArrayF32(Vec<f32>),
   #[serde(rename = "f64[]")]
-  ArrayR64(Vec<f64>),
+  ArrayF64(Vec<f64>),
   #[serde(rename = "str[]")]
   ArrayString(Vec<String>),
   #[serde(rename = "struct[]")]
