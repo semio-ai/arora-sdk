@@ -176,10 +176,11 @@ impl WebAssemblyModule {
 
     let instance = linker.instantiate(&mut store, &module)?;
 
-    let arora_buffer_alloc =
-      instance.get_typed_func::<(u32,), u32, _>(&mut store, "arora_buffer_alloc")?;
     let arora_buffer_free =
       instance.get_typed_func::<(u32,), (), _>(&mut store, "arora_buffer_free")?;
+
+    let arora_buffer_alloc =
+      instance.get_typed_func::<(u32,), u32, _>(&mut store, "arora_buffer_alloc")?;
 
     let mut arora_functions = HashMap::new();
     for export in exports {

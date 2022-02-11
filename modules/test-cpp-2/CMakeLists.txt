@@ -15,7 +15,7 @@ add_executable(test-cpp-2
 target_include_directories(test-cpp-2 PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp-2 PRIVATE -fPIC -O3 -flto -fno-exceptions)
-target_link_options(test-cpp-2 PRIVATE -Wl,--no-entry -Wl,--export=malloc -Wl,--export=free -Wl,--export=arora_buffer_free)
+target_link_options(test-cpp-2 PRIVATE -Wl,--no-entry -Wl,--export=arora_buffer_alloc -Wl,--export=arora_buffer_free)
 
 if(BUILD_TESTING)
   add_test(
