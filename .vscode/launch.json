@@ -7,6 +7,23 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "C++ generation for test-cpp",
+            "program": "${workspaceFolder}/target/debug/arora-module-cli",
+            "args": ["--registry-uri",
+                "https://raw.githubusercontent.com/semio-ai/arora-registry/master/",
+                "generate",
+                "-l",
+                "cpp",
+                "-c",
+                "/home/toover/Code/Palaio/Semio/engine/modules/test-cpp/module.yaml",
+                "-o",
+                "/home/toover/Code/Palaio/Semio/engine/build/modules/test-cpp/arora"
+            ],
+            "cwd": "${workspaceFolder}/build/modules/test-cpp"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in library 'arora'",
             "cargo": {
                 "args": [
