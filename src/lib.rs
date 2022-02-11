@@ -35,7 +35,7 @@ id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
 name: test
 ret:
   kind: scalar
-  id: s32";
+  id: i32";
     let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
@@ -58,10 +58,10 @@ parameters:
     name: b
     type:
       kind: scalar
-      id: s32
+      id: i32
 ret:
   kind: scalar
-  id: s32";
+  id: i32";
     let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
@@ -96,10 +96,10 @@ exports:
         name: b
         type:
           kind: scalar
-          id: s32
+          id: i32
     ret:
       kind: scalar
-      id: s32
+      id: i32
 imports: []
 dependencies: []
 executable_mime: application/wasm";
