@@ -1233,6 +1233,12 @@ pub extern "C" fn arora_buffer_reader_get_string(
 }
 
 #[no_mangle]
+pub extern "C" fn arora_buffer_alloc(size: u32) -> *mut u8 {
+  let vec: Vec<u8> = vec![0; size as usize];
+  vec.leak().as_mut_ptr()
+}
+
+#[no_mangle]
 pub extern "C" fn arora_buffer_free(buffer: *mut u8) {
   unsafe {
     let _ = Box::from_raw(buffer);
