@@ -20,7 +20,12 @@ jobs:
     steps:
 
     - name: Setup Rust Target Platform
-      run: rustup target add wasm32-unknown-unknown
+      run: |
+        rustup target add wasm32-unknown-unknown
+        rustup target add wasm32-wasi
+
+    - name: Install Rust WASI
+      run: cargo install cargo-wasi
 
     - uses: actions/checkout@v2
 
