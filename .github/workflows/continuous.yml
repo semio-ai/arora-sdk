@@ -28,7 +28,9 @@ jobs:
       run: cargo install cargo-wasi
 
     - name: Install Wasmtime
-      run: curl https://wasmtime.dev/install.sh -sSf | bash
+      run: |
+        curl https://wasmtime.dev/install.sh -sSf | bash
+        source ~/.bashrc
 
     - uses: actions/checkout@v2
 
