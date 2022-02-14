@@ -106,25 +106,6 @@ async fn main() -> anyhow::Result<()> {
     .expect(format!("failed to load module {}", module_name).as_str());
   }
 
-
-  engine
-    .load_module(ModuleDefinition {
-      schema_version: 0,
-      header: serde_yaml::from_str(
-        &read_to_string("modules/test-cpp-2/arora/module.yaml")
-          .await
-          .expect("second header file could not be read"),
-      )
-      .expect("second header file could not be parsed"),
-      executable: {
-        let mut file = File::open("modules/test-cpp-2/test-cpp-2").await?;
-        let mut executable = Vec::new();
-        file.read_to_end(&mut executable).await?;
-        executable.into_boxed_slice()
-      },
-    })
-    .expect("failed to load module");
-
   if let Some(call_yaml) = args.call {
     let call: Call = serde_yaml::from_str(&call_yaml)?;
     let function_id = call.id.clone();
