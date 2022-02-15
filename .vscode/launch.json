@@ -7,6 +7,22 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Call Rust WASM Module",
+            "program": "${workspaceFolder}/target/debug/arora-cli",
+            "args": [
+                "--registry-uri",
+                "https://raw.githubusercontent.com/semio-ai/arora-registry/master/",
+                "--header",
+                "${workspaceFolder}/modules/test-rust-wasm/header.yaml",
+                "--exe",
+                "${workspaceFolder}/modules/test-rust-wasm/target/wasm32-wasi/debug/test_rust_wasm.wasm",
+                "--call",
+                "id: 00cd31a8-2cf4-48e6-a957-69a55de90424"
+            ]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "C++ generation for test-cpp",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": ["--registry-uri",
