@@ -101,8 +101,7 @@ struct WebAssemblyModule {
   store: Store<WasiCtx>,
   instance: WasmInstance,
 
-  malloc: TypedFunc<(u32,), u32>,
-  free: TypedFunc<(u32,), ()>,
+  arora_buffer_alloc: TypedFunc<(u32,), u32>,
   arora_buffer_free: TypedFunc<(u32,), ()>,
   arora_functions: HashMap<Uuid, TypedFunc<(u32,), u32>>,
   memory: Memory,
@@ -177,10 +176,11 @@ impl WebAssemblyModule {
 
     let instance = linker.instantiate(&mut store, &module)?;
 
-    let malloc = instance.get_typed_func::<(u32,), u32, _>(&mut store, "malloc")?;
-    let free = instance.get_typed_func::<(u32,), (), _>(&mut store, "free")?;
     let arora_buffer_free =
       instance.get_typed_func::<(u32,), (), _>(&mut store, "arora_buffer_free")?;
+
+    let arora_buffer_alloc =
+      instance.get_typed_func::<(u32,), u32, _>(&mut store, "arora_buffer_alloc")?;
 
     let mut arora_functions = HashMap::new();
     for export in exports {
@@ -195,14 +195,13 @@ impl WebAssemblyModule {
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
-    store.data_mut().table().insert_at(8375, Box::new(malloc));
+    store.data_mut().table().insert_at(8375, Box::new(arora_buffer_alloc));
 
     Ok(Self {
       module,
       store,
       instance,
-      malloc,
-      free,
+      arora_buffer_alloc,
       arora_buffer_free,
       arora_functions,
       memory,
@@ -211,7 +210,7 @@ impl WebAssemblyModule {
   }
 
   fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
-    Ok(self.malloc.call(&mut self.store, (size,)).map_err(|e| {
+    Ok(self.arora_buffer_alloc.call(&mut self.store, (size,)).map_err(|e| {
       println!("{:?}", e);
       DispatchError::Trap
     })?)

@@ -1,14 +1,20 @@
 use arora_buffers::uuid::serialize;
-use arora_schema::value::{Value, Structure};
+use arora_schema::value::{Value, StructureField, Structure};
+use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
 use crate::module::DispatchError;
 
 /// A call is described like a structure in arora engine.
-pub type Call = Structure;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Call {
+  pub id: Uuid,
+  #[serde(default)]
+  pub args: Vec<StructureField>,
+}
 
 pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
-  return serialize(&Value::Structure(call));
+  return serialize(&Value::Structure(Structure { id: call.id, fields: call.args, }));
 }
 
 pub trait Caller {
@@ -28,7 +34,7 @@ mod tests {
   pub fn parse_call_test() -> Result<()> {
     let call: Call = serde_yaml::from_str(CALL_TEST)?;
     assert_eq!(call.id, Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99")?);
-    if let Value::Structure(Structure { id, fields }) = &call.fields[1].value.as_ref() {
+    if let Value::Structure(Structure { id, fields }) = &call.args[1].value.as_ref() {
       assert_eq!(*id, Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?);
       if let Value::I32(v) = fields[1].value.as_ref() {
         assert_eq!(*v, 113);
@@ -45,13 +51,13 @@ mod tests {
   pub fn parse_call_test_2() -> Result<()> {
     let call: Call = serde_yaml::from_str(CALL_TEST_2)?;
     assert_eq!(call.id, Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63")?);
-    assert_eq!(call.fields.len(), 2);
+    assert_eq!(call.args.len(), 2);
     Ok(())
   }
 
   pub const CALL_TEST: &'static str = "\
 id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
-fields:
+args:
 - id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
   value:
     enum:
@@ -77,7 +83,7 @@ fields:
 
   pub const CALL_TEST_2: &'static str = "\
 id: b213a552-77ad-465a-a26d-352e8eccfd63
-fields:
+args:
 - id: 55dbec70-1c3a-433e-a6e6-27446b7f065e
   value:
     u32: 42

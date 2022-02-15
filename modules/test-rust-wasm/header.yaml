@@ -11,16 +11,15 @@ executor:
   name: wasm
 exports:
   - type: function
-    id: 7fc7ccb8-0955-4354-bf1a-e6b7662fd26a
-    name: test
-    parameters:
-      - id: a5f12190-cd8d-4a55-bf24-b0eef9405a7b
-        name: a
-        type: s32
-      - id: e36ebb7d-cfd1-4245-88d9-33cb9bd57edb
-        name: b
-        type: s32
-    ret: s32
+    id: 5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6
+    name: ping
+
+  - type: function
+    id: 00cd31a8-2cf4-48e6-a957-69a55de90424
+    name: succeed
+    ret:
+      kind: scalar
+      id: 325a5767-e344-4532-860e-0749bcf2e428
 imports: []
 dependencies: []
 executable_mime: application/wasm
