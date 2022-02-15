@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
   if let Some(call_yaml) = args.call {
     let call: Call = serde_yaml::from_str(&call_yaml)?;
     let function_id = call.id.clone();
-    let module = index.find_function(&function_id)?;
+    let function = index.find_function(&function_id)?;
 
     let start_time = if args.benchmark {
       Some(std::time::Instant::now())
@@ -118,8 +118,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let nof_iterations = args.repeat;
-    for _i in 1..nof_iterations {
-      engine.arora_call(&module.id, call.clone())?;
+    for _i in 0..nof_iterations {
+      let result = engine.arora_call(&function.module, call.clone())?;
+      println!("{}", serde_yaml::to_string(&result)?);
     }
   
     if args.benchmark {
