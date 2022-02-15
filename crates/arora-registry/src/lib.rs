@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use arora_schema::{
   module::low::{Header, ModuleDefinition},
-  ty::low::Type,
+  ty::{low::Type, PRIMITIVE_TYPES},
 };
 use tokio::{
   fs::{read_to_string, File},
@@ -22,15 +22,24 @@ impl Registry {
   pub fn new() -> Self {
     Registry {
       base_uri: Url::parse(BASE_URL).unwrap(),
-      type_id_cache: HashMap::new(),
+      type_id_cache: Registry::new_type_id_cache_with_primitives(),
     }
   }
 
   pub fn new_with_base_uri(base_uri: Url) -> Self {
     Registry {
       base_uri,
-      type_id_cache: HashMap::new(),
+      type_id_cache: Registry::new_type_id_cache_with_primitives(),
     }
+  }
+  
+  fn new_type_id_cache_with_primitives() -> HashMap<String, Uuid> {
+    let mut type_id_cache = HashMap::new();
+    PRIMITIVE_TYPES.iter().for_each(|(id, ty)| {
+      type_id_cache.insert(ty.name.clone(), id.clone());
+      ();
+    });
+    type_id_cache
   }
 
   async fn get_bytes(url: Url) -> anyhow::Result<Box<[u8]>> {

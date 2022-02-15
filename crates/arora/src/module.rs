@@ -3,11 +3,11 @@ use uuid::Uuid;
 
 #[derive(Display, Debug, From, Error)]
 pub enum DispatchError {
-  MethodNotFound,
+  FunctionNotFound,
   Trap,
   Internal,
 }
 
 pub trait Module {
-  fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError>;
+  fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError>;
 }

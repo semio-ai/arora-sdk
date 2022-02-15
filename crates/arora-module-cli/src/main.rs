@@ -180,8 +180,8 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
   Ok(())
 }
 
-async fn export_module(cmd: ExportModule, registry: Registry) -> anyhow::Result<()> {
-  Ok(())
+async fn export_module(_: ExportModule, _: &mut Registry) -> anyhow::Result<()> {
+  todo!("not implemented");
 }
 
 #[tokio::main]
@@ -208,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
         "Exporting module to {}",
         export_module_data.output_directory
       );
+      export_module(export_module_data, &mut registry).await?;
     }
   }
 

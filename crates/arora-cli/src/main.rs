@@ -1,8 +1,6 @@
-mod call;
-use call::{Call, serialize, Value};
-
 use anyhow::bail;
 use arora::{
+  call::{Call, Caller},
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
 };
@@ -129,8 +127,8 @@ async fn main() -> anyhow::Result<()> {
 
   if let Some(call_yaml) = args.call {
     let call: Call = serde_yaml::from_str(&call_yaml)?;
-    let module = index.find_function(&call.id)?;
-    let arg = serialize(&Value::Structure(call.clone()));
+    let function_id = call.id.clone();
+    let module = index.find_function(&function_id)?;
 
     let start_time = if args.benchmark {
       Some(std::time::Instant::now())
@@ -140,9 +138,7 @@ async fn main() -> anyhow::Result<()> {
 
     let nof_iterations = args.repeat;
     for _i in 1..nof_iterations {
-      /*let raw_result =*/ engine.dispatch(&module.id, &call.id, arg.as_ref())?;
-      // let result = unsafe { Value::deserialize(&raw_result) };
-      // println!("{:#?}", result);
+      engine.arora_call(&module.id, call.clone())?;
     }
   
     if args.benchmark {

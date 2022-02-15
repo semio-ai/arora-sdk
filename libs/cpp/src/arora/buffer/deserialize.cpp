@@ -20,23 +20,23 @@ void arora::buffer::skip(arora_buffer_reader *const reader, const std::uint8_t t
     case ARORA_BUFFER_TYPE_U64:
       arora_buffer_reader_get_u64(reader);
       break;
-    case ARORA_BUFFER_TYPE_S8:
-      arora_buffer_reader_get_s8(reader);
+    case ARORA_BUFFER_TYPE_I8:
+      arora_buffer_reader_get_i8(reader);
       break;
-    case ARORA_BUFFER_TYPE_S16:
-      arora_buffer_reader_get_s16(reader);
+    case ARORA_BUFFER_TYPE_I16:
+      arora_buffer_reader_get_i16(reader);
       break;
-    case ARORA_BUFFER_TYPE_S32:
-      arora_buffer_reader_get_s32(reader);
+    case ARORA_BUFFER_TYPE_I32:
+      arora_buffer_reader_get_i32(reader);
       break;
-    case ARORA_BUFFER_TYPE_S64:
-      arora_buffer_reader_get_s64(reader);
+    case ARORA_BUFFER_TYPE_I64:
+      arora_buffer_reader_get_i64(reader);
       break;
-    case ARORA_BUFFER_TYPE_R32:
-      arora_buffer_reader_get_r32(reader);
+    case ARORA_BUFFER_TYPE_F32:
+      arora_buffer_reader_get_f32(reader);
       break;
-    case ARORA_BUFFER_TYPE_R64:
-      arora_buffer_reader_get_r64(reader);
+    case ARORA_BUFFER_TYPE_F64:
+      arora_buffer_reader_get_f64(reader);
       break;
     case ARORA_BUFFER_TYPE_STRING:
     {
@@ -91,34 +91,34 @@ void arora::buffer::skip_array(arora_buffer_reader *const reader, const std::uin
       arora_buffer_reader_get_u64_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_S8:
+    case ARORA_BUFFER_TYPE_I8:
     {
-      arora_buffer_reader_get_s8_bulk(reader, element_count);
+      arora_buffer_reader_get_i8_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_S16:
+    case ARORA_BUFFER_TYPE_I16:
     {
-      arora_buffer_reader_get_s16_bulk(reader, element_count);
+      arora_buffer_reader_get_i16_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_S32:
+    case ARORA_BUFFER_TYPE_I32:
     {
-      arora_buffer_reader_get_s32_bulk(reader, element_count);
+      arora_buffer_reader_get_i32_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_S64:
+    case ARORA_BUFFER_TYPE_I64:
     {
-      arora_buffer_reader_get_s64_bulk(reader, element_count);
+      arora_buffer_reader_get_i64_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_R32:
+    case ARORA_BUFFER_TYPE_F32:
     {
-      arora_buffer_reader_get_r32_bulk(reader, element_count);
+      arora_buffer_reader_get_f32_bulk(reader, element_count);
       break;
     }
-    case ARORA_BUFFER_TYPE_R64:
+    case ARORA_BUFFER_TYPE_F64:
     {
-      arora_buffer_reader_get_r64_bulk(reader, element_count);
+      arora_buffer_reader_get_f64_bulk(reader, element_count);
       break;
     }
     case ARORA_BUFFER_TYPE_STRING:

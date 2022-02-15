@@ -106,10 +106,10 @@ exports:
         name: b
         type:
           kind: scalar
-          id: s32
+          id: i32
     ret:
       kind: scalar
-      id: s32
+      id: i32
 imports: []
 dependencies: []
 executable_mime: application/wasm";
