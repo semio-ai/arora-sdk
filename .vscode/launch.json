@@ -15,9 +15,9 @@
                 "-l",
                 "cpp",
                 "-c",
-                "/home/toover/Code/Palaio/Semio/engine/modules/test-cpp/module.yaml",
+                "${workspaceFolder}/modules/test-cpp/module.yaml",
                 "-o",
-                "/home/toover/Code/Palaio/Semio/engine/build/modules/test-cpp/arora"
+                "${workspaceFolder}/build/modules/test-cpp/arora"
             ],
             "cwd": "${workspaceFolder}/build/modules/test-cpp"
         },
