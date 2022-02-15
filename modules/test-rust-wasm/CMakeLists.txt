@@ -37,9 +37,10 @@ if(BUILD_TESTING)
   )
 
   # Sanity check of the WASM library.
+  find_program(WASMTIME wasmtime PATHS "$ENV{HOME}/.wasmtime")
   add_test(
     NAME test-call-rust-wasm-from-wasmtime
-    COMMAND wasmtime ${TEST_RUST_WASM_MODULE_EXECUTABLE}
+    COMMAND ${WASMTIME} ${TEST_RUST_WASM_MODULE_EXECUTABLE}
       --invoke arora_function_5f423ba9_d5f9_46d7_a9b5_fb7d28f99ea6 0
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
