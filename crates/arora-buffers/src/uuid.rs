@@ -195,7 +195,8 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
         }
       }
     }
-    _ => panic!("Invalid type"),
+    Some(kind) => panic!("Invalid type kind {}", kind),
+    None => panic!("Invalid type of no kind"),
   }
 }
 
