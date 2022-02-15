@@ -1,4 +1,4 @@
-use arora_buffers::{BufferReader, TYPE_ENUMERATION};
+use arora_buffers::{BufferReader, TYPE_ENUMERATION, BufferWriter};
 
 use crate::ai::semio::core::error::DeserializationError;
 
@@ -51,6 +51,15 @@ impl TryFrom<&[u8]> for Status {
 
 impl Into<Box<[u8]>> for Status {
   fn into(self) -> Box<[u8]> {
-    todo!()
+    let mut writer = BufferWriter::new();
+    let enumeration_id = STATUS_TYPE_RAW_ID.as_slice();
+    let variant_id = match self {
+      Status::Success => STATUS_SUCCESS_VARIANT_RAW_ID.as_slice(),
+      Status::Failure => STATUS_FAILURE_VARIANT_RAW_ID.as_slice(),
+      Status::Running => STATUS_RUNNING_VARIANT_RAW_ID.as_slice(),
+    };
+    writer.add_enumeration_value(enumeration_id, variant_id);
+    writer.add_unit();
+    writer.finalize()
   }
 }
