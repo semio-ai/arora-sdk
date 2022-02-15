@@ -56,7 +56,12 @@ pub struct ExportFunction {
   #[serde(default)]
   pub parameters: Vec<Parameter>,
   /// The return type
+  #[serde(default = "default_return_type")]
   pub ret: TypeRef,
+}
+
+fn default_return_type() -> TypeRef {
+  TypeRef::Scalar { id: "unit".to_string() }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
