@@ -27,9 +27,6 @@ jobs:
     - name: Install Rust WASI
       run: cargo install cargo-wasi
 
-    - name: Install Wasmtime
-      run: curl https://wasmtime.dev/install.sh -sSf | bash
-
     - uses: actions/checkout@v2
 
     - name: Configure
