@@ -30,7 +30,7 @@ jobs:
     - name: Install Wasmtime
       run: |
         curl https://wasmtime.dev/install.sh -sSf | bash
-        source ~/.bashrc
+        bash
 
     - uses: actions/checkout@v2
 
