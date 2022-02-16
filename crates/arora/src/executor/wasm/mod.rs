@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use arora_schema::module::low::{ExportSymbol, ModuleDefinition};
 use bytes::Buf;
@@ -96,17 +97,31 @@ impl Executor for WebAssemblyExecutor {
   }
 }
 
+/// Maintains references to a web assembly module,
+/// and to the buffers used to exchange data with it.
 struct WebAssemblyModule {
+  /// The WASM module.
   module: WasmModule,
-  store: Store<WasiCtx>,
-  instance: WasmInstance,
 
-  arora_buffer_alloc: TypedFunc<(u32,), u32>,
-  arora_buffer_free: TypedFunc<(u32,), ()>,
+  /// Malloc function provided by the module.
+  malloc: TypedFunc<(u32,), u32>,
+
+  /// Free function provided by the module.
+  free: TypedFunc<(u32,), ()>,
+
+  /// Map of functions exported for arora.
   arora_functions: HashMap<Uuid, TypedFunc<(u32,), u32>>,
+
+  /// The chunk of memory currently allocated to pass arguments as (ptr, size).
+  current_arg_memory: Option<(u32, u32)>,
+
+  /// The memory pool taken by the WASM module.
   memory: Memory,
 
-  current_arg_memory: Option<(usize, usize)>,
+  /// The WASM engine hosting the module.
+  instance: WasmInstance,
+
+  store: Store<WasiCtx>,
 }
 
 impl WebAssemblyModule {
@@ -201,8 +216,8 @@ impl WebAssemblyModule {
       module,
       store,
       instance,
-      arora_buffer_alloc,
-      arora_buffer_free,
+      malloc: arora_buffer_alloc,
+      free: arora_buffer_free,
       arora_functions,
       memory,
       current_arg_memory: None,
@@ -210,42 +225,61 @@ impl WebAssemblyModule {
   }
 
   fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
-    Ok(self.arora_buffer_alloc.call(&mut self.store, (size,)).map_err(|e| {
+    self.malloc.call(&mut self.store, (size,)).map_err(|e| {
       println!("{:?}", e);
       DispatchError::Trap
-    })?)
+    })
+  }
+
+  fn free(&mut self, addr: u32) -> Result<(), DispatchError> {
+    self.free.call(&mut self.store, (addr,)).map_err(|e| {
+      println!("{:?}", e);
+      DispatchError::Trap
+    })
+  }
+
+  fn allocate_arg_memory(&mut self, size: u32) -> Result<u32, DispatchError> {
+    let ptr = self.malloc(size)?;
+    self.current_arg_memory = Some((ptr.clone(), size));
+    Ok(ptr)
   }
 }
 
-impl Module for WebAssemblyModule {
-  fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    if let Some((_, size)) = self.current_arg_memory {
-      // Allocate memory for the argument in the WASM module
-      if size < arg.len() {
-        self.current_arg_memory = Some((self.malloc(arg.len() as u32)? as usize, arg.len()));
-      }
-    } else {
-      self.current_arg_memory = Some((self.malloc(arg.len() as u32)? as usize, arg.len()));
-    }
 
-    let (addr, _) = self.current_arg_memory.unwrap();
+
+impl Module for WebAssemblyModule {
+
+  fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+    let arg_size = u32::try_from(arg.len())
+      .map_err(|_| DispatchError::Internal)?;
+
+    let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
+      // Allocate memory for the argument in the WASM module
+      if current_size < arg_size {
+        self.free(current_addr)?;
+        self.allocate_arg_memory(arg_size)?
+      } else { current_addr }
+    } else {
+      self.allocate_arg_memory(arg_size)?
+    };
 
     // Copy the argument into the WASM module
     self
       .memory
-      .write(&mut self.store, addr as usize, &arg)
+      .write(&mut self.store, addr as usize, arg)
       .map_err(|e| {
         println!("{:?}", e);
         DispatchError::Trap
       })?;
 
+    // Calling the function. It returns the adress of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
-
     let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
       println!("call {:#?}", e);
       DispatchError::Trap
     })?;
 
+    // Read the size of the result.
     let mut size_buffer = [0u8; 4];
     self
       .memory
@@ -254,12 +288,10 @@ impl Module for WebAssemblyModule {
         println!("{:#?}", e);
         DispatchError::Internal
       })?;
-
     let size = size_buffer.as_slice().get_u32_le();
 
-    let mut result_buffer = Vec::with_capacity(size as usize + 4);
-
-    result_buffer.resize(size as usize + 4, 0u8);
+    // Read the result.
+    let mut result_buffer = vec![0u8; size as usize];
     self
       .memory
       .read(&self.store, result as usize, &mut result_buffer)
@@ -270,7 +302,7 @@ impl Module for WebAssemblyModule {
 
     // Free the result
     self
-      .arora_buffer_free
+      .free
       .call(&mut self.store, (result,))
       .map_err(|e| {
         println!("arora_buffer_free {:#?}", e);
