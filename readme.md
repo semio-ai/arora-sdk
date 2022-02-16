@@ -55,6 +55,17 @@ use `arora-module-cli` to generate the adequate sources to implement it.
 This is called a "header", and it is used by the runtime to identify the symbols.
 Use `arora-cli --header <module.yaml> --exe <binary>` to try loading a module.
 
+When a function is called (for instance by using `arora-cli --call`),
+the call arguments are passed in via a structure which `id`
+corresponds to the function to call,
+and with arguments `args` represented as structure fields,
+associating an `id` to a `value`.
+The return value is also a structure which `id`
+corresponds to the function called,
+and with fields recalling the mutated input parameters.
+The field which `id` is the same as the one of the function called
+contains the actual return value.
+
 ## Go deeper
 
 - [Arora Buffers](crates/arora-buffers/readme.md),
