@@ -99,7 +99,7 @@ pub fn arora_buffer_writer_add_structure_field(field_identifier: Expression) -> 
 }
 
 pub fn arora_buffer_skip() -> Expression {
-  func::ARORA_BUFFER_SKIP.call(["reader", "type"])
+  func::ARORA_BUFFER_SKIP.call(["reader", "variant"])
 }
 
 pub fn arora_buffer_skip_array() -> Expression {
@@ -372,7 +372,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
   }
 
   let enumeration = Enum {
-    name: "Type".to_string(),
+    name: "Variant".to_string(),
     members: enumeration_values,
   };
 
@@ -392,9 +392,9 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
   struct_statements.push(
     FunctionPrototype {
-      name: "get_type".to_string(),
+      name: "get_variant".to_string(),
       ret: Some(TypeRef {
-        ty: "Type".to_string(),
+        ty: "Variant".to_string(),
         ..Default::default()
       }),
       constant: true,
@@ -531,9 +531,9 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
   struct_statements.push(
     Variable {
-      name: "type_".to_string(),
+      name: "variant_".to_string(),
       ty: TypeRef {
-        ty: "Type".to_string(),
+        ty: "Variant".to_string(),
         ..Default::default()
       },
       ..Default::default()
@@ -584,15 +584,15 @@ pub fn enumeration_impl(
 
   ret.push(
     FunctionImplementation {
-      name: format!("{}::get_type", name),
+      name: format!("{}::get_variant", name),
       ret: Some(TypeRef {
-        ty: format!("{}::Type", name),
+        ty: format!("{}::Variant", name),
         ..Default::default()
       }),
       constant: true,
       noexcept: true,
       body: Block {
-        statements: vec![Statement::Return("type_".to_expression()).into()],
+        statements: vec![Statement::Return("variant_".to_expression()).into()],
         semicolon: false,
       },
       ..Default::default()
@@ -680,8 +680,8 @@ pub fn enumeration_impl(
               .into(),
               "ret"
                 .to_expression()
-                .dot("type_")
-                .assign("Type".to_expression().colon_colon(value.name.as_str()))
+                .dot("variant_")
+                .assign("Variant".to_expression().colon_colon(value.name.as_str()))
                 .into_statement()
                 .into(),
               Statement::Return("ret".to_expression()).into(),
@@ -703,9 +703,9 @@ pub fn enumeration_impl(
         noexcept: true,
         body: Block {
           statements: vec![Statement::Return(
-            "type_"
+            "variant_"
               .to_expression()
-              .equal("Type".to_expression().colon_colon(value.name.as_str())),
+              .equal("Variant".to_expression().colon_colon(value.name.as_str())),
           )
           .into()],
           semicolon: false,
@@ -1054,7 +1054,7 @@ pub fn enumeration_deserializer(
 
   function_statements.push(
     Variable {
-      name: "type".to_string(),
+      name: "variant".to_string(),
       ty: ty::U8_CONST.clone(),
       value: Some(arora_buffer_reader_next_type()),
       ..Default::default()
@@ -1064,7 +1064,7 @@ pub fn enumeration_deserializer(
 
   function_statements.push(
     Statement::If(
-      "type"
+      "variant"
         .to_expression()
         .not_equal(constant::ARORA_BUFFER_TYPE_ENUMERATION.clone()),
       Block {
@@ -1341,7 +1341,7 @@ pub fn enumeration_serializer(
   let value_name = "value".to_string();
   let writer = writer_name.to_expression();
   let value = value_name.to_expression();
-  let enum_type_enum = enum_type_name.to_expression().colon_colon("Type");
+  let enum_type_enum = enum_type_name.to_expression().colon_colon("Variant");
   let mut switch_cases = Vec::<(Expression, Block)>::new();
   for (_, enum_value) in &enum_type.values {
     let mut case_statements: Vec<Declaration> = Vec::new();
@@ -1368,7 +1368,7 @@ pub fn enumeration_serializer(
   let mut function_statements = Vec::<Declaration>::new();
   function_statements.push(
     Statement::Switch(
-      value.dot("get_type").call::<String, _>(vec![]),
+      value.dot("get_variant").call::<String, _>(vec![]),
       switch_cases,
     )
     .into(),
