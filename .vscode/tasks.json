@@ -6,15 +6,10 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "make",
+            "command": "cmake",
+            "args": [ "--build", "build" ],
             "options": {
-                "cwd": "${workspaceFolder}/build"
-            },
-            "windows":{
-                "command": "ninja",
-                "options": {
-                    "cwd": "${workspaceFolder}/build"
-                },
+                "cwd": "${workspaceFolder}"
             },
             "problemMatcher": [],
             "group": {
