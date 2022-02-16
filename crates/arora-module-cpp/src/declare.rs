@@ -1352,6 +1352,10 @@ pub fn enumeration_serializer(
         id::value_uuid(enum_type_name, &enum_value.name).to_expression(),
       ]),
     )));
+    case_statements.push(Declaration::Statement(Statement::Expression(
+      func::ARORA_BUFFER_WRITER_ADD_UNIT.call([writer.clone()])
+    )));
+    case_statements.push(Declaration::Statement(Statement::Break));
     switch_cases.push((
       enum_type_enum.colon_colon(enum_value.name.to_expression()),
       Block {

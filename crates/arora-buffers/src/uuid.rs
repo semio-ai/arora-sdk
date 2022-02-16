@@ -1,4 +1,4 @@
-use arora_schema::value::{Value, Structure, StructureField, StructureWithoutId, EnumerationWithoutId};
+use arora_schema::value::{Value, Structure, StructureField, StructureWithoutId, EnumerationWithoutId, Enumeration};
 use uuid::Uuid;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
   TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
   TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64,
   TYPE_F32, TYPE_F64,
-  TYPE_STRING, TYPE_STRUCTURE, TYPE_ENUMERATION, TYPE_ARRAY
+  TYPE_STRING, TYPE_STRUCTURE, TYPE_ENUMERATION, TYPE_ARRAY, TYPE_UNIT
 };
 
 pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
@@ -108,6 +108,7 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
 
 fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
   match reader.next_type() {
+    Some(TYPE_UNIT) => Value::Unit,
     Some(TYPE_U8) => Value::U8(reader.get_u8()),
     Some(TYPE_U16) => Value::U16(reader.get_u16()),
     Some(TYPE_U32) => Value::U32(reader.get_u32()),
@@ -132,6 +133,15 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
       Value::Structure(Structure {
         id: Uuid::from_slice(id).unwrap(),
         fields: fields,
+      })
+    }
+    Some(TYPE_ENUMERATION) => {
+      let enum_type_id = reader.get_structure_field();
+      let enum_variant_id = reader.get_enumeration_value_raw();
+      Value::Enumeration(Enumeration {
+        id: Uuid::from_slice(enum_type_id).unwrap(),
+        variant_id: Uuid::from_slice(enum_variant_id).unwrap(),
+        value: Box::new(deserialize_from_reader(reader)),
       })
     }
     Some(TYPE_ARRAY) => {

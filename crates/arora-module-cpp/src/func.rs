@@ -12,6 +12,7 @@ lazy_static::lazy_static! {
   pub static ref ARORA_BUFFER_WRITER_NEW: Expression = "arora_buffer_writer_new".to_expression();
   pub static ref ARORA_BUFFER_WRITER_FREE: Expression = "arora_buffer_writer_free".to_expression();
   pub static ref ARORA_BUFFER_WRITER_FINALIZE: Expression = "arora_buffer_writer_finalize".to_expression();
+  pub static ref ARORA_BUFFER_WRITER_ADD_UNIT: Expression = "arora_buffer_writer_add_unit".to_expression();
   pub static ref ARORA_BUFFER_WRITER_ADD_STRUCTURE_FIELD: Expression = "arora_buffer_writer_add_structure_field".to_expression();
   pub static ref ARORA_BUFFER_WRITER_BEGIN_STRUCTURE: Expression = "arora_buffer_writer_begin_structure".to_expression();
   pub static ref ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE: Expression = "arora_buffer_writer_add_enumeration_value".to_expression();
