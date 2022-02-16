@@ -1,9 +1,14 @@
-use derive_more::{Display, Error, From};
+use derive_more::{Display, Error};
 use uuid::Uuid;
 
-#[derive(Display, Debug, From, Error)]
+#[derive(Display, Debug, Error)]
 pub enum DispatchError {
-  FunctionNotFound,
+  ModuleNotFound {
+    id: Uuid,
+  },
+  FunctionNotFound {
+    id: Uuid,
+  },
   Trap,
   Internal,
 }

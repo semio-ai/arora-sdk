@@ -130,7 +130,7 @@ impl Engine {
     let module = self
       .modules
       .get_mut(&module_id)
-      .ok_or_else(|| DispatchError::FunctionNotFound)?;
+      .ok_or_else(|| DispatchError::ModuleNotFound { id: module_id.clone() })?;
 
     module.dispatch(&function_id, &arg)
   }
