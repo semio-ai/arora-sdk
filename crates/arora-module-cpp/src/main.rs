@@ -890,14 +890,9 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(declare::arora_buffer_writer().into());
 
-        let mut field_count = 1;
-        for parameter in sorted_parameters.iter() {
-          if !parameter.mutable {
-            continue;
-          }
-
-          field_count += 1;
-        }
+        let mutable_parameters = sorted_parameters.iter()
+          .filter(|parameter| parameter.mutable);
+        let field_count = mutable_parameters.clone().count() as u32 + 1;
 
         // Return is always written first by convention
         function_declarations.push(
@@ -924,11 +919,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
           .into(),
         );
 
-        for parameter in sorted_parameters.iter() {
-          if !parameter.mutable {
-            continue;
-          }
-
+        for parameter in mutable_parameters {
           function_declarations.push(
             declare::arora_buffer_writer_add_structure_field(
               id::parameter_uuid(&export.name(), &parameter.name).to_expression(),
