@@ -43,7 +43,7 @@ impl BufferWriter {
   }
 
   pub fn begin_structure_raw(&mut self, field_count: u32) {
-    self.backing.put_u32(field_count);
+    self.backing.put_u32_le(field_count);
   }
 
   pub fn begin_structure(&mut self, id: &[u8], field_count: u32) {
