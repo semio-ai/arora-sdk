@@ -642,6 +642,13 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   Ok(TranslationUnit { declarations })
 }
 
+fn parameter_variable_name(parameter: &LowParameter) -> String {
+  format!("{}_{}",
+    identifier_name(parameter.name.as_str()),
+    identifier_uuid(&parameter.id)
+  )
+}
+
 fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<TranslationUnit> {
   let header = context.headers.get(&id).unwrap();
 
@@ -713,7 +720,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         for parameter in sorted_parameters.iter() {
           function_declarations.push(
             Variable {
-              name: parameter.name.clone(),
+              name: parameter_variable_name(parameter),
               ty: optional(
                 TypeRef {
                   ty: ty::type_name(context, &parameter.ty).to_string(),
@@ -770,7 +777,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         for parameter in sorted_parameters.iter() {
           let mut field_declarations: Vec<Declaration> = Vec::new();
 
-          let name = parameter.name.to_expression();
+          let name = parameter_variable_name(parameter).to_expression();
           let type_name = ty::type_name(context, &parameter.ty);
 
           field_declarations.push(
@@ -881,7 +888,8 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
               identifier_name(&header.name)
                 .to_expression()
                 .colon_colon(f.name.to_expression())
-                .call(f.parameters.iter().map(|p| p.name.to_expression())),
+                .call(f.parameters.iter()
+                  .map(|p| parameter_variable_name(p))),
             ),
             ..Default::default()
           }
