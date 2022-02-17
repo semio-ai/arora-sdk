@@ -1,5 +1,5 @@
 use arora_schema::ty::{
-  low::{Enumeration, Structure, Type, TypeKind},
+  low::{Enumeration, Structure, Type, TypeKind, StructureField},
   UNIT_ID,
 };
 use uuid::Uuid;
@@ -10,7 +10,7 @@ use crate::{
     Parameter, Statement, Struct, ToExpression, ToPrettyString, TypeRef,
     Variable,
   },
-  constant, func, id, ty, Context,
+  constant, func, id, ty, Context, identifier_name, identifier_uuid,
 };
 
 fn uuid_initializer_list(uuid: &Uuid) -> Expression {
@@ -197,10 +197,10 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
 
   declarations.push(Declaration::private());
 
-  for (_, field) in &ty.fields {
+  for (id, field) in &ty.fields {
     declarations.push(
       Variable {
-        name: format!("{}_", &field.name),
+        name: structure_private_field_variable_name(id, field),
         ty: ty::optional(&TypeRef {
           ty: ty::type_name(context, &field.type_ref),
           ..Default::default()
@@ -751,15 +751,26 @@ pub fn enumeration_impl(
   ret
 }
 
+fn structure_private_field_variable_name(id: &Uuid, field: &StructureField) -> String {
+  format!("{}_{}",
+    identifier_name(field.name.as_str()),
+    identifier_uuid(&id))
+}
+
+fn structure_private_field_variable(id: &Uuid, field: &StructureField) -> Expression {
+  structure_private_field_variable_name(id, field)
+    .to_expression()
+}
+
 pub fn structure_impl(
   context: &Context,
-  _: &Uuid,
+  id: &Uuid,
   name: &str,
   ty: &Structure,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
-  for (_, field) in ty.fields.iter() {
+  for (id, field) in ty.fields.iter() {
     ret.push(
       FunctionImplementation {
         name: format!("{}::{}", name, field.name.to_lowercase()),
@@ -769,7 +780,7 @@ pub fn structure_impl(
         })),
         body: Block {
           statements: vec![
-            Statement::Return(format!("{}_", field.name).to_expression().into()).into(),
+            Statement::Return(structure_private_field_variable(&id, &field).into()).into(),
           ],
           semicolon: false,
         },
@@ -792,8 +803,7 @@ pub fn structure_impl(
         }],
         ret: Some(ty::VOID.clone()),
         body: Block {
-          statements: vec![format!("{}_", field.name)
-            .to_expression()
+          statements: vec![structure_private_field_variable(&id, &field)
             .assign("value")
             .into_statement()
             .into()],
@@ -815,8 +825,7 @@ pub fn structure_impl(
         }],
         ret: Some(ty::VOID.clone()),
         body: Block {
-          statements: vec![format!("{}_", field.name)
-            .to_expression()
+          statements: vec![structure_private_field_variable(&id, &field)
             .assign("value")
             .into_statement()
             .into()],
@@ -1122,10 +1131,7 @@ pub fn enumeration_deserializer(
         name
           .to_expression()
           .colon_colon(value.name.to_lowercase().to_expression())
-          .call([format!(
-            "arora::buffer::deserialize<{}>()(reader)",
-            ty::type_name(context, &value.type_ref)
-          )]),
+          .call([deserialize(ty::type_name(context, &value.type_ref).as_str())]),
       )
     } else {
       Statement::Return(
