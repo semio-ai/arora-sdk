@@ -33,8 +33,10 @@ if(BUILD_TESTING)
       --registry-uri ${REGISTRY_URI}
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
+      --header ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/module.yaml
+      --exe ${CMAKE_BINARY_DIR}/modules/test-cpp-2/test-cpp-2
       --call "id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
-fields:
+args:
 - id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
   value:
     enum:

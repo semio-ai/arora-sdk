@@ -872,7 +872,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(
           Variable {
-            name: "__arora_return__".to_string(),
+            name: "result".to_string(),
             ty: TypeRef {
               ty: ty::type_name(context, &f.ret).to_string(),
               ..Default::default()
@@ -890,14 +890,9 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(declare::arora_buffer_writer().into());
 
-        let mut field_count = 1;
-        for parameter in sorted_parameters.iter() {
-          if !parameter.mutable {
-            continue;
-          }
-
-          field_count += 1;
-        }
+        let mutable_parameters = sorted_parameters.iter()
+          .filter(|parameter| parameter.mutable);
+        let field_count = mutable_parameters.clone().count() as u32 + 1;
 
         // Return is always written first by convention
         function_declarations.push(
@@ -919,16 +914,12 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         function_declarations.push(
           declare::serialize(
             &ty::type_name(context, &f.ret),
-            &"__arora_return__".to_expression(),
+            &"result".to_expression(),
           )
           .into(),
         );
 
-        for parameter in sorted_parameters.iter() {
-          if !parameter.mutable {
-            continue;
-          }
-
+        for parameter in mutable_parameters {
           function_declarations.push(
             declare::arora_buffer_writer_add_structure_field(
               id::parameter_uuid(&export.name(), &parameter.name).to_expression(),
@@ -947,7 +938,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(
           Variable {
-            name: "__arora_return_buffer__".to_string(),
+            name: "result_buffer".to_string(),
             ty: ty::U8_CONST_PTR.clone(),
             value: Some(declare::arora_buffer_writer_finalize()),
             ..Default::default()
@@ -959,7 +950,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         function_declarations.push(declare::arora_buffer_writer_free().into());
 
         function_declarations.push(
-          "return __arora_return_buffer__"
+          "return result_buffer"
             .to_expression()
             .into_statement()
             .into(),

@@ -43,7 +43,7 @@ impl BufferWriter {
   }
 
   pub fn begin_structure_raw(&mut self, field_count: u32) {
-    self.backing.put_u32(field_count);
+    self.backing.put_u32_le(field_count);
   }
 
   pub fn begin_structure(&mut self, id: &[u8], field_count: u32) {
@@ -304,7 +304,7 @@ pub struct BufferReader<'a> {
 impl<'a> BufferReader<'a> {
   pub fn new(buffer: &'a [u8]) -> Self {
     Self {
-      backing: buffer,
+      backing: &buffer[4..], // skip the first 4 bytes announcing the size
     }
   }
 
@@ -910,7 +910,6 @@ pub extern "C" fn arora_buffer_writer_finalize(
 ) -> *mut u8 {
   unsafe {
     let writer = &mut *writer;
-
     let backing = writer.finalize();
     if !length.is_null() {
       *length = backing.len();
@@ -1234,7 +1233,7 @@ pub extern "C" fn arora_buffer_reader_get_string(
 
 #[no_mangle]
 pub extern "C" fn arora_buffer_alloc(size: u32) -> *mut u8 {
-  let vec: Vec<u8> = vec![0; size as usize];
+  let vec = vec![0u8; size as usize];
   vec.leak().as_mut_ptr()
 }
 
