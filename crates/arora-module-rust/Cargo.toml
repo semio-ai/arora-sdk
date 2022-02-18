@@ -1,0 +1,22 @@
+[package]
+name = "arora-module-rust"
+version = "0.1.0"
+edition = "2021"
+readme = "readme.md"
+include = ["/src", "src/arora/header.yaml"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arora-index = { path = "../arora-index" }
+arora-module-core = { path = "../arora-module-core" }
+arora-schema = { path = "../arora-schema" }
+arora-vfs = { path = "../arora-vfs" }
+anyhow = "*"
+clap = { version = "3.0.10", features = ["derive"] }
+convert_case = "0.5"
+derive_more = "*"
+lazy_static = "*"
+quote = "1.0"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }

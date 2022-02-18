@@ -1,10 +1,9 @@
 // Let us pretend this is an auto-generated header.
 //====================================================================================
 // Provides the interface of the module, and forwards calls to specialized functions.
-mod arora;
+mod arora_generated;
 // Provides symbols imported from other modules.
-mod ai;
-use ai::semio::core::status::Status;
+use arora_generated::status::Status;
 //====================================================================================
 // Put the implementation below.
 
