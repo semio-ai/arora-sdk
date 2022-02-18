@@ -5,6 +5,7 @@ authors = ["Victor Paleologue <victor.paleologue@palaio.eu>"]
 description = "A test module project compiled to wasm"
 license = "Proprietary"
 edition = "2021"
+readme = "readme.md"
 
 [lib]
 crate-type = ["cdylib"]
