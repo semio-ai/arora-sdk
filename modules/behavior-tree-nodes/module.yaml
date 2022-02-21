@@ -1,0 +1,34 @@
+id: 3F0AA0C0-6DD5-4CC5-A05E-97A21EC44455
+author: Semio
+description: Core Behavior Tree Nodes
+license: Proprietary
+name: behavior-tree-nodes
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
+    name: succeed
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: 32246df6-ab5d-4f18-9221-23e28731de93
+    name: seq
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: 6f49e650-84ca-4899-a9bd-1f3bf17fab51
+    ret:
+      kind: scalar
+      id: Status
+imports: []
+dependencies: []
+executable_mime: application/wasm
