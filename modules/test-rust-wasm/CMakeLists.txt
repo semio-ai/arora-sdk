@@ -12,6 +12,9 @@ add_custom_target(generate-${MODULE_NAME}-bindings ALL
       -o ${ARORA_GENERATED_SOURCE_DIR}
   BYPRODUCTS
     ${ARORA_GENERATED_SOURCE_DIR}/module.yaml
+  DEPENDS
+    ${ARORA_MODULE_CLI}
+    ${ARORA_MODULE_RUST}
 )
 
 # Reformat the generated code.
