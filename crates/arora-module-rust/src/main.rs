@@ -100,6 +100,7 @@ fn generate_enumeration_source_contents(id: &Uuid, name: &String, enumeration: &
       quote! { #variant_ident, }
     });
   let enum_declaration = quote! {
+    #[derive(Debug, PartialEq)]
     pub enum #enum_ident {
       #(#enum_contents)*
     }
