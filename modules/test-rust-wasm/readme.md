@@ -3,10 +3,9 @@
 This is a module written in Rust and compiled to WASM to be executed by arora-engine.
 It relies on [wasmtime for Rust](https://docs.wasmtime.dev/wasm-rust.html).
 
-At this stage it pretends some code was generated
-into `src/ai/semio/core` to support custom types,
-into `src/arora.rs` to export symbols adequately
-and forward the calls to the specialized implementation in `src/lib.rs`.
+It uses a code generation step using `arora-module-cli -l rust`,
+and puts all the sources under `src/arora-generated`,
+and provides bindings for the Arora engine.
 
 ## Requirements
 
