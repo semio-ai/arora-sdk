@@ -1,3 +1,28 @@
+cmake_minimum_required(VERSION 3.14)
+
+# Getting and using the WASI SDK
+set(WASI_VERSION 14)
+set(WASI_VERSION_FULL "${WASI_VERSION}.0")
+if (WIN32)
+  set(WASI_PLATFORM "mingw")
+  set(CMAKE_GENERATOR "Ninja" CACHE STRING "Generator")
+  set(CMAKE_MAKE_PROGRAM "ninja" CACHE STRING "Make program")
+elseif (APPLE)
+  set(WASI_PLATFORM "macos")
+elseif (UNIX)
+  set(WASI_PLATFORM "linux")
+else ()
+  message(FATAL "Unsupported platform")
+endif()
+
+include(FetchContent)
+FetchContent_Declare(wasi_sdk
+  URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION_FULL}-${WASI_PLATFORM}.tar.gz
+)
+FetchContent_MakeAvailable(wasi_sdk)
+set(WASI_SDK_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/_deps/wasi_sdk-src")
+set(CMAKE_TOOLCHAIN_FILE "${WASI_SDK_PREFIX}/share/cmake/wasi-sdk.cmake" CACHE STRING "Toolchain file")
+
 project(arora)
 cmake_minimum_required(VERSION 3.0)
 
@@ -28,6 +53,7 @@ set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR
 set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_RUST "${RUST_BINARY_DIR}/arora-module-rust${WASI_HOST_EXE_SUFFIX}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
@@ -35,6 +61,7 @@ add_custom_target(arora ALL
   BYPRODUCTS
     ${ARORA_MODULE_CLI}
     ${ARORA_MODULE_CPP}
+    ${ARORA_MODULE_RUST}
 )
 
 add_custom_target(arora-buffers-build ALL
@@ -63,6 +90,7 @@ install(
     ${ARORA_CLI}
     ${ARORA_MODULE_CLI}
     ${ARORA_MODULE_CPP}
+    ${ARORA_MODULE_RUST}
   PERMISSIONS
     OWNER_EXECUTE
     OWNER_READ
