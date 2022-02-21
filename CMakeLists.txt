@@ -105,7 +105,7 @@ install(
 if(BUILD_TESTING)
   add_test(
     NAME cargo_test
-    COMMAND cargo test
+    COMMAND cargo test ${CARGO_BUILD_FLAGS}
   )
 endif()
 
