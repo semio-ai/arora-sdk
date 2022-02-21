@@ -44,7 +44,7 @@ if(BUILD_TESTING)
   # Unit tests for the host.
   add_test(
     NAME test-${MODULE_NAME}-host
-    COMMAND cargo test
+    COMMAND cargo test ${CARGO_BUILD_FLAGS}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
 

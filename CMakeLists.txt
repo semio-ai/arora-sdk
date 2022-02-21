@@ -20,8 +20,9 @@ FetchContent_Declare(wasi_sdk
   URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION_FULL}-${WASI_PLATFORM}.tar.gz
 )
 FetchContent_MakeAvailable(wasi_sdk)
-set(WASI_SDK_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/_deps/wasi_sdk-src")
+set(WASI_SDK_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/_deps/wasi_sdk-src" CACHE STRING "WASI SDK Prefix")
 set(CMAKE_TOOLCHAIN_FILE "${WASI_SDK_PREFIX}/share/cmake/wasi-sdk.cmake" CACHE STRING "Toolchain file")
+set(USE_RUST_DEBUG ON CACHE BOOL "Use Rust debug build")
 
 project(arora)
 cmake_minimum_required(VERSION 3.0)
@@ -31,15 +32,16 @@ include(CTest)
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option (USE_RUST_DEBUG "Use Rust debug build" OFF)
 set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/master/" CACHE STRING "Registry URI")
 
 set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
 set(CARGO_BUILD_FLAGS --lib --bins)
 if (USE_RUST_DEBUG)
+  message(STATUS "Will build Rust crates in debug")
   set(RUST_TARGET_SUBDIR "debug")
 else()
+message(STATUS "Will build Rust crates in release")
   set(RUST_TARGET_SUBDIR "release")
   list(APPEND CARGO_BUILD_FLAGS --release)
 endif()
