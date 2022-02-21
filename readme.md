@@ -22,23 +22,27 @@ Semio Arora is a C library (written in Rust) and associated tooling for executin
 ## Build
 
 ```bash
-./configure.py
-cd build
-make # or ninja on Windows
+mkdir build
+cmake ..
+cmake --build .
 ```
 
 ## Debug
 
-To build rust crates in debug, you can configure it with:
-
-```bash
-./configure.py USE_RUST_DEBUG=1
-```
+By default it builds in debug.
 
 To get backtraces from fatal errors in code generation tools, try:
 
 ```bash
-RUST_BACKTRACE=& cmake --build build/
+RUST_BACKTRACE=1 cmake --build .
+```
+
+## Release
+
+To build in release, use:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -DUSE_RUST_DEBUG=0 ..
 ```
 
 ## Modules
