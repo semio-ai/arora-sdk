@@ -1,6 +1,9 @@
 {
   "cmake.configureOnOpen": true,
-  "cmake.configureArgs": ["-DCMAKE_BUILD_TYPE=Debug", "USE_RUST_DEBUG=1"],
+  "cmake.configureArgs": [
+    "-DCMAKE_BUILD_TYPE=Debug",
+    "-DUSE_RUST_DEBUG=1",
+  ],
   "cmake.buildDirectory": "${workspaceFolder}/build",
   "editor.tokenColorCustomizations": {
     "textMateRules": []
