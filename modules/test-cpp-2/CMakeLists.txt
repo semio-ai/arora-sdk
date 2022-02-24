@@ -5,6 +5,8 @@ add_custom_target(generate-test-cpp-2 ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp-2.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+  DEPENDS
+    arora
 )
 
 add_executable(test-cpp-2
