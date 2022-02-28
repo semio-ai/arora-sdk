@@ -1,6 +1,6 @@
 use anyhow::bail;
 use arora::{
-  call::{Call, Caller},
+  call::{Call, CallBridge},
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
 };

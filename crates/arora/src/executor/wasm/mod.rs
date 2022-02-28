@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+use arora_buffers::serde_uuid::serialize;
 use arora_schema::module::low::{ExportSymbol, ModuleDefinition};
 use bytes::Buf;
 use uuid::Uuid;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 
+use crate::call::{CallBridge, CallableId};
 use crate::{
   engine::{Engine, EngineRef},
   executor::wasm::guest::AroraBuffer,
@@ -173,6 +175,44 @@ impl WebAssemblyModule {
     result_addr
   }
 
+  fn arora_dispatch_indirect(
+    mut caller: Caller<'_, WasiCtx>,
+    engine: usize,
+    callable_id: u64,
+  ) -> u32 {
+    // more yucks
+    let arora_caller: &mut dyn CallBridge = unsafe { &mut *(engine as *mut Engine) };
+    let result_value = arora_caller
+      .arora_call_indirect(&CallableId { id: callable_id })
+      .unwrap();
+    let result_buffer = serialize(&result_value);
+
+    let malloc = caller
+      .data_mut()
+      .table()
+      .get_mut::<TypedFunc<(u32,), u32>>(8375)
+      .unwrap()
+      .clone();
+
+    let memory = caller
+      .get_export("memory")
+      .map(Extern::into_memory)
+      .flatten()
+      .unwrap();
+
+    let mut context = caller.as_context_mut();
+
+    let result_addr = malloc
+      .call(&mut context, (result_buffer.len() as u32,))
+      .unwrap();
+
+    memory
+      .write(&mut context, result_addr as usize, &result_buffer)
+      .unwrap();
+
+    result_addr
+  }
+
   pub fn new(
     engine: EngineRef,
     exports: Vec<ExportSymbol>,
@@ -186,6 +226,13 @@ impl WebAssemblyModule {
       "arora_dispatch",
       move |caller: Caller<'_, WasiCtx>, module_id, method_id, arg| {
         WebAssemblyModule::arora_dispatch(arora_dispatch_engine, caller, module_id, method_id, arg)
+      },
+    )?;
+    linker.func_wrap(
+      "env",
+      "arora_dispatch_indirect",
+      move |caller: Caller<'_, WasiCtx>, callable_id: u64| {
+        WebAssemblyModule::arora_dispatch_indirect(caller, arora_dispatch_engine, callable_id)
       },
     )?;
 

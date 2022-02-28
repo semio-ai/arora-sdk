@@ -1,7 +1,9 @@
 use std::{
   collections::HashMap,
   fmt::Debug,
+  ops::DerefMut,
   pin::Pin,
+  sync::{Arc, Mutex},
 };
 
 use arora_buffers::serde_uuid::deserialize;
@@ -9,9 +11,10 @@ use arora_schema::value::Value;
 use uuid::Uuid;
 
 use crate::{
+  call::{serialize_to_arg, Call, CallBridge, CallError, Callable, CallableId, CallableRegistry},
   executor::{self, Executor},
   module::{DispatchError, Module},
-  schema::module::low::ModuleDefinition, call::{Caller, Call, serialize_to_arg},
+  schema::module::low::ModuleDefinition,
 };
 
 use derive_more::{Display, Error, From};
@@ -73,6 +76,7 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
 pub struct Engine {
   executors: HashMap<&'static str, Box<dyn Executor>>,
   modules: HashMap<Uuid, Box<dyn Module>>,
+  callables: CallableRegistry,
 }
 
 impl Engine {
@@ -81,6 +85,7 @@ impl Engine {
     let mut ret = Box::pin(Engine {
       executors,
       modules: HashMap::new(),
+      callables: CallableRegistry::new(),
     });
 
     {
@@ -138,9 +143,48 @@ impl Engine {
 
 pub type EngineRef = *mut Engine;
 
-impl Caller for Engine {
-  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, DispatchError> {
-    self.dispatch(&module, &call.id.clone(), serialize_to_arg(call).as_ref())
+impl CallBridge for Engine {
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, CallError> {
+    self
+      .dispatch(&module, &call.id.clone(), serialize_to_arg(call).as_ref())
       .map(|result| deserialize(result.as_ref()))
+      .map_err(DispatchError::into)
+  }
+
+  fn arora_register_callable(&mut self, callable: Arc<Mutex<dyn Callable>>) -> CallableId {
+    self.callables.register_callable(callable).unwrap()
+  }
+
+  fn arora_unregister_callable(&mut self, callable_id: &CallableId) {
+    self.callables.unregister_callable(callable_id).unwrap()
+  }
+
+  fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError> {
+    self
+      .callables
+      .find_callable(callable_id)?
+      .lock()
+      .unwrap()
+      .call(self)
+  }
+}
+
+pub type PinnedEngine = Pin<Box<Engine>>;
+
+impl CallBridge for PinnedEngine {
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, CallError> {
+    self.deref_mut().arora_call(module, call)
+  }
+
+  fn arora_register_callable(&mut self, callable: Arc<Mutex<dyn Callable>>) -> CallableId {
+    self.deref_mut().arora_register_callable(callable)
+  }
+
+  fn arora_unregister_callable(&mut self, callable_id: &CallableId) {
+    self.deref_mut().arora_unregister_callable(callable_id)
+  }
+
+  fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError> {
+    self.deref_mut().arora_call_indirect(callable_id)
   }
 }
