@@ -6,15 +6,16 @@ include(CTest)
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option (USE_RUST_DEBUG "Use Rust debug build" OFF)
 set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/master/" CACHE STRING "Registry URI")
-
+set(USE_RUST_DEBUG ON CACHE BOOL "Use Rust debug build")
 set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
 set(CARGO_BUILD_FLAGS --lib --bins)
 if (USE_RUST_DEBUG)
+  message(STATUS "Will build Rust crates in debug")
   set(RUST_TARGET_SUBDIR "debug")
 else()
+message(STATUS "Will build Rust crates in release")
   set(RUST_TARGET_SUBDIR "release")
   list(APPEND CARGO_BUILD_FLAGS --release)
 endif()
@@ -28,6 +29,7 @@ set(WASM_LIB_DIR "${RUST_TARGET_DIR}/wasm32-unknown-unknown/${RUST_TARGET_SUBDIR
 set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_MODULE_RUST "${RUST_BINARY_DIR}/arora-module-rust${WASI_HOST_EXE_SUFFIX}")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
@@ -35,6 +37,7 @@ add_custom_target(arora ALL
   BYPRODUCTS
     ${ARORA_MODULE_CLI}
     ${ARORA_MODULE_CPP}
+    ${ARORA_MODULE_RUST}
 )
 
 add_custom_target(arora-buffers-build ALL
@@ -63,6 +66,7 @@ install(
     ${ARORA_CLI}
     ${ARORA_MODULE_CLI}
     ${ARORA_MODULE_CPP}
+    ${ARORA_MODULE_RUST}
   PERMISSIONS
     OWNER_EXECUTE
     OWNER_READ
@@ -77,7 +81,7 @@ install(
 if(BUILD_TESTING)
   add_test(
     NAME cargo_test
-    COMMAND cargo test
+    COMMAND cargo test ${CARGO_BUILD_FLAGS}
   )
 endif()
 

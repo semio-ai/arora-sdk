@@ -92,7 +92,7 @@ fn generate_enumeration_source_contents(id: &Uuid, name: &String, enumeration: &
 
   // Actual enum declaration.
   let enum_name = name.to_case(Case::UpperCamel);
-  let enum_ident = format_ident!("{}", enum_name);
+  let enum_ident = type_ident(&enum_name);
   let variants = enumeration.values.iter();
   let enum_contents = variants.clone()
     .map(|(_, variant)| {
@@ -100,6 +100,7 @@ fn generate_enumeration_source_contents(id: &Uuid, name: &String, enumeration: &
       quote! { #variant_ident, }
     });
   let enum_declaration = quote! {
+    #[derive(Debug, PartialEq)]
     pub enum #enum_ident {
       #(#enum_contents)*
     }

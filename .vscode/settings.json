@@ -1,11 +1,10 @@
 {
-  "cmake.configureOnOpen": false,
+  "cmake.configureOnOpen": true,
   "cmake.configureArgs": [
-    "-DWASI_SDK_PREFIX=${workspaceFolder}/wasi-sdk-14.0",
-    "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/wasi-sdk-14.0/share/cmake/wasi-sdk.cmake",
-    "-DCMAKE_SYSROOT=${workspaceFolder}/wasi-sdk-14.0/share/wasi-sysroot",
+    "-DCMAKE_BUILD_TYPE=Debug",
+    "-DUSE_RUST_DEBUG=1",
   ],
-  "cmake.buildDirectory": "${workspaceFolder}/build-vscode",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
   "editor.tokenColorCustomizations": {
     "textMateRules": []
   },
