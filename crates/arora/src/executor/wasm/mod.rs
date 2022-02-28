@@ -257,7 +257,10 @@ impl WebAssemblyModule {
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
-    store.data_mut().table().insert_at(8375, Box::new(arora_buffer_alloc));
+    store
+      .data_mut()
+      .table()
+      .insert_at(8375, Box::new(arora_buffer_alloc));
 
     Ok(Self {
       module,
@@ -292,20 +295,18 @@ impl WebAssemblyModule {
   }
 }
 
-
-
 impl Module for WebAssemblyModule {
-
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    let arg_size = u32::try_from(arg.len())
-      .map_err(|_| DispatchError::Internal)?;
+    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal)?;
 
     let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
       // Allocate memory for the argument in the WASM module
       if current_size < arg_size {
         self.free(current_addr)?;
         self.allocate_arg_memory(arg_size)?
-      } else { current_addr }
+      } else {
+        current_addr
+      }
     } else {
       self.allocate_arg_memory(arg_size)?
     };
@@ -348,13 +349,10 @@ impl Module for WebAssemblyModule {
       })?;
 
     // Free the result
-    self
-      .free
-      .call(&mut self.store, (result,))
-      .map_err(|e| {
-        println!("arora_buffer_free {:#?}", e);
-        DispatchError::Trap
-      })?;
+    self.free.call(&mut self.store, (result,)).map_err(|e| {
+      println!("arora_buffer_free {:#?}", e);
+      DispatchError::Trap
+    })?;
 
     Ok(result_buffer.into_boxed_slice())
   }

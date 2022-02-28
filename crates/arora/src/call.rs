@@ -145,14 +145,17 @@ impl CallableRegistry {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use anyhow::{Result, bail};
+  use anyhow::{bail, Result};
   use std::str::FromStr;
   use uuid::Uuid;
 
   #[test]
   pub fn parse_call_test() -> Result<()> {
     let call: Call = serde_yaml::from_str(CALL_TEST)?;
-    assert_eq!(call.id, Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99")?);
+    assert_eq!(
+      call.id,
+      Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99")?
+    );
     if let Value::Structure(Structure { id, fields }) = &call.args[1].value.as_ref() {
       assert_eq!(*id, Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?);
       if let Value::I32(v) = fields[1].value.as_ref() {
@@ -169,7 +172,10 @@ mod tests {
   #[test]
   pub fn parse_call_test_2() -> Result<()> {
     let call: Call = serde_yaml::from_str(CALL_TEST_2)?;
-    assert_eq!(call.id, Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63")?);
+    assert_eq!(
+      call.id,
+      Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63")?
+    );
     assert_eq!(call.args.len(), 2);
     Ok(())
   }
