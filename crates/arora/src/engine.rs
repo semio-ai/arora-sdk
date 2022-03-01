@@ -4,7 +4,7 @@ use std::{
   pin::Pin,
 };
 
-use arora_buffers::uuid::deserialize;
+use arora_buffers::serde_uuid::deserialize;
 use arora_schema::value::Value;
 use uuid::Uuid;
 
