@@ -272,7 +272,7 @@ impl Module for WebAssemblyModule {
         DispatchError::Trap
       })?;
 
-    // Calling the function. It returns the adress of the buffer of the result.
+    // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
     let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
       println!("call {:#?}", e);
