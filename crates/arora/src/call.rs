@@ -3,10 +3,7 @@ use arora_schema::value::{Structure, StructureField, Value};
 use derive_more::Display;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::{
-  collections::HashMap,
-  sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
 use crate::module::DispatchError;
@@ -26,8 +23,8 @@ pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
   }));
 }
 
-pub trait Callable: Send + Sync {
-  fn call(&mut self, caller: &mut dyn CallBridge) -> Result<Value, CallError>;
+pub trait Callable {
+  fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError>;
 }
 
 pub trait CallBridge {
@@ -38,7 +35,7 @@ pub trait CallBridge {
   /// associates it to an identified generated on the fly.
   /// The function is made available to every module by calling
   /// `arora_dispatch_indirect(id: u64) -> Value`.
-  fn arora_register_callable(&mut self, callable: Arc<Mutex<dyn Callable>>) -> CallableId;
+  fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId;
 
   /// Unregisters the function associated to the given identifier.
   fn arora_unregister_callable(&mut self, callable_id: &CallableId);
@@ -85,8 +82,14 @@ impl From<u64> for CallableId {
   }
 }
 
+impl Callable for CallableId {
+  fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+    caller.arora_call_indirect(self)
+  }
+}
+
 pub struct CallableRegistry {
-  callables_by_id: HashMap<CallableId, Arc<Mutex<dyn Callable>>>,
+  callables_by_id: HashMap<CallableId, Rc<dyn Callable>>,
 }
 
 impl CallableRegistry {
@@ -98,7 +101,7 @@ impl CallableRegistry {
 
   pub fn register_callable(
     &mut self,
-    callable: Arc<Mutex<dyn Callable>>,
+    callable: Rc<dyn Callable>,
   ) -> Result<CallableId, CallError> {
     let tick_id: CallableId = self.generate_unique_callable_id();
     if let Some(existing_one) = self.callables_by_id.insert(tick_id.clone(), callable) {
@@ -110,15 +113,11 @@ impl CallableRegistry {
     Ok(tick_id)
   }
 
-  pub fn find_callable(&self, id: &CallableId) -> Result<Arc<Mutex<dyn Callable>>, CallError> {
-    let callable = self
-      .callables_by_id
-      .get(id)
-      .cloned()
-      .ok_or(CallError::Generic {
-        message: "cannot find callable".to_string(),
-      })?;
-    Ok(callable)
+  pub fn find_callable(&self, id: &CallableId) -> Result<Rc<dyn Callable>, CallError> {
+    let callable = self.callables_by_id.get(id).ok_or(CallError::Generic {
+      message: "cannot find callable".to_string(),
+    })?;
+    Ok(callable.clone())
   }
 
   pub fn unregister_callable(&mut self, id: &CallableId) -> Result<(), CallError> {

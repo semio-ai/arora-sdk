@@ -1,10 +1,4 @@
-use std::{
-  collections::HashMap,
-  fmt::Debug,
-  ops::DerefMut,
-  pin::Pin,
-  sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, fmt::Debug, ops::DerefMut, pin::Pin, rc::Rc};
 
 use arora_buffers::serde_uuid::deserialize;
 use arora_schema::value::Value;
@@ -153,7 +147,7 @@ impl CallBridge for Engine {
       .map_err(DispatchError::into)
   }
 
-  fn arora_register_callable(&mut self, callable: Arc<Mutex<dyn Callable>>) -> CallableId {
+  fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
     self.callables.register_callable(callable).unwrap()
   }
 
@@ -162,12 +156,7 @@ impl CallBridge for Engine {
   }
 
   fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError> {
-    self
-      .callables
-      .find_callable(callable_id)?
-      .lock()
-      .unwrap()
-      .call(self)
+    self.callables.find_callable(callable_id)?.call(self)
   }
 }
 
@@ -178,7 +167,7 @@ impl CallBridge for PinnedEngine {
     self.deref_mut().arora_call(module, call)
   }
 
-  fn arora_register_callable(&mut self, callable: Arc<Mutex<dyn Callable>>) -> CallableId {
+  fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
     self.deref_mut().arora_register_callable(callable)
   }
 

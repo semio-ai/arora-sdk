@@ -3,17 +3,12 @@ use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
 use arora_index::Index;
 use arora_schema::{
   module::low::{Parameter, TypeRef},
-  value::{StructureField, Value},
+  value::{ConversionError, StructureField, Value},
 };
 use derive_more::Display;
 use schema::Node;
 use status::Status;
-use std::{
-  cell::RefCell,
-  collections::HashMap,
-  rc::Rc,
-  sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
 // Runtime.
@@ -28,45 +23,6 @@ pub struct BehaviorTree {
   node_index: Rc<HashMap<Uuid, Rc<Node>>>,
 }
 
-trait Tickable {
-  fn tick(&mut self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError>;
-}
-
-struct TickFunction {
-  node: Rc<Node>,
-  index: Rc<Index>,
-  children: Vec<CallableId>,
-}
-
-impl Tickable for TickFunction {
-  fn tick(&mut self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
-    tick(
-      caller,
-      self.index.clone(),
-      &self.children,
-      self.node.clone(),
-    )
-  }
-}
-
-impl Callable for TickFunction {
-  fn call(&mut self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
-    self
-      .tick(caller)
-      .map(Into::<Value>::into)
-      .map_err(Into::<CallError>::into)
-  }
-}
-
-unsafe impl Send for TickFunction {}
-
-unsafe impl Sync for TickFunction {}
-
-struct NodeTick {
-  function: Arc<Mutex<dyn Tickable>>,
-  id: CallableId,
-}
-
 /// Runs a behavior tree until it reaches the status success or failure.
 pub fn run_behavior_tree(
   behavior: &mut BehaviorTree,
@@ -79,18 +35,10 @@ pub fn run_behavior_tree(
     caller,
   )?;
 
-  let data = Rc::new(RefCell::new(true));
-  {
-    let mut reference = data.borrow_mut();
-    *reference = false;
-  }
-  println!("{:?}", data);
-
   let mut status = Status::Running;
   while status == Status::Running {
-    status = tick.function.lock().unwrap().tick(caller)?;
+    status = tick.tick(caller)?;
   }
-
   return Ok(status);
 }
 
@@ -99,13 +47,13 @@ fn setup_tick_function(
   node_index: Rc<HashMap<Uuid, Rc<Node>>>,
   index: Rc<Index>,
   caller: &mut dyn CallBridge,
-) -> Result<NodeTick, BehaviorTreeError> {
+) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
     .children
     .as_ref()
     .map(|children| children.len())
     .unwrap_or(0);
-  let mut children_ticks: Vec<NodeTick> = Vec::with_capacity(nof_children);
+  let mut children_ticks: Vec<TickId> = Vec::with_capacity(nof_children);
   if let Some(children) = &node.children {
     for child_id in children {
       let child_node = node_index
@@ -125,24 +73,19 @@ fn setup_tick_function(
       children_ticks.push(tick_function_with_id);
     }
   }
-  let children_callable_ids = children_ticks.iter().map(|tick| tick.id.clone()).collect();
-  let tick_function = Arc::new(Mutex::new(TickFunction {
+  let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
     node: node.clone(),
     index,
-    children: children_callable_ids,
-  }));
-  let callable_id = caller
-    .arora_register_callable(tick_function.clone());
-  Ok(NodeTick {
-    function: tick_function.clone(),
-    id: callable_id,
-  })
+    children: children_ticks,
+  });
+  let callable_id = caller.arora_register_callable(tick_function);
+  Ok(callable_id.into())
 }
 
 fn tick(
   caller: &mut dyn CallBridge,
   index: Rc<Index>,
-  children_callable_ids: &Vec<CallableId>,
+  child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<status::Status, BehaviorTreeError> {
   let function = index.find_function(&node.function).map_err(|_| {
@@ -161,7 +104,7 @@ fn tick(
     .as_ref()
     .map(|children| children.len())
     .unwrap_or(0);
-  assert_eq!(nof_children, children_callable_ids.len());
+  assert_eq!(nof_children, child_tick_ids.len());
 
   if let Some(_) = &node.children {
     // Find the `children` parameter by its type
@@ -194,12 +137,12 @@ fn tick(
     }?;
 
     // Pass the tick ids of the children.
-    let mut children_arg = Vec::with_capacity(children_callable_ids.len());
-    for child_callable_id in children_callable_ids {
+    let mut children_arg = Vec::with_capacity(child_tick_ids.len());
+    for child_tick_id in child_tick_ids {
       children_arg.push(arora_schema::value::StructureWithoutId {
         fields: vec![StructureField {
           id: *TICK_ID_ID_FIELD_ID,
-          value: Box::new(Value::U64(child_callable_id.id)),
+          value: Box::new(Value::U64(child_tick_id.callable_id)),
         }],
       });
     }
@@ -242,15 +185,82 @@ pub struct TickId {
   pub callable_id: u64,
 }
 
-impl From<u64> for TickId {
-  fn from(callable_id: u64) -> Self {
-    Self { callable_id }
+impl From<&TickId> for CallableId {
+  fn from(val: &TickId) -> Self {
+    CallableId {
+      id: val.callable_id,
+    }
+  }
+}
+
+impl From<TickId> for CallableId {
+  fn from(val: TickId) -> Self {
+    CallableId {
+      id: val.callable_id,
+    }
+  }
+}
+
+impl From<CallableId> for TickId {
+  fn from(callable_id: CallableId) -> Self {
+    Self {
+      callable_id: callable_id.id,
+    }
   }
 }
 
 lazy_static::lazy_static! {
   pub static ref TICK_ID_TYPE_ID: Uuid = Uuid::parse_str("6f49e650-84ca-4899-a9bd-1f3bf17fab51").unwrap();
   pub static ref TICK_ID_ID_FIELD_ID: Uuid = Uuid::parse_str("237992d2-17d1-459f-bca1-7185fa6a69d7").unwrap();
+}
+
+/// Specialization of Callable that returns a Status.
+trait Tickable {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError>;
+}
+
+impl Tickable for TickId {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+    CallableId::from(self).tick(caller)
+  }
+}
+
+impl Tickable for CallableId {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+    let value = self
+      .call(caller)
+      .map_err(|e| BehaviorTreeError::CallError(e))?;
+    value
+      .try_into()
+      .map_err(|_| BehaviorTreeError::ConversionError(ConversionError {}))
+  }
+}
+
+/// The usual Tickable object in behavior trees, which is also Callable.
+struct TickFunction {
+  node: Rc<Node>,
+  index: Rc<Index>,
+  children: Vec<TickId>,
+}
+
+impl Tickable for TickFunction {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+    tick(
+      caller,
+      self.index.clone(),
+      &self.children,
+      self.node.clone(),
+    )
+  }
+}
+
+impl Callable for TickFunction {
+  fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+    self
+      .tick(caller)
+      .map(Into::<Value>::into)
+      .map_err(Into::<CallError>::into)
+  }
 }
 
 // Loading behavior trees.
@@ -340,18 +350,11 @@ impl Into<CallError> for BehaviorTreeError {
   }
 }
 
-#[derive(Display, Debug)]
-pub struct ConversionError {}
-
-impl std::error::Error for ConversionError {}
-
 // Binding of custom types.
 //=====================================================================
 mod status {
-  use arora_schema::value::{Enumeration, Value};
+  use arora_schema::value::{ConversionError, Enumeration, Value};
   use uuid::Uuid;
-
-  use crate::ConversionError;
 
   #[derive(Debug, PartialEq)]
   pub enum Status {
@@ -454,8 +457,24 @@ mod tests {
     run_to_success(SEQ_OF_SUCCESS, &vec!["behavior-tree-nodes".to_string()]).await;
   }
 
+  #[tokio::test]
+  pub async fn seq_fail_middle() {
+    assert_eq!(Status::Failure, run_base(SEQ_FAIL_MIDDLE).await);
+  }
+
+  async fn run_base(tree_yaml: &str) -> Status {
+    run(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
+  }
+
   async fn run_to_success(tree_yaml: &str, modules: &Vec<String>) {
-    let mut engine = setup_engine();
+    let status = run(tree_yaml, modules).await;
+    assert_eq!(status, Status::Success);
+  }
+
+  async fn run(tree_yaml: &str, modules: &Vec<String>) -> Status {
+    let mut engine = EngineBuilder::new()
+      .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
+      .build();
     let mut index = Index::new();
 
     let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
@@ -468,14 +487,7 @@ mod tests {
     }
     let mut behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
     behavior.index = Rc::new(index);
-    let status = run_behavior_tree(&mut behavior, &mut engine).unwrap();
-    assert_eq!(status, Status::Success);
-  }
-
-  fn setup_engine() -> PinnedEngine {
-    EngineBuilder::new()
-        .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
-        .build()
+    run_behavior_tree(&mut behavior, &mut engine).unwrap()
   }
 
   /// Load a module built by this project, from under the `module/` directory
@@ -580,5 +592,20 @@ mod tests {
   function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
 - id: 817e45e3-26ca-45a4-8537-ad70e3de1298
   function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
+";
+
+  pub const SEQ_FAIL_MIDDLE: &'static str = "\
+- id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
+  function: 32246df6-ab5d-4f18-9221-23e28731de93
+  children:
+    - d50638bf-c44b-4f6e-a5f2-925fcfff71a8
+    - 817e45e3-26ca-45a4-8537-ad70e3de1298
+    - 26aa23ea-85e9-4571-89d5-6f9656c344cb
+- id: d50638bf-c44b-4f6e-a5f2-925fcfff71a8
+  function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
+- id: 817e45e3-26ca-45a4-8537-ad70e3de1298
+  function: 3abbbfb6-d00d-41eb-88bb-97874267eaf6
+- id: 26aa23ea-85e9-4571-89d5-6f9656c344cb
+  function: 41ae5ed0-1d12-4b71-aab8-02e7efedf177
 ";
 }
