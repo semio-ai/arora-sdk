@@ -1,4 +1,5 @@
 mod arora_generated;
+
 use arora_buffers::BufferReader;
 use arora_generated::{status::Status, tick_id::TickId};
 
@@ -6,6 +7,14 @@ use crate::arora_generated::status;
 
 fn succeed() -> Status {
   Status::Success
+}
+
+fn fail() -> Status {
+  Status::Failure
+}
+
+fn run() -> Status {
+  Status::Running
 }
 
 fn seq(children: Vec<TickId>) -> Status {
@@ -17,6 +26,29 @@ fn seq(children: Vec<TickId>) -> Status {
     }
   }
   Status::Success
+}
+
+fn fallback(children: Vec<TickId>) -> Status {
+  for child in children {
+    match call_tick_function(&child) {
+      Status::Success => return Status::Success,
+      Status::Failure => continue,
+      Status::Running => return Status::Running,
+    }
+  }
+  Status::Success
+}
+
+fn parallel(children: Vec<TickId>) -> Status {
+  let mut status = Status::Success;
+  for child in children {
+    match call_tick_function(&child) {
+      Status::Success => continue,
+      Status::Failure => status = Status::Failure,
+      Status::Running => status = Status::Running,
+    }
+  }
+  status
 }
 
 fn call_tick_function(tick_id: &TickId) -> Status {

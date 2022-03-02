@@ -18,6 +18,22 @@ exports:
       id: Status
 
   - type: function
+    id: 3abbbfb6-d00d-41eb-88bb-97874267eaf6
+    name: fail
+    parameters: []
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: 41ae5ed0-1d12-4b71-aab8-02e7efedf177
+    name: run
+    parameters: []
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
     id: 32246df6-ab5d-4f18-9221-23e28731de93
     name: seq
     parameters:
@@ -25,7 +41,35 @@ exports:
         name: children
         type:
           kind: array
-          id: 6f49e650-84ca-4899-a9bd-1f3bf17fab51
+          id: TickId
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: bfa89a4e-c369-430e-be78-0dc07311391c
+    name: fallback
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: TickId
+        mutable: false
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: a9340289-1f30-411f-9faa-0f07d54613e8
+    name: parallel
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: TickId
+        mutable: false
     ret:
       kind: scalar
       id: Status
