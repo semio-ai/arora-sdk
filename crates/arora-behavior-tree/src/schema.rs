@@ -1,6 +1,6 @@
 use arora_schema::module::high::TypeRef;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::{fmt::Display, collections::HashMap};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
