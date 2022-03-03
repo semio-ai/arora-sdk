@@ -16,6 +16,7 @@ anyhow = "*"
 clap = { version = "3.0.10", features = ["derive"] }
 convert_case = "0.5"
 derive_more = "*"
+itertools = "0.10"
 lazy_static = "*"
 quote = "1.0"
 tokio = { version = "1", features = ["full"] }

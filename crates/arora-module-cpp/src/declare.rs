@@ -409,7 +409,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
     if !matches!(
       value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id }
+      arora_schema::module::low::TypeRef::Scalar { id: _ }
     ) || id == &*UNIT_ID
     {
       struct_statements.push(
@@ -485,7 +485,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
     if !matches!(
       value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id }
+      arora_schema::module::low::TypeRef::Scalar { id: _ }
     ) || id == &*UNIT_ID
     {
       struct_statements.push(
@@ -609,7 +609,7 @@ pub fn enumeration_impl(
     .into(),
   );
 
-  for (id, value) in ty.values.iter() {
+  for (_, value) in ty.values.iter() {
     ret.push(Declaration::new_line(1));
 
     if !is_unit(&value.type_ref) {
@@ -764,7 +764,6 @@ fn structure_private_field_variable(id: &Uuid, field: &StructureField) -> Expres
 
 pub fn structure_impl(
   context: &Context,
-  id: &Uuid,
   name: &str,
   ty: &Structure,
 ) -> Vec<Declaration> {
@@ -843,7 +842,7 @@ pub fn structure_impl(
 pub fn ty_impl(context: &Context, ty: &Type) -> Vec<Declaration> {
   match &ty.kind {
     TypeKind::Enumeration(value) => enumeration_impl(context, &ty.id, &ty.name, &value),
-    TypeKind::Structure(value) => structure_impl(context, &ty.id, &ty.name, &value),
+    TypeKind::Structure(value) => structure_impl(context, &ty.name, &value),
     TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
   }
 }
@@ -1124,7 +1123,7 @@ pub fn enumeration_deserializer(
   for (id, value) in ty.values.iter() {
     let ret = if matches!(
       value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id }
+      arora_schema::module::low::TypeRef::Scalar { id: _ }
     ) && id == &*UNIT_ID
     {
       Statement::Return(

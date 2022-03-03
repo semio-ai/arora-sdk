@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+use arora_buffers::serde_uuid::serialize;
 use arora_schema::module::low::{ExportSymbol, ModuleDefinition};
 use bytes::Buf;
 use uuid::Uuid;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 
+use crate::call::{CallBridge, CallableId};
 use crate::{
   engine::{Engine, EngineRef},
   executor::wasm::guest::AroraBuffer,
@@ -173,6 +175,44 @@ impl WebAssemblyModule {
     result_addr
   }
 
+  fn arora_dispatch_indirect(
+    mut caller: Caller<'_, WasiCtx>,
+    engine: usize,
+    callable_id: u64,
+  ) -> u32 {
+    // more yucks
+    let arora_caller: &mut dyn CallBridge = unsafe { &mut *(engine as *mut Engine) };
+    let result_value = arora_caller
+      .arora_call_indirect(&CallableId { id: callable_id })
+      .unwrap();
+    let result_buffer = serialize(&result_value);
+
+    let malloc = caller
+      .data_mut()
+      .table()
+      .get_mut::<TypedFunc<(u32,), u32>>(8375)
+      .unwrap()
+      .clone();
+
+    let memory = caller
+      .get_export("memory")
+      .map(Extern::into_memory)
+      .flatten()
+      .unwrap();
+
+    let mut context = caller.as_context_mut();
+
+    let result_addr = malloc
+      .call(&mut context, (result_buffer.len() as u32,))
+      .unwrap();
+
+    memory
+      .write(&mut context, result_addr as usize, &result_buffer)
+      .unwrap();
+
+    result_addr
+  }
+
   pub fn new(
     engine: EngineRef,
     exports: Vec<ExportSymbol>,
@@ -186,6 +226,13 @@ impl WebAssemblyModule {
       "arora_dispatch",
       move |caller: Caller<'_, WasiCtx>, module_id, method_id, arg| {
         WebAssemblyModule::arora_dispatch(arora_dispatch_engine, caller, module_id, method_id, arg)
+      },
+    )?;
+    linker.func_wrap(
+      "env",
+      "arora_dispatch_indirect",
+      move |caller: Caller<'_, WasiCtx>, callable_id: u64| {
+        WebAssemblyModule::arora_dispatch_indirect(caller, arora_dispatch_engine, callable_id)
       },
     )?;
 
@@ -210,7 +257,10 @@ impl WebAssemblyModule {
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
-    store.data_mut().table().insert_at(8375, Box::new(arora_buffer_alloc));
+    store
+      .data_mut()
+      .table()
+      .insert_at(8375, Box::new(arora_buffer_alloc));
 
     Ok(Self {
       module,
@@ -245,20 +295,18 @@ impl WebAssemblyModule {
   }
 }
 
-
-
 impl Module for WebAssemblyModule {
-
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    let arg_size = u32::try_from(arg.len())
-      .map_err(|_| DispatchError::Internal)?;
+    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal)?;
 
     let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
       // Allocate memory for the argument in the WASM module
       if current_size < arg_size {
         self.free(current_addr)?;
         self.allocate_arg_memory(arg_size)?
-      } else { current_addr }
+      } else {
+        current_addr
+      }
     } else {
       self.allocate_arg_memory(arg_size)?
     };
@@ -272,7 +320,7 @@ impl Module for WebAssemblyModule {
         DispatchError::Trap
       })?;
 
-    // Calling the function. It returns the adress of the buffer of the result.
+    // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
     let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
       println!("call {:#?}", e);
@@ -301,13 +349,10 @@ impl Module for WebAssemblyModule {
       })?;
 
     // Free the result
-    self
-      .free
-      .call(&mut self.store, (result,))
-      .map_err(|e| {
-        println!("arora_buffer_free {:#?}", e);
-        DispatchError::Trap
-      })?;
+    self.free.call(&mut self.store, (result,)).map_err(|e| {
+      println!("arora_buffer_free {:#?}", e);
+      DispatchError::Trap
+    })?;
 
     Ok(result_buffer.into_boxed_slice())
   }

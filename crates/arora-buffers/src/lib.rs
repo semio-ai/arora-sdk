@@ -1,5 +1,5 @@
-pub mod raw_id;
-pub mod uuid;
+pub mod serde_raw_id;
+pub mod serde_uuid;
 
 use bytes::{Buf, BufMut};
 
@@ -432,7 +432,7 @@ impl<'a> BufferReader<'a> {
   pub fn get_structure(&mut self) -> (&'a [u8], u32) {
     let id = &self.backing[0..16];
     self.backing.advance(16);
-    let field_count = self.backing.get_u32_le();
+    let field_count = self.get_structure_raw();
     (id, field_count)
   }
 
