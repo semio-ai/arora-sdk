@@ -1,4 +1,4 @@
-use crate::SemanticVersion;
+use crate::{SemanticVersion, value::Value};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,6 +30,8 @@ pub struct Parameter {
   /// Mutability
   #[serde(default)]
   pub mutable: bool,
+  /// Default value
+  pub default_value: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
