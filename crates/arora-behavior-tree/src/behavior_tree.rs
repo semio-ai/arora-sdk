@@ -1,4 +1,5 @@
 mod error;
+mod nodes;
 mod schema;
 mod status;
 mod tick_id;
@@ -21,36 +22,52 @@ use crate::tick_id::{TICK_ID_ID_FIELD_ID, TICK_ID_TYPE_ID};
 //====================================================================
 /// The behavior tree, binding all nodes, variables and types together.
 pub struct BehaviorTree {
-  /// Index of modules, functions, variables and types.
-  index: Rc<Index>,
   /// The root node from which the tree stems.
   root: Rc<Node>,
   /// All the nodes, indexed by their ID.
-  node_index: Rc<HashMap<Uuid, Rc<Node>>>,
+  node_index: HashMap<Uuid, Rc<Node>>,
+}
+
+struct BehaviorTreeRuntime<'a> {
+  caller: &'a mut dyn CallBridge,
+  tick: TickId,
+}
+
+impl<'a> BehaviorTreeRuntime<'a> {
+  fn setup(
+    tree: &'a BehaviorTree,
+    index: Rc<Index>,
+    caller: &'a mut dyn CallBridge,
+  ) -> Result<Self, BehaviorTreeError> {
+    let tick = setup_tick_function(tree.root.clone(), &tree.node_index, index.clone(), caller)?;
+    Ok(Self {
+      caller,
+      tick,
+    })
+  }
+
+  fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
+    self.tick.tick(self.caller)
+  }
 }
 
 /// Runs a behavior tree until it reaches the status success or failure.
 pub fn run_behavior_tree(
-  behavior: &mut BehaviorTree,
+  behavior: &BehaviorTree,
+  index: Rc<Index>,
   caller: &mut dyn CallBridge,
 ) -> Result<status::Status, BehaviorTreeError> {
-  let tick = setup_tick_function(
-    behavior.root.clone(),
-    behavior.node_index.clone(),
-    behavior.index.clone(),
-    caller,
-  )?;
-
+  let mut runtime = BehaviorTreeRuntime::setup(behavior, index, caller)?;
   let mut status = Status::Running;
   while status == Status::Running {
-    status = tick.tick(caller)?;
+    status = runtime.tick()?;
   }
   return Ok(status);
 }
 
 fn setup_tick_function(
   node: Rc<Node>,
-  node_index: Rc<HashMap<Uuid, Rc<Node>>>,
+  node_index: &HashMap<Uuid, Rc<Node>>,
   index: Rc<Index>,
   caller: &mut dyn CallBridge,
 ) -> Result<TickId, BehaviorTreeError> {
@@ -63,19 +80,14 @@ fn setup_tick_function(
   if let Some(children) = &node.children {
     for child_id in children {
       let child_node = node_index
-        .clone()
         .get(child_id)
         .ok_or(BehaviorTreeError::ChildNodeNotFound {
           node: node.id.clone(),
           child: child_id.clone(),
         })?
         .clone();
-      let tick_function_with_id = setup_tick_function(
-        child_node.clone(),
-        node_index.clone(),
-        index.clone(),
-        caller,
-      )?;
+      let tick_function_with_id =
+        setup_tick_function(child_node.clone(), &node_index, index.clone(), caller)?;
       children_ticks.push(tick_function_with_id);
     }
   }
@@ -254,9 +266,8 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
   }
 
   Ok(BehaviorTree {
-    index: Rc::new(Index::new()),
     root: root.unwrap(),
-    node_index: Rc::new(node_index),
+    node_index,
   })
 }
 
@@ -265,10 +276,12 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::nodes::*;
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_registry::Registry;
   use arora_schema::module::low::{Header, ModuleDefinition};
+
   use std::path::Path;
   use tokio::{
     fs::{read_to_string, File},
@@ -296,29 +309,55 @@ mod tests {
 
   #[tokio::test]
   pub async fn run_trivial_tree() {
-    run_to_success(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await;
+    assert_eq!(
+      Status::Success,
+      run_yaml_with_modules(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await
+    );
   }
 
   #[tokio::test]
   pub async fn seq_of_success() {
-    run_to_success(SEQ_OF_SUCCESS, &vec!["behavior-tree-nodes".to_string()]).await;
+    assert_eq!(Status::Success, run_yaml_base(SEQ_OF_SUCCESS).await);
   }
 
   #[tokio::test]
   pub async fn seq_fail_middle() {
-    assert_eq!(Status::Failure, run_base(SEQ_FAIL_MIDDLE).await);
+    assert_eq!(Status::Failure, run_yaml_base(SEQ_FAIL_MIDDLE).await);
   }
 
-  async fn run_base(tree_yaml: &str) -> Status {
-    run(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
+  #[tokio::test]
+  pub async fn seq_run_last() {
+    let behavior = seq(vec![succeed(), succeed(), run()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
   }
 
-  async fn run_to_success(tree_yaml: &str, modules: &Vec<String>) {
-    let status = run(tree_yaml, modules).await;
-    assert_eq!(status, Status::Success);
+  #[tokio::test]
+  pub async fn seq_run_middle_fail_last() {
+    let behavior = seq(vec![succeed(), run(), fail()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
   }
 
-  async fn run(tree_yaml: &str, modules: &Vec<String>) -> Status {
+  // Test helpers and data
+  //==============================================================================
+  async fn tick_base(behavior: &BehaviorTree) -> Status {
+    tick_with_modules(&behavior, &vec!["behavior-tree-nodes".to_string()]).await
+  }
+
+  async fn run_base(behavior: &BehaviorTree) -> Status {
+    run_with_modules(&behavior, &vec!["behavior-tree-nodes".to_string()]).await
+  }
+
+  async fn run_yaml_base(tree_yaml: &str) -> Status {
+    run_yaml_with_modules(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
+  }
+
+  async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
+    let (mut engine, index) = setup_engine_with_modules(behavior, modules).await;
+    let mut runtime = BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine).unwrap();
+    runtime.tick().unwrap()
+  }
+
+  async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
     let mut engine = EngineBuilder::new()
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
@@ -332,9 +371,29 @@ mod tests {
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
-    let mut behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
-    behavior.index = Rc::new(index);
-    run_behavior_tree(&mut behavior, &mut engine).unwrap()
+    run_behavior_tree(&behavior, Rc::new(index), &mut engine).unwrap()
+  }
+
+  async fn run_yaml_with_modules(tree_yaml: &str, modules: &Vec<String>) -> Status {
+    let behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
+    run_with_modules(&behavior, &modules).await
+  }
+
+  async fn setup_engine_with_modules<'a>(behavior: &'a BehaviorTree, modules: &Vec<String>) -> (PinnedEngine, Index) {
+    let mut engine = EngineBuilder::new()
+      .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
+      .build();
+    let mut index = Index::new();
+
+    let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
+    let mut registry = Registry::new_with_base_uri(
+      Url::parse(registry_uri).expect(format!("malformed registry URI: {}", registry_uri).as_str()),
+    );
+
+    for module in modules {
+      load_module(&mut engine, &mut index, &mut registry, module).await;
+    }
+    (engine, index)
   }
 
   /// Load a module built by this project, from under the `module/` directory
