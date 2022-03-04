@@ -32,6 +32,22 @@ fn seq(children: Vec<TickId>) -> Status {
   Status::Success
 }
 
+fn seq_star(children: Vec<TickId>, current_index: &mut u16) -> Status {
+  for i in (*current_index as usize)..children.len() {
+    let child = &children[i];
+    match call_tick_function(&child) {
+      Status::Success => *current_index += 1,
+      Status::Failure => {
+        *current_index = 0;
+        return Status::Failure;
+      }
+      Status::Running => return Status::Running,
+    }
+  }
+  *current_index = 0;
+  Status::Success
+}
+
 fn fallback(children: Vec<TickId>) -> Status {
   for child in children {
     match call_tick_function(&child) {

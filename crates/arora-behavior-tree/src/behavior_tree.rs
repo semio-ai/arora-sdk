@@ -26,6 +26,8 @@ pub struct BehaviorTree {
   root: Rc<Node>,
   /// All the nodes, indexed by their ID.
   node_index: HashMap<Uuid, Rc<Node>>,
+  /// The local variables.
+  locals: Rc<HashMap<Uuid, Rc<Value>>>,
 }
 
 struct BehaviorTreeRuntime<'a> {
@@ -39,11 +41,14 @@ impl<'a> BehaviorTreeRuntime<'a> {
     index: Rc<Index>,
     caller: &'a mut dyn CallBridge,
   ) -> Result<Self, BehaviorTreeError> {
-    let tick = setup_tick_function(tree.root.clone(), &tree.node_index, index.clone(), caller)?;
-    Ok(Self {
+    let tick = setup_tick_function(
+      tree.root.clone(),
+      &tree.node_index,
+      index.clone(),
+      tree.locals.clone(),
       caller,
-      tick,
-    })
+    )?;
+    Ok(Self { caller, tick })
   }
 
   fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
@@ -69,6 +74,7 @@ fn setup_tick_function(
   node: Rc<Node>,
   node_index: &HashMap<Uuid, Rc<Node>>,
   index: Rc<Index>,
+  locals: Rc<HashMap<Uuid, Rc<Value>>>,
   caller: &mut dyn CallBridge,
 ) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
@@ -86,14 +92,20 @@ fn setup_tick_function(
           child: child_id.clone(),
         })?
         .clone();
-      let tick_function_with_id =
-        setup_tick_function(child_node.clone(), &node_index, index.clone(), caller)?;
+      let tick_function_with_id = setup_tick_function(
+        child_node.clone(),
+        &node_index,
+        index.clone(),
+        locals.clone(),
+        caller,
+      )?;
       children_ticks.push(tick_function_with_id);
     }
   }
   let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
     node: node.clone(),
     index,
+    locals: locals.to_owned(),
     children: children_ticks,
   });
   let callable_id = caller.arora_register_callable(tick_function);
@@ -103,6 +115,7 @@ fn setup_tick_function(
 fn tick(
   caller: &mut dyn CallBridge,
   index: Rc<Index>,
+  locals: &HashMap<Uuid, Rc<Value>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<status::Status, BehaviorTreeError> {
@@ -175,8 +188,7 @@ fn tick(
 
   // Pass the remaining parameters from the behavior-wise variables.
   for (param_id, variable_id) in &node.arguments {
-    let value = index
-      .variables
+    let value = locals
       .get(variable_id)
       .ok_or(BehaviorTreeError::VariableNotFound {
         variable: variable_id.clone(),
@@ -184,7 +196,7 @@ fn tick(
       })?;
     call.args.push(StructureField {
       id: param_id.clone(),
-      value: Box::new(value.clone()),
+      value: Box::new(value.as_ref().clone()),
     });
   }
 
@@ -223,6 +235,7 @@ impl Tickable for CallableId {
 struct TickFunction {
   node: Rc<Node>,
   index: Rc<Index>,
+  locals: Rc<HashMap<Uuid, Rc<Value>>>,
   children: Vec<TickId>,
 }
 
@@ -231,6 +244,7 @@ impl Tickable for TickFunction {
     tick(
       caller,
       self.index.clone(),
+      self.locals.as_ref(),
       &self.children,
       self.node.clone(),
     )
@@ -268,6 +282,7 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
   Ok(BehaviorTree {
     root: root.unwrap(),
     node_index,
+    locals: Rc::new(HashMap::new()),
   })
 }
 
@@ -337,14 +352,49 @@ mod tests {
     assert_eq!(Status::Running, tick_base(&behavior).await);
   }
 
+  #[tokio::test]
+  pub async fn seq_star_succeed() {
+    let behavior =
+      seq_star(vec![
+        succeed(),
+        succeed(),
+        succeed()
+      ]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn seq_star_resumes() {
+    let mut first_status: Rc<Value> = Rc::new(Status::Success.into());
+    let second_status: Rc<Value> = Rc::new(Status::Running.into());
+    let behavior = seq_star(vec![
+      status_identity(first_status.clone()),
+      status_identity(second_status.clone()),
+    ])
+    .into();
+
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    // First tick moves the sequence to the second node.
+    assert_eq!(Status::Running, runtime.tick().unwrap());
+
+    // Second tick ignores the first node.
+    set_value(&mut first_status, Status::Running);
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+  }
+
   // Test helpers and data
   //==============================================================================
+  fn set_value<T: Into<Value>>(rc: &mut Rc<Value>, v: T) {
+    *Rc::get_mut(rc).unwrap() = v.into()
+  }
+
   async fn tick_base(behavior: &BehaviorTree) -> Status {
-    tick_with_modules(&behavior, &vec!["behavior-tree-nodes".to_string()]).await
+    tick_with_modules(&behavior, &BASE_MODULE_NAMES).await
   }
 
   async fn run_yaml_base(tree_yaml: &str) -> Status {
-    run_yaml_with_modules(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
+    run_yaml_with_modules(tree_yaml, &BASE_MODULE_NAMES).await
   }
 
   async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
@@ -354,19 +404,7 @@ mod tests {
   }
 
   async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let mut engine = EngineBuilder::new()
-      .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
-      .build();
-    let mut index = Index::new();
-
-    let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
-    let mut registry = Registry::new_with_base_uri(
-      Url::parse(registry_uri).expect(format!("malformed registry URI: {}", registry_uri).as_str()),
-    );
-
-    for module in modules {
-      load_module(&mut engine, &mut index, &mut registry, module).await;
-    }
+    let (mut engine, index) = setup_engine_with_modules(&modules).await;
     run_behavior_tree(&behavior, Rc::new(index), &mut engine).unwrap()
   }
 
@@ -478,6 +516,10 @@ mod tests {
       })
       .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
 
+  }
+
+  lazy_static::lazy_static! {
+    static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
   }
 
   /// A tree with a single node calling test-wasm.succeed()

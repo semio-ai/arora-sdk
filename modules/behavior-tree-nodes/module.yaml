@@ -60,6 +60,26 @@ exports:
       id: Status
 
   - type: function
+    id: c2d5ed72-798c-4174-94f7-13378bd9bf1f
+    name: seq_star
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: TickId
+
+      - id: 4de502df-3f48-4541-94d8-dd68fe92bc8e
+        name: current_index
+        type:
+          kind: scalar
+          id: u16
+        mutable: true
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
     id: bfa89a4e-c369-430e-be78-0dc07311391c
     name: fallback
     parameters:
