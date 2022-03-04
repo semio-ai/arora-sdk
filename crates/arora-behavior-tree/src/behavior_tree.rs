@@ -343,16 +343,12 @@ mod tests {
     tick_with_modules(&behavior, &vec!["behavior-tree-nodes".to_string()]).await
   }
 
-  async fn run_base(behavior: &BehaviorTree) -> Status {
-    run_with_modules(&behavior, &vec!["behavior-tree-nodes".to_string()]).await
-  }
-
   async fn run_yaml_base(tree_yaml: &str) -> Status {
     run_yaml_with_modules(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
   }
 
   async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let (mut engine, index) = setup_engine_with_modules(behavior, modules).await;
+    let (mut engine, index) = setup_engine_with_modules(modules).await;
     let mut runtime = BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine).unwrap();
     runtime.tick().unwrap()
   }
@@ -379,7 +375,7 @@ mod tests {
     run_with_modules(&behavior, &modules).await
   }
 
-  async fn setup_engine_with_modules<'a>(behavior: &'a BehaviorTree, modules: &Vec<String>) -> (PinnedEngine, Index) {
+  async fn setup_engine_with_modules<'a>(modules: &Vec<String>) -> (PinnedEngine, Index) {
     let mut engine = EngineBuilder::new()
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
