@@ -49,8 +49,8 @@ pub enum CallError {
   Generic { message: String },
   ModuleNotFound { id: Uuid },
   FunctionNotFound { id: Uuid },
-  Trap,
-  Internal,
+  Trap { message: String },
+  Internal { message: String },
 }
 
 impl From<DispatchError> for CallError {
@@ -58,8 +58,8 @@ impl From<DispatchError> for CallError {
     match e {
       DispatchError::ModuleNotFound { id } => CallError::ModuleNotFound { id },
       DispatchError::FunctionNotFound { id } => CallError::FunctionNotFound { id },
-      DispatchError::Trap => CallError::Trap,
-      DispatchError::Internal => CallError::Internal,
+      DispatchError::Trap { message } => CallError::Trap { message },
+      DispatchError::Internal { message } => CallError::Internal { message },
     }
   }
 }

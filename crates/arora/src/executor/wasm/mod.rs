@@ -276,15 +276,17 @@ impl WebAssemblyModule {
 
   fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
     self.malloc.call(&mut self.store, (size,)).map_err(|e| {
-      println!("{:?}", e);
-      DispatchError::Trap
+      DispatchError::Trap {
+        message: format!("failed to allocate memory for module {:?}: {:#?}", self.module.name(), e)
+      }
     })
   }
 
   fn free(&mut self, addr: u32) -> Result<(), DispatchError> {
     self.free.call(&mut self.store, (addr,)).map_err(|e| {
-      println!("{:?}", e);
-      DispatchError::Trap
+      DispatchError::Trap {
+        message: format!("failed to free memory for module {:?}: {:#?}", self.module.name(), e)
+      }
     })
   }
 
@@ -297,7 +299,9 @@ impl WebAssemblyModule {
 
 impl Module for WebAssemblyModule {
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal)?;
+    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal {
+      message: format!("failed to cast args size to u32 in module {:#?}", self.module.name())
+    })?;
 
     let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
       // Allocate memory for the argument in the WASM module
@@ -316,15 +320,17 @@ impl Module for WebAssemblyModule {
       .memory
       .write(&mut self.store, addr as usize, arg)
       .map_err(|e| {
-        println!("{:?}", e);
-        DispatchError::Trap
+        DispatchError::Trap {
+          message: format!("failed to write to memory for module {:?}: {:#?}", self.module.name(), e)
+        }
       })?;
 
     // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
     let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
-      println!("call {:#?}", e);
-      DispatchError::Trap
+      DispatchError::Trap {
+        message: format!("failed to call function of module {:?}: {:#?}", self.module.name(), e)
+      }
     })?;
 
     // Read the size of the result.
@@ -333,8 +339,9 @@ impl Module for WebAssemblyModule {
       .memory
       .read(&self.store, result as usize, &mut size_buffer)
       .map_err(|e| {
-        println!("{:#?}", e);
-        DispatchError::Internal
+        DispatchError::Internal {
+          message: format!("failed to read the size of the result for module {:?}: {:#?}", self.module.name(), e)
+        }
       })?;
     let size = size_buffer.as_slice().get_u32_le();
 
@@ -344,14 +351,16 @@ impl Module for WebAssemblyModule {
       .memory
       .read(&self.store, result as usize, &mut result_buffer)
       .map_err(|e| {
-        println!("read {:#?}", e);
-        DispatchError::Internal
+        DispatchError::Internal {
+          message: format!("failed to read the result for module {:?}: {:#?}", self.module.name(), e)
+        }
       })?;
 
     // Free the result
     self.free.call(&mut self.store, (result,)).map_err(|e| {
-      println!("arora_buffer_free {:#?}", e);
-      DispatchError::Trap
+      DispatchError::Trap {
+        message: format!("failed to free the result for module {:?}: {:#?}", self.module.name(), e)
+      }
     })?;
 
     Ok(result_buffer.into_boxed_slice())
