@@ -6,14 +6,13 @@ use arora_schema::{
   module::low::{ExportSymbol, TypeRef},
   ty::{
     low::{Enumeration, Structure, Type, TypeKind},
-    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, PRIMITIVE_IDS, STRING_ID, U16_ID,
-    U32_ID, U64_ID, U8_ID, UNIT_ID,
+    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
+    U8_ID, UNIT_ID,
   },
 };
 use arora_vfs::{Directory, Entry, File};
 use clap::Parser;
 use convert_case::{Case, Casing};
-use itertools::Itertools;
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
@@ -189,7 +188,7 @@ fn generate_struct_source_contents(
   let deserialization_cases = structure.fields.iter().map(|(_, field)| {
     let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
     let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let deserialize = generate_deserialize_from_type_ref(&field.type_ref, &index, false);
+    let deserialize = generate_deserialize_from_type_ref(&field.type_ref, &index, false, true);
     quote! {
       if field_raw_id == #field_const_id_ident {
         #field_variable_ident = Some(#deserialize);
@@ -391,26 +390,6 @@ fn generate_enumeration_source_contents(
 }
 
 fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Directory> {
-  // Types used by function exports.
-  // May differ from the full list of type dependencies,
-  // because some uses of types are internal to the module.
-  let use_type_mods = exports
-    .iter()
-    .flat_map(|ExportSymbol::Function(function_symbol)| function_symbol.type_dependencies())
-    .filter_map(|type_id| {
-      if PRIMITIVE_IDS.contains(&type_id) {
-        None
-      } else {
-        Some(type_id)
-      }
-    })
-    .unique()
-    .map(|type_id| {
-      let ty = index.find_type(&type_id).unwrap();
-      let type_mod_ident = type_mod_ident(&ty.name);
-      quote! { #type_mod_ident }
-    });
-
   // Function Uses.
   let use_functions = exports.iter().map(|export| {
     let ExportSymbol::Function(function_symbol) = export;
@@ -469,7 +448,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     let deserialization_cases = function_symbol.parameters.iter().map(|param| {
       let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
       let param_var_ident = param_ident(&param.name);
-      let deserialize = generate_deserialize_from_type_ref(&param.ty, &index, true);
+      let deserialize = generate_deserialize_from_type_ref(&param.ty, &index, true, true);
       quote! {
         if field_raw_id == #param_const_id_ident {
           #param_var_ident = Some(#deserialize);
@@ -495,7 +474,11 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
 
     let param_args = function_symbol.parameters.iter().map(|param| {
       let param_var_ident = param_ident(&param.name);
-      quote! { #param_var_ident.unwrap() }
+      if param.mutable {
+        quote! { &mut #param_var_ident.as_mut().unwrap() }
+      } else {
+        quote! { #param_var_ident.unwrap() }
+      }
     });
 
     let call_and_write_result = match function_symbol.ret {
@@ -510,12 +493,27 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
           let return_type_mod_ident = type_mod_ident(&return_type.name);
           quote! {
             let result = #function_ident (#(#param_args),*);
-            #return_type_mod_ident :: serialize_to_writer(&result, &mut writer);
+            arora_generated::#return_type_mod_ident :: serialize_to_writer(&result, &mut writer);
           }
         }
       }
       _ => quote! {},
     };
+
+    let write_mutated_params: Vec<TokenStream> = function_symbol.parameters.iter().filter_map(|param| {
+      if param.mutable {
+        let param_var_ident = param_ident(&param.name);
+        let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
+        let serialize_param = generate_serialize_from_type_ref(&param.ty, quote!{#param_var_ident.unwrap()}, &index);
+        Some(quote! {
+          writer.add_structure_field(&#param_const_id_ident);
+          #serialize_param;
+        })
+      } else {
+        None
+      }
+    }).collect();
+    let nof_mutated_params = write_mutated_params.len();
 
     let uuid_suffix = export.id().to_string().replace("-", "_");
     let arora_function_ident = format_ident!("arora_function_{}", uuid_suffix);
@@ -536,7 +534,10 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
         #call_check
         #deserialize_params
         let mut writer = BufferWriter::new();
+        writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
+        writer.add_structure_field(&#const_id_ident);
         #call_and_write_result
+        #(#write_mutated_params)*
         let result_buffer = writer.finalize();
         result_buffer.as_ptr() as i32
       }
@@ -546,7 +547,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
   // Putting it all together.
   let source = quote! {
     use arora_buffers::*;
-    use crate::{arora_generated::{#(#use_type_mods),*}, #(#use_functions),*};
+    use crate::{arora_generated, arora_generated::error::DeserializationError, #(#use_functions),*};
     #(#function_declarations)*
     #(#function_ids)*
   };
@@ -726,28 +727,67 @@ fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: bool) -> T
     quote! {}
   };
   let deserialization = match id {
-    x if *x == *UNIT_ID => quote! { reader.get_unit() },
-    x if *x == *BOOLEAN_ID => quote! { reader.get_boolean() },
-    x if *x == *U8_ID => quote! { reader.get_u8() },
-    x if *x == *U16_ID => quote! { reader.get_u16() },
-    x if *x == *U32_ID => quote! { reader.get_u32() },
-    x if *x == *U64_ID => quote! { reader.get_u64() },
-    x if *x == *I8_ID => quote! { reader.get_i8() },
-    x if *x == *I16_ID => quote! { reader.get_i16() },
-    x if *x == *I32_ID => quote! { reader.get_i32() },
-    x if *x == *I64_ID => quote! { reader.get_i64() },
-    x if *x == *F32_ID => quote! { reader.get_f32() },
-    x if *x == *F64_ID => quote! { reader.get_f64() },
-    x if *x == *STRING_ID => quote! { reader.get_string().to_string() },
+    x if *x == *UNIT_ID => quote! { Result::<(), DeserializationError>::Ok(reader.get_unit()) },
+    x if *x == *BOOLEAN_ID => {
+      quote! {
+        #type_check
+        Result::<bool, DeserializationError>::Ok(reader.get_boolean())
+      }
+    }
+    x if *x == *U8_ID => quote! {
+      #type_check
+      Result::<u8, DeserializationError>::Ok(reader.get_u8())
+    },
+    x if *x == *U16_ID => quote! { 
+      #type_check
+      Result::<u16, DeserializationError>::Ok(reader.get_u16())
+    },
+    x if *x == *U32_ID => quote! { 
+      #type_check
+      Result::<u32, DeserializationError>::Ok(reader.get_u32())
+    },
+    x if *x == *U64_ID => quote! { 
+      #type_check
+      Result::<u64, DeserializationError>::Ok(reader.get_u64())
+    },
+    x if *x == *I8_ID => quote! { 
+      #type_check
+      Result::<i8, DeserializationError>::Ok(reader.get_i8())
+    },
+    x if *x == *I16_ID => quote! { 
+      #type_check
+      Result::<i16, DeserializationError>::Ok(reader.get_i16())
+    },
+    x if *x == *I32_ID => quote! { 
+      #type_check
+      Result::<i32, DeserializationError>::Ok(reader.get_i32())
+    },
+    x if *x == *I64_ID => quote! { 
+      #type_check
+      Result::<i64, DeserializationError>::Ok(reader.get_i64())
+    },
+    x if *x == *F32_ID => quote! { 
+      #type_check
+      Result::<f32, DeserializationError>::Ok(reader.get_f32())
+    },
+    x if *x == *F64_ID => quote! { 
+      #type_check
+      Result::<f64, DeserializationError>::Ok(reader.get_f64())
+    },
+    x if *x == *STRING_ID => {
+      quote! { 
+        #type_check
+        Result::<String, DeserializationError>::Ok(reader.get_string().to_string())
+      }
+    }
     x => {
       let ty = index.find_type(&x).unwrap();
       let type_mod_ident = type_mod_ident(&ty.name);
-      quote! { #type_mod_ident ::deserialize_from_reader(&mut reader, #check_type) }
+      quote! { arora_generated::#type_mod_ident ::deserialize_from_reader(&mut reader, #check_type) }
     }
   };
   quote! {
     (|| {
-      #type_check
       #deserialization
     })()
   }
@@ -757,9 +797,18 @@ fn generate_deserialize_from_type_ref(
   type_ref: &TypeRef,
   index: &Index,
   with_mod: bool,
+  check_type: bool,
 ) -> TokenStream {
   match type_ref {
-    TypeRef::Scalar { id } => generate_deserialize_from_id(&id, &index, true),
+    TypeRef::Scalar { id } => {
+      let deserialize = generate_deserialize_from_id(&id, &index, check_type);
+      let type_ident = type_ident_from_id(id, &index, with_mod);
+      let type_str = type_ident.to_string();
+      quote! {
+        #deserialize
+          .expect(format!("failed to deserialize value of type {}", #type_str).as_str())
+      }
+    }
     TypeRef::Array { id } => {
       let type_kind_ident = type_kind_ident(&id, &index);
       let array_check = quote! {
@@ -849,7 +898,7 @@ fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: bool) -> TokenStream {
       let ty = index.find_type(&x).unwrap();
       let mod_prefix = if with_mod {
         let mod_ident = type_mod_ident(&ty.name);
-        quote! { #mod_ident :: }
+        quote! { arora_generated::#mod_ident :: }
       } else {
         quote! {}
       };
