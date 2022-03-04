@@ -1,12 +1,12 @@
 use arora_schema::module::high::TypeRef;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, collections::HashMap};
+use std::{collections::HashMap, fmt::Display};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Variable {
   name: String,
-  ty: TypeRef
+  ty: TypeRef,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Eq, PartialEq)]
@@ -14,16 +14,16 @@ pub struct Node {
   /// The ID of this node.
   pub id: Uuid,
 
-  /// The ID of the function in the registry ("{module}.{name}") to call on ticks.
+  /// The ID of the function in the registry to call on ticks.
   pub function: Uuid,
 
   /// Args to apply to the function call parameters.
   #[serde(default)]
   pub arguments: HashMap<Uuid, Uuid>,
-  
+
   /// Child nodes, if any.
   #[serde(default)]
-  pub children: Option<Vec<Uuid>>
+  pub children: Option<Vec<Uuid>>,
 }
 
 impl Display for Node {
@@ -86,10 +86,10 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
       Node {
         id: Uuid::from_str("d50638bf-c44b-4f6e-a5f2-925fcfff71a8")?,
         function: Uuid::from_str("418e7f79-9df8-4fe4-92f9-54f9fc6e2de8")?,
-        arguments: HashMap::from([
-          (Uuid::from_str("85710898-406b-464d-bf9c-21ac658dbc04")?,
-            Uuid::from_str("d775359e-9f6b-4c1e-892c-8a4a36ec82d0")?),
-        ]),
+        arguments: HashMap::from([(
+          Uuid::from_str("85710898-406b-464d-bf9c-21ac658dbc04")?,
+          Uuid::from_str("d775359e-9f6b-4c1e-892c-8a4a36ec82d0")?,
+        )]),
         ..Default::default()
       },
       Node {
