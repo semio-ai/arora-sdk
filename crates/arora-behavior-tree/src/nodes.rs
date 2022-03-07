@@ -16,6 +16,13 @@ pub fn run() -> TreeNode {
   TreeNode::action_node(RUN_FUNCTION_ID.clone())
 }
 
+pub fn status_identity(value: Rc<Value>) -> TreeNode {
+  TreeNode {
+    function: STATUS_IDENTITY_FUNCTION_ID.clone(),
+    children: None,
+    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value.clone())]),
+  }
+}
 pub fn seq(children: Vec<TreeNode>) -> TreeNode {
   TreeNode::control_node(SEQ_FUNCTION_ID.clone(), children)
 }

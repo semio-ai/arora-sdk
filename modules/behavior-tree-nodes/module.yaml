@@ -34,6 +34,19 @@ exports:
       id: Status
 
   - type: function
+    id: ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee
+    name: status_identity
+    parameters:
+      - id: e1f174e6-ca9e-4344-84cb-7f3f22115239
+        name: value
+        type:
+          kind: scalar
+          id: Status
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
     id: 32246df6-ab5d-4f18-9221-23e28731de93
     name: seq
     parameters:

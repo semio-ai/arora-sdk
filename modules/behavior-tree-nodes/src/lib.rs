@@ -17,6 +17,10 @@ fn run() -> Status {
   Status::Running
 }
 
+fn status_identity(value: Status) -> Status {
+  value
+}
+
 fn seq(children: Vec<TickId>) -> Status {
   for child in children {
     match call_tick_function(&child) {
