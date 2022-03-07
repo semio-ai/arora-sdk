@@ -412,10 +412,10 @@ mod tests {
     }
     let repo_root = path;
 
-    // Let us load the test Rust WASM module.
-    let test_rust_wasm = repo_root.join("modules").join(name);
+    // Let us load the WASM module.
+    let module_root = repo_root.join("modules").join(name);
     // The header file should be directly in the sources.
-    let header_path = test_rust_wasm
+    let header_path = module_root
       .join("src")
       .join("arora_generated")
       .join("module.yaml");
@@ -431,6 +431,7 @@ mod tests {
       )
       .as_str(),
     );
+    let actual_module_name = header.name.clone();
 
     // Register the types involved there.
     for type_id in header.type_dependencies() {
@@ -451,15 +452,15 @@ mod tests {
     index.add_module(&header).unwrap();
 
     // Find the executable in the right target directory (debug in priority)
-    let test_rust_wasm_target = test_rust_wasm.join("target").join("wasm32-wasi");
+    let module_target_dir = module_root.join("target").join("wasm32-wasi");
     let target_subdir = if cfg!(debug_assertions) {
       "debug"
     } else {
       "release"
     };
-    let module_path = test_rust_wasm_target
+    let module_path = module_target_dir
       .join(target_subdir)
-      .join("test_rust_wasm.wasm");
+      .join(format!("{}.wasm", name.to_case(Case::Snake)));
     let mut executable_file = File::open(&module_path)
       .await
       .expect(format!("could not open executable file {}", module_path.display()).as_str());
@@ -475,7 +476,8 @@ mod tests {
         header,
         executable,
       })
-      .expect(format!("failed to load module {}", module_name).as_str());
+      .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
+
   }
 
   /// A tree with a single node calling test-wasm.succeed()
