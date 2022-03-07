@@ -5,18 +5,22 @@ use uuid::Uuid;
 
 use crate::{schema::Node, BehaviorTree};
 
+#[allow(unused)]
 pub fn succeed() -> TreeNode {
   TreeNode::action_node(SUCCEED_FUNCTION_ID.clone())
 }
 
+#[allow(unused)]
 pub fn fail() -> TreeNode {
   TreeNode::action_node(FAIL_FUNCTION_ID.clone())
 }
 
+#[allow(unused)]
 pub fn run() -> TreeNode {
   TreeNode::action_node(RUN_FUNCTION_ID.clone())
 }
 
+#[allow(unused)]
 pub fn status_identity(value: Rc<Value>) -> TreeNode {
   TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
@@ -24,10 +28,13 @@ pub fn status_identity(value: Rc<Value>) -> TreeNode {
     parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value.clone())]),
   }
 }
+
+#[allow(unused)]
 pub fn seq(children: Vec<TreeNode>) -> TreeNode {
   TreeNode::control_node(SEQ_FUNCTION_ID.clone(), children)
 }
 
+#[allow(unused)]
 pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   TreeNode {
     function: SEQ_STAR_FUNCTION_ID.clone(),
@@ -44,6 +51,7 @@ pub struct TreeNode {
 
 /// Represents a tree of node with direct relations to children,
 /// instead of using UUID references.
+#[allow(unused)]
 impl TreeNode {
   /// Helper to construct an action node.
   pub fn action_node(function: Uuid) -> Self {
