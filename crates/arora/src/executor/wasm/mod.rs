@@ -303,22 +303,12 @@ impl Module for WebAssemblyModule {
       message: format!("failed to cast args size to u32 in module {:#?}", self.module.name())
     })?;
 
-    let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
-      // Allocate memory for the argument in the WASM module
-      if current_size < arg_size {
-        self.free(current_addr)?;
-        self.allocate_arg_memory(arg_size)?
-      } else {
-        current_addr
-      }
-    } else {
-      self.allocate_arg_memory(arg_size)?
-    };
-
-    // Copy the argument into the WASM module
+    // Let the WASM modue allocate a buffer,
+    // and copy the argument into it.
+    let arg_addr = self.allocate_arg_memory(arg_size)?;
     self
       .memory
-      .write(&mut self.store, addr as usize, arg)
+      .write(&mut self.store, arg_addr as usize, arg)
       .map_err(|e| {
         DispatchError::Trap {
           message: format!("failed to write to memory for module {:?}: {:#?}", self.module.name(), e)
@@ -327,11 +317,14 @@ impl Module for WebAssemblyModule {
 
     // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
-    let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
+    let result = func.call(&mut self.store, (arg_addr as u32,)).map_err(|e| {
       DispatchError::Trap {
         message: format!("failed to call function of module {:?}: {:#?}", self.module.name(), e)
       }
     })?;
+
+    // Free the buffer allocated for the argument.
+    self.free(arg_addr)?;
 
     // Read the size of the result.
     let mut size_buffer = [0u8; 4];
@@ -345,7 +338,7 @@ impl Module for WebAssemblyModule {
       })?;
     let size = size_buffer.as_slice().get_u32_le();
 
-    // Read the result.
+    // Read the result into a local buffer.
     let mut result_buffer = vec![0u8; size as usize];
     self
       .memory
@@ -356,7 +349,7 @@ impl Module for WebAssemblyModule {
         }
       })?;
 
-    // Free the result
+    // Free the result.
     self.free.call(&mut self.store, (result,)).map_err(|e| {
       DispatchError::Trap {
         message: format!("failed to free the result for module {:?}: {:#?}", self.module.name(), e)
