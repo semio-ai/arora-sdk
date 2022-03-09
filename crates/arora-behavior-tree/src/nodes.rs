@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, cell::RefCell};
 
 use arora_schema::value::Value;
 use uuid::Uuid;
@@ -21,11 +21,11 @@ pub fn run() -> TreeNode {
 }
 
 #[allow(unused)]
-pub fn status_identity(value: Rc<Value>) -> TreeNode {
+pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
   TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
     children: None,
-    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value.clone())]),
+    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value)]),
   }
 }
 
@@ -39,14 +39,14 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   TreeNode {
     function: SEQ_STAR_FUNCTION_ID.clone(),
     children: Some(children),
-    parameters: HashMap::from([(SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(), Rc::new(Value::U8(0)))]),
+    parameters: HashMap::from([(SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(), Rc::new(RefCell::new(Value::U16(0))))]),
   }
 }
 
 pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
-  pub parameters: HashMap<Uuid, Rc<Value>>,
+  pub parameters: HashMap<Uuid, Rc<RefCell<Value>>>,
 }
 
 /// Represents a tree of node with direct relations to children,
@@ -75,7 +75,7 @@ impl TreeNode {
   pub fn collect(
     self,
     mut node_index: &mut HashMap<Uuid, Rc<Node>>,
-    mut locals: &mut HashMap<Uuid, Rc<Value>>,
+    mut locals: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
   ) -> Rc<Node> {
     let children: Option<Vec<Uuid>> = self.children.map(|children| {
       let mut ids = Vec::with_capacity(children.len());
@@ -112,7 +112,7 @@ impl Into<BehaviorTree> for TreeNode {
     BehaviorTree {
       root,
       node_index,
-      locals: Rc::new(locals),
+      locals: Rc::new(RefCell::new(locals)),
     }
   }
 }

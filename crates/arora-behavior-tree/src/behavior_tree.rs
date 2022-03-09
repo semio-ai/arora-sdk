@@ -12,7 +12,7 @@ use arora_schema::{
 use error::BehaviorTreeError;
 use schema::Node;
 use status::Status;
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tick_id::TickId;
 use uuid::Uuid;
 
@@ -27,7 +27,7 @@ pub struct BehaviorTree {
   /// All the nodes, indexed by their ID.
   node_index: HashMap<Uuid, Rc<Node>>,
   /// The local variables.
-  locals: Rc<HashMap<Uuid, Rc<Value>>>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
 }
 
 struct BehaviorTreeRuntime<'a> {
@@ -74,7 +74,7 @@ fn setup_tick_function(
   node: Rc<Node>,
   node_index: &HashMap<Uuid, Rc<Node>>,
   index: Rc<Index>,
-  locals: Rc<HashMap<Uuid, Rc<Value>>>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   caller: &mut dyn CallBridge,
 ) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
@@ -115,7 +115,7 @@ fn setup_tick_function(
 fn tick(
   caller: &mut dyn CallBridge,
   index: Rc<Index>,
-  locals: &HashMap<Uuid, Rc<Value>>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<status::Status, BehaviorTreeError> {
@@ -187,26 +187,73 @@ fn tick(
   }
 
   // Pass the remaining parameters from the behavior-wise variables.
-  for (param_id, variable_id) in &node.arguments {
-    let value = locals
-      .get(variable_id)
-      .ok_or(BehaviorTreeError::VariableNotFound {
-        variable: variable_id.clone(),
-        node: node.id.clone(),
-      })?;
-    call.args.push(StructureField {
-      id: param_id.clone(),
-      value: Box::new(value.as_ref().clone()),
-    });
+  {
+    let locals = locals.borrow();
+    for (param_id, variable_id) in &node.arguments {
+      let value = locals
+        .get(variable_id)
+        .ok_or(BehaviorTreeError::VariableNotFound {
+          variable: variable_id.clone(),
+          node: node.id.clone(),
+        })?;
+      call.args.push(StructureField {
+        id: param_id.clone(),
+        value: Box::new(value.borrow().clone()),
+      });
+    }
   }
 
   let result = caller
     .arora_call(&function.module, call)
     .map_err(|e| BehaviorTreeError::CallError(e))?;
 
-  result
-    .try_into()
-    .map_err(|e| BehaviorTreeError::ConversionError(e))
+  let mut mutable_locals = locals.borrow_mut();
+  let mut return_value: Option<Status> = None;
+  if let Value::Structure(result_structure) = result {
+    if result_structure.id != node.function {
+      return Err(BehaviorTreeError::ConversionError(ConversionError {
+        message: format!(
+          "node function's result id differs from function id ({}, vs. {})",
+          result_structure.id.to_string(),
+          node.function.to_string(),
+        )
+        .to_string(),
+      }));
+    }
+    for field in result_structure.fields {
+      if field.id == node.function {
+        return_value = Some(
+          (*field.value)
+            .try_into()
+            .map_err(|e| BehaviorTreeError::ConversionError(e))?,
+        );
+      } else {
+        let variable_id =
+          node
+            .arguments
+            .get(&field.id)
+            .ok_or(BehaviorTreeError::ConversionError(ConversionError {
+              message: "node function mutated an unknown argument".to_string(),
+            }))?;
+        let variable =
+          mutable_locals
+            .get_mut(variable_id)
+            .ok_or(BehaviorTreeError::VariableNotFound {
+              node: node.id,
+              variable: variable_id.clone(),
+            })?;
+        println!("{} = {}", variable_id, field.value);
+        *variable.borrow_mut() = *field.value;
+      }
+    }
+  } else {
+    return Err(BehaviorTreeError::ConversionError(ConversionError {
+      message: "node function's result is not a structure".to_string(),
+    }));
+  }
+  return_value.ok_or(BehaviorTreeError::ConversionError(ConversionError {
+    message: "node function's result does not contain a return value".to_string(),
+  }))
 }
 
 /// Specialization of Callable that returns a Status.
@@ -225,9 +272,11 @@ impl Tickable for CallableId {
     let value = self
       .call(caller)
       .map_err(|e| BehaviorTreeError::CallError(e))?;
-    value
-      .try_into()
-      .map_err(|_| BehaviorTreeError::ConversionError(ConversionError {}))
+    value.try_into().map_err(|_| {
+      BehaviorTreeError::ConversionError(ConversionError {
+        message: "return value cannot be interpreted as a Status".to_string(),
+      })
+    })
   }
 }
 
@@ -235,7 +284,7 @@ impl Tickable for CallableId {
 struct TickFunction {
   node: Rc<Node>,
   index: Rc<Index>,
-  locals: Rc<HashMap<Uuid, Rc<Value>>>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   children: Vec<TickId>,
 }
 
@@ -244,7 +293,7 @@ impl Tickable for TickFunction {
     tick(
       caller,
       self.index.clone(),
-      self.locals.as_ref(),
+      self.locals.clone(),
       &self.children,
       self.node.clone(),
     )
@@ -282,7 +331,7 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
   Ok(BehaviorTree {
     root: root.unwrap(),
     node_index,
-    locals: Rc::new(HashMap::new()),
+    locals: Rc::new(RefCell::new(HashMap::new())),
   })
 }
 
@@ -296,6 +345,7 @@ mod tests {
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_registry::Registry;
   use arora_schema::module::low::{Header, ModuleDefinition};
+  use convert_case::{Case, Casing};
 
   use std::path::Path;
   use tokio::{
@@ -331,6 +381,21 @@ mod tests {
   }
 
   #[tokio::test]
+  pub async fn status_identity_update() {
+    let mut status_value: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
+    let behavior = status_identity(status_value.clone()).into();
+
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+    set_value(&mut status_value, Status::Running);
+    assert_eq!(Status::Running, runtime.tick().unwrap());
+    set_value(&mut status_value, Status::Failure);
+    assert_eq!(Status::Failure, runtime.tick().unwrap());
+  }
+
+  #[tokio::test]
   pub async fn seq_of_success() {
     assert_eq!(Status::Success, run_yaml_base(SEQ_OF_SUCCESS).await);
   }
@@ -354,19 +419,14 @@ mod tests {
 
   #[tokio::test]
   pub async fn seq_star_succeed() {
-    let behavior =
-      seq_star(vec![
-        succeed(),
-        succeed(),
-        succeed()
-      ]).into();
+    let behavior = seq_star(vec![succeed(), succeed(), succeed()]).into();
     assert_eq!(Status::Success, tick_base(&behavior).await);
   }
 
   #[tokio::test]
   pub async fn seq_star_resumes() {
-    let mut first_status: Rc<Value> = Rc::new(Status::Success.into());
-    let second_status: Rc<Value> = Rc::new(Status::Running.into());
+    let mut first_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
+    let mut second_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Running.into()));
     let behavior = seq_star(vec![
       status_identity(first_status.clone()),
       status_identity(second_status.clone()),
@@ -378,15 +438,16 @@ mod tests {
     // First tick moves the sequence to the second node.
     assert_eq!(Status::Running, runtime.tick().unwrap());
 
-    // Second tick ignores the first node.
+    // Second tick ignores the first node, and will only process the second one.
     set_value(&mut first_status, Status::Running);
+    set_value(&mut second_status, Status::Success);
     assert_eq!(Status::Success, runtime.tick().unwrap());
   }
 
   // Test helpers and data
   //==============================================================================
-  fn set_value<T: Into<Value>>(rc: &mut Rc<Value>, v: T) {
-    *Rc::get_mut(rc).unwrap() = v.into()
+  fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {
+    *rc.borrow_mut() = v.into()
   }
 
   async fn tick_base(behavior: &BehaviorTree) -> Status {
