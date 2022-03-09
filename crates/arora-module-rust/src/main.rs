@@ -475,9 +475,9 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     let param_args = function_symbol.parameters.iter().map(|param| {
       let param_var_ident = param_ident(&param.name);
       if param.mutable {
-        quote! { &mut #param_var_ident.as_mut().unwrap() }
+        quote! { &mut #param_var_ident }
       } else {
-        quote! { #param_var_ident.unwrap() }
+        quote! { #param_var_ident }
       }
     });
 
