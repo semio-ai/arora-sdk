@@ -48,6 +48,11 @@ pub fn fallback(children: Vec<TreeNode>) -> TreeNode {
   TreeNode::control_node(FALLBACK_FUNCTION_ID.clone(), children)
 }
 
+#[allow(unused)]
+pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
+  TreeNode::control_node(PARALLEL_FUNCTION_ID.clone(), children)
+}
+
 pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
@@ -131,4 +136,6 @@ lazy_static::lazy_static! {
   static ref SEQ_FUNCTION_ID: Uuid = Uuid::parse_str("32246df6-ab5d-4f18-9221-23e28731de93").unwrap();
   static ref SEQ_STAR_FUNCTION_ID: Uuid = Uuid::parse_str("c2d5ed72-798c-4174-94f7-13378bd9bf1f").unwrap();
   static ref SEQ_STAR_CURRENT_INDEX_PARAM_ID: Uuid = Uuid::parse_str("4de502df-3f48-4541-94d8-dd68fe92bc8e").unwrap();
+  static ref FALLBACK_FUNCTION_ID: Uuid = Uuid::parse_str("bfa89a4e-c369-430e-be78-0dc07311391c").unwrap();
+  static ref PARALLEL_FUNCTION_ID: Uuid = Uuid::parse_str("a9340289-1f30-411f-9faa-0f07d54613e8").unwrap();
 }

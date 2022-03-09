@@ -456,6 +456,24 @@ mod tests {
     assert_eq!(Status::Success, tick_base(&behavior).await);
   }
 
+  #[tokio::test]
+  pub async fn parallel_succeeds() {
+    let behavior = parallel(vec![succeed(), succeed(), succeed()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn parallel_fails() {
+    let behavior = parallel(vec![run(), succeed(), fail()]).into();
+    assert_eq!(Status::Failure, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn parallel_runs() {
+    let behavior = parallel(vec![run(), succeed(), succeed()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
+  }
+
   // Test helpers and data
   //==============================================================================
   fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {
@@ -546,7 +564,10 @@ mod tests {
       .as_str(),
     );
     let actual_module_name = header.name.clone();
-    println!("actual name of module {:?} is {:?}", name, &actual_module_name);
+    println!(
+      "actual name of module {:?} is {:?}",
+      name, &actual_module_name
+    );
 
     // Register the types involved there.
     for type_id in header.type_dependencies() {
@@ -595,7 +616,10 @@ mod tests {
       .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
 
     let total_duration = std::time::Instant::now() - start_time;
-    println!("module {:#?} loaded in {:#?}", &actual_module_name, total_duration);
+    println!(
+      "module {:#?} loaded in {:#?}",
+      &actual_module_name, total_duration
+    );
   }
 
   lazy_static::lazy_static! {

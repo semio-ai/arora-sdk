@@ -60,15 +60,27 @@ fn fallback(children: Vec<TickId>) -> Status {
 }
 
 fn parallel(children: Vec<TickId>) -> Status {
-  let mut status = Status::Success;
+  let mut success = true;
+  let mut failure = false;
   for child in children {
     match call_tick_function(&child) {
       Status::Success => continue,
-      Status::Failure => status = Status::Failure,
-      Status::Running => status = Status::Running,
+      Status::Failure => {
+        success = false;
+        failure = true;
+      }
+      Status::Running => {
+        success = false;
+      }
     }
   }
-  status
+  if success {
+    Status::Success
+  } else if failure {
+    Status::Failure
+  } else {
+    Status::Running
+  }
 }
 
 fn call_tick_function(tick_id: &TickId) -> Status {
