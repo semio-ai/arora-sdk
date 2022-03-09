@@ -437,6 +437,9 @@ mod tests {
     registry: &mut Registry,
     name: &String,
   ) {
+    println!("loading module {:#?}", name);
+    let start_time = std::time::Instant::now();
+
     // Find the root directory of the repository.
     let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
     let mut path = Path::new(&current_crate_dir);
@@ -470,6 +473,7 @@ mod tests {
       .as_str(),
     );
     let actual_module_name = header.name.clone();
+    println!("actual name of module {:?} is {:?}", name, &actual_module_name);
 
     // Register the types involved there.
     for type_id in header.type_dependencies() {
@@ -499,6 +503,7 @@ mod tests {
     let module_path = module_target_dir
       .join(target_subdir)
       .join(format!("{}.wasm", name.to_case(Case::Snake)));
+    println!("reading executable {:#?}", module_path);
     let mut executable_file = File::open(&module_path)
       .await
       .expect(format!("could not open executable file {}", module_path.display()).as_str());
@@ -507,7 +512,7 @@ mod tests {
     let executable = executable.into_boxed_slice();
 
     // Loading the module.
-    let module_name = header.name.clone();
+    println!("loading module {:#?} into the engine", &actual_module_name);
     engine
       .load_module(ModuleDefinition {
         schema_version: 0,
@@ -516,6 +521,8 @@ mod tests {
       })
       .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
 
+    let total_duration = std::time::Instant::now() - start_time;
+    println!("module {:#?} loaded in {:#?}", &actual_module_name, total_duration);
   }
 
   lazy_static::lazy_static! {
