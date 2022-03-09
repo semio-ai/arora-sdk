@@ -444,6 +444,18 @@ mod tests {
     assert_eq!(Status::Success, runtime.tick().unwrap());
   }
 
+  #[tokio::test]
+  pub async fn fallback_succeeds() {
+    let behavior = fallback(vec![succeed(), fail()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn fallback_falls_back() {
+    let behavior = fallback(vec![fail(), succeed()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
   // Test helpers and data
   //==============================================================================
   fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {

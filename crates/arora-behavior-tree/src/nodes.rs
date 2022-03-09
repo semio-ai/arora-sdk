@@ -43,6 +43,11 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   }
 }
 
+#[allow(unused)]
+pub fn fallback(children: Vec<TreeNode>) -> TreeNode {
+  TreeNode::control_node(FALLBACK_FUNCTION_ID.clone(), children)
+}
+
 pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
