@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
   use crate::{
-    error::BehaviorTreeError, load_behavior_tree_nodes, nodes::*, status::Status, BehaviorTree,
-    BehaviorTreeRuntime, run_behavior_tree,
+    error::BehaviorTreeError, load_behavior_tree_nodes, nodes::*, run_behavior_tree,
+    status::Status, BehaviorTree, BehaviorTreeRuntime,
   };
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_index::Index;
-use arora_registry::Registry;
+  use arora_registry::Registry;
   use arora_schema::{
     module::low::{Header, ModuleDefinition},
     value::Value,
@@ -48,9 +48,9 @@ use arora_registry::Registry;
   }
 
   #[tokio::test]
-  pub async fn status_identity_update() {
+  pub async fn status_identity_update() -> Result<()> {
     let mut status_value: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
-    let behavior = status_identity(status_value.clone()).into();
+    let behavior = status_identity(status_value.clone()).try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
     let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
@@ -60,6 +60,8 @@ use arora_registry::Registry;
     assert_eq!(Status::Running, runtime.tick().unwrap());
     set_value(&mut status_value, Status::Failure);
     assert_eq!(Status::Failure, runtime.tick().unwrap());
+
+    Ok(())
   }
 
   #[tokio::test]
@@ -73,32 +75,35 @@ use arora_registry::Registry;
   }
 
   #[tokio::test]
-  pub async fn seq_run_last() {
-    let behavior = seq(vec![succeed(), succeed(), run()]).into();
+  pub async fn seq_run_last() -> Result<()> {
+    let behavior = seq(vec![succeed(), succeed(), run()]).try_into()?;
     assert_eq!(Status::Running, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn seq_run_middle_fail_last() {
-    let behavior = seq(vec![succeed(), run(), fail()]).into();
+  pub async fn seq_run_middle_fail_last() -> Result<()> {
+    let behavior = seq(vec![succeed(), run(), fail()]).try_into()?;
     assert_eq!(Status::Running, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn seq_star_succeed() {
-    let behavior = seq_star(vec![succeed(), succeed(), succeed()]).into();
+  pub async fn seq_star_succeed() -> Result<()> {
+    let behavior = seq_star(vec![succeed(), succeed(), succeed()]).try_into()?;
     assert_eq!(Status::Success, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn seq_star_resumes() {
+  pub async fn seq_star_resumes() -> Result<()> {
     let mut first_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
     let mut second_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Running.into()));
     let behavior = seq_star(vec![
       status_identity(first_status.clone()),
       status_identity(second_status.clone()),
     ])
-    .into();
+    .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
     let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
@@ -109,36 +114,43 @@ use arora_registry::Registry;
     set_value(&mut first_status, Status::Running);
     set_value(&mut second_status, Status::Success);
     assert_eq!(Status::Success, runtime.tick().unwrap());
+
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn fallback_succeeds() {
-    let behavior = fallback(vec![succeed(), fail()]).into();
+  pub async fn fallback_succeeds() -> Result<()> {
+    let behavior = fallback(vec![succeed(), fail()]).try_into()?;
     assert_eq!(Status::Success, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn fallback_falls_back() {
-    let behavior = fallback(vec![fail(), succeed()]).into();
+  pub async fn fallback_falls_back() -> Result<()> {
+    let behavior = fallback(vec![fail(), succeed()]).try_into()?;
     assert_eq!(Status::Success, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn parallel_succeeds() {
-    let behavior = parallel(vec![succeed(), succeed(), succeed()]).into();
+  pub async fn parallel_succeeds() -> Result<()> {
+    let behavior = parallel(vec![succeed(), succeed(), succeed()]).try_into()?;
     assert_eq!(Status::Success, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn parallel_fails() {
-    let behavior = parallel(vec![run(), succeed(), fail()]).into();
+  pub async fn parallel_fails() -> Result<()> {
+    let behavior = parallel(vec![run(), succeed(), fail()]).try_into()?;
     assert_eq!(Status::Failure, tick_base(&behavior).await);
+    Ok(())
   }
 
   #[tokio::test]
-  pub async fn parallel_runs() {
-    let behavior = parallel(vec![run(), succeed(), succeed()]).into();
+  pub async fn parallel_runs() -> Result<()> {
+    let behavior = parallel(vec![run(), succeed(), succeed()]).try_into()?;
     assert_eq!(Status::Running, tick_base(&behavior).await);
+    Ok(())
   }
 
   // Test helpers and data

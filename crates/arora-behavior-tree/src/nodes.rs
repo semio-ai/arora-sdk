@@ -1,9 +1,13 @@
-use std::{collections::HashMap, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use arora_schema::value::Value;
 use uuid::Uuid;
 
-use crate::{schema::Node, BehaviorTree};
+use crate::{
+  error::BehaviorTreeError,
+  schema::{Expression, Node, NodeParameterId},
+  setup_node_parameter_variable, BehaviorTree,
+};
 
 #[allow(unused)]
 pub fn succeed() -> TreeNode {
@@ -25,7 +29,7 @@ pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
   TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
     children: None,
-    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value)]),
+    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), Expression::Variable(value))]),
   }
 }
 
@@ -39,7 +43,10 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   TreeNode {
     function: SEQ_STAR_FUNCTION_ID.clone(),
     children: Some(children),
-    parameters: HashMap::from([(SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(), Rc::new(RefCell::new(Value::U16(0))))]),
+    parameters: HashMap::from([(
+      SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(),
+      Expression::Value(Value::U16(0)),
+    )]),
   }
 }
 
@@ -56,7 +63,7 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
 pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
-  pub parameters: HashMap<Uuid, Rc<RefCell<Value>>>,
+  pub parameters: HashMap<Uuid, Expression>,
 }
 
 /// Represents a tree of node with direct relations to children,
@@ -85,45 +92,61 @@ impl TreeNode {
   pub fn collect(
     self,
     mut node_index: &mut HashMap<Uuid, Rc<Node>>,
-    mut locals: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
-  ) -> Rc<Node> {
-    let children: Option<Vec<Uuid>> = self.children.map(|children| {
+    mut variables: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
+    mut node_parameters_variables: &mut HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+  ) -> Result<Rc<Node>, BehaviorTreeError> {
+    let node_id = Uuid::new_v4();
+    let children: Option<Vec<Uuid>> = if let Some(children) = self.children {
       let mut ids = Vec::with_capacity(children.len());
       for child in children {
-        let node = child.collect(&mut node_index, &mut locals);
-        let node_id = node.id.clone();
+        let child_node =
+          child.collect(&mut node_index, &mut variables, node_parameters_variables)?;
+        let child_node_id = child_node.id.clone();
         // This could only happen with an UUID collision, i.e. never.
-        assert_eq!(node_index.insert(node.id.clone(), node), None);
-        ids.push(node_id);
+        assert_eq!(node_index.insert(child_node.id.clone(), child_node), None);
+        ids.push(child_node_id);
       }
-      ids
-    });
+      Some(ids)
+    } else {
+      None
+    };
     let mut arguments = HashMap::new();
-    for (param_id, value) in self.parameters {
-      let value_id = Uuid::new_v4();
-      locals.insert(value_id.clone(), value);
-      arguments.insert(param_id, value_id);
+    for (param_id, expression) in self.parameters {
+      let node_parameter = NodeParameterId {
+        node: node_id.to_owned(),
+        parameter: param_id.to_owned(),
+      };
+      setup_node_parameter_variable(
+        &node_parameter,
+        &expression,
+        variables,
+        node_parameters_variables,
+      )?;
+      arguments.insert(param_id, expression);
     }
-    Rc::new(Node {
-      id: Uuid::new_v4(),
+    Ok(Rc::new(Node {
+      id: node_id,
       function: self.function,
       arguments,
       children,
-    })
+    }))
   }
 }
 
 /// Transforms the tree of nodes into a behavior tree that can be run.
-impl Into<BehaviorTree> for TreeNode {
-  fn into(self) -> BehaviorTree {
+impl TryInto<BehaviorTree> for TreeNode {
+  type Error = BehaviorTreeError;
+  fn try_into(self) -> Result<BehaviorTree, Self::Error> {
     let mut node_index = HashMap::new();
-    let mut locals = HashMap::new();
-    let root = self.collect(&mut node_index, &mut locals);
-    BehaviorTree {
+    let mut variables = HashMap::new();
+    let mut node_arg_variables = HashMap::new();
+    let root = self.collect(&mut node_index, &mut variables, &mut node_arg_variables)?;
+    Ok(BehaviorTree {
       root,
       node_index,
-      locals: Rc::new(RefCell::new(locals)),
-    }
+      variables: Rc::new(RefCell::new(variables)),
+      node_arg_variables: Rc::new(node_arg_variables),
+    })
   }
 }
 
