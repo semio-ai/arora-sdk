@@ -1,8 +1,8 @@
 [package]
-name = "test-rust-wasm"
+name = "behavior-tree-nodes"
 version = "0.1.0"
 authors = ["Victor Paleologue <victor.paleologue@palaio.eu>"]
-description = "A test module project compiled to wasm"
+description = "Core behavior tree nodes"
 license = "Proprietary"
 edition = "2021"
 readme = "readme.md"

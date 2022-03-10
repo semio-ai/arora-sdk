@@ -1,14 +1,10 @@
-
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use crate::{
-  BufferReader, BufferWriter,
-  TYPE_BOOLEAN,
-  TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
-  TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64,
-  TYPE_F32, TYPE_F64,
-  TYPE_STRING, TYPE_STRUCTURE, TYPE_ARRAY, TYPE_ENUMERATION,
+  read::BufferReader, write::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32,
+  TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32,
+  TYPE_U64, TYPE_U8,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,14 +127,12 @@ impl<'a> Value<'a> {
           id: id.into(),
           fields: fields,
         })
-      },
-      Some(TYPE_ENUMERATION) => {
-        Value::Enumeration(Enumeration {
-          id: reader.get_structure_field().into(),
-          variant_id: reader.get_enumeration_value_raw().into(),
-          value: Box::new(Value::deserialize_reader(reader)),
-        })
       }
+      Some(TYPE_ENUMERATION) => Value::Enumeration(Enumeration {
+        id: reader.get_structure_field().into(),
+        variant_id: reader.get_enumeration_value_raw().into(),
+        value: Box::new(Value::deserialize_reader(reader)),
+      }),
       Some(TYPE_ARRAY) => {
         let (ty, count) = reader.get_array();
         match ty {
@@ -309,7 +303,7 @@ impl<'a> Value<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use anyhow::{Result, bail};
+  use anyhow::{bail, Result};
 
   #[test]
   pub fn u8_yaml() -> Result<()> {

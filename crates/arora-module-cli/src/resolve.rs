@@ -51,6 +51,7 @@ pub async fn resolve_parameter(
     name: parameter.name,
     ty: resolve_type_ref(&parameter.ty, registry).await?,
     mutable: parameter.mutable,
+    default_value: parameter.default_value,
   })
 }
 

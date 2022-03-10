@@ -1,13 +1,12 @@
-use arora_schema::value::{Value, Structure, StructureField, StructureWithoutId, EnumerationWithoutId, Enumeration};
+use arora_schema::value::{
+  Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value,
+};
 use uuid::Uuid;
 
 use crate::{
-  BufferReader, BufferWriter,
-  TYPE_BOOLEAN,
-  TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64,
-  TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64,
-  TYPE_F32, TYPE_F64,
-  TYPE_STRING, TYPE_STRUCTURE, TYPE_ENUMERATION, TYPE_ARRAY, TYPE_UNIT
+  read::BufferReader, write::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32,
+  TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32,
+  TYPE_U64, TYPE_U8, TYPE_UNIT,
 };
 
 pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
@@ -146,7 +145,8 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
     }
     Some(TYPE_ARRAY) => {
       let (ty, count) = reader.get_array();
-      unsafe { // calling get_xx_bulk functions is unsafe, but result is copied.
+      unsafe {
+        // calling get_xx_bulk functions is unsafe, but result is copied.
         match ty {
           TYPE_BOOLEAN => Value::ArrayBoolean(reader.get_boolean_bulk(count as usize).into()),
           TYPE_U8 => Value::ArrayU8(reader.get_u8_bulk(count as usize).into()),
@@ -198,7 +198,7 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
             }
             Value::ArrayEnumeration {
               id: Uuid::from_slice(enumeration_id).unwrap(),
-              elements: enumerations
+              elements: enumerations,
             }
           }
           _ => panic!("unsupported array type"),

@@ -34,6 +34,19 @@ exports:
       id: Status
 
   - type: function
+    id: ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee
+    name: status_identity
+    parameters:
+      - id: e1f174e6-ca9e-4344-84cb-7f3f22115239
+        name: value
+        type:
+          kind: scalar
+          id: Status
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
     id: 32246df6-ab5d-4f18-9221-23e28731de93
     name: seq
     parameters:
@@ -42,6 +55,26 @@ exports:
         type:
           kind: array
           id: TickId
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: c2d5ed72-798c-4174-94f7-13378bd9bf1f
+    name: seq_star
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: TickId
+
+      - id: 4de502df-3f48-4541-94d8-dd68fe92bc8e
+        name: current_index
+        type:
+          kind: scalar
+          id: u16
+        mutable: true
     ret:
       kind: scalar
       id: Status

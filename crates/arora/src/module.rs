@@ -3,14 +3,10 @@ use uuid::Uuid;
 
 #[derive(Display, Debug, Error)]
 pub enum DispatchError {
-  ModuleNotFound {
-    id: Uuid,
-  },
-  FunctionNotFound {
-    id: Uuid,
-  },
-  Trap,
-  Internal,
+  ModuleNotFound { id: Uuid },
+  FunctionNotFound { id: Uuid },
+  Trap { message: String },
+  Internal { message: String },
 }
 
 pub trait Module {

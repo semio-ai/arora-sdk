@@ -24,7 +24,7 @@ add_custom_target(reformat-generated-${MODULE_NAME}-bindings ALL
 )
 
 # Build the WASM module.
-set(MODULE_EXECUTABLE "${TARGET_DIR}/test_rust_wasm.wasm")
+set(MODULE_EXECUTABLE "${TARGET_DIR}/${MODULE_NAME}.wasm")
 add_custom_target(${MODULE_NAME} ALL
   COMMAND cargo wasi build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

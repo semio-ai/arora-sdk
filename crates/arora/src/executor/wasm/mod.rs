@@ -40,6 +40,7 @@ impl WebAssemblyExecutor {
   pub fn new() -> Result<Self, InitializationError> {
     let mut config = Config::new();
     // config.async_support(true);
+    config.debug_info(cfg!(debug_assertions));
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
     config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling {
       instance_limits: InstanceLimits {
@@ -72,8 +73,12 @@ impl Executor for WebAssemblyExecutor {
     &mut self,
     module_definition: ModuleDefinition,
   ) -> Result<Box<dyn Module>, LoadModuleError> {
-    let module = WasmModule::from_binary(&self.engine, &module_definition.executable)
-      .map_err(|_| LoadModuleError::MalformedExecutable)?;
+    let module = WasmModule::new_with_name(
+      &self.engine,
+      &module_definition.executable,
+      module_definition.header.name.as_str(),
+    )
+    .map_err(|_| LoadModuleError::MalformedExecutable)?;
 
     let ctx = WasiCtxBuilder::new().inherit_stdio().build();
 
@@ -275,17 +280,29 @@ impl WebAssemblyModule {
   }
 
   fn malloc(&mut self, size: u32) -> Result<u32, DispatchError> {
-    self.malloc.call(&mut self.store, (size,)).map_err(|e| {
-      println!("{:?}", e);
-      DispatchError::Trap
-    })
+    self
+      .malloc
+      .call(&mut self.store, (size,))
+      .map_err(|e| DispatchError::Trap {
+        message: format!(
+          "failed to allocate memory for module {}: {:#?}",
+          self.name(),
+          e
+        ),
+      })
   }
 
   fn free(&mut self, addr: u32) -> Result<(), DispatchError> {
-    self.free.call(&mut self.store, (addr,)).map_err(|e| {
-      println!("{:?}", e);
-      DispatchError::Trap
-    })
+    self
+      .free
+      .call(&mut self.store, (addr,))
+      .map_err(|e| DispatchError::Trap {
+        message: format!(
+          "failed to free memory for module {}: {:#?}",
+          self.name(),
+          e
+        ),
+      })
   }
 
   fn allocate_arg_memory(&mut self, size: u32) -> Result<u32, DispatchError> {
@@ -293,66 +310,90 @@ impl WebAssemblyModule {
     self.current_arg_memory = Some((ptr.clone(), size));
     Ok(ptr)
   }
+
+  /// Returns the module name if specified, else <unknown>.
+  fn name(&self) -> &str {
+    self.module.name().unwrap_or("<unknown>")
+  }
 }
 
 impl Module for WebAssemblyModule {
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
-    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal)?;
+    let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal {
+      message: format!(
+        "failed to cast args size to u32 in module {}",
+        self.name()
+      ),
+    })?;
 
-    let addr = if let Some((current_addr, current_size)) = self.current_arg_memory {
-      // Allocate memory for the argument in the WASM module
-      if current_size < arg_size {
-        self.free(current_addr)?;
-        self.allocate_arg_memory(arg_size)?
-      } else {
-        current_addr
-      }
-    } else {
-      self.allocate_arg_memory(arg_size)?
-    };
-
-    // Copy the argument into the WASM module
+    // Let the WASM modue allocate a buffer,
+    // and copy the argument into it.
+    let arg_addr = self.allocate_arg_memory(arg_size)?;
     self
       .memory
-      .write(&mut self.store, addr as usize, arg)
-      .map_err(|e| {
-        println!("{:?}", e);
-        DispatchError::Trap
+      .write(&mut self.store, arg_addr as usize, arg)
+      .map_err(|e| DispatchError::Trap {
+        message: format!(
+          "failed to write to memory for module {}: {:#?}",
+          self.name(),
+          e
+        ),
       })?;
 
     // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
-    let result = func.call(&mut self.store, (addr as u32,)).map_err(|e| {
-      println!("call {:#?}", e);
-      DispatchError::Trap
-    })?;
+    let result = func
+      .call(&mut self.store, (arg_addr as u32,))
+      .map_err(|e| DispatchError::Trap {
+        message: format!(
+          "error calling {}.{}: {:#?}",
+          self.name(),
+          method_id.to_string(),
+          e
+        ),
+      })?;
+
+    // Free the buffer allocated for the argument.
+    self.free(arg_addr)?;
 
     // Read the size of the result.
     let mut size_buffer = [0u8; 4];
     self
       .memory
       .read(&self.store, result as usize, &mut size_buffer)
-      .map_err(|e| {
-        println!("{:#?}", e);
-        DispatchError::Internal
+      .map_err(|e| DispatchError::Internal {
+        message: format!(
+          "failed to read the size of the result for module {}: {:#?}",
+          self.name(),
+          e
+        ),
       })?;
     let size = size_buffer.as_slice().get_u32_le();
 
-    // Read the result.
+    // Read the result into a local buffer.
     let mut result_buffer = vec![0u8; size as usize];
     self
       .memory
       .read(&self.store, result as usize, &mut result_buffer)
-      .map_err(|e| {
-        println!("read {:#?}", e);
-        DispatchError::Internal
+      .map_err(|e| DispatchError::Internal {
+        message: format!(
+          "failed to read the result for module {}: {:#?}",
+          self.name(),
+          e
+        ),
       })?;
 
-    // Free the result
-    self.free.call(&mut self.store, (result,)).map_err(|e| {
-      println!("arora_buffer_free {:#?}", e);
-      DispatchError::Trap
-    })?;
+    // Free the result.
+    self
+      .free
+      .call(&mut self.store, (result,))
+      .map_err(|e| DispatchError::Trap {
+        message: format!(
+          "failed to free the result for module {}: {:#?}",
+          self.name(),
+          e
+        ),
+      })?;
 
     Ok(result_buffer.into_boxed_slice())
   }

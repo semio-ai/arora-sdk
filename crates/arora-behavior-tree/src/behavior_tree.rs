@@ -1,4 +1,5 @@
 mod error;
+mod nodes;
 mod schema;
 mod status;
 mod tick_id;
@@ -11,7 +12,7 @@ use arora_schema::{
 use error::BehaviorTreeError;
 use schema::Node;
 use status::Status;
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tick_id::TickId;
 use uuid::Uuid;
 
@@ -21,37 +22,59 @@ use crate::tick_id::{TICK_ID_ID_FIELD_ID, TICK_ID_TYPE_ID};
 //====================================================================
 /// The behavior tree, binding all nodes, variables and types together.
 pub struct BehaviorTree {
-  /// Index of modules, functions, variables and types.
-  index: Rc<Index>,
   /// The root node from which the tree stems.
   root: Rc<Node>,
   /// All the nodes, indexed by their ID.
-  node_index: Rc<HashMap<Uuid, Rc<Node>>>,
+  node_index: HashMap<Uuid, Rc<Node>>,
+  /// The local variables.
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+}
+
+struct BehaviorTreeRuntime<'a> {
+  caller: &'a mut dyn CallBridge,
+  tick: TickId,
+}
+
+impl<'a> BehaviorTreeRuntime<'a> {
+  fn setup(
+    tree: &'a BehaviorTree,
+    index: Rc<Index>,
+    caller: &'a mut dyn CallBridge,
+  ) -> Result<Self, BehaviorTreeError> {
+    let tick = setup_tick_function(
+      tree.root.clone(),
+      &tree.node_index,
+      index.clone(),
+      tree.locals.clone(),
+      caller,
+    )?;
+    Ok(Self { caller, tick })
+  }
+
+  fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
+    self.tick.tick(self.caller)
+  }
 }
 
 /// Runs a behavior tree until it reaches the status success or failure.
 pub fn run_behavior_tree(
-  behavior: &mut BehaviorTree,
+  behavior: &BehaviorTree,
+  index: Rc<Index>,
   caller: &mut dyn CallBridge,
 ) -> Result<status::Status, BehaviorTreeError> {
-  let tick = setup_tick_function(
-    behavior.root.clone(),
-    behavior.node_index.clone(),
-    behavior.index.clone(),
-    caller,
-  )?;
-
+  let mut runtime = BehaviorTreeRuntime::setup(behavior, index, caller)?;
   let mut status = Status::Running;
   while status == Status::Running {
-    status = tick.tick(caller)?;
+    status = runtime.tick()?;
   }
   return Ok(status);
 }
 
 fn setup_tick_function(
   node: Rc<Node>,
-  node_index: Rc<HashMap<Uuid, Rc<Node>>>,
+  node_index: &HashMap<Uuid, Rc<Node>>,
   index: Rc<Index>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   caller: &mut dyn CallBridge,
 ) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
@@ -63,7 +86,6 @@ fn setup_tick_function(
   if let Some(children) = &node.children {
     for child_id in children {
       let child_node = node_index
-        .clone()
         .get(child_id)
         .ok_or(BehaviorTreeError::ChildNodeNotFound {
           node: node.id.clone(),
@@ -72,8 +94,9 @@ fn setup_tick_function(
         .clone();
       let tick_function_with_id = setup_tick_function(
         child_node.clone(),
-        node_index.clone(),
+        &node_index,
         index.clone(),
+        locals.clone(),
         caller,
       )?;
       children_ticks.push(tick_function_with_id);
@@ -82,6 +105,7 @@ fn setup_tick_function(
   let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
     node: node.clone(),
     index,
+    locals: locals.to_owned(),
     children: children_ticks,
   });
   let callable_id = caller.arora_register_callable(tick_function);
@@ -91,6 +115,7 @@ fn setup_tick_function(
 fn tick(
   caller: &mut dyn CallBridge,
   index: Rc<Index>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<status::Status, BehaviorTreeError> {
@@ -162,27 +187,73 @@ fn tick(
   }
 
   // Pass the remaining parameters from the behavior-wise variables.
-  for (param_id, variable_id) in &node.arguments {
-    let value = index
-      .variables
-      .get(variable_id)
-      .ok_or(BehaviorTreeError::VariableNotFound {
-        variable: variable_id.clone(),
-        node: node.id.clone(),
-      })?;
-    call.args.push(StructureField {
-      id: param_id.clone(),
-      value: Box::new(value.clone()),
-    });
+  {
+    let locals = locals.borrow();
+    for (param_id, variable_id) in &node.arguments {
+      let value = locals
+        .get(variable_id)
+        .ok_or(BehaviorTreeError::VariableNotFound {
+          variable: variable_id.clone(),
+          node: node.id.clone(),
+        })?;
+      call.args.push(StructureField {
+        id: param_id.clone(),
+        value: Box::new(value.borrow().clone()),
+      });
+    }
   }
 
   let result = caller
     .arora_call(&function.module, call)
     .map_err(|e| BehaviorTreeError::CallError(e))?;
 
-  result
-    .try_into()
-    .map_err(|e| BehaviorTreeError::ConversionError(e))
+  let mut mutable_locals = locals.borrow_mut();
+  let mut return_value: Option<Status> = None;
+  if let Value::Structure(result_structure) = result {
+    if result_structure.id != node.function {
+      return Err(BehaviorTreeError::ConversionError(ConversionError {
+        message: format!(
+          "node function's result id differs from function id ({}, vs. {})",
+          result_structure.id.to_string(),
+          node.function.to_string(),
+        )
+        .to_string(),
+      }));
+    }
+    for field in result_structure.fields {
+      if field.id == node.function {
+        return_value = Some(
+          (*field.value)
+            .try_into()
+            .map_err(|e| BehaviorTreeError::ConversionError(e))?,
+        );
+      } else {
+        let variable_id =
+          node
+            .arguments
+            .get(&field.id)
+            .ok_or(BehaviorTreeError::ConversionError(ConversionError {
+              message: "node function mutated an unknown argument".to_string(),
+            }))?;
+        let variable =
+          mutable_locals
+            .get_mut(variable_id)
+            .ok_or(BehaviorTreeError::VariableNotFound {
+              node: node.id,
+              variable: variable_id.clone(),
+            })?;
+        println!("{} = {}", variable_id, field.value);
+        *variable.borrow_mut() = *field.value;
+      }
+    }
+  } else {
+    return Err(BehaviorTreeError::ConversionError(ConversionError {
+      message: "node function's result is not a structure".to_string(),
+    }));
+  }
+  return_value.ok_or(BehaviorTreeError::ConversionError(ConversionError {
+    message: "node function's result does not contain a return value".to_string(),
+  }))
 }
 
 /// Specialization of Callable that returns a Status.
@@ -201,9 +272,11 @@ impl Tickable for CallableId {
     let value = self
       .call(caller)
       .map_err(|e| BehaviorTreeError::CallError(e))?;
-    value
-      .try_into()
-      .map_err(|_| BehaviorTreeError::ConversionError(ConversionError {}))
+    value.try_into().map_err(|_| {
+      BehaviorTreeError::ConversionError(ConversionError {
+        message: "return value cannot be interpreted as a Status".to_string(),
+      })
+    })
   }
 }
 
@@ -211,6 +284,7 @@ impl Tickable for CallableId {
 struct TickFunction {
   node: Rc<Node>,
   index: Rc<Index>,
+  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   children: Vec<TickId>,
 }
 
@@ -219,6 +293,7 @@ impl Tickable for TickFunction {
     tick(
       caller,
       self.index.clone(),
+      self.locals.clone(),
       &self.children,
       self.node.clone(),
     )
@@ -254,9 +329,9 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
   }
 
   Ok(BehaviorTree {
-    index: Rc::new(Index::new()),
     root: root.unwrap(),
-    node_index: Rc::new(node_index),
+    node_index,
+    locals: Rc::new(RefCell::new(HashMap::new())),
   })
 }
 
@@ -265,10 +340,13 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::nodes::*;
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_registry::Registry;
   use arora_schema::module::low::{Header, ModuleDefinition};
+  use convert_case::{Case, Casing};
+
   use std::path::Path;
   use tokio::{
     fs::{read_to_string, File},
@@ -296,29 +374,137 @@ mod tests {
 
   #[tokio::test]
   pub async fn run_trivial_tree() {
-    run_to_success(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await;
+    assert_eq!(
+      Status::Success,
+      run_yaml_with_modules(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await
+    );
+  }
+
+  #[tokio::test]
+  pub async fn status_identity_update() {
+    let mut status_value: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
+    let behavior = status_identity(status_value.clone()).into();
+
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+    set_value(&mut status_value, Status::Running);
+    assert_eq!(Status::Running, runtime.tick().unwrap());
+    set_value(&mut status_value, Status::Failure);
+    assert_eq!(Status::Failure, runtime.tick().unwrap());
   }
 
   #[tokio::test]
   pub async fn seq_of_success() {
-    run_to_success(SEQ_OF_SUCCESS, &vec!["behavior-tree-nodes".to_string()]).await;
+    assert_eq!(Status::Success, run_yaml_base(SEQ_OF_SUCCESS).await);
   }
 
   #[tokio::test]
   pub async fn seq_fail_middle() {
-    assert_eq!(Status::Failure, run_base(SEQ_FAIL_MIDDLE).await);
+    assert_eq!(Status::Failure, run_yaml_base(SEQ_FAIL_MIDDLE).await);
   }
 
-  async fn run_base(tree_yaml: &str) -> Status {
-    run(tree_yaml, &vec!["behavior-tree-nodes".to_string()]).await
+  #[tokio::test]
+  pub async fn seq_run_last() {
+    let behavior = seq(vec![succeed(), succeed(), run()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
   }
 
-  async fn run_to_success(tree_yaml: &str, modules: &Vec<String>) {
-    let status = run(tree_yaml, modules).await;
-    assert_eq!(status, Status::Success);
+  #[tokio::test]
+  pub async fn seq_run_middle_fail_last() {
+    let behavior = seq(vec![succeed(), run(), fail()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
   }
 
-  async fn run(tree_yaml: &str, modules: &Vec<String>) -> Status {
+  #[tokio::test]
+  pub async fn seq_star_succeed() {
+    let behavior = seq_star(vec![succeed(), succeed(), succeed()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn seq_star_resumes() {
+    let mut first_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
+    let mut second_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Running.into()));
+    let behavior = seq_star(vec![
+      status_identity(first_status.clone()),
+      status_identity(second_status.clone()),
+    ])
+    .into();
+
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    // First tick moves the sequence to the second node.
+    assert_eq!(Status::Running, runtime.tick().unwrap());
+
+    // Second tick ignores the first node, and will only process the second one.
+    set_value(&mut first_status, Status::Running);
+    set_value(&mut second_status, Status::Success);
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+  }
+
+  #[tokio::test]
+  pub async fn fallback_succeeds() {
+    let behavior = fallback(vec![succeed(), fail()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn fallback_falls_back() {
+    let behavior = fallback(vec![fail(), succeed()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn parallel_succeeds() {
+    let behavior = parallel(vec![succeed(), succeed(), succeed()]).into();
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn parallel_fails() {
+    let behavior = parallel(vec![run(), succeed(), fail()]).into();
+    assert_eq!(Status::Failure, tick_base(&behavior).await);
+  }
+
+  #[tokio::test]
+  pub async fn parallel_runs() {
+    let behavior = parallel(vec![run(), succeed(), succeed()]).into();
+    assert_eq!(Status::Running, tick_base(&behavior).await);
+  }
+
+  // Test helpers and data
+  //==============================================================================
+  fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {
+    *rc.borrow_mut() = v.into()
+  }
+
+  async fn tick_base(behavior: &BehaviorTree) -> Status {
+    tick_with_modules(&behavior, &BASE_MODULE_NAMES).await
+  }
+
+  async fn run_yaml_base(tree_yaml: &str) -> Status {
+    run_yaml_with_modules(tree_yaml, &BASE_MODULE_NAMES).await
+  }
+
+  async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
+    let (mut engine, index) = setup_engine_with_modules(modules).await;
+    let mut runtime = BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine).unwrap();
+    runtime.tick().unwrap()
+  }
+
+  async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
+    let (mut engine, index) = setup_engine_with_modules(&modules).await;
+    run_behavior_tree(&behavior, Rc::new(index), &mut engine).unwrap()
+  }
+
+  async fn run_yaml_with_modules(tree_yaml: &str, modules: &Vec<String>) -> Status {
+    let behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
+    run_with_modules(&behavior, &modules).await
+  }
+
+  async fn setup_engine_with_modules<'a>(modules: &Vec<String>) -> (PinnedEngine, Index) {
     let mut engine = EngineBuilder::new()
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
@@ -332,9 +518,7 @@ mod tests {
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
-    let mut behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
-    behavior.index = Rc::new(index);
-    run_behavior_tree(&mut behavior, &mut engine).unwrap()
+    (engine, index)
   }
 
   /// Load a module built by this project, from under the `module/` directory
@@ -344,6 +528,9 @@ mod tests {
     registry: &mut Registry,
     name: &String,
   ) {
+    println!("loading module {:#?}", name);
+    let start_time = std::time::Instant::now();
+
     // Find the root directory of the repository.
     let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
     let mut path = Path::new(&current_crate_dir);
@@ -357,10 +544,10 @@ mod tests {
     }
     let repo_root = path;
 
-    // Let us load the test Rust WASM module.
-    let test_rust_wasm = repo_root.join("modules").join(name);
+    // Let us load the WASM module.
+    let module_root = repo_root.join("modules").join(name);
     // The header file should be directly in the sources.
-    let header_path = test_rust_wasm
+    let header_path = module_root
       .join("src")
       .join("arora_generated")
       .join("module.yaml");
@@ -375,6 +562,11 @@ mod tests {
         header_path.display()
       )
       .as_str(),
+    );
+    let actual_module_name = header.name.clone();
+    println!(
+      "actual name of module {:?} is {:?}",
+      name, &actual_module_name
     );
 
     // Register the types involved there.
@@ -396,15 +588,16 @@ mod tests {
     index.add_module(&header).unwrap();
 
     // Find the executable in the right target directory (debug in priority)
-    let test_rust_wasm_target = test_rust_wasm.join("target").join("wasm32-wasi");
+    let module_target_dir = module_root.join("target").join("wasm32-wasi");
     let target_subdir = if cfg!(debug_assertions) {
       "debug"
     } else {
       "release"
     };
-    let module_path = test_rust_wasm_target
+    let module_path = module_target_dir
       .join(target_subdir)
-      .join("test_rust_wasm.wasm");
+      .join(format!("{}.wasm", name.to_case(Case::Snake)));
+    println!("reading executable {:#?}", module_path);
     let mut executable_file = File::open(&module_path)
       .await
       .expect(format!("could not open executable file {}", module_path.display()).as_str());
@@ -413,14 +606,24 @@ mod tests {
     let executable = executable.into_boxed_slice();
 
     // Loading the module.
-    let module_name = header.name.clone();
+    println!("loading module {:#?} into the engine", &actual_module_name);
     engine
       .load_module(ModuleDefinition {
         schema_version: 0,
         header,
         executable,
       })
-      .expect(format!("failed to load module {}", module_name).as_str());
+      .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
+
+    let total_duration = std::time::Instant::now() - start_time;
+    println!(
+      "module {:#?} loaded in {:#?}",
+      &actual_module_name, total_duration
+    );
+  }
+
+  lazy_static::lazy_static! {
+    static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
   }
 
   /// A tree with a single node calling test-wasm.succeed()

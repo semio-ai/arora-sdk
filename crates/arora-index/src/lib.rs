@@ -14,7 +14,6 @@ pub struct Index {
   pub modules: HashMap<Uuid, Header>,
   pub types: HashMap<Uuid, Type>,
   pub functions: HashMap<Uuid, ImportFunction>,
-  pub variables: HashMap<Uuid, Value>,
 }
 
 impl Index {
@@ -23,7 +22,6 @@ impl Index {
       modules: HashMap::new(),
       types: PRIMITIVE_TYPES.clone(),
       functions: HashMap::new(),
-      variables: HashMap::new(),
     }
   }
 
