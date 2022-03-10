@@ -40,6 +40,7 @@ impl WebAssemblyExecutor {
   pub fn new() -> Result<Self, InitializationError> {
     let mut config = Config::new();
     // config.async_support(true);
+    config.debug_info(cfg!(debug_assertions));
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
     config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling {
       instance_limits: InstanceLimits {
