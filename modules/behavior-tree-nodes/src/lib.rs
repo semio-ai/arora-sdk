@@ -114,19 +114,3 @@ fn call_tick_function(tick_id: &TickId) -> Status {
 extern "C" {
   fn arora_dispatch_indirect(callable_id: u64) -> i32;
 }
-
-// Implementation of `scoped`.
-//========================================================================
-struct CallOnDrop<F: FnMut() -> ()> {
-  function: F,
-}
-
-impl<F: FnMut() -> ()> Drop for CallOnDrop<F> {
-  fn drop(&mut self) {
-    (self.function)()
-  }
-}
-
-fn scoped<F: FnMut() -> ()>(function: F) -> CallOnDrop<F> {
-  CallOnDrop { function }
-}
