@@ -118,7 +118,7 @@ fn generate_struct_source_contents(
   let struct_ident = type_ident(&name);
   let field_declarations = structure.fields.iter().map(|(_, field)| {
     let field_ident = variable_ident(&field.name);
-    let field_type_ident = type_ident_from_ref(&field.type_ref, &index, true);
+    let field_type_ident = type_ident_from_ref(&field.type_ref, &index, PrefixWithMod::Yes);
     quote! { pub #field_ident: #field_type_ident }
   });
   let struct_declaration = quote! {
@@ -181,14 +181,14 @@ fn generate_struct_source_contents(
   // then we move all of them into the result structure.
   let field_variable_declarations = structure.fields.iter().map(|(_, field)| {
     let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let type_ident = type_ident_from_ref(&field.type_ref, &index, false);
+    let type_ident = type_ident_from_ref(&field.type_ref, &index, PrefixWithMod::No);
     quote! { let mut #variable_ident: Option<#type_ident> = None; }
   });
 
   let deserialization_cases = structure.fields.iter().map(|(_, field)| {
     let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
     let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let deserialize = generate_deserialize_from_type_ref(&field.type_ref, &index, false, true);
+    let deserialize = generate_deserialize_from_type_ref(&field.type_ref, &index, PrefixWithMod::No, CheckType::Yes);
     quote! {
       if field_raw_id == #field_const_id_ident {
         #field_variable_ident = Some(#deserialize);
@@ -441,14 +441,14 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
 
     let param_declarations = function_symbol.parameters.iter().map(|param| {
       let param_var_ident = param_ident(&param.name);
-      let param_type_ident = type_ident_from_ref(&param.ty, &index, true);
+      let param_type_ident = type_ident_from_ref(&param.ty, &index, PrefixWithMod::Yes);
       quote! { let mut #param_var_ident: Option<#param_type_ident> = None; }
     });
 
     let deserialization_cases = function_symbol.parameters.iter().map(|param| {
       let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
       let param_var_ident = param_ident(&param.name);
-      let deserialize = generate_deserialize_from_type_ref(&param.ty, &index, true, true);
+      let deserialize = generate_deserialize_from_type_ref(&param.ty, &index, PrefixWithMod::Yes, CheckType::Yes);
       quote! {
         if field_raw_id == #param_const_id_ident {
           #param_var_ident = Some(#deserialize);
@@ -500,19 +500,25 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
       _ => quote! {},
     };
 
-    let write_mutated_params: Vec<TokenStream> = function_symbol.parameters.iter().filter_map(|param| {
-      if param.mutable {
-        let param_var_ident = param_ident(&param.name);
-        let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
-        let serialize_param = generate_serialize_from_type_ref(&param.ty, quote!{#param_var_ident.unwrap()}, &index);
-        Some(quote! {
-          writer.add_structure_field(&#param_const_id_ident);
-          #serialize_param;
-        })
-      } else {
-        None
-      }
-    }).collect();
+    let write_mutated_params: Vec<TokenStream> = function_symbol
+      .parameters
+      .iter()
+      .filter_map(|param| {
+        if param.mutable {
+          let param_var_ident = param_ident(&param.name);
+          let param_const_id_ident =
+            function_param_const_id_ident(&function_symbol.name, &param.name);
+          let serialize_param =
+            generate_serialize_from_type_ref(&param.ty, quote! {#param_var_ident.unwrap()}, &index);
+          Some(quote! {
+            writer.add_structure_field(&#param_const_id_ident);
+            #serialize_param;
+          })
+        } else {
+          None
+        }
+      })
+      .collect();
     let nof_mutated_params = write_mutated_params.len();
 
     let uuid_suffix = export.id().to_string().replace("-", "_");
@@ -717,14 +723,13 @@ fn generate_serialize_from_type_ref(
   }
 }
 
-fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: bool) -> TokenStream {
+fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: CheckType) -> TokenStream {
   let type_kind_ident = type_kind_ident(&id, &index);
-  let type_check = if check_type {
-    quote! {
+  let type_check = match check_type {
+    CheckType::Yes => quote! {
       assert_eq!(reader.next_type(), Some(#type_kind_ident));
-    }
-  } else {
-    quote! {}
+    },
+    CheckType::No => quote! {},
   };
   let deserialization = match id {
     x if *x == *UNIT_ID => quote! { Result::<(), DeserializationError>::Ok(reader.get_unit()) },
@@ -738,44 +743,44 @@ fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: bool) -> T
       #type_check
       Result::<u8, DeserializationError>::Ok(reader.get_u8())
     },
-    x if *x == *U16_ID => quote! { 
+    x if *x == *U16_ID => quote! {
       #type_check
       Result::<u16, DeserializationError>::Ok(reader.get_u16())
     },
-    x if *x == *U32_ID => quote! { 
+    x if *x == *U32_ID => quote! {
       #type_check
       Result::<u32, DeserializationError>::Ok(reader.get_u32())
     },
-    x if *x == *U64_ID => quote! { 
+    x if *x == *U64_ID => quote! {
       #type_check
       Result::<u64, DeserializationError>::Ok(reader.get_u64())
     },
-    x if *x == *I8_ID => quote! { 
+    x if *x == *I8_ID => quote! {
       #type_check
       Result::<i8, DeserializationError>::Ok(reader.get_i8())
     },
-    x if *x == *I16_ID => quote! { 
+    x if *x == *I16_ID => quote! {
       #type_check
       Result::<i16, DeserializationError>::Ok(reader.get_i16())
     },
-    x if *x == *I32_ID => quote! { 
+    x if *x == *I32_ID => quote! {
       #type_check
       Result::<i32, DeserializationError>::Ok(reader.get_i32())
     },
-    x if *x == *I64_ID => quote! { 
+    x if *x == *I64_ID => quote! {
       #type_check
       Result::<i64, DeserializationError>::Ok(reader.get_i64())
     },
-    x if *x == *F32_ID => quote! { 
+    x if *x == *F32_ID => quote! {
       #type_check
       Result::<f32, DeserializationError>::Ok(reader.get_f32())
     },
-    x if *x == *F64_ID => quote! { 
+    x if *x == *F64_ID => quote! {
       #type_check
       Result::<f64, DeserializationError>::Ok(reader.get_f64())
     },
     x if *x == *STRING_ID => {
-      quote! { 
+      quote! {
         #type_check
         Result::<String, DeserializationError>::Ok(reader.get_string().to_string())
       }
@@ -783,6 +788,7 @@ fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: bool) -> T
     x => {
       let ty = index.find_type(&x).unwrap();
       let type_mod_ident = type_mod_ident(&ty.name);
+      let check_type = check_type == CheckType::Yes;
       quote! { arora_generated::#type_mod_ident ::deserialize_from_reader(&mut reader, #check_type) }
     }
   };
@@ -796,8 +802,8 @@ fn generate_deserialize_from_id(id: &Uuid, index: &Index, check_type: bool) -> T
 fn generate_deserialize_from_type_ref(
   type_ref: &TypeRef,
   index: &Index,
-  with_mod: bool,
-  check_type: bool,
+  with_mod: PrefixWithMod,
+  check_type: CheckType,
 ) -> TokenStream {
   match type_ref {
     TypeRef::Scalar { id } => {
@@ -839,7 +845,7 @@ fn generate_deserialize_from_type_ref(
           };
           let type_ident = type_ident_from_id(x, &index, with_mod);
           let type_str = type_ident.to_string();
-          let deserialize_element = generate_deserialize_from_id(x, &index, false);
+          let deserialize_element = generate_deserialize_from_id(x, &index, CheckType::No);
           quote! {
             #maybe_get_structure_field
             let mut res = Vec::<#type_ident>::with_capacity(count as usize);
@@ -879,7 +885,7 @@ fn type_mod_ident(type_name: &String) -> Ident {
   format_ident!("{}", type_name.to_case(Case::Snake))
 }
 
-fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: bool) -> TokenStream {
+fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: PrefixWithMod) -> TokenStream {
   match id {
     x if *x == *UNIT_ID => quote! { () },
     x if *x == *BOOLEAN_ID => quote! { bool },
@@ -896,11 +902,12 @@ fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: bool) -> TokenStream {
     x if *x == *STRING_ID => quote! { String },
     x => {
       let ty = index.find_type(&x).unwrap();
-      let mod_prefix = if with_mod {
-        let mod_ident = type_mod_ident(&ty.name);
-        quote! { arora_generated::#mod_ident :: }
-      } else {
-        quote! {}
+      let mod_prefix = match with_mod {
+        PrefixWithMod::Yes => {
+          let mod_ident = type_mod_ident(&ty.name);
+          quote! { arora_generated::#mod_ident :: }
+        }
+        PrefixWithMod::No => quote! {}
       };
       let type_ident = type_ident(&ty.name);
       quote! { #mod_prefix #type_ident }
@@ -908,7 +915,7 @@ fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: bool) -> TokenStream {
   }
 }
 
-fn type_ident_from_ref(type_ref: &TypeRef, index: &Index, with_mod: bool) -> TokenStream {
+fn type_ident_from_ref(type_ref: &TypeRef, index: &Index, with_mod: PrefixWithMod) -> TokenStream {
   match type_ref {
     TypeRef::Scalar { id } => type_ident_from_id(&id, &index, with_mod),
     TypeRef::Array { id } => {
@@ -1018,6 +1025,18 @@ fn param_ident(name: &String) -> Ident {
 
 fn variable_ident(name: &String) -> Ident {
   format_ident!("{}", name.to_case(Case::Snake))
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CheckType {
+  Yes,
+  No,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PrefixWithMod {
+  Yes,
+  No,
 }
 
 /// A helper to format a Uuid into an inlined byte array.
