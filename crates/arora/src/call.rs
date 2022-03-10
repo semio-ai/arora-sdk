@@ -1,4 +1,4 @@
-use arora_buffers::serde_uuid::serialize;
+use arora_buffers::serde_uuid::{serialize, deserialize};
 use arora_schema::value::{Structure, StructureField, Value};
 use derive_more::Display;
 use rand::{thread_rng, Rng};
@@ -23,13 +23,20 @@ pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
   }));
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CallResult {
+  pub ret: Value,
+  #[serde(default)]
+  pub mutated: Vec<StructureField>,
+}
+
 pub trait Callable {
   fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError>;
 }
 
 pub trait CallBridge {
   /// Calls the given function, with the arguments provided via `call`.
-  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, CallError>;
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError>;
 
   /// Registers the given function in the executor and
   /// associates it to an identified generated on the fly.

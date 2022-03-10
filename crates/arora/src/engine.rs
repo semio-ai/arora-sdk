@@ -5,7 +5,7 @@ use arora_schema::value::Value;
 use uuid::Uuid;
 
 use crate::{
-  call::{serialize_to_arg, Call, CallBridge, CallError, Callable, CallableId, CallableRegistry},
+  call::{serialize_to_arg, Call, CallBridge, CallError, Callable, CallableId, CallableRegistry, CallResult},
   executor::{self, Executor},
   module::{DispatchError, Module},
   schema::module::low::ModuleDefinition,
@@ -140,11 +140,38 @@ impl Engine {
 pub type EngineRef = *mut Engine;
 
 impl CallBridge for Engine {
-  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, CallError> {
-    self
-      .dispatch(&module, &call.id.clone(), serialize_to_arg(call).as_ref())
-      .map(|result| deserialize(result.as_ref()))
-      .map_err(DispatchError::into)
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
+    let call_id = call.id.clone();
+    let result_data = self
+      .dispatch(&module, &call_id, serialize_to_arg(call).as_ref())
+      .map_err(Into::<CallError>::into)?;
+    if let Value::Structure(structure) = deserialize(result_data.as_ref()) {
+      if call_id != structure.id {
+        Err(CallError::Internal {
+          message: format!("result id {} differs from function id {}", structure.id, call_id)
+        })?
+      }
+      let mut ret = None;
+      let mut mutated = Vec::with_capacity(structure.fields.len() - 1);
+      for field in structure.fields {
+        if field.id == call_id {
+          ret = Some(*field.value);
+        } else {
+          mutated.push(field);
+        }
+      }
+      let ret = ret.ok_or(CallError::Internal {
+        message: "call result did not contain a return value".to_string()
+      })?;
+      Ok(CallResult {
+        ret,
+        mutated,
+      })
+    } else {
+      Err(CallError::Internal {
+        message: "returned data was not a structure".to_string()
+      })
+    }
   }
 
   fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
@@ -163,7 +190,7 @@ impl CallBridge for Engine {
 pub type PinnedEngine = Pin<Box<Engine>>;
 
 impl CallBridge for PinnedEngine {
-  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<Value, CallError> {
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
     self.deref_mut().arora_call(module, call)
   }
 

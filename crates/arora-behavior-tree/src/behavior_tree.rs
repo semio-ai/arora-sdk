@@ -208,53 +208,23 @@ fn tick(
     .arora_call(&function.module, call)
     .map_err(|e| BehaviorTreeError::CallError(e))?;
 
-  let mut mutable_locals = locals.borrow_mut();
-  let mut return_value: Option<Status> = None;
-  if let Value::Structure(result_structure) = result {
-    if result_structure.id != node.function {
-      return Err(BehaviorTreeError::ConversionError(ConversionError {
+  let mut mutable_locals = variables.borrow_mut();
+  for mutated in result.mutated {
+    let variable = locals
+      .get_mut(&mutated.id)
+      .ok_or(BehaviorTreeError::InternalError {
         message: format!(
-          "node function's result id differs from function id ({}, vs. {})",
-          result_structure.id.to_string(),
-          node.function.to_string(),
-        )
-        .to_string(),
-      }));
-    }
-    for field in result_structure.fields {
-      if field.id == node.function {
-        return_value = Some(
-          (*field.value)
-            .try_into()
-            .map_err(|e| BehaviorTreeError::ConversionError(e))?,
-        );
-      } else {
-        let variable_id =
-          node
-            .arguments
-            .get(&field.id)
-            .ok_or(BehaviorTreeError::ConversionError(ConversionError {
-              message: "node function mutated an unknown argument".to_string(),
-            }))?;
-        let variable =
-          mutable_locals
-            .get_mut(variable_id)
-            .ok_or(BehaviorTreeError::VariableNotFound {
-              node: node.id,
-              variable: variable_id.clone(),
-            })?;
-        println!("{} = {}", variable_id, field.value);
-        *variable.borrow_mut() = *field.value;
-      }
-    }
-  } else {
-    return Err(BehaviorTreeError::ConversionError(ConversionError {
-      message: "node function's result is not a structure".to_string(),
-    }));
+          "mutated parameter {} does not correspond to any local variable",
+          &mutated.id
+        ),
+      })?;
+    *variable.borrow_mut() = *mutated.value;
   }
-  return_value.ok_or(BehaviorTreeError::ConversionError(ConversionError {
-    message: "node function's result does not contain a return value".to_string(),
-  }))
+
+  result
+    .ret
+    .try_into()
+    .map_err(|e| BehaviorTreeError::ConversionError(e))
 }
 
 /// Specialization of Callable that returns a Status.
