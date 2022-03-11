@@ -188,7 +188,12 @@ fn generate_struct_source_contents(
   let deserialization_cases = structure.fields.iter().map(|(_, field)| {
     let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
     let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let deserialize = generate_deserialize_from_type_ref(&field.type_ref, &index, PrefixWithMod::No, CheckType::Yes);
+    let deserialize = generate_deserialize_from_type_ref(
+      &field.type_ref,
+      &index,
+      PrefixWithMod::No,
+      CheckType::Yes,
+    );
     quote! {
       if field_raw_id == #field_const_id_ident {
         #field_variable_ident = Some(#deserialize);
@@ -448,7 +453,8 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     let deserialization_cases = function_symbol.parameters.iter().map(|param| {
       let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
       let param_var_ident = param_ident(&param.name);
-      let deserialize = generate_deserialize_from_type_ref(&param.ty, &index, PrefixWithMod::Yes, CheckType::Yes);
+      let deserialize =
+        generate_deserialize_from_type_ref(&param.ty, &index, PrefixWithMod::Yes, CheckType::Yes);
       quote! {
         if field_raw_id == #param_const_id_ident {
           #param_var_ident = Some(#deserialize);
@@ -481,24 +487,18 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
       }
     });
 
-    let call_and_write_result = match function_symbol.ret {
-      TypeRef::Scalar { id } => {
-        if id == *UNIT_ID {
-          quote! {
-            #function_ident (#(#param_args),*);
-            writer.add_unit();
-          }
-        } else {
-          let return_type = index.find_type(&id).unwrap();
-          let return_type_mod_ident = type_mod_ident(&return_type.name);
-          quote! {
-            let result = #function_ident (#(#param_args),*);
-            arora_generated::#return_type_mod_ident :: serialize_to_writer(&result, &mut writer);
-          }
-        }
+    let call_and_write_result = (|| {
+      let result_ident = match function_symbol.ret {
+        TypeRef::Scalar { id } if id == *UNIT_ID => quote! { _ },
+        _ => quote! { result },
+      };
+      let serialize_result =
+        generate_serialize_from_type_ref(&function_symbol.ret, result_ident.clone(), &index);
+      quote! {
+        let #result_ident = #function_ident (#(#param_args),*);
+        #serialize_result;
       }
-      _ => quote! {},
-    };
+    })();
 
     let write_mutated_params: Vec<TokenStream> = function_symbol
       .parameters
@@ -545,7 +545,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
         #call_and_write_result
         #(#write_mutated_params)*
         let result_buffer = writer.finalize();
-        result_buffer.as_ptr() as i32
+        Box::leak(result_buffer).as_ptr() as i32
       }
     }
   });
@@ -620,7 +620,7 @@ fn generate_serialize_from_id(
     x => {
       let ty = index.find_type(&x).unwrap();
       let type_mod_ident = type_mod_ident(&ty.name);
-      quote! { #type_mod_ident ::serialize_to_writer(&mut writer) }
+      quote! { arora_generated::#type_mod_ident ::serialize_to_writer(&#value_expression, &mut writer) }
     }
   }
 }
@@ -907,7 +907,7 @@ fn type_ident_from_id(id: &Uuid, index: &Index, with_mod: PrefixWithMod) -> Toke
           let mod_ident = type_mod_ident(&ty.name);
           quote! { arora_generated::#mod_ident :: }
         }
-        PrefixWithMod::No => quote! {}
+        PrefixWithMod::No => quote! {},
       };
       let type_ident = type_ident(&ty.name);
       quote! { #mod_prefix #type_ident }
