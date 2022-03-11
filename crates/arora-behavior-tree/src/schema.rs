@@ -153,35 +153,4 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
     assert!(actual == expected);
     return Ok(());
   }
-
-  #[test]
-  pub fn serialize_stuff() -> Result<()> {
-    let expected = vec![
-      Node {
-        id: Uuid::from_str("fc8e2c43-8f0a-461f-9b44-30cc45c4357f")?,
-        function: Uuid::from_str("af2bd9fa-14f6-4388-b68b-e50c8443960e")?,
-        children: Some(vec![
-          Uuid::from_str("d50638bf-c44b-4f6e-a5f2-925fcfff71a8")?,
-          Uuid::from_str("817e45e3-26ca-45a4-8537-ad70e3de1298")?,
-        ]),
-        ..Default::default()
-      },
-      Node {
-        id: Uuid::from_str("d50638bf-c44b-4f6e-a5f2-925fcfff71a8")?,
-        function: Uuid::from_str("418e7f79-9df8-4fe4-92f9-54f9fc6e2de8")?,
-        arguments: HashMap::from([(
-          Uuid::from_str("85710898-406b-464d-bf9c-21ac658dbc04")?,
-          Expression::VariableId(Uuid::from_str("d775359e-9f6b-4c1e-892c-8a4a36ec82d0")?),
-        )]),
-        ..Default::default()
-      },
-      Node {
-        id: Uuid::from_str("817e45e3-26ca-45a4-8537-ad70e3de1298")?,
-        function: Uuid::from_str("77c7bfa6-c01f-416b-a09f-5d2a8e63d4e0")?,
-        ..Default::default()
-      },
-    ];
-    println!("{:#?}", serde_yaml::to_string(&expected)?);
-    Ok(())
-  }
 }
