@@ -201,7 +201,7 @@ impl BufferWriter {
   }
 
   pub fn add_f32_raw(&mut self, value: f32) {
-    self.backing.put_f32(value);
+    self.backing.put_f32_le(value);
   }
 
   pub fn add_f32(&mut self, value: f32) {
@@ -218,7 +218,7 @@ impl BufferWriter {
 
   pub fn add_f64_raw(&mut self, value: f64) {
     self.backing.put_u8(TYPE_F64);
-    self.backing.put_f64(value);
+    self.backing.put_f64_le(value);
   }
 
   pub fn add_f64(&mut self, value: f64) {
