@@ -1,4 +1,4 @@
-use arora_buffers::serde_uuid::{serialize, deserialize};
+use arora_buffers::serde_uuid::serialize;
 use arora_schema::value::{Structure, StructureField, Value};
 use derive_more::Display;
 use rand::{thread_rng, Rng};
@@ -106,10 +106,7 @@ impl CallableRegistry {
     }
   }
 
-  pub fn register_callable(
-    &mut self,
-    callable: Rc<dyn Callable>,
-  ) -> Result<CallableId, CallError> {
+  pub fn register_callable(&mut self, callable: Rc<dyn Callable>) -> Result<CallableId, CallError> {
     let tick_id: CallableId = self.generate_unique_callable_id();
     if let Some(existing_one) = self.callables_by_id.insert(tick_id.clone(), callable) {
       self.callables_by_id.insert(tick_id.clone(), existing_one);
