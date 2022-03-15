@@ -1,8 +1,11 @@
-use std::{collections::{HashMap, HashSet}, fmt::Display};
+use std::{
+  collections::{HashMap, HashSet},
+  fmt::Display,
+};
 
 use arora_schema::{
-  module::low::{Header, ImportFunction, ExportSymbol},
-  ty::{PRIMITIVE_TYPES, low::Type}, value::Value,
+  module::low::{ExportSymbol, Header, ImportFunction},
+  ty::{low::Type, PRIMITIVE_TYPES},
 };
 
 use derive_more::{Display, Error};
@@ -30,34 +33,33 @@ impl Index {
   pub fn add_module(&mut self, header: &Header) -> Result<(), UnresolvedTypesError> {
     self.modules.insert(header.id.clone(), header.clone());
     let mut unresolved_types = HashSet::<Uuid>::new();
-    header.exports.iter().for_each(|e| {
-      match e {
-        ExportSymbol::Function(function) => {
-          let types = function.type_dependencies();
-          types.iter()
-            .filter(|type_id| !self.types.contains_key(type_id))
-            .for_each(|type_id| {
-              unresolved_types.insert(type_id.clone());
-              ()
-            });
+    header.exports.iter().for_each(|e| match e {
+      ExportSymbol::Function(function) => {
+        let types = function.type_dependencies();
+        types
+          .iter()
+          .filter(|type_id| !self.types.contains_key(type_id))
+          .for_each(|type_id| {
+            unresolved_types.insert(type_id.clone());
+            ()
+          });
 
-          let function = ImportFunction {
-            module: header.id.clone(),
-            id: function.id.clone(),
-            name: function.name.clone(),
-            parameters: function.parameters.clone(),
-            ret: function.ret.clone(),
-          };
-          self.functions.insert(e.id().clone(), function);
-        }
+        let function = ImportFunction {
+          module: header.id.clone(),
+          id: function.id.clone(),
+          name: function.name.clone(),
+          parameters: function.parameters.clone(),
+          ret: function.ret.clone(),
+        };
+        self.functions.insert(e.id().clone(), function);
       }
     });
-    
+
     if unresolved_types.is_empty() {
-      Ok(())      
+      Ok(())
     } else {
       Err(UnresolvedTypesError {
-        type_ids: unresolved_types.iter().cloned().collect::<Vec<Uuid>>()
+        type_ids: unresolved_types.iter().cloned().collect::<Vec<Uuid>>(),
       })
     }
   }
@@ -68,13 +70,21 @@ impl Index {
   }
 
   pub fn find_type(&self, type_id: &Uuid) -> Result<&Type, UnresolvedTypesError> {
-    self.types.get(type_id)
-      .ok_or(UnresolvedTypesError { type_ids: vec![type_id.clone()] })
+    self.types.get(type_id).ok_or(UnresolvedTypesError {
+      type_ids: vec![type_id.clone()],
+    })
   }
 
-  pub fn find_function(&self, function_id: &Uuid) -> Result<&ImportFunction, UnresolvedFunctionError> {
-    self.functions.get(function_id)
-      .ok_or(UnresolvedFunctionError { function_id: function_id.clone() })
+  pub fn find_function(
+    &self,
+    function_id: &Uuid,
+  ) -> Result<&ImportFunction, UnresolvedFunctionError> {
+    self
+      .functions
+      .get(function_id)
+      .ok_or(UnresolvedFunctionError {
+        function_id: function_id.clone(),
+      })
   }
 }
 
@@ -84,11 +94,12 @@ pub struct UnresolvedTypesError {
 }
 
 impl Display for UnresolvedTypesError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(
-          format_args!("following types are referenced but are unknown {:?}", self.type_ids)
-        )
-    }
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_fmt(format_args!(
+      "following types are referenced but are unknown {:?}",
+      self.type_ids
+    ))
+  }
 }
 
 #[derive(Display, Debug, Error)]
@@ -124,7 +135,8 @@ mod tests {
     let index = new_index_with_types()?;
     let status_type = index.find_type(&Uuid::from_str("325a5767-e344-4532-860e-0749bcf2e428")?)?;
     debug_assert_eq!("Status", status_type.name);
-    let structure_type = index.find_type(&Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?)?;
+    let structure_type =
+      index.find_type(&Uuid::from_str("7f9aedf8-dbde-4020-b5f4-c28a6635ae7c")?)?;
     debug_assert_eq!("TestStructure1", structure_type.name);
     return Ok(());
   }
@@ -265,5 +277,5 @@ imports:
       kind: scalar
       id: 325a5767-e344-4532-860e-0749bcf2e428
 executable_mime: application/wasm
-"; 
+";
 }
