@@ -39,6 +39,7 @@ if(BUILD_TESTING)
   add_custom_target(${MODULE_NAME}-host ALL
     COMMAND cargo build ${CARGO_BUILD_FLAGS}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS ${MODULE_NAME}
   )
 
   # Unit tests for the host.
@@ -47,6 +48,7 @@ if(BUILD_TESTING)
     COMMAND cargo test ${CARGO_BUILD_FLAGS}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  set_tests_properties(test-${MODULE_NAME}-host PROPERTIES DEPENDS "${MODULE_NAME}")
 
   # Integration test with the engine.
   add_test(
@@ -58,4 +60,5 @@ if(BUILD_TESTING)
       --call "id: 00cd31a8-2cf4-48e6-a957-69a55de90424"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+  set_tests_properties(test-call-${MODULE_NAME}-from-engine PROPERTIES DEPENDS "${MODULE_NAME}")
 endif()
