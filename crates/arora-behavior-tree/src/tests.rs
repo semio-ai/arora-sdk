@@ -2,7 +2,7 @@
 mod tests {
   use crate::{
     error::BehaviorTreeError, load_behavior_tree_nodes, nodes::*, run_behavior_tree,
-    status::Status, BehaviorTree, BehaviorTreeRuntime,
+    schema::Expression, status::Status, BehaviorTree, BehaviorTreeRuntime,
   };
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
@@ -12,6 +12,7 @@ mod tests {
     module::low::{Header, ModuleDefinition},
     value::Value,
   };
+  use assert_float_eq::*;
   use convert_case::{Case, Casing};
 
   use std::{cell::RefCell, path::Path, rc::Rc};
@@ -150,6 +151,83 @@ mod tests {
   pub async fn parallel_runs() -> Result<()> {
     let behavior = parallel(vec![run(), succeed(), succeed()]).try_into()?;
     assert_eq!(Status::Running, tick_base(&behavior).await);
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn store_float() -> Result<()> {
+    let storage: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
+    let expected_value = Value::F32(42f32);
+    let behavior = store(
+      Expression::Variable(storage.to_owned()),
+      Expression::Value(expected_value.to_owned()),
+    )
+    .try_into()?;
+    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(expected_value, *storage.borrow());
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn increasing_float() -> Result<()> {
+    let storage: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
+    let delta = 42f32;
+    let delta_value = Value::F32(delta);
+    let behavior = increase(
+      Expression::Variable(storage.to_owned()),
+      Expression::Value(delta_value.to_owned()),
+    )
+    .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    for i in 1..10 {
+      println!("storage = {}", storage.borrow());
+      assert_eq!(Status::Success, runtime.tick().unwrap());
+      assert_eq!(Value::F32(delta * i as f32), *storage.borrow());
+    }
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn cosine_signal() -> Result<()> {
+    let angle: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
+    let cosine: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(1f32)));
+    let behavior = seq(vec![
+      increase(
+        Expression::Variable(angle.to_owned()),
+        Expression::Value(Value::F32(0.1f32)),
+      ),
+      cos(
+        Expression::Variable(angle.to_owned()),
+        Expression::Variable(cosine.to_owned()),
+      ),
+    ])
+    .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&vec![
+      "behavior-tree-nodes".to_string(),
+      "test-rust-wasm".to_string(),
+    ])
+    .await;
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+
+    for i in 1..11 {
+      assert_eq!(Status::Success, runtime.tick().unwrap());
+      println!("angle={}, cosine={}", angle.borrow(), cosine.borrow());
+      let expected_angle = i as f32 * 0.1f32;
+      if let Value::F32(angle_value) = *angle.borrow() {
+        assert_f32_near!(expected_angle, angle_value);
+      } else {
+        panic!("angle variable does not hold an f32");
+      }
+      let expected_cosine = expected_angle.cos();
+      if let Value::F32(cosine_value) = *cosine.borrow() {
+        assert_f32_near!(expected_cosine, cosine_value);
+      } else {
+        panic!("cosine variable does not hold an f32");
+      }
+    }
     Ok(())
   }
 

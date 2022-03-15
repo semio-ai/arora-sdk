@@ -47,6 +47,46 @@ exports:
       id: Status
 
   - type: function
+    id: b8349b96-abc7-4a31-906c-da1ce6fa356e
+    name: store
+    parameters:
+      - id: 2345a3a5-a80d-4480-9927-3c65bd2b7543
+        name: storage
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+
+      - id: 0a0778cd-cb7a-41fc-96d4-512cc8538ce2
+        name: value
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: 7f6fc4a9-567c-4f15-87cc-7ca34ae1456f
+    name: increase
+    parameters:
+      - id: e898fe88-cc61-46d2-aecc-b4fc0beb862f
+        name: storage
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+        
+      - id: 1018eb85-2d04-4995-a349-b6c83c27f287
+        name: delta
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
     id: 32246df6-ab5d-4f18-9221-23e28731de93
     name: seq
     parameters:
@@ -103,6 +143,25 @@ exports:
           kind: array
           id: TickId
         mutable: false
+    ret:
+      kind: scalar
+      id: Status
+
+  - type: function
+    id: 104b9710-5d43-4a93-944c-d64bddb30ef8
+    name: cos
+    parameters:
+      - id: 272fbafd-c2a5-4ffe-a294-9cabe6e6c1e7
+        name: angle
+        type:
+          kind: scalar
+          id: f32
+      - id: 1d101686-05d8-47b4-9292-fdc9e5a0daeb
+        name: res
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
     ret:
       kind: scalar
       id: Status
