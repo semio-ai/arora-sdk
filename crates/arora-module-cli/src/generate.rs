@@ -1,14 +1,15 @@
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashSet};
 
 use arora_module_core::{Asset, Reader, Writer};
 use arora_registry::Registry;
 use arora_vfs::Entry;
 use clap::Parser;
 
-use arora_schema::module::high::ModuleDefinition as HighModuleDefinition;
+use arora_schema::module::{high::ModuleDefinition as HighModuleDefinition, low::Header};
 use tokio::fs::read_to_string;
 
 use log::debug;
+use uuid::Uuid;
 
 use crate::resolve::resolve_module_header;
 
@@ -40,8 +41,8 @@ fn print_entry(entry: Arc<Entry>, i: usize) {
 }
 
 pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<()> {
-  let module_definition: HighModuleDefinition =
-    serde_yaml::from_str(&read_to_string(cmd.configuration_file).await?)?;
+  let module_yaml = read_to_string(cmd.configuration_file).await?;
+  let module_definition: HighModuleDefinition = serde_yaml::from_str(&module_yaml)?;
   let header = resolve_module_header(module_definition, registry).await?;
 
   let header_yaml = serde_yaml::to_string(&header)?;
@@ -68,21 +69,34 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
   let mut writer = Writer::new(&mut stdin);
   let mut reader = Reader::new(&mut stdout);
 
-  writer.write(Asset::Header(header.clone())).await?;
-
-  for module in header.module_dependencies() {
-    let dep_header = registry.get_module_header(&module).await?;
-    writer.write(Asset::Header(dep_header.clone())).await?;
+  
+  let mut type_dependencies = HashSet::<Uuid>::new();
+  for type_id in header.type_dependencies() {
+    type_dependencies.insert(type_id);
   }
 
-  for ty in header.type_dependencies().iter() {
-    if arora_schema::ty::PRIMITIVE_IDS.contains(ty) {
+  let mut module_dependencies = Vec::<Header>::new();
+  for module in header.module_dependencies() {
+    let dep_header = registry.get_module_header(&module).await?;
+    for type_id in dep_header.type_dependencies() {
+      type_dependencies.insert(type_id);
+    }
+    module_dependencies.push(dep_header);
+  }
+
+  for type_id in type_dependencies {
+    if arora_schema::ty::PRIMITIVE_IDS.contains(&type_id) {
       continue;
     }
 
-    let ty = registry.get_type(ty).await?;
+    let ty = registry.get_type(&type_id).await?;
     debug!("type {} fetched from registry", ty.name);
     writer.write(Asset::Type(ty)).await?;
+  }
+
+  writer.write(Asset::Header(header.clone())).await?;
+  for dep_header in module_dependencies {
+    writer.write(Asset::Header(dep_header)).await?;
   }
 
   for symbol in header.imports {
