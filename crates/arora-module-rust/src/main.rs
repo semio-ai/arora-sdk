@@ -1,18 +1,23 @@
-use std::{fmt::Display, sync::Arc};
+use std::{
+  collections::HashSet,
+  fmt::{Debug, Display},
+  sync::Arc,
+};
 
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
 use arora_schema::{
-  module::low::{ExportSymbol, TypeRef},
+  module::low::{ExportSymbol, ImportSymbol, TypeRef},
   ty::{
     low::{Enumeration, Structure, Type, TypeKind},
-    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
-    U8_ID, UNIT_ID,
+    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, PRIMITIVE_IDS, STRING_ID, U16_ID,
+    U32_ID, U64_ID, U8_ID, UNIT_ID,
   },
 };
 use arora_vfs::{Directory, Entry, File};
 use clap::Parser;
 use convert_case::{Case, Casing};
+use itertools::Itertools;
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
@@ -44,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
       }
       Asset::ExportSymbol(symbol) => exports.push(symbol),
       Asset::ImportSymbol(symbol) => imports.push(symbol),
-      _ => (),
+      Asset::Header(header) => index.add_module(&header)?,
     };
   }
 
@@ -53,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
   for ty in &types {
     out_dir = out_dir.merge_with(generate_type_source(&ty, &index));
   }
+  out_dir = out_dir.merge_with(generate_imports_source(&imports, &index));
   out_dir = out_dir.merge_with(generate_exports_source(&exports, &index));
   out_dir = out_dir.merge_with(generate_mod_source(&types));
 
@@ -401,30 +407,23 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     format_ident!("{}", function_symbol.name)
   });
 
-  // Function IDs.
+  // Function and param IDs.
   let function_ids = exports.iter().flat_map(|export| {
     let ExportSymbol::Function(function_symbol) = export;
-    let id_str = function_symbol.id.to_string();
-    let id_bytes = RawUuidValue(&function_symbol.id);
-    let const_id_ident = function_const_id_ident(&function_symbol.name);
-    let const_id_doc = format!("{}: {}", &function_symbol.name, id_str);
     let mut id_declarations = Vec::with_capacity(function_symbol.parameters.len() + 1);
-    id_declarations.push(quote! {
-      #[doc = #const_id_doc]
-      pub const #const_id_ident: [u8; 16] = #id_bytes;
-    });
+    id_declarations.push(generate_const_id_declaration(
+      &function_symbol.name,
+      &function_const_id_ident(&function_symbol.name),
+      &function_symbol.id,
+      Public::Yes,
+    ));
     for param in &function_symbol.parameters {
-      let param_id_str = param.id.to_string();
-      let param_id_bytes = RawUuidValue(&param.id);
-      let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
-      let param_const_id_doc = format!(
-        "{}.{}: {}",
-        &function_symbol.name, &param.name, param_id_str
-      );
-      id_declarations.push(quote! {
-        #[doc = #param_const_id_doc]
-        pub const #param_const_id_ident: [u8; 16] = #param_id_bytes;
-      });
+      id_declarations.push(generate_const_id_declaration(
+        &format!("{}.{}", &function_symbol.name, &param.name),
+        &function_param_const_id_ident(&function_symbol.name, &param.name),
+        &param.id,
+        Public::Yes,
+      ));
     }
     id_declarations
   });
@@ -472,7 +471,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
         for _ in 0..field_count {
           let field_raw_id = reader.get_structure_field();
           #(#deserialization_cases else)* {
-            panic!("buffer contains an unexpected parameter");
+            panic!("buffer contains an unexpected parameter: {:?}", field_raw_id);
           }
         }
       }
@@ -560,6 +559,251 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
   token_stream_to_file("export.rs".to_string(), &source)
 }
 
+/// Generates a virtual source file with wrappers for every symbol imported by the module.
+/// It contains human-readable public functions that can be used by the module implementation,
+/// under the module `import`, as `<module>::<function>`.
+fn generate_imports_source(imports: &Vec<ImportSymbol>, index: &Index) -> Arc<Directory> {
+  // Using dependent types.
+  let type_dependencies = HashSet::<Uuid>::from_iter(
+    imports
+      .into_iter()
+      .flat_map(|import| import.type_dependencies()),
+  );
+  let uses = type_dependencies.into_iter().filter_map(|ref type_id| {
+    if PRIMITIVE_IDS.contains(type_id) {
+      None
+    } else {
+      let type_ident = type_ident_from_id(type_id, index, PrefixWithMod::Yes);
+      Some(quote! {
+        use crate::arora_generated::#type_ident;
+      })
+    }
+  });
+
+  // Sort imports by module, so that to declare them together.
+  let imports_by_module = imports.into_iter().group_by(|import| import.module());
+
+  // For each module, declare a mod.
+  let mod_declarations = imports_by_module
+    .into_iter()
+    .map(|(module_id, module_imports)| {
+      let module = index
+        .modules
+        .get(module_id)
+        .expect(format!("importing symbol from unknown module {}", module_id).as_str());
+      let module_ident = format_ident!("{}", module.name.to_case(Case::Snake));
+
+      // Declare the ID of the module to use it locally.
+      let module_const_id_ident =
+        format_ident!("{}_MODULE_ID", module.name.to_case(Case::ScreamingSnake),);
+      let module_id_declaration =
+        generate_const_id_declaration(&module.name, &module_const_id_ident, &module.id, Public::No);
+
+      // For each import, declare a function.
+      let functions_declarations = module_imports.map(|import_symbol| {
+        let ImportSymbol::Function(function_symbol) = import_symbol;
+        let function_ident = format_ident!("{}", function_symbol.name);
+        let parameters_declarations = function_symbol.parameters.iter().map(|param| {
+          let maybe_mut = if param.mutable {
+            quote! { mut }
+          } else {
+            quote! {}
+          };
+          let param_name_ident = format_ident!("{}", param.name);
+          let param_type_ident = type_ident_from_ref(&param.ty, index, PrefixWithMod::Yes);
+          quote! { #maybe_mut #param_name_ident: #param_type_ident }
+        });
+        let ret_type_ident = type_ident_from_ref(&function_symbol.ret, index, PrefixWithMod::Yes);
+
+        // And implement the call.
+        // First declare the const ids.
+        let function_const_id_ident = function_const_id_ident(&function_symbol.name);
+        let function_id_declaration = generate_const_id_declaration(
+          &function_symbol.name,
+          &function_const_id_ident,
+          &function_symbol.id,
+          Public::No,
+        );
+        let param_ids_declarations = function_symbol.parameters.iter().map(|param| {
+          generate_const_id_declaration(
+            &format!("{}.{}", &function_symbol.name, &param.name),
+            &function_param_const_id_ident(&function_symbol.name, &param.name),
+            &param.id,
+            Public::No,
+          )
+        });
+        let ids_declaration = quote! {
+          #function_id_declaration
+          #(#param_ids_declarations)*
+        };
+
+        // Then prepare a call argument structure.
+        // It consists in a struct with the function id as id,
+        // and with one field for each param.
+        let add_args = function_symbol.parameters.iter().map(|param| {
+          let function_param_const_id_ident =
+            function_param_const_id_ident(&function_symbol.name, &param.name);
+          let param_name_ident = format_ident!("{}", param.name);
+          let serialize_arg = generate_serialize_from_type_ref(
+            &param.ty,
+            param_name_ident.into_token_stream(),
+            &index,
+          );
+          quote! {
+            writer.add_structure_field(#function_param_const_id_ident.as_slice());
+            #serialize_arg;
+          }
+        });
+        let nof_args = add_args.len() as u32;
+        let prepare_call_structure = quote! {
+          let mut writer = BufferWriter::new();
+          writer.begin_structure(#function_const_id_ident.as_slice(), #nof_args);
+          #(#add_args)*
+          let arg = writer.finalize();
+        };
+
+        // Then perform the call.
+        let perform_call = quote! {
+          let result_buffer_addr = unsafe {
+            arora_dispatch(
+              #module_const_id_ident.as_ptr() as i32,
+              #function_const_id_ident.as_ptr() as i32,
+              arg.as_ptr() as i32,
+            )
+          };
+        };
+
+        // Then parse the result.
+        let prepare_parsing = quote! {
+          let result_buffer_ptr = result_buffer_addr as *const u8;
+          const BUFFER_SIZE_SIZE: usize = std::mem::size_of::<u32>();
+          let input_size_bytes: &[u8; 4] =
+            unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE) }
+              .try_into()
+              .expect("input is too small");
+          let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
+          let input =
+            unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
+          let mut reader = BufferReader::new(&input);
+        };
+
+        // It consists in a struct with the function id as id,
+        let check_result_struct = quote! {
+          let type_raw_id_opt = reader.next_type();
+          assert!(!type_raw_id_opt.is_none());
+          assert_eq!(type_raw_id_opt.unwrap(), TYPE_STRUCTURE);
+          let (result_struct_id, result_field_count) = reader.get_structure();
+          assert_eq!(result_struct_id, #function_const_id_ident);
+        };
+
+        // with one field for the return value,
+        // plus one field for each param.
+        // Mutate the mutable parameters
+        // and return.
+        let deserialize_ret = generate_deserialize_from_type_ref(
+          &function_symbol.ret,
+          index,
+          PrefixWithMod::Yes,
+          CheckType::Yes,
+        );
+
+        let process_params = if nof_args > 1 {
+          let declare_mutable_params = function_symbol.parameters.iter().filter_map(|param| {
+            if param.mutable {
+              let param_name_ident = format_ident!("{}", param.name);
+              Some(quote! {
+                let mut #param_name_ident = None;
+              })
+            } else {
+              None
+            }
+          });
+          
+          let deserialize_params = function_symbol.parameters.iter().filter_map(|param| {
+            if param.mutable {
+              let param_name_ident = format_ident!("{}", param.name);
+              let function_param_const_id_ident =
+                function_param_const_id_ident(&function_symbol.name, &param.name);
+              let deserialize_param = generate_deserialize_from_type_ref(
+                &param.ty,
+                index,
+                PrefixWithMod::Yes,
+                CheckType::Yes,
+              );
+              Some(quote! {
+                x if *x == #function_param_const_id_ident => *#param_name_ident = #deserialize_param,
+              })
+            } else {
+              None
+            }
+          });
+
+          quote! {
+            #(#declare_mutable_params)*
+            for _i in 1u32..#nof_args {
+              let next_field_id = reader.get_structure_field();
+              match next_field_id {
+                #(#deserialize_params)*
+                x => panic!("found unexpected mutated argument id: {:#?}", x),
+              }
+            }
+          }
+        } else {
+          quote! {}
+        };
+
+        let process_result = quote! {
+          assert_eq!(result_field_count, #nof_args);
+          let first_field_id = reader.get_structure_field();
+          assert_eq!(first_field_id, #function_const_id_ident);
+          let ret = #deserialize_ret;
+          #process_params
+          ret
+        };
+
+        // This makes an import function.
+        quote! {
+          pub fn #function_ident (#(#parameters_declarations),*) -> #ret_type_ident {
+            #ids_declaration
+            #prepare_call_structure
+            #perform_call
+            #prepare_parsing
+            #check_result_struct
+            #process_result
+          }
+        }
+      });
+
+      // Also declare arora engine functions.
+      let engine_functions_declarations = quote! {
+        #[link(wasm_import_module = "env")]
+        extern "C" {
+          pub fn arora_dispatch(module_id: i32, method_id: i32, arg: i32) -> i32;
+          pub fn arora_dispatch_indirect(callable_id: u64) -> i32;
+        }
+      };
+
+      // This makes a module import.
+      quote! {
+        pub mod #module_ident {
+          use arora_buffers::*;
+          use crate::{arora_generated, arora_generated::error::DeserializationError};
+          use super::arora_dispatch;
+          #module_id_declaration
+          #(#functions_declarations)*
+        }
+        #engine_functions_declarations
+      }
+    });
+
+  // This makes the import source file.
+  let source = quote! {
+    #(#uses)*
+    #(#mod_declarations)*
+  };
+  token_stream_to_file("import.rs".to_string(), &source)
+}
+
 fn generate_mod_source(types: &Vec<Type>) -> Arc<Directory> {
   let type_mods = types.iter().map(|ty| {
     let type_mod_ident = type_mod_ident(&ty.name);
@@ -568,6 +812,7 @@ fn generate_mod_source(types: &Vec<Type>) -> Arc<Directory> {
   let source = quote! {
     pub mod error;
     #(pub mod #type_mods;)*
+    pub mod import;
     pub mod export;
   };
   token_stream_to_file("mod.rs".to_string(), &source)
@@ -875,6 +1120,26 @@ fn generate_deserialize_from_type_ref(
   }
 }
 
+/// Generates
+fn generate_const_id_declaration(
+  name: &String,
+  ident: &Ident,
+  id: &Uuid,
+  public: Public,
+) -> TokenStream {
+  let id_str = id.to_string();
+  let id_bytes = RawUuidValue(id);
+  let const_id_doc = format!("{}: {}", name, id_str);
+  let maybe_pub = match public {
+    Public::Yes => quote! { pub },
+    Public::No => quote! {},
+  };
+  quote! {
+    #[doc = #const_id_doc]
+    #maybe_pub const #ident: [u8; 16] = #id_bytes;
+  }
+}
+
 fn token_stream_to_file(file_name: String, tokens: &TokenStream) -> Arc<Directory> {
   let mut output = Directory::new();
   output.insert(file_name, File::new(tokens.to_string()));
@@ -1035,6 +1300,12 @@ enum CheckType {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum PrefixWithMod {
+  Yes,
+  No,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Public {
   Yes,
   No,
 }
