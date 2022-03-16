@@ -7,7 +7,7 @@ use std::{
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
 use arora_schema::{
-  module::low::{ExportSymbol, ImportSymbol, TypeRef},
+  module::low::{ExportSymbol, ImportSymbol, TypeRef, Parameter},
   ty::{
     low::{Enumeration, Structure, Type, TypeKind},
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, PRIMITIVE_IDS, STRING_ID, U16_ID,
@@ -444,14 +444,14 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     };
 
     let param_declarations = function_symbol.parameters.iter().map(|param| {
-      let param_var_ident = param_ident(&param.name);
+      let param_var_ident = param_ident(&param);
       let param_type_ident = type_ident_from_ref(&param.ty, &index, PrefixWithMod::Yes);
       quote! { let mut #param_var_ident: Option<#param_type_ident> = None; }
     });
 
     let deserialization_cases = function_symbol.parameters.iter().map(|param| {
       let param_const_id_ident = function_param_const_id_ident(&function_symbol.name, &param.name);
-      let param_var_ident = param_ident(&param.name);
+      let param_var_ident = param_ident(&param);
       let deserialize =
         generate_deserialize_from_type_ref(&param.ty, &index, PrefixWithMod::Yes, CheckType::Yes);
       quote! {
@@ -478,7 +478,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
     };
 
     let param_args = function_symbol.parameters.iter().map(|param| {
-      let param_var_ident = param_ident(&param.name);
+      let param_var_ident = param_ident(&param);
       if param.mutable {
         quote! { &mut #param_var_ident }
       } else {
@@ -504,7 +504,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
       .iter()
       .filter_map(|param| {
         if param.mutable {
-          let param_var_ident = param_ident(&param.name);
+          let param_var_ident = param_ident(&param);
           let param_const_id_ident =
             function_param_const_id_ident(&function_symbol.name, &param.name);
           let serialize_param =
@@ -1284,8 +1284,9 @@ fn function_param_const_id_ident(function_name: &String, param_name: &String) ->
   )
 }
 
-fn param_ident(name: &String) -> Ident {
-  format_ident!("param_{}", name.to_case(Case::Snake))
+fn param_ident(param: &Parameter) -> Ident {
+  let param_id_sanitized = param.id.to_string().replace("-", "");
+  format_ident!("param_{}_{}", param.name.to_case(Case::Snake), param_id_sanitized)
 }
 
 fn variable_ident(name: &String) -> Ident {
