@@ -7,8 +7,14 @@ use arora_generated::status::Status;
 //====================================================================================
 // Put the implementation below.
 
-fn ping() { }
-fn succeed() -> Status { Status::Success }
+fn ping() {}
+fn succeed() -> Status {
+  Status::Success
+}
+
+fn cos(angle: Option<f32>) -> f32 {
+  angle.unwrap().cos()
+}
 
 // Tests
 //====================================================================================

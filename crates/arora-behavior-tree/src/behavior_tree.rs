@@ -2,6 +2,7 @@ mod error;
 mod nodes;
 mod schema;
 mod status;
+mod tests;
 mod tick_id;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
 use arora_index::Index;
@@ -10,13 +11,16 @@ use arora_schema::{
   value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
-use schema::Node;
+use schema::{CallExpression, Node, NodeParameterId};
 use status::Status;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tick_id::TickId;
 use uuid::Uuid;
 
-use crate::tick_id::{TICK_ID_ID_FIELD_ID, TICK_ID_TYPE_ID};
+use crate::{
+  schema::Expression,
+  tick_id::{TICK_ID_ID_FIELD_ID, TICK_ID_TYPE_ID},
+};
 
 // Runtime.
 //====================================================================
@@ -27,7 +31,9 @@ pub struct BehaviorTree {
   /// All the nodes, indexed by their ID.
   node_index: HashMap<Uuid, Rc<Node>>,
   /// The local variables.
-  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  /// Variables associated to node arguments (node, arg).
+  node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
 }
 
 struct BehaviorTreeRuntime<'a> {
@@ -45,7 +51,8 @@ impl<'a> BehaviorTreeRuntime<'a> {
       tree.root.clone(),
       &tree.node_index,
       index.clone(),
-      tree.locals.clone(),
+      tree.variables.clone(),
+      tree.node_arg_variables.clone(),
       caller,
     )?;
     Ok(Self { caller, tick })
@@ -74,7 +81,8 @@ fn setup_tick_function(
   node: Rc<Node>,
   node_index: &HashMap<Uuid, Rc<Node>>,
   index: Rc<Index>,
-  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   caller: &mut dyn CallBridge,
 ) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
@@ -96,7 +104,8 @@ fn setup_tick_function(
         child_node.clone(),
         &node_index,
         index.clone(),
-        locals.clone(),
+        variables.clone(),
+        node_arg_variables.clone(),
         caller,
       )?;
       children_ticks.push(tick_function_with_id);
@@ -105,7 +114,8 @@ fn setup_tick_function(
   let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
     node: node.clone(),
     index,
-    locals: locals.to_owned(),
+    locals: variables.to_owned(),
+    node_arg_variables: node_arg_variables.to_owned(),
     children: children_ticks,
   });
   let callable_id = caller.arora_register_callable(tick_function);
@@ -115,7 +125,8 @@ fn setup_tick_function(
 fn tick(
   caller: &mut dyn CallBridge,
   index: Rc<Index>,
-  locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  node_parameters_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<status::Status, BehaviorTreeError> {
@@ -186,19 +197,42 @@ fn tick(
     })
   }
 
-  // Pass the remaining parameters from the behavior-wise variables.
+  // Resolving the remaining parameters, and passing them.
+  // A local map of variables is maintained to update them when if mutated.
+  // Some of them were setup to be shared, but it is transparent here.
+  // They are indexed by parameter id.
+  let mut locals = HashMap::<Uuid, Rc<RefCell<Value>>>::new();
   {
-    let locals = locals.borrow();
-    for (param_id, variable_id) in &node.arguments {
-      let value = locals
-        .get(variable_id)
-        .ok_or(BehaviorTreeError::VariableNotFound {
-          variable: variable_id.clone(),
-          node: node.id.clone(),
-        })?;
+    let variables = variables.borrow();
+    for (param_id, value_expression) in &node.arguments {
+      let node_parameter = NodeParameterId {
+        node: node.id.to_owned(),
+        parameter: param_id.to_owned(),
+      };
+      let variable = get_node_parameter_variable(&node_parameter, &node_parameters_variables)?;
+
+      // If the parameter expression is a call, perform the call to update the value.
+      match value_expression {
+        Expression::Call(parameter_call_expression) => {
+          let value = call_expression(
+            &variables,
+            &node_parameters_variables,
+            &parameter_call_expression,
+            caller,
+            &NodeParameterId {
+              node: node.id,
+              parameter: param_id.to_owned(),
+            },
+          )?;
+          *variable.borrow_mut() = value;
+        }
+        _ => {}
+      };
+
+      locals.insert(param_id.clone(), variable.clone());
       call.args.push(StructureField {
         id: param_id.clone(),
-        value: Box::new(value.borrow().clone()),
+        value: Box::new(variable.borrow().clone()),
       });
     }
   }
@@ -207,53 +241,22 @@ fn tick(
     .arora_call(&function.module, call)
     .map_err(|e| BehaviorTreeError::CallError(e))?;
 
-  let mut mutable_locals = locals.borrow_mut();
-  let mut return_value: Option<Status> = None;
-  if let Value::Structure(result_structure) = result {
-    if result_structure.id != node.function {
-      return Err(BehaviorTreeError::ConversionError(ConversionError {
+  for mutated in result.mutated {
+    let variable = locals
+      .get_mut(&mutated.id)
+      .ok_or(BehaviorTreeError::InternalError {
         message: format!(
-          "node function's result id differs from function id ({}, vs. {})",
-          result_structure.id.to_string(),
-          node.function.to_string(),
-        )
-        .to_string(),
-      }));
-    }
-    for field in result_structure.fields {
-      if field.id == node.function {
-        return_value = Some(
-          (*field.value)
-            .try_into()
-            .map_err(|e| BehaviorTreeError::ConversionError(e))?,
-        );
-      } else {
-        let variable_id =
-          node
-            .arguments
-            .get(&field.id)
-            .ok_or(BehaviorTreeError::ConversionError(ConversionError {
-              message: "node function mutated an unknown argument".to_string(),
-            }))?;
-        let variable =
-          mutable_locals
-            .get_mut(variable_id)
-            .ok_or(BehaviorTreeError::VariableNotFound {
-              node: node.id,
-              variable: variable_id.clone(),
-            })?;
-        println!("{} = {}", variable_id, field.value);
-        *variable.borrow_mut() = *field.value;
-      }
-    }
-  } else {
-    return Err(BehaviorTreeError::ConversionError(ConversionError {
-      message: "node function's result is not a structure".to_string(),
-    }));
+          "mutated parameter {} does not correspond to any local variable",
+          &mutated.id
+        ),
+      })?;
+    *variable.borrow_mut() = *mutated.value;
   }
-  return_value.ok_or(BehaviorTreeError::ConversionError(ConversionError {
-    message: "node function's result does not contain a return value".to_string(),
-  }))
+
+  result
+    .ret
+    .try_into()
+    .map_err(|e| BehaviorTreeError::ConversionError(e))
 }
 
 /// Specialization of Callable that returns a Status.
@@ -285,6 +288,7 @@ struct TickFunction {
   node: Rc<Node>,
   index: Rc<Index>,
   locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+  node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   children: Vec<TickId>,
 }
 
@@ -294,6 +298,7 @@ impl Tickable for TickFunction {
       caller,
       self.index.clone(),
       self.locals.clone(),
+      self.node_arg_variables.clone(),
       &self.children,
       self.node.clone(),
     )
@@ -314,348 +319,248 @@ impl Callable for TickFunction {
 pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, BehaviorTreeError> {
   let mut node_index: HashMap<Uuid, Rc<Node>> = HashMap::new();
   let mut root: Option<Rc<Node>> = None;
+  let mut variables = HashMap::new();
+  let mut node_parameters_variables = HashMap::new();
   for node in nodes {
     let shared_node = Rc::new(node);
     if root.is_none() {
       // first node is the root?
       root = Some(shared_node.clone());
     }
+
+    // Index the node and check for duplicates.
     let existing_node = node_index.insert(shared_node.id.clone(), shared_node.clone());
     if let Some(existing_node) = existing_node {
       return Err(BehaviorTreeError::InconsistentTreeError {
         message: format!("duplicate node {}", existing_node.id),
       });
     }
+
+    // Setup variables for every parameter.
+    for (param_id, arg_expr) in &shared_node.arguments {
+      let node_param = NodeParameterId {
+        node: shared_node.id.to_owned(),
+        parameter: param_id.to_owned(),
+      };
+      setup_node_parameter_variable(
+        &node_param,
+        &arg_expr,
+        &mut variables,
+        &mut node_parameters_variables,
+      )?;
+    }
   }
 
   Ok(BehaviorTree {
     root: root.unwrap(),
     node_index,
-    locals: Rc::new(RefCell::new(HashMap::new())),
+    variables: Rc::new(RefCell::new(variables)),
+    node_arg_variables: Rc::new(node_parameters_variables),
   })
 }
 
-// Tests.
-//=====================================================================
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::nodes::*;
-  use anyhow::Result;
-  use arora::engine::{EngineBuilder, PinnedEngine};
-  use arora_registry::Registry;
-  use arora_schema::module::low::{Header, ModuleDefinition};
-  use convert_case::{Case, Casing};
+// Other helpers
+//=======================================================
+fn get_variable<'a>(
+  variables: &'a HashMap<Uuid, Rc<RefCell<Value>>>,
+  variable_id: &Uuid,
+  node_id: &Uuid,
+) -> Result<&'a Rc<RefCell<Value>>, BehaviorTreeError> {
+  variables
+    .get(variable_id)
+    .ok_or(BehaviorTreeError::VariableNotFound {
+      variable: variable_id.to_owned(),
+      node: node_id.to_owned(),
+    })
+}
 
-  use std::path::Path;
-  use tokio::{
-    fs::{read_to_string, File},
-    io::AsyncReadExt,
-  };
-  use url::Url;
+fn get_node_parameter_variable<'a>(
+  node_parameter: &NodeParameterId,
+  node_parameters_variables: &'a HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+) -> Result<&'a Rc<RefCell<Value>>, BehaviorTreeError> {
+  node_parameters_variables
+    .get(&node_parameter)
+    .ok_or(BehaviorTreeError::InconsistentTreeError {
+      message: format!("node parameter {} was not found", node_parameter),
+    })
+}
 
-  pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
-    return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
-  }
-
-  #[test]
-  pub fn load_parse_error() -> Result<()> {
-    let tree_yaml = "I'm singing in the rain...";
-    assert!(load_behavior_tree_yaml(tree_yaml).is_err());
-    return Ok(());
-  }
-
-  #[test]
-  pub fn load_simple_tree() -> Result<()> {
-    let tree_yaml = &super::schema::tests::SIMPLE_TREE_YAML;
-    load_behavior_tree_yaml(tree_yaml)?;
-    return Ok(());
-  }
-
-  #[tokio::test]
-  pub async fn run_trivial_tree() {
-    assert_eq!(
-      Status::Success,
-      run_yaml_with_modules(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await
-    );
-  }
-
-  #[tokio::test]
-  pub async fn status_identity_update() {
-    let mut status_value: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
-    let behavior = status_identity(status_value.clone()).into();
-
-    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
-
-    assert_eq!(Status::Success, runtime.tick().unwrap());
-    set_value(&mut status_value, Status::Running);
-    assert_eq!(Status::Running, runtime.tick().unwrap());
-    set_value(&mut status_value, Status::Failure);
-    assert_eq!(Status::Failure, runtime.tick().unwrap());
-  }
-
-  #[tokio::test]
-  pub async fn seq_of_success() {
-    assert_eq!(Status::Success, run_yaml_base(SEQ_OF_SUCCESS).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_fail_middle() {
-    assert_eq!(Status::Failure, run_yaml_base(SEQ_FAIL_MIDDLE).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_run_last() {
-    let behavior = seq(vec![succeed(), succeed(), run()]).into();
-    assert_eq!(Status::Running, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_run_middle_fail_last() {
-    let behavior = seq(vec![succeed(), run(), fail()]).into();
-    assert_eq!(Status::Running, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_star_succeed() {
-    let behavior = seq_star(vec![succeed(), succeed(), succeed()]).into();
-    assert_eq!(Status::Success, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_star_resumes() {
-    let mut first_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
-    let mut second_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Running.into()));
-    let behavior = seq_star(vec![
-      status_identity(first_status.clone()),
-      status_identity(second_status.clone()),
-    ])
-    .into();
-
-    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
-    // First tick moves the sequence to the second node.
-    assert_eq!(Status::Running, runtime.tick().unwrap());
-
-    // Second tick ignores the first node, and will only process the second one.
-    set_value(&mut first_status, Status::Running);
-    set_value(&mut second_status, Status::Success);
-    assert_eq!(Status::Success, runtime.tick().unwrap());
-  }
-
-  #[tokio::test]
-  pub async fn fallback_succeeds() {
-    let behavior = fallback(vec![succeed(), fail()]).into();
-    assert_eq!(Status::Success, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn fallback_falls_back() {
-    let behavior = fallback(vec![fail(), succeed()]).into();
-    assert_eq!(Status::Success, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn parallel_succeeds() {
-    let behavior = parallel(vec![succeed(), succeed(), succeed()]).into();
-    assert_eq!(Status::Success, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn parallel_fails() {
-    let behavior = parallel(vec![run(), succeed(), fail()]).into();
-    assert_eq!(Status::Failure, tick_base(&behavior).await);
-  }
-
-  #[tokio::test]
-  pub async fn parallel_runs() {
-    let behavior = parallel(vec![run(), succeed(), succeed()]).into();
-    assert_eq!(Status::Running, tick_base(&behavior).await);
-  }
-
-  // Test helpers and data
-  //==============================================================================
-  fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {
-    *rc.borrow_mut() = v.into()
-  }
-
-  async fn tick_base(behavior: &BehaviorTree) -> Status {
-    tick_with_modules(&behavior, &BASE_MODULE_NAMES).await
-  }
-
-  async fn run_yaml_base(tree_yaml: &str) -> Status {
-    run_yaml_with_modules(tree_yaml, &BASE_MODULE_NAMES).await
-  }
-
-  async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let (mut engine, index) = setup_engine_with_modules(modules).await;
-    let mut runtime = BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine).unwrap();
-    runtime.tick().unwrap()
-  }
-
-  async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let (mut engine, index) = setup_engine_with_modules(&modules).await;
-    run_behavior_tree(&behavior, Rc::new(index), &mut engine).unwrap()
-  }
-
-  async fn run_yaml_with_modules(tree_yaml: &str, modules: &Vec<String>) -> Status {
-    let behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
-    run_with_modules(&behavior, &modules).await
-  }
-
-  async fn setup_engine_with_modules<'a>(modules: &Vec<String>) -> (PinnedEngine, Index) {
-    let mut engine = EngineBuilder::new()
-      .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
-      .build();
-    let mut index = Index::new();
-
-    let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
-    let mut registry = Registry::new_with_base_uri(
-      Url::parse(registry_uri).expect(format!("malformed registry URI: {}", registry_uri).as_str()),
-    );
-
-    for module in modules {
-      load_module(&mut engine, &mut index, &mut registry, module).await;
+/// Sets up a variable for the given node parameter.
+/// A variable will always be added to the `node_parameters_variables`.
+/// If the parameter refers to a variable that does not exist yet,
+/// it will be created with the default value `Value::Unit`.
+/// If a parameter has to be computed with a function call,
+/// the variable will hold the default value `Value::Unit`.
+fn setup_node_parameter_variable(
+  node_parameter: &NodeParameterId,
+  argument_expression: &Expression,
+  variables: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
+  node_parameters_variables: &mut HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+) -> Result<Rc<RefCell<Value>>, BehaviorTreeError> {
+  let variable = match argument_expression {
+    Expression::Value(value) => Rc::new(RefCell::new(value.to_owned())),
+    Expression::Uuid(uuid) => {
+      let value = Value::ArrayU8(uuid.as_bytes().to_vec());
+      Rc::new(RefCell::new(value))
     }
-    (engine, index)
-  }
-
-  /// Load a module built by this project, from under the `module/` directory
-  async fn load_module(
-    engine: &mut PinnedEngine,
-    index: &mut Index,
-    registry: &mut Registry,
-    name: &String,
-  ) {
-    println!("loading module {:#?}", name);
-    let start_time = std::time::Instant::now();
-
-    // Find the root directory of the repository.
-    let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
-    let mut path = Path::new(&current_crate_dir);
-    loop {
-      if path.join(".git").is_dir() {
-        break;
-      }
-      path = path
-        .parent()
-        .expect("test not implemented from its git repository");
-    }
-    let repo_root = path;
-
-    // Let us load the WASM module.
-    let module_root = repo_root.join("modules").join(name);
-    // The header file should be directly in the sources.
-    let header_path = module_root
-      .join("src")
-      .join("arora_generated")
-      .join("module.yaml");
-    let header: Header = serde_yaml::from_str(
-      &read_to_string(header_path.clone())
-        .await
-        .expect(format!("header file {} could not be read", header_path.display()).as_str()),
-    )
-    .expect(
-      format!(
-        "header file {} contains invalid yaml",
-        header_path.display()
-      )
-      .as_str(),
-    );
-    let actual_module_name = header.name.clone();
-    println!(
-      "actual name of module {:?} is {:?}",
-      name, &actual_module_name
-    );
-
-    // Register the types involved there.
-    for type_id in header.type_dependencies() {
-      if index.find_type(&type_id).is_ok() {
-        continue;
+    Expression::Variable(variable) => variable.clone(),
+    Expression::VariableId(variable_id) => {
+      if let Some(variable) = variables.get(&variable_id) {
+        variable.clone()
       } else {
-        let ty = registry.get_type(&type_id).await.expect(
-          format!(
-            "header provided in {} depends on type {} which is unknown",
-            header_path.display(),
-            type_id
-          )
-          .as_str(),
-        );
-        index.add_type(ty);
+        let variable = Rc::new(RefCell::new(Value::Unit));
+        variables.insert(Uuid::new_v4(), variable.clone());
+        variable
       }
     }
-    index.add_module(&header).unwrap();
+    Expression::NodeArgument(other_node_parameter) => node_parameters_variables
+      .get(&other_node_parameter)
+      .ok_or(BehaviorTreeError::InconsistentTreeError {
+        message: format!(
+          "node argument {} used by node argument {} was not found",
+          other_node_parameter,
+          node_parameter.to_owned()
+        ),
+      })?
+      .to_owned(),
+    Expression::Call(_) => Rc::new(RefCell::new(Value::Unit)),
+  };
+  node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
+  Ok(variable)
+}
 
-    // Find the executable in the right target directory (debug in priority)
-    let module_target_dir = module_root.join("target").join("wasm32-wasi");
-    let target_subdir = if cfg!(debug_assertions) {
-      "debug"
-    } else {
-      "release"
-    };
-    let module_path = module_target_dir
-      .join(target_subdir)
-      .join(format!("{}.wasm", name.to_case(Case::Snake)));
-    println!("reading executable {:#?}", module_path);
-    let mut executable_file = File::open(&module_path)
-      .await
-      .expect(format!("could not open executable file {}", module_path.display()).as_str());
-    let mut executable = Vec::new();
-    executable_file.read_to_end(&mut executable).await.unwrap();
-    let executable = executable.into_boxed_slice();
+fn compute_expression(
+  variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
+  node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+  expression: &Expression,
+  caller: &mut dyn CallBridge,
+  node_parameter: &NodeParameterId,
+) -> Result<Value, BehaviorTreeError> {
+  let value = match expression {
+    Expression::Value(value) => value.to_owned(),
+    Expression::Uuid(uuid) => Value::ArrayU8(uuid.as_bytes().to_vec()),
+    Expression::Variable(variable) => variable.borrow().to_owned(),
+    Expression::VariableId(variable_id) => {
+      let variable = get_variable(&variables, &variable_id, &node_parameter.node)?;
+      variable.borrow().to_owned()
+    }
+    Expression::Call(call) => call_expression(
+      &variables,
+      &node_parameters_variables,
+      call,
+      caller,
+      &node_parameter,
+    )?,
+    Expression::NodeArgument(other_node_parameter) => {
+      let variable =
+        get_node_parameter_variable(&other_node_parameter, &node_parameters_variables)?;
+      variable.borrow().to_owned()
+    }
+  };
+  Ok(value)
+}
 
-    // Loading the module.
-    println!("loading module {:#?} into the engine", &actual_module_name);
-    engine
-      .load_module(ModuleDefinition {
-        schema_version: 0,
-        header,
-        executable,
+fn compute_uuid(
+  variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
+  node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+  expression: &Expression,
+  caller: &mut dyn CallBridge,
+  node_parameter: &NodeParameterId,
+) -> Result<Uuid, BehaviorTreeError> {
+  match expression {
+    Expression::Value(value) => try_into_uuid(&value, &None),
+    Expression::Uuid(uuid) => Ok(uuid.to_owned()),
+    Expression::Variable(variable) => try_into_uuid(&*variable.borrow(), &None),
+    Expression::VariableId(variable_id) => {
+      let variable = get_variable(&variables, &variable_id, &node_parameter.node)?;
+      try_into_uuid(&*variable.borrow(), &Some(&variable_id))
+    }
+    Expression::Call(call) => {
+      let value = call_expression(
+        &variables,
+        &node_parameters_variables,
+        call,
+        caller,
+        &node_parameter,
+      )?;
+      try_into_uuid(&value, &None)
+    }
+    Expression::NodeArgument(other_node_parameter) => {
+      let variable =
+        get_node_parameter_variable(&other_node_parameter, &node_parameters_variables)?;
+      try_into_uuid(&*variable.borrow(), &None)
+    }
+  }
+}
+
+fn try_into_uuid(value: &Value, variable_id: &Option<&Uuid>) -> Result<Uuid, BehaviorTreeError> {
+  if let Value::ArrayU8(uuid_bytes) = value {
+    let uuid = Uuid::from_slice(uuid_bytes.as_slice()).map_err(|e| {
+      BehaviorTreeError::ConversionError(ConversionError {
+        message: format!(
+          "bytes of variable {:?} are not an uuid ({})",
+          variable_id, e
+        ),
       })
-      .expect(format!("failed to load module {:#?}", &actual_module_name).as_str());
-
-    let total_duration = std::time::Instant::now() - start_time;
-    println!(
-      "module {:#?} loaded in {:#?}",
-      &actual_module_name, total_duration
-    );
+    })?;
+    Ok(uuid)
+  } else {
+    Err(BehaviorTreeError::ConversionError(ConversionError {
+      message: format!("variable {:?} is not an uuid", variable_id),
+    }))
   }
+}
 
-  lazy_static::lazy_static! {
-    static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
+fn call_expression(
+  variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
+  node_arg_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+  call: &CallExpression,
+  caller: &mut dyn CallBridge,
+  node_parameter: &NodeParameterId,
+) -> Result<Value, BehaviorTreeError> {
+  let module_id = compute_uuid(
+    &variables,
+    &node_arg_variables,
+    call.module.as_ref(),
+    caller,
+    node_parameter,
+  )?;
+  let function_id = compute_uuid(
+    &variables,
+    &node_arg_variables,
+    call.function.as_ref(),
+    caller,
+    node_parameter,
+  )?;
+  let mut args = Vec::with_capacity(call.arguments.len());
+  for (arg_id_expression, value_expression) in &call.arguments {
+    let arg_id = compute_uuid(
+      &variables,
+      &node_arg_variables,
+      arg_id_expression.as_ref(),
+      caller,
+      &node_parameter,
+    )?;
+    let value = compute_expression(
+      &variables,
+      &node_arg_variables,
+      value_expression.as_ref(),
+      caller,
+      &node_parameter,
+    )?;
+    args.push(StructureField {
+      id: arg_id,
+      value: Box::new(value),
+    });
   }
-
-  /// A tree with a single node calling test-wasm.succeed()
-  pub const TRIVIAL_TREE: &'static str = "\
-- id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
-  function: 00cd31a8-2cf4-48e6-a957-69a55de90424
-";
-
-  pub const SEQ_OF_SUCCESS: &'static str = "\
-- id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
-  function: 32246df6-ab5d-4f18-9221-23e28731de93
-  children:
-    - d50638bf-c44b-4f6e-a5f2-925fcfff71a8
-    - 817e45e3-26ca-45a4-8537-ad70e3de1298
-- id: d50638bf-c44b-4f6e-a5f2-925fcfff71a8
-  function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
-- id: 817e45e3-26ca-45a4-8537-ad70e3de1298
-  function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
-";
-
-  pub const SEQ_FAIL_MIDDLE: &'static str = "\
-- id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
-  function: 32246df6-ab5d-4f18-9221-23e28731de93
-  children:
-    - d50638bf-c44b-4f6e-a5f2-925fcfff71a8
-    - 817e45e3-26ca-45a4-8537-ad70e3de1298
-    - 26aa23ea-85e9-4571-89d5-6f9656c344cb
-- id: d50638bf-c44b-4f6e-a5f2-925fcfff71a8
-  function: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
-- id: 817e45e3-26ca-45a4-8537-ad70e3de1298
-  function: 3abbbfb6-d00d-41eb-88bb-97874267eaf6
-- id: 26aa23ea-85e9-4571-89d5-6f9656c344cb
-  function: 41ae5ed0-1d12-4b71-aab8-02e7efedf177
-";
+  let result = caller
+    .arora_call(
+      &module_id,
+      Call {
+        id: function_id,
+        args,
+      },
+    )
+    .map_err(|e| BehaviorTreeError::CallError(e))?;
+  Ok(result.ret)
 }

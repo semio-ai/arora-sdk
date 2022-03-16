@@ -1,6 +1,6 @@
-use arora_schema::module::high::TypeRef;
+use arora_schema::{module::high::TypeRef, value::Value};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, rc::Rc, cell::RefCell};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -9,7 +9,7 @@ pub struct Variable {
   ty: TypeRef,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
 pub struct Node {
   /// The ID of this node.
   pub id: Uuid,
@@ -19,7 +19,7 @@ pub struct Node {
 
   /// Args to apply to the function call parameters.
   #[serde(default)]
-  pub arguments: HashMap<Uuid, Uuid>,
+  pub arguments: HashMap<Uuid, Expression>,
 
   /// Child nodes, if any.
   #[serde(default)]
@@ -29,6 +29,54 @@ pub struct Node {
 impl Display for Node {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.write_fmt(format_args!("node {}", self.id))
+  }
+}
+
+/// An expression describing a variable in the context of the behavior tree.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Expression {
+  /// Generic value description.
+  Value(Value),
+  /// Specific UUID value.
+  Uuid(Uuid),
+  /// Reference to an anonymous variable.
+  #[serde(skip)] 
+  Variable(Rc<RefCell<Value>>),
+  /// Reference to a variable by ID.
+  VariableId(Uuid),
+  /// Reference to another parameter.
+  NodeArgument(NodeParameterId),
+  /// Local variable resulting from some computation.
+  Call(CallExpression),
+}
+
+/// An expression describing a function to call.
+/// Every piece of it can be expressed dynamically.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct CallExpression {
+  /// The module ID.
+  /// The result of the expression must be an UUID.
+  pub module: Box<Expression>,
+  /// The function ID.
+  /// The result of the expression must be an UUID.
+  pub function: Box<Expression>,
+  /// The arguments.
+  /// The result of the key expressions must be UUIDs of parameters.
+  /// The result of the value expressions can be any value.
+  pub arguments: Vec<(Box<Expression>, Box<Expression>)>,
+}
+
+/// An identifier for the parameter of a node in the context of a behavior tree.
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct NodeParameterId {
+  pub node: Uuid,
+  pub parameter: Uuid,
+}
+
+impl Display for NodeParameterId {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_fmt(format_args!("node parameter {}.{}", self.node, self.parameter))
   }
 }
 
@@ -65,7 +113,9 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
 - id: d50638bf-c44b-4f6e-a5f2-925fcfff71a8
   function: 418e7f79-9df8-4fe4-92f9-54f9fc6e2de8
   arguments:
-    85710898-406b-464d-bf9c-21ac658dbc04: d775359e-9f6b-4c1e-892c-8a4a36ec82d0
+    85710898-406b-464d-bf9c-21ac658dbc04:
+      variable_id:
+        d775359e-9f6b-4c1e-892c-8a4a36ec82d0
 - id: 817e45e3-26ca-45a4-8537-ad70e3de1298
   function: 77c7bfa6-c01f-416b-a09f-5d2a8e63d4e0
 ";
@@ -88,7 +138,7 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
         function: Uuid::from_str("418e7f79-9df8-4fe4-92f9-54f9fc6e2de8")?,
         arguments: HashMap::from([(
           Uuid::from_str("85710898-406b-464d-bf9c-21ac658dbc04")?,
-          Uuid::from_str("d775359e-9f6b-4c1e-892c-8a4a36ec82d0")?,
+          Expression::VariableId(Uuid::from_str("d775359e-9f6b-4c1e-892c-8a4a36ec82d0")?),
         )]),
         ..Default::default()
       },

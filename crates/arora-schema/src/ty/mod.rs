@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ lazy_static::lazy_static! {
     ids.insert(MAP_ID.clone());
     ids
   };
-  
+
   pub static ref PRIMITIVE_LOW_TYPE_REFS: HashMap<Uuid, TypeRef> = {
     let mut types: HashMap<Uuid, TypeRef> = HashMap::new();
     let make_scalar = |id: &Uuid| TypeRef::Scalar { id: id.clone() };

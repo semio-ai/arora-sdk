@@ -1,10 +1,16 @@
-use std::{collections::HashMap, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use arora_schema::value::Value;
 use uuid::Uuid;
 
-use crate::{schema::Node, BehaviorTree};
+use crate::{
+  error::BehaviorTreeError,
+  schema::{Expression, Node, NodeParameterId},
+  setup_node_parameter_variable, BehaviorTree,
+};
 
+// To simulate statuses
+//===============================================================
 #[allow(unused)]
 pub fn succeed() -> TreeNode {
   TreeNode::action_node(SUCCEED_FUNCTION_ID.clone())
@@ -25,10 +31,38 @@ pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
   TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
     children: None,
-    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), value)]),
+    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), Expression::Variable(value))]),
   }
 }
 
+// Basic data-oriented action nodes
+//==============================================================
+#[allow(unused)]
+pub fn store(storage: Expression, value: Expression) -> TreeNode {
+  TreeNode {
+    function: STORE_FUNCTION_ID.clone(),
+    children: None,
+    parameters: HashMap::from([
+      (STORE_STORAGE_PARAM_ID.clone(), storage),
+      (STORE_VALUE_PARAM_ID.clone(), value),
+    ]),
+  }
+}
+
+#[allow(unused)]
+pub fn increase(storage: Expression, delta: Expression) -> TreeNode {
+  TreeNode {
+    function: INCREASE_FUNCTION_ID.clone(),
+    children: None,
+    parameters: HashMap::from([
+      (INCREASE_STORAGE_PARAM_ID.clone(), storage),
+      (INCREASE_DELTA_PARAM_ID.clone(), delta),
+    ]),
+  }
+}
+
+// Basic control nodes
+//==============================================================
 #[allow(unused)]
 pub fn seq(children: Vec<TreeNode>) -> TreeNode {
   TreeNode::control_node(SEQ_FUNCTION_ID.clone(), children)
@@ -39,7 +73,10 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   TreeNode {
     function: SEQ_STAR_FUNCTION_ID.clone(),
     children: Some(children),
-    parameters: HashMap::from([(SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(), Rc::new(RefCell::new(Value::U16(0))))]),
+    parameters: HashMap::from([(
+      SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(),
+      Expression::Value(Value::U16(0)),
+    )]),
   }
 }
 
@@ -53,10 +90,26 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
   TreeNode::control_node(PARALLEL_FUNCTION_ID.clone(), children)
 }
 
+// Other functions from other modules
+//================================================================
+#[allow(unused)]
+pub fn cos(angle: Expression, res: Expression) -> TreeNode {
+  TreeNode {
+    function: COS_FUNCTION_ID.clone(),
+    children: None,
+    parameters: HashMap::from([
+      (COS_ANGLE_PARAM_ID.clone(), angle),
+      (COS_RES_PARAM_ID.clone(), res),
+    ]),
+  }
+}
+
+// Helpers to make trees
+//================================================================
 pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
-  pub parameters: HashMap<Uuid, Rc<RefCell<Value>>>,
+  pub parameters: HashMap<Uuid, Expression>,
 }
 
 /// Represents a tree of node with direct relations to children,
@@ -85,45 +138,61 @@ impl TreeNode {
   pub fn collect(
     self,
     mut node_index: &mut HashMap<Uuid, Rc<Node>>,
-    mut locals: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
-  ) -> Rc<Node> {
-    let children: Option<Vec<Uuid>> = self.children.map(|children| {
+    mut variables: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
+    mut node_parameters_variables: &mut HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+  ) -> Result<Rc<Node>, BehaviorTreeError> {
+    let node_id = Uuid::new_v4();
+    let children: Option<Vec<Uuid>> = if let Some(children) = self.children {
       let mut ids = Vec::with_capacity(children.len());
       for child in children {
-        let node = child.collect(&mut node_index, &mut locals);
-        let node_id = node.id.clone();
+        let child_node =
+          child.collect(&mut node_index, &mut variables, node_parameters_variables)?;
+        let child_node_id = child_node.id.clone();
         // This could only happen with an UUID collision, i.e. never.
-        assert_eq!(node_index.insert(node.id.clone(), node), None);
-        ids.push(node_id);
+        assert_eq!(node_index.insert(child_node.id.clone(), child_node), None);
+        ids.push(child_node_id);
       }
-      ids
-    });
+      Some(ids)
+    } else {
+      None
+    };
     let mut arguments = HashMap::new();
-    for (param_id, value) in self.parameters {
-      let value_id = Uuid::new_v4();
-      locals.insert(value_id.clone(), value);
-      arguments.insert(param_id, value_id);
+    for (param_id, expression) in self.parameters {
+      let node_parameter = NodeParameterId {
+        node: node_id.to_owned(),
+        parameter: param_id.to_owned(),
+      };
+      setup_node_parameter_variable(
+        &node_parameter,
+        &expression,
+        variables,
+        node_parameters_variables,
+      )?;
+      arguments.insert(param_id, expression);
     }
-    Rc::new(Node {
-      id: Uuid::new_v4(),
+    Ok(Rc::new(Node {
+      id: node_id,
       function: self.function,
       arguments,
       children,
-    })
+    }))
   }
 }
 
 /// Transforms the tree of nodes into a behavior tree that can be run.
-impl Into<BehaviorTree> for TreeNode {
-  fn into(self) -> BehaviorTree {
+impl TryInto<BehaviorTree> for TreeNode {
+  type Error = BehaviorTreeError;
+  fn try_into(self) -> Result<BehaviorTree, Self::Error> {
     let mut node_index = HashMap::new();
-    let mut locals = HashMap::new();
-    let root = self.collect(&mut node_index, &mut locals);
-    BehaviorTree {
+    let mut variables = HashMap::new();
+    let mut node_arg_variables = HashMap::new();
+    let root = self.collect(&mut node_index, &mut variables, &mut node_arg_variables)?;
+    Ok(BehaviorTree {
       root,
       node_index,
-      locals: Rc::new(RefCell::new(locals)),
-    }
+      variables: Rc::new(RefCell::new(variables)),
+      node_arg_variables: Rc::new(node_arg_variables),
+    })
   }
 }
 
@@ -133,9 +202,22 @@ lazy_static::lazy_static! {
   static ref RUN_FUNCTION_ID: Uuid = Uuid::parse_str("41ae5ed0-1d12-4b71-aab8-02e7efedf177").unwrap();
   static ref STATUS_IDENTITY_FUNCTION_ID: Uuid = Uuid::parse_str("ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee").unwrap();
   static ref STATUS_VALUE_PARAM_ID: Uuid = Uuid::parse_str("e1f174e6-ca9e-4344-84cb-7f3f22115239").unwrap();
+
+  static ref STORE_FUNCTION_ID: Uuid = Uuid::parse_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap();
+  static ref STORE_STORAGE_PARAM_ID: Uuid = Uuid::parse_str("2345a3a5-a80d-4480-9927-3c65bd2b7543").unwrap();
+  static ref STORE_VALUE_PARAM_ID: Uuid = Uuid::parse_str("0a0778cd-cb7a-41fc-96d4-512cc8538ce2").unwrap();
+
+  static ref INCREASE_FUNCTION_ID: Uuid = Uuid::parse_str("7f6fc4a9-567c-4f15-87cc-7ca34ae1456f").unwrap();
+  static ref INCREASE_STORAGE_PARAM_ID: Uuid = Uuid::parse_str("e898fe88-cc61-46d2-aecc-b4fc0beb862f").unwrap();
+  static ref INCREASE_DELTA_PARAM_ID: Uuid = Uuid::parse_str("1018eb85-2d04-4995-a349-b6c83c27f287").unwrap();
+
   static ref SEQ_FUNCTION_ID: Uuid = Uuid::parse_str("32246df6-ab5d-4f18-9221-23e28731de93").unwrap();
   static ref SEQ_STAR_FUNCTION_ID: Uuid = Uuid::parse_str("c2d5ed72-798c-4174-94f7-13378bd9bf1f").unwrap();
   static ref SEQ_STAR_CURRENT_INDEX_PARAM_ID: Uuid = Uuid::parse_str("4de502df-3f48-4541-94d8-dd68fe92bc8e").unwrap();
   static ref FALLBACK_FUNCTION_ID: Uuid = Uuid::parse_str("bfa89a4e-c369-430e-be78-0dc07311391c").unwrap();
   static ref PARALLEL_FUNCTION_ID: Uuid = Uuid::parse_str("a9340289-1f30-411f-9faa-0f07d54613e8").unwrap();
+
+  static ref COS_FUNCTION_ID: Uuid = Uuid::parse_str("104b9710-5d43-4a93-944c-d64bddb30ef8").unwrap();
+  static ref COS_ANGLE_PARAM_ID: Uuid = Uuid::parse_str("272fbafd-c2a5-4ffe-a294-9cabe6e6c1e7").unwrap();
+  static ref COS_RES_PARAM_ID: Uuid = Uuid::parse_str("1d101686-05d8-47b4-9292-fdc9e5a0daeb").unwrap();
 }

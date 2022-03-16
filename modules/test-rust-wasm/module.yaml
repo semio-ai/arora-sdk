@@ -1,8 +1,8 @@
 id: 665d6ec9-3fc9-4cfa-9100-5c8964e95aec
 author: Semio
-description: Test WASM module
+description: Test WASM module written in Rust
 license: Proprietary
-name: test-wasm
+name: test-rust-wasm
 version:
   major: 0
   minor: 1
@@ -20,6 +20,20 @@ exports:
     ret:
       kind: scalar
       id: Status
+
+  - type: function
+    id: c13757cb-2311-4c93-abcc-cb12d6cbb859
+    name: cos
+    parameters:
+      - id: 6c2a157c-4235-47b0-bff3-1eeef3e5747d
+        name: angle
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: f32
+
 imports: []
 dependencies: []
 executable_mime: application/wasm

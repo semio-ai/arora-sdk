@@ -326,7 +326,7 @@ impl Module for WebAssemblyModule {
       ),
     })?;
 
-    // Let the WASM modue allocate a buffer,
+    // Let the WASM module allocate a buffer,
     // and copy the argument into it.
     let arg_addr = self.allocate_arg_memory(arg_size)?;
     self
