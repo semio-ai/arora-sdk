@@ -4,6 +4,7 @@ use arora_schema::{
   module::low::{Header, ModuleDefinition},
   ty::{low::Type, PRIMITIVE_TYPES},
 };
+use derive_more::Display;
 use tokio::{
   fs::{read_to_string, File},
   io::AsyncReadExt,
@@ -32,7 +33,7 @@ impl Registry {
       type_id_cache: Registry::new_type_id_cache_with_primitives(),
     }
   }
-  
+
   fn new_type_id_cache_with_primitives() -> HashMap<String, Uuid> {
     let mut type_id_cache = HashMap::new();
     PRIMITIVE_TYPES.iter().for_each(|(id, ty)| {
@@ -76,7 +77,11 @@ impl Registry {
 
   pub async fn get_type(&self, id: &Uuid) -> anyhow::Result<Type> {
     let uri = self.base_uri.join(&format!("types/by-uuid/{id}.yaml"))?;
-    let ret: Type = serde_yaml::from_str(&Self::get_text(uri).await?)?;
+    let ret: Type = serde_yaml::from_str(&Self::get_text(uri.clone()).await?).map_err(|e| {
+      RegistryError::ParsingError {
+        message: format!("error parsing type info from {}: {}", uri, e),
+      }
+    })?;
     Ok(ret)
   }
 
@@ -96,8 +101,10 @@ impl Registry {
     let uri = self
       .base_uri
       .join(&format!("modules/by-uuid/{id}/header.yaml"))?;
-    let text = Self::get_text(uri).await?;
-    let header: Header = serde_yaml::from_str(&text)?;
+    let text = Self::get_text(uri.clone()).await?;
+    let header: Header = serde_yaml::from_str(&text).map_err(|e| RegistryError::ParsingError {
+      message: format!("error parsing module info from {}: {}", uri, e),
+    })?;
     Ok(header)
   }
 
@@ -123,3 +130,16 @@ impl Registry {
     Ok(Uuid::parse_str(&Self::get_text(uri).await?)?)
   }
 }
+
+#[derive(Display, Debug)]
+pub enum RegistryError {
+  /// Error when parsing something, such as a behavior tree description.
+  #[display(fmt = "parsing error: {}", message)]
+  ParsingError { message: String },
+
+  /// For any other error.
+  #[display(fmt = "error: {}", message)]
+  Generic { message: String },
+}
+
+impl std::error::Error for RegistryError {}

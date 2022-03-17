@@ -48,7 +48,7 @@ pub enum Expression {
   /// Reference to another parameter.
   NodeArgument(NodeParameterId),
   /// Local variable resulting from some computation.
-  Call(CallExpression),
+  Call(Box<CallExpression>),
 }
 
 /// An expression describing a function to call.
@@ -57,14 +57,14 @@ pub enum Expression {
 pub struct CallExpression {
   /// The module ID.
   /// The result of the expression must be an UUID.
-  pub module: Box<Expression>,
+  pub module: Expression,
   /// The function ID.
   /// The result of the expression must be an UUID.
-  pub function: Box<Expression>,
+  pub function: Expression,
   /// The arguments.
   /// The result of the key expressions must be UUIDs of parameters.
   /// The result of the value expressions can be any value.
-  pub arguments: Vec<(Box<Expression>, Box<Expression>)>,
+  pub arguments: Vec<(Expression, Expression)>,
 }
 
 /// An identifier for the parameter of a node in the context of a behavior tree.

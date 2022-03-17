@@ -11,13 +11,13 @@
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
                 "--registry-uri",
-                "https://raw.githubusercontent.com/semio-ai/arora-registry/master/",
-                "--header",
-                "${workspaceFolder}/build/modules/test-cpp-2/arora/module.yaml",
-                "--exe",
-                "${workspaceFolder}/build/modules/test-cpp-2/test-cpp-2",
-                "--call",
-                "id: b213a552-77ad-465a-a26d-352e8eccfd63\nargs:\n- id: 55dbec70-1c3a-433e-a6e6-27446b7f065e\n  value:\n    u32: 42\n- id: abf9ca4e-e03f-431a-a32b-4911f809c399\n  value:\n    u32: 64"
+                "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/",
+                "generate",
+                "-l", "rust",
+                "-c",
+                "${workspaceFolder}/modules/behavior-tree-nodes/module.yaml",
+                "-o",
+                "${workspaceFolder}/modules/behavior-tree-nodes/src/arora_generated",
             ],
             "env": {
                 "RUST_BACKTRACE": "1",

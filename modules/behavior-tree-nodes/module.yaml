@@ -1,8 +1,9 @@
-id: 3F0AA0C0-6DD5-4CC5-A05E-97A21EC44455
+---
+name: behavior-tree-nodes
+id: 3f0aa0c0-6dd5-4cc5-a05e-97a21ec44455
 author: Semio
 description: Core Behavior Tree Nodes
 license: Proprietary
-name: behavior-tree-nodes
 version:
   major: 0
   minor: 1
@@ -11,7 +12,7 @@ executor:
   name: wasm
 exports:
   - type: function
-    id: 6696F0BD-E781-40CD-AEB5-8DC616F810D2
+    id: 6696f0bd-e781-40cd-aeb5-8dc616f810d2
     name: succeed
     ret:
       kind: scalar
@@ -165,6 +166,19 @@ exports:
     ret:
       kind: scalar
       id: Status
-imports: []
+imports:
+  - type: function
+    module: 665d6ec9-3fc9-4cfa-9100-5c8964e95aec
+    id: c13757cb-2311-4c93-abcc-cb12d6cbb859
+    name: cos
+    parameters:
+      - id: 6c2a157c-4235-47b0-bff3-1eeef3e5747d
+        name: angle
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: f32
 dependencies: []
 executable_mime: application/wasm

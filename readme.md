@@ -64,11 +64,11 @@ the call arguments are passed in via a structure which `id`
 corresponds to the function to call,
 and with arguments `args` represented as structure fields,
 associating an `id` to a `value`.
-The return value is also a structure which `id`
-corresponds to the function called,
-and with fields recalling the mutated input parameters.
-The field which `id` is the same as the one of the function called
-contains the actual return value.
+The functions return a structure which `id`
+corresponds to the function called.
+The first field must be of the same `id` as the function
+and contains the return value.
+The remaining fields correspond to parameters that the call has mutated.
 
 ## Go deeper
 

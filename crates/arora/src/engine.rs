@@ -154,7 +154,9 @@ impl CallBridge for Engine {
       let mut ret = None;
       let mut mutated = Vec::with_capacity(structure.fields.len() - 1);
       for field in structure.fields {
-        if field.id == call_id {
+        // First field must be the return value.
+        if ret.is_none() {
+          assert_eq!(field.id, call_id);
           ret = Some(*field.value);
         } else {
           mutated.push(field);

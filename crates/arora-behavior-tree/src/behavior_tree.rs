@@ -521,14 +521,14 @@ fn call_expression(
   let module_id = compute_uuid(
     &variables,
     &node_arg_variables,
-    call.module.as_ref(),
+    &call.module,
     caller,
     node_parameter,
   )?;
   let function_id = compute_uuid(
     &variables,
     &node_arg_variables,
-    call.function.as_ref(),
+    &call.function,
     caller,
     node_parameter,
   )?;
@@ -537,14 +537,14 @@ fn call_expression(
     let arg_id = compute_uuid(
       &variables,
       &node_arg_variables,
-      arg_id_expression.as_ref(),
+      &arg_id_expression,
       caller,
       &node_parameter,
     )?;
     let value = compute_expression(
       &variables,
       &node_arg_variables,
-      value_expression.as_ref(),
+      &value_expression,
       caller,
       &node_parameter,
     )?;
