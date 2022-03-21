@@ -5,6 +5,7 @@ mod schema_groot;
 mod status;
 mod tests;
 mod tick_id;
+mod tree_node;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
 use arora_index::Index;
 use arora_schema::{
