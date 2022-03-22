@@ -266,12 +266,7 @@ mod tests {
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
     let mut index = Index::new();
-
-    let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
-    let mut registry = Registry::new_with_base_uri(
-      Url::parse(registry_uri).expect(format!("malformed registry URI: {}", registry_uri).as_str()),
-    );
-
+    let mut registry = Registry::new();
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
