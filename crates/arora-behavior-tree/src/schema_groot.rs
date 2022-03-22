@@ -1,3 +1,6 @@
+use arora_index::Index;
+use arora_schema::module::low::{ImportFunction, Parameter};
+use arora_schema::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{escape::unescape, events::Event, Reader};
@@ -9,6 +12,13 @@ use std::{collections::HashMap, fmt::Display};
 use uuid::Uuid;
 
 use crate::error::BehaviorTreeError;
+use crate::nodes::{
+  COS_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID,
+  PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_FUNCTION_ID,
+  STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+};
+use crate::schema::Expression;
+use crate::tree_node::TreeNode;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct BehaviorTree {
@@ -16,41 +26,130 @@ pub struct BehaviorTree {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub enum Node {
-  Sequence {
-    name: String,
-    children: Vec<Box<Node>>,
-  },
-  Action {
-    id: String,
-    name: String,
-    param_args: HashMap<String, String>,
-  },
+pub struct Node {
+  id: String,
+  name: String,
+  param_args: HashMap<String, String>,
+  children: Vec<Box<Node>>,
+}
+
+impl Node {
+  /// Convert the Groot-style behavior tree into a TreeNode one.
+  pub fn try_into_tree_node(
+    &self,
+    index: &Index,
+    variables: &mut HashMap<String, Uuid>,
+  ) -> Result<TreeNode, BehaviorTreeError> {
+    let mut tree_node_children = Vec::new();
+    for child in &self.children {
+      tree_node_children.push(child.as_ref().try_into_tree_node(index, variables)?)
+    }
+
+    let arora_id = match self.id.as_str() {
+      SUCCEED_GROOT_ID => SUCCEED_FUNCTION_ID,
+      FAIL_GROOT_ID => FAIL_FUNCTION_ID,
+      RUN_GROOT_ID => RUN_FUNCTION_ID,
+      STATUS_IDENTITY_GROOT_ID => STATUS_IDENTITY_FUNCTION_ID,
+      STORE_GROOT_ID => STORE_FUNCTION_ID,
+      INCREASE_GROOT_ID => INCREASE_FUNCTION_ID,
+      SEQ_GROOT_ID => SEQ_FUNCTION_ID,
+      SEQ_STAR_GROOT_ID => SEQ_STAR_FUNCTION_ID,
+      FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
+      PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
+      COS_GROOT_ID => COS_FUNCTION_ID,
+      id => {
+        return Err(BehaviorTreeError::InconsistentTreeError {
+          message: format!("unexpected node id: {}", id.to_string()),
+        })
+      }
+    };
+    let function =
+      index
+        .find_function(&arora_id)
+        .map_err(|_| BehaviorTreeError::InternalError {
+          message: format!("function {} is missing from index", arora_id.to_string()),
+        })?;
+    let mut parameters = HashMap::new();
+    for param_arg in &self.param_args {
+      let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
+      parameters.insert(param, arg);
+    }
+    Ok(TreeNode {
+      function: function.id,
+      children: None,
+      parameters,
+    })
+  }
+
+  /// Converts a TreeNode into a Groot Node.
+  pub fn try_from_tree_node(
+    tree_node: &TreeNode,
+    index: &Index,
+    variables: &mut HashMap<Uuid, String>,
+  ) -> Result<Node, BehaviorTreeError> {
+    let mut groot_children = Vec::new();
+    if let Some(tree_node_children) = &tree_node.children {
+      for child in tree_node_children {
+        groot_children.push(Box::new(Self::try_from_tree_node(child, index, variables)?))
+      }
+    }
+    let groot_id = match tree_node.function {
+      SUCCEED_FUNCTION_ID => SUCCEED_GROOT_ID,
+      FAIL_FUNCTION_ID => FAIL_GROOT_ID,
+      RUN_FUNCTION_ID => RUN_GROOT_ID,
+      STATUS_IDENTITY_FUNCTION_ID => STATUS_IDENTITY_GROOT_ID,
+      STORE_FUNCTION_ID => STORE_GROOT_ID,
+      INCREASE_FUNCTION_ID => INCREASE_GROOT_ID,
+      SEQ_FUNCTION_ID => SEQ_GROOT_ID,
+      SEQ_STAR_FUNCTION_ID => SEQ_STAR_GROOT_ID,
+      FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
+      PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
+      COS_FUNCTION_ID => COS_GROOT_ID,
+      id => {
+        return Err(BehaviorTreeError::InconsistentTreeError {
+          message: format!("unexpected node id: {}", id.to_string()),
+        })
+      }
+    }
+    .to_string();
+    let function = index.find_function(&tree_node.function).map_err(|_| {
+      BehaviorTreeError::InconsistentTreeError {
+        message: format!(
+          "node refers to function {} that could not be resolved",
+          tree_node.function.to_string()
+        ),
+      }
+    })?;
+    let mut param_args = HashMap::new();
+    for (param, arg) in &tree_node.parameters {
+      let param_arg = arora_param_to_groot((param, arg), function, variables)?;
+      param_args.insert(param_arg.0, param_arg.1);
+    }
+    Ok(Node {
+      id: groot_id,
+      name: Uuid::new_v4().to_string(),
+      param_args,
+      children: groot_children,
+    })
+  }
 }
 
 pub fn seq(children: Vec<Node>) -> Node {
-  Node::Sequence {
+  Node {
+    id: SEQ_GROOT_ID.to_string(),
     name: Uuid::new_v4().to_string(),
     children: to_boxed_vec(children),
+    param_args: HashMap::new(),
   }
 }
 
 pub fn action(type_name: &str, param_args: HashMap<&str, &str>) -> Node {
-  Node::Action {
+  Node {
     id: type_name.to_string(),
     name: Uuid::new_v4().to_string(),
+    children: Vec::new(),
     param_args: to_string_map(param_args),
   }
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
-pub struct Children {
-  children: Vec<Box<Node>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
-pub struct Args {
-  param_args: HashMap<String, String>,
 }
 
 macro_rules! param_args {
@@ -59,6 +158,120 @@ macro_rules! param_args {
        $( map.insert($key, $val); )*
        map
   }}
+}
+
+const SUCCEED_GROOT_ID: &'static str = "Succeed";
+const FAIL_GROOT_ID: &'static str = "Fail";
+const RUN_GROOT_ID: &'static str = "Run";
+const STATUS_IDENTITY_GROOT_ID: &'static str = "Status";
+const STORE_GROOT_ID: &'static str = "Store";
+const INCREASE_GROOT_ID: &'static str = "Increase";
+const SEQ_GROOT_ID: &'static str = "Sequence";
+const SEQ_STAR_GROOT_ID: &'static str = "SequenceStar";
+const FALLBACK_GROOT_ID: &'static str = "Fallback";
+const PARALLEL_GROOT_ID: &'static str = "Parallel";
+const COS_GROOT_ID: &'static str = "Cos";
+
+/// Converts a Groot parameter into an Arora one.
+/// Requires some context to do so:
+/// - the function to which the parameter belongs,
+/// - a local mapping of names and variable IDs.
+/// If the argument is surrounded by {}, the result will be a variable expression.
+/// Otherwise, the result will be a value expression.
+fn groot_param_arg_to_arora(
+  param_arg: (&String, &String),
+  function: &ImportFunction,
+  variables: &mut HashMap<String, Uuid>,
+) -> Result<(Uuid, Expression), BehaviorTreeError> {
+  let param_matches: Vec<&Parameter> = function
+    .parameters
+    .iter()
+    .filter(|parameter| parameter.name == *param_arg.0)
+    .collect();
+  match param_matches.len() {
+    0 => Err(BehaviorTreeError::InternalError {
+      message: format!(
+        "no such parameter \"{}\" in function \"{}\"",
+        param_arg.0, function.name
+      ),
+    }),
+    1 => {
+      let expression = if param_arg.1.starts_with("{") && param_arg.1.ends_with("}") {
+        let variable_name = &param_arg.1[1..param_arg.1.len() - 1];
+        let maybe_id = variables.get(variable_name);
+        let id = if let Some(id) = maybe_id {
+          id.to_owned()
+        } else {
+          let id = Uuid::new_v4();
+          variables.insert(variable_name.to_owned(), id.to_owned());
+          id
+        };
+        Expression::VariableId(id)
+      } else {
+        Expression::Value(Value::String(param_arg.1.to_owned()))
+      };
+      let function_parameter = param_matches.first().unwrap();
+      Ok((function_parameter.id.to_owned(), expression))
+    }
+    _ => Err(BehaviorTreeError::InternalError {
+      message: format!(
+        "several parameters found \"{}\" in function \"{}\"",
+        param_arg.0, function.name
+      ),
+    }),
+  }
+}
+
+fn arora_param_to_groot(
+  param_arg: (&Uuid, &Expression),
+  function: &ImportFunction,
+  variables: &mut HashMap<Uuid, String>,
+) -> Result<(String, String), BehaviorTreeError> {
+  let param_matches: Vec<&Parameter> = function
+    .parameters
+    .iter()
+    .filter(|parameter| parameter.id == *param_arg.0)
+    .collect();
+  match param_matches.len() {
+    0 => Err(BehaviorTreeError::InternalError {
+      message: format!(
+        "no such parameter \"{}\" in function \"{}\"",
+        param_arg.0, function.name
+      ),
+    }),
+    1 => {
+      let function_parameter = param_matches.first().unwrap();
+      let value = match param_arg.1 {
+        Expression::Uuid(id) => {
+          let maybe_name = variables.get(id);
+          let name = if let Some(name) = maybe_name {
+            name.to_owned()
+          } else {
+            let id = Uuid::new_v4();
+            variables.insert(id.to_owned(), id.to_string());
+            id.to_string()
+          };
+          format!("{{{}}}", name)
+        }
+        Expression::Value(value) => value.to_string(),
+        _ => {
+          return Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!(
+              "param {} of function {} has a value of an unsupported type: {:?}",
+              param_arg.0, function.name, param_arg.1
+            ),
+          })
+        }
+      };
+      Ok((function_parameter.name.to_owned(), value))
+    }
+    _ => Err(BehaviorTreeError::InternalError {
+      message: format!(
+        "several parameters found \"{}\" in function \"{}\"",
+        param_arg.0, function.name
+      ),
+    }),
+  }
 }
 
 impl BehaviorTree {
@@ -75,66 +288,81 @@ fn parse_groot_xml(xml_str: &str) -> Result<BehaviorTree, BehaviorTreeError> {
   let mut reader = Reader::from_str(xml_str);
   reader.trim_text(true);
   let mut buf = Vec::new();
+  let root = parse_groot_root(&mut reader, &mut buf)?;
+  // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
+  buf.clear();
+  Ok(BehaviorTree { root })
+}
 
-  let root = match reader.read_event(&mut buf) {
+fn parse_groot_root(
+  reader: &mut Reader<&[u8]>,
+  buf: &mut Vec<u8>,
+) -> Result<Node, BehaviorTreeError> {
+  let root = match reader.read_event(buf) {
+    Ok(Event::Decl(_)) => parse_groot_root(reader, buf)?,
     Ok(Event::Start(ref root_start)) => {
       if root_start.name() != b"root" {
         return Err(BehaviorTreeError::ParsingError {
           message: "root tag is not \"root\"".to_string(),
         });
       }
-      match reader.read_event(&mut buf) {
-        Ok(Event::Start(ref node_start)) => {
-          if node_start.name() != b"BehaviorTree" {
-            return Err(BehaviorTreeError::ParsingError {
-              message: "found node that is not a \"BehaviorTree\"".to_string(),
-            });
-          }
-          parse_groot_node(&mut reader, &mut buf)?
-            .ok_or(new_parsing_error("behavior tree has no root node", &reader))?
-        }
-        Err(e) => forward_parsing_error("Error parsing XML", &reader, e)?,
-        _ => new_parsing_error_result("XML does contain a \"BehaviorTree\" node", &reader)?,
-      }
+      parse_groot_behavior_tree_node(reader, buf)?
     }
     Err(e) => forward_parsing_error("Error parsing XML", &reader, e)?,
     _ => new_parsing_error_result("XML does not start with a valid root tag", &reader)?,
   };
+  Ok(root)
+}
 
-  // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
-  buf.clear();
-  Ok(BehaviorTree { root })
+fn parse_groot_behavior_tree_node(
+  reader: &mut Reader<&[u8]>,
+  buf: &mut Vec<u8>,
+) -> Result<Node, BehaviorTreeError> {
+  match reader.read_event(buf) {
+    Ok(Event::Start(ref node_start)) => {
+      if node_start.name() != b"BehaviorTree" {
+        return Err(BehaviorTreeError::ParsingError {
+          message: "found node that is not a \"BehaviorTree\"".to_string(),
+        });
+      }
+      parse_groot_node(reader, buf)?
+        .ok_or(new_parsing_error("behavior tree has no root node", &reader))
+    }
+    Err(e) => forward_parsing_error("Error parsing XML", &reader, e)?,
+    Ok(Event::Comment(_)) => parse_groot_behavior_tree_node(reader, buf),
+    _ => new_parsing_error_result("XML does not contain a \"BehaviorTree\" node", &reader)?,
+  }
 }
 
 fn parse_groot_node(
   reader: &mut Reader<&[u8]>,
   buf: &mut Vec<u8>,
 ) -> Result<Option<Node>, BehaviorTreeError> {
-  let mut depth = 0usize;
   match reader.read_event(buf) {
     Ok(Event::Start(ref node_start)) => {
-      depth += 1;
-      match node_start.name() {
-        b"Sequence" => {
-          let mut children = Vec::new();
-          loop {
-            let child = parse_groot_node(reader, buf)?;
-            match child {
-              Some(child) => children.push(child),
-              None => break,
-            }
-          }
-          Ok(Some(seq(children)))
-        }
-        tag => new_parsing_error_result(
-          format!(
-            "unexpected control node type {}",
-            String::from_utf8_lossy(tag)
-          )
-          .as_str(),
-          reader,
-        )?,
+      let id = String::from_utf8(node_start.name().to_vec());
+      let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
+
+      let mut attributes = collect_action_attributes(node_start, reader)?;
+      if !attributes.remove(&ID_ATTRIBUTE_KEY.to_string()).is_none() {
+        new_parsing_error_result("redundant ID attribute for action", reader)?
       }
+      let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
+
+      let mut children = Vec::new();
+      loop {
+        let child = parse_groot_node(reader, buf)?;
+        match child {
+          Some(child) => children.push(Box::new(child)),
+          None => break,
+        }
+      }
+      Ok(Some(Node {
+        id,
+        name: name.unwrap_or(Uuid::new_v4().to_string()),
+        param_args: attributes,
+        children,
+      }))
     }
     Ok(Event::Empty(ref node_empty)) => match node_empty.name() {
       b"Action" => {
@@ -143,10 +371,11 @@ fn parse_groot_node(
           .remove(&ID_ATTRIBUTE_KEY.to_string())
           .ok_or(new_parsing_error("missing ID attribute of action", reader))?;
         let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
-        Ok(Some(Node::Action {
+        Ok(Some(Node {
           id,
           name: name.unwrap_or(Uuid::new_v4().to_string()),
           param_args: attributes,
+          children: Vec::new(),
         }))
       }
       tag => {
@@ -157,17 +386,15 @@ fn parse_groot_node(
           new_parsing_error_result("redundant ID attribute for action", reader)?
         }
         let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
-        Ok(Some(Node::Action {
+        Ok(Some(Node {
           id,
           name: name.unwrap_or(Uuid::new_v4().to_string()),
           param_args: attributes,
+          children: Vec::new(),
         }))
       }
     },
-    Ok(Event::End(_)) => {
-      assert!(depth <= 1usize);
-      Ok(None)
-    }
+    Ok(Event::End(_)) => Ok(None),
     Ok(Event::Eof) => {
       new_parsing_error_result("XML file ends before the root node is closed", &reader)?
     }
@@ -299,31 +526,21 @@ fn serialize_behavior_to_groot_xml(behavior: &BehaviorTree) -> Vec<u8> {
 fn serialize_node_to_groot_xml(node: &Node, writer: &mut Writer<Cursor<Vec<u8>>>) {
   use quick_xml::events::BytesEnd;
 
-  match node {
-    Node::Sequence { name, children } => {
-      const SEQUENCE_NAME: &[u8; 8] = b"Sequence";
-      let mut elem = BytesStart::owned(SEQUENCE_NAME.to_vec(), SEQUENCE_NAME.len());
-      elem.push_attribute((NAME_ATTRIBUTE_KEY, name.as_str()));
-      writer.write_event(Event::Start(elem)).unwrap();
-      for child in children {
-        serialize_node_to_groot_xml(&child, writer);
-      }
-      writer
-        .write_event(Event::End(BytesEnd::owned(SEQUENCE_NAME.to_vec())))
-        .unwrap();
+  let mut elem = BytesStart::owned(node.id.as_bytes().to_vec(), node.id.as_bytes().len());
+  elem.push_attribute((NAME_ATTRIBUTE_KEY, node.name.as_str()));
+  for (param, arg) in &node.param_args {
+    elem.push_attribute((param.as_str(), arg.as_str()));
+  }
+  if node.children.is_empty() {
+    writer.write_event(Event::Empty(elem)).unwrap();
+  } else {
+    writer.write_event(Event::Start(elem)).unwrap();
+    for child in &node.children {
+      serialize_node_to_groot_xml(&child, writer);
     }
-    Node::Action {
-      id,
-      name,
-      param_args,
-    } => {
-      let mut elem = BytesStart::owned(id.as_bytes().to_vec(), id.as_bytes().len());
-      elem.push_attribute((NAME_ATTRIBUTE_KEY, name.as_str()));
-      for (param, arg) in param_args {
-        elem.push_attribute((param.as_str(), arg.as_str()));
-      }
-      writer.write_event(Event::Empty(elem)).unwrap();
-    }
+    writer
+      .write_event(Event::End(BytesEnd::owned(node.id.as_bytes().to_vec())))
+      .unwrap();
   }
 }
 
@@ -338,21 +555,14 @@ impl Display for BehaviorTree {
 
 impl Display for Node {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Node::Sequence { name: _, children } => {
-        f.write_fmt(format_args!("sequence:"))?;
-        display_children(f, children)
-      }
-      Node::Action {
-        id,
-        name: _,
-        param_args,
-      } => {
-        f.write_fmt(format_args!("{}(", id))?;
-        display_param_args(param_args);
-        f.write_char(')')
-      }
+    f.write_fmt(format_args!("{}(", self.id))?;
+    display_param_args(&self.param_args);
+    f.write_char(')')?;
+    if !self.children.is_empty() {
+      f.write_fmt(format_args!(":"))?;
+      display_children(f, &self.children)?;
     }
+    Ok(())
   }
 }
 
@@ -384,26 +594,25 @@ fn to_string_map(m: HashMap<&str, &str>) -> HashMap<String, String> {
 
 #[cfg(test)]
 pub mod tests {
-  use super::{action, seq, BehaviorTree, Node};
-  use anyhow::{bail, Result};
+  use super::{action, parse_groot_xml, seq, BehaviorTree, Node};
+  use crate::{
+    schema::Expression,
+    tests::tests::{read_header_to_index, BASE_MODULE_NAMES},
+  };
+  use anyhow::Result;
+  use arora_index::Index;
+  use arora_registry::Registry;
+  use arora_schema::value::Value;
+  use std::{collections::HashMap, path::Path};
+  use tokio::fs::read_to_string;
+  use uuid::Uuid;
 
   #[test]
   pub fn parse_simple_compact_groot_xml() -> Result<()> {
     let behavior = BehaviorTree::try_from_groot_xml(SIMPLE_COMPACT_GROOT_XML)?;
-    if let Node::Sequence { name: _, children } = behavior.root {
-      assert_eq!(2, children.len());
-      for child in children {
-        if let Node::Action {
-          id,
-          name: _,
-          param_args: _,
-        } = child.as_ref()
-        {
-          assert_eq!(id.as_str(), "SaySomething")
-        }
-      }
-    } else {
-      bail!("root node is not a sequence");
+    assert_eq!(2, behavior.root.children.len());
+    for child in behavior.root.children {
+      assert_eq!(child.id.as_str(), "SaySomething");
     }
     Ok(())
   }
@@ -411,20 +620,9 @@ pub mod tests {
   #[test]
   pub fn parse_simple_explicit_groot_xml() -> Result<()> {
     let behavior = BehaviorTree::try_from_groot_xml(SIMPLE_EXPLICIT_GROOT_XML)?;
-    if let Node::Sequence { name: _, children } = behavior.root {
-      assert_eq!(2, children.len());
-      for child in children {
-        if let Node::Action {
-          id,
-          name: _,
-          param_args: _,
-        } = child.as_ref()
-        {
-          assert_eq!(id.as_str(), "SaySomething")
-        }
-      }
-    } else {
-      bail!("root node is not a sequence");
+    assert_eq!(2, behavior.root.children.len());
+    for child in behavior.root.children {
+      assert_eq!(child.id.as_str(), "SaySomething");
     }
     Ok(())
   }
@@ -458,4 +656,73 @@ pub mod tests {
     </Sequence>
   </BehaviorTree>
 </root>"#;
+
+  #[tokio::test]
+  async fn tree_node_to_groot() -> Result<()> {
+    use crate::nodes::{cos, increase, seq};
+    let angle_variable = Uuid::new_v4();
+    let cos_variable = Uuid::new_v4();
+    let behavior = seq(vec![
+      increase(
+        Expression::Uuid(angle_variable.to_owned()),
+        Expression::Value(Value::F32(0.1f32)),
+      ),
+      cos(
+        Expression::Uuid(angle_variable.to_owned()),
+        Expression::Uuid(cos_variable.to_owned()),
+      ),
+    ]);
+    let index = setup_index().await;
+    let mut variables = HashMap::new();
+    variables.insert(angle_variable.to_owned(), "angle".to_string());
+    variables.insert(cos_variable.to_owned(), "cos".to_string());
+    let behavior = BehaviorTree {
+      root: Node::try_from_tree_node(&behavior, &index, &mut variables)?,
+    };
+
+    println!("{}", String::from_utf8(behavior.to_groot_xml()).unwrap());
+    Ok(())
+  }
+
+  #[tokio::test]
+  async fn tree_node_from_groot() -> Result<()> {
+    let xml_path = std::env::var("CARGO_MANIFEST_DIR")
+      .map_or_else(
+        |_| {
+          Path::new(file!()) // crates/arora-behavior-tree/src/schema_groot.rs
+            .parent() // crates/arora-behavior-tree/src
+            .unwrap()
+            .parent() // crates/arora-behavior-tree
+            .unwrap()
+            .to_owned()
+        },
+        |dir| Path::new(dir.as_str()).to_owned(),
+      )
+      .join("groot")
+      .join("cosine_tree_groot_edited.xml");
+    let xml_str = read_to_string(xml_path.to_owned())
+      .await
+      .expect(format!("failed to read XML file {:?}", xml_path).as_str());
+    let behavior = parse_groot_xml(xml_str.as_str())?;
+    println!("{}", String::from_utf8(behavior.to_groot_xml()).unwrap());
+
+    let angle_variable = Uuid::new_v4();
+    let cos_variable = Uuid::new_v4();
+    let index = setup_index().await;
+    let mut variables = HashMap::new();
+    variables.insert("angle".to_string(), angle_variable.to_owned());
+    variables.insert("cos".to_string(), cos_variable.to_owned());
+    let tree = behavior.root.try_into_tree_node(&index, &mut variables)?;
+    let _behavior: crate::BehaviorTree = tree.try_into()?;
+    Ok(())
+  }
+
+  async fn setup_index() -> Index {
+    let mut registry = Registry::new();
+    let mut index = Index::new();
+    for module_name in &*BASE_MODULE_NAMES {
+      read_header_to_index(module_name, &mut index, &mut registry).await;
+    }
+    index
+  }
 }

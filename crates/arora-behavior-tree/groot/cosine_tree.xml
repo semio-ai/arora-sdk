@@ -1,0 +1,8 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="2798f748-082f-46f3-8954-6f027e3a3d4d">
+      <Increase name="3f24778a-5d5e-46ca-8ed3-5b907c0d12ab" storage="{angle}" delta="0.1f32" />
+      <Cos name="c285163f-bba8-4cd1-9cd4-69304f67a520" res="{cos}" angle="{angle}" />
+    </Sequence>
+  </BehaviorTree>
+</root>

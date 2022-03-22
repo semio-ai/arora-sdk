@@ -1,0 +1,8 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="499179ef-766a-4162-89e3-ab8094ad8b6a">
+      <SaySomething name="5f8508de-583a-4262-90e2-a29277244637" message="Hello" />
+      <SaySomething name="e09467bb-9f3a-4bf5-87a7-3e8422278040" message="{my_message}" />
+    </Sequence>
+  </BehaviorTree>
+</root>
