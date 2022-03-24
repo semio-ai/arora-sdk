@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
+pub mod local;
 use arora_schema::{
   module::low::{Header, ModuleDefinition},
   ty::{low::Type, PRIMITIVE_TYPES},
 };
 use derive_more::Display;
+use std::collections::HashMap;
 use tokio::{
   fs::{read_to_string, File},
   io::AsyncReadExt,
