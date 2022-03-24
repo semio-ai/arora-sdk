@@ -14,7 +14,6 @@ pub mod tests {
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
-
   use std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -24,7 +23,6 @@ pub mod tests {
     fs::{read_to_string, File},
     io::AsyncReadExt,
   };
-  use url::Url;
 
   pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
     return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
