@@ -12,6 +12,7 @@ anyhow = "*"
 arora-schema = { path = "../arora-schema" }
 derive_more = "*"
 reqwest = "0.11"
+semver = { version = "1.0.5", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
