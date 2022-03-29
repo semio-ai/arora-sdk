@@ -1,9 +1,20 @@
 pub mod local;
+pub mod remote;
+pub mod remote_cached;
 use arora_schema::{
   module::low::{Header, ModuleDefinition},
-  ty::{low::Type, PRIMITIVE_TYPES},
+  ty::{
+    low::Type, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, PRIMITIVE_TYPES, STRING_ID, U16_ID,
+    U32_ID, U64_ID, U8_ID, UNIT_ID,
+  },
 };
+use async_trait::async_trait;
 use derive_more::Display;
+use semio_client::common::Selector;
+use semio_record::ty::PrimitiveKind;
+use semio_record::{
+  enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
+};
 use std::collections::HashMap;
 use tokio::{
   fs::{read_to_string, File},
@@ -131,8 +142,105 @@ impl Registry {
   }
 }
 
+#[async_trait(?Send)]
+trait ReadableRegistry {
+  /// Gets the definition of a type entity,
+  /// i.e. of a primitive, a structure or an enumeration.
+  /// Not to be confused with the [`semio_client::common::type_of`] function,
+  /// which retrieves the type of an entity.
+  async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError>;
+
+  /// Gets the definition of a module.
+  async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError>;
+
+  /// Resolves the given selector into an identifier.
+  async fn resolve(&mut self, selector: &Selector) -> Result<Uuid, RegistryError>;
+}
+
+#[async_trait(?Send)]
+trait EditableRegistry {
+  /// Adds an [`EnumerationPublic`] to the registry.
+  /// Its parent must be found in the registry.
+  /// Its name must be unique under the given parent.
+  /// Its identifier must be unique in the registry.
+  /// All variants will be registered too.
+  /// Returns the identifier under which the enumeration
+  /// was registered.
+  async fn add_enumeration(
+    &mut self,
+    id: Uuid,
+    enumeration: EnumerationPublic,
+  ) -> Result<Uuid, RegistryError>;
+
+  /// Adds a [`StructurePublic`] to the registry.
+  /// Its parent must be found in the registry.
+  /// Its name must be unique under the given parent.
+  /// Its identifier must be unique in the registry.
+  /// All fields will be registered too.
+  /// Returns the identifier under which the structure
+  /// was registered.
+  async fn add_structure(
+    &mut self,
+    id: Uuid,
+    structure: StructurePublic,
+  ) -> Result<(), RegistryError>;
+
+  /// Adds a [`ModulePublic`] to the registry.
+  /// Its parent must be found in the registry.
+  /// Its name must be unique under the given parent.
+  /// Its identifier must be unique in the registry.
+  /// All fields will be registered too.
+  /// Returns the identifier under which the module
+  /// was registered.
+  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
+}
+
+pub type EnumerationPublic = <Enumeration as RecordDefn>::Public;
+pub type StructurePublic = <Structure as RecordDefn>::Public;
+pub type ModulePublic = <Module as RecordDefn>::Public;
+
+pub enum TypeDefinition {
+  Primitive(PrimitiveKind),
+  Enumeration(EnumerationPublic),
+  Structure(StructurePublic),
+}
+
 #[derive(Display, Debug)]
 pub enum RegistryError {
+  /// No such entity.
+  #[display(fmt = "no such entity \"{}\"", selector)]
+  NoSuchEntity { selector: Selector },
+
+  /// Entity exists but is not a type.
+  #[display(fmt = "entity \"{}\" exists but is not a type", selector)]
+  NotAType { selector: Selector },
+
+  /// Entity exists but is not a module.
+  #[display(fmt = "entity \"{}\" exists but is not a module", selector)]
+  NotAModule { selector: Selector },
+
+  /// Entity being inserted has a parent defined, but it is unknown locally.
+  #[display(fmt = "parent of entity \"{}\" is unknown to the registry", name)]
+  UnknownParent { name: String },
+
+  /// The name or identifier of the entity being added is already taken by another entity.
+  #[display(
+    fmt = "added entity's selector {} is already taken in the registry",
+    selector
+  )]
+  DuplicateSelector { selector: Selector },
+
+  /// Entity being inserted uses a dependency that is not known locally.
+  #[display(
+    fmt = "entity depends on \"{}\", which is unknown to the registry",
+    selector
+  )]
+  UnknownDependency { selector: Selector },
+
+  /// Request to the registry failed because of an error in the remote service.
+  #[display(fmt = "remote service error: {}", message)]
+  RemoteError { message: String },
+
   /// Error when parsing something, such as a behavior tree description.
   #[display(fmt = "parsing error: {}", message)]
   ParsingError { message: String },
@@ -143,3 +251,27 @@ pub enum RegistryError {
 }
 
 impl std::error::Error for RegistryError {}
+
+pub fn get_primitive(selector: &Selector) -> Option<PrimitiveKind> {
+  match selector {
+    Selector::Id(id) => match id {
+      id if *id == *UNIT_ID => Some(PrimitiveKind::Unit),
+      id if *id == *U8_ID => Some(PrimitiveKind::U8),
+      id if *id == *U16_ID => Some(PrimitiveKind::U16),
+      id if *id == *U32_ID => Some(PrimitiveKind::U32),
+      id if *id == *U64_ID => Some(PrimitiveKind::U64),
+      id if *id == *I8_ID => Some(PrimitiveKind::I8),
+      id if *id == *I16_ID => Some(PrimitiveKind::I16),
+      id if *id == *I32_ID => Some(PrimitiveKind::I32),
+      id if *id == *I64_ID => Some(PrimitiveKind::I64),
+      id if *id == *F32_ID => Some(PrimitiveKind::F32),
+      id if *id == *F64_ID => Some(PrimitiveKind::F64),
+      id if *id == *STRING_ID => Some(PrimitiveKind::String),
+      _ => None,
+    },
+    Selector::Path(path) => match path.parse() {
+      Ok(primitive_kind) => Some(primitive_kind),
+      Err(_) => None,
+    },
+  }
+}

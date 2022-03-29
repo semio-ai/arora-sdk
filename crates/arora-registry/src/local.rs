@@ -1,15 +1,14 @@
-use derive_more::Display;
-use semio_client::common::Selector;
-use semio_record::{
-  enumeration::v0::frozen::Enumeration,
-  module::v0::frozen::{ExportKind, Module},
-  record::{Frozen, FrozenReference},
-  structure::v0::frozen::Structure,
+use crate::{
+  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry,
+  RegistryError, StructurePublic, TypeDefinition,
 };
+use async_trait::async_trait;
+use semio_client::common::Selector;
+use semio_record::module::v0::unfrozen::ExportKind;
 use std::{
   collections::{
     hash_map::{Entry, VacantEntry},
-    HashMap, HashSet,
+    HashMap,
   },
   rc::Rc,
 };
@@ -22,21 +21,22 @@ use uuid::Uuid;
 /// It provides an absolute root available for any entity,
 /// with the identifier [`ROOT_ID`].
 pub struct LocalRegistry {
-  enumerations: Vec<Rc<Enumeration>>,
-  structures: Vec<Rc<Structure>>,
-  modules: Vec<Rc<Module>>,
+  enumerations: Vec<Rc<EnumerationPublic>>,
+  structures: Vec<Rc<StructurePublic>>,
+  modules: Vec<Rc<ModulePublic>>,
   indexed: HashMap<Selector, RegistryReference>,
+  path_to_ids: HashMap<String, Uuid>,
 }
 
 /// A reference to an entity stored in a [`LocalRegistry`].
 #[derive(Clone)]
 pub enum RegistryReference {
-  Enumeration(Rc<Enumeration>),
-  Variant(Rc<Enumeration>, Uuid),
-  Structure(Rc<Structure>),
-  Field(Rc<Structure>, Uuid),
-  Module(Rc<Module>),
-  Function(Rc<Module>, Uuid),
+  Enumeration(Rc<EnumerationPublic>),
+  Variant(Rc<EnumerationPublic>, Uuid),
+  Structure(Rc<StructurePublic>),
+  Field(Rc<StructurePublic>, Uuid),
+  Module(Rc<ModulePublic>),
+  Function(Rc<ModulePublic>, Uuid),
   Root,
 }
 
@@ -50,143 +50,8 @@ impl LocalRegistry {
       structures: Vec::new(),
       modules: Vec::new(),
       indexed: HashMap::from([(Selector::Id(ROOT_ID.to_owned()), RegistryReference::Root)]),
+      path_to_ids: HashMap::new(),
     }
-  }
-
-  /// Adds an [`Enumeration`] to the registry.
-  /// Its parent must be found in the registry.
-  /// Its name must be unique under the given parent.
-  /// Its identifier must be unique in the registry.
-  /// All variants will be registered too.
-  /// Dependent types must be found in the registry.
-  /// Returns the identifier under which the enumeration
-  /// was registered.
-  pub fn add_enumeration(&mut self, enumeration: Enumeration) -> Result<Uuid, RegistryError> {
-    self.check_dependencies_known(&enumeration)?;
-    let enumeration = Rc::new(enumeration);
-    let reg_ref = RegistryReference::Enumeration(enumeration.to_owned());
-    let id = Uuid::new_v4();
-    let path = self.compute_path(&reg_ref)?;
-    let mut new_entries = HashMap::new();
-    add_index_entry(
-      &mut new_entries,
-      Selector::Id(id.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    add_index_entry(
-      &mut new_entries,
-      Selector::Path(path.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    for (variant_id, variant) in &enumeration.variants {
-      let variant_ref = RegistryReference::Variant(enumeration.to_owned(), variant_id.to_owned());
-      let variant_path = format!("{}.{}", path, variant.name);
-      add_index_entry(
-        &mut new_entries,
-        Selector::Id(variant_id.to_owned()),
-        variant_ref.to_owned(),
-      )?;
-      add_index_entry(
-        &mut new_entries,
-        Selector::Path(variant_path),
-        variant_ref.to_owned(),
-      )?;
-    }
-    add_index_entries(&mut self.indexed, new_entries)?;
-    self.enumerations.push(enumeration.to_owned());
-    Ok(id)
-  }
-
-  /// Adds a [`Structure`] to the registry.
-  /// Its parent must be found in the registry.
-  /// Its name must be unique under the given parent.
-  /// Its identifier must be unique in the registry.
-  /// All fields will be registered too.
-  /// Dependent types must be found in the registry.
-  /// Returns the identifier under which the structure
-  /// was registered.
-  pub fn add_structure(&mut self, structure: Structure) -> Result<Uuid, RegistryError> {
-    self.check_dependencies_known(&structure)?;
-    let structure = Rc::new(structure);
-    let reg_ref = RegistryReference::Structure(structure.to_owned());
-    let id = Uuid::new_v4();
-    let path = self.compute_path(&reg_ref)?;
-    let mut new_entries = HashMap::new();
-    add_index_entry(
-      &mut new_entries,
-      Selector::Id(id.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    add_index_entry(
-      &mut new_entries,
-      Selector::Path(path.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    for (field_id, field) in &structure.fields {
-      let field_ref = RegistryReference::Field(structure.to_owned(), field_id.to_owned());
-      let field_path = format!("{}.{}", path, field.name);
-      add_index_entry(
-        &mut new_entries,
-        Selector::Id(field_id.to_owned()),
-        field_ref.to_owned(),
-      )?;
-      add_index_entry(
-        &mut new_entries,
-        Selector::Path(field_path),
-        field_ref.to_owned(),
-      )?;
-    }
-    add_index_entries(&mut self.indexed, new_entries)?;
-    self.structures.push(structure.to_owned());
-    Ok(id)
-  }
-
-  /// Adds a [`Module`] to the registry.
-  /// Its parent must be found in the registry.
-  /// Its name must be unique under the given parent.
-  /// Its identifier must be unique in the registry.
-  /// All fields will be registered too.
-  /// Dependent types must be found in the registry.
-  /// Returns the identifier under which the module
-  /// was registered.
-  pub fn add_module(&mut self, module: Module) -> Result<Uuid, RegistryError> {
-    self.check_dependencies_known(&module)?;
-    let module = Rc::new(module);
-    let reg_ref = RegistryReference::Module(module.to_owned());
-    let id = Uuid::new_v4();
-    let path = self.compute_path(&reg_ref)?;
-    let mut new_entries = HashMap::new();
-    add_index_entry(
-      &mut new_entries,
-      Selector::Id(id.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    add_index_entry(
-      &mut new_entries,
-      Selector::Path(path.to_owned()),
-      reg_ref.to_owned(),
-    )?;
-    for (export_id, export) in &module.exports {
-      match export.kind {
-        ExportKind::Function(_) => {
-          let field_ref = RegistryReference::Function(module.to_owned(), export_id.to_owned());
-          let field_path = format!("{}.{}", path, export.name);
-          add_index_entry(
-            &mut new_entries,
-            Selector::Id(export_id.to_owned()),
-            field_ref.to_owned(),
-          )?;
-          add_index_entry(
-            &mut new_entries,
-            Selector::Path(field_path),
-            field_ref.to_owned(),
-          )?;
-        }
-      }
-    }
-    add_index_entries(&mut self.indexed, new_entries)?;
-    self.modules.push(module.to_owned());
-    Ok(id)
   }
 
   pub fn find(&self, selector: &Selector) -> Option<&RegistryReference> {
@@ -195,27 +60,6 @@ impl LocalRegistry {
 
   pub fn find_id(&self, id: &Uuid) -> Option<&RegistryReference> {
     self.find(&Selector::Id(id.to_owned()))
-  }
-
-  fn check_frozen_reference_known(
-    &self,
-    frozen_reference: &FrozenReference,
-  ) -> Result<(), RegistryError> {
-    self
-      .find_id(&frozen_reference.id)
-      .ok_or(RegistryError::UnknownDependency {
-        selector: Selector::Id(frozen_reference.id.to_owned()),
-      })
-      .map(|_| ())
-  }
-
-  fn check_dependencies_known<T: Frozen>(&self, frozen: &T) -> Result<(), RegistryError> {
-    let mut deps = HashSet::new();
-    frozen.dependencies(&mut deps);
-    for dep in deps {
-      self.check_frozen_reference_known(dep)?;
-    }
-    Ok(())
   }
 
   fn parent(&self, reg_ref: &RegistryReference) -> Result<RegistryReference, RegistryError> {
@@ -247,6 +91,213 @@ impl LocalRegistry {
       }
     };
     Ok(path)
+  }
+
+  fn map_path_to_id(&mut self, path: String, id: Uuid) {
+    if self
+      .path_to_ids
+      .insert(path.to_owned(), id.to_owned())
+      .is_some()
+    {
+      unreachable!("duplicate path-to-id mapping");
+    }
+  }
+}
+
+#[async_trait(?Send)]
+impl ReadableRegistry for LocalRegistry {
+  async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError> {
+    if let Some(primitive_kind) = get_primitive(selector) {
+      return Ok(TypeDefinition::Primitive(primitive_kind));
+    }
+    let reg_ref = self
+      .indexed
+      .get(selector)
+      .ok_or(RegistryError::NoSuchEntity {
+        selector: selector.to_owned(),
+      })?;
+    match reg_ref {
+      RegistryReference::Enumeration(entity) => {
+        Ok(TypeDefinition::Enumeration(entity.as_ref().clone()))
+      }
+      RegistryReference::Structure(entity) => {
+        Ok(TypeDefinition::Structure(entity.as_ref().clone()))
+      }
+      _ => Err(RegistryError::NotAType {
+        selector: selector.to_owned(),
+      }),
+    }
+  }
+
+  async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
+    let reg_ref = self
+      .indexed
+      .get(selector)
+      .ok_or(RegistryError::NoSuchEntity {
+        selector: selector.to_owned(),
+      })?;
+    match reg_ref {
+      RegistryReference::Module(entity) => Ok(entity.as_ref().clone()),
+      _ => Err(RegistryError::NotAModule {
+        selector: selector.to_owned(),
+      }),
+    }
+  }
+
+  async fn resolve(&mut self, selector: &Selector) -> Result<Uuid, RegistryError> {
+    match selector {
+      Selector::Id(id) => Ok(id.clone()),
+      Selector::Path(path) => {
+        let id = self
+          .path_to_ids
+          .get(path)
+          .ok_or(RegistryError::NoSuchEntity {
+            selector: selector.to_owned(),
+          })?;
+        Ok(id.clone())
+      }
+    }
+  }
+}
+
+#[async_trait(?Send)]
+impl EditableRegistry for LocalRegistry {
+  async fn add_enumeration(
+    &mut self,
+    id: Uuid,
+    enumeration: EnumerationPublic,
+  ) -> Result<Uuid, RegistryError> {
+    let enumeration = Rc::new(enumeration);
+    let reg_ref = RegistryReference::Enumeration(enumeration.to_owned());
+    let path = self.compute_path(&reg_ref)?;
+    let mut new_entries = HashMap::new();
+    let mut new_mappings = HashMap::new();
+    add_index_entry(
+      &mut new_entries,
+      Selector::Id(id.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_index_entry(
+      &mut new_entries,
+      Selector::Path(path.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_mapping(&mut new_mappings, path.to_owned(), id.to_owned())?;
+    for (sub_id, variant) in &enumeration.variants {
+      let sub_ref = RegistryReference::Variant(enumeration.to_owned(), sub_id.to_owned());
+      let sub_path = format!("{}.{}", path, variant.name);
+      add_index_entry(
+        &mut new_entries,
+        Selector::Id(sub_id.to_owned()),
+        sub_ref.to_owned(),
+      )?;
+      add_index_entry(
+        &mut new_entries,
+        Selector::Path(sub_path.to_owned()),
+        sub_ref.to_owned(),
+      )?;
+      add_mapping(&mut new_mappings, sub_path.to_owned(), sub_id.to_owned())?;
+    }
+    add_index_entries(
+      &mut self.indexed,
+      new_entries,
+      &mut self.path_to_ids,
+      new_mappings,
+    )?;
+    self.enumerations.push(enumeration.to_owned());
+    Ok(id)
+  }
+
+  async fn add_structure(
+    &mut self,
+    id: Uuid,
+    structure: StructurePublic,
+  ) -> Result<(), RegistryError> {
+    let structure = Rc::new(structure);
+    let reg_ref = RegistryReference::Structure(structure.to_owned());
+    let path = self.compute_path(&reg_ref)?;
+    let mut new_entries = HashMap::new();
+    let mut new_mappings = HashMap::new();
+    add_index_entry(
+      &mut new_entries,
+      Selector::Id(id.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_index_entry(
+      &mut new_entries,
+      Selector::Path(path.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_mapping(&mut new_mappings, path.to_owned(), id.to_owned())?;
+    for (sub_id, field) in &structure.fields {
+      let sub_ref = RegistryReference::Field(structure.to_owned(), sub_id.to_owned());
+      let sub_path = format!("{}.{}", path, field.name);
+      add_index_entry(
+        &mut new_entries,
+        Selector::Id(sub_id.to_owned()),
+        sub_ref.to_owned(),
+      )?;
+      add_index_entry(
+        &mut new_entries,
+        Selector::Path(sub_path.to_owned()),
+        sub_ref.to_owned(),
+      )?;
+      add_mapping(&mut new_mappings, sub_path.to_owned(), sub_id.to_owned())?;
+    }
+    add_index_entries(
+      &mut self.indexed,
+      new_entries,
+      &mut self.path_to_ids,
+      new_mappings,
+    )?;
+    self.structures.push(structure.to_owned());
+    Ok(())
+  }
+
+  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError> {
+    let module = Rc::new(module);
+    let reg_ref = RegistryReference::Module(module.to_owned());
+    let path = self.compute_path(&reg_ref)?;
+    let mut new_entries = HashMap::new();
+    let mut new_mappings = HashMap::new();
+    add_index_entry(
+      &mut new_entries,
+      Selector::Id(id.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_index_entry(
+      &mut new_entries,
+      Selector::Path(path.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_mapping(&mut new_mappings, path.to_owned(), id.to_owned())?;
+    for (sub_id, export) in &module.exports {
+      match export.kind {
+        ExportKind::Function(_) => {
+          let sub_ref = RegistryReference::Function(module.to_owned(), sub_id.to_owned());
+          let sub_path = format!("{}.{}", path, export.name);
+          add_index_entry(
+            &mut new_entries,
+            Selector::Id(sub_id.to_owned()),
+            sub_ref.to_owned(),
+          )?;
+          add_index_entry(
+            &mut new_entries,
+            Selector::Path(sub_path.to_owned()),
+            sub_ref.to_owned(),
+          )?;
+          add_mapping(&mut new_mappings, sub_path.to_owned(), sub_id.to_owned())?;
+        }
+      }
+    }
+    add_index_entries(
+      &mut self.indexed,
+      new_entries,
+      &mut self.path_to_ids,
+      new_mappings,
+    )?;
+    self.modules.push(module.to_owned());
+    Ok(())
   }
 }
 
@@ -314,44 +365,52 @@ fn add_index_entry(
   Ok(())
 }
 
+fn add_mapping(
+  path_to_ids: &mut HashMap<String, Uuid>,
+  path: String,
+  id: Uuid,
+) -> Result<(), RegistryError> {
+  let entry = match path_to_ids.entry(path.to_owned()) {
+    Entry::Occupied(_) => {
+      return Err(RegistryError::DuplicateSelector {
+        selector: Selector::Path(path.to_owned()),
+      })
+    }
+    Entry::Vacant(entry) => entry,
+  };
+  entry.insert(id);
+  Ok(())
+}
+
 /// Adds the entries to the index.
 /// If any of the insertions should fail,
 /// none of the insertions will be performed.
 fn add_index_entries(
   index: &mut HashMap<Selector, RegistryReference>,
   entries: HashMap<Selector, RegistryReference>,
+  path_to_ids: &mut HashMap<String, Uuid>,
+  mappings: HashMap<String, Uuid>,
 ) -> Result<(), RegistryError> {
+  // Check that transaction is valid.
   for (selector, _) in &entries {
     check_index_entry_vacant(index, selector)?;
   }
+  for (path, _) in &mappings {
+    if path_to_ids.contains_key(path) {
+      Err(RegistryError::DuplicateSelector {
+        selector: Selector::Path(path.to_owned()),
+      })?
+    }
+  }
+  // Apply the transaction.
   for (selector, reg_ref) in entries {
     add_index_entry(index, selector, reg_ref)?;
   }
+  for (path, id) in mappings {
+    path_to_ids.insert(path.to_owned(), id.to_owned());
+  }
   Ok(())
 }
-
-#[derive(Display, Debug)]
-pub enum RegistryError {
-  /// Entity being inserted has a parent defined, but it is unknown locally.
-  #[display(fmt = "parent of entity \"{}\" is unknown to the registry", name)]
-  UnknownParent { name: String },
-
-  /// The name or identifier of the entity being added is already taken by another entity.
-  #[display(
-    fmt = "added entity's selector {} is already taken in the registry",
-    selector
-  )]
-  DuplicateSelector { selector: Selector },
-
-  /// Entity being inserted uses a dependency that is not known locally.
-  #[display(
-    fmt = "entity depends on \"{}\", which is unknown to the registry",
-    selector
-  )]
-  UnknownDependency { selector: Selector },
-}
-
-impl std::error::Error for RegistryError {}
 
 pub const ROOT_ID: Uuid = Uuid::from_bytes([
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -359,38 +418,40 @@ pub const ROOT_ID: Uuid = Uuid::from_bytes([
 
 #[cfg(test)]
 mod tests {
-  use std::collections::HashMap;
-
+  use super::{LocalRegistry, ROOT_ID};
+  use crate::{EditableRegistry, EnumerationPublic, ModulePublic};
   use semio_record::{
-    enumeration::v0::frozen::{Enumeration, EnumerationVariant},
-    module::v0::frozen::{Export, ExportKind, Function, Module},
-    record::{FrozenReference, Version},
-    ty::{FrozenScalar, FrozenTy, Primitive},
+    enumeration::v0::unfrozen::EnumerationVariant,
+    module::v0::unfrozen::{Export, ExportKind, Function},
+    record::{UnfrozenReference, VersionReq},
+    ty::{Primitive, UnfrozenScalar, UnfrozenTy},
   };
+  use std::collections::HashMap;
   use uuid::Uuid;
 
-  use super::{LocalRegistry, ROOT_ID};
-
-  #[test]
-  fn add_status_enumeration_and_use_it_in_a_module() {
+  #[tokio::test]
+  async fn add_status_enumeration_and_use_it_in_a_module() {
     let mut registry = LocalRegistry::new();
 
-    let status = Enumeration {
+    let status = EnumerationPublic {
       name: "Status".to_owned(),
       parent: ROOT_ID,
       variants: HashMap::from([(
         Uuid::new_v4(),
         EnumerationVariant {
           name: "Ok".to_owned(),
-          ty: FrozenTy::Primitive(Primitive {
+          ty: UnfrozenTy::Primitive(Primitive {
             kind: semio_record::ty::PrimitiveKind::Unit,
           }),
         },
       )]),
     };
-    let enum_id = registry.add_enumeration(status).unwrap();
+    let enum_id = registry
+      .add_enumeration(Uuid::new_v4(), status)
+      .await
+      .unwrap();
 
-    let module = Module {
+    let module = ModulePublic {
       parent: ROOT_ID,
       name: "node".to_owned(),
       exports: HashMap::from([(
@@ -400,10 +461,10 @@ mod tests {
           kind: ExportKind::Function(Function {
             parameters: HashMap::new(),
             parameter_ordering: vec![],
-            return_ty: FrozenTy::FrozenScalar(FrozenScalar {
-              reference: FrozenReference {
+            return_ty: UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
+              reference: UnfrozenReference {
                 id: enum_id,
-                version: Version(semver::Version::new(0, 0, 0)),
+                version_req: VersionReq::parse("*").unwrap(),
               },
             }),
           }),
@@ -412,6 +473,6 @@ mod tests {
       executable: None,
       dependencies: vec![],
     };
-    registry.add_module(module).unwrap();
+    registry.add_module(Uuid::new_v4(), module).await.unwrap();
   }
 }
