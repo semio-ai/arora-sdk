@@ -27,15 +27,15 @@ impl ReadableRegistry for RemoteCachedRegistry {
       Ok(ty) => Ok(ty),
       Err(RegistryError::NoSuchEntity { selector: _ }) => {
         let ty = self.remote.get_type(selector).await?;
-        match ty {
+        match &ty {
           TypeDefinition::Primitive(_) => {
             unreachable!("primitive type should have been found in cache");
           }
-          TypeDefinition::Enumeration(ref enumeration) => {
+          TypeDefinition::Enumeration(enumeration) => {
             let id = self.resolve(selector).await?;
             self.cache.add_enumeration(id, enumeration.clone()).await?;
           }
-          TypeDefinition::Structure(ref structure) => {
+          TypeDefinition::Structure(structure) => {
             let id = self.resolve(selector).await?;
             self.cache.add_structure(id, structure.clone()).await?;
           }
