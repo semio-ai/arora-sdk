@@ -27,6 +27,9 @@ jobs:
     - name: Install Rust WASI
       run: cargo install cargo-wasi
 
+    - name: Configure Cargo Git Access
+      run: echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+
     - uses: actions/checkout@v2
 
     - name: Create build directory
