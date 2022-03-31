@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+pub mod tests {
   use crate::{
     error::BehaviorTreeError, load_behavior_tree_nodes, nodes::*, run_behavior_tree,
     schema::Expression, status::Status, BehaviorTree, BehaviorTreeRuntime,
@@ -15,7 +15,11 @@ mod tests {
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
 
-  use std::{cell::RefCell, path::Path, rc::Rc};
+  use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+  };
   use tokio::{
     fs::{read_to_string, File},
     io::AsyncReadExt,
@@ -266,12 +270,7 @@ mod tests {
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
     let mut index = Index::new();
-
-    let registry_uri = "https://raw.githubusercontent.com/semio-ai/arora-registry/behavior_tree/";
-    let mut registry = Registry::new_with_base_uri(
-      Url::parse(registry_uri).expect(format!("malformed registry URI: {}", registry_uri).as_str()),
-    );
-
+    let mut registry = Registry::new();
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
@@ -288,61 +287,9 @@ mod tests {
     println!("loading module {:#?}", name);
     let start_time = std::time::Instant::now();
 
-    // Find the root directory of the repository.
-    let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
-    let mut path = Path::new(&current_crate_dir);
-    loop {
-      if path.join(".git").is_dir() {
-        break;
-      }
-      path = path
-        .parent()
-        .expect("test not implemented from its git repository");
-    }
-    let repo_root = path;
-
-    // Let us load the WASM module.
-    let module_root = repo_root.join("modules").join(name);
-    // The header file should be directly in the sources.
-    let header_path = module_root
-      .join("src")
-      .join("arora_generated")
-      .join("module.yaml");
-    let header: Header = serde_yaml::from_str(
-      &read_to_string(header_path.clone())
-        .await
-        .expect(format!("header file {} could not be read", header_path.display()).as_str()),
-    )
-    .expect(
-      format!(
-        "header file {} contains invalid yaml",
-        header_path.display()
-      )
-      .as_str(),
-    );
-    let actual_module_name = header.name.clone();
-    println!(
-      "actual name of module {:?} is {:?}",
-      name, &actual_module_name
-    );
-
-    // Register the types involved there.
-    for type_id in header.type_dependencies() {
-      if index.find_type(&type_id).is_ok() {
-        continue;
-      } else {
-        let ty = registry.get_type(&type_id).await.expect(
-          format!(
-            "header provided in {} depends on type {} which is unknown",
-            header_path.display(),
-            type_id
-          )
-          .as_str(),
-        );
-        index.add_type(ty);
-      }
-    }
-    index.add_module(&header).unwrap();
+    let module_root = module_root_path(name);
+    let header = read_header_from_module_root(module_root.to_owned()).await;
+    add_header_to_index(&header, index, registry).await;
 
     // Find the executable in the right target directory (debug in priority)
     let module_target_dir = module_root.join("target").join("wasm32-wasi");
@@ -363,6 +310,7 @@ mod tests {
     let executable = executable.into_boxed_slice();
 
     // Loading the module.
+    let actual_module_name = header.name.to_owned();
     println!("loading module {:#?} into the engine", &actual_module_name);
     engine
       .load_module(ModuleDefinition {
@@ -379,8 +327,82 @@ mod tests {
     );
   }
 
+  async fn read_header_from_module_root(module_root: PathBuf) -> Header {
+    // The header file should be directly in the sources.
+    let header_path = module_root
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml");
+    let header: Header = serde_yaml::from_str(
+      &read_to_string(header_path.clone())
+        .await
+        .expect(format!("header file {} could not be read", header_path.display()).as_str()),
+    )
+    .expect(
+      format!(
+        "header file {} contains invalid yaml",
+        header_path.display()
+      )
+      .as_str(),
+    );
+    let actual_module_name = header.name.clone();
+    println!(
+      "actual name of module {:?} is {:?}",
+      module_root.file_name().unwrap(),
+      &actual_module_name
+    );
+    header
+  }
+
+  pub async fn read_header_to_index(name: &String, index: &mut Index, registry: &mut Registry) {
+    let header = read_header(name.as_str()).await;
+    add_header_to_index(&header, index, registry).await;
+  }
+
+  async fn read_header(name: &str) -> Header {
+    let module_root = module_root_path(&name.to_string());
+    read_header_from_module_root(module_root).await
+  }
+
+  pub async fn add_header_to_index(header: &Header, index: &mut Index, registry: &mut Registry) {
+    // Register the types involved there.
+    for type_id in header.type_dependencies() {
+      if index.find_type(&type_id).is_ok() {
+        continue;
+      } else {
+        let ty = registry.get_type(&type_id).await.expect(
+          format!(
+            "module {} depends on type {} which is unknown",
+            header.name, type_id
+          )
+          .as_str(),
+        );
+        index.add_type(ty);
+      }
+    }
+    index.add_module(&header).unwrap();
+  }
+
+  fn module_root_path(name: &String) -> PathBuf {
+    // Find the root directory of the repository.
+    let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
+    let mut path = Path::new(&current_crate_dir);
+    loop {
+      if path.join(".git").is_dir() {
+        break;
+      }
+      path = path
+        .parent()
+        .expect("test not implemented from its git repository");
+    }
+    let repo_root = path;
+
+    // The local modules are all under the same dir.
+    repo_root.join("modules").join(name)
+  }
+
   lazy_static::lazy_static! {
-    static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
+    pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
   }
 
   /// A tree with a single node calling test-wasm.succeed()
