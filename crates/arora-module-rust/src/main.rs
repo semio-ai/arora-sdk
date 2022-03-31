@@ -1,11 +1,12 @@
+mod lib;
 use std::{
   collections::HashSet,
   fmt::{Debug, Display},
   sync::Arc,
 };
-
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
+use arora_module_rust::token_stream_to_file;
 use arora_schema::{
   module::low::{ExportSymbol, ImportSymbol, TypeRef, Parameter},
   ty::{
@@ -14,7 +15,7 @@ use arora_schema::{
     U32_ID, U64_ID, U8_ID, UNIT_ID,
   },
 };
-use arora_vfs::{Directory, Entry, File};
+use arora_vfs::{Directory, Entry};
 use clap::Parser;
 use convert_case::{Case, Casing};
 use itertools::Itertools;
@@ -53,19 +54,19 @@ async fn main() -> anyhow::Result<()> {
     };
   }
 
-  let mut out_dir = Arc::new(Directory::new());
-  out_dir = out_dir.merge_with(generate_common_sources());
+  let mut out_dir = Directory::new();
+  out_dir = out_dir.merge_with(&generate_common_sources());
   for ty in &types {
-    out_dir = out_dir.merge_with(generate_type_source(&ty, &index));
+    out_dir = out_dir.merge_with(&generate_type_source(&ty, &index));
   }
-  out_dir = out_dir.merge_with(generate_imports_source(&imports, &index));
-  out_dir = out_dir.merge_with(generate_exports_source(&exports, &index));
-  out_dir = out_dir.merge_with(generate_mod_source(&types));
+  out_dir = out_dir.merge_with(&generate_imports_source(&imports, &index));
+  out_dir = out_dir.merge_with(&generate_exports_source(&exports, &index));
+  out_dir = out_dir.merge_with(&generate_mod_source(&types));
 
   let mut stdout = stdout();
   let mut writer = Writer::new(&mut stdout);
   writer
-    .write::<arora_vfs::Entry>(Entry::Directory(out_dir))
+    .write::<arora_vfs::Entry>(Entry::Directory(Arc::new(out_dir)))
     .await?;
   writer.end().await?;
   stdout.flush().await?;
@@ -73,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
   Ok(())
 }
 
-fn generate_common_sources() -> Arc<Directory> {
+fn generate_common_sources() -> Directory {
   let source = quote! {
     use derive_more::Display;
 
@@ -88,7 +89,7 @@ fn generate_common_sources() -> Arc<Directory> {
   token_stream_to_file("error.rs".to_string(), &source)
 }
 
-fn generate_type_source(ty: &Type, index: &Index) -> Arc<Directory> {
+fn generate_type_source(ty: &Type, index: &Index) -> Directory {
   let tokens = match &ty.kind {
     arora_schema::ty::low::TypeKind::Structure(structure) => {
       generate_struct_source_contents(&ty.id, &ty.name, &structure, &index)
@@ -96,7 +97,7 @@ fn generate_type_source(ty: &Type, index: &Index) -> Arc<Directory> {
     arora_schema::ty::low::TypeKind::Enumeration(enumeration) => {
       generate_enumeration_source_contents(&ty.id, &ty.name, &enumeration)
     }
-    arora_schema::ty::low::TypeKind::Primitive(_) => return Arc::new(Directory::new()),
+    arora_schema::ty::low::TypeKind::Primitive(_) => return Directory::new(),
   };
   token_stream_to_file(format!("{}.rs", ty.name.to_case(Case::Snake)), &tokens)
 }
@@ -400,7 +401,7 @@ fn generate_enumeration_source_contents(
   return type_source;
 }
 
-fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Directory> {
+fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Directory {
   // Function Uses.
   let use_functions = exports.iter().map(|export| {
     let ExportSymbol::Function(function_symbol) = export;
@@ -562,7 +563,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Arc<Di
 /// Generates a virtual source file with wrappers for every symbol imported by the module.
 /// It contains human-readable public functions that can be used by the module implementation,
 /// under the module `import`, as `<module>::<function>`.
-fn generate_imports_source(imports: &Vec<ImportSymbol>, index: &Index) -> Arc<Directory> {
+fn generate_imports_source(imports: &Vec<ImportSymbol>, index: &Index) -> Directory {
   // Using dependent types.
   let type_dependencies = HashSet::<Uuid>::from_iter(
     imports
@@ -804,7 +805,7 @@ fn generate_imports_source(imports: &Vec<ImportSymbol>, index: &Index) -> Arc<Di
   token_stream_to_file("import.rs".to_string(), &source)
 }
 
-fn generate_mod_source(types: &Vec<Type>) -> Arc<Directory> {
+fn generate_mod_source(types: &Vec<Type>) -> Directory {
   let type_mods = types.iter().map(|ty| {
     let type_mod_ident = type_mod_ident(&ty.name);
     quote! { #type_mod_ident }
@@ -1140,11 +1141,6 @@ fn generate_const_id_declaration(
   }
 }
 
-fn token_stream_to_file(file_name: String, tokens: &TokenStream) -> Arc<Directory> {
-  let mut output = Directory::new();
-  output.insert(file_name, File::new(tokens.to_string()));
-  Arc::new(output)
-}
 
 fn type_mod_ident(type_name: &String) -> Ident {
   format_ident!("{}", type_name.to_case(Case::Snake))

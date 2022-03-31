@@ -82,7 +82,7 @@ impl Directory {
     Ok(())
   }
 
-  pub fn merge_with(self: Arc<Directory>, other: Arc<Directory>) -> Arc<Directory> {
+  pub fn merge_with(&self, other: &Directory) -> Directory {
     // If they both have the same entry, recursively merge
     let mut entries = HashMap::new();
     for (name, entry) in self.entries.iter() {
@@ -97,7 +97,7 @@ impl Directory {
               let other_directory = other_directory.clone();
               entries.insert(
                 name.clone(),
-                Entry::Directory(directory.merge_with(other_directory)).into(),
+                Entry::Directory(Arc::new(directory.merge_with(other_directory.as_ref()))).into(),
               );
             } else {
               panic!("Tried to merge a directory with a file");
@@ -115,7 +115,7 @@ impl Directory {
       }
     }
 
-    Arc::new(Directory { entries })
+    Directory { entries }
   }
 }
 

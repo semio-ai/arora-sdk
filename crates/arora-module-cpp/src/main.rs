@@ -1,8 +1,7 @@
 use arora_vfs::{Directory, Entry, File};
 use ast::{
-  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
-  IncludeStyle, Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit,
-  TypeRef,
+  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype, IncludeStyle,
+  Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit, TypeRef,
 };
 use clap::Parser;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -89,7 +88,7 @@ pub struct Context<'a> {
   pub headers: HashMap<Uuid, Header>,
 }
 
-async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let ty = context
     .types
     .get(&id)
@@ -150,7 +149,10 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
       return;
     }
 
-    let dep_header = context.types.get(dep).expect(format!("unknown type {}", dep).as_str());
+    let dep_header = context
+      .types
+      .get(dep)
+      .expect(format!("unknown type {}", dep).as_str());
     include_declarations.push(
       PreprocessorDirective::Include(
         format!("types/{}.hpp", dep_header.name),
@@ -189,7 +191,7 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   Ok(root.into())
 }
 
-async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let header = context
     .headers
     .get(&id)
@@ -643,7 +645,8 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 }
 
 fn parameter_variable_name(parameter: &LowParameter) -> String {
-  format!("{}_{}",
+  format!(
+    "{}_{}",
     identifier_name(parameter.name.as_str()),
     identifier_uuid(&parameter.id)
   )
@@ -888,8 +891,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
               identifier_name(&header.name)
                 .to_expression()
                 .colon_colon(f.name.to_expression())
-                .call(f.parameters.iter()
-                  .map(|p| parameter_variable_name(p))),
+                .call(f.parameters.iter().map(|p| parameter_variable_name(p))),
             ),
             ..Default::default()
           }
@@ -898,7 +900,8 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(declare::arora_buffer_writer().into());
 
-        let mutable_parameters = sorted_parameters.iter()
+        let mutable_parameters = sorted_parameters
+          .iter()
           .filter(|parameter| parameter.mutable);
         let field_count = mutable_parameters.clone().count() as u32 + 1;
 
@@ -920,11 +923,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         );
 
         function_declarations.push(
-          declare::serialize(
-            &ty::type_name(context, &f.ret),
-            &"result".to_expression(),
-          )
-          .into(),
+          declare::serialize(&ty::type_name(context, &f.ret), &"result".to_expression()).into(),
         );
 
         for parameter in mutable_parameters {
@@ -1007,7 +1006,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   Ok(TranslationUnit { declarations })
 }
 
-async fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let header = context.headers.get(&id).unwrap();
 
   let mut source = Directory::new();
@@ -1078,23 +1077,23 @@ async fn main() -> anyhow::Result<()> {
     }
   }
 
-  let mut root = Arc::new(Directory::new());
+  let mut root = Directory::new();
   for id in context.types.keys() {
-    root = root.merge_with(generate_type(&context, id).await?);
+    root = root.merge_with(&generate_type(&context, id)?);
   }
 
   for id in context.headers.keys() {
     if id == &self_id {
-      root = root.merge_with(generate_self(&context, &self_id).await?);
+      root = root.merge_with(&generate_self(&context, &self_id)?);
     } else {
-      root = root.merge_with(generate_module(&&context, id).await?);
+      root = root.merge_with(&generate_module(&context, id)?);
     }
   }
 
   let mut writer = Writer::new(&mut stdout);
 
   writer
-    .write::<arora_vfs::Entry>(Entry::Directory(root))
+    .write::<arora_vfs::Entry>(Entry::Directory(Arc::new(root)))
     .await?;
   writer.end().await?;
   stdout.flush().await?;
