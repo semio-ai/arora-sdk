@@ -19,14 +19,13 @@ jobs:
 
     steps:
 
-    - name: Setup Rust Target Platform
+    - name: Setup Rust Tools & Target
       run: |
         rustup default nightly
+        rustup component add rustfmt
         rustup target add wasm32-unknown-unknown
         rustup target add wasm32-wasi
-
-    - name: Install Rust WASI
-      run: cargo install cargo-wasi
+        cargo install cargo-wasi
 
     - name: Configure Cargo Git Access
       run: |
