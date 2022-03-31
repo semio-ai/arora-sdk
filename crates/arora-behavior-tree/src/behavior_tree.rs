@@ -1,11 +1,11 @@
-mod error;
-mod nodes;
-mod schema;
-mod schema_groot;
-mod status;
+pub mod error;
+pub mod nodes;
+pub mod schema;
+pub mod schema_groot;
+pub mod status;
 mod tests;
-mod tick_id;
-mod tree_node;
+pub mod tick_id;
+pub mod tree_node;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
 use arora_index::Index;
 use arora_schema::{

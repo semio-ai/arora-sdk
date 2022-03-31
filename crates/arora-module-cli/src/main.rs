@@ -13,7 +13,7 @@ use arora_schema::{
     },
   },
 };
-use clap::{AppSettings, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 use tokio::{
   fs::{read_to_string, File},
@@ -62,9 +62,8 @@ enum Commands {
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
-#[clap(global_setting(AppSettings::PropagateVersion))]
-#[clap(global_setting(AppSettings::UseLongFormatForHelpSubcommand))]
-#[clap(global_setting(AppSettings::TrailingVarArg))]
+#[clap(propagate_version = true)]
+#[clap(trailing_var_arg = true)]
 struct Args {
   #[clap(short, long)]
   registry_uri: Option<String>,
@@ -145,7 +144,7 @@ async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result
 
         LowTypeKind::Enumeration(LowEnumeration { values: low_values })
       }
-      HighTypeKind::Primitive(_) =>  {
+      HighTypeKind::Primitive(_) => {
         eprintln!("Forbidden to register primitive type {}", &high_type.name);
         std::process::exit(1);
       }

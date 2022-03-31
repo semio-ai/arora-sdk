@@ -18,8 +18,8 @@ use super::{Executor, LoadModuleError, UnloadModuleError};
 use derive_more::{Display, Error, From};
 
 use wasmtime::{
-  AsContextMut, Caller, Config, Engine as WasmEngine, Extern, Instance as WasmInstance,
-  InstanceLimits, Linker, Memory, Module as WasmModule, ModuleLimits, Store, TypedFunc,
+  AsContextMut, Caller, Config, Engine as WasmEngine, Extern, InstanceLimits, Linker, Memory,
+  Module as WasmModule, ModuleLimits, Store, TypedFunc,
 };
 
 mod guest;
@@ -99,8 +99,8 @@ impl Executor for WebAssemblyExecutor {
     ))
   }
 
-  fn unload_module(&mut self, module_id: Uuid) -> Result<(), UnloadModuleError> {
-    Ok(())
+  fn unload_module(&mut self, _: Uuid) -> Result<(), UnloadModuleError> {
+    unimplemented!("unload_module");
   }
 }
 
@@ -124,9 +124,6 @@ struct WebAssemblyModule {
 
   /// The memory pool taken by the WASM module.
   memory: Memory,
-
-  /// The WASM engine hosting the module.
-  instance: WasmInstance,
 
   store: Store<WasiCtx>,
 }
@@ -270,7 +267,6 @@ impl WebAssemblyModule {
     Ok(Self {
       module,
       store,
-      instance,
       malloc: arora_buffer_alloc,
       free: arora_buffer_free,
       arora_functions,
@@ -297,11 +293,7 @@ impl WebAssemblyModule {
       .free
       .call(&mut self.store, (addr,))
       .map_err(|e| DispatchError::Trap {
-        message: format!(
-          "failed to free memory for module {}: {:#?}",
-          self.name(),
-          e
-        ),
+        message: format!("failed to free memory for module {}: {:#?}", self.name(), e),
       })
   }
 
@@ -320,10 +312,7 @@ impl WebAssemblyModule {
 impl Module for WebAssemblyModule {
   fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
     let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal {
-      message: format!(
-        "failed to cast args size to u32 in module {}",
-        self.name()
-      ),
+      message: format!("failed to cast args size to u32 in module {}", self.name()),
     })?;
 
     // Let the WASM module allocate a buffer,

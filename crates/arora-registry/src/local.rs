@@ -92,16 +92,6 @@ impl LocalRegistry {
     };
     Ok(path)
   }
-
-  fn map_path_to_id(&mut self, path: String, id: Uuid) {
-    if self
-      .path_to_ids
-      .insert(path.to_owned(), id.to_owned())
-      .is_some()
-    {
-      unreachable!("duplicate path-to-id mapping");
-    }
-  }
 }
 
 #[async_trait(?Send)]

@@ -152,6 +152,7 @@ pub fn action(type_name: &str, param_args: HashMap<&str, &str>) -> Node {
   }
 }
 
+#[macro_export]
 macro_rules! param_args {
   ($( $key: expr => $val: expr ),*) => {{
        let mut map = ::std::collections::HashMap::new();
