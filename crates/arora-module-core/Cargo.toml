@@ -6,11 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+semio-record = { git = "https://github.com/semio-ai/semio-entity.git", branch = "master" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
+arora-registry = { path = "../arora-registry" }
 arora-schema = { path = "../arora-schema" }
+bytes = "1"
+derive_more = "*"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-bytes = "1"
+uuid = "*"
 
 [dev-dependencies]
 serde_yaml = "0.8"

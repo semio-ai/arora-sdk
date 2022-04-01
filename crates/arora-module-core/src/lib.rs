@@ -1,11 +1,81 @@
+use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
   module::low::{ExportSymbol, Header, ImportSymbol},
   ty::low::Type,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
 use bytes::{Buf, BufMut};
+use derive_more::Display;
+use semio_client::{
+  common::{type_of, EntityType, Selector, TypeOf},
+  context::Context,
+};
+use semio_record::{module::v0::public::Public as ModulePublic, record::UnfrozenReference};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+pub enum Asset2 {
+  Type(TypeDefinition),
+  Module(ModulePublic),
+  Import(ImportSymbol),
+}
+
+/// Analyzes a module by reading its header and
+/// resolves its dependencies with the help of the provided registry.
+/// Produces a list of assets that can be used for code generation.
+/// First, the types, then the modules, then the imports.
+pub async fn analyze_module<Registry: ReadableRegistry>(
+  header: &Header,
+  context: &Context,
+  registry: &mut Registry,
+) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+  let mut assets = Vec::new();
+  let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
+  let mut module_deps = Vec::new();
+  for dep_module_id in &header.module_dependencies() {
+    let dep_module = registry
+      .get_module(&Selector::Id(dep_module_id.clone()))
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
+    for indirect_dep_ref in &dep_module.dependencies {
+      deps_to_resolve.insert(indirect_dep_ref.clone());
+    }
+    module_deps.push(dep_module);
+  }
+  for dep_ref in deps_to_resolve {
+    let selector = Selector::Id(dep_ref.id);
+    let entity_type = type_of(
+      context,
+      TypeOf {
+        selector: selector.clone(),
+      },
+    )
+    .await
+    .map_err(|e| {
+      ModuleDeclarationError::RegistryError(RegistryError::Generic {
+        message: format!("error resolving type of {}: {}", dep_ref.to_string(), e),
+      })
+    })?;
+    match entity_type {
+      EntityType::Module => module_deps.push(
+        registry
+          .get_module(&selector)
+          .await
+          .map_err(ModuleDeclarationError::RegistryError)?,
+      ),
+      EntityType::Structure | EntityType::Enumeration => assets.push(Asset2::Type(
+        registry
+          .get_type(&selector)
+          .await
+          .map_err(ModuleDeclarationError::RegistryError)?,
+      )),
+      _ => (),
+    }
+  }
+  assets.extend(module_deps.into_iter().map(Asset2::Module));
+  assets.extend(header.imports.iter().cloned().map(Asset2::Import));
+  Ok(assets)
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Asset {
@@ -64,6 +134,19 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
     Ok(Some(value))
   }
 }
+
+#[derive(Display, Debug)]
+pub enum ModuleDeclarationError {
+  /// No such entity.
+  #[display(fmt = "{}", _0)]
+  RegistryError(RegistryError),
+
+  /// For any other error.
+  #[display(fmt = "error: {}", message)]
+  Generic { message: String },
+}
+
+impl std::error::Error for ModuleDeclarationError {}
 
 #[cfg(test)]
 mod tests {
