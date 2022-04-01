@@ -4,7 +4,7 @@ use ast::{
   Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit, TypeRef,
 };
 use clap::Parser;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use arora_module_core::{Asset, Reader, Writer};
 
@@ -111,9 +111,9 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
   }
   .to_pretty_string(0);
 
-  source_types.insert(format!("{}.cpp", ty.name), File::new(source_content));
+  source_types.insert(format!("{}.cpp", ty.name), File::new(source_content))?;
 
-  source.insert("types", source_types);
+  source.insert("types", source_types)?;
 
   let mut include = Directory::new();
   let mut include_types = Directory::new();
@@ -179,13 +179,13 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
   }
   .to_pretty_string(0);
 
-  include_types.insert(format!("{}.hpp", ty.name), File::new(include_content));
+  include_types.insert(format!("{}.hpp", ty.name), File::new(include_content))?;
 
-  include.insert("types", include_types);
+  include.insert("types", include_types)?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
@@ -444,7 +444,7 @@ fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Direc
   }
   .to_pretty_string(0);
 
-  source.insert(format!("{}.cpp", header.name), File::new(source_content));
+  source.insert(format!("{}.cpp", header.name), File::new(source_content))?;
 
   let mut include = Directory::new();
 
@@ -526,11 +526,11 @@ fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Direc
   }
   .to_pretty_string(0);
 
-  include.insert(format!("{}.hpp", header.name), File::new(include_content));
+  include.insert(format!("{}.hpp", header.name), File::new(include_content))?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
@@ -1014,18 +1014,18 @@ fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
   source.insert(
     format!("{}.cpp", header.name),
     File::new(generate_self_source(context, id)?.to_pretty_string(0)),
-  );
+  )?;
 
   let mut include = Directory::new();
 
   include.insert(
     format!("{}.hpp", header.name),
     File::new(generate_self_header(context, id)?.to_pretty_string(0)),
-  );
+  )?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
@@ -1093,7 +1093,7 @@ async fn main() -> anyhow::Result<()> {
   let mut writer = Writer::new(&mut stdout);
 
   writer
-    .write::<arora_vfs::Entry>(Entry::Directory(Arc::new(root)))
+    .write::<arora_vfs::Entry>(Entry::Directory(root))
     .await?;
   writer.end().await?;
   stdout.flush().await?;

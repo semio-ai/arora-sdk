@@ -1,4 +1,4 @@
-use std::{sync::Arc, collections::HashSet};
+use std::collections::HashSet;
 
 use arora_module_core::{Asset, Reader, Writer};
 use arora_registry::Registry;
@@ -28,12 +28,12 @@ pub struct Generate {
   pub var_args: Vec<String>,
 }
 
-fn print_entry(entry: Arc<Entry>, i: usize) {
+fn print_entry(entry: &Entry, i: usize) {
   match *entry {
     Entry::Directory(ref directory) => {
       for (name, entry) in directory.entries.iter() {
         println!("{} {}", " ".repeat(i), name);
-        print_entry(entry.clone(), i + 2);
+        print_entry(entry, i + 2);
       }
     }
     Entry::File(_) => {}
@@ -69,7 +69,6 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
   let mut writer = Writer::new(&mut stdin);
   let mut reader = Reader::new(&mut stdout);
 
-  
   let mut type_dependencies = HashSet::<Uuid>::new();
   for type_id in header.type_dependencies() {
     type_dependencies.insert(type_id);
@@ -109,7 +108,7 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
 
   writer.end().await?;
 
-  let vfs = reader.read::<Arc<Entry>>().await?;
+  let vfs = reader.read::<Entry>().await?;
 
   assert!(reader.read::<Entry>().await?.is_none());
 
@@ -124,7 +123,7 @@ pub async fn generate(cmd: Generate, registry: &mut Registry) -> anyhow::Result<
 
     if cmd.dry_run {
       println!("{}", cmd.output_directory);
-      print_entry(vfs, 0);
+      print_entry(&vfs, 0);
       return Ok(());
     } else {
       vfs.sync(cmd.output_directory.clone().into()).await?;
