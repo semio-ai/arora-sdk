@@ -2,7 +2,6 @@ mod lib;
 use std::{
   collections::HashSet,
   fmt::{Debug, Display},
-  sync::Arc,
 };
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
@@ -66,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
   let mut stdout = stdout();
   let mut writer = Writer::new(&mut stdout);
   writer
-    .write::<arora_vfs::Entry>(Entry::Directory(Arc::new(out_dir)))
+    .write::<arora_vfs::Entry>(Entry::Directory(out_dir))
     .await?;
   writer.end().await?;
   stdout.flush().await?;
@@ -86,7 +85,7 @@ fn generate_common_sources() -> Directory {
 
     impl std::error::Error for DeserializationError {}
   };
-  token_stream_to_file("error.rs".to_string(), &source)
+  token_stream_to_file("error.rs".to_string(), &source).unwrap()
 }
 
 fn generate_type_source(ty: &Type, index: &Index) -> Directory {
@@ -99,7 +98,7 @@ fn generate_type_source(ty: &Type, index: &Index) -> Directory {
     }
     arora_schema::ty::low::TypeKind::Primitive(_) => return Directory::new(),
   };
-  token_stream_to_file(format!("{}.rs", ty.name.to_case(Case::Snake)), &tokens)
+  token_stream_to_file(format!("{}.rs", ty.name.to_case(Case::Snake)), &tokens).unwrap()
 }
 
 fn generate_struct_source_contents(
@@ -557,7 +556,7 @@ fn generate_exports_source(exports: &Vec<ExportSymbol>, index: &Index) -> Direct
     #(#function_declarations)*
     #(#function_ids)*
   };
-  token_stream_to_file("export.rs".to_string(), &source)
+  token_stream_to_file("export.rs".to_string(), &source).unwrap()
 }
 
 /// Generates a virtual source file with wrappers for every symbol imported by the module.
@@ -802,7 +801,7 @@ fn generate_imports_source(imports: &Vec<ImportSymbol>, index: &Index) -> Direct
     #(#uses)*
     #(#mod_declarations)*
   };
-  token_stream_to_file("import.rs".to_string(), &source)
+  token_stream_to_file("import.rs".to_string(), &source).unwrap()
 }
 
 fn generate_mod_source(types: &Vec<Type>) -> Directory {
@@ -816,7 +815,7 @@ fn generate_mod_source(types: &Vec<Type>) -> Directory {
     pub mod import;
     pub mod export;
   };
-  token_stream_to_file("mod.rs".to_string(), &source)
+  token_stream_to_file("mod.rs".to_string(), &source).unwrap()
 }
 
 fn generate_into_impl(type_ident: &Ident) -> TokenStream {
