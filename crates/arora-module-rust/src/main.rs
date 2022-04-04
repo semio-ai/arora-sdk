@@ -1,11 +1,11 @@
 mod lib;
 use std::{
   collections::HashSet,
-  fmt::{Debug, Display},
+  fmt::Debug,
 };
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
-use arora_module_rust::token_stream_to_file;
+use arora_module_rust::{token_stream_to_file, type_ident, RawUuidValue, variable_ident, struct_field_const_id_ident, struct_field_ident, generate_into_impl, struct_field_intermediate_variable_ident, PrefixWithMod, generate_try_from_impl, enum_variant_const_id_ident, enum_variant_ident, Public, CheckType, generate_common_sources};
 use arora_schema::{
   module::low::{ExportSymbol, ImportSymbol, TypeRef, Parameter},
   ty::{
@@ -18,6 +18,7 @@ use arora_vfs::{Directory, Entry};
 use clap::Parser;
 use convert_case::{Case, Casing};
 use itertools::Itertools;
+use lib::{function_const_id_ident, function_param_const_id_ident};
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
@@ -54,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
   }
 
   let mut out_dir = Directory::new();
-  out_dir = out_dir.merge_with(&generate_common_sources());
+  out_dir = out_dir.merge_with(&generate_common_sources().unwrap());
   for ty in &types {
     out_dir = out_dir.merge_with(&generate_type_source(&ty, &index));
   }
@@ -71,21 +72,6 @@ async fn main() -> anyhow::Result<()> {
   stdout.flush().await?;
 
   Ok(())
-}
-
-fn generate_common_sources() -> Directory {
-  let source = quote! {
-    use derive_more::Display;
-
-    #[derive(Display, Debug)]
-    pub struct DeserializationError {
-      #[display(fmt = "deserialization error: {}", message)]
-      pub message: String,
-    }
-
-    impl std::error::Error for DeserializationError {}
-  };
-  token_stream_to_file("error.rs".to_string(), &source).unwrap()
 }
 
 fn generate_type_source(ty: &Type, index: &Index) -> Directory {
@@ -818,31 +804,6 @@ fn generate_mod_source(types: &Vec<Type>) -> Directory {
   token_stream_to_file("mod.rs".to_string(), &source).unwrap()
 }
 
-fn generate_into_impl(type_ident: &Ident) -> TokenStream {
-  quote! {
-    impl Into<Box<[u8]>> for #type_ident {
-      fn into(self) -> Box<[u8]> {
-        let mut writer = BufferWriter::new();
-        serialize_to_writer(&self, &mut writer);
-        writer.finalize()
-      }
-    }
-  }
-}
-
-fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
-  quote! {
-    impl TryFrom<&[u8]> for #type_ident {
-      type Error = DeserializationError;
-
-      fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
-        let mut reader = BufferReader::new(buffer);
-        return deserialize_from_reader(&mut reader, true)
-      }
-    }
-  }
-}
-
 fn generate_serialize_from_id(
   id: &Uuid,
   value_expression: TokenStream,
@@ -1190,10 +1151,6 @@ fn type_ident_from_ref(type_ref: &TypeRef, index: &Index, with_mod: PrefixWithMo
   }
 }
 
-fn type_ident(type_name: &String) -> Ident {
-  format_ident!("{}", type_name.to_case(Case::UpperCamel))
-}
-
 fn type_kind_ident(id: &Uuid, index: &Index) -> TokenStream {
   match id {
     x if *x == *UNIT_ID => quote! { TYPE_UNIT },
@@ -1220,104 +1177,7 @@ fn type_kind_ident(id: &Uuid, index: &Index) -> TokenStream {
   }
 }
 
-fn struct_field_const_id_ident(struct_name: &String, field_name: &String) -> Ident {
-  format_ident!(
-    "{}_{}_FIELD_RAW_ID",
-    struct_name.to_case(Case::ScreamingSnake),
-    field_name.to_case(Case::ScreamingSnake)
-  )
-}
-
-fn struct_field_ident(struct_name: &String, field_name: &String) -> TokenStream {
-  format!(
-    "{}::{}",
-    struct_name.to_case(Case::UpperCamel),
-    field_name.to_case(Case::UpperCamel)
-  )
-  .parse()
-  .unwrap()
-}
-
-fn struct_field_intermediate_variable_ident(struct_name: &String, field_name: &String) -> Ident {
-  format_ident!(
-    "{}_{}",
-    struct_name.to_case(Case::Snake),
-    field_name.to_case(Case::Snake),
-  )
-}
-
-fn enum_variant_ident(enum_name: &String, variant_name: &String) -> TokenStream {
-  format!(
-    "{}::{}",
-    enum_name.to_case(Case::UpperCamel),
-    variant_name.to_case(Case::UpperCamel),
-  )
-  .parse()
-  .unwrap()
-}
-
-fn enum_variant_const_id_ident(enum_name: &String, variant_name: &String) -> Ident {
-  format_ident!(
-    "{}_{}_VARIANT_RAW_ID",
-    enum_name.to_case(Case::ScreamingSnake),
-    variant_name.to_case(Case::ScreamingSnake),
-  )
-}
-
-fn function_const_id_ident(function_name: &String) -> Ident {
-  format_ident!(
-    "{}_FUNCTION_RAW_ID",
-    function_name.to_case(Case::ScreamingSnake),
-  )
-}
-
-fn function_param_const_id_ident(function_name: &String, param_name: &String) -> Ident {
-  format_ident!(
-    "{}_{}_PARAMETER_RAW_ID",
-    function_name.to_case(Case::ScreamingSnake),
-    param_name.to_case(Case::ScreamingSnake),
-  )
-}
-
 fn param_ident(param: &Parameter) -> Ident {
   let param_id_sanitized = param.id.to_string().replace("-", "");
   format_ident!("param_{}_{}", param.name.to_case(Case::Snake), param_id_sanitized)
-}
-
-fn variable_ident(name: &String) -> Ident {
-  format_ident!("{}", name.to_case(Case::Snake))
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum CheckType {
-  Yes,
-  No,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum PrefixWithMod {
-  Yes,
-  No,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Public {
-  Yes,
-  No,
-}
-
-/// A helper to format a Uuid into an inlined byte array.
-struct RawUuidValue<'a>(&'a Uuid);
-
-impl<'a> Display for RawUuidValue<'a> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{:#04x?}", self.0.as_bytes())
-  }
-}
-
-impl<'a> ToTokens for RawUuidValue<'a> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let new_tokens: TokenStream = self.to_string().parse().unwrap();
-    tokens.extend(new_tokens);
-  }
 }
