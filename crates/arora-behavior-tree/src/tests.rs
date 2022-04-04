@@ -1,8 +1,8 @@
 #[cfg(test)]
 pub mod tests {
   use crate::{
-    error::BehaviorTreeError, load_behavior_tree_nodes, nodes::*, run_behavior_tree,
-    schema::Expression, status::Status, BehaviorTree, BehaviorTreeRuntime,
+    arora_generated::std::status::Status, error::BehaviorTreeError, load_behavior_tree_nodes,
+    nodes::*, run_behavior_tree, schema::Expression, BehaviorTree, BehaviorTreeRuntime,
   };
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
