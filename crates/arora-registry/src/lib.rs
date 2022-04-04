@@ -11,9 +11,11 @@ use arora_schema::{
 use async_trait::async_trait;
 use derive_more::Display;
 use semio_client::common::Selector;
-use semio_record::ty::PrimitiveKind;
 use semio_record::{
   enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
+};
+use semio_record::{
+  folder::v0::Folder, organization::v0::Organization, ty::PrimitiveKind, user::v0::User,
 };
 use std::collections::HashMap;
 use tokio::{
@@ -154,7 +156,10 @@ pub trait ReadableRegistry {
   async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError>;
 
   /// Resolves the given selector into an identifier.
-  async fn resolve(&mut self, selector: &Selector) -> Result<Uuid, RegistryError>;
+  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError>;
+
+  /// Resolves the given identifier into a path.
+  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
 }
 
 #[async_trait(?Send)]
@@ -198,6 +203,9 @@ pub trait EditableRegistry {
 pub type EnumerationPublic = <Enumeration as RecordDefn>::Public;
 pub type StructurePublic = <Structure as RecordDefn>::Public;
 pub type ModulePublic = <Module as RecordDefn>::Public;
+pub type UserPublic = <User as RecordDefn>::Public;
+pub type OrganizationPublic = <Organization as RecordDefn>::Public;
+pub type FolderPublic = <Folder as RecordDefn>::Public;
 
 pub enum TypeDefinition {
   Primitive(PrimitiveKind),

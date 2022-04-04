@@ -134,19 +134,24 @@ impl ReadableRegistry for LocalRegistry {
     }
   }
 
-  async fn resolve(&mut self, selector: &Selector) -> Result<Uuid, RegistryError> {
-    match selector {
-      Selector::Id(id) => Ok(id.clone()),
-      Selector::Path(path) => {
-        let id = self
-          .path_to_ids
-          .get(path)
-          .ok_or(RegistryError::NoSuchEntity {
-            selector: selector.to_owned(),
-          })?;
-        Ok(id.clone())
-      }
-    }
+  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError> {
+    Ok(
+      self
+        .path_to_ids
+        .get(path)
+        .ok_or(RegistryError::NoSuchEntity {
+          selector: Selector::Path(path.to_owned()),
+        })?
+        .clone(),
+    )
+  }
+
+  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
+    self.compute_path(self.indexed.get(&Selector::Id(id.to_owned())).ok_or(
+      RegistryError::NoSuchEntity {
+        selector: Selector::Id(id.to_owned()),
+      },
+    )?)
   }
 }
 
