@@ -24,10 +24,10 @@ pub enum Asset2 {
 /// resolves its dependencies with the help of the provided registry.
 /// Produces a list of assets that can be used for code generation.
 /// First, the types, then the modules, then the imports.
-pub async fn analyze_module<Registry: ReadableRegistry>(
+pub async fn analyze_module(
   header: &Header,
   context: &Context,
-  registry: &mut Registry,
+  registry: &mut dyn ReadableRegistry,
 ) -> Result<Vec<Asset2>, ModuleDeclarationError> {
   let mut assets = Vec::new();
   let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
