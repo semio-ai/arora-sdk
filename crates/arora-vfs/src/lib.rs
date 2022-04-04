@@ -162,6 +162,34 @@ impl Directory {
     );
   }
 
+  /// Lists entries in the directory.
+  pub fn list_mut(&mut self) -> Vec<(String, &mut Entry)> {
+    self
+      .entries
+      .iter_mut()
+      .map(|(name, entry)| (name.clone(), entry))
+      .collect()
+  }
+
+  /// Lists every entry under this directory, recursively.
+  pub fn list_all_mut(&mut self) -> Vec<(String, &mut Entry)> {
+    self.list_all_recurse(PathBuf::new())
+  }
+
+  fn list_all_recurse(&mut self, parent_path: PathBuf) -> Vec<(String, &mut Entry)> {
+    self
+      .entries
+      .iter_mut()
+      .flat_map(|(name, entry)| {
+        let path = parent_path.join(name);
+        match entry {
+          Entry::Directory(directory) => directory.list_all_recurse(path),
+          _ => vec![(path.display().to_string(), entry)],
+        }
+      })
+      .collect()
+  }
+
   fn os_str_to_string(os_str: &std::ffi::OsStr) -> Result<String, VfsError> {
     os_str
       .to_str()
