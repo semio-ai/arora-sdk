@@ -13,8 +13,8 @@ members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
-  "crates/arora-status",
   "crates/arora-behavior-tree",
+  "crates/arora-behavior-tree-types",
 ]
 
 [profile.release]

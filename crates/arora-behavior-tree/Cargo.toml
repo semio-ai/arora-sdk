@@ -30,7 +30,7 @@ url = "2"
 
 [build-dependencies]
 anyhow = "*"
-arora-status = { path = "../arora-status" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
 arora-module-core = { path = "../arora-module-core" }
 arora-module-rust = { path = "../arora-module-rust" }
