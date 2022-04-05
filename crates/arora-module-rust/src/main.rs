@@ -1,4 +1,3 @@
-mod lib;
 use std::{
   collections::HashSet,
   fmt::Debug,
@@ -17,7 +16,7 @@ use arora_vfs::{Directory, Entry};
 use clap::Parser;
 use convert_case::{Case, Casing};
 use itertools::Itertools;
-use lib::{token_stream_to_file, type_ident, RawUuidValue, variable_ident,
+use arora_module_rust::{token_stream_to_file, type_ident, RawUuidValue, variable_ident,
   struct_field_const_id_ident, struct_field_ident, generate_into_impl,
   struct_field_intermediate_variable_ident, PrefixWithMod, generate_try_from_impl,
   enum_variant_const_id_ident, enum_variant_ident, Public, CheckType,

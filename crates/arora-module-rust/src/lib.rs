@@ -1,5 +1,6 @@
-use std::{fmt::Display, path};
+pub mod rustfmt;
 
+use std::{fmt::Display, path};
 use arora_module_core::{Asset2, ModuleDeclarationError};
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::ty::{
@@ -1003,6 +1004,8 @@ pub enum GenerationError {
   ModuleDeclarationError(ModuleDeclarationError),
   RegistryError(RegistryError),
   VfsError(VfsError),
+  IoError(std::io::Error),
+  Generic(String),
 }
 
 impl std::error::Error for GenerationError {}
