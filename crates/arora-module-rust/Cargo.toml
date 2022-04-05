@@ -3,9 +3,7 @@ name = "arora-module-rust"
 version = "0.1.0"
 edition = "2021"
 readme = "readme.md"
-include = ["/src", "src/arora/header.yaml"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+include = ["/src"]
 
 [dependencies]
 arora-index = { path = "../arora-index" }
