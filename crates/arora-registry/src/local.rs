@@ -1,5 +1,5 @@
 use crate::{
-  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry, Registry,
+  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry,
   RegistryError, StructurePublic, TypeDefinition,
 };
 use async_trait::async_trait;
