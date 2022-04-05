@@ -1,8 +1,8 @@
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
   module::{
-    high::{ImportSymbol, ModuleDefinition},
-    low::{ExportSymbol, Header},
+    high::{ImportSymbol as HighImportSymbol, ModuleDefinition},
+    low::{ExportSymbol, Header, ImportSymbol as LowImportSymbol},
   },
   ty::low::Type,
 };
@@ -21,7 +21,7 @@ use uuid::Uuid;
 pub enum Asset2 {
   Type(TypeDefinition),
   Module(ModulePublic),
-  Import(ImportSymbol),
+  Import(HighImportSymbol),
 }
 
 /// Analyzes a module from the path where it is written in the YAML format.
@@ -49,7 +49,7 @@ pub async fn analyze_module(
   let mut assets = Vec::new();
   let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
   let mut module_deps = Vec::new();
-  for ImportSymbol::Function(import_function) in &module_definition.imports {
+  for HighImportSymbol::Function(import_function) in &module_definition.imports {
     let mod_selector = match Uuid::from_str(import_function.module.as_str()) {
       Ok(uuid) => Selector::Id(uuid),
       Err(_) => Selector::Path(import_function.module.to_owned()),
@@ -93,7 +93,7 @@ pub async fn analyze_module(
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Asset {
   Type(Type),
-  ImportSymbol(ImportSymbol),
+  ImportSymbol(LowImportSymbol),
   ExportSymbol(ExportSymbol),
   Header(Header),
 }
