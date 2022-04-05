@@ -1,13 +1,25 @@
 use std::{fmt::Display, path};
 
-use arora_module_core::Asset2;
+use arora_module_core::{Asset2, ModuleDeclarationError};
+use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
+use arora_schema::ty::{
+  BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
+  U8_ID,
+};
 use arora_vfs::{Directory, Entry, File, VfsError};
+use async_recursion::async_recursion;
 use convert_case::{Case, Casing};
+use derive_more::Display;
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
 };
-use semio_record::enumeration::v0::public::Public as EnumerationPublic;
+use semio_client::common::Selector;
+use semio_record::{
+  enumeration::v0::public::Public as EnumerationPublic,
+  ty::{Primitive, UnfrozenScalar, UnfrozenTy},
+};
+use semio_record::{structure::v0::public::Public as StructurePublic, ty::PrimitiveKind};
 use uuid::Uuid;
 
 /// Generates a set of sources organized in a virtual directory
@@ -19,7 +31,7 @@ pub fn generate_sources(assets: Vec<Asset2>) -> Directory {
 
 /// Generates `mod.rs` files and adds them at every level of the directory hierarchy
 /// where `.rs` files can be found. Returns true if it was generated.
-pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, VfsError> {
+pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, GenerationError> {
   let mut mods = Vec::new();
   for (path, entry) in dir.list_mut() {
     if let Entry::Directory(ref mut dir) = entry {
@@ -39,7 +51,9 @@ pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, VfsErro
     let tokens = quote! {
       #(pub mod #mods;)*
     };
-    dir.insert("mod.rs", File::new(tokens.to_string()))?;
+    dir
+      .insert("mod.rs", File::new(tokens.to_string()))
+      .map_err(GenerationError::VfsError)?;
     Ok(true)
   } else {
     Ok(false)
@@ -66,8 +80,8 @@ pub fn generate_common_sources() -> Result<Directory, VfsError> {
 
 /// Generates a Rust source file for the given enumeration.
 /// It contains the type declaration and some functions
-/// to serialize and deserialixe values.
-/// It depends on `arora_buffers` and the
+/// to serialize and deserialize values.
+/// It depends on `arora_buffers`, `arora_schema` and `uuid`.
 pub fn generate_enumeration_source(
   id: &Uuid,
   enumeration: &EnumerationPublic,
@@ -265,6 +279,181 @@ pub fn generate_enumeration_source(
   )
 }
 
+/// Generates a Rust source file for the given structure.
+/// It contains the type declaration and some functions
+/// to serialize and deserialize values.
+/// It depends on `arora-buffers`, `arora-schema`, `arora-registry` and `uuid`.
+pub async fn generate_structure_source(
+  id: &Uuid,
+  structure: &StructurePublic,
+  registry: &mut dyn ReadableRegistry,
+  parent_path: &String,
+) -> Result<Directory, GenerationError> {
+  // Struct declaration.
+  let name = &structure.name;
+  let struct_ident = type_ident(name);
+  let mut field_declarations = Vec::new();
+  for (id, field) in &structure.fields {
+    let field_ident = variable_ident(&field.name);
+    let field_type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes)
+      .await
+      .map_err(GenerationError::RegistryError)?;
+    field_declarations.push(quote! { pub #field_ident: #field_type_ident });
+  }
+  let struct_declaration = quote! {
+    pub struct #struct_ident {
+      #(#field_declarations),*
+    }
+  };
+
+  // Struct IDs.
+  let id_str = id.to_string();
+  let id_bytes = RawUuidValue(id);
+  let upper_name = format_ident!("{}", name.to_case(Case::ScreamingSnake));
+  let const_id_ident = format_ident!("{}_STRUCT_RAW_ID", upper_name);
+  let const_id_doc = format!("{}: {}", name, id_str);
+  let id_declaration = quote! {
+    #[doc = #const_id_doc]
+    pub const #const_id_ident: [u8; 16] = #id_bytes;
+  };
+
+  let field_id_declarations = structure.fields.iter().map(|(field_id, field)| {
+    let field_id_bytes = RawUuidValue(field_id);
+    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
+    let field_doc = format!(
+      "{}: {}",
+      struct_field_ident(&name, &field.name).to_string(),
+      field_id.to_string(),
+    );
+    quote! {
+      #[doc = #field_doc]
+      pub const #field_const_id_ident: [u8; 16] = #field_id_bytes;
+    }
+  });
+
+  // Struct Serialization.
+  let mut fields_serialization = Vec::new();
+  for (_, field) in &structure.fields {
+    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
+    let field_ident = variable_ident(&field.name);
+    let value_expression = quote! { value.#field_ident };
+    let serialize = generate_serialize_from_unfrozen(&field.ty, value_expression, registry).await?;
+    fields_serialization.push(quote! {
+      writer.add_structure_field(&#field_const_id_ident);
+      #serialize
+    });
+  }
+  let field_count = fields_serialization.len() as u32;
+
+  let into_impl = generate_into_impl(&struct_ident);
+  let serialization = quote! {
+    #into_impl
+
+    pub fn serialize_to_writer(value: &#struct_ident, writer: &mut BufferWriter) {
+      let structure_id = #const_id_ident.as_slice();
+      writer.begin_structure(structure_id, #field_count);
+      #(#fields_serialization)*
+    }
+  };
+
+  // Struct Deserialization.
+  // We convert each field we read into an optional,
+  // then we move all of them into the result structure.
+  let mut field_variable_declarations = Vec::new();
+  for (_, field) in &structure.fields {
+    let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    let type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes)
+      .await
+      .map_err(GenerationError::RegistryError)?;
+    field_variable_declarations
+      .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
+  }
+
+  let mut deserialization_cases = Vec::new();
+  for (_, field) in &structure.fields {
+    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
+    let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    let deserialize =
+      generate_deserialize_from_unfrozen(&field.ty, registry, CheckType::Yes).await?;
+    deserialization_cases.push(quote! {
+      if field_raw_id == #field_const_id_ident {
+        #field_variable_ident = Some(#deserialize);
+      }
+    });
+  }
+
+  let struct_field_assignment = structure.fields.iter().map(|(_, field)| {
+    let field_ident = variable_ident(&field.name);
+    let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    quote! { #field_ident: #variable_ident.unwrap() }
+  });
+
+  let try_from_impl = generate_try_from_impl(&struct_ident);
+  let expected_field_count = structure.fields.len();
+  let deserialization = quote! {
+    #try_from_impl
+
+    pub fn deserialize_from_reader(reader: &mut BufferReader, check_type: bool) -> Result<#struct_ident, DeserializationError> {
+      let field_count = if check_type {
+        let type_raw_id_opt = reader.next_type();
+        if type_raw_id_opt.is_none() {
+          return Err(DeserializationError{ message: "missing next type information".to_string() })
+        }
+        if type_raw_id_opt.unwrap() != TYPE_STRUCTURE {
+          return Err(DeserializationError{ message: "next type is not a structure".to_string() })
+        }
+        let (structure_raw_id, field_count) = reader.get_structure();
+        if #const_id_ident != structure_raw_id {
+          return Err(DeserializationError{ message: "structure id does not match".to_string() })
+        }
+        field_count
+      } else {
+        reader.get_structure_raw()
+      };
+      if #expected_field_count != field_count as usize {
+        return Err(DeserializationError{
+          message: format!("expected {} fields, found {}", #expected_field_count, field_count)
+        })
+      }
+
+      #(#field_variable_declarations)*
+      for _ in 0..field_count {
+        let field_raw_id = reader.get_structure_field();
+        #(#deserialization_cases) else* else {
+          return Err(DeserializationError {
+            message: format!("unexpected struct field {}", Uuid::from_slice(field_raw_id).unwrap().to_string())
+          })
+        }
+      }
+
+      Ok(#struct_ident {
+        #(#struct_field_assignment,)*
+      })
+    }
+  };
+
+  let type_source = quote! {
+    use arora_buffers::*;
+    use uuid::Uuid;
+    use crate::arora_generated::error::DeserializationError;
+    #struct_declaration
+    #serialization
+    #deserialization
+    #id_declaration
+    #(#field_id_declarations)*
+  };
+
+  token_stream_to_file(
+    format!(
+      "{}/{}.rs",
+      parent_path.replace('.', "/"),
+      structure.name.to_case(Case::Snake)
+    ),
+    &type_source,
+  )
+  .map_err(GenerationError::VfsError)
+}
+
 pub fn generate_into_impl(type_ident: &Ident) -> TokenStream {
   quote! {
     impl Into<Box<[u8]>> for #type_ident {
@@ -286,6 +475,266 @@ pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
         let mut reader = BufferReader::new(buffer);
         return deserialize_from_reader(&mut reader, true)
       }
+    }
+  }
+}
+
+async fn generate_serialize_from_unfrozen(
+  ty: &UnfrozenTy,
+  value_expression: TokenStream,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<TokenStream, GenerationError> {
+  match ty {
+    UnfrozenTy::Primitive(primitive) => {
+      let generate_serialize_primitive_array =
+        |primitive_type_id: &Uuid, write_function: TokenStream| {
+          let id_bytes = RawUuidValue(primitive_type_id);
+          quote! {
+            writer.add_array_primitive(#id_bytes, #value_expression.len() as u32);
+            #write_function (#value_expression);
+          }
+        };
+      Ok(match primitive.kind {
+        PrimitiveKind::Unit => quote! { write.add_unit() },
+        PrimitiveKind::Boolean => quote! { writer.add_boolean(#value_expression) },
+        PrimitiveKind::U8 => quote! { writer.add_u8(#value_expression) },
+        PrimitiveKind::U16 => quote! { writer.add_u16(#value_expression) },
+        PrimitiveKind::U32 => quote! { writer.add_u32(#value_expression) },
+        PrimitiveKind::U64 => quote! { writer.add_u64(#value_expression) },
+        PrimitiveKind::I8 => quote! { writer.add_i8(#value_expression) },
+        PrimitiveKind::I16 => quote! { writer.add_i16(#value_expression) },
+        PrimitiveKind::I32 => quote! { writer.add_i32(#value_expression) },
+        PrimitiveKind::I64 => quote! { writer.add_i64(#value_expression) },
+        PrimitiveKind::F32 => quote! { writer.add_f32(#value_expression) },
+        PrimitiveKind::F64 => quote! { writer.add_f64(#value_expression) },
+        PrimitiveKind::String => quote! { writer.add_string(#value_expression) },
+        PrimitiveKind::ArrayBoolean => {
+          generate_serialize_primitive_array(&BOOLEAN_ID, quote! { write.add_boolean_bulk })
+        }
+        PrimitiveKind::ArrayU8 => {
+          generate_serialize_primitive_array(&U8_ID, quote! { write.add_u8_bulk })
+        }
+        PrimitiveKind::ArrayU16 => {
+          generate_serialize_primitive_array(&U16_ID, quote! { write.add_u16_bulk })
+        }
+        PrimitiveKind::ArrayU32 => {
+          generate_serialize_primitive_array(&U32_ID, quote! { write.add_u32_bulk })
+        }
+        PrimitiveKind::ArrayU64 => {
+          generate_serialize_primitive_array(&U64_ID, quote! { write.add_u64_bulk })
+        }
+        PrimitiveKind::ArrayI8 => {
+          generate_serialize_primitive_array(&I8_ID, quote! { write.add_i8_bulk })
+        }
+        PrimitiveKind::ArrayI16 => {
+          generate_serialize_primitive_array(&I16_ID, quote! { write.add_i16_bulk })
+        }
+        PrimitiveKind::ArrayI32 => {
+          generate_serialize_primitive_array(&I32_ID, quote! { write.add_i32_bulk })
+        }
+        PrimitiveKind::ArrayI64 => {
+          generate_serialize_primitive_array(&I64_ID, quote! { write.add_i64_bulk })
+        }
+        PrimitiveKind::ArrayF32 => {
+          generate_serialize_primitive_array(&F32_ID, quote! { write.add_f32_bulk })
+        }
+        PrimitiveKind::ArrayF64 => {
+          generate_serialize_primitive_array(&F64_ID, quote! { write.add_f64_bulk })
+        }
+        PrimitiveKind::ArrayString => {
+          let id_bytes = RawUuidValue(&STRING_ID);
+          quote! {
+            writer.add_array_primitive(#id_bytes, #value_expression.len() as u32);
+            for s in #value_expression {
+              writer.add_string(s);
+            }
+          }
+        }
+      })
+    }
+    UnfrozenTy::UnfrozenScalar(scalar) => {
+      let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
+        .await
+        .map_err(GenerationError::RegistryError)?;
+      Ok(quote! { #mod_prefix ::serialize_to_writer(&#value_expression, &mut writer) })
+    }
+    UnfrozenTy::UnfrozenArray(array) => {
+      let type_def = registry
+        .get_type(&Selector::Id(array.reference.id))
+        .await
+        .map_err(GenerationError::RegistryError)?;
+      let id_bytes = RawUuidValue(&array.reference.id);
+      let add_array_args = quote! { #id_bytes, #value_expression.len() };
+      let prepare_array = match type_def {
+        TypeDefinition::Primitive(_) => {
+          unreachable!("got an array of primitive type instead of a primitive array type")
+        }
+        TypeDefinition::Enumeration(_) => {
+          quote! { writer.add_array_enumeration(#add_array_args); }
+        }
+        TypeDefinition::Structure(_) => {
+          quote! { writer.add_array_structure(#add_array_args); }
+        }
+      };
+      let mod_prefix = generated_mod_ident_from_id(&array.reference.id, registry)
+        .await
+        .map_err(GenerationError::RegistryError)?;
+      let serialize_element =
+        quote! { #mod_prefix ::serialize_to_writer(&#value_expression, &mut writer) };
+      Ok(quote! {
+        #prepare_array
+        for element in #value_expression {
+          #serialize_element;
+        }
+      })
+    }
+  }
+}
+
+#[async_recursion(?Send)]
+async fn generate_deserialize_from_unfrozen(
+  ty: &UnfrozenTy,
+  registry: &mut dyn ReadableRegistry,
+  check_type: CheckType,
+) -> Result<TokenStream, GenerationError> {
+  match ty {
+    UnfrozenTy::Primitive(primitive) => {
+      let type_kind_ident = type_kind_ident_from_primitive(&primitive.kind);
+
+      let generate_deserialize = |deserialize: TokenStream| {
+        let type_check = match check_type {
+          CheckType::Yes => quote! {
+            assert_eq!(reader.next_type(), Some(#type_kind_ident));
+          },
+          CheckType::No => quote! {},
+        };
+        quote! {(|| {
+            #type_check
+            #deserialize
+          })()
+        }
+      };
+
+      let generate_deserialize_base_type = |type_ident: TokenStream| {
+        let getter = format_ident!("get_{}", type_ident.to_string());
+        generate_deserialize(quote! { reader.#getter() })
+      };
+
+      let generate_deserialize_array = |deserialize_array: TokenStream| {
+        let array_type_check = quote! {
+          assert_eq!(reader.next_type(), Some(TYPE_ARRAY));
+          let (ty, count) = reader.get_array();
+          assert_eq!(ty, #type_kind_ident);
+        };
+        quote! {
+          {
+            #array_type_check
+            #deserialize_array
+          }
+        }
+      };
+      Ok(match primitive.kind {
+        PrimitiveKind::Unit => quote! { Result::<(), DeserializationError>::Ok(reader.get_unit()) },
+        PrimitiveKind::Boolean => generate_deserialize(quote! { reader.get_boolean() }),
+        PrimitiveKind::U8 => generate_deserialize_base_type(quote! {u8}),
+        PrimitiveKind::U16 => generate_deserialize_base_type(quote! {u16}),
+        PrimitiveKind::U32 => generate_deserialize_base_type(quote! {u32}),
+        PrimitiveKind::U64 => generate_deserialize_base_type(quote! {u64}),
+        PrimitiveKind::I8 => generate_deserialize_base_type(quote! {i8}),
+        PrimitiveKind::I16 => generate_deserialize_base_type(quote! {i16}),
+        PrimitiveKind::I32 => generate_deserialize_base_type(quote! {i32}),
+        PrimitiveKind::I64 => generate_deserialize_base_type(quote! {i64}),
+        PrimitiveKind::F32 => generate_deserialize_base_type(quote! {f32}),
+        PrimitiveKind::F64 => generate_deserialize_base_type(quote! {f64}),
+        PrimitiveKind::String => generate_deserialize(quote! {
+          reader.get_string().to_string()
+        }),
+        PrimitiveKind::ArrayBoolean => generate_deserialize_array(quote! {
+          reader.get_boolean_bulk(count)
+        }),
+        PrimitiveKind::ArrayU8 => generate_deserialize_array(quote! {
+          reader.get_u8_bulk(count)
+        }),
+        PrimitiveKind::ArrayU16 => generate_deserialize_array(quote! {
+          reader.get_u16_bulk(count)
+        }),
+        PrimitiveKind::ArrayU32 => generate_deserialize_array(quote! {
+          reader.get_u32_bulk(count)
+        }),
+        PrimitiveKind::ArrayU64 => generate_deserialize_array(quote! {
+          reader.get_u64_bulk(count)
+        }),
+        PrimitiveKind::ArrayI8 => generate_deserialize_array(quote! {
+          reader.get_i8_bulk(count)
+        }),
+        PrimitiveKind::ArrayI16 => generate_deserialize_array(quote! {
+          reader.get_i16_bulk(count)
+        }),
+        PrimitiveKind::ArrayI32 => generate_deserialize_array(quote! {
+          reader.get_i32_bulk(count)
+        }),
+        PrimitiveKind::ArrayI64 => generate_deserialize_array(quote! {
+          reader.get_i64_bulk(count)
+        }),
+        PrimitiveKind::ArrayF32 => generate_deserialize_array(quote! {
+          reader.get_f32_bulk(count)
+        }),
+        PrimitiveKind::ArrayF64 => generate_deserialize_array(quote! {
+          reader.get_f64_bulk(count)
+        }),
+        PrimitiveKind::ArrayString => {
+          let deserialize_element = generate_deserialize(quote! {
+            Result::<String, DeserializationError>::Ok(reader.get_string().to_string())
+          });
+          generate_deserialize_array(quote! {
+            let mut res = Vec::<String>::with_capacity(count as usize);
+            for i in 0..count {
+              res.push(
+                #deserialize_element
+                  .expect(format!("failed to deserialize item #{} of an array of String", i).as_str())
+              );
+            }
+            res
+          })
+        }
+      })
+    }
+    UnfrozenTy::UnfrozenScalar(scalar) => {
+      let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
+        .await
+        .map_err(GenerationError::RegistryError)?;
+      let check_type = check_type == CheckType::Yes;
+      Ok(quote! { #mod_prefix ::deserialize_from_reader(&mut reader, #check_type) })
+    }
+    UnfrozenTy::UnfrozenArray(array) => {
+      // STRING_ID case is almost the same
+      let get_structure_field = {
+        let raw_id = RawUuidValue(&array.reference.id);
+        quote! { assert_eq!(reader.get_structure_field(), #raw_id); }
+      };
+      let type_ident = type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes)
+        .await
+        .map_err(GenerationError::RegistryError)?;
+      let type_str = type_ident.to_string();
+      let deserialize_element = generate_deserialize_from_unfrozen(
+        &UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
+          reference: array.reference.to_owned(),
+        }),
+        registry,
+        CheckType::No,
+      )
+      .await?;
+      Ok(quote! {
+        #get_structure_field
+        let mut res = Vec::<#type_ident>::with_capacity(count as usize);
+        for i in 0..count {
+          res.push(
+            #deserialize_element
+              .expect(format!("failed to deserialize item #{} of an array of {}", i, #type_str).as_str())
+          );
+        }
+        res
+      })
     }
   }
 }
@@ -377,6 +826,160 @@ pub fn variable_ident(name: &String) -> Ident {
   format_ident!("{}", name.to_case(Case::Snake))
 }
 
+async fn type_ident_from_unfrozen(
+  ty: &UnfrozenTy,
+  registry: &mut dyn ReadableRegistry,
+  with_mod: PrefixWithMod,
+) -> Result<TokenStream, RegistryError> {
+  Ok(match ty {
+    UnfrozenTy::Primitive(primitive) => match primitive {
+      &Primitive::UNIT => quote! { () },
+      &Primitive::BOOLEAN => quote!(bool),
+      &Primitive::U8 => quote!(u8),
+      &Primitive::U16 => quote!(u16),
+      &Primitive::U32 => quote!(u32),
+      &Primitive::U64 => quote!(u64),
+      &Primitive::I8 => quote!(i8),
+      &Primitive::I16 => quote!(i16),
+      &Primitive::I32 => quote!(i32),
+      &Primitive::I64 => quote!(i64),
+      &Primitive::F32 => quote!(f32),
+      &Primitive::F64 => quote!(f64),
+      &Primitive::STRING => quote!(String),
+      &Primitive::ARRAY_BOOLEAN => quote!(Vec<bool>),
+      &Primitive::ARRAY_U8 => quote!(Vec<u8>),
+      &Primitive::ARRAY_U16 => quote!(Vec<u16>),
+      &Primitive::ARRAY_U32 => quote!(Vec<u32>),
+      &Primitive::ARRAY_U64 => quote!(Vec<u64>),
+      &Primitive::ARRAY_I8 => quote!(Vec<i8>),
+      &Primitive::ARRAY_I16 => quote!(Vec<i16>),
+      &Primitive::ARRAY_I32 => quote!(Vec<i32>),
+      &Primitive::ARRAY_I64 => quote!(Vec<i64>),
+      &Primitive::ARRAY_F32 => quote!(Vec<f32>),
+      &Primitive::ARRAY_F64 => quote!(Vec<f64>),
+      &Primitive::ARRAY_STRING => quote!(Vec<String>),
+    },
+    UnfrozenTy::UnfrozenScalar(scalar) => {
+      type_ident_from_id(&scalar.reference.id, registry, with_mod).await?
+    }
+    UnfrozenTy::UnfrozenArray(array) => {
+      type_ident_from_id(&array.reference.id, registry, with_mod).await?
+    }
+  })
+}
+
+async fn type_ident_from_id(
+  id: &Uuid,
+  registry: &mut dyn ReadableRegistry,
+  with_mod: PrefixWithMod,
+) -> Result<TokenStream, RegistryError> {
+  let type_def = registry.get_type(&Selector::Id(id.to_owned())).await?;
+  type_ident_from_definition(&type_def, registry, with_mod).await
+}
+
+async fn type_ident_from_definition(
+  type_def: &TypeDefinition,
+  registry: &mut dyn ReadableRegistry,
+  with_mod: PrefixWithMod,
+) -> Result<TokenStream, RegistryError> {
+  Ok(match type_def {
+    TypeDefinition::Primitive(primitive) => match primitive {
+      PrimitiveKind::Unit => quote! { () },
+      PrimitiveKind::Boolean => quote!(bool),
+      PrimitiveKind::U8 => quote!(u8),
+      PrimitiveKind::U16 => quote!(u16),
+      PrimitiveKind::U32 => quote!(u32),
+      PrimitiveKind::U64 => quote!(u64),
+      PrimitiveKind::I8 => quote!(i8),
+      PrimitiveKind::I16 => quote!(i16),
+      PrimitiveKind::I32 => quote!(i32),
+      PrimitiveKind::I64 => quote!(i64),
+      PrimitiveKind::F32 => quote!(f32),
+      PrimitiveKind::F64 => quote!(f64),
+      PrimitiveKind::String => quote!(String),
+      PrimitiveKind::ArrayBoolean => quote!(Vec<bool>),
+      PrimitiveKind::ArrayU8 => quote!(Vec<u8>),
+      PrimitiveKind::ArrayU16 => quote!(Vec<u16>),
+      PrimitiveKind::ArrayU32 => quote!(Vec<u32>),
+      PrimitiveKind::ArrayU64 => quote!(Vec<u64>),
+      PrimitiveKind::ArrayI8 => quote!(Vec<i8>),
+      PrimitiveKind::ArrayI16 => quote!(Vec<i16>),
+      PrimitiveKind::ArrayI32 => quote!(Vec<i32>),
+      PrimitiveKind::ArrayI64 => quote!(Vec<i64>),
+      PrimitiveKind::ArrayF32 => quote!(Vec<f32>),
+      PrimitiveKind::ArrayF64 => quote!(Vec<f64>),
+      PrimitiveKind::ArrayString => quote!(Vec<String>),
+    },
+    TypeDefinition::Enumeration(enumeration) => {
+      type_ident_from_name_and_parent(&enumeration.name, &enumeration.parent, registry, with_mod)
+        .await?
+    }
+    TypeDefinition::Structure(structure) => {
+      type_ident_from_name_and_parent(&structure.name, &structure.parent, registry, with_mod)
+        .await?
+    }
+  })
+}
+
+async fn type_ident_from_name_and_parent(
+  name: &String,
+  parent: &Uuid,
+  registry: &mut dyn ReadableRegistry,
+  with_mod: PrefixWithMod,
+) -> Result<TokenStream, RegistryError> {
+  let mod_prefix = match with_mod {
+    PrefixWithMod::Yes => generated_mod_ident_from_id(parent, registry).await?,
+    PrefixWithMod::No => quote! {},
+  };
+  let type_ident = type_ident(name);
+  Ok(quote! { #mod_prefix #type_ident })
+}
+
+fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
+  match primitive {
+    PrimitiveKind::Unit => quote! { TYPE_UNIT },
+    PrimitiveKind::Boolean => quote! { TYPE_BOOLEAN },
+    PrimitiveKind::U8 => quote! { TYPE_U8 },
+    PrimitiveKind::U16 => quote! { TYPE_U16 },
+    PrimitiveKind::U32 => quote! { TYPE_U32 },
+    PrimitiveKind::U64 => quote! { TYPE_U64 },
+    PrimitiveKind::I8 => quote! { TYPE_I8 },
+    PrimitiveKind::I16 => quote! { TYPE_I16 },
+    PrimitiveKind::I32 => quote! { TYPE_I32 },
+    PrimitiveKind::I64 => quote! { TYPE_I64 },
+    PrimitiveKind::F32 => quote! { TYPE_F32 },
+    PrimitiveKind::F64 => quote! { TYPE_F64 },
+    PrimitiveKind::String => quote! { TYPE_STRING },
+    PrimitiveKind::ArrayBoolean
+    | PrimitiveKind::ArrayU8
+    | PrimitiveKind::ArrayU16
+    | PrimitiveKind::ArrayU32
+    | PrimitiveKind::ArrayU64
+    | PrimitiveKind::ArrayI8
+    | PrimitiveKind::ArrayI16
+    | PrimitiveKind::ArrayI32
+    | PrimitiveKind::ArrayI64
+    | PrimitiveKind::ArrayF32
+    | PrimitiveKind::ArrayF64
+    | PrimitiveKind::ArrayString => quote! { TYPE_ARRAY },
+  }
+}
+
+async fn generated_mod_ident_from_id(
+  id: &Uuid,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<TokenStream, RegistryError> {
+  let mod_path = registry.resolve_id(id).await?;
+  let mod_ident = mod_ident_from_path(&mod_path);
+  Ok(quote! { arora_generated::#mod_ident :: })
+}
+
+fn mod_ident_from_path(path: &String) -> TokenStream {
+  let path_parts = path.split(".").collect::<Vec<&str>>();
+  let path_parts = path_parts.iter().map(|part| format_ident!("{}", part));
+  quote! { #(#path_parts)::* }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CheckType {
   Yes,
@@ -394,6 +997,15 @@ pub enum Public {
   Yes,
   No,
 }
+
+#[derive(Display, Debug)]
+pub enum GenerationError {
+  ModuleDeclarationError(ModuleDeclarationError),
+  RegistryError(RegistryError),
+  VfsError(VfsError),
+}
+
+impl std::error::Error for GenerationError {}
 
 /// A helper to format a Uuid into an inlined byte array.
 pub struct RawUuidValue<'a>(pub &'a Uuid);
