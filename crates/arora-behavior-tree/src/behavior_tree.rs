@@ -1,12 +1,13 @@
-mod error;
-mod nodes;
-mod schema;
-mod schema_groot;
-mod status;
+pub mod arora_generated;
+pub mod error;
+pub mod nodes;
+pub mod schema;
+pub mod schema_groot;
 mod tests;
-mod tick_id;
-mod tree_node;
+pub mod tick_id;
+pub mod tree_node;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
+use arora_generated::std::status::Status;
 use arora_index::Index;
 use arora_schema::{
   module::low::{Parameter, TypeRef},
@@ -14,7 +15,6 @@ use arora_schema::{
 };
 use error::BehaviorTreeError;
 use schema::{CallExpression, Node, NodeParameterId};
-use status::Status;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tick_id::TickId;
 use uuid::Uuid;
@@ -70,7 +70,7 @@ pub fn run_behavior_tree(
   behavior: &BehaviorTree,
   index: Rc<Index>,
   caller: &mut dyn CallBridge,
-) -> Result<status::Status, BehaviorTreeError> {
+) -> Result<Status, BehaviorTreeError> {
   let mut runtime = BehaviorTreeRuntime::setup(behavior, index, caller)?;
   let mut status = Status::Running;
   while status == Status::Running {
@@ -131,7 +131,7 @@ fn tick(
   node_parameters_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
-) -> Result<status::Status, BehaviorTreeError> {
+) -> Result<Status, BehaviorTreeError> {
   let function = index.find_function(&node.function).map_err(|_| {
     BehaviorTreeError::CallError(CallError::FunctionNotFound {
       id: node.function.clone(),
@@ -263,17 +263,17 @@ fn tick(
 
 /// Specialization of Callable that returns a Status.
 trait Tickable {
-  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError>;
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError>;
 }
 
 impl Tickable for TickId {
-  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
     CallableId::from(self).tick(caller)
   }
 }
 
 impl Tickable for CallableId {
-  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
     let value = self
       .call(caller)
       .map_err(|e| BehaviorTreeError::CallError(e))?;
@@ -295,7 +295,7 @@ struct TickFunction {
 }
 
 impl Tickable for TickFunction {
-  fn tick(&self, caller: &mut dyn CallBridge) -> Result<status::Status, BehaviorTreeError> {
+  fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
     tick(
       caller,
       self.index.clone(),

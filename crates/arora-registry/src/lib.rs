@@ -143,7 +143,7 @@ impl Registry {
 }
 
 #[async_trait(?Send)]
-trait ReadableRegistry {
+pub trait ReadableRegistry {
   /// Gets the definition of a type entity,
   /// i.e. of a primitive, a structure or an enumeration.
   /// Not to be confused with the [`semio_client::common::type_of`] function,
@@ -158,7 +158,7 @@ trait ReadableRegistry {
 }
 
 #[async_trait(?Send)]
-trait EditableRegistry {
+pub trait EditableRegistry {
   /// Adds an [`EnumerationPublic`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.

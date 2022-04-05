@@ -1,11 +1,10 @@
 use arora_vfs::{Directory, Entry, File};
 use ast::{
-  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
-  IncludeStyle, Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit,
-  TypeRef,
+  Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype, IncludeStyle,
+  Namespace, NewLine, Parameter, PreprocessorDirective, Statement, TranslationUnit, TypeRef,
 };
 use clap::Parser;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use arora_module_core::{Asset, Reader, Writer};
 
@@ -89,7 +88,7 @@ pub struct Context<'a> {
   pub headers: HashMap<Uuid, Header>,
 }
 
-async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let ty = context
     .types
     .get(&id)
@@ -112,9 +111,9 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   }
   .to_pretty_string(0);
 
-  source_types.insert(format!("{}.cpp", ty.name), File::new(source_content));
+  source_types.insert(format!("{}.cpp", ty.name), File::new(source_content))?;
 
-  source.insert("types", source_types);
+  source.insert("types", source_types)?;
 
   let mut include = Directory::new();
   let mut include_types = Directory::new();
@@ -150,7 +149,10 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
       return;
     }
 
-    let dep_header = context.types.get(dep).expect(format!("unknown type {}", dep).as_str());
+    let dep_header = context
+      .types
+      .get(dep)
+      .expect(format!("unknown type {}", dep).as_str());
     include_declarations.push(
       PreprocessorDirective::Include(
         format!("types/{}.hpp", dep_header.name),
@@ -177,19 +179,19 @@ async fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   }
   .to_pretty_string(0);
 
-  include_types.insert(format!("{}.hpp", ty.name), File::new(include_content));
+  include_types.insert(format!("{}.hpp", ty.name), File::new(include_content))?;
 
-  include.insert("types", include_types);
+  include.insert("types", include_types)?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
 }
 
-async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let header = context
     .headers
     .get(&id)
@@ -442,7 +444,7 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
   }
   .to_pretty_string(0);
 
-  source.insert(format!("{}.cpp", header.name), File::new(source_content));
+  source.insert(format!("{}.cpp", header.name), File::new(source_content))?;
 
   let mut include = Directory::new();
 
@@ -524,11 +526,11 @@ async fn generate_module<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result
   }
   .to_pretty_string(0);
 
-  include.insert(format!("{}.hpp", header.name), File::new(include_content));
+  include.insert(format!("{}.hpp", header.name), File::new(include_content))?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
@@ -643,7 +645,8 @@ fn generate_self_header<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 }
 
 fn parameter_variable_name(parameter: &LowParameter) -> String {
-  format!("{}_{}",
+  format!(
+    "{}_{}",
     identifier_name(parameter.name.as_str()),
     identifier_uuid(&parameter.id)
   )
@@ -888,8 +891,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
               identifier_name(&header.name)
                 .to_expression()
                 .colon_colon(f.name.to_expression())
-                .call(f.parameters.iter()
-                  .map(|p| parameter_variable_name(p))),
+                .call(f.parameters.iter().map(|p| parameter_variable_name(p))),
             ),
             ..Default::default()
           }
@@ -898,7 +900,8 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
 
         function_declarations.push(declare::arora_buffer_writer().into());
 
-        let mutable_parameters = sorted_parameters.iter()
+        let mutable_parameters = sorted_parameters
+          .iter()
           .filter(|parameter| parameter.mutable);
         let field_count = mutable_parameters.clone().count() as u32 + 1;
 
@@ -920,11 +923,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
         );
 
         function_declarations.push(
-          declare::serialize(
-            &ty::type_name(context, &f.ret),
-            &"result".to_expression(),
-          )
-          .into(),
+          declare::serialize(&ty::type_name(context, &f.ret), &"result".to_expression()).into(),
         );
 
         for parameter in mutable_parameters {
@@ -1007,7 +1006,7 @@ fn generate_self_source<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<
   Ok(TranslationUnit { declarations })
 }
 
-async fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Arc<Directory>> {
+fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let header = context.headers.get(&id).unwrap();
 
   let mut source = Directory::new();
@@ -1015,18 +1014,18 @@ async fn generate_self<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<A
   source.insert(
     format!("{}.cpp", header.name),
     File::new(generate_self_source(context, id)?.to_pretty_string(0)),
-  );
+  )?;
 
   let mut include = Directory::new();
 
   include.insert(
     format!("{}.hpp", header.name),
     File::new(generate_self_header(context, id)?.to_pretty_string(0)),
-  );
+  )?;
 
   let mut root = Directory::new();
-  root.insert("source", source);
-  root.insert("include", include);
+  root.insert("source", source)?;
+  root.insert("include", include)?;
 
   // Write out a C++ header
   Ok(root.into())
@@ -1078,16 +1077,16 @@ async fn main() -> anyhow::Result<()> {
     }
   }
 
-  let mut root = Arc::new(Directory::new());
+  let mut root = Directory::new();
   for id in context.types.keys() {
-    root = root.merge_with(generate_type(&context, id).await?);
+    root = root.merge_with(&generate_type(&context, id)?);
   }
 
   for id in context.headers.keys() {
     if id == &self_id {
-      root = root.merge_with(generate_self(&context, &self_id).await?);
+      root = root.merge_with(&generate_self(&context, &self_id)?);
     } else {
-      root = root.merge_with(generate_module(&&context, id).await?);
+      root = root.merge_with(&generate_module(&context, id)?);
     }
   }
 

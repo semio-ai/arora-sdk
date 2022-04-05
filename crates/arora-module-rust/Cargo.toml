@@ -12,6 +12,7 @@ arora-index = { path = "../arora-index" }
 arora-module-core = { path = "../arora-module-core" }
 arora-schema = { path = "../arora-schema" }
 arora-vfs = { path = "../arora-vfs" }
+semio-record = { git = "https://github.com/semio-ai/semio-entity.git", branch = "master" }
 anyhow = "*"
 clap = { version = "3.0.10", features = ["derive"] }
 convert_case = "0.5"
