@@ -1,18 +1,22 @@
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
-  module::low::{ExportSymbol, Header, ImportSymbol},
+  module::{
+    high::{ImportSymbol, ModuleDefinition},
+    low::{ExportSymbol, Header},
+  },
   ty::low::Type,
 };
 use bytes::{Buf, BufMut};
 use derive_more::Display;
-use semio_client::{
-  common::{type_of, EntityType, Selector, TypeOf},
-  context::Context,
-};
+use semio_client::common::{EntityType, Selector};
 use semio_record::{module::v0::public::Public as ModulePublic, record::UnfrozenReference};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashSet;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::{collections::HashSet, path::Path, str::FromStr};
+use tokio::{
+  fs::read_to_string,
+  io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
+use uuid::Uuid;
 
 pub enum Asset2 {
   Type(TypeDefinition),
@@ -20,21 +24,38 @@ pub enum Asset2 {
   Import(ImportSymbol),
 }
 
+/// Analyzes a module from the path where it is written in the YAML format.
+/// See [`analyze_module`].
+pub async fn analyze_module_from_path<P: AsRef<Path>>(
+  path: P,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+  let module_yaml = read_to_string(path)
+    .await
+    .map_err(ModuleDeclarationError::IoError)?;
+  let module_definition: ModuleDefinition =
+    serde_yaml::from_str(&module_yaml).map_err(ModuleDeclarationError::YAMLError)?;
+  analyze_module(module_definition, registry).await
+}
+
 /// Analyzes a module by reading its header and
 /// resolves its dependencies with the help of the provided registry.
 /// Produces a list of assets that can be used for code generation.
 /// First, the types, then the modules, then the imports.
 pub async fn analyze_module(
-  header: &Header,
-  context: &Context,
+  module_definition: ModuleDefinition,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Vec<Asset2>, ModuleDeclarationError> {
   let mut assets = Vec::new();
   let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
   let mut module_deps = Vec::new();
-  for dep_module_id in &header.module_dependencies() {
+  for ImportSymbol::Function(import_function) in &module_definition.imports {
+    let mod_selector = match Uuid::from_str(import_function.module.as_str()) {
+      Ok(uuid) => Selector::Id(uuid),
+      Err(_) => Selector::Path(import_function.module.to_owned()),
+    }; // more modeselektor here https://soundcloud.com/modeselektor/wake-me-up-when-its-over
     let dep_module = registry
-      .get_module(&Selector::Id(dep_module_id.clone()))
+      .get_module(&mod_selector)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     for indirect_dep_ref in &dep_module.dependencies {
@@ -44,18 +65,10 @@ pub async fn analyze_module(
   }
   for dep_ref in deps_to_resolve {
     let selector = Selector::Id(dep_ref.id);
-    let entity_type = type_of(
-      context,
-      TypeOf {
-        selector: selector.clone(),
-      },
-    )
-    .await
-    .map_err(|e| {
-      ModuleDeclarationError::RegistryError(RegistryError::Generic {
-        message: format!("error resolving type of {}: {}", dep_ref.to_string(), e),
-      })
-    })?;
+    let entity_type = registry
+      .type_of(&selector)
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
     match entity_type {
       EntityType::Module => module_deps.push(
         registry
@@ -73,7 +86,7 @@ pub async fn analyze_module(
     }
   }
   assets.extend(module_deps.into_iter().map(Asset2::Module));
-  assets.extend(header.imports.iter().cloned().map(Asset2::Import));
+  assets.extend(module_definition.imports.into_iter().map(Asset2::Import));
   Ok(assets)
 }
 
@@ -138,8 +151,13 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
 #[derive(Display, Debug)]
 pub enum ModuleDeclarationError {
   /// No such entity.
-  #[display(fmt = "{}", _0)]
   RegistryError(RegistryError),
+
+  /// IO error.
+  IoError(std::io::Error),
+
+  /// Serialization / deserialization error.
+  YAMLError(serde_yaml::Error),
 
   /// For any other error.
   #[display(fmt = "error: {}", message)]
