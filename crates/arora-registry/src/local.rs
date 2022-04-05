@@ -1,9 +1,9 @@
 use crate::{
-  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry,
+  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry, Registry,
   RegistryError, StructurePublic, TypeDefinition,
 };
 use async_trait::async_trait;
-use semio_client::common::Selector;
+use semio_client::common::{EntityType, Selector};
 use semio_record::module::v0::unfrozen::ExportKind;
 use std::{
   collections::{
@@ -152,6 +152,24 @@ impl ReadableRegistry for LocalRegistry {
         selector: Selector::Id(id.to_owned()),
       },
     )?)
+  }
+
+  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+    self
+      .indexed
+      .get(selector)
+      .map(|reg_ref| match reg_ref {
+        RegistryReference::Enumeration(_) => EntityType::Enumeration,
+        RegistryReference::Variant(_, _) => EntityType::Unknown,
+        RegistryReference::Structure(_) => EntityType::Structure,
+        RegistryReference::Field(_, _) => EntityType::Unknown,
+        RegistryReference::Module(_) => EntityType::Module,
+        RegistryReference::Function(_, _) => EntityType::Unknown,
+        RegistryReference::Root => EntityType::Unknown,
+      })
+      .ok_or(RegistryError::NoSuchEntity {
+        selector: selector.to_owned(),
+      })
   }
 }
 
