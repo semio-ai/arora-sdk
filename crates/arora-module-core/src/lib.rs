@@ -1,27 +1,30 @@
+mod resolve;
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
   module::{
-    high::{ImportSymbol as HighImportSymbol, ModuleDefinition},
-    low::{ExportSymbol, Header, ImportSymbol as LowImportSymbol},
+    high::ModuleDefinition,
+    low::{ExportSymbol as LowExportSymbol, Header, ImportSymbol as LowImportSymbol},
   },
   ty::low::Type,
 };
 use bytes::{Buf, BufMut};
 use derive_more::Display;
+use resolve::resolve_module;
 use semio_client::common::{EntityType, Selector};
-use semio_record::{module::v0::public::Public as ModulePublic, record::UnfrozenReference};
+use semio_record::module::v0::{public::Public as ModulePublic, unfrozen::Export};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashSet, path::Path, str::FromStr};
+use std::path::Path;
 use tokio::{
   fs::read_to_string,
   io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub enum Asset2 {
-  Type(TypeDefinition),
-  Module(ModulePublic),
-  Import(HighImportSymbol),
+  Type(Uuid, TypeDefinition),
+  Import(Export),
+  Module(Uuid, ModulePublic),
 }
 
 /// Analyzes a module from the path where it is written in the YAML format.
@@ -46,37 +49,23 @@ pub async fn analyze_module(
   module_definition: ModuleDefinition,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+  let module_id = module_definition.id.clone();
+
+  // Resolve the module contents into a description compatible with the registry.
+  // It already includes the dependencies (internal and external) as references.
+  let resolved_module = resolve_module(module_definition, registry).await?;
+
+  // Collect first the actual types behind the references.
   let mut assets = Vec::new();
-  let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
-  let mut module_deps = Vec::new();
-  for HighImportSymbol::Function(import_function) in &module_definition.imports {
-    let mod_selector = match Uuid::from_str(import_function.module.as_str()) {
-      Ok(uuid) => Selector::Id(uuid),
-      Err(_) => Selector::Path(import_function.module.to_owned()),
-    }; // more modeselektor here https://soundcloud.com/modeselektor/wake-me-up-when-its-over
-    let dep_module = registry
-      .get_module(&mod_selector)
-      .await
-      .map_err(ModuleDeclarationError::RegistryError)?;
-    for indirect_dep_ref in &dep_module.dependencies {
-      deps_to_resolve.insert(indirect_dep_ref.clone());
-    }
-    module_deps.push(dep_module);
-  }
-  for dep_ref in deps_to_resolve {
+  for dep_ref in &resolved_module.module.dependencies {
     let selector = Selector::Id(dep_ref.id);
     let entity_type = registry
       .type_of(&selector)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     match entity_type {
-      EntityType::Module => module_deps.push(
-        registry
-          .get_module(&selector)
-          .await
-          .map_err(ModuleDeclarationError::RegistryError)?,
-      ),
       EntityType::Structure | EntityType::Enumeration => assets.push(Asset2::Type(
+        dep_ref.id.to_owned(),
         registry
           .get_type(&selector)
           .await
@@ -85,8 +74,10 @@ pub async fn analyze_module(
       _ => (),
     }
   }
-  assets.extend(module_deps.into_iter().map(Asset2::Module));
-  assets.extend(module_definition.imports.into_iter().map(Asset2::Import));
+
+  // Then publish imports, and then this module.
+  assets.extend(resolved_module.imports.into_iter().map(Asset2::Import));
+  assets.push(Asset2::Module(module_id, resolved_module.module));
   Ok(assets)
 }
 
@@ -94,7 +85,7 @@ pub async fn analyze_module(
 pub enum Asset {
   Type(Type),
   ImportSymbol(LowImportSymbol),
-  ExportSymbol(ExportSymbol),
+  ExportSymbol(LowExportSymbol),
   Header(Header),
 }
 
@@ -160,8 +151,8 @@ pub enum ModuleDeclarationError {
   YAMLError(serde_yaml::Error),
 
   /// For any other error.
-  #[display(fmt = "error: {}", message)]
-  Generic { message: String },
+  #[display(fmt = "error: {}", _0)]
+  Generic(String),
 }
 
 impl std::error::Error for ModuleDeclarationError {}
