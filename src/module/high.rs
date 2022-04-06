@@ -1,4 +1,4 @@
-use crate::{SemanticVersion, value::Value};
+use crate::{value::Value, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ pub enum TypeRef {
   Map { key_id: String, value_id: String },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Parameter {
   /// ID
   pub id: Uuid,
@@ -34,7 +34,7 @@ pub struct Parameter {
   pub default_value: Option<Value>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ImportFunction {
   /// Module ID
   pub module: String,
@@ -48,7 +48,7 @@ pub struct ImportFunction {
   pub ret: TypeRef,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ExportFunction {
   /// Function ID
   pub id: Uuid,
@@ -63,17 +63,19 @@ pub struct ExportFunction {
 }
 
 fn default_return_type() -> TypeRef {
-  TypeRef::Scalar { id: "unit".to_string() }
+  TypeRef::Scalar {
+    id: "unit".to_string(),
+  }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ImportSymbol {
   /// A function
   Function(ImportFunction),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ExportSymbol {
   /// A function
