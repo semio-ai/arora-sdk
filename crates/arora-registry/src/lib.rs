@@ -212,6 +212,7 @@ pub type UserPublic = <User as RecordDefn>::Public;
 pub type OrganizationPublic = <Organization as RecordDefn>::Public;
 pub type FolderPublic = <Folder as RecordDefn>::Public;
 
+#[derive(Debug)]
 pub enum TypeDefinition {
   Primitive(PrimitiveKind),
   Enumeration(EnumerationPublic),
