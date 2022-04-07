@@ -203,6 +203,9 @@ pub trait EditableRegistry {
   /// Returns the identifier under which the module
   /// was registered.
   async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
+
+  /// Adds a folder to the registry, under the given identifier.
+  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError>;
 }
 
 pub type EnumerationPublic = <Enumeration as RecordDefn>::Public;
