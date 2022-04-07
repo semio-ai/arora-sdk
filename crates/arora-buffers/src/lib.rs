@@ -26,3 +26,5 @@ pub const TYPE_ARRAY: u8 = 15;
 pub const TYPE_MAP: u8 = 16;
 
 const ALIGNMENT: usize = 8;
+
+pub const BUFFER_SIZE_SIZE: usize = std::mem::size_of::<u32>();
