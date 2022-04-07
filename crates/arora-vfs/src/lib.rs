@@ -200,7 +200,7 @@ impl Directory {
   /// Writes the directory to the given path.
   pub async fn sync(&self, path: PathBuf) -> io::Result<()> {
     if !path.exists() {
-      fs::create_dir(&path).await?;
+      fs::create_dir_all(&path).await?;
     }
 
     for (name, entry) in self.entries.iter() {
