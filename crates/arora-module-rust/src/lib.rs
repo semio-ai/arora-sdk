@@ -1,7 +1,8 @@
-mod header;
 pub mod rustfmt;
 
-use arora_module_core::{Asset2, ImportAsset, ModuleDeclarationError};
+use arora_module_core::{
+  header::generate_header_file, Asset2, ImportAsset, ModuleDeclarationError,
+};
 use arora_registry::{ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::ty::{
   BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
@@ -11,12 +12,11 @@ use arora_vfs::{Directory, Entry as VfsEntry, File, VfsError};
 use async_recursion::async_recursion;
 use convert_case::{Case, Casing};
 use derive_more::Display;
-use header::generate_header_file;
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
 };
-use semio_client::common::Selector;
+use semio_client::common::{EntityType, Selector};
 use semio_record::{
   enumeration::v0::public::Public as EnumerationPublic,
   module::v0::unfrozen::{ExportKind, Parameter},
@@ -94,11 +94,10 @@ pub async fn generate_sources(
 
   // Produce the stripped `module.yaml` file.
   let current_module = current_module.unwrap();
-  result = result.merge_with(&generate_header_file(
-    &current_module.0,
-    &current_module.1,
-    &all_imports,
-  )?);
+  result = result.merge_with(
+    &generate_header_file(&current_module.0, &current_module.1, &all_imports)
+      .map_err(GenerationError::ModuleDeclarationError)?,
+  );
 
   // Also declare arora engine functions.
   let engine_functions_declarations = quote! {
@@ -774,8 +773,7 @@ async fn generate_imports_from_module_source(
   let source = quote! {
     #(#uses)*
     use arora_buffers::*;
-    use crate::{arora_generated, arora_generated::error::DeserializationError};
-    use super::arora_dispatch;
+    use crate::arora_generated::arora::arora_dispatch;
     #module_id_declaration
     #(#functions_declarations)*
   };
@@ -877,7 +875,8 @@ async fn generate_module_source(
         }
       };
 
-      let param_args = function_symbol.parameters.iter().map(|(param_id, param)| {
+      let param_args = function_symbol.parameter_ordering.iter().map(|param_id| {
+        let param = function_symbol.parameters.get(param_id).unwrap();
         let param_var_ident = param_ident(param_id, param);
         if param.mutable {
           quote! { &mut #param_var_ident }
@@ -959,7 +958,7 @@ async fn generate_module_source(
   // Putting it all together.
   let source = quote! {
     use arora_buffers::*;
-    use crate::{arora_generated, arora_generated::error::DeserializationError, #(#use_functions),*};
+    use crate::{arora_generated, #(#use_functions),*};
     #(#function_declarations)*
     #(#function_ids)*
   };
@@ -1068,7 +1067,7 @@ async fn generate_serialize_from_unfrozen(
       let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
         .await
         .map_err(GenerationError::RegistryError)?;
-      Ok(quote! { #mod_prefix ::serialize_to_writer(&#value_expression, &mut writer) })
+      Ok(quote! { #mod_prefix serialize_to_writer(&#value_expression, &mut writer) })
     }
     UnfrozenTy::UnfrozenArray(array) => {
       let type_def = registry
@@ -1092,7 +1091,7 @@ async fn generate_serialize_from_unfrozen(
         .await
         .map_err(GenerationError::RegistryError)?;
       let serialize_element =
-        quote! { #mod_prefix ::serialize_to_writer(&#value_expression, &mut writer) };
+        quote! { #mod_prefix serialize_to_writer(&#value_expression, &mut writer) };
       Ok(quote! {
         #prepare_array
         for element in #value_expression {
@@ -1138,11 +1137,10 @@ async fn generate_deserialize_from_unfrozen(
           let (ty, count) = reader.get_array();
           assert_eq!(ty, #type_kind_ident);
         };
-        quote! {
-          {
+        quote! {(|| {
             #array_type_check
             #deserialize_array
-          }
+          })()
         }
       };
       Ok(match primitive.kind {
@@ -1200,11 +1198,8 @@ async fn generate_deserialize_from_unfrozen(
           });
           generate_deserialize_array(quote! {
             let mut res = Vec::<String>::with_capacity(count as usize);
-            for i in 0..count {
-              res.push(
-                #deserialize_element
-                  .expect(format!("failed to deserialize item #{} of an array of String", i).as_str())
-              );
+            for _i in 0..count {
+              res.push(#deserialize_element);
             }
             res
           })
@@ -1216,17 +1211,17 @@ async fn generate_deserialize_from_unfrozen(
         .await
         .map_err(GenerationError::RegistryError)?;
       let check_type = check_type == CheckType::Yes;
-      Ok(quote! { #mod_prefix ::deserialize_from_reader(&mut reader, #check_type) })
+      let type_ident =
+        type_ident_from_id(&scalar.reference.id, registry, PrefixWithMod::Yes).await?;
+      let type_str = type_ident.to_string();
+      Ok(
+        quote! { #mod_prefix deserialize_from_reader(&mut reader, #check_type)
+        .expect(format!("failed to deserialize value of type {}", #type_str).as_str()) },
+      )
     }
     UnfrozenTy::UnfrozenArray(array) => {
-      // STRING_ID case is almost the same
-      let get_structure_field = {
-        let raw_id = RawUuidValue(&array.reference.id);
-        quote! { assert_eq!(reader.get_structure_field(), #raw_id); }
-      };
       let type_ident =
         type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
-      let type_str = type_ident.to_string();
       let deserialize_element = generate_deserialize_from_unfrozen(
         &UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
           reference: array.reference.to_owned(),
@@ -1235,17 +1230,27 @@ async fn generate_deserialize_from_unfrozen(
         CheckType::No,
       )
       .await?;
-      Ok(quote! {
-        #get_structure_field
+      let type_enum = match registry
+        .type_of(&Selector::Id(array.reference.id.to_owned()))
+        .await
+        .map_err(GenerationError::RegistryError)?
+      {
+        EntityType::Enumeration => quote! { TYPE_ENUMERATION },
+        EntityType::Structure => quote! { TYPE_STRUCTURE },
+        _ => unreachable!("unexpected type of element in array"),
+      };
+      let raw_id = RawUuidValue(&array.reference.id);
+      Ok(quote! {(|| {
+        assert_eq!(reader.next_type(), Some(TYPE_ARRAY));
+        let (ty, count) = reader.get_array();
+        assert_eq!(ty, #type_enum);
+        assert_eq!(reader.get_structure_field(), #raw_id);
         let mut res = Vec::<#type_ident>::with_capacity(count as usize);
-        for i in 0..count {
-          res.push(
-            #deserialize_element
-              .expect(format!("failed to deserialize item #{} of an array of {}", i, #type_str).as_str())
-          );
+        for _i in 0..count {
+          res.push(#deserialize_element);
         }
         res
-      })
+      })()})
     }
   }
 }
@@ -1403,7 +1408,8 @@ async fn type_ident_from_unfrozen(
       type_ident_from_id(&scalar.reference.id, registry, with_mod).await?
     }
     UnfrozenTy::UnfrozenArray(array) => {
-      type_ident_from_id(&array.reference.id, registry, with_mod).await?
+      let type_ident = type_ident_from_id(&array.reference.id, registry, with_mod).await?;
+      quote! { Vec<#type_ident> }
     }
   })
 }
@@ -1526,7 +1532,7 @@ fn mod_ident_from_path(path: &String) -> TokenStream {
   let path_parts = path_parts
     .iter()
     .map(|part| format_ident!("{}", part.to_case(Case::Snake)));
-  quote! { #(#path_parts)::* }
+  quote! { #(#path_parts ::)* }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
