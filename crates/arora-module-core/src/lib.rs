@@ -1,23 +1,37 @@
+mod resolve;
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
-  module::low::{ExportSymbol, Header, ImportSymbol},
+  module::{
+    high::ModuleDefinition,
+    low::{ExportSymbol as LowExportSymbol, Header, ImportSymbol as LowImportSymbol},
+  },
   ty::low::Type,
 };
 use bytes::{Buf, BufMut};
 use derive_more::Display;
-use semio_client::{
-  common::{type_of, EntityType, Selector, TypeOf},
-  context::Context,
-};
-use semio_record::{module::v0::public::Public as ModulePublic, record::UnfrozenReference};
+use resolve::resolve_module;
+use semio_client::common::{EntityType, Selector};
+use semio_record::module::v0::{public::Public as ModulePublic, unfrozen::Export};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashSet;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::path::Path;
+use tokio::{
+  fs::read_to_string,
+  io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
+use uuid::Uuid;
 
-pub enum Asset2 {
-  Type(TypeDefinition),
-  Module(ModulePublic),
-  Import(ImportSymbol),
+/// Analyzes a module from the path where it is written in the YAML format.
+/// See [`analyze_module`].
+pub async fn analyze_module_from_path<P: AsRef<Path>>(
+  path: P,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+  let module_yaml = read_to_string(path)
+    .await
+    .map_err(ModuleDeclarationError::IoError)?;
+  let module_definition: ModuleDefinition =
+    serde_yaml::from_str(&module_yaml).map_err(ModuleDeclarationError::YAMLError)?;
+  analyze_module(module_definition, registry).await
 }
 
 /// Analyzes a module by reading its header and
@@ -25,45 +39,26 @@ pub enum Asset2 {
 /// Produces a list of assets that can be used for code generation.
 /// First, the types, then the modules, then the imports.
 pub async fn analyze_module(
-  header: &Header,
-  context: &Context,
+  module_definition: ModuleDefinition,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+  let module_id = module_definition.id.clone();
+
+  // Resolve the module contents into a description compatible with the registry.
+  // It already includes the dependencies (internal and external) as references.
+  let resolved_module = resolve_module(module_definition, registry).await?;
+
+  // Collect first the actual types behind the references.
   let mut assets = Vec::new();
-  let mut deps_to_resolve = HashSet::<UnfrozenReference>::new();
-  let mut module_deps = Vec::new();
-  for dep_module_id in &header.module_dependencies() {
-    let dep_module = registry
-      .get_module(&Selector::Id(dep_module_id.clone()))
+  for dep_ref in &resolved_module.module.dependencies {
+    let selector = Selector::Id(dep_ref.id);
+    let entity_type = registry
+      .type_of(&selector)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
-    for indirect_dep_ref in &dep_module.dependencies {
-      deps_to_resolve.insert(indirect_dep_ref.clone());
-    }
-    module_deps.push(dep_module);
-  }
-  for dep_ref in deps_to_resolve {
-    let selector = Selector::Id(dep_ref.id);
-    let entity_type = type_of(
-      context,
-      TypeOf {
-        selector: selector.clone(),
-      },
-    )
-    .await
-    .map_err(|e| {
-      ModuleDeclarationError::RegistryError(RegistryError::Generic {
-        message: format!("error resolving type of {}: {}", dep_ref.to_string(), e),
-      })
-    })?;
     match entity_type {
-      EntityType::Module => module_deps.push(
-        registry
-          .get_module(&selector)
-          .await
-          .map_err(ModuleDeclarationError::RegistryError)?,
-      ),
       EntityType::Structure | EntityType::Enumeration => assets.push(Asset2::Type(
+        dep_ref.id.to_owned(),
         registry
           .get_type(&selector)
           .await
@@ -72,17 +67,37 @@ pub async fn analyze_module(
       _ => (),
     }
   }
-  assets.extend(module_deps.into_iter().map(Asset2::Module));
-  assets.extend(header.imports.iter().cloned().map(Asset2::Import));
+
+  // Then publish imports, and then this module.
+  assets.extend(resolved_module.imports.into_iter().map(Asset2::Import));
+  assets.push(Asset2::Module(module_id, resolved_module.module));
   Ok(assets)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Asset {
   Type(Type),
-  ImportSymbol(ImportSymbol),
-  ExportSymbol(ExportSymbol),
+  ImportSymbol(LowImportSymbol),
+  ExportSymbol(LowExportSymbol),
   Header(Header),
+}
+
+/// Assets are entities provided or referred to by a module.
+#[derive(Debug)]
+pub enum Asset2 {
+  /// Type, including its identifier.
+  Type(Uuid, TypeDefinition),
+  /// Imported symbol, including the identifier of its origin module.
+  Import(ImportAsset),
+  /// Module, including its identifier.
+  Module(Uuid, ModulePublic),
+}
+
+#[derive(Debug)]
+pub struct ImportAsset {
+  pub module_id: Uuid,
+  pub id: Uuid,
+  pub import: Export,
 }
 
 pub struct Writer<'a, W: AsyncWrite + Unpin> {
@@ -137,13 +152,18 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
 
 #[derive(Display, Debug)]
 pub enum ModuleDeclarationError {
-  /// No such entity.
-  #[display(fmt = "{}", _0)]
+  /// Entity is not known to the registry or registry is not available.
   RegistryError(RegistryError),
 
+  /// IO error.
+  IoError(std::io::Error),
+
+  /// Serialization / deserialization error.
+  YAMLError(serde_yaml::Error),
+
   /// For any other error.
-  #[display(fmt = "error: {}", message)]
-  Generic { message: String },
+  #[display(fmt = "error: {}", _0)]
+  Generic(String),
 }
 
 impl std::error::Error for ModuleDeclarationError {}

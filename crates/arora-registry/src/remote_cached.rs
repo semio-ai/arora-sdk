@@ -2,7 +2,7 @@ use crate::local::LocalRegistry;
 use crate::remote::RemoteRegistry;
 use crate::{EditableRegistry, ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
 use async_trait::async_trait;
-use semio_client::common::Selector;
+use semio_client::common::{EntityType, Selector};
 use semio_client::context::Context;
 use uuid::Uuid;
 
@@ -80,5 +80,13 @@ impl ReadableRegistry for RemoteCachedRegistry {
       return res;
     }
     self.remote.resolve_id(id).await
+  }
+  
+  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+    match self.cache.type_of(selector).await {
+      Ok(ty) => Ok(ty),
+      Err(RegistryError::NoSuchEntity { selector: _ }) => self.remote.type_of(selector).await,
+      Err(err) => Err(err),
+    }
   }
 }

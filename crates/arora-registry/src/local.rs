@@ -1,9 +1,9 @@
 use crate::{
-  get_primitive, EditableRegistry, EnumerationPublic, ModulePublic, ReadableRegistry,
+  get_primitive, EditableRegistry, EnumerationPublic, FolderPublic, ModulePublic, ReadableRegistry,
   RegistryError, StructurePublic, TypeDefinition,
 };
 use async_trait::async_trait;
-use semio_client::common::Selector;
+use semio_client::common::{EntityType, Selector};
 use semio_record::module::v0::unfrozen::ExportKind;
 use std::{
   collections::{
@@ -24,6 +24,7 @@ pub struct LocalRegistry {
   enumerations: Vec<Rc<EnumerationPublic>>,
   structures: Vec<Rc<StructurePublic>>,
   modules: Vec<Rc<ModulePublic>>,
+  folders: Vec<Rc<FolderPublic>>,
   indexed: HashMap<Selector, RegistryReference>,
   path_to_ids: HashMap<String, Uuid>,
 }
@@ -37,6 +38,7 @@ pub enum RegistryReference {
   Field(Rc<StructurePublic>, Uuid),
   Module(Rc<ModulePublic>),
   Function(Rc<ModulePublic>, Uuid),
+  Folder(Rc<FolderPublic>),
   Root,
 }
 
@@ -49,6 +51,7 @@ impl LocalRegistry {
       enumerations: Vec::new(),
       structures: Vec::new(),
       modules: Vec::new(),
+      folders: Vec::new(),
       indexed: HashMap::from([(Selector::Id(ROOT_ID.to_owned()), RegistryReference::Root)]),
       path_to_ids: HashMap::new(),
     }
@@ -72,6 +75,7 @@ impl LocalRegistry {
       RegistryReference::Field(entity, _) => Some(RegistryReference::Structure(entity.to_owned())),
       RegistryReference::Module(entity) => self.find_id(&entity.parent).cloned(),
       RegistryReference::Function(entity, _) => Some(RegistryReference::Module(entity.to_owned())),
+      RegistryReference::Folder(entity) => self.find_id(&entity.parent).cloned(),
       RegistryReference::Root => None,
     };
     parent_ref.ok_or(RegistryError::UnknownParent {
@@ -152,6 +156,25 @@ impl ReadableRegistry for LocalRegistry {
         selector: Selector::Id(id.to_owned()),
       },
     )?)
+  }
+
+  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+    self
+      .indexed
+      .get(selector)
+      .map(|reg_ref| match reg_ref {
+        RegistryReference::Enumeration(_) => EntityType::Enumeration,
+        RegistryReference::Variant(_, _) => EntityType::Unknown,
+        RegistryReference::Structure(_) => EntityType::Structure,
+        RegistryReference::Field(_, _) => EntityType::Unknown,
+        RegistryReference::Module(_) => EntityType::Module,
+        RegistryReference::Function(_, _) => EntityType::Unknown,
+        RegistryReference::Folder(_) => EntityType::Folder,
+        RegistryReference::Root => EntityType::Unknown,
+      })
+      .ok_or(RegistryError::NoSuchEntity {
+        selector: selector.to_owned(),
+      })
   }
 }
 
@@ -294,6 +317,33 @@ impl EditableRegistry for LocalRegistry {
     self.modules.push(module.to_owned());
     Ok(())
   }
+
+  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError> {
+    let folder = Rc::new(folder);
+    let reg_ref = RegistryReference::Folder(folder.to_owned());
+    let path = self.compute_path(&reg_ref)?;
+    let mut new_entries = HashMap::new();
+    let mut new_mappings = HashMap::new();
+    add_index_entry(
+      &mut new_entries,
+      Selector::Id(id.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_index_entry(
+      &mut new_entries,
+      Selector::Path(path.to_owned()),
+      reg_ref.to_owned(),
+    )?;
+    add_mapping(&mut new_mappings, path.to_owned(), id.to_owned())?;
+    add_index_entries(
+      &mut self.indexed,
+      new_entries,
+      &mut self.path_to_ids,
+      new_mappings,
+    )?;
+    self.folders.push(folder.to_owned());
+    Ok(())
+  }
 }
 
 impl<'a> RegistryReference {
@@ -323,6 +373,7 @@ impl<'a> RegistryReference {
           .expect("looking up an export id not known to its module")
           .name
       }
+      RegistryReference::Folder(entity) => &entity.name,
       RegistryReference::Root => return None,
     })
   }

@@ -74,7 +74,7 @@
                 "--registry-uri",
                 "https://raw.githubusercontent.com/semio-ai/arora-registry/master/",
                 "--header",
-                "${workspaceFolder}/modules/test-rust-wasm/header.yaml",
+                "${workspaceFolder}/modules/test-rust-wasm/module.yaml",
                 "--exe",
                 "${workspaceFolder}/modules/test-rust-wasm/target/wasm32-wasi/debug/test_rust_wasm.wasm",
                 "--call",

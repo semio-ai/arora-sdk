@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use semio_client::{
-  common::{EntityType, GetPublic, Selector, TypeOf},
+  common::{type_of, EntityType, GetPublic, Selector, TypeOf},
   context::Context,
 };
 use uuid::Uuid;
@@ -185,5 +185,18 @@ impl ReadableRegistry for RemoteRegistry {
         message: format!("{} is of an unknown type", selector.clone()),
       }),
     }
+  }
+
+  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+    type_of(
+      &self.context,
+      TypeOf {
+        selector: selector.clone(),
+      },
+    )
+    .await
+    .map_err(|err| RegistryError::Generic {
+      message: format!("error getting type from remote: {}", err),
+    })
   }
 }

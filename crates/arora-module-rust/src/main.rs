@@ -1,4 +1,3 @@
-mod lib;
 use std::{
   collections::HashSet,
   fmt::Debug,
@@ -17,11 +16,12 @@ use arora_vfs::{Directory, Entry};
 use clap::Parser;
 use convert_case::{Case, Casing};
 use itertools::Itertools;
-use lib::{token_stream_to_file, type_ident, RawUuidValue, variable_ident,
+use arora_module_rust::{token_stream_to_file, type_ident, RawUuidValue, variable_ident,
   struct_field_const_id_ident, struct_field_ident, generate_into_impl,
   struct_field_intermediate_variable_ident, PrefixWithMod, generate_try_from_impl,
   enum_variant_const_id_ident, enum_variant_ident, Public, CheckType,
-  generate_common_sources, function_const_id_ident, function_param_const_id_ident
+  generate_common_sources, function_const_id_ident, function_param_const_id_ident,
+  generate_const_id_declaration
 };
 use quote::{
   __private::{Ident, TokenStream},
@@ -1084,27 +1084,6 @@ fn generate_deserialize_from_type_ref(
     }
   }
 }
-
-/// Generates
-fn generate_const_id_declaration(
-  name: &String,
-  ident: &Ident,
-  id: &Uuid,
-  public: Public,
-) -> TokenStream {
-  let id_str = id.to_string();
-  let id_bytes = RawUuidValue(id);
-  let const_id_doc = format!("{}: {}", name, id_str);
-  let maybe_pub = match public {
-    Public::Yes => quote! { pub },
-    Public::No => quote! {},
-  };
-  quote! {
-    #[doc = #const_id_doc]
-    #maybe_pub const #ident: [u8; 16] = #id_bytes;
-  }
-}
-
 
 fn type_mod_ident(type_name: &String) -> Ident {
   format_ident!("{}", type_name.to_case(Case::Snake))

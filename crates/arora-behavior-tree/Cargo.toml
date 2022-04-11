@@ -32,6 +32,5 @@ url = "2"
 anyhow = "*"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
-arora-module-core = { path = "../arora-module-core" }
 arora-module-rust = { path = "../arora-module-rust" }
 tokio = { version = "1", features = ["full"] }

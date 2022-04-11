@@ -10,7 +10,7 @@ use arora_schema::{
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_client::common::Selector;
+use semio_client::common::{Selector, EntityType};
 use semio_record::{
   enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
 };
@@ -148,7 +148,7 @@ impl Registry {
 pub trait ReadableRegistry {
   /// Gets the definition of a type entity,
   /// i.e. of a primitive, a structure or an enumeration.
-  /// Not to be confused with the [`semio_client::common::type_of`] function,
+  /// Not to be confused with the [`type_of`] function,
   /// which retrieves the type of an entity.
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError>;
 
@@ -160,6 +160,11 @@ pub trait ReadableRegistry {
 
   /// Resolves the given identifier into a path.
   async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
+
+  /// Resolves the type of entity identified by the given selector.
+  /// Do not confuse with the [`get_type`] function,
+  /// which returns type definitions.
+  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError>;
 }
 
 #[async_trait(?Send)]
@@ -198,6 +203,9 @@ pub trait EditableRegistry {
   /// Returns the identifier under which the module
   /// was registered.
   async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
+
+  /// Adds a folder to the registry, under the given identifier.
+  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError>;
 }
 
 pub type EnumerationPublic = <Enumeration as RecordDefn>::Public;
@@ -207,6 +215,7 @@ pub type UserPublic = <User as RecordDefn>::Public;
 pub type OrganizationPublic = <Organization as RecordDefn>::Public;
 pub type FolderPublic = <Folder as RecordDefn>::Public;
 
+#[derive(Debug, Clone)]
 pub enum TypeDefinition {
   Primitive(PrimitiveKind),
   Enumeration(EnumerationPublic),

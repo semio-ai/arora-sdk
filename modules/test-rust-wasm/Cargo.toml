@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 arora-buffers = { path = "../../crates/arora-buffers" }
+arora-schema = { path = "../../crates/arora-schema" }
 bytes = "1"
 derive_more = "*"
 serde = { version = "1", features = ["derive"] }
@@ -21,5 +22,13 @@ uuid = { version = "0.8", features = ["serde", "v4", "stdweb"] }
 
 [dev-dependencies]
 anyhow = "*"
+
+[build-dependencies]
+anyhow = "*"
+arora-behavior-tree-types = { path = "../../crates/arora-behavior-tree-types" }
+arora-module-core = { path = "../../crates/arora-module-core" }
+arora-module-rust = { path = "../../crates/arora-module-rust" }
+arora-registry = { path = "../../crates/arora-registry" }
+tokio = { version = "1", features = ["full"] }
 
 [workspace]
