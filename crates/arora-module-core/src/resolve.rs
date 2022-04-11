@@ -1,4 +1,4 @@
-use crate::ModuleDeclarationError;
+use crate::{ImportAsset, ModuleDeclarationError};
 use arora_registry::local::ROOT_ID;
 use arora_registry::{get_primitive, ModulePublic, ReadableRegistry};
 use arora_schema::module::high::{
@@ -155,24 +155,21 @@ pub async fn resolve_module(
   let mut imports = Vec::new();
   for import in module_definition.imports {
     let HighImportSymbol::Function(import_function) = import.clone();
-    let selector = Selector::from_str(import_function.module.as_str())
-      .map_err(ModuleDeclarationError::Generic)?;
-    let import_module_id = match selector {
-      Selector::Id(id) => id,
-      Selector::Path(path) => registry
-        .resolve_path(&path)
-        .await
-        .map_err(ModuleDeclarationError::RegistryError)?,
-    };
+    let import_module_id = resolve_module_id(import_function.module.as_str(), registry).await?;
     dependencies.insert(UnfrozenReference {
       id: import_module_id,
       version_req: VersionReq::parse("*").unwrap(),
     });
+    let import_id = import_function.id.to_owned();
     let resolved_import = resolve_import(import, registry).await?;
     let mut import_deps = HashSet::new();
     resolved_import.dependencies(&mut import_deps);
     dependencies.extend(import_deps.into_iter().cloned());
-    imports.push(resolved_import);
+    imports.push(ImportAsset {
+      module_id: import_module_id,
+      id: import_id,
+      import: resolved_import,
+    });
   }
 
   let mut exports = HashMap::new();
@@ -199,5 +196,5 @@ pub async fn resolve_module(
 
 pub struct ModuleAndImports {
   pub module: ModulePublic,
-  pub imports: Vec<Export>,
+  pub imports: Vec<ImportAsset>,
 }

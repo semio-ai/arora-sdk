@@ -20,13 +20,6 @@ use tokio::{
 };
 use uuid::Uuid;
 
-#[derive(Debug)]
-pub enum Asset2 {
-  Type(Uuid, TypeDefinition),
-  Import(Export),
-  Module(Uuid, ModulePublic),
-}
-
 /// Analyzes a module from the path where it is written in the YAML format.
 /// See [`analyze_module`].
 pub async fn analyze_module_from_path<P: AsRef<Path>>(
@@ -89,6 +82,24 @@ pub enum Asset {
   Header(Header),
 }
 
+/// Assets are entities provided or referred to by a module.
+#[derive(Debug)]
+pub enum Asset2 {
+  /// Type, including its identifier.
+  Type(Uuid, TypeDefinition),
+  /// Imported symbol, including the identifier of its origin module.
+  Import(ImportAsset),
+  /// Module, including its identifier.
+  Module(Uuid, ModulePublic),
+}
+
+#[derive(Debug)]
+pub struct ImportAsset {
+  pub module_id: Uuid,
+  pub id: Uuid,
+  pub import: Export,
+}
+
 pub struct Writer<'a, W: AsyncWrite + Unpin> {
   writer: &'a mut W,
 }
@@ -141,7 +152,7 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
 
 #[derive(Display, Debug)]
 pub enum ModuleDeclarationError {
-  /// No such entity.
+  /// Entity is not known to the registry or registry is not available.
   RegistryError(RegistryError),
 
   /// IO error.
