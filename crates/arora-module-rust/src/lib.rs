@@ -1,16 +1,17 @@
+mod header;
 pub mod rustfmt;
 
-use std::{fmt::Display, path};
-use arora_module_core::{Asset2, ModuleDeclarationError};
-use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
+use arora_module_core::{Asset2, ImportAsset, ModuleDeclarationError};
+use arora_registry::{ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::ty::{
   BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
   U8_ID,
 };
-use arora_vfs::{Directory, Entry, File, VfsError};
+use arora_vfs::{Directory, Entry as VfsEntry, File, VfsError};
 use async_recursion::async_recursion;
 use convert_case::{Case, Casing};
 use derive_more::Display;
+use header::generate_header_file;
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
@@ -18,16 +19,104 @@ use quote::{
 use semio_client::common::Selector;
 use semio_record::{
   enumeration::v0::public::Public as EnumerationPublic,
+  module::v0::unfrozen::{ExportKind, Parameter},
+  record::UnfrozenReference,
   ty::{Primitive, UnfrozenScalar, UnfrozenTy},
 };
 use semio_record::{structure::v0::public::Public as StructurePublic, ty::PrimitiveKind};
+use std::{
+  collections::{hash_map::Entry, HashMap, HashSet},
+  fmt::Display,
+  path,
+};
 use uuid::Uuid;
 
 /// Generates a set of sources organized in a virtual directory
 /// from a set of assets as produced by [`arora_module_core::analyze_module`].
 /// First, the types, then the modules, then the imports.
-pub fn generate_sources(assets: Vec<Asset2>) -> Directory {
-  Directory::new()
+pub async fn generate_sources(
+  assets: Vec<Asset2>,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<Directory, GenerationError> {
+  let mut result = generate_common_sources()?;
+  let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
+  let mut current_module = Option::<(Uuid, ModulePublic)>::None;
+  for asset in assets {
+    match asset {
+      Asset2::Type(id, ty) => match ty {
+        TypeDefinition::Primitive(_) => (),
+        TypeDefinition::Enumeration(enumeration) => {
+          let parent_path = registry
+            .resolve_id(&enumeration.parent)
+            .await
+            .map_err(GenerationError::RegistryError)?;
+          let enum_sources = generate_enumeration_source(&id, &enumeration, &parent_path)
+            .map_err(GenerationError::VfsError)?;
+          result = result.merge_with(&enum_sources);
+        }
+        TypeDefinition::Structure(structure) => {
+          let parent_path = registry
+            .resolve_id(&structure.parent)
+            .await
+            .map_err(GenerationError::RegistryError)?;
+          let struct_sources =
+            generate_structure_source(&id, &structure, registry, &parent_path).await?;
+          result = result.merge_with(&struct_sources);
+        }
+      },
+      Asset2::Import(import) => match imports_by_module.entry(import.module_id.to_owned()) {
+        Entry::Occupied(mut entry) => entry.get_mut().push(import),
+        Entry::Vacant(entry) => {
+          entry.insert(vec![import]);
+        }
+      },
+      Asset2::Module(ref module_id, ref module) => {
+        let module_sources = generate_module_source(&module, registry).await?;
+        result = result.merge_with(&module_sources);
+        assert!(current_module.is_none()); // Only one module to generate at a time.
+        current_module = Some((module_id.to_owned(), module.to_owned()));
+      }
+    }
+  }
+
+  let mut all_imports = Vec::new();
+  for (module_id, ref mut imports) in imports_by_module {
+    // Generate bindings for imported functions.
+    let module_path = registry
+      .resolve_id(&module_id)
+      .await
+      .map_err(GenerationError::RegistryError)?;
+    let imports_sources =
+      generate_imports_from_module_source(&module_id, &module_path, imports, registry).await?;
+    result = result.merge_with(&imports_sources);
+    all_imports.append(imports);
+  }
+
+  // Produce the stripped `module.yaml` file.
+  let current_module = current_module.unwrap();
+  result = result.merge_with(&generate_header_file(
+    &current_module.0,
+    &current_module.1,
+    &all_imports,
+  )?);
+
+  // Also declare arora engine functions.
+  let engine_functions_declarations = quote! {
+    #[link(wasm_import_module = "env")]
+    extern "C" {
+      pub fn arora_dispatch(module_id: i32, method_id: i32, arg: i32) -> i32;
+      pub fn arora_dispatch_indirect(callable_id: u64) -> i32;
+    }
+  };
+  result = result.merge_with(
+    &token_stream_to_file("arora.rs", &engine_functions_declarations)
+      .map_err(GenerationError::VfsError)?,
+  );
+
+  // Add the `mod.rs` files.
+  generate_mods_in_directories(&mut result)?;
+
+  Ok(result)
 }
 
 /// Generates `mod.rs` files and adds them at every level of the directory hierarchy
@@ -35,7 +124,7 @@ pub fn generate_sources(assets: Vec<Asset2>) -> Directory {
 pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, GenerationError> {
   let mut mods = Vec::new();
   for (path, entry) in dir.list_mut() {
-    if let Entry::Directory(ref mut dir) = entry {
+    if let VfsEntry::Directory(ref mut dir) = entry {
       if generate_mods_in_directories(dir)? {
         mods.push(path);
       }
@@ -64,7 +153,7 @@ pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, Generat
 /// Generates sources that are common dependencies to
 /// other generated sources.
 /// Always call this function before generating sources.
-pub fn generate_common_sources() -> Result<Directory, VfsError> {
+pub fn generate_common_sources() -> Result<Directory, GenerationError> {
   let source = quote! {
     use derive_more::Display;
 
@@ -76,7 +165,7 @@ pub fn generate_common_sources() -> Result<Directory, VfsError> {
 
     impl std::error::Error for DeserializationError {}
   };
-  token_stream_to_file("error.rs".to_string(), &source)
+  token_stream_to_file("error.rs".to_string(), &source).map_err(GenerationError::VfsError)
 }
 
 /// Generates a Rust source file for the given enumeration.
@@ -270,14 +359,13 @@ pub fn generate_enumeration_source(
     #(#variant_id_declarations)*
   };
 
-  token_stream_to_file(
-    format!(
-      "{}/{}.rs",
-      parent_path.replace('.', "/"),
-      enumeration.name.to_case(Case::Snake)
-    ),
-    &type_source,
-  )
+  let base_file_name = enumeration.name.to_case(Case::Snake);
+  let file_path = if parent_path.is_empty() {
+    format!("{}.rs", base_file_name)
+  } else {
+    format!("{}/{}.rs", parent_path.replace('.', "/"), base_file_name)
+  };
+  token_stream_to_file(file_path, &type_source)
 }
 
 /// Generates a Rust source file for the given structure.
@@ -294,11 +382,10 @@ pub async fn generate_structure_source(
   let name = &structure.name;
   let struct_ident = type_ident(name);
   let mut field_declarations = Vec::new();
-  for (id, field) in &structure.fields {
+  for (_, field) in &structure.fields {
     let field_ident = variable_ident(&field.name);
-    let field_type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes)
-      .await
-      .map_err(GenerationError::RegistryError)?;
+    let field_type_ident =
+      type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes).await?;
     field_declarations.push(quote! { pub #field_ident: #field_type_ident });
   }
   let struct_declaration = quote! {
@@ -363,9 +450,7 @@ pub async fn generate_structure_source(
   let mut field_variable_declarations = Vec::new();
   for (_, field) in &structure.fields {
     let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes)
-      .await
-      .map_err(GenerationError::RegistryError)?;
+    let type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes).await?;
     field_variable_declarations
       .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
   }
@@ -444,15 +529,441 @@ pub async fn generate_structure_source(
     #(#field_id_declarations)*
   };
 
-  token_stream_to_file(
-    format!(
-      "{}/{}.rs",
-      parent_path.replace('.', "/"),
-      structure.name.to_case(Case::Snake)
-    ),
-    &type_source,
-  )
-  .map_err(GenerationError::VfsError)
+  let base_file_name = structure.name.to_case(Case::Snake);
+  let file_path = if parent_path.is_empty() {
+    format!("{}.rs", base_file_name)
+  } else {
+    format!("{}/{}.rs", parent_path.replace('.', "/"), base_file_name)
+  };
+  token_stream_to_file(file_path, &type_source).map_err(GenerationError::VfsError)
+}
+
+/// Generates a virtual source file with wrappers for every symbol imported by the module.
+/// It contains human-readable public functions that can be used by the module implementation,
+/// under the path of the module, as `path::to::module::import`.
+async fn generate_imports_from_module_source(
+  module_id: &Uuid,
+  module_path: &String,
+  imports: &Vec<ImportAsset>,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<Directory, GenerationError> {
+  // Using dependent types.
+  let uses = {
+    let mut dependencies = HashSet::<&UnfrozenReference>::new();
+    for import in imports {
+      import.import.dependencies(&mut dependencies);
+    }
+    let mut uses = Vec::new();
+    for dep in dependencies {
+      let dep_selector = Selector::Id(dep.id);
+      let type_def = match registry.get_type(&dep_selector).await {
+        Ok(TypeDefinition::Primitive(_)) => continue,
+        Ok(type_definition) => type_definition,
+        Err(RegistryError::NotAType { selector: _ }) => continue,
+        Err(err) => return Err(GenerationError::RegistryError(err)),
+      };
+      let type_ident =
+        type_ident_from_definition(&type_def, &dep.id, registry, PrefixWithMod::Yes).await?;
+      uses.push(type_ident);
+    }
+    uses
+  };
+
+  let splitted_module_path: Vec<&str> = module_path.split(".").collect();
+  let module_name = splitted_module_path.last().unwrap();
+
+  // Declare the ID of the module to use it locally.
+  let module_const_id_ident =
+    format_ident!("{}_MODULE_ID", module_name.to_case(Case::ScreamingSnake),);
+  let module_id_declaration = generate_const_id_declaration(
+    &module_name.to_string(),
+    &module_const_id_ident,
+    &module_id,
+    Public::No,
+  );
+
+  // Declare each imported function.
+  let mut functions_declarations = Vec::<TokenStream>::new();
+  for import in imports {
+    let ExportKind::Function(function_symbol) = &import.import.kind;
+    let function_name = &import.import.name;
+    let function_ident = format_ident!("{}", function_name);
+    let mut parameters_declarations = Vec::new();
+    for (_, param) in &function_symbol.parameters {
+      let maybe_mut = if param.mutable {
+        quote! { mut }
+      } else {
+        quote! {}
+      };
+      let param_name_ident = format_ident!("{}", param.name);
+      let param_type_ident =
+        type_ident_from_unfrozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+      parameters_declarations.push(quote! {
+        #maybe_mut #param_name_ident: #param_type_ident
+      });
+    }
+    let ret_type_ident =
+      type_ident_from_unfrozen(&function_symbol.return_ty, registry, PrefixWithMod::Yes).await?;
+
+    // And implement the call.
+    // First declare the const ids.
+    let function_const_id_ident = function_const_id_ident(&function_name);
+    let function_id_declaration = generate_const_id_declaration(
+      &function_name,
+      &function_const_id_ident,
+      &import.id,
+      Public::No,
+    );
+    let param_ids_declarations = {
+      let mut param_ids_declarations = Vec::new();
+      for (id, param) in &function_symbol.parameters {
+        param_ids_declarations.push(generate_const_id_declaration(
+          &format!("{}.{}", &function_name, &param.name),
+          &function_param_const_id_ident(&function_name, &param.name),
+          &id,
+          Public::No,
+        ));
+      }
+      param_ids_declarations
+    };
+
+    let ids_declaration = quote! {
+      #function_id_declaration
+      #(#param_ids_declarations)*
+    };
+
+    // Then prepare a call argument structure.
+    // It consists in a struct with the function id as id,
+    // and with one field for each param.
+    let add_args = {
+      let mut add_args = Vec::new();
+      for (_, param) in &function_symbol.parameters {
+        let function_param_const_id_ident =
+          function_param_const_id_ident(&function_name, &param.name);
+        let param_name_ident = format_ident!("{}", param.name);
+        let serialize_arg = generate_serialize_from_unfrozen(
+          &param.ty,
+          param_name_ident.into_token_stream(),
+          registry,
+        )
+        .await?;
+        add_args.push(quote! {
+          writer.add_structure_field(#function_param_const_id_ident.as_slice());
+          #serialize_arg;
+        });
+      }
+      add_args
+    };
+    let nof_args = add_args.len() as u32;
+    let prepare_call_structure = quote! {
+      let mut writer = BufferWriter::new();
+      writer.begin_structure(#function_const_id_ident.as_slice(), #nof_args);
+      #(#add_args)*
+      let arg = writer.finalize();
+    };
+
+    // Then perform the call.
+    let perform_call = quote! {
+      let result_buffer_addr = unsafe {
+        arora_dispatch(
+          #module_const_id_ident.as_ptr() as i32,
+          #function_const_id_ident.as_ptr() as i32,
+          arg.as_ptr() as i32,
+        )
+      };
+    };
+
+    // Then parse the result.
+    let prepare_parsing = quote! {
+      let result_buffer_ptr = result_buffer_addr as *const u8;
+      let input_size_bytes: &[u8; 4] =
+        unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE) }
+          .try_into()
+          .expect("input is too small");
+      let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
+      let input =
+        unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
+      let mut reader = BufferReader::new(&input);
+    };
+
+    // It consists in a struct with the function id as id,
+    let check_result_struct = quote! {
+      let type_raw_id_opt = reader.next_type();
+      assert!(!type_raw_id_opt.is_none());
+      assert_eq!(type_raw_id_opt.unwrap(), TYPE_STRUCTURE);
+      let (result_struct_id, result_field_count) = reader.get_structure();
+      assert_eq!(result_struct_id, #function_const_id_ident);
+    };
+
+    // with one field for the return value,
+    // plus one field for each param.
+    // Mutate the mutable parameters
+    // and return.
+    let deserialize_ret =
+      generate_deserialize_from_unfrozen(&function_symbol.return_ty, registry, CheckType::Yes)
+        .await?;
+
+    let process_params = if nof_args > 1 {
+      let declare_mutable_params = {
+        let mut declare_mutable_params = Vec::new();
+        for (_, param) in &function_symbol.parameters {
+          if param.mutable {
+            let param_name_ident = format_ident!("{}", param.name);
+            declare_mutable_params.push(quote! {
+              let mut #param_name_ident = None;
+            })
+          }
+        }
+        declare_mutable_params
+      };
+
+      let deserialize_params = {
+        let mut deserialize_params = Vec::new();
+        for (_, param) in &function_symbol.parameters {
+          if param.mutable {
+            let param_name_ident = format_ident!("{}", param.name);
+            let function_param_const_id_ident =
+              function_param_const_id_ident(&function_name, &param.name);
+            let deserialize_param =
+              generate_deserialize_from_unfrozen(&param.ty, registry, CheckType::Yes).await?;
+            deserialize_params.push(quote! {
+              x if *x == #function_param_const_id_ident => *#param_name_ident = #deserialize_param,
+            });
+          }
+        }
+        deserialize_params
+      };
+
+      quote! {
+        #(#declare_mutable_params)*
+        for _i in 1u32..#nof_args {
+          let next_field_id = reader.get_structure_field();
+          match next_field_id {
+            #(#deserialize_params)*
+            x => panic!("found unexpected mutated argument id: {:#?}", x),
+          }
+        }
+      }
+    } else {
+      quote! {}
+    };
+
+    let process_result = quote! {
+      assert_eq!(result_field_count, #nof_args);
+      let first_field_id = reader.get_structure_field();
+      assert_eq!(first_field_id, #function_const_id_ident);
+      let ret = #deserialize_ret;
+      #process_params
+      ret
+    };
+
+    // This makes an import function.
+    functions_declarations.push(quote! {
+      pub fn #function_ident (#(#parameters_declarations),*) -> #ret_type_ident {
+        #ids_declaration
+        #prepare_call_structure
+        #perform_call
+        #prepare_parsing
+        #check_result_struct
+        #process_result
+      }
+    });
+  }
+
+  // This makes a module import.
+  let source = quote! {
+    #(#uses)*
+    use arora_buffers::*;
+    use crate::{arora_generated, arora_generated::error::DeserializationError};
+    use super::arora_dispatch;
+    #module_id_declaration
+    #(#functions_declarations)*
+  };
+
+  let file_path = splitted_module_path.join(".") + ".rs";
+  token_stream_to_file(file_path, &source).map_err(GenerationError::VfsError)
+}
+
+/// Generates the interface of a module, i.e. the declarations of its exported functions.
+async fn generate_module_source(
+  module: &ModulePublic,
+  registry: &mut dyn ReadableRegistry,
+) -> Result<Directory, GenerationError> {
+  // Function Uses.
+  let exports = &module.exports;
+  let use_functions = exports
+    .iter()
+    .map(|(_, export)| format_ident!("{}", export.name));
+
+  // Function and param IDs.
+  let function_ids = exports.iter().flat_map(|(function_id, export)| {
+    let ExportKind::Function(function_symbol) = &export.kind;
+    let mut id_declarations = Vec::with_capacity(function_symbol.parameters.len() + 1);
+    id_declarations.push(generate_const_id_declaration(
+      &export.name,
+      &function_const_id_ident(&export.name),
+      &function_id,
+      Public::Yes,
+    ));
+    for (param_id, param) in &function_symbol.parameters {
+      id_declarations.push(generate_const_id_declaration(
+        &format!("{}.{}", &export.name, &param.name),
+        &function_param_const_id_ident(&export.name, &param.name),
+        &param_id,
+        Public::Yes,
+      ));
+    }
+    id_declarations
+  });
+
+  // Functions declarations exported for Arora.
+  let function_declarations = {
+    let mut function_declarations = Vec::new();
+    for (export_id, export) in exports {
+      let function_ident = format_ident!("{}", export.name);
+      let ExportKind::Function(function_symbol) = &export.kind;
+      let const_id_ident = function_const_id_ident(&export.name);
+
+      let call_check = quote! {
+        let mut reader = BufferReader::new(&input);
+        let type_raw_id_opt = reader.next_type();
+        assert!(!type_raw_id_opt.is_none());
+        assert_eq!(type_raw_id_opt.unwrap(), TYPE_STRUCTURE);
+        let (structure_raw_id, field_count) = reader.get_structure();
+        assert_eq!(#const_id_ident, structure_raw_id);
+      };
+
+      let param_declarations = {
+        let mut param_declarations = Vec::new();
+        for (param_id, param) in &function_symbol.parameters {
+          let param_var_ident = param_ident(param_id, param);
+          let param_type_ident =
+            type_ident_from_unfrozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+          param_declarations
+            .push(quote! { let mut #param_var_ident: Option<#param_type_ident> = None; });
+        }
+        param_declarations
+      };
+
+      let deserialization_cases = {
+        let mut deserialization_cases = Vec::new();
+        for (param_id, param) in &function_symbol.parameters {
+          let param_const_id_ident = function_param_const_id_ident(&export.name, &param.name);
+          let param_var_ident = param_ident(param_id, param);
+          let deserialize =
+            generate_deserialize_from_unfrozen(&param.ty, registry, CheckType::Yes).await?;
+          deserialization_cases.push(quote! {
+            if field_raw_id == #param_const_id_ident {
+              #param_var_ident = Some(#deserialize);
+            }
+          });
+        }
+        deserialization_cases
+      };
+
+      let deserialize_params = if function_symbol.parameters.is_empty() {
+        quote! {
+          assert_eq!(0, field_count);
+        }
+      } else {
+        quote! {
+          #(#param_declarations)*
+          for _ in 0..field_count {
+            let field_raw_id = reader.get_structure_field();
+            #(#deserialization_cases else)* {
+              panic!("buffer contains an unexpected parameter: {:?}", field_raw_id);
+            }
+          }
+        }
+      };
+
+      let param_args = function_symbol.parameters.iter().map(|(param_id, param)| {
+        let param_var_ident = param_ident(param_id, param);
+        if param.mutable {
+          quote! { &mut #param_var_ident }
+        } else {
+          quote! { #param_var_ident }
+        }
+      });
+
+      let call_and_write_result = {
+        let result_ident = match &function_symbol.return_ty {
+          UnfrozenTy::Primitive(Primitive { kind }) if *kind == PrimitiveKind::Unit => quote! { _ },
+          _ => quote! { result },
+        };
+        let serialize_result = generate_serialize_from_unfrozen(
+          &function_symbol.return_ty,
+          result_ident.clone(),
+          registry,
+        )
+        .await?;
+        quote! {
+          let #result_ident = #function_ident (#(#param_args),*);
+          #serialize_result;
+        }
+      };
+
+      let write_mutated_params: Vec<TokenStream> = {
+        let mut write_mutated_params = Vec::new();
+        for (param_id, param) in &function_symbol.parameters {
+          if param.mutable {
+            let param_var_ident = param_ident(param_id, param);
+            let param_const_id_ident = function_param_const_id_ident(&export.name, &param.name);
+            let serialize_param = generate_serialize_from_unfrozen(
+              &param.ty,
+              quote! {#param_var_ident.unwrap()},
+              registry,
+            )
+            .await?;
+            write_mutated_params.push(quote! {
+              writer.add_structure_field(&#param_const_id_ident);
+              #serialize_param;
+            });
+          }
+        }
+        write_mutated_params
+      };
+      let nof_mutated_params = write_mutated_params.len();
+
+      let uuid_suffix = export_id.to_string().replace("-", "_");
+      let arora_function_ident = format_ident!("arora_function_{}", uuid_suffix);
+      let doc = format!("{}", export.name);
+      function_declarations.push(quote! {
+        #[doc = #doc]
+        #[no_mangle]
+        pub extern "C" fn #arora_function_ident (input_addr: i32) -> i32 {
+          let input_ptr = input_addr as *const u8;
+          const INPUT_SIZE_SIZE: usize = std::mem::size_of::<u32>();
+          let input_size_bytes: &[u8; 4] = unsafe {
+            std::slice::from_raw_parts(input_ptr, INPUT_SIZE_SIZE)
+          }.try_into().expect("input is too small");
+          let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
+          let input = unsafe {
+            std::slice::from_raw_parts(input_ptr, INPUT_SIZE_SIZE + input_size)
+          };
+          #call_check
+          #deserialize_params
+          let mut writer = BufferWriter::new();
+          writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
+          writer.add_structure_field(&#const_id_ident);
+          #call_and_write_result
+          #(#write_mutated_params)*
+          let result_buffer = writer.finalize();
+          Box::leak(result_buffer).as_ptr() as i32
+        }
+      });
+    }
+    function_declarations
+  };
+
+  // Putting it all together.
+  let source = quote! {
+    use arora_buffers::*;
+    use crate::{arora_generated, arora_generated::error::DeserializationError, #(#use_functions),*};
+    #(#function_declarations)*
+    #(#function_ids)*
+  };
+  token_stream_to_file("export.rs".to_string(), &source).map_err(GenerationError::VfsError)
 }
 
 pub fn generate_into_impl(type_ident: &Ident) -> TokenStream {
@@ -496,7 +1007,7 @@ async fn generate_serialize_from_unfrozen(
           }
         };
       Ok(match primitive.kind {
-        PrimitiveKind::Unit => quote! { write.add_unit() },
+        PrimitiveKind::Unit => quote! { writer.add_unit() },
         PrimitiveKind::Boolean => quote! { writer.add_boolean(#value_expression) },
         PrimitiveKind::U8 => quote! { writer.add_u8(#value_expression) },
         PrimitiveKind::U16 => quote! { writer.add_u16(#value_expression) },
@@ -510,37 +1021,37 @@ async fn generate_serialize_from_unfrozen(
         PrimitiveKind::F64 => quote! { writer.add_f64(#value_expression) },
         PrimitiveKind::String => quote! { writer.add_string(#value_expression) },
         PrimitiveKind::ArrayBoolean => {
-          generate_serialize_primitive_array(&BOOLEAN_ID, quote! { write.add_boolean_bulk })
+          generate_serialize_primitive_array(&BOOLEAN_ID, quote! { writer.add_boolean_bulk })
         }
         PrimitiveKind::ArrayU8 => {
-          generate_serialize_primitive_array(&U8_ID, quote! { write.add_u8_bulk })
+          generate_serialize_primitive_array(&U8_ID, quote! { writer.add_u8_bulk })
         }
         PrimitiveKind::ArrayU16 => {
-          generate_serialize_primitive_array(&U16_ID, quote! { write.add_u16_bulk })
+          generate_serialize_primitive_array(&U16_ID, quote! { writer.add_u16_bulk })
         }
         PrimitiveKind::ArrayU32 => {
-          generate_serialize_primitive_array(&U32_ID, quote! { write.add_u32_bulk })
+          generate_serialize_primitive_array(&U32_ID, quote! { writer.add_u32_bulk })
         }
         PrimitiveKind::ArrayU64 => {
-          generate_serialize_primitive_array(&U64_ID, quote! { write.add_u64_bulk })
+          generate_serialize_primitive_array(&U64_ID, quote! { writer.add_u64_bulk })
         }
         PrimitiveKind::ArrayI8 => {
-          generate_serialize_primitive_array(&I8_ID, quote! { write.add_i8_bulk })
+          generate_serialize_primitive_array(&I8_ID, quote! { writer.add_i8_bulk })
         }
         PrimitiveKind::ArrayI16 => {
-          generate_serialize_primitive_array(&I16_ID, quote! { write.add_i16_bulk })
+          generate_serialize_primitive_array(&I16_ID, quote! { writer.add_i16_bulk })
         }
         PrimitiveKind::ArrayI32 => {
-          generate_serialize_primitive_array(&I32_ID, quote! { write.add_i32_bulk })
+          generate_serialize_primitive_array(&I32_ID, quote! { writer.add_i32_bulk })
         }
         PrimitiveKind::ArrayI64 => {
-          generate_serialize_primitive_array(&I64_ID, quote! { write.add_i64_bulk })
+          generate_serialize_primitive_array(&I64_ID, quote! { writer.add_i64_bulk })
         }
         PrimitiveKind::ArrayF32 => {
-          generate_serialize_primitive_array(&F32_ID, quote! { write.add_f32_bulk })
+          generate_serialize_primitive_array(&F32_ID, quote! { writer.add_f32_bulk })
         }
         PrimitiveKind::ArrayF64 => {
-          generate_serialize_primitive_array(&F64_ID, quote! { write.add_f64_bulk })
+          generate_serialize_primitive_array(&F64_ID, quote! { writer.add_f64_bulk })
         }
         PrimitiveKind::ArrayString => {
           let id_bytes = RawUuidValue(&STRING_ID);
@@ -713,9 +1224,8 @@ async fn generate_deserialize_from_unfrozen(
         let raw_id = RawUuidValue(&array.reference.id);
         quote! { assert_eq!(reader.get_structure_field(), #raw_id); }
       };
-      let type_ident = type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes)
-        .await
-        .map_err(GenerationError::RegistryError)?;
+      let type_ident =
+        type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
       let type_str = type_ident.to_string();
       let deserialize_element = generate_deserialize_from_unfrozen(
         &UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
@@ -740,11 +1250,11 @@ async fn generate_deserialize_from_unfrozen(
   }
 }
 
-pub fn token_stream_to_file(
-  file_path: String,
+pub fn token_stream_to_file<P: AsRef<path::Path>>(
+  file_path: P,
   tokens: &TokenStream,
 ) -> Result<Directory, VfsError> {
-  let file_path = path::Path::new(&file_path);
+  let file_path = file_path.as_ref();
   let file_name = file_path.file_name().unwrap().to_str().unwrap();
   let parent_path = file_path.parent().unwrap();
   let mut output = Directory::new();
@@ -808,6 +1318,26 @@ pub fn enum_variant_const_id_ident(enum_name: &String, variant_name: &String) ->
   )
 }
 
+/// Generates the const declaration of the ID associated to the given name (and ident).
+pub fn generate_const_id_declaration(
+  name: &String,
+  ident: &Ident,
+  id: &Uuid,
+  public: Public,
+) -> TokenStream {
+  let id_str = id.to_string();
+  let id_bytes = RawUuidValue(id);
+  let const_id_doc = format!("{}: {}", name, id_str);
+  let maybe_pub = match public {
+    Public::Yes => quote! { pub },
+    Public::No => quote! {},
+  };
+  quote! {
+    #[doc = #const_id_doc]
+    #maybe_pub const #ident: [u8; 16] = #id_bytes;
+  }
+}
+
 pub fn function_const_id_ident(function_name: &String) -> Ident {
   format_ident!(
     "{}_FUNCTION_RAW_ID",
@@ -823,6 +1353,15 @@ pub fn function_param_const_id_ident(function_name: &String, param_name: &String
   )
 }
 
+fn param_ident(param_id: &Uuid, param: &Parameter) -> Ident {
+  let param_id_sanitized = param_id.to_string().replace("-", "");
+  format_ident!(
+    "param_{}_{}",
+    param.name.to_case(Case::Snake),
+    param_id_sanitized
+  )
+}
+
 pub fn variable_ident(name: &String) -> Ident {
   format_ident!("{}", name.to_case(Case::Snake))
 }
@@ -831,7 +1370,7 @@ async fn type_ident_from_unfrozen(
   ty: &UnfrozenTy,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
-) -> Result<TokenStream, RegistryError> {
+) -> Result<TokenStream, GenerationError> {
   Ok(match ty {
     UnfrozenTy::Primitive(primitive) => match primitive {
       &Primitive::UNIT => quote! { () },
@@ -873,16 +1412,20 @@ async fn type_ident_from_id(
   id: &Uuid,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
-) -> Result<TokenStream, RegistryError> {
-  let type_def = registry.get_type(&Selector::Id(id.to_owned())).await?;
-  type_ident_from_definition(&type_def, registry, with_mod).await
+) -> Result<TokenStream, GenerationError> {
+  let type_def = registry
+    .get_type(&Selector::Id(id.to_owned()))
+    .await
+    .map_err(GenerationError::RegistryError)?;
+  type_ident_from_definition(&type_def, id, registry, with_mod).await
 }
 
 async fn type_ident_from_definition(
   type_def: &TypeDefinition,
+  id: &Uuid,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
-) -> Result<TokenStream, RegistryError> {
+) -> Result<TokenStream, GenerationError> {
   Ok(match type_def {
     TypeDefinition::Primitive(primitive) => match primitive {
       PrimitiveKind::Unit => quote! { () },
@@ -912,24 +1455,26 @@ async fn type_ident_from_definition(
       PrimitiveKind::ArrayString => quote!(Vec<String>),
     },
     TypeDefinition::Enumeration(enumeration) => {
-      type_ident_from_name_and_parent(&enumeration.name, &enumeration.parent, registry, with_mod)
-        .await?
+      type_ident_from_name_and_id(&enumeration.name, id, registry, with_mod)
+        .await
+        .map_err(GenerationError::RegistryError)?
     }
     TypeDefinition::Structure(structure) => {
-      type_ident_from_name_and_parent(&structure.name, &structure.parent, registry, with_mod)
-        .await?
+      type_ident_from_name_and_id(&structure.name, id, registry, with_mod)
+        .await
+        .map_err(GenerationError::RegistryError)?
     }
   })
 }
 
-async fn type_ident_from_name_and_parent(
+async fn type_ident_from_name_and_id(
   name: &String,
-  parent: &Uuid,
+  id: &Uuid,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, RegistryError> {
   let mod_prefix = match with_mod {
-    PrefixWithMod::Yes => generated_mod_ident_from_id(parent, registry).await?,
+    PrefixWithMod::Yes => generated_mod_ident_from_id(id, registry).await?,
     PrefixWithMod::No => quote! {},
   };
   let type_ident = type_ident(name);
@@ -966,18 +1511,21 @@ fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
   }
 }
 
+/// Generates the identifier for the mod publishing the entity of the given id.
 async fn generated_mod_ident_from_id(
   id: &Uuid,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, RegistryError> {
   let mod_path = registry.resolve_id(id).await?;
   let mod_ident = mod_ident_from_path(&mod_path);
-  Ok(quote! { arora_generated::#mod_ident :: })
+  Ok(quote! { arora_generated::#mod_ident })
 }
 
 fn mod_ident_from_path(path: &String) -> TokenStream {
   let path_parts = path.split(".").collect::<Vec<&str>>();
-  let path_parts = path_parts.iter().map(|part| format_ident!("{}", part));
+  let path_parts = path_parts
+    .iter()
+    .map(|part| format_ident!("{}", part.to_case(Case::Snake)));
   quote! { #(#path_parts)::* }
 }
 
