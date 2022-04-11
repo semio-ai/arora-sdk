@@ -3,7 +3,7 @@
 // Provides the interface of the module, and forwards calls to specialized functions.
 mod arora_generated;
 // Provides symbols imported from other modules.
-use arora_generated::status::Status;
+use arora_generated::behavior_tree::status::Status;
 //====================================================================================
 // Put the implementation below.
 
