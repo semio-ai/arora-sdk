@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 pub fn declare_tick_id_structure(parent: Uuid) -> StructurePublic {
   StructurePublic {
-    name: "tick_id".to_string(),
+    name: "TickId".to_string(),
     parent,
     fields: HashMap::from([(
       TICK_ID_CALLABLE_ID_FIELD_RAW_ID,
@@ -23,7 +23,7 @@ pub fn declare_tick_id_structure(parent: Uuid) -> StructurePublic {
 }
 
 /// Use this ID to register the type to a registry.
-pub const TICK_ID_ENUMERATION_ID: Uuid = Uuid::from_bytes([
+pub const TICK_ID_STRUCTURE_ID: Uuid = Uuid::from_bytes([
   0x6f, 0x49, 0xe6, 0x50, 0x84, 0xca, 0x48, 0x99, 0xa9, 0xbd, 0x1f, 0x3b, 0xf1, 0x7f, 0xab, 0x51,
 ]);
 pub const TICK_ID_CALLABLE_ID_FIELD_RAW_ID: Uuid = Uuid::from_bytes([
