@@ -18,6 +18,13 @@ impl RemoteCachedRegistry {
       cache: LocalRegistry::new(),
     }
   }
+
+  pub async fn resolve_selector(&mut self, selector: &Selector) -> Result<Uuid, RegistryError> {
+    match selector {
+      Selector::Id(id) => Ok(id.clone()),
+      Selector::Path(path) => self.resolve_path(path).await,
+    }
+  }
 }
 
 #[async_trait(?Send)]
@@ -32,11 +39,11 @@ impl ReadableRegistry for RemoteCachedRegistry {
             unreachable!("primitive type should have been found in cache");
           }
           TypeDefinition::Enumeration(enumeration) => {
-            let id = self.resolve(selector).await?;
+            let id = self.resolve_selector(selector).await?;
             self.cache.add_enumeration(id, enumeration.clone()).await?;
           }
           TypeDefinition::Structure(structure) => {
-            let id = self.resolve(selector).await?;
+            let id = self.resolve_selector(selector).await?;
             self.cache.add_structure(id, structure.clone()).await?;
           }
         }
@@ -51,7 +58,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
       Ok(module) => Ok(module),
       Err(RegistryError::NoSuchEntity { selector: _ }) => {
         let module = self.remote.get_module(selector).await?;
-        let id = self.resolve(selector).await?;
+        let id = self.resolve_selector(selector).await?;
         self.cache.add_module(id, module.clone()).await?;
         Ok(module)
       }
@@ -59,11 +66,19 @@ impl ReadableRegistry for RemoteCachedRegistry {
     }
   }
 
-  async fn resolve(&mut self, selector: &Selector) -> Result<Uuid, RegistryError> {
-    let res = self.cache.resolve(selector).await;
+  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError> {
+    let res = self.cache.resolve_path(path).await;
     if res.is_ok() {
       return res;
     }
-    self.remote.resolve(selector).await
+    self.remote.resolve_path(path).await
+  }
+
+  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
+    let res = self.cache.resolve_id(id).await;
+    if res.is_ok() {
+      return res;
+    }
+    self.remote.resolve_id(id).await
   }
 }

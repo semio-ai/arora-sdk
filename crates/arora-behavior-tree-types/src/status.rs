@@ -11,13 +11,13 @@ use uuid::Uuid;
 /// with the given parent, and under the ID [`STATUS_TYPE_ID`].
 pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
   EnumerationPublic {
-    name: "status".to_string(),
+    name: "Status".to_string(),
     parent,
     variants: HashMap::from([
       (
         STATUS_SUCCESS_VARIANT_ID,
         EnumerationVariant {
-          name: "success".to_string(),
+          name: "Success".to_string(),
           ty: UnfrozenTy::Primitive(Primitive {
             kind: PrimitiveKind::Unit,
           }),
@@ -26,7 +26,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
       (
         STATUS_FAILURE_VARIANT_ID,
         EnumerationVariant {
-          name: "failure".to_string(),
+          name: "Failure".to_string(),
           ty: UnfrozenTy::Primitive(Primitive {
             kind: PrimitiveKind::Unit,
           }),
@@ -35,7 +35,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
       (
         STATUS_RUNNING_VARIANT_ID,
         EnumerationVariant {
-          name: "running".to_string(),
+          name: "Running".to_string(),
           ty: UnfrozenTy::Primitive(Primitive {
             kind: PrimitiveKind::Unit,
           }),
@@ -46,7 +46,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
 }
 
 /// Use this ID to register the type to a registry.
-pub const STATUS_TYPE_ID: Uuid = Uuid::from_bytes([
+pub const STATUS_ENUMERATION_ID: Uuid = Uuid::from_bytes([
   0x32, 0x5a, 0x57, 0x67, 0xe3, 0x44, 0x45, 0x32, 0x86, 0x0e, 0x07, 0x49, 0xbc, 0xf2, 0xe4, 0x28,
 ]);
 pub const STATUS_SUCCESS_VARIANT_ID: Uuid = Uuid::from_bytes([
@@ -58,12 +58,3 @@ pub const STATUS_FAILURE_VARIANT_ID: Uuid = Uuid::from_bytes([
 pub const STATUS_RUNNING_VARIANT_ID: Uuid = Uuid::from_bytes([
   0xac, 0xd7, 0x9e, 0xc6, 0x0c, 0x44, 0x40, 0x1a, 0x82, 0xf8, 0x5d, 0xa5, 0x42, 0x2d, 0x3e, 0xec,
 ]);
-
-#[cfg(test)]
-mod tests {
-  #[test]
-  fn it_works() {
-    let result = 2 + 2;
-    assert_eq!(result, 4);
-  }
-}

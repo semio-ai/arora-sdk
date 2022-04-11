@@ -5,7 +5,6 @@ use std::{
 };
 use arora_index::Index;
 use arora_module_core::{Asset, Reader, Writer};
-use arora_module_rust::{token_stream_to_file, type_ident, RawUuidValue, variable_ident, struct_field_const_id_ident, struct_field_ident, generate_into_impl, struct_field_intermediate_variable_ident, PrefixWithMod, generate_try_from_impl, enum_variant_const_id_ident, enum_variant_ident, Public, CheckType, generate_common_sources};
 use arora_schema::{
   module::low::{ExportSymbol, ImportSymbol, TypeRef, Parameter},
   ty::{
@@ -18,7 +17,12 @@ use arora_vfs::{Directory, Entry};
 use clap::Parser;
 use convert_case::{Case, Casing};
 use itertools::Itertools;
-use lib::{function_const_id_ident, function_param_const_id_ident};
+use lib::{token_stream_to_file, type_ident, RawUuidValue, variable_ident,
+  struct_field_const_id_ident, struct_field_ident, generate_into_impl,
+  struct_field_intermediate_variable_ident, PrefixWithMod, generate_try_from_impl,
+  enum_variant_const_id_ident, enum_variant_ident, Public, CheckType,
+  generate_common_sources, function_const_id_ident, function_param_const_id_ident
+};
 use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,

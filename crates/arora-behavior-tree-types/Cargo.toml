@@ -1,5 +1,5 @@
 [package]
-name = "arora-status"
+name = "arora-behavior-tree-types"
 version = "0.1.0"
 edition = "2021"
 

@@ -4,10 +4,9 @@ pub mod nodes;
 pub mod schema;
 pub mod schema_groot;
 mod tests;
-pub mod tick_id;
 pub mod tree_node;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
-use arora_generated::std::status::Status;
+use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_index::Index;
 use arora_schema::{
   module::low::{Parameter, TypeRef},
@@ -16,12 +15,13 @@ use arora_schema::{
 use error::BehaviorTreeError;
 use schema::{CallExpression, Node, NodeParameterId};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
-use tick_id::TickId;
 use uuid::Uuid;
 
 use crate::{
+  arora_generated::behavior_tree::tick_id::{
+    TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
+  },
   schema::Expression,
-  tick_id::{TICK_ID_ID_FIELD_ID, TICK_ID_TYPE_ID},
 };
 
 // Runtime.
@@ -121,7 +121,9 @@ fn setup_tick_function(
     children: children_ticks,
   });
   let callable_id = caller.arora_register_callable(tick_function);
-  Ok(callable_id.into())
+  Ok(TickId {
+    callable_id: callable_id.id,
+  })
 }
 
 fn tick(
@@ -157,7 +159,7 @@ fn tick(
       .iter()
       .filter(|parameter| {
         if let TypeRef::Array { id: param_id } = parameter.ty {
-          param_id == *TICK_ID_TYPE_ID && parameter.name == "children"
+          *param_id.as_bytes() == TICK_ID_STRUCT_RAW_ID && parameter.name == "children"
         } else {
           false
         }
@@ -185,7 +187,7 @@ fn tick(
     for child_tick_id in child_tick_ids {
       children_arg.push(arora_schema::value::StructureWithoutId {
         fields: vec![StructureField {
-          id: *TICK_ID_ID_FIELD_ID,
+          id: Uuid::from_bytes(TICK_ID_CALLABLE_ID_FIELD_RAW_ID),
           value: Box::new(Value::U64(child_tick_id.callable_id)),
         }],
       });
@@ -193,7 +195,7 @@ fn tick(
     call.args.push(StructureField {
       id: children_param.id.clone(),
       value: Box::new(Value::ArrayStructure {
-        id: *TICK_ID_TYPE_ID,
+        id: Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID),
         elements: children_arg,
       }),
     })
@@ -268,7 +270,10 @@ trait Tickable {
 
 impl Tickable for TickId {
   fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-    CallableId::from(self).tick(caller)
+    CallableId {
+      id: self.callable_id,
+    }
+    .tick(caller)
   }
 }
 
