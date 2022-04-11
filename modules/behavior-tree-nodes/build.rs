@@ -1,0 +1,68 @@
+use anyhow::{Ok, Result};
+use arora_behavior_tree_types::{
+  declare_behavior_tree_folder, declare_status_enumeration, declare_tick_id_structure,
+  BEHAVIOR_TREE_FOLDER_ID, STATUS_ENUMERATION_ID, TICK_ID_STRUCTURE_ID,
+};
+use arora_module_core::{analyze_module_from_path, header::module_public_from_header_file};
+use arora_module_rust::{generate_sources, rustfmt::apply_rustfmt};
+use arora_registry::{
+  local::{LocalRegistry, ROOT_ID},
+  EditableRegistry,
+};
+use rustfmt::config::Config;
+use std::path::{Path, PathBuf};
+
+#[tokio::main]
+pub async fn main() -> Result<()> {
+  let mut registry = LocalRegistry::new();
+
+  // behavior_tree
+  registry
+    .add_folder(
+      BEHAVIOR_TREE_FOLDER_ID,
+      declare_behavior_tree_folder(ROOT_ID),
+    )
+    .await?;
+
+  // behavior_tree.Status
+  registry
+    .add_enumeration(
+      STATUS_ENUMERATION_ID.to_owned(),
+      declare_status_enumeration(BEHAVIOR_TREE_FOLDER_ID),
+    )
+    .await?;
+
+  // behavior_tree.TickId
+  registry
+    .add_structure(
+      TICK_ID_STRUCTURE_ID.to_owned(),
+      declare_tick_id_structure(BEHAVIOR_TREE_FOLDER_ID),
+    )
+    .await?;
+
+  // test_rust_wasm
+  let (test_rust_wasm_id, test_rust_wasm_module) = module_public_from_header_file(Path::new(
+    "../test-rust-wasm/src/arora_generated/module.yaml",
+  ))
+  .await?;
+  registry
+    .add_module(test_rust_wasm_id, test_rust_wasm_module.module)
+    .await?;
+
+  // Generate sources for the module
+  let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
+  let generated_sources = generate_sources(assets, &mut registry).await?;
+  let source_path = PathBuf::from("src/arora_generated/");
+  generated_sources
+    .sync(source_path.clone())
+    .await
+    .map_err(|err| {
+      anyhow::anyhow!(
+        "failed to write generated source files to {}: {}",
+        source_path.display(),
+        err
+      )
+    })?;
+  apply_rustfmt(source_path).await?;
+  Ok(())
+}
