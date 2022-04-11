@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
 #[display(fmt = "{}.{}.{}", major, minor, patch)]
 pub struct SemanticVersion {
-  major: u32,
-  minor: u32,
-  patch: u32,
+  pub major: u32,
+  pub minor: u32,
+  pub patch: u32,
 }
 
 #[cfg(test)]
