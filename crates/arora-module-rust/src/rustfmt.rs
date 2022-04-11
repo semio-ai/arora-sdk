@@ -1,13 +1,17 @@
 use crate::GenerationError;
 use std::{
+  ffi::OsStr,
   io,
   path::{Path, PathBuf},
 };
 
 /// Run `rustfmt` on all Rust files found under the given path.
 pub async fn apply_rustfmt<P: AsRef<Path>>(path: P) -> Result<(), GenerationError> {
-  let rust_files =
-    list_all_files(path, |sub_path| sub_path.ends_with(".rs")).map_err(GenerationError::IoError)?;
+  let rust_files = list_all_files(path, |sub_path| {
+    sub_path.extension() == Some(OsStr::new("rs"))
+  })
+  .map_err(GenerationError::IoError)?;
+  dbg!(rust_files.to_owned());
   let rustfmt_status = tokio::process::Command::new("rustfmt")
     .args(&rust_files)
     .spawn()
