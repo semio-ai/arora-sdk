@@ -10,14 +10,19 @@ use arora_schema::{
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_client::common::{Selector, EntityType};
+use semio_client::common::{EntityType, Selector};
 use semio_record::{
-  enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
+  enumeration::v0::Enumeration,
+  module::v0::Module,
+  record::{RecordDefn},
+  structure::v0::Structure,
+  ty::UnfrozenTy,
 };
 use semio_record::{
   folder::v0::Folder, organization::v0::Organization, ty::PrimitiveKind, user::v0::User,
 };
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use tokio::{
   fs::{read_to_string, File},
   io::AsyncReadExt,
@@ -215,11 +220,48 @@ pub type UserPublic = <User as RecordDefn>::Public;
 pub type OrganizationPublic = <Organization as RecordDefn>::Public;
 pub type FolderPublic = <Folder as RecordDefn>::Public;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDefinition {
   Primitive(PrimitiveKind),
   Enumeration(EnumerationPublic),
   Structure(StructurePublic),
+}
+
+impl TypeDefinition {
+  pub fn name(&self) -> String {
+    match self {
+      TypeDefinition::Primitive(primitive) => primitive.to_string(),
+      TypeDefinition::Enumeration(enumeration) => enumeration.name.to_owned(),
+      TypeDefinition::Structure(structure) => structure.name.to_owned(),
+    }
+  }
+
+  pub fn direct_dependencies(&self) -> HashSet<Uuid> {
+    let mut dependencies = HashSet::new();
+    let mut maybe_insert = |ty: &UnfrozenTy| {
+      match ty {
+        UnfrozenTy::Primitive(_) => {}
+        UnfrozenTy::UnfrozenScalar(scalar) => {
+          dependencies.insert(scalar.reference.id.to_owned());
+        }
+        UnfrozenTy::UnfrozenArray(array) => {
+          dependencies.insert(array.reference.id.to_owned());
+        }
+      };
+    };
+    match self {
+      TypeDefinition::Primitive(_) => {}
+      TypeDefinition::Enumeration(enumeration) => enumeration
+        .variants
+        .iter()
+        .for_each(|(_, variant)| maybe_insert(&variant.ty)),
+      TypeDefinition::Structure(structure) => structure
+        .fields
+        .iter()
+        .for_each(|(_, field)| maybe_insert(&field.ty)),
+    }
+    dependencies
+  }
 }
 
 #[derive(Display, Debug)]
