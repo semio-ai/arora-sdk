@@ -1,9 +1,5 @@
-use arora_schema::ty::{
-  BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
-  U8_ID, UNIT_ID,
-};
-
 use crate::{ast::TypeRef, Context};
+use semio_record::ty::{PrimitiveKind, UnfrozenTy};
 
 lazy_static::lazy_static! {
   pub static ref VOID: TypeRef = TypeRef {
@@ -68,49 +64,45 @@ lazy_static::lazy_static! {
   };
 }
 
-pub fn type_name<'a>(context: &'a Context<'a>, ty: &arora_schema::module::low::TypeRef) -> String {
+pub fn type_name<'a>(context: &'a Context<'a>, ty: &UnfrozenTy) -> String {
   match ty {
-    arora_schema::module::low::TypeRef::Scalar { id } => match id {
-      x if *x == *UNIT_ID => "void".to_string(),
-      x if *x == *BOOLEAN_ID => "bool".to_string(),
-      x if *x == *U8_ID => "std::uint8_t".to_string(),
-      x if *x == *U16_ID => "std::uint16_t".to_string(),
-      x if *x == *U32_ID => "std::uint32_t".to_string(),
-      x if *x == *U64_ID => "std::uint64_t".to_string(),
-      x if *x == *I8_ID => "std::int8_t".to_string(),
-      x if *x == *I16_ID => "std::int16_t".to_string(),
-      x if *x == *I32_ID => "std::int32_t".to_string(),
-      x if *x == *I64_ID => "std::int64_t".to_string(),
-      x if *x == *F32_ID => "float".to_string(),
-      x if *x == *F64_ID => "double".to_string(),
-      x if *x == *STRING_ID => "std::string_view".to_string(),
-      x => {
-        let ty = context.types.get(&x).expect(format!("encountered unknown type {}", x).as_str());
-        ty.name.clone()
-      }
+    UnfrozenTy::Primitive(primitive) => match primitive.kind {
+      PrimitiveKind::Unit => "void".to_string(),
+      PrimitiveKind::Boolean => "bool".to_string(),
+      PrimitiveKind::U8 => "std::uint8_t".to_string(),
+      PrimitiveKind::U16 => "std::uint16_t".to_string(),
+      PrimitiveKind::U32 => "std::uint32_t".to_string(),
+      PrimitiveKind::U64 => "std::uint64_t".to_string(),
+      PrimitiveKind::I8 => "std::int8_t".to_string(),
+      PrimitiveKind::I16 => "std::int16_t".to_string(),
+      PrimitiveKind::I32 => "std::int32_t".to_string(),
+      PrimitiveKind::I64 => "std::int64_t".to_string(),
+      PrimitiveKind::F32 => "float".to_string(),
+      PrimitiveKind::F64 => "double".to_string(),
+      PrimitiveKind::String => "std::string_view".to_string(),
+      PrimitiveKind::ArrayBoolean => "arora::buffer::View<bool>".to_string(),
+      PrimitiveKind::ArrayU8 => "arora::buffer::View<std::uint8_t>".to_string(),
+      PrimitiveKind::ArrayU16 => "arora::buffer::View<std::uint16_t>".to_string(),
+      PrimitiveKind::ArrayU32 => "arora::buffer::View<std::uint32_t>".to_string(),
+      PrimitiveKind::ArrayU64 => "arora::buffer::View<std::uint64_t>".to_string(),
+      PrimitiveKind::ArrayI8 => "arora::buffer::View<std::int8_t>".to_string(),
+      PrimitiveKind::ArrayI16 => "arora::buffer::View<std::int16_t>".to_string(),
+      PrimitiveKind::ArrayI32 => "arora::buffer::View<std::int32_t>".to_string(),
+      PrimitiveKind::ArrayI64 => "arora::buffer::View<std::int64_t>".to_string(),
+      PrimitiveKind::ArrayF32 => "arora::buffer::View<float>".to_string(),
+      PrimitiveKind::ArrayF64 => "arora::buffer::View<double>".to_string(),
+      PrimitiveKind::ArrayString => "arora::buffer::View<std::string_view>".to_string(),
     },
-    arora_schema::module::low::TypeRef::Array { id } => match id {
-      x if *x == *BOOLEAN_ID => "arora::buffer::View<bool>".to_string(),
-      x if *x == *U8_ID => "arora::buffer::View<std::uint8_t>".to_string(),
-      x if *x == *U16_ID => "arora::buffer::View<std::uint16_t>".to_string(),
-      x if *x == *U32_ID => "arora::buffer::View<std::uint32_t>".to_string(),
-      x if *x == *U64_ID => "arora::buffer::View<std::uint64_t>".to_string(),
-      x if *x == *I8_ID => "arora::buffer::View<std::int8_t>".to_string(),
-      x if *x == *I16_ID => "arora::buffer::View<std::int16_t>".to_string(),
-      x if *x == *I32_ID => "arora::buffer::View<std::int32_t>".to_string(),
-      x if *x == *I64_ID => "arora::buffer::View<std::int64_t>".to_string(),
-      x if *x == *F32_ID => "arora::buffer::View<float>".to_string(),
-      x if *x == *F64_ID => "arora::buffer::View<double>".to_string(),
-      x if *x == *STRING_ID => "std::vector<std::string_view>".to_string(),
-      x => {
-        let ty = context.types.get(&x).unwrap();
-        format!("std::vector<{}>", ty.name)
-      }
-    },
-    arora_schema::module::low::TypeRef::Map { key_id, value_id } => {
-      let key_ty = context.types.get(&key_id).unwrap();
-      let value_ty = context.types.get(&value_id).unwrap();
-      format!("std::unordered_map<{}, {}>", key_ty.name, value_ty.name)
+    UnfrozenTy::UnfrozenScalar(scalar) => {
+      let ty = context
+        .types
+        .get(&scalar.reference.id)
+        .expect(format!("encountered unknown type {}", scalar.reference.id).as_str());
+      ty.name().clone()
+    }
+    UnfrozenTy::UnfrozenArray(array) => {
+      let ty = context.types.get(&array.reference.id).unwrap();
+      format!("std::vector<{}>", ty.name())
     }
   }
 }

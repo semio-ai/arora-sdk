@@ -260,6 +260,10 @@ pub async fn resolve_high_module(
   for import in module_definition.imports {
     let HighImportSymbol::Function(import_function) = import.clone();
     let import_module_id = resolve_module_id(import_function.module.as_str(), registry).await?;
+    let import_module = registry
+      .get_module(&Selector::Id(import_module_id.clone()))
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
     dependencies.insert(UnfrozenReference {
       id: import_module_id,
       version_req: VersionReq::parse("*").unwrap(),
@@ -271,6 +275,7 @@ pub async fn resolve_high_module(
     dependencies.extend(import_deps.into_iter().cloned());
     imports.push(ImportAsset {
       module_id: import_module_id,
+      module_name: import_module.name.clone(),
       id: import_id,
       import: resolved_import,
     });
@@ -300,6 +305,7 @@ pub async fn resolve_high_module(
 
 pub async fn resolve_low_module(
   module_header: Header,
+  registry: &mut dyn ReadableRegistry,
 ) -> Result<ModuleAndImports, ModuleDeclarationError> {
   let mut dependencies = HashSet::new();
 
@@ -307,6 +313,10 @@ pub async fn resolve_low_module(
   for import in module_header.imports {
     let LowImportSymbol::Function(import_function) = import.clone();
     let import_module_id = import_function.module;
+    let import_module = registry
+      .get_module(&Selector::Id(import_module_id.clone()))
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
     dependencies.insert(UnfrozenReference {
       id: import_module_id,
       version_req: VersionReq::parse("*").unwrap(),
@@ -318,6 +328,7 @@ pub async fn resolve_low_module(
     dependencies.extend(import_deps.into_iter().cloned());
     imports.push(ImportAsset {
       module_id: import_module_id,
+      module_name: import_module.name.clone(),
       id: import_id,
       import: resolved_import,
     });

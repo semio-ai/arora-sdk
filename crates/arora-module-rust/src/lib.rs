@@ -1,7 +1,7 @@
 pub mod rustfmt;
 
 use arora_module_core::{
-  header::generate_header_file, Asset2, ImportAsset, ModuleDeclarationError,
+  header::generate_header_file, ModuleAsset, ImportAsset, ModuleDeclarationError,
 };
 use arora_registry::{ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::ty::{
@@ -35,7 +35,7 @@ use uuid::Uuid;
 /// from a set of assets as produced by [`arora_module_core::analyze_module`].
 /// First, the types, then the modules, then the imports.
 pub async fn generate_sources(
-  assets: Vec<Asset2>,
+  assets: Vec<ModuleAsset>,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Directory, GenerationError> {
   let mut result = generate_common_sources()?;
@@ -43,7 +43,7 @@ pub async fn generate_sources(
   let mut current_module = Option::<(Uuid, ModulePublic)>::None;
   for asset in assets {
     match asset {
-      Asset2::Type(id, ty) => match ty {
+      ModuleAsset::Type(id, ty) => match ty {
         TypeDefinition::Primitive(_) => (),
         TypeDefinition::Enumeration(enumeration) => {
           let parent_path = registry
@@ -64,13 +64,13 @@ pub async fn generate_sources(
           result = result.merge_with(&struct_sources);
         }
       },
-      Asset2::Import(import) => match imports_by_module.entry(import.module_id.to_owned()) {
+      ModuleAsset::Import(import) => match imports_by_module.entry(import.module_id.to_owned()) {
         Entry::Occupied(mut entry) => entry.get_mut().push(import),
         Entry::Vacant(entry) => {
           entry.insert(vec![import]);
         }
       },
-      Asset2::Module(ref module_id, ref module) => {
+      ModuleAsset::Module(ref module_id, ref module) => {
         let module_sources = generate_module_source(&module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.

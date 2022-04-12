@@ -15,16 +15,3 @@ for details on code generation.
 
   - `--language` / `-l` - The language to generate files for (e.g., cpp, rust)
   - `--output-directory` / `-o` - The location generated files will be placed
-
-## `arora-module-cli export-type`
-
-  - `--input-file` / `-i` - The Type input YAML
-  - `--no-resolution` / `-n` - Specify this type is already in the low-level format and does not need name resolution
-  - `--output-directory` / `-o` - The root of the arora-registry repository
-  - `--help` - Print subcommand-specific help
-
-## `arora-module-cli export-module`
-
-  - `--executable-file` / `-e` - The module's binary executable
-  - `--configuration-file` / `-c` - The ModuleDefinition input YAML
-  - `--help` - Print subcommand-specific help

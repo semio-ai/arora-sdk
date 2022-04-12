@@ -1,13 +1,7 @@
 pub mod header;
 pub mod resolve;
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
-use arora_schema::{
-  module::{
-    high::ModuleDefinition,
-    low::{ExportSymbol as LowExportSymbol, Header, ImportSymbol as LowImportSymbol},
-  },
-  ty::low::Type,
-};
+use arora_schema::module::high::ModuleDefinition;
 use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
@@ -27,7 +21,7 @@ use uuid::Uuid;
 pub async fn analyze_module_from_path<P: AsRef<Path>>(
   path: P,
   registry: &mut dyn ReadableRegistry,
-) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
   let module_yaml = read_to_string(path)
     .await
     .map_err(ModuleDeclarationError::IoError)?;
@@ -43,7 +37,7 @@ pub async fn analyze_module_from_path<P: AsRef<Path>>(
 pub async fn analyze_module(
   module_definition: ModuleDefinition,
   registry: &mut dyn ReadableRegistry,
-) -> Result<Vec<Asset2>, ModuleDeclarationError> {
+) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
   let module_id = module_definition.id.clone();
 
   // Resolve the module contents into a description compatible with the registry.
@@ -59,7 +53,7 @@ pub async fn analyze_module(
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     match entity_type {
-      EntityType::Structure | EntityType::Enumeration => assets.push(Asset2::Type(
+      EntityType::Structure | EntityType::Enumeration => assets.push(ModuleAsset::Type(
         dep_ref.id.to_owned(),
         registry
           .get_type(&selector)
@@ -71,22 +65,14 @@ pub async fn analyze_module(
   }
 
   // Then publish imports, and then this module.
-  assets.extend(resolved_module.imports.into_iter().map(Asset2::Import));
-  assets.push(Asset2::Module(module_id, resolved_module.module));
+  assets.extend(resolved_module.imports.into_iter().map(ModuleAsset::Import));
+  assets.push(ModuleAsset::Module(module_id, resolved_module.module));
   Ok(assets)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Asset {
-  Type(Type),
-  ImportSymbol(LowImportSymbol),
-  ExportSymbol(LowExportSymbol),
-  Header(Header),
-}
-
 /// Assets are entities provided or referred to by a module.
-#[derive(Debug)]
-pub enum Asset2 {
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ModuleAsset {
   /// Type, including its identifier.
   Type(Uuid, TypeDefinition),
   /// Imported symbol, including the identifier of its origin module.
@@ -95,9 +81,10 @@ pub enum Asset2 {
   Module(Uuid, ModulePublic),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportAsset {
   pub module_id: Uuid,
+  pub module_name: String,
   pub id: Uuid,
   pub import: Export,
 }
