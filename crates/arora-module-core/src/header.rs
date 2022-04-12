@@ -1,4 +1,3 @@
-use arora_module_core::ImportAsset;
 use arora_registry::ModulePublic;
 use arora_schema::{
   module::low::{
@@ -16,15 +15,21 @@ use semio_record::{
   module::v0::unfrozen::ExportKind,
   ty::{PrimitiveKind, UnfrozenTy},
 };
+use std::path::Path;
+use tokio::fs::read_to_string;
 use uuid::Uuid;
 
-use crate::GenerationError;
+use crate::{
+  resolve::{resolve_low_module, ModuleAndImports},
+  ImportAsset, ModuleDeclarationError,
+};
 
+/// Creates a YAML header file named `module.yaml` describing the module.
 pub fn generate_header_file(
   id: &Uuid,
   module: &ModulePublic,
   imports: &Vec<ImportAsset>,
-) -> Result<Directory, GenerationError> {
+) -> Result<Directory, ModuleDeclarationError> {
   let header = Header {
     id: id.to_owned(),
     name: module.name.to_owned(),
@@ -93,8 +98,28 @@ pub fn generate_header_file(
   let header_file = File::new(serde_yaml::to_string(&header).unwrap().as_bytes());
   result
     .insert("module.yaml", Entry::File(header_file))
-    .map_err(GenerationError::VfsError)?;
+    .map_err(ModuleDeclarationError::VfsError)?;
   Ok(result)
+}
+
+/// Reads the YAML header file at the given path
+/// and returns a description compatible with the registry.
+pub async fn module_public_from_header_file<P: AsRef<Path>>(
+  header_path: P,
+) -> Result<(Uuid, ModuleAndImports), ModuleDeclarationError> {
+  let header: Header = serde_yaml::from_str(
+    &read_to_string(header_path.as_ref())
+      .await
+      .map_err(ModuleDeclarationError::IoError)?,
+  )
+  .map_err(|e| {
+    ModuleDeclarationError::Generic(format!(
+      "header file {} contains invalid yaml: {}",
+      header_path.as_ref().display(),
+      e
+    ))
+  })?;
+  Ok((header.id.to_owned(), resolve_low_module(header).await?))
 }
 
 fn low_type_ref_fron_unfrozen_ty(unfrozen: &UnfrozenTy) -> TypeRef {

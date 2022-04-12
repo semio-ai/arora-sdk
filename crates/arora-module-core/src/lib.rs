@@ -1,4 +1,5 @@
-mod resolve;
+pub mod header;
+pub mod resolve;
 use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::{
   module::{
@@ -7,9 +8,10 @@ use arora_schema::{
   },
   ty::low::Type,
 };
+use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
-use resolve::resolve_module;
+use resolve::resolve_high_module;
 use semio_client::common::{EntityType, Selector};
 use semio_record::module::v0::{public::Public as ModulePublic, unfrozen::Export};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -46,7 +48,7 @@ pub async fn analyze_module(
 
   // Resolve the module contents into a description compatible with the registry.
   // It already includes the dependencies (internal and external) as references.
-  let resolved_module = resolve_module(module_definition, registry).await?;
+  let resolved_module = resolve_high_module(module_definition, registry).await?;
 
   // Collect first the actual types behind the references.
   let mut assets = Vec::new();
@@ -160,6 +162,9 @@ pub enum ModuleDeclarationError {
 
   /// Serialization / deserialization error.
   YAMLError(serde_yaml::Error),
+
+  /// Virtual file system error.
+  VfsError(VfsError),
 
   /// For any other error.
   #[display(fmt = "error: {}", _0)]

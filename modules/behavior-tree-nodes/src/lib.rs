@@ -1,13 +1,11 @@
 mod arora_generated;
 
-use arora_buffers::BufferReader;
-use arora_generated::{
-  import::{arora_dispatch_indirect, test_rust_wasm},
-  status::Status,
-  tick_id::TickId,
+use crate::arora_generated::{
+  arora::arora_dispatch_indirect,
+  behavior_tree::{status, status::Status, tick_id::TickId},
+  test_rust_wasm,
 };
-
-use crate::arora_generated::status;
+use arora_buffers::BufferReader;
 
 // To simulate statuses
 //===============================================================
