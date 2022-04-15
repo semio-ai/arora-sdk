@@ -1,4 +1,5 @@
 pub mod local;
+pub mod local_yaml;
 pub mod remote;
 pub mod remote_cached;
 use arora_schema::{

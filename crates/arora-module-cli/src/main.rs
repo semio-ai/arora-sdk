@@ -1,14 +1,7 @@
 mod generate;
-use std::{
-  ffi::OsStr,
-  path::{Path, PathBuf},
-  str::FromStr,
-};
-
 use anyhow::bail;
 use arora_registry::{
-  remote_cached::RemoteCachedRegistry, EditableRegistry, EnumerationPublic, FolderPublic,
-  ModulePublic, StructurePublic,
+  local_yaml::load_entities_from_yaml_dir, remote_cached::RemoteCachedRegistry,
 };
 use clap::{Parser, Subcommand};
 use generate::generate;
@@ -22,8 +15,8 @@ use semio_client::{
   mutation::Mutation,
   user::{self, Login},
 };
+use std::{path::PathBuf, str::FromStr};
 use tokio::fs::read_to_string;
-use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 struct ExportType {
@@ -207,52 +200,7 @@ async fn main() -> anyhow::Result<()> {
         include_path.display()
       );
     }
-
-    let mut folders = Vec::new();
-    for_each_uuid_yaml(&include_path.join("folder"), &mut |id, yaml: String| {
-      folders.push((id, serde_yaml::from_str::<FolderPublic>(yaml.as_str())?));
-      Ok(())
-    })
-    .await?;
-    for (id, folder) in folders {
-      registry.add_folder(id, folder).await?;
-    }
-
-    let mut enumerations = Vec::new();
-    for_each_uuid_yaml(
-      &include_path.join("enumeration"),
-      &mut |id, yaml: String| {
-        enumerations.push((
-          id,
-          serde_yaml::from_str::<EnumerationPublic>(yaml.as_str())?,
-        ));
-        Ok(())
-      },
-    )
-    .await?;
-    for (id, enumeration) in enumerations {
-      registry.add_enumeration(id, enumeration).await?;
-    }
-
-    let mut structures = Vec::new();
-    for_each_uuid_yaml(&include_path.join("structure"), &mut |id, yaml: String| {
-      structures.push((id, serde_yaml::from_str::<StructurePublic>(yaml.as_str())?));
-      Ok(())
-    })
-    .await?;
-    for (id, structure) in structures {
-      registry.add_structure(id, structure).await?;
-    }
-
-    let mut modules = Vec::new();
-    for_each_uuid_yaml(&include_path.join("module"), &mut |id, yaml: String| {
-      modules.push((id, serde_yaml::from_str::<ModulePublic>(yaml.as_str())?));
-      Ok(())
-    })
-    .await?;
-    for (id, module) in modules {
-      registry.add_module(id, module).await?;
-    }
+    load_entities_from_yaml_dir(include_path, &mut registry).await?;
   }
 
   // Perform the command.
@@ -262,32 +210,5 @@ async fn main() -> anyhow::Result<()> {
     }
   }
 
-  Ok(())
-}
-
-async fn for_each_uuid_yaml<F>(path: &Path, mut f: F) -> anyhow::Result<()>
-where
-  F: FnMut(Uuid, String) -> anyhow::Result<()>,
-{
-  let mut dir = match tokio::fs::read_dir(path).await {
-    Ok(dir) => dir,
-    _ => return Ok(()),
-  };
-  while let Some(entry) = dir.next_entry().await? {
-    let path = entry.path();
-    if path.extension() != Some(OsStr::new("yaml")) {
-      continue;
-    }
-    let stem = match path.file_stem().map(OsStr::to_str) {
-      Some(Some(stem)) => stem,
-      _ => continue,
-    };
-    let id = match Uuid::from_str(stem) {
-      Ok(id) => id,
-      _ => continue,
-    };
-    let yaml = read_to_string(&path).await?;
-    f(id, yaml)?;
-  }
   Ok(())
 }
