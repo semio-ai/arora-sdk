@@ -9,3 +9,7 @@ edition = "2021"
 semio-record = { git = "https://github.com/semio-ai/semio-entity.git", branch = "master" }
 lazy_static = "*"
 uuid = "*"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
