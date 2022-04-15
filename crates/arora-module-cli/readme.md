@@ -8,7 +8,17 @@ for details on code generation.
 
 ## Common Arguments
 
-  - `--registry-uri` - Specify an alternate URI for the registry
+  - `--config` / `-c` - Path to a `semio-cli` configuration file to reuse
+    and potentially update.
+  - `--include` / `-i` - Include entities in the registry.
+    It should be the path to a directory of entities.
+  - `--user-name` / `-u` - User name to authenticate with.
+    Overrides and updates the configuration file if provided.
+  - `--password` / `-p` - Password to authenticate with.
+    Updates the configuration file if provided.
+  - `--registry-url` - URL of the registry to use.
+    Overrides and updates the configuration file if provided.
+    Default is `http://localhost:8080`.
   - `--help` - Print available options and subcommands
 
 ## `arora-module-cli generate`
