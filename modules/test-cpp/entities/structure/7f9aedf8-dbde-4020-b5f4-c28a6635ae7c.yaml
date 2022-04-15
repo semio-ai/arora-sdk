@@ -1,0 +1,16 @@
+---
+name: TestStructure1
+parent: 00000000-0000-0000-0000-000001000000
+fields:
+  7d94a956-e50d-4cc4-9714-f62e1f9b134e:
+    name: status
+    type:
+      UnfrozenArray:
+        reference:
+          id: 325a5767-e344-4532-860e-0749bcf2e428
+          version_req: "*"
+  5ffa9104-1e5c-4026-943f-8db38bd34563:
+    name: integer_array
+    type:
+      Primitive:
+        kind: ArrayI32

@@ -79,6 +79,12 @@
             "name": "C++ generation for test-cpp",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
+                "--config",
+                "${env:HOME}/.semio/cli.yaml",
+                "--include",
+                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/entities",
+                "--include",
+                "${workspaceFolder}/build/modules/test-cpp-2/arora/entities",
                 "generate",
                 "-l",
                 "cpp",
@@ -88,6 +94,26 @@
                 "${workspaceFolder}/build/modules/test-cpp/arora"
             ],
             "cwd": "${workspaceFolder}/build/modules/test-cpp"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "C++ generation for test-cpp-2",
+            "program": "${workspaceFolder}/target/debug/arora-module-cli",
+            "args": [
+                "--config",
+                "${env:HOME}/.semio/cli.yaml",
+                "--include",
+                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/entities",
+                "generate",
+                "-l",
+                "cpp",
+                "-c",
+                "${workspaceFolder}/modules/test-cpp-2/module.yaml",
+                "-o",
+                "${workspaceFolder}/build/modules/test-cpp-2/arora"
+            ],
+            "cwd": "${workspaceFolder}/build/modules/test-cpp-2"
         },
         {
             "type": "lldb",
