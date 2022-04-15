@@ -94,9 +94,11 @@ pub async fn generate(cmd: Generate, registry: &mut dyn ReadableRegistry) -> any
 
   let mut module_low = std::path::PathBuf::new();
   module_low.push(cmd.output_directory);
-  module_low.push("module.yaml");
   let header_file = generate_header_file(&module_id, &module, &imports)?;
-  header_file.sync(module_low).await?;
+  header_file
+    .sync(module_low)
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to write header: {}", err))?;
 
   Ok(())
 }
