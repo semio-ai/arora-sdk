@@ -14,7 +14,8 @@ use ast::{
 use ast::{ToExpression, ToPrettyString};
 use clap::Parser;
 use convert_case::{Case, Casing};
-use semio_record::module::v0::unfrozen::{Export, ExportKind, Parameter};
+use semio_record::module::v0::unfrozen::{ExportKind, Parameter};
+use std::path::PathBuf;
 use std::{
   collections::{hash_map, HashMap, HashSet},
   str::FromStr,
@@ -79,7 +80,6 @@ pub struct Context<'a> {
   pub args: &'a Args,
   pub types: HashMap<Uuid, TypeDefinition>,
   pub grouped_import_symbols: HashMap<Uuid, Vec<ImportAsset>>,
-  pub exports: HashMap<Uuid, Export>,
   pub module_id: Uuid,
   pub module: Option<ModulePublic>,
 }
@@ -575,7 +575,7 @@ fn generate_self_header<'a>(context: &Context<'a>) -> anyhow::Result<Translation
   declarations
     .push(PreprocessorDirective::Include("optional".to_string(), IncludeStyle::System).into());
 
-  for export in context.exports.values() {
+  for export in context.module.as_ref().unwrap().exports.values() {
     let mut dependencies = HashSet::new();
     export.dependencies(&mut dependencies);
     dependencies.into_iter().for_each(|dep| {
@@ -594,12 +594,13 @@ fn generate_self_header<'a>(context: &Context<'a>) -> anyhow::Result<Translation
 
   let mut namespace_declarations: Vec<Declaration> = Vec::new();
 
-  for export in context.exports.values() {
+  for export in context.module.as_ref().unwrap().exports.values() {
     let name = identifier_name(&export.name);
     match &export.kind {
       ExportKind::Function(f) => {
         let mut parameters = Vec::new();
-        for (_, parameter) in f.parameters.iter() {
+        for parameter_id in f.parameter_ordering.iter() {
+          let parameter = f.parameter(parameter_id).unwrap();
           parameters.push(ast::Parameter {
             name: parameter.name.clone(),
             type_ref: optional(
@@ -690,7 +691,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
 
   declarations.push(declare::uuid_variable(id::module_uuid(&module.name), &module_id).into());
 
-  for (export_id, export) in &context.exports {
+  for (export_id, export) in &context.module.as_ref().unwrap().exports {
     match &export.kind {
       ExportKind::Function(f) => {
         declarations
@@ -1043,6 +1044,17 @@ fn generate_self<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
   Ok(root.into())
 }
 
+/// Generates a directory describing the module in a layout compatible with `arora-module-cli --include`.
+fn generate_self_entity<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
+  let module = context.module.as_ref().unwrap();
+  let mut result = Directory::new();
+  let modules_dir = result.ensure_directories(&PathBuf::from_str("entities/module/")?)?;
+  let module_path = format!("{}.yaml", context.module_id);
+  let module_yaml = serde_yaml::to_string(&module).unwrap();
+  modules_dir.insert(module_path, File::new(module_yaml.as_bytes()))?;
+  Ok(result)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
@@ -1062,7 +1074,6 @@ async fn main() -> anyhow::Result<()> {
     args: &args,
     types: HashMap::new(),
     grouped_import_symbols: HashMap::new(),
-    exports: HashMap::new(),
     module_id: self_id,
     module: None,
   };
@@ -1102,6 +1113,7 @@ async fn main() -> anyhow::Result<()> {
     root = root.merge_with(&generate_module_imports(&context, imports)?);
   }
   root = root.merge_with(&generate_self(&context)?);
+  root = root.merge_with(&generate_self_entity(&context)?);
 
   let mut writer = Writer::new(&mut stdout);
 

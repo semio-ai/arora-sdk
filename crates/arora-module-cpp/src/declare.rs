@@ -411,8 +411,11 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationPublic) -> Str
     struct_statements.push(Declaration::new_line(1));
 
     if variant.ty.is_scalar()
-      || variant.ty.is_primitive() && variant.ty.as_primitive().unwrap().is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
+      // Static method to create an instance of the variant.
       struct_statements.push(
         FunctionPrototype {
           name: format!("{}", variant.name.to_lowercase()),
@@ -485,7 +488,9 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationPublic) -> Str
     );
 
     if variant.ty.is_scalar()
-      || variant.ty.is_primitive() && variant.ty.as_primitive().unwrap().is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
       struct_statements.push(
         FunctionPrototype {
@@ -1126,7 +1131,9 @@ pub fn enumeration_deserializer(
 
   for (_, variant) in ty.variants.iter() {
     let ret = if variant.ty.is_scalar()
-      || variant.ty.is_primitive() && variant.ty.as_primitive().unwrap().is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
       Statement::Return(
         name
