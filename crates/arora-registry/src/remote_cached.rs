@@ -1,6 +1,9 @@
 use crate::local::LocalRegistry;
 use crate::remote::RemoteRegistry;
-use crate::{EditableRegistry, ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
+use crate::{
+  EditableRegistry, EnumerationPublic, FolderPublic, ModulePublic, ReadableRegistry, RegistryError,
+  StructurePublic, TypeDefinition,
+};
 use async_trait::async_trait;
 use semio_client::common::{EntityType, Selector};
 use semio_client::context::Context;
@@ -81,12 +84,40 @@ impl ReadableRegistry for RemoteCachedRegistry {
     }
     self.remote.resolve_id(id).await
   }
-  
+
   async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
     match self.cache.type_of(selector).await {
       Ok(ty) => Ok(ty),
       Err(RegistryError::NoSuchEntity { selector: _ }) => self.remote.type_of(selector).await,
       Err(err) => Err(err),
     }
+  }
+}
+
+/// When an entity is added, it is added to the local cache only.
+#[async_trait(?Send)]
+impl EditableRegistry for RemoteCachedRegistry {
+  async fn add_enumeration(
+    &mut self,
+    id: Uuid,
+    enumeration: EnumerationPublic,
+  ) -> Result<Uuid, RegistryError> {
+    self.cache.add_enumeration(id, enumeration).await
+  }
+
+  async fn add_structure(
+    &mut self,
+    id: Uuid,
+    structure: StructurePublic,
+  ) -> Result<(), RegistryError> {
+    self.cache.add_structure(id, structure).await
+  }
+
+  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError> {
+    self.cache.add_module(id, module).await
+  }
+
+  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError> {
+    self.cache.add_folder(id, folder).await
   }
 }
