@@ -485,7 +485,8 @@ fn generate_module_imports<'a>(
     match &import.import.kind {
       ExportKind::Function(func) => {
         let mut parameters = Vec::new();
-        for (_, parameter) in func.parameters.iter() {
+        for parameter_id in func.parameter_ordering.iter() {
+          let parameter = func.parameters.get(parameter_id).unwrap();
           parameters.push(ast::Parameter {
             type_ref: ast::TypeRef {
               ty: ty::type_name(context, &parameter.ty),
