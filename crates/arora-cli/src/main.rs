@@ -1,16 +1,26 @@
+use std::{
+  borrow::BorrowMut, collections::HashMap, fs::read_to_string, path::PathBuf, str::FromStr,
+};
+
 use anyhow::bail;
 use arora::{
   call::{Call, CallBridge},
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
 };
-use arora_index::Index;
-use arora_registry::Registry;
-use clap::{Error, ErrorKind, Parser};
-use tokio::{
-  fs::{read_to_string, File},
-  io::AsyncReadExt
+use arora_module_core::header::module_public_from_header_file;
+use arora_registry::{
+  config::check_and_update_config, local::LocalRegistry, local_yaml::load_entities_from_yaml_dir,
+  remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry,
 };
+use clap::{Error, ErrorKind, Parser};
+use reqwest::{
+  header::{self, HeaderMap, HeaderValue},
+  Client,
+};
+use semio_client::{authentication::Config, context::Context};
+use semio_record::module::v0::unfrozen::ExportKind;
+use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
 
 // Command-line arguments.
@@ -18,10 +28,49 @@ use url::Url;
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Args {
-  /// URI to the registry of existing types.
-  #[clap(short, long)]
-  pub registry_uri: Option<String>,
-  
+  #[clap(
+    short,
+    long,
+    help = "Path to a semio-cli configuration file to reuse and potentially update.
+    If absent and no registry URL is provided, a local registry will be used."
+  )]
+  config: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    help = "URL of the registry to use.
+    If absent and no configuration file is provided, a local registry will be used."
+  )]
+  registry_url: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    name = "user-name",
+    help = "User name to authenticate with.
+    Overrides and updates the configuration file if provided.
+    Ignored if no registry URL is provided."
+  )]
+  user_name: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    help = "Password to authenticate with.
+    Updates the configuration file if provided.
+    Ignored if no registry URL is provided."
+  )]
+  password: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    help = "Include entities in the registry.
+    It should be the path to a directory of entities."
+  )]
+  include: Vec<String>,
+
   /// Headers of modules to load. Order must match --exe arguments.
   #[clap(short, long)]
   pub header: Vec<String>,
@@ -37,7 +86,7 @@ pub struct Args {
   /// Measure time taken to perform the tasks, and print them.
   #[clap(short, long)]
   pub benchmark: bool,
-  
+
   /// Number of times to perform a call. Still performs the call is set to 0. Ignored if --call is not set.
   #[clap(short = 'n', long, default_value = "1")]
   pub repeat: u32,
@@ -47,69 +96,126 @@ pub struct Args {
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
 
-  let mut engine = EngineBuilder::new()
-    .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
-    .build();
-
-  let mut index = Index::new();
-
   if args.header.len() != args.exe.len() {
     bail!(Error::raw(
       ErrorKind::WrongNumberOfValues,
       format!(
         "mismatching number of headers ({}) and executables ({}) provided",
         args.header.len(),
-        args.exe.len())
+        args.exe.len()
       )
-    );
+    ));
   }
 
-  let registry = args.registry_uri.map(|uri| {
-    Registry::new_with_base_uri(Url::parse(&uri)
-      .expect(format!("malformed registry URI: {}", uri).as_str()))
-  });
+  let registry_url = if args.registry_url.is_some() {
+    args.registry_url.to_owned()
+  } else if let Some(config_path) = &args.config {
+    let config = read_to_string(config_path)?;
+    let config = serde_yaml::from_str::<Config>(&config)?;
+    config.url
+  } else {
+    None
+  };
 
+  if let Some(registry_url) = registry_url {
+    // Check config and args and update config if necessary,
+    // while getting the updated token.
+    let registry_url = Url::parse(registry_url.as_str())?;
+    let token = check_and_update_config(
+      &registry_url,
+      args.config.to_owned(),
+      args.user_name.to_owned(),
+      args.password.to_owned(),
+    )
+    .await?;
+
+    // Setup the context with the refreshed token.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+      header::AUTHORIZATION,
+      HeaderValue::from_str(token.as_str())?,
+    );
+    let client = Client::builder().default_headers(headers).build()?;
+    let context = Context::new(registry_url, client);
+
+    // Connect to the remote registry, and add entities added locally.
+    let mut registry = RemoteCachedRegistry::new(context);
+    main_with_registry(&args, &mut registry).await
+  } else {
+    let mut registry = LocalRegistry::new();
+    main_with_registry(&args, &mut registry).await
+  }
+}
+
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
+  args: &Args,
+  registry: &mut R,
+) -> anyhow::Result<()> {
+  // Add entities manually included to the registry.
+  for include in &args.include {
+    let include_path = PathBuf::from_str(include.as_str())?;
+    if !include_path.exists() {
+      eprintln!(
+        "include path {} does not exist and is ignored",
+        include_path.display()
+      );
+    }
+    load_entities_from_yaml_dir(include_path, registry).await?;
+  }
+
+  let mut functions_modules = HashMap::new();
+  let mut engine = EngineBuilder::new()
+    .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
+    .build();
   for i in 0..args.header.len() {
+    // Read the header.
     let header_path = &args.header[i];
     let header: Header = serde_yaml::from_str(
       &read_to_string(header_path)
-        .await
         .expect(format!("header file {} could not be read", header_path).as_str()),
-    ).expect(format!("header file {} contains invalid yaml", header_path).as_str());
+    )
+    .expect(format!("header file {} contains invalid yaml", header_path).as_str());
+    let (module_id, module_and_imports) =
+      module_public_from_header_file(header_path, registry.borrow_mut()).await?;
 
-    for type_id in header.type_dependencies() {
-      if index.find_type(&type_id).is_ok() {
-        continue;
-      }
-      if let Some(ref registry) = registry {
-        let ty = registry.get_type(&type_id).await?;
-        index.add_type(ty);
-      } else {
-        bail!("header provided in {} depends on type {} which is unknown", header_path, type_id);
-      }
+    // Remember the module ID for each function ID.
+    for (export_id, export) in &module_and_imports.module.exports {
+      match export.kind {
+        ExportKind::Function(_) => functions_modules.insert(export_id.clone(), module_id.clone()),
+      };
     }
 
+    // Add it to the registry.
+    registry
+      .add_module(module_id, module_and_imports.module)
+      .await?;
+
+    // Load the executable in the engine.
     let mut executable_file = File::open(&args.exe[i]).await?;
     let mut executable = Vec::new();
     executable_file.read_to_end(&mut executable).await?;
     let executable = executable.into_boxed_slice();
-    
-    index.add_module(&header)?;
 
     let module_name = header.name.clone();
     engine
-    .load_module(ModuleDefinition {
-      schema_version: 0,
-      header,
-      executable,
-    })
-    .expect(format!("failed to load module {}", module_name).as_str());
+      .load_module(ModuleDefinition {
+        schema_version: 0,
+        header,
+        executable,
+      })
+      .expect(format!("failed to load module {}", module_name).as_str());
   }
 
-  if let Some(call_yaml) = args.call {
+  if let Some(call_yaml) = &args.call {
     let call: Call = serde_yaml::from_str(&call_yaml)?;
     let function_id = call.id.clone();
-    let function = index.find_function(&function_id)?;
+    let module_id = if let Some(module_id) = &call.module_id {
+      module_id
+    } else {
+      functions_modules
+        .get(&function_id)
+        .expect(format!("no such function {}", function_id).as_str())
+    };
 
     let start_time = if args.benchmark {
       Some(std::time::Instant::now())
@@ -119,10 +225,10 @@ async fn main() -> anyhow::Result<()> {
 
     let nof_iterations = args.repeat;
     for _i in 0..nof_iterations {
-      let result = engine.arora_call(&function.module, call.clone())?;
+      let result = engine.arora_call(&module_id, call.clone())?;
       println!("{}", serde_yaml::to_string(&result)?);
     }
-  
+
     if args.benchmark {
       let end_time = std::time::Instant::now();
       let total_duration = end_time - start_time.unwrap();

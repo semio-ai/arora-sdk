@@ -6,7 +6,6 @@ readme = "readme.md"
 include = ["/src"]
 
 [dependencies]
-arora-index = { path = "../arora-index" }
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
 arora-schema = { path = "../arora-schema" }
