@@ -6,6 +6,13 @@ use crate::{
 };
 use std::{ffi::OsStr, path::Path, str::FromStr};
 
+/// Reads a directory describing registry entities in YAML format,
+/// and loads them into the given registry.
+/// The directory may contain a subdirectory for each entity type:
+/// `folder`, `enumeration`, `structure`, `module`.
+/// Each subdirectory may contain a list of entities serialized in YAML,
+/// into files named `<uuid>.yaml`,
+/// where `<uuid>` is the UUID to give to the entity when adding it to the registry.
 pub async fn load_entities_from_yaml_dir<P: AsRef<Path>>(
   path: P,
   registry: &mut dyn EditableRegistry,

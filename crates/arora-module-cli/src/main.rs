@@ -1,7 +1,7 @@
 mod generate;
-use anyhow::bail;
 use arora_registry::{
-  local_yaml::load_entities_from_yaml_dir, remote_cached::RemoteCachedRegistry,
+  config::check_and_update_config, local_yaml::load_entities_from_yaml_dir,
+  remote_cached::RemoteCachedRegistry,
 };
 use clap::{Parser, Subcommand};
 use generate::generate;
@@ -9,14 +9,8 @@ use reqwest::{
   header::{self, HeaderValue},
   Client, Url,
 };
-use semio_client::{
-  authentication::{access_token, Config, ConfigMutation},
-  context::Context,
-  mutation::Mutation,
-  user::{self, Login},
-};
+use semio_client::context::Context;
 use std::{path::PathBuf, str::FromStr};
-use tokio::fs::read_to_string;
 
 #[derive(Debug, Parser)]
 struct ExportType {
@@ -98,97 +92,18 @@ async fn main() -> anyhow::Result<()> {
   env_logger::builder().init();
 
   let args = Args::parse();
-
-  // Read the configuration file if specified.
-  let mut config: Option<Config> = if let Some(config_path) = &args.config {
-    let config_str = read_to_string(&config_path)
-      .await
-      .expect(format!("Failed to read configuration file {}", config_path).as_str());
-    Some(serde_yaml::from_str(&config_str)?)
-  } else {
-    None
-  };
-
-  // Set the registry URL, update configuration file if specified.
-  let url = Url::parse(&args.registry_url).map_err(|_| anyhow::anyhow!("Invalid registry URL"))?;
-  if let Some(conf) = config {
-    config = Some(
-      ConfigMutation {
-        url: Mutation::Set(url.to_string()),
-        ..Default::default()
-      }
-      .next(conf),
-    );
-  }
-
-  // Authentication.
-  let mut token = None;
-
-  // User name is provided, update configuration file if specified.
-  if let Some(user_name) = args.user_name {
-    let password = args.password.clone().unwrap_or("".to_string());
-    let login = Login {
-      user_name,
-      password,
-    };
-    let context = Context::new(url.to_owned(), Client::builder().build()?);
-    let login_result = user::login(&context, login).await?;
-    token = Some(login_result.access_token.token.to_owned());
-    if let Some(conf) = config {
-      config = Some(
-        ConfigMutation {
-          access: Mutation::Set(login_result.access_token),
-          refresh: if let Some(refresh_token) = login_result.refresh_token {
-            Mutation::Set(refresh_token)
-          } else {
-            Mutation::Unset
-          },
-          user_id: Mutation::Set(login_result.id),
-          ..Default::default()
-        }
-        .next(conf),
-      );
-    }
-  }
-
-  // Password is provided without user name, we can't authenticate.
-  if args.password.is_some() {
-    bail!("Password provided without user name");
-  }
-
-  // If not yet authenticated, try to authenticate with the configuration file.
-  if token.is_none() {
-    if let Some(conf) = config {
-      let (new_token, config_mutation) = access_token(&conf).await.map_err(|err| {
-        anyhow::anyhow!(
-          "error while refreshing authentication token from configuration: {}",
-          err
-        )
-      })?;
-      token = new_token;
-      config = Some(config_mutation.next(conf));
-    } else {
-      bail!("No authentication information provided");
-    }
-  }
-
-  // Update the configuration file.
-  if let Some(conf) = config {
-    let config_str = serde_yaml::to_string(&conf)?;
-    if let Some(config_path) = &args.config {
-      tokio::fs::write(config_path, config_str).await?;
-    }
-  }
+  let registry_url = Url::parse(args.registry_url.as_str())?;
+  let token =
+    check_and_update_config(&registry_url, args.config, args.user_name, args.password).await?;
 
   // Setup the context with the refreshed token.
-  let token = token.expect("Token still missing after authentication succeeded.");
   let mut headers = header::HeaderMap::new();
   headers.insert(
     header::AUTHORIZATION,
     HeaderValue::from_str(token.as_str())?,
   );
   let client = Client::builder().default_headers(headers).build()?;
-  let context = Context::new(url, client);
+  let context = Context::new(registry_url, client);
 
   // Connect to the remote registry, and add entities added locally.
   let mut registry = RemoteCachedRegistry::new(context);
