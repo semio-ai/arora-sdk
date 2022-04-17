@@ -29,7 +29,6 @@ use url::Url;
 #[clap(author, version, about, long_about = None)]
 pub struct Args {
   #[clap(
-    short,
     long,
     help = "Path to a semio-cli configuration file to reuse and potentially update.
     If absent and no registry URL is provided, a local registry will be used."
