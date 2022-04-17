@@ -11,7 +11,7 @@ use arora::{
 use arora_module_core::header::module_public_from_header_file;
 use arora_registry::{
   config::check_and_update_config, local::LocalRegistry, local_yaml::load_entities_from_yaml_dir,
-  remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry,
+  remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry, RegistryError,
 };
 use clap::{Error, ErrorKind, Parser};
 use reqwest::{
@@ -185,9 +185,14 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
     }
 
     // Add it to the registry.
-    registry
+    // It might be already brought by the includes, but we don't care.
+    match registry
       .add_module(module_id, module_and_imports.module)
-      .await?;
+      .await
+    {
+      Ok(_) | Err(RegistryError::DuplicateSelector { selector: _ }) => {}
+      Err(e) => bail!(e),
+    }
 
     // Load the executable in the engine.
     let mut executable_file = File::open(&args.exe[i]).await?;
