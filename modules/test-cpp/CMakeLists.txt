@@ -41,6 +41,8 @@ if(BUILD_TESTING)
     COMMAND ${ARORA_CLI}
       --config ${REGISTRY_CONFIGURATION_FILE}
       --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
+      --include ${CMAKE_CURRENT_SOURCE_DIR}/entities
+      --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/entities
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
       --header ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/module.yaml
