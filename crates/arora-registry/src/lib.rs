@@ -1,4 +1,6 @@
+pub mod config;
 pub mod local;
+pub mod local_yaml;
 pub mod remote;
 pub mod remote_cached;
 use arora_schema::{
@@ -10,14 +12,19 @@ use arora_schema::{
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_client::common::{Selector, EntityType};
+use semio_client::common::{RecordType, Selector};
 use semio_record::{
-  enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
+  enumeration::v0::Enumeration,
+  module::v0::Module,
+  record::{RecordDefn},
+  structure::v0::Structure,
+  ty::UnfrozenTy,
 };
 use semio_record::{
   folder::v0::Folder, organization::v0::Organization, ty::PrimitiveKind, user::v0::User,
 };
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use tokio::{
   fs::{read_to_string, File},
   io::AsyncReadExt,
@@ -146,10 +153,10 @@ impl Registry {
 
 #[async_trait(?Send)]
 pub trait ReadableRegistry {
-  /// Gets the definition of a type entity,
+  /// Gets the definition of a type record,
   /// i.e. of a primitive, a structure or an enumeration.
   /// Not to be confused with the [`type_of`] function,
-  /// which retrieves the type of an entity.
+  /// which retrieves the type of an record.
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError>;
 
   /// Gets the definition of a module.
@@ -161,10 +168,10 @@ pub trait ReadableRegistry {
   /// Resolves the given identifier into a path.
   async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
 
-  /// Resolves the type of entity identified by the given selector.
+  /// Resolves the type of record identified by the given selector.
   /// Do not confuse with the [`get_type`] function,
   /// which returns type definitions.
-  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError>;
+  async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError>;
 }
 
 #[async_trait(?Send)]
@@ -215,41 +222,78 @@ pub type UserPublic = <User as RecordDefn>::Public;
 pub type OrganizationPublic = <Organization as RecordDefn>::Public;
 pub type FolderPublic = <Folder as RecordDefn>::Public;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDefinition {
   Primitive(PrimitiveKind),
   Enumeration(EnumerationPublic),
   Structure(StructurePublic),
 }
 
+impl TypeDefinition {
+  pub fn name(&self) -> String {
+    match self {
+      TypeDefinition::Primitive(primitive) => primitive.to_string(),
+      TypeDefinition::Enumeration(enumeration) => enumeration.name.to_owned(),
+      TypeDefinition::Structure(structure) => structure.name.to_owned(),
+    }
+  }
+
+  pub fn direct_dependencies(&self) -> HashSet<Uuid> {
+    let mut dependencies = HashSet::new();
+    let mut maybe_insert = |ty: &UnfrozenTy| {
+      match ty {
+        UnfrozenTy::Primitive(_) => {}
+        UnfrozenTy::UnfrozenScalar(scalar) => {
+          dependencies.insert(scalar.reference.id.to_owned());
+        }
+        UnfrozenTy::UnfrozenArray(array) => {
+          dependencies.insert(array.reference.id.to_owned());
+        }
+      };
+    };
+    match self {
+      TypeDefinition::Primitive(_) => {}
+      TypeDefinition::Enumeration(enumeration) => enumeration
+        .variants
+        .iter()
+        .for_each(|(_, variant)| maybe_insert(&variant.ty)),
+      TypeDefinition::Structure(structure) => structure
+        .fields
+        .iter()
+        .for_each(|(_, field)| maybe_insert(&field.ty)),
+    }
+    dependencies
+  }
+}
+
 #[derive(Display, Debug)]
 pub enum RegistryError {
-  /// No such entity.
-  #[display(fmt = "no such entity \"{}\"", selector)]
-  NoSuchEntity { selector: Selector },
+  /// No such record.
+  #[display(fmt = "no such record \"{}\"", selector)]
+  NoSuchRecord { selector: Selector },
 
-  /// Entity exists but is not a type.
-  #[display(fmt = "entity \"{}\" exists but is not a type", selector)]
+  /// Record exists but is not a type.
+  #[display(fmt = "record \"{}\" exists but is not a type", selector)]
   NotAType { selector: Selector },
 
-  /// Entity exists but is not a module.
-  #[display(fmt = "entity \"{}\" exists but is not a module", selector)]
+  /// Record exists but is not a module.
+  #[display(fmt = "record \"{}\" exists but is not a module", selector)]
   NotAModule { selector: Selector },
 
-  /// Entity being inserted has a parent defined, but it is unknown locally.
-  #[display(fmt = "parent of entity \"{}\" is unknown to the registry", name)]
+  /// Record being inserted has a parent defined, but it is unknown locally.
+  #[display(fmt = "parent of record \"{}\" is unknown to the registry", name)]
   UnknownParent { name: String },
 
-  /// The name or identifier of the entity being added is already taken by another entity.
+  /// The name or identifier of the record being added is already taken by another record.
   #[display(
-    fmt = "added entity's selector {} is already taken in the registry",
+    fmt = "added record's selector {} is already taken in the registry",
     selector
   )]
   DuplicateSelector { selector: Selector },
 
-  /// Entity being inserted uses a dependency that is not known locally.
+  /// Record being inserted uses a dependency that is not known locally.
   #[display(
-    fmt = "entity depends on \"{}\", which is unknown to the registry",
+    fmt = "record depends on \"{}\", which is unknown to the registry",
     selector
   )]
   UnknownDependency { selector: Selector },

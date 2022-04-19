@@ -41,9 +41,10 @@ pub async fn main() -> Result<()> {
     .await?;
 
   // test_rust_wasm
-  let (test_rust_wasm_id, test_rust_wasm_module) = module_public_from_header_file(Path::new(
-    "../test-rust-wasm/src/arora_generated/module.yaml",
-  ))
+  let (test_rust_wasm_id, test_rust_wasm_module) = module_public_from_header_file(
+    Path::new("../test-rust-wasm/src/arora_generated/module.yaml"),
+    &mut registry
+  )
   .await?;
   registry
     .add_module(test_rust_wasm_id, test_rust_wasm_module.module)

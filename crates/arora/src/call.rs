@@ -11,6 +11,8 @@ use crate::module::DispatchError;
 /// A call is described like a structure in arora engine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Call {
+  #[serde(default)]
+  pub module_id: Option<Uuid>,
   pub id: Uuid,
   #[serde(default)]
   pub args: Vec<StructureField>,

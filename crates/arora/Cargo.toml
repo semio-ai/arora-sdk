@@ -11,7 +11,6 @@ crate-type = [ "cdylib", "rlib" ]
 
 [dependencies]
 arora-buffers = { path = "../arora-buffers" }
-arora-index = { path = "../arora-index" }
 arora-schema = { path = "../arora-schema" }
 derive_more = "*"
 anyhow = "*"

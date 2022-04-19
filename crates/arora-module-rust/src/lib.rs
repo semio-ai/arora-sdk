@@ -1,7 +1,7 @@
 pub mod rustfmt;
 
 use arora_module_core::{
-  header::generate_header_file, Asset2, ImportAsset, ModuleDeclarationError,
+  header::generate_header_file, ModuleAsset, ImportAsset, ModuleDeclarationError,
 };
 use arora_registry::{ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
 use arora_schema::ty::{
@@ -16,7 +16,7 @@ use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
 };
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_record::{
   enumeration::v0::public::Public as EnumerationPublic,
   module::v0::unfrozen::{ExportKind, Parameter},
@@ -35,7 +35,7 @@ use uuid::Uuid;
 /// from a set of assets as produced by [`arora_module_core::analyze_module`].
 /// First, the types, then the modules, then the imports.
 pub async fn generate_sources(
-  assets: Vec<Asset2>,
+  assets: Vec<ModuleAsset>,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Directory, GenerationError> {
   let mut result = generate_common_sources()?;
@@ -43,7 +43,7 @@ pub async fn generate_sources(
   let mut current_module = Option::<(Uuid, ModulePublic)>::None;
   for asset in assets {
     match asset {
-      Asset2::Type(id, ty) => match ty {
+      ModuleAsset::Type(id, ty) => match ty {
         TypeDefinition::Primitive(_) => (),
         TypeDefinition::Enumeration(enumeration) => {
           let parent_path = registry
@@ -64,13 +64,13 @@ pub async fn generate_sources(
           result = result.merge_with(&struct_sources);
         }
       },
-      Asset2::Import(import) => match imports_by_module.entry(import.module_id.to_owned()) {
+      ModuleAsset::Import(import) => match imports_by_module.entry(import.module_id.to_owned()) {
         Entry::Occupied(mut entry) => entry.get_mut().push(import),
         Entry::Vacant(entry) => {
           entry.insert(vec![import]);
         }
       },
-      Asset2::Module(ref module_id, ref module) => {
+      ModuleAsset::Module(ref module_id, ref module) => {
         let module_sources = generate_module_source(&module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.
@@ -1235,8 +1235,8 @@ async fn generate_deserialize_from_unfrozen(
         .await
         .map_err(GenerationError::RegistryError)?
       {
-        EntityType::Enumeration => quote! { TYPE_ENUMERATION },
-        EntityType::Structure => quote! { TYPE_STRUCTURE },
+        RecordType::Enumeration => quote! { TYPE_ENUMERATION },
+        RecordType::Structure => quote! { TYPE_STRUCTURE },
         _ => unreachable!("unexpected type of element in array"),
       };
       let raw_id = RawUuidValue(&array.reference.id);
@@ -1517,7 +1517,7 @@ fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
   }
 }
 
-/// Generates the identifier for the mod publishing the entity of the given id.
+/// Generates the identifier for the mod publishing the record of the given id.
 async fn generated_mod_ident_from_id(
   id: &Uuid,
   registry: &mut dyn ReadableRegistry,

@@ -1,17 +1,16 @@
-use arora_schema::ty::{
-  low::{Enumeration, Structure, Type, TypeKind, StructureField},
-  UNIT_ID,
-};
-use uuid::Uuid;
-
 use crate::{
   ast::{
     ArrayKind, Block, Declaration, Enum, Expression, FunctionImplementation, FunctionPrototype,
-    Parameter, Statement, Struct, ToExpression, ToPrettyString, TypeRef,
-    Variable,
+    Parameter, Statement, Struct, ToExpression, ToPrettyString, TypeRef, Variable,
   },
-  constant, func, id, ty, Context, identifier_name, identifier_uuid,
+  constant, func, id, identifier_name, identifier_uuid, ty, Context,
 };
+use arora_registry::{EnumerationPublic, StructurePublic, TypeDefinition};
+use semio_record::{
+  structure::v0::unfrozen::StructureField,
+  ty::{PrimitiveKind, UnfrozenTy},
+};
+use uuid::Uuid;
 
 fn uuid_initializer_list(uuid: &Uuid) -> Expression {
   let id_bytes = uuid.as_bytes();
@@ -144,7 +143,7 @@ pub fn arora_buffer_reader_get_structure() -> Expression {
   func::ARORA_BUFFER_READER_GET_STRUCTURE.call(["reader"])
 }
 
-pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
+pub fn structure(context: &Context, name: &str, ty: &StructurePublic) -> Struct {
   let mut declarations = Vec::new();
   for (_, field) in &ty.fields {
     declarations.push(
@@ -152,7 +151,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
         name: field.name.clone(),
         parameters: vec![],
         ret: Some(ty::optional_const_ref(&TypeRef {
-          ty: ty::type_name(context, &field.type_ref),
+          ty: ty::type_name(context, &field.ty),
           ..Default::default()
         })),
         constant: true,
@@ -168,7 +167,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_const_ref(&TypeRef {
-            ty: ty::type_name(context, &field.type_ref),
+            ty: ty::type_name(context, &field.ty),
             ..Default::default()
           }),
         }],
@@ -184,7 +183,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_move(&TypeRef {
-            ty: ty::type_name(context, &field.type_ref),
+            ty: ty::type_name(context, &field.ty),
             ..Default::default()
           }),
         }],
@@ -202,7 +201,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
       Variable {
         name: structure_private_field_variable_name(id, field),
         ty: ty::optional(&TypeRef {
-          ty: ty::type_name(context, &field.type_ref),
+          ty: ty::type_name(context, &field.ty),
           ..Default::default()
         }),
         ..Default::default()
@@ -222,7 +221,7 @@ pub fn structure(context: &Context, name: &str, ty: &Structure) -> Struct {
   }
 }
 
-pub fn enumeration_constants(_: &Uuid, name: &str, ty: &Enumeration) -> Vec<Declaration> {
+pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationPublic) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -236,10 +235,10 @@ pub fn enumeration_constants(_: &Uuid, name: &str, ty: &Enumeration) -> Vec<Decl
     .into(),
   );
 
-  for (_, value) in ty.values.iter() {
+  for (_, variant) in ty.variants.iter() {
     ret.push(
       Variable {
-        name: id::value_uuid(&name, &value.name),
+        name: id::value_uuid(&name, &variant.name),
         ty: ty::U8_CONST.clone(),
         extern_: true,
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -252,7 +251,7 @@ pub fn enumeration_constants(_: &Uuid, name: &str, ty: &Enumeration) -> Vec<Decl
   ret
 }
 
-pub fn structure_constants(_: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+pub fn structure_constants(_: &Uuid, name: &str, ty: &StructurePublic) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -282,15 +281,19 @@ pub fn structure_constants(_: &Uuid, name: &str, ty: &Structure) -> Vec<Declarat
   ret
 }
 
-pub fn type_constants(id: &Uuid, ty: &Type) -> Vec<Declaration> {
-  match &ty.kind {
-    TypeKind::Structure(v) => structure_constants(id, &ty.name, v),
-    TypeKind::Enumeration(v) => enumeration_constants(id, &ty.name, v),
-    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
+pub fn type_constants(id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+  match &ty {
+    TypeDefinition::Structure(v) => structure_constants(id, &ty.name(), v),
+    TypeDefinition::Enumeration(v) => enumeration_constants(id, &ty.name(), v),
+    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", id.to_string()),
   }
 }
 
-pub fn enumeration_constants_impl(id: &Uuid, name: &str, ty: &Enumeration) -> Vec<Declaration> {
+pub fn enumeration_constants_impl(
+  id: &Uuid,
+  name: &str,
+  ty: &EnumerationPublic,
+) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -304,10 +307,10 @@ pub fn enumeration_constants_impl(id: &Uuid, name: &str, ty: &Enumeration) -> Ve
     .into(),
   );
 
-  for (id, value) in ty.values.iter() {
+  for (id, variant) in ty.variants.iter() {
     ret.push(
       Variable {
-        name: id::value_uuid(&name, &value.name),
+        name: id::value_uuid(&name, &variant.name),
         ty: ty::U8_CONST.clone(),
         value: Some(uuid_initializer_list(id)),
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -320,7 +323,7 @@ pub fn enumeration_constants_impl(id: &Uuid, name: &str, ty: &Enumeration) -> Ve
   ret
 }
 
-pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &Structure) -> Vec<Declaration> {
+pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructurePublic) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -350,25 +353,25 @@ pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &Structure) -> Vec<De
   ret
 }
 
-pub fn type_constants_impl(id: &Uuid, ty: &Type) -> Vec<Declaration> {
-  match &ty.kind {
-    TypeKind::Structure(v) => structure_constants_impl(id, &ty.name, v),
-    TypeKind::Enumeration(v) => enumeration_constants_impl(id, &ty.name, v),
-    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
+pub fn type_constants_impl(id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+  match ty {
+    TypeDefinition::Structure(v) => structure_constants_impl(id, &v.name, v),
+    TypeDefinition::Enumeration(v) => enumeration_constants_impl(id, &v.name, v),
+    TypeDefinition::Primitive(v) => panic!("forbidden to define primitive type {}", v.to_string()),
   }
 }
 
-pub fn is_unit(ty: &arora_schema::module::low::TypeRef) -> bool {
+pub fn is_unit(ty: &UnfrozenTy) -> bool {
   match ty {
-    arora_schema::module::low::TypeRef::Scalar { id } => id == &*UNIT_ID,
+    UnfrozenTy::Primitive(as_primitive) => as_primitive.kind == PrimitiveKind::Unit,
     _ => false,
   }
 }
 
-pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
+pub fn enumeration(context: &Context, name: &str, ty: &EnumerationPublic) -> Struct {
   let mut enumeration_values = Vec::new();
-  for (_, value) in ty.values.iter() {
-    enumeration_values.push(value.name.clone());
+  for (_, variant) in ty.variants.iter() {
+    enumeration_values.push(variant.name.clone());
   }
 
   let enumeration = Enum {
@@ -377,12 +380,12 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
   };
 
   let mut data_size_args = Vec::new();
-  for (_, value) in ty.values.iter() {
-    if is_unit(&value.type_ref) {
+  for (_, variant) in ty.variants.iter() {
+    if is_unit(&variant.ty) {
       continue;
     }
 
-    data_size_args.push(func::SIZEOF.call([ty::type_name(context, &value.type_ref)]));
+    data_size_args.push(func::SIZEOF.call([ty::type_name(context, &variant.ty)]));
   }
 
   let mut struct_statements: Vec<Declaration> = Vec::new();
@@ -404,17 +407,18 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
     .into(),
   );
 
-  for (id, value) in ty.values.iter() {
+  for (_, variant) in ty.variants.iter() {
     struct_statements.push(Declaration::new_line(1));
 
-    if !matches!(
-      value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id: _ }
-    ) || id == &*UNIT_ID
+    if variant.ty.is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
+      // Static method to create an instance of the variant.
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", value.name.to_lowercase()),
+          name: format!("{}", variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -422,7 +426,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
           parameters: vec![Parameter {
             name: "value".to_string(),
             type_ref: TypeRef {
-              ty: ty::type_name(context, &value.type_ref),
+              ty: ty::type_name(context, &variant.ty),
               reference: true,
               constant: true,
               ..Default::default()
@@ -437,7 +441,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", value.name.to_lowercase()),
+          name: format!("{}", variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -445,7 +449,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
           parameters: vec![Parameter {
             name: "value".to_string(),
             type_ref: TypeRef {
-              ty: ty::type_name(context, &value.type_ref),
+              ty: ty::type_name(context, &variant.ty),
               rvalue_reference: true,
               ..Default::default()
             },
@@ -459,7 +463,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
     } else {
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", value.name.to_lowercase()),
+          name: format!("{}", variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -474,7 +478,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
     struct_statements.push(
       FunctionPrototype {
-        name: format!("is_{}", value.name.to_lowercase()),
+        name: format!("is_{}", variant.name.to_lowercase()),
         ret: Some(ty::BOOL.clone()),
         constant: true,
         noexcept: true,
@@ -483,16 +487,16 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
       .into(),
     );
 
-    if !matches!(
-      value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id: _ }
-    ) || id == &*UNIT_ID
+    if variant.ty.is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
       struct_statements.push(
         FunctionPrototype {
-          name: format!("as_{}", value.name.to_lowercase()),
+          name: format!("as_{}", variant.name.to_lowercase()),
           ret: Some(TypeRef {
-            ty: ty::type_name(context, &value.type_ref),
+            ty: ty::type_name(context, &variant.ty),
             reference: true,
             ..Default::default()
           }),
@@ -503,9 +507,9 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
 
       struct_statements.push(
         FunctionPrototype {
-          name: format!("as_{}", value.name.to_lowercase()),
+          name: format!("as_{}", variant.name.to_lowercase()),
           ret: Some(TypeRef {
-            ty: ty::type_name(context, &value.type_ref),
+            ty: ty::type_name(context, &variant.ty),
             reference: true,
             constant: true,
             ..Default::default()
@@ -564,11 +568,14 @@ pub fn enumeration(context: &Context, name: &str, ty: &Enumeration) -> Struct {
   }
 }
 
-pub fn ty(context: &Context, ty: &Type) -> Struct {
-  match &ty.kind {
-    TypeKind::Enumeration(value) => enumeration(context, &ty.name, &value),
-    TypeKind::Structure(value) => structure(context, &ty.name, &value),
-    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
+pub fn ty(context: &Context, ty: &TypeDefinition) -> Struct {
+  match ty {
+    TypeDefinition::Enumeration(value) => enumeration(context, &ty.name(), &value),
+    TypeDefinition::Structure(value) => structure(context, &ty.name(), &value),
+    TypeDefinition::Primitive(_) => panic!(
+      "forbidden to define primitive type {}",
+      ty.name().to_string()
+    ),
   }
 }
 
@@ -576,7 +583,7 @@ pub fn enumeration_impl(
   context: &Context,
   _: &Uuid,
   name: &str,
-  ty: &Enumeration,
+  ty: &EnumerationPublic,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
@@ -609,13 +616,13 @@ pub fn enumeration_impl(
     .into(),
   );
 
-  for (_, value) in ty.values.iter() {
+  for (_, variant) in ty.variants.iter() {
     ret.push(Declaration::new_line(1));
 
-    if !is_unit(&value.type_ref) {
+    if !is_unit(&variant.ty) {
       ret.push(
         FunctionImplementation {
-          name: format!("{}::{}", name, value.name.to_lowercase()),
+          name: format!("{}::{}", name, variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -623,7 +630,7 @@ pub fn enumeration_impl(
           parameters: vec![Parameter {
             name: "value".to_string(),
             type_ref: TypeRef {
-              ty: ty::type_name(context, &value.type_ref),
+              ty: ty::type_name(context, &variant.ty),
               reference: true,
               constant: true,
               ..Default::default()
@@ -641,7 +648,7 @@ pub fn enumeration_impl(
 
       ret.push(
         FunctionImplementation {
-          name: format!("{}::{}", name, value.name.to_lowercase()),
+          name: format!("{}::{}", name, variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -649,7 +656,7 @@ pub fn enumeration_impl(
           parameters: vec![Parameter {
             name: "value".to_string(),
             type_ref: TypeRef {
-              ty: ty::type_name(context, &value.type_ref),
+              ty: ty::type_name(context, &variant.ty),
               rvalue_reference: true,
               ..Default::default()
             },
@@ -662,7 +669,7 @@ pub fn enumeration_impl(
     } else {
       ret.push(
         FunctionImplementation {
-          name: format!("{}::{}", name, value.name.to_lowercase()),
+          name: format!("{}::{}", name, variant.name.to_lowercase()),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -681,7 +688,7 @@ pub fn enumeration_impl(
               "ret"
                 .to_expression()
                 .dot("variant_")
-                .assign("Variant".to_expression().colon_colon(value.name.as_str()))
+                .assign("Variant".to_expression().colon_colon(variant.name.as_str()))
                 .into_statement()
                 .into(),
               Statement::Return("ret".to_expression()).into(),
@@ -697,7 +704,7 @@ pub fn enumeration_impl(
 
     ret.push(
       FunctionImplementation {
-        name: format!("{}::is_{}", name, value.name.to_lowercase()),
+        name: format!("{}::is_{}", name, variant.name.to_lowercase()),
         ret: Some(ty::BOOL.clone()),
         constant: true,
         noexcept: true,
@@ -705,7 +712,7 @@ pub fn enumeration_impl(
           statements: vec![Statement::Return(
             "variant_"
               .to_expression()
-              .equal("Variant".to_expression().colon_colon(value.name.as_str())),
+              .equal("Variant".to_expression().colon_colon(variant.name.as_str())),
           )
           .into()],
           semicolon: false,
@@ -715,13 +722,13 @@ pub fn enumeration_impl(
       .into(),
     );
 
-    if !is_unit(&value.type_ref) {
+    if !is_unit(&variant.ty) {
       // Generate Enumeration::as_value()
       ret.push(
         FunctionImplementation {
-          name: format!("{}::as_{}", name, value.name.to_lowercase()),
+          name: format!("{}::as_{}", name, variant.name.to_lowercase()),
           ret: Some(TypeRef {
-            ty: ty::type_name(context, &value.type_ref),
+            ty: ty::type_name(context, &variant.ty),
             reference: true,
             ..Default::default()
           }),
@@ -733,9 +740,9 @@ pub fn enumeration_impl(
       // Generate Enumeration::as_value()
       ret.push(
         FunctionImplementation {
-          name: format!("{}::as_{}", name, value.name.to_lowercase()),
+          name: format!("{}::as_{}", name, variant.name.to_lowercase()),
           ret: Some(TypeRef {
-            ty: ty::type_name(context, &value.type_ref),
+            ty: ty::type_name(context, &variant.ty),
             reference: true,
             constant: true,
             ..Default::default()
@@ -752,20 +759,21 @@ pub fn enumeration_impl(
 }
 
 fn structure_private_field_variable_name(id: &Uuid, field: &StructureField) -> String {
-  format!("{}_{}",
+  format!(
+    "{}_{}",
     identifier_name(field.name.as_str()),
-    identifier_uuid(&id))
+    identifier_uuid(&id)
+  )
 }
 
 fn structure_private_field_variable(id: &Uuid, field: &StructureField) -> Expression {
-  structure_private_field_variable_name(id, field)
-    .to_expression()
+  structure_private_field_variable_name(id, field).to_expression()
 }
 
 pub fn structure_impl(
   context: &Context,
   name: &str,
-  ty: &Structure,
+  ty: &StructurePublic,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
@@ -774,7 +782,7 @@ pub fn structure_impl(
       FunctionImplementation {
         name: format!("{}::{}", name, field.name.to_lowercase()),
         ret: Some(ty::optional_const_ref(&TypeRef {
-          ty: ty::type_name(context, &field.type_ref),
+          ty: ty::type_name(context, &field.ty),
           ..Default::default()
         })),
         body: Block {
@@ -796,7 +804,7 @@ pub fn structure_impl(
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_const_ref(&TypeRef {
-            ty: ty::type_name(context, &field.type_ref),
+            ty: ty::type_name(context, &field.ty),
             ..Default::default()
           }),
         }],
@@ -818,7 +826,7 @@ pub fn structure_impl(
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_move(&TypeRef {
-            ty: ty::type_name(context, &field.type_ref),
+            ty: ty::type_name(context, &field.ty),
             ..Default::default()
           }),
         }],
@@ -839,18 +847,18 @@ pub fn structure_impl(
   ret
 }
 
-pub fn ty_impl(context: &Context, ty: &Type) -> Vec<Declaration> {
-  match &ty.kind {
-    TypeKind::Enumeration(value) => enumeration_impl(context, &ty.id, &ty.name, &value),
-    TypeKind::Structure(value) => structure_impl(context, &ty.name, &value),
-    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
+pub fn ty_impl(context: &Context, id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+  match ty {
+    TypeDefinition::Enumeration(value) => enumeration_impl(context, id, &value.name, &value),
+    TypeDefinition::Structure(value) => structure_impl(context, &value.name, &value),
+    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", id.to_string()),
   }
 }
 
 pub fn structure_deserializer(
   context: &Context,
   name: &str,
-  ty: &Structure,
+  ty: &StructurePublic,
 ) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
 
@@ -960,7 +968,7 @@ pub fn structure_deserializer(
 
     let mut field_declarations: Vec<Declaration> = Vec::new();
 
-    let type_name = ty::type_name(context, &field.type_ref);
+    let type_name = ty::type_name(context, &field.ty);
 
     field_declarations.push(
       "__arora_result__"
@@ -1056,7 +1064,7 @@ pub fn enumeration_deserializer(
   context: &Context,
   _: &Uuid,
   name: &str,
-  ty: &Enumeration,
+  ty: &EnumerationPublic,
 ) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
 
@@ -1120,23 +1128,23 @@ pub fn enumeration_deserializer(
     .into(),
   );
 
-  for (id, value) in ty.values.iter() {
-    let ret = if matches!(
-      value.type_ref,
-      arora_schema::module::low::TypeRef::Scalar { id: _ }
-    ) && id == &*UNIT_ID
+  for (_, variant) in ty.variants.iter() {
+    let ret = if variant.ty.is_scalar()
+      || variant.ty.is_primitive()
+        && variant.ty.as_primitive().unwrap().is_scalar()
+        && variant.ty.as_primitive().unwrap().kind != PrimitiveKind::Unit
     {
       Statement::Return(
         name
           .to_expression()
-          .colon_colon(value.name.to_lowercase().to_expression())
-          .call([deserialize(ty::type_name(context, &value.type_ref).as_str())]),
+          .colon_colon(variant.name.to_lowercase().to_expression())
+          .call([deserialize(ty::type_name(context, &variant.ty).as_str())]),
       )
     } else {
       Statement::Return(
         name
           .to_expression()
-          .colon_colon(value.name.to_lowercase().to_expression())
+          .colon_colon(variant.name.to_lowercase().to_expression())
           .call::<String, _>([]),
       )
     };
@@ -1145,7 +1153,7 @@ pub fn enumeration_deserializer(
         func::ARORA_UUID_COMPARE
           .call([
             "res".to_expression().dot("value_id"),
-            id::value_uuid(&name, &value.name).to_expression(),
+            id::value_uuid(&name, &variant.name).to_expression(),
           ])
           .equal(0u8.to_expression()),
         Block {
@@ -1182,11 +1190,11 @@ pub fn enumeration_deserializer(
   }
 }
 
-pub fn type_of(ty: &Type) -> FunctionImplementation {
-  let buffer_type_constant = match ty.kind {
-    TypeKind::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
-    TypeKind::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
-    TypeKind::Primitive(_) => panic!("forbidden to define primitive type {}", ty.id.to_string()),
+pub fn type_of(ty: &TypeDefinition) -> FunctionImplementation {
+  let buffer_type_constant = match ty {
+    TypeDefinition::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
+    TypeDefinition::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
+    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", ty.name()),
   };
 
   FunctionImplementation {
@@ -1197,7 +1205,7 @@ pub fn type_of(ty: &Type) -> FunctionImplementation {
       ..Default::default()
     }),
     name: "arora::buffer::arora_buffer_type_of".to_string(),
-    specialization: Some(vec![ty.name.clone()]),
+    specialization: Some(vec![ty.name().clone()]),
     noexcept: true,
     body: Block {
       statements: vec![Declaration::Statement(Statement::Return(
@@ -1209,11 +1217,17 @@ pub fn type_of(ty: &Type) -> FunctionImplementation {
   }
 }
 
-pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
-  match ty.kind {
-    TypeKind::Structure(ref structure) => structure_deserializer(context, &ty.name, structure),
-    TypeKind::Enumeration(ref enumeration) => {
-      enumeration_deserializer(&context, &ty.id, &ty.name, enumeration)
+pub fn deserializer(
+  context: &Context,
+  type_id: &Uuid,
+  ty: &TypeDefinition,
+) -> FunctionImplementation {
+  match ty {
+    TypeDefinition::Structure(ref structure) => {
+      structure_deserializer(context, &ty.name(), structure)
+    }
+    TypeDefinition::Enumeration(ref enumeration) => {
+      enumeration_deserializer(&context, type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),
   }
@@ -1222,7 +1236,7 @@ pub fn deserializer(context: &Context, ty: &Type) -> FunctionImplementation {
 pub fn structure_serializer(
   context: &Context,
   name: &str,
-  ty: &Structure,
+  ty: &StructurePublic,
 ) -> FunctionImplementation {
   let value_name = "value".to_string();
   let field_count = "field_count".to_string();
@@ -1288,7 +1302,7 @@ pub fn structure_serializer(
             .into(),
             format!(
               "arora::buffer::serialize<{}>",
-              ty::type_name(context, &field.type_ref)
+              ty::type_name(context, &field.ty)
             )
             .to_expression()
             .call([
@@ -1340,7 +1354,7 @@ pub fn enumeration_serializer(
   _: &Context,
   _: &Uuid,
   enum_type_name: &str,
-  enum_type: &Enumeration,
+  enum_type: &EnumerationPublic,
 ) -> FunctionImplementation {
   let writer_name = "writer".to_string();
   let value_name = "value".to_string();
@@ -1348,21 +1362,21 @@ pub fn enumeration_serializer(
   let value = value_name.to_expression();
   let enum_type_enum = enum_type_name.to_expression().colon_colon("Variant");
   let mut switch_cases = Vec::<(Expression, Block)>::new();
-  for (_, enum_value) in &enum_type.values {
+  for (_, variant) in &enum_type.variants {
     let mut case_statements: Vec<Declaration> = Vec::new();
     case_statements.push(Declaration::Statement(Statement::Expression(
       func::ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE.call([
         writer.clone(),
         id::type_uuid(enum_type_name).to_expression(),
-        id::value_uuid(enum_type_name, &enum_value.name).to_expression(),
+        id::value_uuid(enum_type_name, &variant.name).to_expression(),
       ]),
     )));
     case_statements.push(Declaration::Statement(Statement::Expression(
-      func::ARORA_BUFFER_WRITER_ADD_UNIT.call([writer.clone()])
+      func::ARORA_BUFFER_WRITER_ADD_UNIT.call([writer.clone()]),
     )));
     case_statements.push(Declaration::Statement(Statement::Break));
     switch_cases.push((
-      enum_type_enum.colon_colon(enum_value.name.to_expression()),
+      enum_type_enum.colon_colon(variant.name.to_expression()),
       Block {
         statements: case_statements,
         semicolon: false,
@@ -1409,11 +1423,17 @@ pub fn enumeration_serializer(
   }
 }
 
-pub fn serializer(context: &Context, ty: &Type) -> FunctionImplementation {
-  match ty.kind {
-    TypeKind::Structure(ref structure) => structure_serializer(context, &ty.name, structure),
-    TypeKind::Enumeration(ref enumeration) => {
-      enumeration_serializer(&context, &ty.id, &ty.name, enumeration)
+pub fn serializer(
+  context: &Context,
+  type_id: &Uuid,
+  ty: &TypeDefinition,
+) -> FunctionImplementation {
+  match ty {
+    TypeDefinition::Structure(ref structure) => {
+      structure_serializer(context, &ty.name(), structure)
+    }
+    TypeDefinition::Enumeration(ref enumeration) => {
+      enumeration_serializer(&context, &type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),
   }

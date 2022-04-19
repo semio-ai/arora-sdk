@@ -1,15 +1,15 @@
 [package]
-name = "arora-behavior-tree-types"
+name = "arora-behavior-tree-types-yaml"
 version = "0.1.0"
 edition = "2021"
+include = ["enumeration/**.yaml", "structure/**.yaml"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
-lazy_static = "*"
-uuid = "*"
 
-[dev-dependencies]
+[build-dependencies]
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
+uuid = "0.8"

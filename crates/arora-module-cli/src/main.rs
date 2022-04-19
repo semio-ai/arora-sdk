@@ -1,31 +1,16 @@
-use std::{collections::HashMap, path::Path};
-
-use arora_registry::Registry;
-use arora_schema::{
-  module::high::TypeRef as HighTypeRef,
-  module::low::TypeRef as LowTypeRef,
-  ty::{
-    high::{Type as HighType, TypeKind as HighTypeKind},
-    low::{
-      Enumeration as LowEnumeration, EnumerationValue as LowEnumerationValue,
-      Structure as LowStructure, StructureField as LowStructureField, Type as LowType,
-      TypeKind as LowTypeKind,
-    },
-  },
+mod generate;
+use arora_registry::{
+  config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
+  remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry,
 };
 use clap::{Parser, Subcommand};
-
-use tokio::{
-  fs::{read_to_string, File},
-  io::AsyncWriteExt,
-};
-use url::Url;
-use uuid::Uuid;
-
-mod generate;
-mod resolve;
-
 use generate::generate;
+use reqwest::{
+  header::{self, HeaderMap, HeaderValue},
+  Client, Url,
+};
+use semio_client::{authentication::Config, context::Context};
+use std::{fs::read_to_string, path::PathBuf, str::FromStr};
 
 #[derive(Debug, Parser)]
 struct ExportType {
@@ -54,10 +39,6 @@ struct ExportModule {
 #[derive(Subcommand, Debug)]
 enum Commands {
   Generate(generate::Generate),
-  #[clap(name = "export-type")]
-  ExportType(ExportType),
-  #[clap(name = "export-module")]
-  ExportModule(ExportModule),
 }
 
 #[derive(Parser, Debug)]
@@ -65,122 +46,44 @@ enum Commands {
 #[clap(propagate_version = true)]
 #[clap(trailing_var_arg = true)]
 struct Args {
-  #[clap(short, long)]
-  registry_uri: Option<String>,
+  #[clap(
+    short,
+    long,
+    help = "Path to a semio-cli configuration file to reuse and potentially update."
+  )]
+  config: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    help = "URL of the registry to use. Overrides and updates the configuration file if provided."
+  )]
+  registry_url: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    name = "user-name",
+    help = "User name to authenticate with. Overrides and updates the configuration file if provided."
+  )]
+  user_name: Option<String>,
+
+  #[clap(
+    short,
+    long,
+    help = "Password to authenticate with. Updates the configuration file if provided."
+  )]
+  password: Option<String>,
 
   #[clap(subcommand)]
   command: Commands,
-}
 
-async fn lookup_type_ref(
-  type_ref: &HighTypeRef,
-  registry: &mut Registry,
-) -> anyhow::Result<LowTypeRef> {
-  Ok(match type_ref {
-    HighTypeRef::Scalar { id } => LowTypeRef::Scalar {
-      id: registry.lookup_type(&id).await?,
-    },
-    HighTypeRef::Array { id } => LowTypeRef::Array {
-      id: registry.lookup_type(&id).await?,
-    },
-    HighTypeRef::Map { key_id, value_id } => LowTypeRef::Map {
-      key_id: registry.lookup_type(&key_id).await?,
-      value_id: registry.lookup_type(&value_id).await?,
-    },
-  })
-}
-
-async fn export_type(cmd: ExportType, registry: &mut Registry) -> anyhow::Result<()> {
-  let low_type = if !cmd.no_resolution {
-    let high_type: HighType = serde_yaml::from_str(&read_to_string(cmd.input_file).await?)?;
-    let id = if let Ok(id) = registry.lookup_type(&high_type.name).await {
-      id
-    } else {
-      Uuid::new_v4()
-    };
-
-    let kind = match high_type.kind {
-      HighTypeKind::Structure(high_structure) => {
-        let mut low_fields = HashMap::new();
-        for (id, field) in high_structure.fields.iter() {
-          match lookup_type_ref(&field.ty, registry).await {
-            Ok(type_ref) => {
-              low_fields.insert(
-                *id,
-                LowStructureField {
-                  name: field.name.clone(),
-                  type_ref,
-                },
-              );
-            }
-            Err(err) => {
-              eprintln!("Failed to lookup type {:?}: {}", field.ty, err);
-              std::process::exit(1);
-            }
-          }
-        }
-        LowTypeKind::Structure(LowStructure { fields: low_fields })
-      }
-      HighTypeKind::Enumeration(high_enumeration) => {
-        let mut low_values = HashMap::new();
-
-        for (id, value) in high_enumeration.values.iter() {
-          match lookup_type_ref(&value.ty, registry).await {
-            Ok(type_ref) => {
-              low_values.insert(
-                *id,
-                LowEnumerationValue {
-                  name: value.name.clone(),
-                  type_ref,
-                },
-              );
-            }
-            Err(err) => {
-              eprintln!("Failed to lookup type {:?}: {}", &value.ty, err);
-              std::process::exit(1);
-            }
-          }
-        }
-
-        LowTypeKind::Enumeration(LowEnumeration { values: low_values })
-      }
-      HighTypeKind::Primitive(_) => {
-        eprintln!("Forbidden to register primitive type {}", &high_type.name);
-        std::process::exit(1);
-      }
-    };
-
-    LowType {
-      id,
-      name: high_type.name,
-      description: high_type.description,
-      kind: kind,
-    }
-  } else {
-    serde_yaml::from_str(&read_to_string(cmd.input_file).await?)?
-  };
-
-  let output_path =
-    Path::new(&cmd.output_directory).join(format!("types/by-uuid/{}.yaml", low_type.id));
-
-  let mut output_file = File::create(&output_path).await?;
-  output_file
-    .write_all(serde_yaml::to_string(&low_type)?.as_bytes())
-    .await?;
-
-  let name_output_path =
-    Path::new(&cmd.output_directory).join(format!("types/by-name/{}", low_type.name));
-
-  let mut name_output_file = File::create(&name_output_path).await?;
-  name_output_file
-    .write_all(format!("{}", low_type.id).as_bytes())
-    .await?;
-
-  Ok(())
-}
-
-async fn export_module(_: ExportModule, _: &mut Registry) -> anyhow::Result<()> {
-  todo!("not implemented");
+  #[clap(
+    short,
+    long,
+    help = "Include records in the registry. It should be the path to a directory of records."
+  )]
+  include: Vec<String>,
 }
 
 #[tokio::main]
@@ -189,25 +92,65 @@ async fn main() -> anyhow::Result<()> {
 
   let args = Args::parse();
 
-  let mut registry = if let Some(uri) = args.registry_uri {
-    Registry::new_with_base_uri(Url::parse(&uri)?)
+  let registry_url = if args.registry_url.is_some() {
+    args.registry_url.to_owned()
+  } else if let Some(config_path) = &args.config {
+    let config = read_to_string(config_path)?;
+    let config = serde_yaml::from_str::<Config>(&config)?;
+    config.url
   } else {
-    Registry::new()
+    None
   };
 
+  if let Some(registry_url) = registry_url {
+    // Check config and args and update config if necessary,
+    // while getting the updated token.
+    let registry_url = Url::parse(registry_url.as_str())?;
+    let token = check_and_update_config(
+      &registry_url,
+      args.config.to_owned(),
+      args.user_name.to_owned(),
+      args.password.to_owned(),
+    )
+    .await?;
+
+    // Setup the context with the refreshed token.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+      header::AUTHORIZATION,
+      HeaderValue::from_str(token.as_str())?,
+    );
+    let client = Client::builder().default_headers(headers).build()?;
+    let context = Context::new(registry_url, client);
+
+    // Connect to the remote registry, and add records added locally.
+    let mut registry = RemoteCachedRegistry::new(context);
+    main_with_registry(args, &mut registry).await
+  } else {
+    let mut registry = LocalRegistry::new();
+    main_with_registry(args, &mut registry).await
+  }
+}
+
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
+  args: Args,
+  registry: &mut R,
+) -> anyhow::Result<()> {
+  for include in &args.include {
+    let include_path = PathBuf::from_str(include.as_str())?;
+    if !include_path.exists() {
+      eprintln!(
+        "include path {} does not exist and is ignored",
+        include_path.display()
+      );
+    }
+    load_records_from_yaml_dir(include_path, registry).await?;
+  }
+
+  // Perform the command.
   match args.command {
     Commands::Generate(cmd) => {
-      generate(cmd, &mut registry).await?;
-    }
-    Commands::ExportType(export_type_data) => {
-      export_type(export_type_data, &mut registry).await?;
-    }
-    Commands::ExportModule(export_module_data) => {
-      println!(
-        "Exporting module to {}",
-        export_module_data.output_directory
-      );
-      export_module(export_module_data, &mut registry).await?;
+      generate(cmd, registry).await?;
     }
   }
 

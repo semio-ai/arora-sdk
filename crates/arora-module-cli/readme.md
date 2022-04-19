@@ -8,23 +8,20 @@ for details on code generation.
 
 ## Common Arguments
 
-  - `--registry-uri` - Specify an alternate URI for the registry
+  - `--config` / `-c` - Path to a `semio-cli` configuration file to reuse
+    and potentially update.
+  - `--include` / `-i` - Include records in the registry.
+    It should be the path to a directory of records.
+  - `--user-name` / `-u` - User name to authenticate with.
+    Overrides and updates the configuration file if provided.
+  - `--password` / `-p` - Password to authenticate with.
+    Updates the configuration file if provided.
+  - `--registry-url` - URL of the registry to use.
+    Overrides and updates the configuration file if provided.
+    Default is `http://localhost:8080`.
   - `--help` - Print available options and subcommands
 
 ## `arora-module-cli generate`
 
   - `--language` / `-l` - The language to generate files for (e.g., cpp, rust)
   - `--output-directory` / `-o` - The location generated files will be placed
-
-## `arora-module-cli export-type`
-
-  - `--input-file` / `-i` - The Type input YAML
-  - `--no-resolution` / `-n` - Specify this type is already in the low-level format and does not need name resolution
-  - `--output-directory` / `-o` - The root of the arora-registry repository
-  - `--help` - Print subcommand-specific help
-
-## `arora-module-cli export-module`
-
-  - `--executable-file` / `-e` - The module's binary executable
-  - `--configuration-file` / `-c` - The ModuleDefinition input YAML
-  - `--help` - Print subcommand-specific help

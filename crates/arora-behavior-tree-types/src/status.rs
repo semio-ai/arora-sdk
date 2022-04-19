@@ -58,3 +58,15 @@ pub const STATUS_FAILURE_VARIANT_ID: Uuid = Uuid::from_bytes([
 pub const STATUS_RUNNING_VARIANT_ID: Uuid = Uuid::from_bytes([
   0xac, 0xd7, 0x9e, 0xc6, 0x0c, 0x44, 0x40, 0x1a, 0x82, 0xf8, 0x5d, 0xa5, 0x42, 0x2d, 0x3e, 0xec,
 ]);
+
+#[cfg(test)]
+pub mod tests {
+    use crate::{BEHAVIOR_TREE_FOLDER_ID, declare_status_enumeration};
+
+  #[test]
+  pub fn serialize_status() {
+    let status_declaration = declare_status_enumeration(BEHAVIOR_TREE_FOLDER_ID);
+    let status_declaration_yaml = serde_yaml::to_string(&status_declaration).unwrap();
+    dbg!(status_declaration_yaml);
+  }
+}

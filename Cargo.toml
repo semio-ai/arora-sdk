@@ -15,6 +15,7 @@ members = [
   "crates/arora-vfs",
   "crates/arora-behavior-tree",
   "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree-types-yaml",
 ]
 
 [profile.release]

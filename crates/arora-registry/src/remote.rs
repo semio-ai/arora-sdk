@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use semio_client::{
-  common::{type_of, EntityType, GetPublic, Selector, TypeOf},
+  common::{type_of, RecordType, GetPublic, Selector, TypeOf},
   context::Context,
 };
 use uuid::Uuid;
@@ -20,7 +20,7 @@ impl RemoteRegistry {
     Self { context }
   }
 
-  async fn entity_type_of(&self, selector: &Selector) -> Result<EntityType, RegistryError> {
+  async fn record_type_of(&self, selector: &Selector) -> Result<RecordType, RegistryError> {
     semio_client::common::type_of(
       &self.context,
       TypeOf {
@@ -108,17 +108,17 @@ impl ReadableRegistry for RemoteRegistry {
     if let Some(primitive_kind) = get_primitive(selector) {
       return Ok(TypeDefinition::Primitive(primitive_kind));
     }
-    let entity_type = self.entity_type_of(selector).await?;
+    let record_type = self.record_type_of(selector).await?;
 
-    match entity_type {
-      EntityType::Enumeration => Ok(TypeDefinition::Enumeration(
+    match record_type {
+      RecordType::Enumeration => Ok(TypeDefinition::Enumeration(
         self.get_enumeration(selector).await?,
       )),
-      EntityType::Structure => Ok(TypeDefinition::Structure(
+      RecordType::Structure => Ok(TypeDefinition::Structure(
         self.get_structure(selector).await?,
       )),
       _ => Err(RegistryError::RemoteError {
-        message: format!("{} is a {}, not a type", selector.clone(), entity_type),
+        message: format!("{} is a {}, not a type", selector.clone(), record_type),
       }),
     }
   }
@@ -152,32 +152,32 @@ impl ReadableRegistry for RemoteRegistry {
     if let Some(primitive_kind) = get_primitive(&selector) {
       return Ok(primitive_kind.to_string());
     }
-    let entity_type = self.entity_type_of(&selector).await?;
-    match entity_type {
-      EntityType::Enumeration => {
+    let record_type = self.record_type_of(&selector).await?;
+    match record_type {
+      RecordType::Enumeration => {
         let enumeration = self.get_enumeration(&selector).await?;
         let parent_path = self.resolve_id(&enumeration.parent).await?;
         Ok(format!("{}.{}", parent_path, enumeration.name))
       }
-      EntityType::Structure => {
+      RecordType::Structure => {
         let structure = self.get_structure(&selector).await?;
         let parent_path = self.resolve_id(&structure.parent).await?;
         Ok(format!("{}.{}", parent_path, structure.name))
       }
-      EntityType::User => {
+      RecordType::User => {
         let user = self.get_user(&selector).await?;
         Ok(format!("{}", user.user_name))
       }
-      EntityType::Organization => {
+      RecordType::Organization => {
         let organization = self.get_organization(&selector).await?;
         Ok(format!("{}", organization.name))
       }
-      EntityType::Folder => {
+      RecordType::Folder => {
         let folder = self.get_folder(&selector).await?;
         let parent_path = self.resolve_id(&folder.parent).await?;
         Ok(format!("{}.{}", parent_path, folder.name))
       }
-      EntityType::Module => {
+      RecordType::Module => {
         let module = self.get_module(&selector).await?;
         Ok(format!("{}", module.name))
       }
@@ -187,7 +187,7 @@ impl ReadableRegistry for RemoteRegistry {
     }
   }
 
-  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+  async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     type_of(
       &self.context,
       TypeOf {

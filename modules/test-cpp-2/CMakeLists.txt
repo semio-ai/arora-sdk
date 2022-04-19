@@ -1,10 +1,17 @@
 add_custom_target(generate-test-cpp-2 ALL
-  COMMAND ${ARORA_MODULE_CLI} --registry-uri ${REGISTRY_URI} generate -l cpp -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml -o ${CMAKE_CURRENT_BINARY_DIR}/arora
+  COMMAND ${ARORA_MODULE_CLI}
+  --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
+  generate
+  -l cpp
+  -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+  -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp-2.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp-2.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
+    ${CMAKE_CURRENT_BINARY_DIR}/arora/records/module/23a75559-025c-4be8-8b48-0784e30dc9ec.yaml
   DEPENDS
     arora
 )
@@ -23,7 +30,7 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine-with-scalars
     COMMAND ${ARORA_CLI}
-      --registry-uri ${REGISTRY_URI}
+      --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp-2
       --call "id: b213a552-77ad-465a-a26d-352e8eccfd63

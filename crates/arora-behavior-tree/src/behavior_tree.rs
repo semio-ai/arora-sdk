@@ -141,6 +141,7 @@ fn tick(
   })?;
 
   let mut call = Call {
+    module_id: None,
     id: node.function.clone(),
     args: Vec::with_capacity(node.arguments.len() + if node.children.is_some() { 1 } else { 0 }),
   };
@@ -564,6 +565,7 @@ fn call_expression(
     .arora_call(
       &module_id,
       Call {
+        module_id: None,
         id: function_id,
         args,
       },

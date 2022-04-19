@@ -6,7 +6,6 @@ include(CTest)
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(REGISTRY_URI "https://raw.githubusercontent.com/semio-ai/arora-registry/master/" CACHE STRING "Registry URI")
 set(USE_RUST_DEBUG ON CACHE BOOL "Use Rust debug build")
 set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
@@ -30,6 +29,7 @@ set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_RUST "${RUST_BINARY_DIR}/arora-module-rust${WASI_HOST_EXE_SUFFIX}")
+set(ARORA_BEHAVIOR_TREE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/crates/arora-behavior-tree-types-yaml/records")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}

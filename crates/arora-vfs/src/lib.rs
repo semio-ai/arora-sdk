@@ -201,12 +201,22 @@ impl Directory {
   pub async fn sync(&self, path: PathBuf) -> io::Result<()> {
     if !path.exists() {
       fs::create_dir_all(&path).await?;
+    } else if !path.is_dir() {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("path {} is not a directory", path.display()),
+      ));
     }
 
     for (name, entry) in self.entries.iter() {
       let mut entry_path = path.clone();
       entry_path.push(name);
-      entry.sync(entry_path).await?;
+      entry.sync(entry_path).await.map_err(|err| {
+        io::Error::new(
+          err.kind(),
+          format!("failed to sync entry {}: {}", name, err),
+        )
+      })?;
     }
     Ok(())
   }

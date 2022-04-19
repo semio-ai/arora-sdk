@@ -1,4 +1,4 @@
-use arora_registry::ModulePublic;
+use arora_registry::{ModulePublic, ReadableRegistry};
 use arora_schema::{
   module::low::{
     Executor, ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter,
@@ -106,6 +106,7 @@ pub fn generate_header_file(
 /// and returns a description compatible with the registry.
 pub async fn module_public_from_header_file<P: AsRef<Path>>(
   header_path: P,
+  registry: &mut dyn ReadableRegistry,
 ) -> Result<(Uuid, ModuleAndImports), ModuleDeclarationError> {
   let header: Header = serde_yaml::from_str(
     &read_to_string(header_path.as_ref())
@@ -119,7 +120,7 @@ pub async fn module_public_from_header_file<P: AsRef<Path>>(
       e
     ))
   })?;
-  Ok((header.id.to_owned(), resolve_low_module(header).await?))
+  Ok((header.id.to_owned(), resolve_low_module(header, registry).await?))
 }
 
 fn low_type_ref_fron_unfrozen_ty(unfrozen: &UnfrozenTy) -> TypeRef {

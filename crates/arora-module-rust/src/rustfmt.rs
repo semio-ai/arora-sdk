@@ -11,7 +11,6 @@ pub async fn apply_rustfmt<P: AsRef<Path>>(path: P) -> Result<(), GenerationErro
     sub_path.extension() == Some(OsStr::new("rs"))
   })
   .map_err(GenerationError::IoError)?;
-  dbg!(rust_files.to_owned());
   let rustfmt_status = tokio::process::Command::new("rustfmt")
     .args(&rust_files)
     .spawn()

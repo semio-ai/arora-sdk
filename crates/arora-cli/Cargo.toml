@@ -8,13 +8,16 @@ edition = "2021"
 [dependencies]
 arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
-arora-index = { path = "../arora-index" }
+arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 anyhow = "*"
 clap = { version = "3", features = ["derive"] }
 futures = "0.3"
-tokio = { version = "1", features = ["full"] }
+reqwest = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
+tokio = { version = "1", features = ["full"] }
 url = "2"
 uuid = { version = "0.8", features = ["serde", "v4"] }

@@ -1,5 +1,12 @@
 add_custom_target(module-cli ALL
-  COMMAND ${ARORA_MODULE_CLI} --registry-uri ${REGISTRY_URI} generate -l cpp -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml -o ${CMAKE_CURRENT_BINARY_DIR}/arora
+  COMMAND ${ARORA_MODULE_CLI}
+  --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
+  --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
+  --include ${CMAKE_CURRENT_SOURCE_DIR}/records
+  generate
+  -l cpp
+  -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+  -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp-2.hpp
@@ -11,6 +18,7 @@ add_custom_target(module-cli ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
   DEPENDS
     arora
+    generate-test-cpp-2
 )
 
 add_executable(test-cpp
@@ -30,7 +38,9 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine-with-struct
     COMMAND ${ARORA_CLI}
-      --registry-uri ${REGISTRY_URI}
+      --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
+      --include ${CMAKE_CURRENT_SOURCE_DIR}/records
+      --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
       --header ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/module.yaml

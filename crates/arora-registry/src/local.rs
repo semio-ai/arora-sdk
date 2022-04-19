@@ -3,7 +3,7 @@ use crate::{
   RegistryError, StructurePublic, TypeDefinition,
 };
 use async_trait::async_trait;
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_record::module::v0::unfrozen::ExportKind;
 use std::{
   collections::{
@@ -18,7 +18,7 @@ use uuid::Uuid;
 /// on the fly. It provides a local index to look them up fast
 /// by [`Uuid'] or by path ([`String`]).
 /// It can be used as a local cache of a remote registry accessed using [`semio_client`].
-/// It provides an absolute root available for any entity,
+/// It provides an absolute root available for any record,
 /// with the identifier [`ROOT_ID`].
 pub struct LocalRegistry {
   enumerations: Vec<Rc<EnumerationPublic>>,
@@ -29,7 +29,7 @@ pub struct LocalRegistry {
   path_to_ids: HashMap<String, Uuid>,
 }
 
-/// A reference to an entity stored in a [`LocalRegistry`].
+/// A reference to an record stored in a [`LocalRegistry`].
 #[derive(Clone)]
 pub enum RegistryReference {
   Enumeration(Rc<EnumerationPublic>),
@@ -67,15 +67,15 @@ impl LocalRegistry {
 
   fn parent(&self, reg_ref: &RegistryReference) -> Result<RegistryReference, RegistryError> {
     let parent_ref = match reg_ref {
-      RegistryReference::Enumeration(entity) => self.find_id(&entity.parent).cloned(),
-      RegistryReference::Variant(entity, _) => {
-        Some(RegistryReference::Enumeration(entity.to_owned()))
+      RegistryReference::Enumeration(record) => self.find_id(&record.parent).cloned(),
+      RegistryReference::Variant(record, _) => {
+        Some(RegistryReference::Enumeration(record.to_owned()))
       }
-      RegistryReference::Structure(entity) => self.find_id(&entity.parent).cloned(),
-      RegistryReference::Field(entity, _) => Some(RegistryReference::Structure(entity.to_owned())),
-      RegistryReference::Module(entity) => self.find_id(&entity.parent).cloned(),
-      RegistryReference::Function(entity, _) => Some(RegistryReference::Module(entity.to_owned())),
-      RegistryReference::Folder(entity) => self.find_id(&entity.parent).cloned(),
+      RegistryReference::Structure(record) => self.find_id(&record.parent).cloned(),
+      RegistryReference::Field(record, _) => Some(RegistryReference::Structure(record.to_owned())),
+      RegistryReference::Module(record) => self.find_id(&record.parent).cloned(),
+      RegistryReference::Function(record, _) => Some(RegistryReference::Module(record.to_owned())),
+      RegistryReference::Folder(record) => self.find_id(&record.parent).cloned(),
       RegistryReference::Root => None,
     };
     parent_ref.ok_or(RegistryError::UnknownParent {
@@ -87,10 +87,10 @@ impl LocalRegistry {
     let path = match reg_ref {
       RegistryReference::Root => String::new(),
       reg_ref => {
-        let entity_name = reg_ref.name().expect("non-root entity had no name");
+        let record_name = reg_ref.name().expect("non-root record had no name");
         match self.parent(reg_ref)? {
-          RegistryReference::Root => entity_name.to_owned(),
-          parent => format!("{}.{}", self.compute_path(&parent)?, entity_name),
+          RegistryReference::Root => record_name.to_owned(),
+          parent => format!("{}.{}", self.compute_path(&parent)?, record_name),
         }
       }
     };
@@ -107,15 +107,15 @@ impl ReadableRegistry for LocalRegistry {
     let reg_ref = self
       .indexed
       .get(selector)
-      .ok_or(RegistryError::NoSuchEntity {
+      .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
       })?;
     match reg_ref {
-      RegistryReference::Enumeration(entity) => {
-        Ok(TypeDefinition::Enumeration(entity.as_ref().clone()))
+      RegistryReference::Enumeration(record) => {
+        Ok(TypeDefinition::Enumeration(record.as_ref().clone()))
       }
-      RegistryReference::Structure(entity) => {
-        Ok(TypeDefinition::Structure(entity.as_ref().clone()))
+      RegistryReference::Structure(record) => {
+        Ok(TypeDefinition::Structure(record.as_ref().clone()))
       }
       _ => Err(RegistryError::NotAType {
         selector: selector.to_owned(),
@@ -127,11 +127,11 @@ impl ReadableRegistry for LocalRegistry {
     let reg_ref = self
       .indexed
       .get(selector)
-      .ok_or(RegistryError::NoSuchEntity {
+      .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
       })?;
     match reg_ref {
-      RegistryReference::Module(entity) => Ok(entity.as_ref().clone()),
+      RegistryReference::Module(record) => Ok(record.as_ref().clone()),
       _ => Err(RegistryError::NotAModule {
         selector: selector.to_owned(),
       }),
@@ -143,7 +143,7 @@ impl ReadableRegistry for LocalRegistry {
       self
         .path_to_ids
         .get(path)
-        .ok_or(RegistryError::NoSuchEntity {
+        .ok_or(RegistryError::NoSuchRecord {
           selector: Selector::Path(path.to_owned()),
         })?
         .clone(),
@@ -152,27 +152,27 @@ impl ReadableRegistry for LocalRegistry {
 
   async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
     self.compute_path(self.indexed.get(&Selector::Id(id.to_owned())).ok_or(
-      RegistryError::NoSuchEntity {
+      RegistryError::NoSuchRecord {
         selector: Selector::Id(id.to_owned()),
       },
     )?)
   }
 
-  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+  async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     self
       .indexed
       .get(selector)
       .map(|reg_ref| match reg_ref {
-        RegistryReference::Enumeration(_) => EntityType::Enumeration,
-        RegistryReference::Variant(_, _) => EntityType::Unknown,
-        RegistryReference::Structure(_) => EntityType::Structure,
-        RegistryReference::Field(_, _) => EntityType::Unknown,
-        RegistryReference::Module(_) => EntityType::Module,
-        RegistryReference::Function(_, _) => EntityType::Unknown,
-        RegistryReference::Folder(_) => EntityType::Folder,
-        RegistryReference::Root => EntityType::Unknown,
+        RegistryReference::Enumeration(_) => RecordType::Enumeration,
+        RegistryReference::Variant(_, _) => RecordType::Unknown,
+        RegistryReference::Structure(_) => RecordType::Structure,
+        RegistryReference::Field(_, _) => RecordType::Unknown,
+        RegistryReference::Module(_) => RecordType::Module,
+        RegistryReference::Function(_, _) => RecordType::Unknown,
+        RegistryReference::Folder(_) => RecordType::Folder,
+        RegistryReference::Root => RecordType::Unknown,
       })
-      .ok_or(RegistryError::NoSuchEntity {
+      .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
       })
   }
@@ -349,31 +349,31 @@ impl EditableRegistry for LocalRegistry {
 impl<'a> RegistryReference {
   fn name(&'a self) -> Option<&'a String> {
     Some(match self {
-      RegistryReference::Enumeration(entity) => &entity.name,
-      RegistryReference::Variant(entity, variant_id) => {
-        &entity
+      RegistryReference::Enumeration(record) => &record.name,
+      RegistryReference::Variant(record, variant_id) => {
+        &record
           .variants
           .get(variant_id)
           .expect("looking up a variant id not known to its enumeration")
           .name
       }
-      RegistryReference::Structure(entity) => &entity.name,
-      RegistryReference::Field(entity, field_id) => {
-        &entity
+      RegistryReference::Structure(record) => &record.name,
+      RegistryReference::Field(record, field_id) => {
+        &record
           .fields
           .get(field_id)
           .expect("looking up a field id not known to its structure")
           .name
       }
-      RegistryReference::Module(entity) => &entity.name,
-      RegistryReference::Function(entity, export_id) => {
-        &entity
+      RegistryReference::Module(record) => &record.name,
+      RegistryReference::Function(record, export_id) => {
+        &record
           .exports
           .get(export_id)
           .expect("looking up an export id not known to its module")
           .name
       }
-      RegistryReference::Folder(entity) => &entity.name,
+      RegistryReference::Folder(record) => &record.name,
       RegistryReference::Root => return None,
     })
   }
