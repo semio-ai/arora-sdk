@@ -2,8 +2,8 @@ add_custom_target(module-cli ALL
   COMMAND ${ARORA_MODULE_CLI}
   --config ${REGISTRY_CONFIGURATION_FILE}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
-  --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/entities
-  --include ${CMAKE_CURRENT_SOURCE_DIR}/entities
+  --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
+  --include ${CMAKE_CURRENT_SOURCE_DIR}/records
   generate
   -l cpp
   -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
@@ -41,8 +41,8 @@ if(BUILD_TESTING)
     COMMAND ${ARORA_CLI}
       --config ${REGISTRY_CONFIGURATION_FILE}
       --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
-      --include ${CMAKE_CURRENT_SOURCE_DIR}/entities
-      --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/entities
+      --include ${CMAKE_CURRENT_SOURCE_DIR}/records
+      --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp
       --header ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/module.yaml

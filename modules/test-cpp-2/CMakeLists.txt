@@ -12,7 +12,7 @@ add_custom_target(generate-test-cpp-2 ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/entities/module/23a75559-025c-4be8-8b48-0784e30dc9ec.yaml
+    ${CMAKE_CURRENT_BINARY_DIR}/arora/records/module/23a75559-025c-4be8-8b48-0784e30dc9ec.yaml
   DEPENDS
     arora
 )

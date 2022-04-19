@@ -30,7 +30,7 @@ set(ARORA_CLI "${RUST_BINARY_DIR}/arora-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CLI "${RUST_BINARY_DIR}/arora-module-cli${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_CPP "${RUST_BINARY_DIR}/arora-module-cpp${WASI_HOST_EXE_SUFFIX}")
 set(ARORA_MODULE_RUST "${RUST_BINARY_DIR}/arora-module-rust${WASI_HOST_EXE_SUFFIX}")
-set(ARORA_BEHAVIOR_TREE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/crates/arora-behavior-tree-types-yaml/entities")
+set(ARORA_BEHAVIOR_TREE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/crates/arora-behavior-tree-types-yaml/records")
 
 add_custom_target(arora ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}

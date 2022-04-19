@@ -10,8 +10,8 @@ for details on code generation.
 
   - `--config` / `-c` - Path to a `semio-cli` configuration file to reuse
     and potentially update.
-  - `--include` / `-i` - Include entities in the registry.
-    It should be the path to a directory of entities.
+  - `--include` / `-i` - Include records in the registry.
+    It should be the path to a directory of records.
   - `--user-name` / `-u` - User name to authenticate with.
     Overrides and updates the configuration file if provided.
   - `--password` / `-p` - Password to authenticate with.

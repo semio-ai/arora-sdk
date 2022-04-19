@@ -1047,10 +1047,10 @@ fn generate_self<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
 }
 
 /// Generates a directory describing the module in a layout compatible with `arora-module-cli --include`.
-fn generate_self_entity<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
+fn generate_self_record<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
   let module = context.module.as_ref().unwrap();
   let mut result = Directory::new();
-  let modules_dir = result.ensure_directories(&PathBuf::from_str("entities/module/")?)?;
+  let modules_dir = result.ensure_directories(&PathBuf::from_str("records/module/")?)?;
   let module_path = format!("{}.yaml", context.module_id);
   let module_yaml = serde_yaml::to_string(&module).unwrap();
   modules_dir.insert(module_path, File::new(module_yaml.as_bytes()))?;
@@ -1115,7 +1115,7 @@ async fn main() -> anyhow::Result<()> {
     root = root.merge_with(&generate_module_imports(&context, imports)?);
   }
   root = root.merge_with(&generate_self(&context)?);
-  root = root.merge_with(&generate_self_entity(&context)?);
+  root = root.merge_with(&generate_self_record(&context)?);
 
   let mut writer = Writer::new(&mut stdout);
 

@@ -10,7 +10,7 @@ use arora::{
 };
 use arora_module_core::header::module_public_from_header_file;
 use arora_registry::{
-  config::check_and_update_config, local::LocalRegistry, local_yaml::load_entities_from_yaml_dir,
+  config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
   remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry, RegistryError,
 };
 use clap::{Error, ErrorKind, Parser};
@@ -65,8 +65,8 @@ pub struct Args {
   #[clap(
     short,
     long,
-    help = "Include entities in the registry.
-    It should be the path to a directory of entities."
+    help = "Include records in the registry.
+    It should be the path to a directory of records."
   )]
   include: Vec<String>,
 
@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
     let client = Client::builder().default_headers(headers).build()?;
     let context = Context::new(registry_url, client);
 
-    // Connect to the remote registry, and add entities added locally.
+    // Connect to the remote registry, and add records added locally.
     let mut registry = RemoteCachedRegistry::new(context);
     main_with_registry(&args, &mut registry).await
   } else {
@@ -150,7 +150,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
   args: &Args,
   registry: &mut R,
 ) -> anyhow::Result<()> {
-  // Add entities manually included to the registry.
+  // Add records manually included to the registry.
   for include in &args.include {
     let include_path = PathBuf::from_str(include.as_str())?;
     if !include_path.exists() {
@@ -159,7 +159,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
         include_path.display()
       );
     }
-    load_entities_from_yaml_dir(include_path, registry).await?;
+    load_records_from_yaml_dir(include_path, registry).await?;
   }
 
   let mut functions_modules = HashMap::new();

@@ -6,7 +6,7 @@ use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
 use resolve::resolve_high_module;
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_record::module::v0::{public::Public as ModulePublic, unfrozen::Export};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::path::Path;
@@ -48,12 +48,12 @@ pub async fn analyze_module(
   let mut assets = Vec::new();
   for dep_ref in &resolved_module.module.dependencies {
     let selector = Selector::Id(dep_ref.id);
-    let entity_type = registry
+    let record_type = registry
       .type_of(&selector)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
-    match entity_type {
-      EntityType::Structure | EntityType::Enumeration => assets.push(ModuleAsset::Type(
+    match record_type {
+      RecordType::Structure | RecordType::Enumeration => assets.push(ModuleAsset::Type(
         dep_ref.id.to_owned(),
         registry
           .get_type(&selector)
@@ -70,7 +70,7 @@ pub async fn analyze_module(
   Ok(assets)
 }
 
-/// Assets are entities provided or referred to by a module.
+/// Assets are records provided or referred to by a module.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ModuleAsset {
   /// Type, including its identifier.
@@ -141,7 +141,7 @@ impl<'a, R: AsyncRead + Unpin> Reader<'a, R> {
 
 #[derive(Display, Debug)]
 pub enum ModuleDeclarationError {
-  /// Entity is not known to the registry or registry is not available.
+  /// Record is not known to the registry or registry is not available.
   RegistryError(RegistryError),
 
   /// IO error.

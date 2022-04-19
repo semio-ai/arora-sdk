@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-semio-record = { git = "https://github.com/semio-ai/semio-entity.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 arora-registry = { path = "../arora-registry" }
 arora-schema = { path = "../arora-schema" }

@@ -16,7 +16,7 @@ use quote::{
   __private::{Ident, TokenStream},
   format_ident, quote, ToTokens,
 };
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_record::{
   enumeration::v0::public::Public as EnumerationPublic,
   module::v0::unfrozen::{ExportKind, Parameter},
@@ -1235,8 +1235,8 @@ async fn generate_deserialize_from_unfrozen(
         .await
         .map_err(GenerationError::RegistryError)?
       {
-        EntityType::Enumeration => quote! { TYPE_ENUMERATION },
-        EntityType::Structure => quote! { TYPE_STRUCTURE },
+        RecordType::Enumeration => quote! { TYPE_ENUMERATION },
+        RecordType::Structure => quote! { TYPE_STRUCTURE },
         _ => unreachable!("unexpected type of element in array"),
       };
       let raw_id = RawUuidValue(&array.reference.id);
@@ -1517,7 +1517,7 @@ fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
   }
 }
 
-/// Generates the identifier for the mod publishing the entity of the given id.
+/// Generates the identifier for the mod publishing the record of the given id.
 async fn generated_mod_ident_from_id(
   id: &Uuid,
   registry: &mut dyn ReadableRegistry,

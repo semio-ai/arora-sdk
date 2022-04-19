@@ -5,7 +5,7 @@ use crate::{
   StructurePublic, TypeDefinition,
 };
 use async_trait::async_trait;
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_client::context::Context;
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError> {
     match self.cache.get_type(selector).await {
       Ok(ty) => Ok(ty),
-      Err(RegistryError::NoSuchEntity { selector: _ }) => {
+      Err(RegistryError::NoSuchRecord { selector: _ }) => {
         let ty = self.remote.get_type(selector).await?;
         match &ty {
           TypeDefinition::Primitive(_) => {
@@ -59,7 +59,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
   async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
     match self.cache.get_module(selector).await {
       Ok(module) => Ok(module),
-      Err(RegistryError::NoSuchEntity { selector: _ }) => {
+      Err(RegistryError::NoSuchRecord { selector: _ }) => {
         let module = self.remote.get_module(selector).await?;
         let id = self.resolve_selector(selector).await?;
         self.cache.add_module(id, module.clone()).await?;
@@ -85,16 +85,16 @@ impl ReadableRegistry for RemoteCachedRegistry {
     self.remote.resolve_id(id).await
   }
 
-  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError> {
+  async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     match self.cache.type_of(selector).await {
       Ok(ty) => Ok(ty),
-      Err(RegistryError::NoSuchEntity { selector: _ }) => self.remote.type_of(selector).await,
+      Err(RegistryError::NoSuchRecord { selector: _ }) => self.remote.type_of(selector).await,
       Err(err) => Err(err),
     }
   }
 }
 
-/// When an entity is added, it is added to the local cache only.
+/// When an record is added, it is added to the local cache only.
 #[async_trait(?Send)]
 impl EditableRegistry for RemoteCachedRegistry {
   async fn add_enumeration(

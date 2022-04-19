@@ -12,7 +12,7 @@ use arora_schema::{
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_client::common::{EntityType, Selector};
+use semio_client::common::{RecordType, Selector};
 use semio_record::{
   enumeration::v0::Enumeration,
   module::v0::Module,
@@ -153,10 +153,10 @@ impl Registry {
 
 #[async_trait(?Send)]
 pub trait ReadableRegistry {
-  /// Gets the definition of a type entity,
+  /// Gets the definition of a type record,
   /// i.e. of a primitive, a structure or an enumeration.
   /// Not to be confused with the [`type_of`] function,
-  /// which retrieves the type of an entity.
+  /// which retrieves the type of an record.
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError>;
 
   /// Gets the definition of a module.
@@ -168,10 +168,10 @@ pub trait ReadableRegistry {
   /// Resolves the given identifier into a path.
   async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
 
-  /// Resolves the type of entity identified by the given selector.
+  /// Resolves the type of record identified by the given selector.
   /// Do not confuse with the [`get_type`] function,
   /// which returns type definitions.
-  async fn type_of(&mut self, selector: &Selector) -> Result<EntityType, RegistryError>;
+  async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError>;
 }
 
 #[async_trait(?Send)]
@@ -268,32 +268,32 @@ impl TypeDefinition {
 
 #[derive(Display, Debug)]
 pub enum RegistryError {
-  /// No such entity.
-  #[display(fmt = "no such entity \"{}\"", selector)]
-  NoSuchEntity { selector: Selector },
+  /// No such record.
+  #[display(fmt = "no such record \"{}\"", selector)]
+  NoSuchRecord { selector: Selector },
 
-  /// Entity exists but is not a type.
-  #[display(fmt = "entity \"{}\" exists but is not a type", selector)]
+  /// Record exists but is not a type.
+  #[display(fmt = "record \"{}\" exists but is not a type", selector)]
   NotAType { selector: Selector },
 
-  /// Entity exists but is not a module.
-  #[display(fmt = "entity \"{}\" exists but is not a module", selector)]
+  /// Record exists but is not a module.
+  #[display(fmt = "record \"{}\" exists but is not a module", selector)]
   NotAModule { selector: Selector },
 
-  /// Entity being inserted has a parent defined, but it is unknown locally.
-  #[display(fmt = "parent of entity \"{}\" is unknown to the registry", name)]
+  /// Record being inserted has a parent defined, but it is unknown locally.
+  #[display(fmt = "parent of record \"{}\" is unknown to the registry", name)]
   UnknownParent { name: String },
 
-  /// The name or identifier of the entity being added is already taken by another entity.
+  /// The name or identifier of the record being added is already taken by another record.
   #[display(
-    fmt = "added entity's selector {} is already taken in the registry",
+    fmt = "added record's selector {} is already taken in the registry",
     selector
   )]
   DuplicateSelector { selector: Selector },
 
-  /// Entity being inserted uses a dependency that is not known locally.
+  /// Record being inserted uses a dependency that is not known locally.
   #[display(
-    fmt = "entity depends on \"{}\", which is unknown to the registry",
+    fmt = "record depends on \"{}\", which is unknown to the registry",
     selector
   )]
   UnknownDependency { selector: Selector },

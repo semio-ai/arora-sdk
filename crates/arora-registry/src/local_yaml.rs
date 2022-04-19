@@ -6,14 +6,14 @@ use crate::{
 };
 use std::{ffi::OsStr, path::Path, str::FromStr};
 
-/// Reads a directory describing registry entities in YAML format,
+/// Reads a directory describing registry records in YAML format,
 /// and loads them into the given registry.
-/// The directory may contain a subdirectory for each entity type:
+/// The directory may contain a subdirectory for each record type:
 /// `folder`, `enumeration`, `structure`, `module`.
-/// Each subdirectory may contain a list of entities serialized in YAML,
+/// Each subdirectory may contain a list of records serialized in YAML,
 /// into files named `<uuid>.yaml`,
-/// where `<uuid>` is the UUID to give to the entity when adding it to the registry.
-pub async fn load_entities_from_yaml_dir<P: AsRef<Path>>(
+/// where `<uuid>` is the UUID to give to the record when adding it to the registry.
+pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   path: P,
   registry: &mut dyn EditableRegistry,
 ) -> Result<(), RegistryError> {
@@ -136,7 +136,7 @@ where
       .await
       .map_err(|err| RegistryError::Generic {
         message: format!(
-          "failed to read entity description in {}: {}",
+          "failed to read record description in {}: {}",
           path.display(),
           err
         ),

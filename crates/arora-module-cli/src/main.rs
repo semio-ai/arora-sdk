@@ -1,6 +1,6 @@
 mod generate;
 use arora_registry::{
-  config::check_and_update_config, local_yaml::load_entities_from_yaml_dir,
+  config::check_and_update_config, local_yaml::load_records_from_yaml_dir,
   remote_cached::RemoteCachedRegistry,
 };
 use clap::{Parser, Subcommand};
@@ -82,7 +82,7 @@ struct Args {
   #[clap(
     short,
     long,
-    help = "Include entities in the registry. It should be the path to a directory of entities."
+    help = "Include records in the registry. It should be the path to a directory of records."
   )]
   include: Vec<String>,
 }
@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
   let client = Client::builder().default_headers(headers).build()?;
   let context = Context::new(registry_url, client);
 
-  // Connect to the remote registry, and add entities added locally.
+  // Connect to the remote registry, and add records added locally.
   let mut registry = RemoteCachedRegistry::new(context);
   for include in args.include {
     let include_path = PathBuf::from_str(include.as_str())?;
@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         include_path.display()
       );
     }
-    load_entities_from_yaml_dir(include_path, &mut registry).await?;
+    load_records_from_yaml_dir(include_path, &mut registry).await?;
   }
 
   // Perform the command.

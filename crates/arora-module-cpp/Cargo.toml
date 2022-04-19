@@ -11,7 +11,7 @@ arora-registry = { path = "../arora-registry" }
 arora-schema = { path = "../arora-schema" }
 arora-vfs = { path = "../arora-vfs" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
-semio-record = { git = "https://github.com/semio-ai/semio-entity.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 anyhow = "*"
 clap = { version = "3.0.10", features = ["derive"] }
 convert_case = "0.5"

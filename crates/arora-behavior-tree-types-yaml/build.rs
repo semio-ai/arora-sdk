@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 pub fn main() {
   // Folders.
-  let folders_dir = "entities/folder/";
+  let folders_dir = "records/folder/";
   create_dir_all(folders_dir).unwrap();
   // behavior_tree
   let behavior_tree_folder_path = format!("{}/{}.yaml", folders_dir, BEHAVIOR_TREE_FOLDER_ID);
@@ -16,7 +16,7 @@ pub fn main() {
   write(behavior_tree_folder_path, behavior_tree_folder_yaml).unwrap();
 
   // Enumerations
-  let enumerations_dir = "entities/enumeration/";
+  let enumerations_dir = "records/enumeration/";
   create_dir_all(&enumerations_dir).unwrap();
   // behavior_tree::Status
   let status_enumeration_path = format!("{}/{}.yaml", enumerations_dir, STATUS_ENUMERATION_ID);
@@ -25,7 +25,7 @@ pub fn main() {
   write(status_enumeration_path, status_enumeration_yaml).unwrap();
 
   // Structures.
-  let structures_dir = "entities/structure/";
+  let structures_dir = "records/structure/";
   create_dir_all(&structures_dir).unwrap();
   // behavior_tree::TickId
   let tick_id_structure_path = format!("{}/{}.yaml", structures_dir, TICK_ID_STRUCTURE_ID);
