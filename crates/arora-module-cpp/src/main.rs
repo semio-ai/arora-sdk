@@ -893,7 +893,8 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
               identifier_name(&module.name)
                 .to_expression()
                 .colon_colon(export.name.to_expression())
-                .call(f.parameters.iter().map(|(parameter_id, parameter)| {
+                .call(f.parameter_ordering.iter().map(|parameter_id| {
+                  let parameter = f.parameters.get(parameter_id).unwrap();
                   parameter_variable_name(parameter_id, parameter)
                 })),
             ),
