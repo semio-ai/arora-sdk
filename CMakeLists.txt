@@ -6,7 +6,6 @@ include(CTest)
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(REGISTRY_CONFIGURATION_FILE "$ENV{HOME}/.semio/cli.yaml" CACHE STRING "Registry configuration file")
 set(USE_RUST_DEBUG ON CACHE BOOL "Use Rust debug build")
 set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 

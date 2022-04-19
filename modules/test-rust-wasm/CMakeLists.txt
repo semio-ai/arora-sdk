@@ -33,7 +33,6 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-${MODULE_NAME}-from-engine
     COMMAND ${ARORA_CLI}
-      --config ${REGISTRY_CONFIGURATION_FILE}
       --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
       --header ${ARORA_GENERATED_SOURCE_DIR}/module.yaml
       --exe ${MODULE_EXECUTABLE}

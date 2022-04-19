@@ -1,6 +1,5 @@
 add_custom_target(generate-test-cpp-2 ALL
   COMMAND ${ARORA_MODULE_CLI}
-  --config ${REGISTRY_CONFIGURATION_FILE}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
   generate
   -l cpp
@@ -31,7 +30,6 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine-with-scalars
     COMMAND ${ARORA_CLI}
-      --config ${REGISTRY_CONFIGURATION_FILE}
       --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
       --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
       --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp-2

@@ -139,15 +139,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Connect to the remote registry, and add records added locally.
     let mut registry = RemoteCachedRegistry::new(context);
-    main_with_registry(&args, &mut registry).await
+    main_with_registry(args, &mut registry).await
   } else {
     let mut registry = LocalRegistry::new();
-    main_with_registry(&args, &mut registry).await
+    main_with_registry(args, &mut registry).await
   }
 }
 
 async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
-  args: &Args,
+  args: Args,
   registry: &mut R,
 ) -> anyhow::Result<()> {
   // Add records manually included to the registry.

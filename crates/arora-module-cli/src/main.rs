@@ -1,16 +1,16 @@
 mod generate;
 use arora_registry::{
-  config::check_and_update_config, local_yaml::load_records_from_yaml_dir,
-  remote_cached::RemoteCachedRegistry,
+  config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
+  remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry,
 };
 use clap::{Parser, Subcommand};
 use generate::generate;
 use reqwest::{
-  header::{self, HeaderValue},
+  header::{self, HeaderMap, HeaderValue},
   Client, Url,
 };
-use semio_client::context::Context;
-use std::{path::PathBuf, str::FromStr};
+use semio_client::{authentication::Config, context::Context};
+use std::{fs::read_to_string, path::PathBuf, str::FromStr};
 
 #[derive(Debug, Parser)]
 struct ExportType {
@@ -56,10 +56,9 @@ struct Args {
   #[clap(
     short,
     long,
-    default_value = "http://localhost:8080",
     help = "URL of the registry to use. Overrides and updates the configuration file if provided."
   )]
-  registry_url: String,
+  registry_url: Option<String>,
 
   #[clap(
     short,
@@ -92,22 +91,52 @@ async fn main() -> anyhow::Result<()> {
   env_logger::builder().init();
 
   let args = Args::parse();
-  let registry_url = Url::parse(args.registry_url.as_str())?;
-  let token =
-    check_and_update_config(&registry_url, args.config, args.user_name, args.password).await?;
 
-  // Setup the context with the refreshed token.
-  let mut headers = header::HeaderMap::new();
-  headers.insert(
-    header::AUTHORIZATION,
-    HeaderValue::from_str(token.as_str())?,
-  );
-  let client = Client::builder().default_headers(headers).build()?;
-  let context = Context::new(registry_url, client);
+  let registry_url = if args.registry_url.is_some() {
+    args.registry_url.to_owned()
+  } else if let Some(config_path) = &args.config {
+    let config = read_to_string(config_path)?;
+    let config = serde_yaml::from_str::<Config>(&config)?;
+    config.url
+  } else {
+    None
+  };
 
-  // Connect to the remote registry, and add records added locally.
-  let mut registry = RemoteCachedRegistry::new(context);
-  for include in args.include {
+  if let Some(registry_url) = registry_url {
+    // Check config and args and update config if necessary,
+    // while getting the updated token.
+    let registry_url = Url::parse(registry_url.as_str())?;
+    let token = check_and_update_config(
+      &registry_url,
+      args.config.to_owned(),
+      args.user_name.to_owned(),
+      args.password.to_owned(),
+    )
+    .await?;
+
+    // Setup the context with the refreshed token.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+      header::AUTHORIZATION,
+      HeaderValue::from_str(token.as_str())?,
+    );
+    let client = Client::builder().default_headers(headers).build()?;
+    let context = Context::new(registry_url, client);
+
+    // Connect to the remote registry, and add records added locally.
+    let mut registry = RemoteCachedRegistry::new(context);
+    main_with_registry(args, &mut registry).await
+  } else {
+    let mut registry = LocalRegistry::new();
+    main_with_registry(args, &mut registry).await
+  }
+}
+
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
+  args: Args,
+  registry: &mut R,
+) -> anyhow::Result<()> {
+  for include in &args.include {
     let include_path = PathBuf::from_str(include.as_str())?;
     if !include_path.exists() {
       eprintln!(
@@ -115,13 +144,13 @@ async fn main() -> anyhow::Result<()> {
         include_path.display()
       );
     }
-    load_records_from_yaml_dir(include_path, &mut registry).await?;
+    load_records_from_yaml_dir(include_path, registry).await?;
   }
 
   // Perform the command.
   match args.command {
     Commands::Generate(cmd) => {
-      generate(cmd, &mut registry).await?;
+      generate(cmd, registry).await?;
     }
   }
 

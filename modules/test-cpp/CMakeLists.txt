@@ -1,6 +1,5 @@
 add_custom_target(module-cli ALL
   COMMAND ${ARORA_MODULE_CLI}
-  --config ${REGISTRY_CONFIGURATION_FILE}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
   --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
   --include ${CMAKE_CURRENT_SOURCE_DIR}/records
@@ -39,7 +38,6 @@ if(BUILD_TESTING)
   add_test(
     NAME test-call-cpp-wasm-from-engine-with-struct
     COMMAND ${ARORA_CLI}
-      --config ${REGISTRY_CONFIGURATION_FILE}
       --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
       --include ${CMAKE_CURRENT_SOURCE_DIR}/records
       --include ${CMAKE_BINARY_DIR}/modules/test-cpp-2/arora/records
