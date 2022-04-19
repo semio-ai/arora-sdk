@@ -772,7 +772,6 @@ fn structure_private_field_variable(id: &Uuid, field: &StructureField) -> Expres
 
 pub fn structure_impl(
   context: &Context,
-  id: &Uuid,
   name: &str,
   ty: &StructurePublic,
 ) -> Vec<Declaration> {
@@ -851,7 +850,7 @@ pub fn structure_impl(
 pub fn ty_impl(context: &Context, id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
   match ty {
     TypeDefinition::Enumeration(value) => enumeration_impl(context, id, &value.name, &value),
-    TypeDefinition::Structure(value) => structure_impl(context, id, &value.name, &value),
+    TypeDefinition::Structure(value) => structure_impl(context, &value.name, &value),
     TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", id.to_string()),
   }
 }
