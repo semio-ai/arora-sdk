@@ -11,17 +11,22 @@ path = "src/behavior_tree.rs"
 [dependencies]
 arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
-arora-index = { path = "../arora-index" }
 arora-schema = { path = "../arora-schema" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 lazy_static = "*"
 quick-xml = "0.20.0"
 serde = { version = "1.0", features = ["derive"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+uuid = { version = "0.8.2", features = ["serde", "v4"] }
 derive_more = "*"
 
 [dev-dependencies]
 anyhow = "*"
+arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 assert_float_eq = "1.1.3"
 convert_case = "0.5"
 serde_yaml = "0.8"

@@ -12,4 +12,4 @@ include = ["enumeration/**.yaml", "structure/**.yaml"]
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
-uuid = "0.8"
+uuid = "0.8.2"

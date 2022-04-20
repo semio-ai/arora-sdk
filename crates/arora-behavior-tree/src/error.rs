@@ -32,10 +32,11 @@ pub enum BehaviorTreeError {
   ChildNodeNotFound { child: Uuid, node: Uuid },
 
   #[display(
-    fmt = "children were specified for node \"{}\", but it does not accept them as a parameter",
-    node
+    fmt = "children were specified for node \"{}\", but associated function \"{}\" does not accept them as a parameter",
+    node,
+    function
   )]
-  MissingChildrenParameter { node: Uuid },
+  MissingChildrenParameter { node: Uuid, function: Uuid },
 
   #[display(fmt = "internal error: {}", message)]
   InternalError { message: String },
