@@ -9,7 +9,7 @@ edition = "2021"
 arora-schema = { path = "../arora-schema" }
 derive_more = "*"
 serde = { version = "1.0", features = ["derive"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+uuid = { version = "0.8.2", features = ["serde", "v4"] }
 
 [dev-dependencies]
 anyhow = "*"

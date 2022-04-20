@@ -16,7 +16,7 @@ arora-schema = { path = "../arora-schema" }
 lazy_static = "*"
 quick-xml = "0.20.0"
 serde = { version = "1.0", features = ["derive"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+uuid = { version = "0.8.2", features = ["serde", "v4"] }
 derive_more = "*"
 
 [dev-dependencies]
