@@ -14,6 +14,8 @@ pub struct RemoteCachedRegistry {
   cache: LocalRegistry,
 }
 
+unsafe impl Send for RemoteCachedRegistry {}
+
 impl RemoteCachedRegistry {
   pub fn new(context: Context) -> Self {
     Self {
@@ -30,7 +32,7 @@ impl RemoteCachedRegistry {
   }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ReadableRegistry for RemoteCachedRegistry {
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError> {
     match self.cache.get_type(selector).await {
@@ -69,7 +71,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
     }
   }
 
-  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
     let res = self.cache.resolve_path(path).await;
     if res.is_ok() {
       return res;
@@ -77,7 +79,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
     self.remote.resolve_path(path).await
   }
 
-  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
+  async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError> {
     let res = self.cache.resolve_id(id).await;
     if res.is_ok() {
       return res;
@@ -95,7 +97,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
 }
 
 /// When an record is added, it is added to the local cache only.
-#[async_trait(?Send)]
+#[async_trait]
 impl EditableRegistry for RemoteCachedRegistry {
   async fn add_enumeration(
     &mut self,

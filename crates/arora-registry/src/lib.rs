@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-#[async_trait(?Send)]
+#[async_trait]
 pub trait ReadableRegistry {
   /// Gets the definition of a type record,
   /// i.e. of a primitive, a structure or an enumeration.
@@ -32,10 +32,10 @@ pub trait ReadableRegistry {
   async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError>;
 
   /// Resolves the given selector into an identifier.
-  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError>;
+  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError>;
 
   /// Resolves the given identifier into a path.
-  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
+  async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError>;
 
   /// Resolves the type of record identified by the given selector.
   /// Do not confuse with the [`get_type`] function,
@@ -43,7 +43,7 @@ pub trait ReadableRegistry {
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError>;
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 pub trait EditableRegistry {
   /// Adds an [`EnumerationPublic`] to the registry.
   /// Its parent must be found in the registry.
@@ -97,6 +97,8 @@ pub enum TypeDefinition {
   Enumeration(EnumerationPublic),
   Structure(StructurePublic),
 }
+
+unsafe impl Send for TypeDefinition {}
 
 impl TypeDefinition {
   pub fn name(&self) -> String {
@@ -181,6 +183,8 @@ pub enum RegistryError {
 }
 
 impl std::error::Error for RegistryError {}
+
+unsafe impl Send for RegistryError {}
 
 pub fn get_primitive(selector: &Selector) -> Option<PrimitiveKind> {
   match selector {

@@ -4,14 +4,17 @@ use crate::{
 };
 use async_trait::async_trait;
 use semio_client::{
-  common::{type_of, RecordType, GetPublic, Selector, TypeOf},
+  common::{type_of, GetPublic, RecordType, Selector, TypeOf},
   context::Context,
 };
+use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use uuid::Uuid;
 
 pub struct RemoteRegistry {
   context: Context,
 }
+unsafe impl Send for RemoteRegistry {}
+unsafe impl Sync for RemoteRegistry {}
 
 impl RemoteRegistry {
   /// Creates a new registry that will use the given context to communicate with the server.
@@ -100,9 +103,23 @@ impl RemoteRegistry {
       message: format!("error getting folder {}: {}", selector.clone(), e),
     })
   }
+
+  async fn get_module_not_mut(&self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
+    let module = semio_client::module::get_public(
+      &self.context,
+      GetPublic {
+        id: selector.clone(),
+      },
+    )
+    .await
+    .map_err(|e| RegistryError::RemoteError {
+      message: format!("error getting module {}: {}", selector.clone(), e),
+    })?;
+    Ok(module)
+  }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ReadableRegistry for RemoteRegistry {
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError> {
     if let Some(primitive_kind) = get_primitive(selector) {
@@ -124,20 +141,10 @@ impl ReadableRegistry for RemoteRegistry {
   }
 
   async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
-    let module = semio_client::module::get_public(
-      &self.context,
-      GetPublic {
-        id: selector.clone(),
-      },
-    )
-    .await
-    .map_err(|e| RegistryError::RemoteError {
-      message: format!("error getting module {}: {}", selector.clone(), e),
-    })?;
-    Ok(module)
+    self.get_module_not_mut(selector).await
   }
 
-  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
     let selector = Selector::Path(path.to_owned());
     selector
       .resolve(&self.context)
@@ -147,7 +154,7 @@ impl ReadableRegistry for RemoteRegistry {
       })
   }
 
-  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
+  async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError> {
     let selector = Selector::Id(id.clone());
     if let Some(primitive_kind) = get_primitive(&selector) {
       return Ok(primitive_kind.to_string());
@@ -178,7 +185,7 @@ impl ReadableRegistry for RemoteRegistry {
         Ok(format!("{}.{}", parent_path, folder.name))
       }
       RecordType::Module => {
-        let module = self.get_module(&selector).await?;
+        let module = self.get_module_not_mut(&selector).await?;
         Ok(format!("{}", module.name))
       }
       _ => Err(RegistryError::RemoteError {
@@ -197,6 +204,34 @@ impl ReadableRegistry for RemoteRegistry {
     .await
     .map_err(|err| RegistryError::Generic {
       message: format!("error getting type from remote: {}", err),
+    })
+  }
+}
+
+#[async_trait]
+impl Freezer for RemoteRegistry {
+  type Error = RegistryError;
+
+  async fn freeze(&self, id: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+    let path = self.resolve_id(&id.id).await?;
+    let selector = Selector::Path(format!("{}@{}", path, id.version_req));
+
+    let tags = semio_client::common::tags(
+      &self.context,
+      semio_client::common::Tags {
+        selector: selector.to_owned(),
+      },
+    )
+    .await
+    .map_err(|e| RegistryError::RemoteError {
+      message: format!("error getting tags for {}: {}", selector.clone(), e),
+    })?;
+    let latest_tag = tags
+      .last()
+      .ok_or(RegistryError::NoSuchRecord { selector })?;
+    Ok(FrozenReference {
+      id: id.id.clone(),
+      version: latest_tag.to_owned(),
     })
   }
 }

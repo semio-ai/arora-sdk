@@ -29,6 +29,9 @@ pub struct LocalRegistry {
   path_to_ids: HashMap<String, Uuid>,
 }
 
+unsafe impl Send for LocalRegistry {}
+unsafe impl Sync for LocalRegistry {}
+
 /// A reference to an record stored in a [`LocalRegistry`].
 #[derive(Clone)]
 pub enum RegistryReference {
@@ -98,7 +101,7 @@ impl LocalRegistry {
   }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ReadableRegistry for LocalRegistry {
   async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError> {
     if let Some(primitive_kind) = get_primitive(selector) {
@@ -138,7 +141,7 @@ impl ReadableRegistry for LocalRegistry {
     }
   }
 
-  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
     Ok(
       self
         .path_to_ids
@@ -150,7 +153,7 @@ impl ReadableRegistry for LocalRegistry {
     )
   }
 
-  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError> {
+  async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError> {
     self.compute_path(self.indexed.get(&Selector::Id(id.to_owned())).ok_or(
       RegistryError::NoSuchRecord {
         selector: Selector::Id(id.to_owned()),
@@ -178,7 +181,7 @@ impl ReadableRegistry for LocalRegistry {
   }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl EditableRegistry for LocalRegistry {
   async fn add_enumeration(
     &mut self,
