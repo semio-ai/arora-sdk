@@ -7,13 +7,10 @@ mod tests;
 pub mod tree_node;
 use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
-use arora_index::Index;
-use arora_schema::{
-  module::low::{Parameter, TypeRef},
-  value::{ConversionError, StructureField, Value},
-};
+use arora_schema::value::{ConversionError, StructureField, Value};
 use error::BehaviorTreeError;
 use schema::{CallExpression, Node, NodeParameterId};
+use semio_record::module::v0::unfrozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
@@ -46,13 +43,13 @@ struct BehaviorTreeRuntime<'a> {
 impl<'a> BehaviorTreeRuntime<'a> {
   fn setup(
     tree: &'a BehaviorTree,
-    index: Rc<Index>,
+    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     caller: &'a mut dyn CallBridge,
   ) -> Result<Self, BehaviorTreeError> {
     let tick = setup_tick_function(
       tree.root.clone(),
       &tree.node_index,
-      index.clone(),
+      function_index.clone(),
       tree.variables.clone(),
       tree.node_arg_variables.clone(),
       caller,
@@ -68,10 +65,10 @@ impl<'a> BehaviorTreeRuntime<'a> {
 /// Runs a behavior tree until it reaches the status success or failure.
 pub fn run_behavior_tree(
   behavior: &BehaviorTree,
-  index: Rc<Index>,
+  function_index: Rc<HashMap<Uuid, ModuleFunction>>,
   caller: &mut dyn CallBridge,
 ) -> Result<Status, BehaviorTreeError> {
-  let mut runtime = BehaviorTreeRuntime::setup(behavior, index, caller)?;
+  let mut runtime = BehaviorTreeRuntime::setup(behavior, function_index, caller)?;
   let mut status = Status::Running;
   while status == Status::Running {
     status = runtime.tick()?;
@@ -82,7 +79,7 @@ pub fn run_behavior_tree(
 fn setup_tick_function(
   node: Rc<Node>,
   node_index: &HashMap<Uuid, Rc<Node>>,
-  index: Rc<Index>,
+  function_index: Rc<HashMap<Uuid, ModuleFunction>>,
   variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   caller: &mut dyn CallBridge,
@@ -105,7 +102,7 @@ fn setup_tick_function(
       let tick_function_with_id = setup_tick_function(
         child_node.clone(),
         &node_index,
-        index.clone(),
+        function_index.clone(),
         variables.clone(),
         node_arg_variables.clone(),
         caller,
@@ -115,7 +112,7 @@ fn setup_tick_function(
   }
   let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
     node: node.clone(),
-    index,
+    function_index,
     locals: variables.to_owned(),
     node_arg_variables: node_arg_variables.to_owned(),
     children: children_ticks,
@@ -128,17 +125,18 @@ fn setup_tick_function(
 
 fn tick(
   caller: &mut dyn CallBridge,
-  index: Rc<Index>,
+  function_index: Rc<HashMap<Uuid, ModuleFunction>>,
   variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   node_parameters_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
 ) -> Result<Status, BehaviorTreeError> {
-  let function = index.find_function(&node.function).map_err(|_| {
-    BehaviorTreeError::CallError(CallError::FunctionNotFound {
+  let module_function = function_index
+    .get(&node.function)
+    .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
       id: node.function.clone(),
-    })
-  })?;
+    }))?;
+  let function = &module_function.function;
 
   let mut call = Call {
     module_id: None,
@@ -153,35 +151,43 @@ fn tick(
     .unwrap_or(0);
   assert_eq!(nof_children, child_tick_ids.len());
 
-  if let Some(_) = &node.children {
-    // Find the `children` parameter by its type
-    let children_params: Vec<&Parameter> = function
-      .parameters
-      .iter()
-      .filter(|parameter| {
-        if let TypeRef::Array { id: param_id } = parameter.ty {
-          *param_id.as_bytes() == TICK_ID_STRUCT_RAW_ID && parameter.name == "children"
-        } else {
-          false
-        }
-      })
-      .collect();
-
-    let children_param: &Parameter = if children_params.is_empty() {
+  if node.children.is_some() {
+    // Check the presence of the `children` parameter, which must be the first one.
+    let first_parameter_id =
+      function
+        .parameter_ordering
+        .first()
+        .ok_or(BehaviorTreeError::MissingChildrenParameter {
+          node: node.id.to_owned(),
+          function: node.function.to_owned()
+        })?;
+    let first_parameter = function.parameters.get(&first_parameter_id).ok_or(
+      BehaviorTreeError::MissingChildrenParameter {
+        node: node.id.clone(),
+        function: node.function.to_owned()
+      },
+    )?;
+    if first_parameter.name != "children" {
       Err(BehaviorTreeError::MissingChildrenParameter {
         node: node.id.clone(),
-      })
-    } else if children_params.len() > 1 {
-      Err(BehaviorTreeError::InternalError {
-        message: "two args are named \"children\" and accept an array of TickId".to_string(),
-      })
-    } else {
-      children_params
-        .first()
-        .ok_or(BehaviorTreeError::InternalError {
-          message: "single child parameter cannot be accessed".to_string(),
-        })
-    }?;
+        function: node.function.to_owned()
+      })?;
+    }
+    let first_parameter_type_id = first_parameter
+      .ty
+      .as_array()
+      .ok_or(BehaviorTreeError::MissingChildrenParameter {
+        node: node.id.clone(),
+        function: node.function.to_owned()
+      })?
+      .reference
+      .id;
+    if first_parameter_type_id != Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID) {
+      Err(BehaviorTreeError::MissingChildrenParameter {
+        node: node.id.clone(),
+        function: node.function.to_owned()
+      })?;
+    }
 
     // Pass the tick ids of the children.
     let mut children_arg = Vec::with_capacity(child_tick_ids.len());
@@ -194,7 +200,7 @@ fn tick(
       });
     }
     call.args.push(StructureField {
-      id: children_param.id.clone(),
+      id: first_parameter_id.clone(),
       value: Box::new(Value::ArrayStructure {
         id: Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID),
         elements: children_arg,
@@ -243,7 +249,7 @@ fn tick(
   }
 
   let result = caller
-    .arora_call(&function.module, call)
+    .arora_call(&module_function.module_id, call)
     .map_err(|e| BehaviorTreeError::CallError(e))?;
 
   for mutated in result.mutated {
@@ -294,7 +300,7 @@ impl Tickable for CallableId {
 /// The usual Tickable object in behavior trees, which is also Callable.
 struct TickFunction {
   node: Rc<Node>,
-  index: Rc<Index>,
+  function_index: Rc<HashMap<Uuid, ModuleFunction>>,
   locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   children: Vec<TickId>,
@@ -304,7 +310,7 @@ impl Tickable for TickFunction {
   fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
     tick(
       caller,
-      self.index.clone(),
+      self.function_index.clone(),
       self.locals.clone(),
       self.node_arg_variables.clone(),
       &self.children,
@@ -572,4 +578,11 @@ fn call_expression(
     )
     .map_err(|e| BehaviorTreeError::CallError(e))?;
   Ok(result.ret)
+}
+
+pub struct ModuleFunction {
+  module_id: Uuid,
+  function_id: Uuid,
+  function_name: String,
+  function: Function,
 }

@@ -3,20 +3,22 @@ pub mod tests {
   use crate::{
     arora_generated::behavior_tree::status::Status, error::BehaviorTreeError,
     load_behavior_tree_nodes, nodes::*, run_behavior_tree, schema::Expression, BehaviorTree,
-    BehaviorTreeRuntime,
+    BehaviorTreeRuntime, ModuleFunction,
   };
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
-  use arora_index::Index;
-  use arora_registry::Registry;
+  use arora_module_core::resolve::resolve_low_module;
+  use arora_registry::{local::LocalRegistry, EditableRegistry, ModulePublic, ReadableRegistry};
   use arora_schema::{
     module::low::{Header, ModuleDefinition},
     value::Value,
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
+  use semio_record::module::v0::unfrozen::ExportKind;
   use std::{
     cell::RefCell,
+    collections::HashMap,
     path::{Path, PathBuf},
     rc::Rc,
   };
@@ -24,6 +26,7 @@ pub mod tests {
     fs::{read_to_string, File},
     io::AsyncReadExt,
   };
+  use uuid::Uuid;
 
   pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
     return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
@@ -209,8 +212,8 @@ pub mod tests {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-      "behavior-tree-nodes".to_string(),
       "test-rust-wasm".to_string(),
+      "behavior-tree-nodes".to_string(),
     ])
     .await;
     let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
@@ -264,12 +267,14 @@ pub mod tests {
     run_with_modules(&behavior, &modules).await
   }
 
-  async fn setup_engine_with_modules<'a>(modules: &Vec<String>) -> (PinnedEngine, Index) {
+  async fn setup_engine_with_modules<'a>(
+    modules: &Vec<String>,
+  ) -> (PinnedEngine, HashMap<Uuid, ModuleFunction>) {
     let mut engine = EngineBuilder::new()
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
       .build();
-    let mut index = Index::new();
-    let mut registry = Registry::new();
+    let mut index = HashMap::new();
+    let mut registry = LocalRegistry::new();
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
@@ -277,10 +282,10 @@ pub mod tests {
   }
 
   /// Load a module built by this project, from under the `module/` directory
-  async fn load_module(
+  async fn load_module<R: ReadableRegistry + EditableRegistry>(
     engine: &mut PinnedEngine,
-    index: &mut Index,
-    registry: &mut Registry,
+    index: &mut HashMap<Uuid, ModuleFunction>,
+    registry: &mut R,
     name: &String,
   ) {
     println!("loading module {:#?}", name);
@@ -288,7 +293,17 @@ pub mod tests {
 
     let module_root = module_root_path(name);
     let header = read_header_from_module_root(module_root.to_owned()).await;
-    add_header_to_index(&header, index, registry).await;
+    let module_id = header.id.to_owned();
+    let module = resolve_low_module(header.to_owned(), registry)
+      .await
+      .expect("failed to resolve module info from header")
+      .module;
+    let actual_module_name = module.name.to_owned();
+    add_module_functions_to_index(&module_id, &module, index);
+    registry
+      .add_module(module_id.to_owned(), module)
+      .await
+      .expect(format!("failed to add module {} to registry", module_id).as_str());
 
     // Find the executable in the right target directory (debug in priority)
     let module_target_dir = module_root.join("target").join("wasm32-wasi");
@@ -309,7 +324,6 @@ pub mod tests {
     let executable = executable.into_boxed_slice();
 
     // Loading the module.
-    let actual_module_name = header.name.to_owned();
     println!("loading module {:#?} into the engine", &actual_module_name);
     engine
       .load_module(ModuleDefinition {
@@ -353,33 +367,47 @@ pub mod tests {
     header
   }
 
-  pub async fn read_header_to_index(name: &String, index: &mut Index, registry: &mut Registry) {
-    let header = read_header(name.as_str()).await;
-    add_header_to_index(&header, index, registry).await;
+  pub async fn read_header_to_index<R: ReadableRegistry + EditableRegistry>(
+    name: &String,
+    index: &mut HashMap<Uuid, ModuleFunction>,
+    registry: &mut R,
+  ) {
+    let (module_id, module) = read_header(name.as_str(), registry).await;
+    add_module_functions_to_index(&module_id, &module, index);
+    registry
+      .add_module(module_id.to_owned(), module)
+      .await
+      .expect(format!("failed to add module {} to registry", module_id).as_str());
   }
 
-  async fn read_header(name: &str) -> Header {
+  async fn read_header(name: &str, registry: &mut dyn ReadableRegistry) -> (Uuid, ModulePublic) {
     let module_root = module_root_path(&name.to_string());
-    read_header_from_module_root(module_root).await
+    let header = read_header_from_module_root(module_root).await;
+    let module_id = header.id.to_owned();
+    let module = resolve_low_module(header, registry)
+      .await
+      .expect("failed to resolve module info from header")
+      .module;
+    (module_id, module)
   }
 
-  pub async fn add_header_to_index(header: &Header, index: &mut Index, registry: &mut Registry) {
-    // Register the types involved there.
-    for type_id in header.type_dependencies() {
-      if index.find_type(&type_id).is_ok() {
-        continue;
-      } else {
-        let ty = registry.get_type(&type_id).await.expect(
-          format!(
-            "module {} depends on type {} which is unknown",
-            header.name, type_id
-          )
-          .as_str(),
-        );
-        index.add_type(ty);
-      }
+  pub fn add_module_functions_to_index(
+    module_id: &Uuid,
+    module: &ModulePublic,
+    index: &mut HashMap<Uuid, ModuleFunction>,
+  ) {
+    for (export_id, export) in &module.exports {
+      let ExportKind::Function(function) = &export.kind;
+      index.insert(
+        export_id.to_owned(),
+        ModuleFunction {
+          module_id: module_id.to_owned(),
+          function_id: export_id.to_owned(),
+          function_name: export.name.to_owned(),
+          function: function.to_owned(),
+        },
+      );
     }
-    index.add_module(&header).unwrap();
   }
 
   fn module_root_path(name: &String) -> PathBuf {
@@ -401,7 +429,7 @@ pub mod tests {
   }
 
   lazy_static::lazy_static! {
-    pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
+    pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["test-rust-wasm".to_string(), "behavior-tree-nodes".to_string()];
   }
 
   /// A tree with a single node calling test-wasm.succeed()

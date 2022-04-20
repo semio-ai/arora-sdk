@@ -1,14 +1,15 @@
-use arora_index::Index;
-use arora_schema::module::low::{ImportFunction, Parameter};
 use arora_schema::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{escape::unescape, events::Event, Reader};
+use semio_record::module::v0::unfrozen::Parameter;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::fmt::Write;
-use std::io::Cursor;
-use std::{collections::HashMap, fmt::Display};
+use std::{
+  collections::HashMap,
+  error::Error,
+  fmt::{Display, Write},
+  io::Cursor,
+};
 use uuid::Uuid;
 
 use crate::error::BehaviorTreeError;
@@ -19,6 +20,7 @@ use crate::nodes::{
 };
 use crate::schema::Expression;
 use crate::tree_node::TreeNode;
+use crate::ModuleFunction;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct BehaviorTree {
@@ -37,7 +39,7 @@ impl Node {
   /// Convert the Groot-style behavior tree into a TreeNode one.
   pub fn try_into_tree_node(
     &self,
-    index: &Index,
+    index: &HashMap<Uuid, ModuleFunction>,
     variables: &mut HashMap<String, Uuid>,
   ) -> Result<TreeNode, BehaviorTreeError> {
     let mut tree_node_children = Vec::new();
@@ -63,19 +65,18 @@ impl Node {
         })
       }
     };
-    let function =
-      index
-        .find_function(&arora_id)
-        .map_err(|_| BehaviorTreeError::InternalError {
-          message: format!("function {} is missing from index", arora_id.to_string()),
-        })?;
+    let function = index
+      .get(&arora_id)
+      .ok_or(BehaviorTreeError::InternalError {
+        message: format!("function {} is missing from index", arora_id.to_string()),
+      })?;
     let mut parameters = HashMap::new();
     for param_arg in &self.param_args {
-      let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
+      let (param, arg) = groot_param_arg_to_arora(param_arg, &function, variables)?;
       parameters.insert(param, arg);
     }
     Ok(TreeNode {
-      function: function.id,
+      function: function.function_id,
       children: None,
       parameters,
     })
@@ -84,7 +85,7 @@ impl Node {
   /// Converts a TreeNode into a Groot Node.
   pub fn try_from_tree_node(
     tree_node: &TreeNode,
-    index: &Index,
+    index: &HashMap<Uuid, ModuleFunction>,
     variables: &mut HashMap<Uuid, String>,
   ) -> Result<Node, BehaviorTreeError> {
     let mut groot_children = Vec::new();
@@ -112,17 +113,18 @@ impl Node {
       }
     }
     .to_string();
-    let function = index.find_function(&tree_node.function).map_err(|_| {
-      BehaviorTreeError::InconsistentTreeError {
-        message: format!(
-          "node refers to function {} that could not be resolved",
-          tree_node.function.to_string()
-        ),
-      }
-    })?;
+    let function =
+      index
+        .get(&tree_node.function)
+        .ok_or(BehaviorTreeError::InconsistentTreeError {
+          message: format!(
+            "node refers to function {} that could not be resolved",
+            tree_node.function.to_string()
+          ),
+        })?;
     let mut param_args = HashMap::new();
     for (param, arg) in &tree_node.parameters {
-      let param_arg = arora_param_to_groot((param, arg), function, variables)?;
+      let param_arg = arora_param_to_groot((param, arg), &function, variables)?;
       param_args.insert(param_arg.0, param_arg.1);
     }
     Ok(Node {
@@ -181,19 +183,27 @@ const COS_GROOT_ID: &'static str = "Cos";
 /// Otherwise, the result will be a value expression.
 fn groot_param_arg_to_arora(
   param_arg: (&String, &String),
-  function: &ImportFunction,
+  module_function: &ModuleFunction,
   variables: &mut HashMap<String, Uuid>,
 ) -> Result<(Uuid, Expression), BehaviorTreeError> {
-  let param_matches: Vec<&Parameter> = function
-    .parameters
+  let param_matches: Vec<&Uuid> = module_function
+    .function
+    .parameter_ordering
     .iter()
-    .filter(|parameter| parameter.name == *param_arg.0)
+    .filter(|parameter_id| {
+      let parameter = module_function
+        .function
+        .parameters
+        .get(parameter_id)
+        .unwrap();
+      parameter.name == *param_arg.0
+    })
     .collect();
   match param_matches.len() {
     0 => Err(BehaviorTreeError::InternalError {
       message: format!(
         "no such parameter \"{}\" in function \"{}\"",
-        param_arg.0, function.name
+        param_arg.0, module_function.function_name
       ),
     }),
     1 => {
@@ -211,13 +221,13 @@ fn groot_param_arg_to_arora(
       } else {
         Expression::Value(Value::String(param_arg.1.to_owned()))
       };
-      let function_parameter = param_matches.first().unwrap();
-      Ok((function_parameter.id.to_owned(), expression))
+      let parameter_id = param_matches.first().unwrap();
+      Ok((*parameter_id.to_owned(), expression))
     }
     _ => Err(BehaviorTreeError::InternalError {
       message: format!(
         "several parameters found \"{}\" in function \"{}\"",
-        param_arg.0, function.name
+        param_arg.0, module_function.function_name
       ),
     }),
   }
@@ -225,19 +235,27 @@ fn groot_param_arg_to_arora(
 
 fn arora_param_to_groot(
   param_arg: (&Uuid, &Expression),
-  function: &ImportFunction,
+  module_function: &ModuleFunction,
   variables: &mut HashMap<Uuid, String>,
 ) -> Result<(String, String), BehaviorTreeError> {
+  let function = &module_function.function;
   let param_matches: Vec<&Parameter> = function
-    .parameters
+    .parameter_ordering
     .iter()
-    .filter(|parameter| parameter.id == *param_arg.0)
+    .filter_map(|parameter_id| {
+      let parameter = function.parameters.get(parameter_id).unwrap();
+      if *parameter_id == *param_arg.0 {
+        Some(parameter)
+      } else {
+        None
+      }
+    })
     .collect();
   match param_matches.len() {
     0 => Err(BehaviorTreeError::InternalError {
       message: format!(
         "no such parameter \"{}\" in function \"{}\"",
-        param_arg.0, function.name
+        param_arg.0, module_function.function_name
       ),
     }),
     1 => {
@@ -259,7 +277,7 @@ fn arora_param_to_groot(
           return Err(BehaviorTreeError::InconsistentTreeError {
             message: format!(
               "param {} of function {} has a value of an unsupported type: {:?}",
-              param_arg.0, function.name, param_arg.1
+              param_arg.0, module_function.function_name, param_arg.1
             ),
           })
         }
@@ -269,7 +287,7 @@ fn arora_param_to_groot(
     _ => Err(BehaviorTreeError::InternalError {
       message: format!(
         "several parameters found \"{}\" in function \"{}\"",
-        param_arg.0, function.name
+        param_arg.0, module_function.function_name
       ),
     }),
   }
@@ -599,10 +617,10 @@ pub mod tests {
   use crate::{
     schema::Expression,
     tests::tests::{read_header_to_index, BASE_MODULE_NAMES},
+    ModuleFunction,
   };
   use anyhow::Result;
-  use arora_index::Index;
-  use arora_registry::Registry;
+  use arora_registry::local::LocalRegistry;
   use arora_schema::value::Value;
   use std::{collections::HashMap, path::Path};
   use tokio::fs::read_to_string;
@@ -718,9 +736,9 @@ pub mod tests {
     Ok(())
   }
 
-  async fn setup_index() -> Index {
-    let mut registry = Registry::new();
-    let mut index = Index::new();
+  async fn setup_index() -> HashMap<Uuid, ModuleFunction> {
+    let mut registry = LocalRegistry::new();
+    let mut index = HashMap::new();
     for module_name in &*BASE_MODULE_NAMES {
       read_header_to_index(module_name, &mut index, &mut registry).await;
     }
