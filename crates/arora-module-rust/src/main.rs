@@ -1,6 +1,6 @@
 use arora_module_core::{ModuleAsset, Reader, Writer};
 use arora_module_rust::generate_sources;
-use arora_registry::{local::LocalRegistry, EditableRegistry, TypeDefinition};
+use arora_registry::{local::LocalRegistry, EditableRegistry, TypeDefinitionFrozen};
 use arora_vfs::Entry;
 use clap::Parser;
 use std::fmt::Debug;
@@ -23,26 +23,26 @@ async fn main() -> anyhow::Result<()> {
   let mut reader = Reader::new(&mut stdin);
   while let Ok(Some(asset)) = reader.read::<ModuleAsset>().await {
     match &asset {
-      ModuleAsset::Type(id, type_def) => {
+      ModuleAsset::Type(id, tag, type_def) => {
         match type_def {
-          TypeDefinition::Enumeration(enumeration) => {
+          TypeDefinitionFrozen::Enumeration(enumeration) => {
             registry
-              .add_enumeration(id.to_owned(), enumeration.to_owned())
+              .add_enumeration_frozen(id.to_owned(), tag.to_owned(), enumeration.to_owned())
               .await?;
           }
-          TypeDefinition::Structure(structure) => {
+          TypeDefinitionFrozen::Structure(structure) => {
             registry
-              .add_structure(id.to_owned(), structure.to_owned())
+              .add_structure_frozen(id.to_owned(), tag.to_owned(), structure.to_owned())
               .await?;
           }
-          TypeDefinition::Primitive(_) => {}
+          TypeDefinitionFrozen::Primitive(_) => {}
         }
         types.push((id.to_owned(), type_def.to_owned()));
       }
       ModuleAsset::Import(import) => imports.push(import.to_owned()),
-      ModuleAsset::Module(id, module) => {
+      ModuleAsset::Module(id, tag, module) => {
         registry
-          .add_module(id.to_owned(), module.to_owned())
+          .add_module_frozen(id.to_owned(), tag.to_owned(), module.to_owned())
           .await?
       }
     };

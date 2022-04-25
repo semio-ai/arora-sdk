@@ -1,6 +1,6 @@
 use crate::{ImportAsset, ModuleDeclarationError};
 use arora_registry::local::ROOT_ID;
-use arora_registry::{get_primitive, ModulePublic, ReadableRegistry};
+use arora_registry::{get_primitive, Module, ModuleFrozen, ReadableRegistry, RegistryError};
 use arora_schema::module::low::Header;
 use arora_schema::module::{
   high::{
@@ -12,11 +12,11 @@ use arora_schema::module::{
     TypeRef as LowTypeRef,
   },
 };
-use convert_case::{Case, Casing};
 use semio_client::common::Selector;
+use semio_record::record::{Freeze, Freezer, UnfrozenReference, VersionReq};
 use semio_record::{
+  acl::Acl,
   module::v0::unfrozen::{Export, Function, Parameter},
-  record::{UnfrozenReference, VersionReq},
   ty::{UnfrozenArray, UnfrozenScalar, UnfrozenTy},
 };
 use std::collections::HashSet;
@@ -250,9 +250,9 @@ pub async fn resolve_low_export(symbol: LowExportSymbol) -> Result<Export, Modul
   })
 }
 
-pub async fn resolve_high_module(
+pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
   module_definition: HighModuleDefinition,
-  registry: &mut dyn ReadableRegistry,
+  registry: &mut R,
 ) -> Result<ModuleAndImports, ModuleDeclarationError> {
   let mut dependencies = HashSet::new();
 
@@ -260,8 +260,13 @@ pub async fn resolve_high_module(
   for import in module_definition.imports {
     let HighImportSymbol::Function(import_function) = import.clone();
     let import_module_id = resolve_module_id(import_function.module.as_str(), registry).await?;
+    let import_module_selector = Selector::Id(import_module_id.clone());
+    let import_module_version = registry
+      .resolve_tag(&import_module_selector, &semver::VersionReq::STAR)
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
     let import_module = registry
-      .get_module(&Selector::Id(import_module_id.clone()))
+      .get_module_tagged(&import_module_selector, &semver::VersionReq::STAR)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     dependencies.insert(UnfrozenReference {
@@ -275,9 +280,14 @@ pub async fn resolve_high_module(
     dependencies.extend(import_deps.into_iter().cloned());
     imports.push(ImportAsset {
       module_id: import_module_id,
+      tag: import_module_version,
       module_name: import_module.name.clone(),
       id: import_id,
-      import: resolved_import,
+      import: resolved_import.freeze(registry).await.map_err(|e| {
+        ModuleDeclarationError::RegistryError(RegistryError::Generic {
+          message: format!("error freezing import {}: {}", import_id, e),
+        })
+      })?,
     });
   }
 
@@ -291,21 +301,27 @@ pub async fn resolve_high_module(
     exports.insert(export_function.id, resolved_export);
   }
 
+  let module = Module {
+    parent: ROOT_ID.to_owned(),
+    name: module_definition.name,
+    executable: None,
+    exports,
+    dependencies: dependencies.into_iter().collect(),
+    acl: <Acl as Default>::default(),
+  };
   Ok(ModuleAndImports {
-    module: ModulePublic {
-      parent: ROOT_ID.to_owned(),
-      name: module_definition.name,
-      executable: None,
-      exports,
-      dependencies: dependencies.into_iter().collect(),
-    },
+    module: module.freeze(registry).await.map_err(|e| {
+      ModuleDeclarationError::RegistryError(RegistryError::Generic {
+        message: format!("error freezing module {}: {}", module_definition.id, e),
+      })
+    })?,
     imports,
   })
 }
 
-pub async fn resolve_low_module(
+pub async fn resolve_low_module<R: ReadableRegistry + Freezer>(
   module_header: Header,
-  registry: &mut dyn ReadableRegistry,
+  registry: &mut R,
 ) -> Result<ModuleAndImports, ModuleDeclarationError> {
   let mut dependencies = HashSet::new();
 
@@ -313,8 +329,16 @@ pub async fn resolve_low_module(
   for import in module_header.imports {
     let LowImportSymbol::Function(import_function) = import.clone();
     let import_module_id = import_function.module;
+    let import_module_selector = Selector::Id(import_module_id.clone());
+    let import_module_version = registry
+      .resolve_tag(&import_module_selector, &semver::VersionReq::STAR)
+      .await
+      .map_err(ModuleDeclarationError::RegistryError)?;
     let import_module = registry
-      .get_module(&Selector::Id(import_module_id.clone()))
+      .get_module_tagged(
+        &Selector::Id(import_module_id.clone()),
+        &semver::VersionReq::STAR,
+      )
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     dependencies.insert(UnfrozenReference {
@@ -328,9 +352,14 @@ pub async fn resolve_low_module(
     dependencies.extend(import_deps.into_iter().cloned());
     imports.push(ImportAsset {
       module_id: import_module_id,
+      tag: import_module_version,
       module_name: import_module.name.clone(),
-      id: import_id,
-      import: resolved_import,
+      id: import_id.to_owned(),
+      import: resolved_import.freeze(registry).await.map_err(|e| {
+        ModuleDeclarationError::RegistryError(RegistryError::Generic {
+          message: format!("error freezing import {}: {}", import_id, e),
+        })
+      })?,
     });
   }
 
@@ -343,20 +372,25 @@ pub async fn resolve_low_module(
     dependencies.extend(export_deps.into_iter().cloned());
     exports.insert(export_function.id, resolved_export);
   }
-
+  let module = Module {
+    parent: ROOT_ID.to_owned(),
+    name: module_header.name,
+    executable: None,
+    exports,
+    dependencies: dependencies.into_iter().collect(),
+    acl: <Acl as Default>::default(),
+  };
   Ok(ModuleAndImports {
-    module: ModulePublic {
-      parent: ROOT_ID.to_owned(),
-      name: module_header.name.to_case(Case::Snake),
-      executable: None,
-      exports,
-      dependencies: dependencies.into_iter().collect(),
-    },
+    module: module.freeze(registry).await.map_err(|e| {
+      ModuleDeclarationError::RegistryError(RegistryError::Generic {
+        message: format!("error freezing module {}: {}", module_header.id, e),
+      })
+    })?,
     imports,
   })
 }
 
 pub struct ModuleAndImports {
-  pub module: ModulePublic,
+  pub module: ModuleFrozen,
   pub imports: Vec<ImportAsset>,
 }

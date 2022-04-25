@@ -1,14 +1,10 @@
-use std::{
-  borrow::BorrowMut, collections::HashMap, fs::read_to_string, path::PathBuf, str::FromStr,
-};
-
 use anyhow::bail;
 use arora::{
   call::{Call, CallBridge},
   engine::EngineBuilder,
   schema::module::low::{Header, ModuleDefinition},
 };
-use arora_module_core::header::module_public_from_header_file;
+use arora_module_core::header::module_frozen_from_header_file;
 use arora_registry::{
   config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
   remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry, RegistryError,
@@ -19,7 +15,11 @@ use reqwest::{
   Client,
 };
 use semio_client::{authentication::Config, context::Context};
-use semio_record::module::v0::unfrozen::ExportKind;
+use semio_record::module::v0::frozen::ExportKind;
+use semio_record::record::Freezer;
+use std::{
+  borrow::BorrowMut, collections::HashMap, fs::read_to_string, path::PathBuf, str::FromStr,
+};
 use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
 
@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
   }
 }
 
-async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
   args: Args,
   registry: &mut R,
 ) -> anyhow::Result<()> {
@@ -174,8 +174,8 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
         .expect(format!("header file {} could not be read", header_path).as_str()),
     )
     .expect(format!("header file {} contains invalid yaml", header_path).as_str());
-    let (module_id, module_and_imports) =
-      module_public_from_header_file(header_path, registry.borrow_mut()).await?;
+    let (module_id, module_version, module_and_imports) =
+      module_frozen_from_header_file(header_path, registry.borrow_mut()).await?;
 
     // Remember the module ID for each function ID.
     for (export_id, export) in &module_and_imports.module.exports {
@@ -187,7 +187,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
     // Add it to the registry.
     // It might be already brought by the includes, but we don't care.
     match registry
-      .add_module(module_id, module_and_imports.module)
+      .add_module_frozen(module_id, module_version, module_and_imports.module)
       .await
     {
       Ok(_) | Err(RegistryError::DuplicateSelector { selector: _ }) => {}

@@ -1,13 +1,14 @@
 pub mod header;
 pub mod resolve;
-use arora_registry::{ReadableRegistry, RegistryError, TypeDefinition};
+use arora_registry::{ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
 use arora_schema::module::high::ModuleDefinition;
 use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
 use resolve::resolve_high_module;
 use semio_client::common::{RecordType, Selector};
-use semio_record::module::v0::{public::Public as ModulePublic, unfrozen::Export};
+use semio_record::{module::v0::frozen::Export, record::Freezer};
+use semver::{Version, VersionReq};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::path::Path;
 use tokio::{
@@ -18,9 +19,9 @@ use uuid::Uuid;
 
 /// Analyzes a module from the path where it is written in the YAML format.
 /// See [`analyze_module`].
-pub async fn analyze_module_from_path<P: AsRef<Path>>(
+pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Freezer>(
   path: P,
-  registry: &mut dyn ReadableRegistry,
+  registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
   let module_yaml = read_to_string(path)
     .await
@@ -34,11 +35,12 @@ pub async fn analyze_module_from_path<P: AsRef<Path>>(
 /// resolves its dependencies with the help of the provided registry.
 /// Produces a list of assets that can be used for code generation.
 /// First, the types, then the modules, then the imports.
-pub async fn analyze_module(
+pub async fn analyze_module<R: ReadableRegistry + Freezer>(
   module_definition: ModuleDefinition,
-  registry: &mut dyn ReadableRegistry,
+  registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
   let module_id = module_definition.id.clone();
+  let module_version = module_definition.version.clone();
 
   // Resolve the module contents into a description compatible with the registry.
   // It already includes the dependencies (internal and external) as references.
@@ -55,8 +57,12 @@ pub async fn analyze_module(
     match record_type {
       RecordType::Structure | RecordType::Enumeration => assets.push(ModuleAsset::Type(
         dep_ref.id.to_owned(),
+        dep_ref.version.0.to_owned(),
         registry
-          .get_type(&selector)
+          .get_type_tagged(
+            &selector,
+            &VersionReq::parse(dep_ref.version.to_string().as_str()).unwrap(),
+          )
           .await
           .map_err(ModuleDeclarationError::RegistryError)?,
       )),
@@ -66,7 +72,11 @@ pub async fn analyze_module(
 
   // Then publish imports, and then this module.
   assets.extend(resolved_module.imports.into_iter().map(ModuleAsset::Import));
-  assets.push(ModuleAsset::Module(module_id, resolved_module.module));
+  assets.push(ModuleAsset::Module(
+    module_id,
+    module_version.into(),
+    resolved_module.module,
+  ));
   Ok(assets)
 }
 
@@ -74,16 +84,17 @@ pub async fn analyze_module(
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ModuleAsset {
   /// Type, including its identifier.
-  Type(Uuid, TypeDefinition),
+  Type(Uuid, Version, TypeDefinitionFrozen),
   /// Imported symbol, including the identifier of its origin module.
   Import(ImportAsset),
   /// Module, including its identifier.
-  Module(Uuid, ModulePublic),
+  Module(Uuid, Version, ModuleFrozen),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportAsset {
   pub module_id: Uuid,
+  pub tag: Version,
   pub module_name: String,
   pub id: Uuid,
   pub import: Export,

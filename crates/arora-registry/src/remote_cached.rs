@@ -8,6 +8,7 @@ use crate::{
 use async_trait::async_trait;
 use semio_client::common::{RecordType, Selector};
 use semio_client::context::Context;
+use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::{Version, VersionReq};
 use uuid::Uuid;
 
@@ -78,13 +79,15 @@ impl ReadableRegistry for RemoteCachedRegistry {
             let id = self.resolve_selector(selector).await?;
             self
               .cache
-              .add_enumeration_frozen(id, tag.clone(), enumeration.clone())?;
+              .add_enumeration_frozen(id, tag.clone(), enumeration.clone())
+              .await?;
           }
           TypeDefinitionFrozen::Structure(structure) => {
             let id = self.resolve_selector(selector).await?;
             self
               .cache
-              .add_structure_frozen(id, tag.clone(), structure.clone())?;
+              .add_structure_frozen(id, tag.clone(), structure.clone())
+              .await?;
           }
         }
         Ok(ty)
@@ -119,7 +122,8 @@ impl ReadableRegistry for RemoteCachedRegistry {
         let tag = self.remote.resolve_tag(selector, tag_req).await?;
         self
           .cache
-          .add_module_frozen(id, tag.clone(), module.clone())?;
+          .add_module_frozen(id, tag.clone(), module.clone())
+          .await?;
         Ok(module)
       }
       Err(e) => Err(e),
@@ -142,6 +146,18 @@ impl ReadableRegistry for RemoteCachedRegistry {
     self.remote.resolve_id(id).await
   }
 
+  async fn resolve_tag(
+    &self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<Version, RegistryError> {
+    let res = self.cache.resolve_tag(selector, tag_req).await;
+    if res.is_ok() {
+      return res;
+    }
+    self.remote.resolve_tag(selector, tag_req).await
+  }
+
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     match self.cache.type_of(selector).await {
       Ok(ty) => Ok(ty),
@@ -162,20 +178,16 @@ impl EditableRegistry for RemoteCachedRegistry {
     self.cache.add_enumeration(id, enumeration).await
   }
 
-  async fn add_structure(
+  async fn add_enumeration_frozen(
     &mut self,
     id: Uuid,
-    structure: StructurePublic,
+    tag: Version,
+    enumeration: EnumerationFrozen,
   ) -> Result<(), RegistryError> {
-    self.cache.add_structure(id, structure).await
-  }
-
-  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError> {
-    self.cache.add_module(id, module).await
-  }
-
-  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError> {
-    self.cache.add_folder(id, folder).await
+    self
+      .cache
+      .add_enumeration_frozen(id, tag, enumeration)
+      .await
   }
 
   async fn tag_enumeration(
@@ -187,6 +199,22 @@ impl EditableRegistry for RemoteCachedRegistry {
     self.cache.tag_enumeration(id, tag, enumeration).await
   }
 
+  async fn add_structure(
+    &mut self,
+    id: Uuid,
+    structure: StructurePublic,
+  ) -> Result<(), RegistryError> {
+    self.cache.add_structure(id, structure).await
+  }
+  async fn add_structure_frozen(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    structure: StructureFrozen,
+  ) -> Result<(), RegistryError> {
+    self.cache.add_structure_frozen(id, tag, structure).await
+  }
+
   async fn tag_structure(
     &mut self,
     id: Uuid,
@@ -196,6 +224,19 @@ impl EditableRegistry for RemoteCachedRegistry {
     self.cache.tag_structure(id, tag, structure).await
   }
 
+  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError> {
+    self.cache.add_module(id, module).await
+  }
+
+  async fn add_module_frozen(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    module: ModuleFrozen,
+  ) -> Result<(), RegistryError> {
+    self.cache.add_module_frozen(id, tag, module).await
+  }
+
   async fn tag_module(
     &mut self,
     id: Uuid,
@@ -203,5 +244,22 @@ impl EditableRegistry for RemoteCachedRegistry {
     module: Module,
   ) -> Result<ModuleFrozen, RegistryError> {
     self.cache.tag_module(id, tag, module).await
+  }
+  async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError> {
+    self.cache.add_folder(id, folder).await
+  }
+}
+
+#[async_trait]
+impl Freezer for RemoteCachedRegistry {
+  type Error = RegistryError;
+  async fn freeze(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+    match self.cache.freeze(reference).await {
+      Ok(frozen) => Ok(frozen),
+      Err(RegistryError::NoSuchRecord { .. }) | Err(RegistryError::NoSuchVersion { .. }) => {
+        Ok(self.remote.freeze(reference).await?)
+      }
+      Err(err) => Err(err),
+    }
   }
 }

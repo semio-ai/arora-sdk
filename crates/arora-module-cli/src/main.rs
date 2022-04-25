@@ -10,6 +10,7 @@ use reqwest::{
   Client, Url,
 };
 use semio_client::{authentication::Config, context::Context};
+use semio_record::record::Freezer;
 use std::{fs::read_to_string, path::PathBuf, str::FromStr};
 
 #[derive(Debug, Parser)]
@@ -132,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
   }
 }
 
-async fn main_with_registry<R: ReadableRegistry + EditableRegistry>(
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
   args: Args,
   registry: &mut R,
 ) -> anyhow::Result<()> {

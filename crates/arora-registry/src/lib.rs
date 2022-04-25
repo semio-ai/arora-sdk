@@ -56,6 +56,13 @@ pub trait ReadableRegistry {
   /// Resolves the given identifier into a path.
   async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError>;
 
+  /// Resolves the latest tag of a record matching the requirement.
+  async fn resolve_tag(
+    &self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<Version, RegistryError>;
+
   /// Resolves the type of record identified by the given selector.
   /// Do not confuse with the [`get_type`] function,
   /// which returns type definitions.
@@ -76,6 +83,14 @@ pub trait EditableRegistry {
     id: Uuid,
     enumeration: EnumerationPublic,
   ) -> Result<Uuid, RegistryError>;
+
+  /// Adds the frozen enumeration to the registry.
+  async fn add_enumeration_frozen(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    enumeration: EnumerationFrozen,
+  ) -> Result<(), RegistryError>;
 
   /// Takes an unfrozen [`Enumeration`],
   /// freezes it with what is currently available in the registry,
@@ -100,6 +115,14 @@ pub trait EditableRegistry {
     structure: StructurePublic,
   ) -> Result<(), RegistryError>;
 
+  /// Adds the frozen structure to the registry.
+  async fn add_structure_frozen(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    structure: StructureFrozen,
+  ) -> Result<(), RegistryError>;
+
   /// Takes an unfrozen [`Structure`],
   /// freezes it with what is currently available in the registry,
   /// and adds it to the registry with the given identifier and version tag.
@@ -118,6 +141,14 @@ pub trait EditableRegistry {
   /// Returns the identifier under which the module
   /// was registered.
   async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
+
+  /// Adds the frozen module to the registry.
+  async fn add_module_frozen(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    module: ModuleFrozen,
+  ) -> Result<(), RegistryError>;
 
   /// Takes an unfrozen [`Module`],
   /// freezes it with what is currently available in the registry,
@@ -325,7 +356,7 @@ impl RegistryError {
       version_req: version_req.to_owned(),
     }
   }
-  
+
   pub fn not_a_type(selector: &Selector) -> Self {
     RegistryError::NotAType {
       selector: selector.to_owned(),

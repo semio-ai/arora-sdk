@@ -11,7 +11,8 @@
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
                 "generate",
-                "-l", "rust",
+                "-l",
+                "rust",
                 "-c",
                 "${workspaceFolder}/modules/behavior-tree-nodes/module.yaml",
                 "-o",
@@ -101,8 +102,6 @@
             "name": "C++ generation for test-cpp-2",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
-                "--config",
-                "${env:HOME}/.semio/cli.yaml",
                 "--include",
                 "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
                 "generate",
@@ -113,7 +112,10 @@
                 "-o",
                 "${workspaceFolder}/build/modules/test-cpp-2/arora"
             ],
-            "cwd": "${workspaceFolder}/build/modules/test-cpp-2"
+            "cwd": "${workspaceFolder}/build/modules/test-cpp-2",
+            "env": {
+                "RUST_BACKTRACE": "1",
+            }
         },
         {
             "type": "lldb",
@@ -318,7 +320,12 @@
                     "kind": "bin"
                 }
             },
-            "args": ["--header", "modules/test-wasm/module.yaml", "--exe", "modules/test-wasm/target/wasm32-unknown-unknown/debug/test_wasm.wasm"],
+            "args": [
+                "--header",
+                "modules/test-wasm/module.yaml",
+                "--exe",
+                "modules/test-wasm/target/wasm32-unknown-unknown/debug/test_wasm.wasm"
+            ],
             "cwd": "${workspaceFolder}"
         },
         {

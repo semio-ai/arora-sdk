@@ -8,7 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use semio_client::common::{RecordType, Selector};
-use semver::VersionReq;
+use semver::{Version, VersionReq};
 use uuid::Uuid;
 
 #[async_trait]
@@ -18,7 +18,7 @@ impl ReadableRegistry for LocalRegistry {
       return Ok(TypeDefinitionPublic::Primitive(primitive_kind));
     }
     let reg_ref = self
-      .latest_indexed
+      .public_indexed
       .get(selector)
       .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
@@ -44,7 +44,7 @@ impl ReadableRegistry for LocalRegistry {
     if let Some(primitive_kind) = get_primitive(selector) {
       return Ok(TypeDefinitionFrozen::Primitive(primitive_kind));
     }
-    let (version, reg_ref) = self
+    let (_, reg_ref) = self
       .frozen_indexed
       .get(selector)
       .ok_or(RegistryError::no_such_record(selector))?
@@ -67,7 +67,7 @@ impl ReadableRegistry for LocalRegistry {
 
   async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
     let reg_ref = self
-      .latest_indexed
+      .public_indexed
       .get(selector)
       .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
@@ -113,19 +113,34 @@ impl ReadableRegistry for LocalRegistry {
   }
 
   async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError> {
-    self.compute_path(
+    let reg_ref = self
+      .find_latest(id)
+      .ok_or(RegistryError::no_such_record(&Selector::Id(id.to_owned())))?;
+    self.compute_path(reg_ref)
+  }
+
+  async fn resolve_tag(
+    &self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<Version, RegistryError> {
+    Ok(
       self
-        .latest_indexed
-        .get(&Selector::Id(id.to_owned()))
-        .ok_or(RegistryError::NoSuchRecord {
-          selector: Selector::Id(id.to_owned()),
-        })?,
+        .frozen_indexed
+        .get(selector)
+        .ok_or(RegistryError::no_such_record(selector))?
+        .iter()
+        .rev()
+        .find(|(version, _)| tag_req.matches(version))
+        .ok_or(RegistryError::no_such_version(selector, tag_req))?
+        .0
+        .to_owned(),
     )
   }
 
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     self
-      .latest_indexed
+      .public_indexed
       .get(selector)
       .map(|reg_ref| match reg_ref {
         LatestRegistryReference::Enumeration { .. } => RecordType::Enumeration,
@@ -136,6 +151,27 @@ impl ReadableRegistry for LocalRegistry {
         LatestRegistryReference::Function { .. } => RecordType::Unknown,
         LatestRegistryReference::Folder { .. } => RecordType::Folder,
         LatestRegistryReference::Root => RecordType::Unknown,
+      })
+      .or_else(|| {
+        self
+          .frozen_indexed
+          .get(selector)
+          .map(|version_index| {
+            version_index
+              .iter()
+              .last()
+              .map(|(_, reg_ref)| match reg_ref {
+                FrozenRegistryReference::Enumeration { .. } => RecordType::Enumeration,
+                FrozenRegistryReference::Variant { .. } => RecordType::Unknown,
+                FrozenRegistryReference::Structure { .. } => RecordType::Structure,
+                FrozenRegistryReference::Field { .. } => RecordType::Unknown,
+                FrozenRegistryReference::Module { .. } => RecordType::Module,
+                FrozenRegistryReference::Function { .. } => RecordType::Unknown,
+                FrozenRegistryReference::Folder { .. } => RecordType::Folder,
+                FrozenRegistryReference::Root => RecordType::Unknown,
+              })
+          })
+          .unwrap_or(None)
       })
       .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),

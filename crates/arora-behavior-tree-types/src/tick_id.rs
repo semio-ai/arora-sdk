@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use semio_record::{
-  structure::v0::{public::Public as StructurePublic, unfrozen::StructureField},
+  acl::Acl,
+  structure::v0::unfrozen::{Structure, StructureField},
   ty::{Primitive, PrimitiveKind, UnfrozenTy},
 };
+use semver::Version;
 use uuid::Uuid;
 
-pub fn declare_tick_id_structure(parent: Uuid) -> StructurePublic {
-  StructurePublic {
+pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
+  Structure {
     name: "TickId".to_string(),
     parent,
     fields: HashMap::from([(
@@ -19,6 +21,7 @@ pub fn declare_tick_id_structure(parent: Uuid) -> StructurePublic {
         }),
       },
     )]),
+    acl: <Acl as Default>::default(),
   }
 }
 
@@ -29,3 +32,4 @@ pub const TICK_ID_STRUCTURE_ID: Uuid = Uuid::from_bytes([
 pub const TICK_ID_CALLABLE_ID_FIELD_RAW_ID: Uuid = Uuid::from_bytes([
   0x23, 0x79, 0x92, 0xd2, 0x17, 0xd1, 0x45, 0x9f, 0xbc, 0xa1, 0x71, 0x85, 0xfa, 0x6a, 0x69, 0xd7,
 ]);
+pub const TICK_ID_STRUCTURE_VERSION: Version = Version::new(1, 0, 0);

@@ -119,35 +119,6 @@ impl RemoteRegistry {
     })?;
     Ok(module)
   }
-
-  pub async fn resolve_tag(
-    &self,
-    selector: &Selector,
-    tag_req: &VersionReq,
-  ) -> Result<Version, RegistryError> {
-    let tags = semio_client::common::tags(
-      &self.context,
-      semio_client::common::Tags {
-        selector: selector.to_owned(),
-      },
-    )
-    .await
-    .map_err(|e| RegistryError::RemoteError {
-      message: format!("error listing tags for record {}: {}", selector.clone(), e),
-    })?;
-    tags
-      .into_iter()
-      .rev()
-      .find(|tag| tag_req.matches(&tag.0))
-      .ok_or_else(|| RegistryError::RemoteError {
-        message: format!(
-          "no tag matching {} found for record {}",
-          tag_req,
-          selector.clone()
-        ),
-      })
-      .map(|tag| tag.0)
-  }
 }
 
 #[async_trait]
@@ -285,6 +256,35 @@ impl ReadableRegistry for RemoteRegistry {
         message: format!("{} is of an unknown type", selector.clone()),
       }),
     }
+  }
+
+  async fn resolve_tag(
+    &self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<Version, RegistryError> {
+    let tags = semio_client::common::tags(
+      &self.context,
+      semio_client::common::Tags {
+        selector: selector.to_owned(),
+      },
+    )
+    .await
+    .map_err(|e| RegistryError::RemoteError {
+      message: format!("error listing tags for record {}: {}", selector.clone(), e),
+    })?;
+    tags
+      .into_iter()
+      .rev()
+      .find(|tag| tag_req.matches(&tag.0))
+      .ok_or_else(|| RegistryError::RemoteError {
+        message: format!(
+          "no tag matching {} found for record {}",
+          tag_req,
+          selector.clone()
+        ),
+      })
+      .map(|tag| tag.0)
   }
 
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {

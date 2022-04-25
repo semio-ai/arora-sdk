@@ -2,7 +2,7 @@ use arora_schema::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{escape::unescape, events::Event, Reader};
-use semio_record::module::v0::unfrozen::Parameter;
+use semio_record::module::v0::frozen::Parameter;
 use serde::{Deserialize, Serialize};
 use std::{
   collections::HashMap,
@@ -616,11 +616,11 @@ pub mod tests {
   use super::{action, parse_groot_xml, seq, BehaviorTree, Node};
   use crate::{
     schema::Expression,
-    tests::tests::{read_header_to_index, BASE_MODULE_NAMES},
+    tests::tests::{crate_root_path, read_header_to_index, BASE_MODULE_NAMES},
     ModuleFunction,
   };
   use anyhow::Result;
-  use arora_registry::local::LocalRegistry;
+  use arora_registry::{local::LocalRegistry, local_yaml::load_records_from_yaml_dir};
   use arora_schema::value::Value;
   use std::{collections::HashMap, path::Path};
   use tokio::fs::read_to_string;
@@ -738,6 +738,11 @@ pub mod tests {
 
   async fn setup_index() -> HashMap<Uuid, ModuleFunction> {
     let mut registry = LocalRegistry::new();
+    let behavior_tree_types_yaml_dir =
+      crate_root_path("arora-behavior-tree-types-yaml").join("records");
+    load_records_from_yaml_dir(behavior_tree_types_yaml_dir, &mut registry)
+      .await
+      .unwrap();
     let mut index = HashMap::new();
     for module_name in &*BASE_MODULE_NAMES {
       read_header_to_index(module_name, &mut index, &mut registry).await;

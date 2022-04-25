@@ -220,26 +220,14 @@ impl LocalRegistryReference for FrozenRegistryReference {
 
   fn parent(&self) -> Option<&Uuid> {
     match self {
-      FrozenRegistryReference::Enumeration { id, record } => todo!(),
-      FrozenRegistryReference::Variant {
-        id,
-        parent_id,
-        parent_record,
-      } => todo!(),
-      FrozenRegistryReference::Structure { id, record } => todo!(),
-      FrozenRegistryReference::Field {
-        id,
-        parent_id,
-        parent_record,
-      } => todo!(),
-      FrozenRegistryReference::Module { id, record } => todo!(),
-      FrozenRegistryReference::Function {
-        id,
-        parent_id,
-        parent_record,
-      } => todo!(),
-      FrozenRegistryReference::Folder { id, record } => todo!(),
-      FrozenRegistryReference::Root => todo!(),
+      FrozenRegistryReference::Enumeration { record, .. } => Some(&record.parent),
+      FrozenRegistryReference::Variant { parent_id, .. } => Some(parent_id),
+      FrozenRegistryReference::Structure { record, .. } => Some(&record.parent),
+      FrozenRegistryReference::Field { parent_id, .. } => Some(parent_id),
+      FrozenRegistryReference::Module { record, .. } => Some(&record.parent),
+      FrozenRegistryReference::Function { parent_id, .. } => Some(parent_id),
+      FrozenRegistryReference::Folder { record, .. } => Some(&record.parent),
+      FrozenRegistryReference::Root => None,
     }
   }
 }

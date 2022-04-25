@@ -5,7 +5,7 @@ pub mod func;
 pub mod id;
 pub mod ty;
 use arora_module_core::{ImportAsset, ModuleAsset, Reader, Writer};
-use arora_registry::{ModulePublic, TypeDefinition};
+use arora_registry::{ModuleFrozen, TypeDefinitionFrozen};
 use arora_vfs::{Directory, Entry, File};
 use ast::{
   Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype, IncludeStyle,
@@ -14,7 +14,8 @@ use ast::{
 use ast::{ToExpression, ToPrettyString};
 use clap::Parser;
 use convert_case::{Case, Casing};
-use semio_record::module::v0::unfrozen::{ExportKind, Parameter};
+use semio_record::module::v0::frozen::{ExportKind, Parameter};
+use semver::Version;
 use std::path::PathBuf;
 use std::{
   collections::{hash_map, HashMap, HashSet},
@@ -60,28 +61,20 @@ impl FromStr for NameStyle {
 #[derive(Parser, Debug)]
 #[clap(long_about = None)]
 pub struct Args {
-  #[clap(short, long, name = "self-id")]
+  #[clap(long, name = "self-id")]
   pub self_id: String,
 
-  #[clap(short, long, name = "method-style", default_value = "snake")]
-  pub method_style: NameStyle,
-
-  #[clap(short, long, name = "variable-style", default_value = "snake")]
-  pub variable_style: NameStyle,
-
-  #[clap(short, long, name = "type-style", default_value = "upper_camel")]
-  pub type_style: NameStyle,
-
-  #[clap(short, long, name = "namespace-style", default_value = "snake")]
-  pub namespace_style: NameStyle,
+  #[clap(long, name = "self-version")]
+  pub self_version: String,
 }
 
 pub struct Context<'a> {
   pub args: &'a Args,
-  pub types: HashMap<Uuid, TypeDefinition>,
+  pub types: HashMap<Uuid, TypeDefinitionFrozen>,
   pub grouped_import_symbols: HashMap<Uuid, Vec<ImportAsset>>,
   pub module_id: Uuid,
-  pub module: Option<ModulePublic>,
+  pub module_version: Version,
+  pub module: Option<ModuleFrozen>,
 }
 
 fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
@@ -1051,7 +1044,7 @@ fn generate_self_record<'a>(context: &Context<'a>) -> anyhow::Result<Directory> 
   let module = context.module.as_ref().unwrap();
   let mut result = Directory::new();
   let modules_dir = result.ensure_directories(&PathBuf::from_str("records/module/")?)?;
-  let module_path = format!("{}.yaml", context.module_id);
+  let module_path = format!("{}@{}.yaml", context.module_id, context.module_version);
   let module_yaml = serde_yaml::to_string(&module).unwrap();
   modules_dir.insert(module_path, File::new(module_yaml.as_bytes()))?;
   Ok(result)
@@ -1061,6 +1054,7 @@ fn generate_self_record<'a>(context: &Context<'a>) -> anyhow::Result<Directory> 
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
   let self_id = Uuid::parse_str(&args.self_id)?;
+  let self_version = Version::parse(&args.self_version)?;
 
   let mut stdin = stdin();
   let mut stdout = stdout();
@@ -1077,12 +1071,13 @@ async fn main() -> anyhow::Result<()> {
     types: HashMap::new(),
     grouped_import_symbols: HashMap::new(),
     module_id: self_id,
+    module_version: self_version,
     module: None,
   };
 
   for asset in assets {
     match asset {
-      ModuleAsset::Type(type_id, type_def) => {
+      ModuleAsset::Type(type_id, _, type_def) => {
         context.types.insert(type_id, type_def);
       }
       ModuleAsset::Import(import) => {
@@ -1098,7 +1093,7 @@ async fn main() -> anyhow::Result<()> {
           }
         }
       }
-      ModuleAsset::Module(module_id, module) => {
+      ModuleAsset::Module(module_id, _, module) => {
         if module_id != context.module_id {
           anyhow::bail!("Module ID differs from self ID");
         }

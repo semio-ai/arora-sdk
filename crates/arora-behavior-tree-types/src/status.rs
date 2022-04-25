@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 
 use semio_record::{
-  enumeration::v0::{public::Public as EnumerationPublic, unfrozen::EnumerationVariant},
+  acl::Acl,
+  enumeration::v0::unfrozen::{Enumeration, EnumerationVariant},
   ty::{Primitive, PrimitiveKind, UnfrozenTy},
 };
+use semver::Version;
 use uuid::Uuid;
 
 /// Produces the declaration of the `Status` enum,
 /// so that it can be added to a registry,
 /// with the given parent, and under the ID [`STATUS_TYPE_ID`].
-pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
-  EnumerationPublic {
+pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
+  Enumeration {
     name: "Status".to_string(),
     parent,
     variants: HashMap::from([
@@ -42,6 +44,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> EnumerationPublic {
         },
       ),
     ]),
+    acl: <Acl as Default>::default(),
   }
 }
 
@@ -58,10 +61,11 @@ pub const STATUS_FAILURE_VARIANT_ID: Uuid = Uuid::from_bytes([
 pub const STATUS_RUNNING_VARIANT_ID: Uuid = Uuid::from_bytes([
   0xac, 0xd7, 0x9e, 0xc6, 0x0c, 0x44, 0x40, 0x1a, 0x82, 0xf8, 0x5d, 0xa5, 0x42, 0x2d, 0x3e, 0xec,
 ]);
+pub const STATUS_ENUMERATION_VERSION: Version = Version::new(1, 0, 0);
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{BEHAVIOR_TREE_FOLDER_ID, declare_status_enumeration};
+  use crate::{declare_status_enumeration, BEHAVIOR_TREE_FOLDER_ID};
 
   #[test]
   pub fn serialize_status() {

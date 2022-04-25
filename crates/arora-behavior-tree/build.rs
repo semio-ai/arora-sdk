@@ -1,13 +1,16 @@
 use anyhow::{Ok, Result};
 use arora_behavior_tree_types::{
   declare_status_enumeration, declare_tick_id_structure, STATUS_ENUMERATION_ID,
-  TICK_ID_STRUCTURE_ID,
+  STATUS_ENUMERATION_VERSION, TICK_ID_STRUCTURE_ID, TICK_ID_STRUCTURE_VERSION,
 };
 use arora_module_rust::{
   generate_common_sources, generate_enumeration_source, generate_mods_in_directories,
   generate_structure_source, rustfmt::apply_rustfmt,
 };
-use arora_registry::local::{LocalRegistry, ROOT_ID};
+use arora_registry::{
+  local::{LocalRegistry, ROOT_ID},
+  EditableRegistry,
+};
 use rustfmt::config::Config;
 use std::path::PathBuf;
 
@@ -19,17 +22,31 @@ pub async fn main() -> Result<()> {
   let mut generated_sources = generate_common_sources()?;
 
   // Generate sources for [`behavior_tree.Status`].
+  let status = registry
+    .tag_enumeration(
+      STATUS_ENUMERATION_ID.to_owned(),
+      STATUS_ENUMERATION_VERSION.to_owned(),
+      declare_status_enumeration(ROOT_ID.clone()),
+    )
+    .await?;
   generated_sources = generate_enumeration_source(
     &STATUS_ENUMERATION_ID,
-    &declare_status_enumeration(ROOT_ID.clone()),
+    &status,
     &"behavior_tree".to_string(),
   )?
   .merge_with(&generated_sources);
 
   // Generate sources for [`behavior_tree.TickId`]
+  let tick_id = registry
+    .tag_structure(
+      TICK_ID_STRUCTURE_ID.to_owned(),
+      TICK_ID_STRUCTURE_VERSION.to_owned(),
+      declare_tick_id_structure(ROOT_ID.clone()),
+    )
+    .await?;
   generated_sources = generate_structure_source(
     &TICK_ID_STRUCTURE_ID,
-    &declare_tick_id_structure(ROOT_ID.clone()),
+    &tick_id,
     &mut registry,
     &"behavior_tree".to_string(),
   )

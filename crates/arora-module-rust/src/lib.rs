@@ -1,9 +1,12 @@
 pub mod rustfmt;
 
 use arora_module_core::{
-  header::generate_header_file, ModuleAsset, ImportAsset, ModuleDeclarationError,
+  header::generate_header_file, ImportAsset, ModuleAsset, ModuleDeclarationError,
 };
-use arora_registry::{ModulePublic, ReadableRegistry, RegistryError, TypeDefinition};
+use arora_registry::{
+  EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError, StructureFrozen,
+  TypeDefinitionFrozen,
+};
 use arora_schema::ty::{
   BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
   U8_ID,
@@ -17,13 +20,13 @@ use quote::{
   format_ident, quote, ToTokens,
 };
 use semio_client::common::{RecordType, Selector};
+use semio_record::ty::PrimitiveKind;
 use semio_record::{
-  enumeration::v0::public::Public as EnumerationPublic,
-  module::v0::unfrozen::{ExportKind, Parameter},
-  record::UnfrozenReference,
-  ty::{Primitive, UnfrozenScalar, UnfrozenTy},
+  module::v0::frozen::{ExportKind, Parameter},
+  record::FrozenReference,
+  ty::{FrozenScalar, FrozenTy, Primitive},
 };
-use semio_record::{structure::v0::public::Public as StructurePublic, ty::PrimitiveKind};
+use semver::VersionReq;
 use std::{
   collections::{hash_map::Entry, HashMap, HashSet},
   fmt::Display,
@@ -40,12 +43,12 @@ pub async fn generate_sources(
 ) -> Result<Directory, GenerationError> {
   let mut result = generate_common_sources()?;
   let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
-  let mut current_module = Option::<(Uuid, ModulePublic)>::None;
+  let mut current_module = Option::<(Uuid, ModuleFrozen)>::None;
   for asset in assets {
     match asset {
-      ModuleAsset::Type(id, ty) => match ty {
-        TypeDefinition::Primitive(_) => (),
-        TypeDefinition::Enumeration(enumeration) => {
+      ModuleAsset::Type(id, _, ty) => match ty {
+        TypeDefinitionFrozen::Primitive(_) => (),
+        TypeDefinitionFrozen::Enumeration(enumeration) => {
           let parent_path = registry
             .resolve_id(&enumeration.parent)
             .await
@@ -54,7 +57,7 @@ pub async fn generate_sources(
             .map_err(GenerationError::VfsError)?;
           result = result.merge_with(&enum_sources);
         }
-        TypeDefinition::Structure(structure) => {
+        TypeDefinitionFrozen::Structure(structure) => {
           let parent_path = registry
             .resolve_id(&structure.parent)
             .await
@@ -70,7 +73,7 @@ pub async fn generate_sources(
           entry.insert(vec![import]);
         }
       },
-      ModuleAsset::Module(ref module_id, ref module) => {
+      ModuleAsset::Module(ref module_id, _, ref module) => {
         let module_sources = generate_module_source(&module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.
@@ -136,7 +139,7 @@ pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, Generat
   if !mods.is_empty() {
     let mods = mods
       .into_iter()
-      .map(|mod_name| format_ident!("{}", mod_name));
+      .map(|mod_name| format_ident!("{}", mod_name.to_case(Case::Snake)));
     let tokens = quote! {
       #(pub mod #mods;)*
     };
@@ -173,7 +176,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 /// It depends on `arora_buffers`, `arora_schema` and `uuid`.
 pub fn generate_enumeration_source(
   id: &Uuid,
-  enumeration: &EnumerationPublic,
+  enumeration: &EnumerationFrozen,
   parent_path: &String,
 ) -> Result<Directory, VfsError> {
   let uses = quote! {
@@ -373,7 +376,7 @@ pub fn generate_enumeration_source(
 /// It depends on `arora-buffers`, `arora-schema`, `arora-registry` and `uuid`.
 pub async fn generate_structure_source(
   id: &Uuid,
-  structure: &StructurePublic,
+  structure: &StructureFrozen,
   registry: &mut dyn ReadableRegistry,
   parent_path: &String,
 ) -> Result<Directory, GenerationError> {
@@ -383,8 +386,7 @@ pub async fn generate_structure_source(
   let mut field_declarations = Vec::new();
   for (_, field) in &structure.fields {
     let field_ident = variable_ident(&field.name);
-    let field_type_ident =
-      type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+    let field_type_ident = type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
     field_declarations.push(quote! { pub #field_ident: #field_type_ident });
   }
   let struct_declaration = quote! {
@@ -424,7 +426,7 @@ pub async fn generate_structure_source(
     let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
     let field_ident = variable_ident(&field.name);
     let value_expression = quote! { value.#field_ident };
-    let serialize = generate_serialize_from_unfrozen(&field.ty, value_expression, registry).await?;
+    let serialize = generate_serialize_from_frozen(&field.ty, value_expression, registry).await?;
     fields_serialization.push(quote! {
       writer.add_structure_field(&#field_const_id_ident);
       #serialize
@@ -449,7 +451,7 @@ pub async fn generate_structure_source(
   let mut field_variable_declarations = Vec::new();
   for (_, field) in &structure.fields {
     let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let type_ident = type_ident_from_unfrozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+    let type_ident = type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
     field_variable_declarations
       .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
   }
@@ -458,8 +460,7 @@ pub async fn generate_structure_source(
   for (_, field) in &structure.fields {
     let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
     let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
-    let deserialize =
-      generate_deserialize_from_unfrozen(&field.ty, registry, CheckType::Yes).await?;
+    let deserialize = generate_deserialize_from_frozen(&field.ty, registry, CheckType::Yes).await?;
     deserialization_cases.push(quote! {
       if field_raw_id == #field_const_id_ident {
         #field_variable_ident = Some(#deserialize);
@@ -548,15 +549,21 @@ async fn generate_imports_from_module_source(
 ) -> Result<Directory, GenerationError> {
   // Using dependent types.
   let uses = {
-    let mut dependencies = HashSet::<&UnfrozenReference>::new();
+    let mut dependencies = HashSet::<&FrozenReference>::new();
     for import in imports {
       import.import.dependencies(&mut dependencies);
     }
     let mut uses = Vec::new();
     for dep in dependencies {
       let dep_selector = Selector::Id(dep.id);
-      let type_def = match registry.get_type(&dep_selector).await {
-        Ok(TypeDefinition::Primitive(_)) => continue,
+      let type_def = match registry
+        .get_type_tagged(
+          &dep_selector,
+          &VersionReq::parse(dep.version.to_string().as_str()).unwrap(),
+        )
+        .await
+      {
+        Ok(TypeDefinitionFrozen::Primitive(_)) => continue,
         Ok(type_definition) => type_definition,
         Err(RegistryError::NotAType { selector: _ }) => continue,
         Err(err) => return Err(GenerationError::RegistryError(err)),
@@ -596,13 +603,13 @@ async fn generate_imports_from_module_source(
       };
       let param_name_ident = format_ident!("{}", param.name);
       let param_type_ident =
-        type_ident_from_unfrozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+        type_ident_from_frozen(&param.ty, registry, PrefixWithMod::Yes).await?;
       parameters_declarations.push(quote! {
         #maybe_mut #param_name_ident: #param_type_ident
       });
     }
     let ret_type_ident =
-      type_ident_from_unfrozen(&function_symbol.return_ty, registry, PrefixWithMod::Yes).await?;
+      type_ident_from_frozen(&function_symbol.return_ty, registry, PrefixWithMod::Yes).await?;
 
     // And implement the call.
     // First declare the const ids.
@@ -640,12 +647,9 @@ async fn generate_imports_from_module_source(
         let function_param_const_id_ident =
           function_param_const_id_ident(&function_name, &param.name);
         let param_name_ident = format_ident!("{}", param.name);
-        let serialize_arg = generate_serialize_from_unfrozen(
-          &param.ty,
-          param_name_ident.into_token_stream(),
-          registry,
-        )
-        .await?;
+        let serialize_arg =
+          generate_serialize_from_frozen(&param.ty, param_name_ident.into_token_stream(), registry)
+            .await?;
         add_args.push(quote! {
           writer.add_structure_field(#function_param_const_id_ident.as_slice());
           #serialize_arg;
@@ -699,7 +703,7 @@ async fn generate_imports_from_module_source(
     // Mutate the mutable parameters
     // and return.
     let deserialize_ret =
-      generate_deserialize_from_unfrozen(&function_symbol.return_ty, registry, CheckType::Yes)
+      generate_deserialize_from_frozen(&function_symbol.return_ty, registry, CheckType::Yes)
         .await?;
 
     let process_params = if nof_args > 1 {
@@ -724,7 +728,7 @@ async fn generate_imports_from_module_source(
             let function_param_const_id_ident =
               function_param_const_id_ident(&function_name, &param.name);
             let deserialize_param =
-              generate_deserialize_from_unfrozen(&param.ty, registry, CheckType::Yes).await?;
+              generate_deserialize_from_frozen(&param.ty, registry, CheckType::Yes).await?;
             deserialize_params.push(quote! {
               x if *x == #function_param_const_id_ident => *#param_name_ident = #deserialize_param,
             });
@@ -784,7 +788,7 @@ async fn generate_imports_from_module_source(
 
 /// Generates the interface of a module, i.e. the declarations of its exported functions.
 async fn generate_module_source(
-  module: &ModulePublic,
+  module: &ModuleFrozen,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Directory, GenerationError> {
   // Function Uses.
@@ -836,7 +840,7 @@ async fn generate_module_source(
         for (param_id, param) in &function_symbol.parameters {
           let param_var_ident = param_ident(param_id, param);
           let param_type_ident =
-            type_ident_from_unfrozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+            type_ident_from_frozen(&param.ty, registry, PrefixWithMod::Yes).await?;
           param_declarations
             .push(quote! { let mut #param_var_ident: Option<#param_type_ident> = None; });
         }
@@ -849,7 +853,7 @@ async fn generate_module_source(
           let param_const_id_ident = function_param_const_id_ident(&export.name, &param.name);
           let param_var_ident = param_ident(param_id, param);
           let deserialize =
-            generate_deserialize_from_unfrozen(&param.ty, registry, CheckType::Yes).await?;
+            generate_deserialize_from_frozen(&param.ty, registry, CheckType::Yes).await?;
           deserialization_cases.push(quote! {
             if field_raw_id == #param_const_id_ident {
               #param_var_ident = Some(#deserialize);
@@ -887,10 +891,10 @@ async fn generate_module_source(
 
       let call_and_write_result = {
         let result_ident = match &function_symbol.return_ty {
-          UnfrozenTy::Primitive(Primitive { kind }) if *kind == PrimitiveKind::Unit => quote! { _ },
+          FrozenTy::Primitive(Primitive { kind }) if *kind == PrimitiveKind::Unit => quote! { _ },
           _ => quote! { result },
         };
-        let serialize_result = generate_serialize_from_unfrozen(
+        let serialize_result = generate_serialize_from_frozen(
           &function_symbol.return_ty,
           result_ident.clone(),
           registry,
@@ -908,7 +912,7 @@ async fn generate_module_source(
           if param.mutable {
             let param_var_ident = param_ident(param_id, param);
             let param_const_id_ident = function_param_const_id_ident(&export.name, &param.name);
-            let serialize_param = generate_serialize_from_unfrozen(
+            let serialize_param = generate_serialize_from_frozen(
               &param.ty,
               quote! {#param_var_ident.unwrap()},
               registry,
@@ -990,13 +994,13 @@ pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
   }
 }
 
-async fn generate_serialize_from_unfrozen(
-  ty: &UnfrozenTy,
+async fn generate_serialize_from_frozen(
+  ty: &FrozenTy,
   value_expression: TokenStream,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
   match ty {
-    UnfrozenTy::Primitive(primitive) => {
+    FrozenTy::Primitive(primitive) => {
       let generate_serialize_primitive_array =
         |primitive_type_id: &Uuid, write_function: TokenStream| {
           let id_bytes = RawUuidValue(primitive_type_id);
@@ -1063,27 +1067,30 @@ async fn generate_serialize_from_unfrozen(
         }
       })
     }
-    UnfrozenTy::UnfrozenScalar(scalar) => {
+    FrozenTy::FrozenScalar(scalar) => {
       let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
         .await
         .map_err(GenerationError::RegistryError)?;
       Ok(quote! { #mod_prefix serialize_to_writer(&#value_expression, &mut writer) })
     }
-    UnfrozenTy::UnfrozenArray(array) => {
+    FrozenTy::FrozenArray(array) => {
       let type_def = registry
-        .get_type(&Selector::Id(array.reference.id))
+        .get_type_tagged(
+          &Selector::Id(array.reference.id),
+          &VersionReq::parse(array.reference.version.0.to_string().as_str()).unwrap(),
+        )
         .await
         .map_err(GenerationError::RegistryError)?;
       let id_bytes = RawUuidValue(&array.reference.id);
       let add_array_args = quote! { #id_bytes, #value_expression.len() };
       let prepare_array = match type_def {
-        TypeDefinition::Primitive(_) => {
+        TypeDefinitionFrozen::Primitive(_) => {
           unreachable!("got an array of primitive type instead of a primitive array type")
         }
-        TypeDefinition::Enumeration(_) => {
+        TypeDefinitionFrozen::Enumeration(_) => {
           quote! { writer.add_array_enumeration(#add_array_args); }
         }
-        TypeDefinition::Structure(_) => {
+        TypeDefinitionFrozen::Structure(_) => {
           quote! { writer.add_array_structure(#add_array_args); }
         }
       };
@@ -1103,13 +1110,13 @@ async fn generate_serialize_from_unfrozen(
 }
 
 #[async_recursion(?Send)]
-async fn generate_deserialize_from_unfrozen(
-  ty: &UnfrozenTy,
+async fn generate_deserialize_from_frozen(
+  ty: &FrozenTy,
   registry: &mut dyn ReadableRegistry,
   check_type: CheckType,
 ) -> Result<TokenStream, GenerationError> {
   match ty {
-    UnfrozenTy::Primitive(primitive) => {
+    FrozenTy::Primitive(primitive) => {
       let type_kind_ident = type_kind_ident_from_primitive(&primitive.kind);
 
       let generate_deserialize = |deserialize: TokenStream| {
@@ -1206,7 +1213,7 @@ async fn generate_deserialize_from_unfrozen(
         }
       })
     }
-    UnfrozenTy::UnfrozenScalar(scalar) => {
+    FrozenTy::FrozenScalar(scalar) => {
       let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
         .await
         .map_err(GenerationError::RegistryError)?;
@@ -1219,11 +1226,11 @@ async fn generate_deserialize_from_unfrozen(
         .expect(format!("failed to deserialize value of type {}", #type_str).as_str()) },
       )
     }
-    UnfrozenTy::UnfrozenArray(array) => {
+    FrozenTy::FrozenArray(array) => {
       let type_ident =
         type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
-      let deserialize_element = generate_deserialize_from_unfrozen(
-        &UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
+      let deserialize_element = generate_deserialize_from_frozen(
+        &FrozenTy::FrozenScalar(FrozenScalar {
           reference: array.reference.to_owned(),
         }),
         registry,
@@ -1371,13 +1378,13 @@ pub fn variable_ident(name: &String) -> Ident {
   format_ident!("{}", name.to_case(Case::Snake))
 }
 
-async fn type_ident_from_unfrozen(
-  ty: &UnfrozenTy,
+async fn type_ident_from_frozen(
+  ty: &FrozenTy,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
   Ok(match ty {
-    UnfrozenTy::Primitive(primitive) => match primitive {
+    FrozenTy::Primitive(primitive) => match primitive {
       &Primitive::UNIT => quote! { () },
       &Primitive::BOOLEAN => quote!(bool),
       &Primitive::U8 => quote!(u8),
@@ -1404,10 +1411,10 @@ async fn type_ident_from_unfrozen(
       &Primitive::ARRAY_F64 => quote!(Vec<f64>),
       &Primitive::ARRAY_STRING => quote!(Vec<String>),
     },
-    UnfrozenTy::UnfrozenScalar(scalar) => {
+    FrozenTy::FrozenScalar(scalar) => {
       type_ident_from_id(&scalar.reference.id, registry, with_mod).await?
     }
-    UnfrozenTy::UnfrozenArray(array) => {
+    FrozenTy::FrozenArray(array) => {
       let type_ident = type_ident_from_id(&array.reference.id, registry, with_mod).await?;
       quote! { Vec<#type_ident> }
     }
@@ -1420,20 +1427,20 @@ async fn type_ident_from_id(
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
   let type_def = registry
-    .get_type(&Selector::Id(id.to_owned()))
+    .get_type_tagged(&Selector::Id(id.to_owned()), &VersionReq::STAR)
     .await
     .map_err(GenerationError::RegistryError)?;
   type_ident_from_definition(&type_def, id, registry, with_mod).await
 }
 
 async fn type_ident_from_definition(
-  type_def: &TypeDefinition,
+  type_def: &TypeDefinitionFrozen,
   id: &Uuid,
   registry: &mut dyn ReadableRegistry,
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
   Ok(match type_def {
-    TypeDefinition::Primitive(primitive) => match primitive {
+    TypeDefinitionFrozen::Primitive(primitive) => match primitive {
       PrimitiveKind::Unit => quote! { () },
       PrimitiveKind::Boolean => quote!(bool),
       PrimitiveKind::U8 => quote!(u8),
@@ -1460,12 +1467,12 @@ async fn type_ident_from_definition(
       PrimitiveKind::ArrayF64 => quote!(Vec<f64>),
       PrimitiveKind::ArrayString => quote!(Vec<String>),
     },
-    TypeDefinition::Enumeration(enumeration) => {
+    TypeDefinitionFrozen::Enumeration(enumeration) => {
       type_ident_from_name_and_id(&enumeration.name, id, registry, with_mod)
         .await
         .map_err(GenerationError::RegistryError)?
     }
-    TypeDefinition::Structure(structure) => {
+    TypeDefinitionFrozen::Structure(structure) => {
       type_ident_from_name_and_id(&structure.name, id, registry, with_mod)
         .await
         .map_err(GenerationError::RegistryError)?

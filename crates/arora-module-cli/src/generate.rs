@@ -4,6 +4,7 @@ use arora_module_core::{
 use arora_registry::ReadableRegistry;
 use arora_vfs::Entry;
 use clap::Parser;
+use semio_record::record::Freezer;
 
 #[derive(Debug, Parser)]
 pub struct Generate {
@@ -32,10 +33,15 @@ fn print_entry(entry: &Entry, i: usize) {
   }
 }
 
-pub async fn generate(cmd: Generate, registry: &mut dyn ReadableRegistry) -> anyhow::Result<()> {
+pub async fn generate<R: ReadableRegistry + Freezer>(
+  cmd: Generate,
+  registry: &mut R,
+) -> anyhow::Result<()> {
   let assets = analyze_module_from_path(cmd.configuration_file, registry).await?;
-  let (module_id, module) = match assets.last() {
-    Some(ModuleAsset::Module(module_id, module)) => (module_id.to_owned(), module.to_owned()),
+  let (module_id, tag, module) = match assets.last() {
+    Some(ModuleAsset::Module(module_id, tag, module)) => {
+      (module_id.to_owned(), tag.to_owned(), module.to_owned())
+    }
     _ => panic!("last module asset should be the module!"),
   };
 
@@ -49,6 +55,7 @@ pub async fn generate(cmd: Generate, registry: &mut dyn ReadableRegistry) -> any
 
   let mut command = tokio::process::Command::new(&generator_path)
     .args(&["--self-id", &module_id.to_string()])
+    .args(&["--self-version", &tag.to_string()])
     .args(cmd.var_args)
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
