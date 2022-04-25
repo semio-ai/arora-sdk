@@ -10,14 +10,9 @@ use async_trait::async_trait;
 use derive_more::Display;
 use semio_client::common::{RecordType, Selector};
 use semio_record::{
-  enumeration::v0::Enumeration as EnumerationDefn,
-  folder::v0::Folder as FolderDefn,
-  module::v0::Module as ModuleDefn,
-  organization::v0::Organization as OrganizationDefn,
-  record::RecordDefn,
-  structure::v0::Structure as StructureDefn,
-  ty::PrimitiveKind,
-  ty::{FrozenTy, UnfrozenTy},
+  enumeration::v0::Enumeration as EnumerationDefn, folder::v0::Folder as FolderDefn,
+  module::v0::Module as ModuleDefn, organization::v0::Organization as OrganizationDefn,
+  record::RecordDefn, structure::v0::Structure as StructureDefn, ty::FrozenTy, ty::PrimitiveKind,
   user::v0::User as UserDefn,
 };
 use semver::{Version, VersionReq};
@@ -27,21 +22,16 @@ use uuid::Uuid;
 
 #[async_trait]
 pub trait ReadableRegistry {
-  /// Gets the definition of a type record,
-  /// i.e. of a primitive, a structure or an enumeration.
+  /// Gets the definition of the latest version of a type matching the tag pattern.
+  /// It can be a primitive, a structure or an enumeration.
   /// Not to be confused with the [`type_of`] function,
   /// which retrieves the type of an record.
-  async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinitionPublic, RegistryError>;
-
-  /// Gets the definition of the latest version of a type matching the tag pattern.
+  /// Gets the definition
   async fn get_type_tagged(
     &mut self,
     selector: &Selector,
     tag_req: &VersionReq,
   ) -> Result<TypeDefinitionFrozen, RegistryError>;
-
-  /// Gets the definition of a module.
-  async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError>;
 
   /// Gets the definition of the latest version of a type matching the tag pattern.
   async fn get_module_tagged(
@@ -71,20 +61,13 @@ pub trait ReadableRegistry {
 
 #[async_trait]
 pub trait EditableRegistry {
-  /// Adds an [`EnumerationPublic`] to the registry.
+  /// Adds an [`EnumerationFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
   /// All variants will be registered too.
   /// Returns the identifier under which the enumeration
   /// was registered.
-  async fn add_enumeration(
-    &mut self,
-    id: Uuid,
-    enumeration: EnumerationPublic,
-  ) -> Result<Uuid, RegistryError>;
-
-  /// Adds the frozen enumeration to the registry.
   async fn add_enumeration_frozen(
     &mut self,
     id: Uuid,
@@ -102,20 +85,13 @@ pub trait EditableRegistry {
     enumeration: Enumeration,
   ) -> Result<EnumerationFrozen, RegistryError>;
 
-  /// Adds a [`StructurePublic`] to the registry.
+  /// Adds a [`StructureFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
   /// All fields will be registered too.
   /// Returns the identifier under which the structure
   /// was registered.
-  async fn add_structure(
-    &mut self,
-    id: Uuid,
-    structure: StructurePublic,
-  ) -> Result<(), RegistryError>;
-
-  /// Adds the frozen structure to the registry.
   async fn add_structure_frozen(
     &mut self,
     id: Uuid,
@@ -133,16 +109,13 @@ pub trait EditableRegistry {
     structure: Structure,
   ) -> Result<StructureFrozen, RegistryError>;
 
-  /// Adds a [`ModulePublic`] to the registry.
+  /// Adds a [`ModuleFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
   /// All fields will be registered too.
   /// Returns the identifier under which the module
   /// was registered.
-  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
-
-  /// Adds the frozen module to the registry.
   async fn add_module_frozen(
     &mut self,
     id: Uuid,
@@ -171,9 +144,6 @@ pub type User = <UserDefn as RecordDefn>::Unfrozen;
 pub type Organization = <OrganizationDefn as RecordDefn>::Unfrozen;
 pub type Folder = <FolderDefn as RecordDefn>::Unfrozen;
 
-pub type EnumerationPublic = <EnumerationDefn as RecordDefn>::Public;
-pub type StructurePublic = <StructureDefn as RecordDefn>::Public;
-pub type ModulePublic = <ModuleDefn as RecordDefn>::Public;
 pub type UserPublic = <UserDefn as RecordDefn>::Public;
 pub type OrganizationPublic = <OrganizationDefn as RecordDefn>::Public;
 pub type FolderPublic = <FolderDefn as RecordDefn>::Public;
@@ -183,52 +153,6 @@ pub type StructureFrozen = <StructureDefn as RecordDefn>::Frozen;
 pub type ModuleFrozen = <ModuleDefn as RecordDefn>::Frozen;
 pub type UserFrozen = <UserDefn as RecordDefn>::Frozen;
 pub type OrganizationFrozen = <OrganizationDefn as RecordDefn>::Frozen;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeDefinitionPublic {
-  Primitive(PrimitiveKind),
-  Enumeration(EnumerationPublic),
-  Structure(StructurePublic),
-}
-
-unsafe impl Send for TypeDefinitionPublic {}
-
-impl TypeDefinitionPublic {
-  pub fn name(&self) -> String {
-    match self {
-      Self::Primitive(primitive) => primitive.to_string(),
-      Self::Enumeration(enumeration) => enumeration.name.to_owned(),
-      Self::Structure(structure) => structure.name.to_owned(),
-    }
-  }
-
-  pub fn direct_dependencies(&self) -> HashSet<Uuid> {
-    let mut dependencies = HashSet::new();
-    let mut maybe_insert = |ty: &UnfrozenTy| {
-      match ty {
-        UnfrozenTy::Primitive(_) => {}
-        UnfrozenTy::UnfrozenScalar(scalar) => {
-          dependencies.insert(scalar.reference.id.to_owned());
-        }
-        UnfrozenTy::UnfrozenArray(array) => {
-          dependencies.insert(array.reference.id.to_owned());
-        }
-      };
-    };
-    match self {
-      Self::Primitive(_) => {}
-      Self::Enumeration(enumeration) => enumeration
-        .variants
-        .iter()
-        .for_each(|(_, variant)| maybe_insert(&variant.ty)),
-      Self::Structure(structure) => structure
-        .fields
-        .iter()
-        .for_each(|(_, field)| maybe_insert(&field.ty)),
-    }
-    dependencies
-  }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDefinitionFrozen {

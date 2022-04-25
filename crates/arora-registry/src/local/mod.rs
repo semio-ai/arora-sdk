@@ -1,11 +1,8 @@
 mod editable;
 mod readable;
 mod reg_ref;
-use self::reg_ref::{FrozenRegistryReference, LatestRegistryReference, LocalRegistryReference};
-use crate::{
-  EnumerationFrozen, EnumerationPublic, FolderPublic, ModuleFrozen, ModulePublic, RegistryError,
-  StructureFrozen, StructurePublic,
-};
+use self::reg_ref::{FrozenRegistryReference, LocalRegistryReference};
+use crate::{EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen};
 use async_trait::async_trait;
 use semio_client::common::Selector;
 use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
@@ -23,15 +20,11 @@ use uuid::Uuid;
 /// It provides an absolute root available for any record,
 /// with the identifier [`ROOT_ID`].
 pub struct LocalRegistry {
-  public_enumerations: Vec<Rc<EnumerationPublic>>,
-  public_structures: Vec<Rc<StructurePublic>>,
-  public_modules: Vec<Rc<ModulePublic>>,
-  public_folders: Vec<Rc<FolderPublic>>,
-  public_indexed: HashMap<Selector, LatestRegistryReference>,
-  frozen_enumerations: Vec<Rc<EnumerationFrozen>>,
-  frozen_structures: Vec<Rc<StructureFrozen>>,
-  frozen_modules: Vec<Rc<ModuleFrozen>>,
-  frozen_indexed: HashMap<Selector, BTreeMap<Version, FrozenRegistryReference>>,
+  enumerations: Vec<Rc<EnumerationFrozen>>,
+  structures: Vec<Rc<StructureFrozen>>,
+  modules: Vec<Rc<ModuleFrozen>>,
+  folders: Vec<Rc<FolderPublic>>, // folders cannot be frozen
+  indexed: HashMap<Selector, BTreeMap<Version, FrozenRegistryReference>>,
   path_to_ids: HashMap<String, Uuid>,
 }
 unsafe impl Send for LocalRegistry {}
@@ -40,18 +33,11 @@ unsafe impl Sync for LocalRegistry {}
 impl LocalRegistry {
   pub fn new() -> Self {
     Self {
-      public_enumerations: Vec::new(),
-      public_structures: Vec::new(),
-      public_modules: Vec::new(),
-      public_folders: Vec::new(),
-      public_indexed: HashMap::from([(
-        Selector::Id(ROOT_ID.to_owned()),
-        LatestRegistryReference::Root,
-      )]),
-      frozen_enumerations: Vec::new(),
-      frozen_structures: Vec::new(),
-      frozen_modules: Vec::new(),
-      frozen_indexed: HashMap::from([(
+      folders: Vec::new(),
+      enumerations: Vec::new(),
+      structures: Vec::new(),
+      modules: Vec::new(),
+      indexed: HashMap::from([(
         Selector::Id(ROOT_ID.to_owned()),
         BTreeMap::from([(Version::new(0, 0, 0), FrozenRegistryReference::Root)]),
       )]),
@@ -59,17 +45,9 @@ impl LocalRegistry {
     }
   }
 
-  fn find_public(&self, selector: &Selector) -> Option<&LatestRegistryReference> {
-    self.public_indexed.get(selector)
-  }
-
-  fn find_public_by_id(&self, id: &Uuid) -> Option<&LatestRegistryReference> {
-    self.find_public(&Selector::Id(id.to_owned()))
-  }
-
   pub fn find_frozen_by_id(&self, id: &Uuid) -> Option<&FrozenRegistryReference> {
     self
-      .frozen_indexed
+      .indexed
       .get(&Selector::Id(id.to_owned()))
       .and_then(|version_index| get_latest_frozen(version_index))
   }
@@ -79,13 +57,8 @@ impl LocalRegistry {
   /// then in the frozen index, and returns the latest version.
   pub fn find_latest(&self, id: &Uuid) -> Option<&dyn LocalRegistryReference> {
     self
-      .find_public_by_id(id)
+      .find_frozen_by_id(id)
       .map(|r| r as &dyn LocalRegistryReference)
-      .or_else(|| {
-        self
-          .find_frozen_by_id(id)
-          .map(|r| r as &dyn LocalRegistryReference)
-      })
   }
 
   fn parent(
@@ -124,7 +97,7 @@ impl Freezer for LocalRegistry {
   async fn freeze(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
     let selector = Selector::Id(reference.id.to_owned());
     let version = self
-      .frozen_indexed
+      .indexed
       .get(&selector)
       .ok_or(RegistryError::no_such_record(&selector))?
       .iter()

@@ -1,11 +1,5 @@
-use super::{
-  reg_ref::{FrozenRegistryReference, LatestRegistryReference},
-  LocalRegistry,
-};
-use crate::{
-  get_primitive, ModuleFrozen, ModulePublic, ReadableRegistry, RegistryError, TypeDefinitionFrozen,
-  TypeDefinitionPublic,
-};
+use super::{reg_ref::FrozenRegistryReference, LocalRegistry};
+use crate::{get_primitive, ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
 use async_trait::async_trait;
 use semio_client::common::{RecordType, Selector};
 use semver::{Version, VersionReq};
@@ -13,29 +7,6 @@ use uuid::Uuid;
 
 #[async_trait]
 impl ReadableRegistry for LocalRegistry {
-  async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinitionPublic, RegistryError> {
-    if let Some(primitive_kind) = get_primitive(selector) {
-      return Ok(TypeDefinitionPublic::Primitive(primitive_kind));
-    }
-    let reg_ref = self
-      .public_indexed
-      .get(selector)
-      .ok_or(RegistryError::NoSuchRecord {
-        selector: selector.to_owned(),
-      })?;
-    match reg_ref {
-      LatestRegistryReference::Enumeration { record, .. } => {
-        Ok(TypeDefinitionPublic::Enumeration(record.as_ref().clone()))
-      }
-      LatestRegistryReference::Structure { record, .. } => {
-        Ok(TypeDefinitionPublic::Structure(record.as_ref().clone()))
-      }
-      _ => Err(RegistryError::NotAType {
-        selector: selector.to_owned(),
-      }),
-    }
-  }
-
   async fn get_type_tagged(
     &mut self,
     selector: &Selector,
@@ -45,7 +16,7 @@ impl ReadableRegistry for LocalRegistry {
       return Ok(TypeDefinitionFrozen::Primitive(primitive_kind));
     }
     let (_, reg_ref) = self
-      .frozen_indexed
+      .indexed
       .get(selector)
       .ok_or(RegistryError::no_such_record(selector))?
       .iter()
@@ -65,28 +36,13 @@ impl ReadableRegistry for LocalRegistry {
     }
   }
 
-  async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError> {
-    let reg_ref = self
-      .public_indexed
-      .get(selector)
-      .ok_or(RegistryError::NoSuchRecord {
-        selector: selector.to_owned(),
-      })?;
-    match reg_ref {
-      LatestRegistryReference::Module { record, .. } => Ok(record.as_ref().clone()),
-      _ => Err(RegistryError::NotAModule {
-        selector: selector.to_owned(),
-      }),
-    }
-  }
-
   async fn get_module_tagged(
     &mut self,
     selector: &Selector,
     tag: &VersionReq,
   ) -> Result<ModuleFrozen, RegistryError> {
     let reg_ref = self
-      .frozen_indexed
+      .indexed
       .get(selector)
       .ok_or(RegistryError::no_such_record(selector))?
       .iter()
@@ -126,7 +82,7 @@ impl ReadableRegistry for LocalRegistry {
   ) -> Result<Version, RegistryError> {
     Ok(
       self
-        .frozen_indexed
+        .indexed
         .get(selector)
         .ok_or(RegistryError::no_such_record(selector))?
         .iter()
@@ -140,38 +96,22 @@ impl ReadableRegistry for LocalRegistry {
 
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
     self
-      .public_indexed
+      .indexed
       .get(selector)
-      .map(|reg_ref| match reg_ref {
-        LatestRegistryReference::Enumeration { .. } => RecordType::Enumeration,
-        LatestRegistryReference::Variant { .. } => RecordType::Unknown,
-        LatestRegistryReference::Structure { .. } => RecordType::Structure,
-        LatestRegistryReference::Field { .. } => RecordType::Unknown,
-        LatestRegistryReference::Module { .. } => RecordType::Module,
-        LatestRegistryReference::Function { .. } => RecordType::Unknown,
-        LatestRegistryReference::Folder { .. } => RecordType::Folder,
-        LatestRegistryReference::Root => RecordType::Unknown,
-      })
-      .or_else(|| {
-        self
-          .frozen_indexed
-          .get(selector)
-          .map(|version_index| {
-            version_index
-              .iter()
-              .last()
-              .map(|(_, reg_ref)| match reg_ref {
-                FrozenRegistryReference::Enumeration { .. } => RecordType::Enumeration,
-                FrozenRegistryReference::Variant { .. } => RecordType::Unknown,
-                FrozenRegistryReference::Structure { .. } => RecordType::Structure,
-                FrozenRegistryReference::Field { .. } => RecordType::Unknown,
-                FrozenRegistryReference::Module { .. } => RecordType::Module,
-                FrozenRegistryReference::Function { .. } => RecordType::Unknown,
-                FrozenRegistryReference::Folder { .. } => RecordType::Folder,
-                FrozenRegistryReference::Root => RecordType::Unknown,
-              })
+      .and_then(|version_index| {
+        version_index
+          .iter()
+          .last()
+          .map(|(_, reg_ref)| match reg_ref {
+            FrozenRegistryReference::Enumeration { .. } => RecordType::Enumeration,
+            FrozenRegistryReference::Variant { .. } => RecordType::Unknown,
+            FrozenRegistryReference::Structure { .. } => RecordType::Structure,
+            FrozenRegistryReference::Field { .. } => RecordType::Unknown,
+            FrozenRegistryReference::Module { .. } => RecordType::Module,
+            FrozenRegistryReference::Function { .. } => RecordType::Unknown,
+            FrozenRegistryReference::Folder { .. } => RecordType::Folder,
+            FrozenRegistryReference::Root => RecordType::Unknown,
           })
-          .unwrap_or(None)
       })
       .ok_or(RegistryError::NoSuchRecord {
         selector: selector.to_owned(),
