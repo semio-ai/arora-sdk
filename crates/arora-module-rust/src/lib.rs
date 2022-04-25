@@ -782,7 +782,17 @@ async fn generate_imports_from_module_source(
     #(#functions_declarations)*
   };
 
-  let file_path = splitted_module_path.join(".") + ".rs";
+  let file_path = splitted_module_path
+    .iter()
+    .map(|name| name.to_case(Case::Snake))
+    .fold(String::new(), |acc, name| {
+      if acc.is_empty() {
+        name
+      } else {
+        format!("{}/{}", acc, name)
+      }
+    })
+    + ".rs";
   token_stream_to_file(file_path, &source).map_err(GenerationError::VfsError)
 }
 
