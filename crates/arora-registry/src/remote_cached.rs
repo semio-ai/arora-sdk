@@ -37,15 +37,15 @@ impl RemoteCachedRegistry {
 
 #[async_trait]
 impl ReadableRegistry for RemoteCachedRegistry {
-  async fn get_type_tagged(
+  async fn get_type(
     &mut self,
     selector: &Selector,
     tag_req: &VersionReq,
   ) -> Result<TypeDefinitionFrozen, RegistryError> {
-    match self.cache.get_type_tagged(selector, tag_req).await {
+    match self.cache.get_type(selector, tag_req).await {
       Ok(ty) => Ok(ty),
       Err(RegistryError::NoSuchRecord { selector: _ }) => {
-        let ty = self.remote.get_type_tagged(selector, tag_req).await?;
+        let ty = self.remote.get_type(selector, tag_req).await?;
         let tag = self.remote.resolve_tag(selector, tag_req).await?;
         match &ty {
           TypeDefinitionFrozen::Primitive(_) => {
@@ -55,14 +55,14 @@ impl ReadableRegistry for RemoteCachedRegistry {
             let id = self.resolve_selector(selector).await?;
             self
               .cache
-              .add_enumeration_frozen(id, tag.clone(), enumeration.clone())
+              .add_enumeration(id, tag.clone(), enumeration.clone())
               .await?;
           }
           TypeDefinitionFrozen::Structure(structure) => {
             let id = self.resolve_selector(selector).await?;
             self
               .cache
-              .add_structure_frozen(id, tag.clone(), structure.clone())
+              .add_structure(id, tag.clone(), structure.clone())
               .await?;
           }
         }
@@ -72,20 +72,20 @@ impl ReadableRegistry for RemoteCachedRegistry {
     }
   }
 
-  async fn get_module_tagged(
+  async fn get_module(
     &mut self,
     selector: &Selector,
     tag_req: &VersionReq,
   ) -> Result<ModuleFrozen, RegistryError> {
-    match self.cache.get_module_tagged(selector, tag_req).await {
+    match self.cache.get_module(selector, tag_req).await {
       Ok(module) => Ok(module),
       Err(RegistryError::NoSuchRecord { selector: _ }) => {
-        let module = self.remote.get_module_tagged(selector, tag_req).await?;
+        let module = self.remote.get_module(selector, tag_req).await?;
         let id = self.resolve_selector(selector).await?;
         let tag = self.remote.resolve_tag(selector, tag_req).await?;
         self
           .cache
-          .add_module_frozen(id, tag.clone(), module.clone())
+          .add_module(id, tag.clone(), module.clone())
           .await?;
         Ok(module)
       }
@@ -133,7 +133,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
 /// When an record is added, it is added to the local cache only.
 #[async_trait]
 impl EditableRegistry for RemoteCachedRegistry {
-  async fn add_enumeration_frozen(
+  async fn add_enumeration(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -141,7 +141,7 @@ impl EditableRegistry for RemoteCachedRegistry {
   ) -> Result<(), RegistryError> {
     self
       .cache
-      .add_enumeration_frozen(id, tag, enumeration)
+      .add_enumeration(id, tag, enumeration)
       .await
   }
 
@@ -154,13 +154,13 @@ impl EditableRegistry for RemoteCachedRegistry {
     self.cache.tag_enumeration(id, tag, enumeration).await
   }
 
-  async fn add_structure_frozen(
+  async fn add_structure(
     &mut self,
     id: Uuid,
     tag: Version,
     structure: StructureFrozen,
   ) -> Result<(), RegistryError> {
-    self.cache.add_structure_frozen(id, tag, structure).await
+    self.cache.add_structure(id, tag, structure).await
   }
 
   async fn tag_structure(
@@ -172,13 +172,13 @@ impl EditableRegistry for RemoteCachedRegistry {
     self.cache.tag_structure(id, tag, structure).await
   }
 
-  async fn add_module_frozen(
+  async fn add_module(
     &mut self,
     id: Uuid,
     tag: Version,
     module: ModuleFrozen,
   ) -> Result<(), RegistryError> {
-    self.cache.add_module_frozen(id, tag, module).await
+    self.cache.add_module(id, tag, module).await
   }
 
   async fn tag_module(

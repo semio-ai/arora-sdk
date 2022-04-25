@@ -27,12 +27,12 @@ async fn main() -> anyhow::Result<()> {
         match type_def {
           TypeDefinitionFrozen::Enumeration(enumeration) => {
             registry
-              .add_enumeration_frozen(id.to_owned(), tag.to_owned(), enumeration.to_owned())
+              .add_enumeration(id.to_owned(), tag.to_owned(), enumeration.to_owned())
               .await?;
           }
           TypeDefinitionFrozen::Structure(structure) => {
             registry
-              .add_structure_frozen(id.to_owned(), tag.to_owned(), structure.to_owned())
+              .add_structure(id.to_owned(), tag.to_owned(), structure.to_owned())
               .await?;
           }
           TypeDefinitionFrozen::Primitive(_) => {}
@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
       ModuleAsset::Import(import) => imports.push(import.to_owned()),
       ModuleAsset::Module(id, tag, module) => {
         registry
-          .add_module_frozen(id.to_owned(), tag.to_owned(), module.to_owned())
+          .add_module(id.to_owned(), tag.to_owned(), module.to_owned())
           .await?
       }
     };

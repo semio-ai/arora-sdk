@@ -187,7 +187,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
     // Add it to the registry.
     // It might be already brought by the includes, but we don't care.
     match registry
-      .add_module_frozen(module_id, module_version, module_and_imports.module)
+      .add_module(module_id, module_version, module_and_imports.module)
       .await
     {
       Ok(_) | Err(RegistryError::DuplicateSelector { selector: _ }) => {}

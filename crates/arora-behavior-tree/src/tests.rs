@@ -310,7 +310,7 @@ pub mod tests {
     let actual_module_name = module.name.to_owned();
     add_module_functions_to_index(&module_id, &module, index);
     registry
-      .add_module_frozen(module_id.to_owned(), module_version.into(), module)
+      .add_module(module_id.to_owned(), module_version.into(), module)
       .await
       .expect(format!("failed to add module {} to registry", module_id).as_str());
 
@@ -384,7 +384,7 @@ pub mod tests {
     let (module_id, module_version, module) = read_header(name.as_str(), registry).await;
     add_module_functions_to_index(&module_id, &module, index);
     registry
-      .add_module_frozen(module_id.to_owned(), module_version, module)
+      .add_module(module_id.to_owned(), module_version, module)
       .await
       .expect(format!("failed to add module {} to registry", module_id).as_str());
   }

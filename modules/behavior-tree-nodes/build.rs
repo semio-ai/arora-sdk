@@ -51,7 +51,7 @@ pub async fn main() -> Result<()> {
     )
     .await?;
   registry
-    .add_module_frozen(
+    .add_module(
       test_rust_wasm_id,
       test_rust_wasm_version,
       test_rust_wasm_module.module,

@@ -69,7 +69,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   .await?;
   for (id, tag, enumeration) in enumerations {
     registry
-      .add_enumeration_frozen(id, tag, enumeration)
+      .add_enumeration(id, tag, enumeration)
       .await?;
   }
 
@@ -100,7 +100,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   )
   .await?;
   for (id, tag, structure) in structures {
-    registry.add_structure_frozen(id, tag, structure).await?;
+    registry.add_structure(id, tag, structure).await?;
   }
 
   let mut modules = Vec::new();
@@ -130,7 +130,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   )
   .await?;
   for (id, tag, module) in modules {
-    registry.add_module_frozen(id, tag, module).await?;
+    registry.add_module(id, tag, module).await?;
   }
   Ok(())
 }

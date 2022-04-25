@@ -27,14 +27,14 @@ pub trait ReadableRegistry {
   /// Not to be confused with the [`type_of`] function,
   /// which retrieves the type of an record.
   /// Gets the definition
-  async fn get_type_tagged(
+  async fn get_type(
     &mut self,
     selector: &Selector,
     tag_req: &VersionReq,
   ) -> Result<TypeDefinitionFrozen, RegistryError>;
 
   /// Gets the definition of the latest version of a type matching the tag pattern.
-  async fn get_module_tagged(
+  async fn get_module(
     &mut self,
     selector: &Selector,
     tag_req: &VersionReq,
@@ -68,7 +68,7 @@ pub trait EditableRegistry {
   /// All variants will be registered too.
   /// Returns the identifier under which the enumeration
   /// was registered.
-  async fn add_enumeration_frozen(
+  async fn add_enumeration(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -92,7 +92,7 @@ pub trait EditableRegistry {
   /// All fields will be registered too.
   /// Returns the identifier under which the structure
   /// was registered.
-  async fn add_structure_frozen(
+  async fn add_structure(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -116,7 +116,7 @@ pub trait EditableRegistry {
   /// All fields will be registered too.
   /// Returns the identifier under which the module
   /// was registered.
-  async fn add_module_frozen(
+  async fn add_module(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -151,8 +151,6 @@ pub type FolderPublic = <FolderDefn as RecordDefn>::Public;
 pub type EnumerationFrozen = <EnumerationDefn as RecordDefn>::Frozen;
 pub type StructureFrozen = <StructureDefn as RecordDefn>::Frozen;
 pub type ModuleFrozen = <ModuleDefn as RecordDefn>::Frozen;
-pub type UserFrozen = <UserDefn as RecordDefn>::Frozen;
-pub type OrganizationFrozen = <OrganizationDefn as RecordDefn>::Frozen;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDefinitionFrozen {

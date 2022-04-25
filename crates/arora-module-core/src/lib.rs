@@ -59,7 +59,7 @@ pub async fn analyze_module<R: ReadableRegistry + Freezer>(
         dep_ref.id.to_owned(),
         dep_ref.version.0.to_owned(),
         registry
-          .get_type_tagged(
+          .get_type(
             &selector,
             &VersionReq::parse(dep_ref.version.to_string().as_str()).unwrap(),
           )

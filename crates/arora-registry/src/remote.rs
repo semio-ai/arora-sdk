@@ -137,7 +137,7 @@ impl RemoteRegistry {
 
 #[async_trait]
 impl ReadableRegistry for RemoteRegistry {
-  async fn get_type_tagged(
+  async fn get_type(
     &mut self,
     selector: &Selector,
     tag: &VersionReq,
@@ -160,7 +160,7 @@ impl ReadableRegistry for RemoteRegistry {
     }
   }
 
-  async fn get_module_tagged(
+  async fn get_module(
     &mut self,
     selector: &Selector,
     tag: &VersionReq,

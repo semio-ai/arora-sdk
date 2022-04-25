@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 #[async_trait]
 impl EditableRegistry for LocalRegistry {
-  async fn add_enumeration_frozen(
+  async fn add_enumeration(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -81,12 +81,12 @@ impl EditableRegistry for LocalRegistry {
   ) -> Result<EnumerationFrozen, RegistryError> {
     let enumeration = enumeration.freeze(self).await?;
     self
-      .add_enumeration_frozen(id, tag, enumeration.to_owned())
+      .add_enumeration(id, tag, enumeration.to_owned())
       .await?;
     Ok(enumeration)
   }
 
-  async fn add_structure_frozen(
+  async fn add_structure(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -152,12 +152,12 @@ impl EditableRegistry for LocalRegistry {
   ) -> Result<StructureFrozen, RegistryError> {
     let structure = structure.freeze(self).await?;
     self
-      .add_structure_frozen(id, tag, structure.to_owned())
+      .add_structure(id, tag, structure.to_owned())
       .await?;
     Ok(structure)
   }
 
-  async fn add_module_frozen(
+  async fn add_module(
     &mut self,
     id: Uuid,
     tag: Version,
@@ -226,7 +226,7 @@ impl EditableRegistry for LocalRegistry {
     module: Module,
   ) -> Result<ModuleFrozen, RegistryError> {
     let module: ModuleFrozen = module.freeze(self).await?;
-    self.add_module_frozen(id, tag, module.to_owned()).await?;
+    self.add_module(id, tag, module.to_owned()).await?;
     Ok(module)
   }
 

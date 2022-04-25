@@ -266,7 +266,7 @@ pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     let import_module = registry
-      .get_module_tagged(&import_module_selector, &semver::VersionReq::STAR)
+      .get_module(&import_module_selector, &semver::VersionReq::STAR)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     dependencies.insert(UnfrozenReference {
@@ -335,7 +335,7 @@ pub async fn resolve_low_module<R: ReadableRegistry + Freezer>(
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     let import_module = registry
-      .get_module_tagged(
+      .get_module(
         &Selector::Id(import_module_id.clone()),
         &semver::VersionReq::STAR,
       )

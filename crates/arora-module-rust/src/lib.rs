@@ -557,7 +557,7 @@ async fn generate_imports_from_module_source(
     for dep in dependencies {
       let dep_selector = Selector::Id(dep.id);
       let type_def = match registry
-        .get_type_tagged(
+        .get_type(
           &dep_selector,
           &VersionReq::parse(dep.version.to_string().as_str()).unwrap(),
         )
@@ -1075,7 +1075,7 @@ async fn generate_serialize_from_frozen(
     }
     FrozenTy::FrozenArray(array) => {
       let type_def = registry
-        .get_type_tagged(
+        .get_type(
           &Selector::Id(array.reference.id),
           &VersionReq::parse(array.reference.version.0.to_string().as_str()).unwrap(),
         )
@@ -1427,7 +1427,7 @@ async fn type_ident_from_id(
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
   let type_def = registry
-    .get_type_tagged(&Selector::Id(id.to_owned()), &VersionReq::STAR)
+    .get_type(&Selector::Id(id.to_owned()), &VersionReq::STAR)
     .await
     .map_err(GenerationError::RegistryError)?;
   type_ident_from_definition(&type_def, id, registry, with_mod).await

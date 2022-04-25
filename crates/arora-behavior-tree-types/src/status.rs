@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 /// Produces the declaration of the `Status` enum,
 /// so that it can be added to a registry,
-/// with the given parent, and under the ID [`STATUS_TYPE_ID`].
+/// with the given parent, and under the ID [`STATUS_ENUMERATION_ID`].
 pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
   Enumeration {
     name: "Status".to_string(),

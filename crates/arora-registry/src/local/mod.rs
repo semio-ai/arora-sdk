@@ -13,7 +13,7 @@ use std::{
 };
 use uuid::Uuid;
 
-/// A [`LocalRegistry`] supports the addition of [`Structure`], [`Enumeration`] and [`Module`]
+/// A [`LocalRegistry`] supports the addition of [`StructureFrozen`], [`EnumerationFrozen`] and [`ModuleFrozen`]
 /// on the fly. It provides a local index to look them up fast
 /// by [`Uuid'] or by path ([`String`]).
 /// It can be used as a local cache of a remote registry accessed using [`semio_client`].
@@ -166,7 +166,7 @@ mod tests {
     let status_version = Version::new(1, 0, 0);
     let enum_id = Uuid::new_v4();
     registry
-      .add_enumeration_frozen(enum_id, status_version.to_owned(), status)
+      .add_enumeration(enum_id, status_version.to_owned(), status)
       .await
       .unwrap();
 
@@ -193,7 +193,7 @@ mod tests {
       dependencies: vec![],
     };
     registry
-      .add_module_frozen(Uuid::new_v4(), Version::new(1, 0, 0), module)
+      .add_module(Uuid::new_v4(), Version::new(1, 0, 0), module)
       .await
       .unwrap();
   }
