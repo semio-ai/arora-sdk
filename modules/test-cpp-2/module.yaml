@@ -1,4 +1,4 @@
-id: 23a75559-025c-4be8-8b48-0784e30dc9ec
+id: 325c5e47-32db-4e23-a38f-7a2849647e0c
 author: Semio
 description: Test C++ module 2
 license: Proprietary
@@ -9,10 +9,11 @@ version:
   patch: 0
 executor:
   name: wasm
-exports:
+imports:
   - type: function
+    module: 23a75559-025c-4be8-8b48-0784e30dc9ec
     id: b213a552-77ad-465a-a26d-352e8eccfd63
-    name: test_2
+    name: test_2_args
     parameters:
       - id: 55dbec70-1c3a-433e-a6e6-27446b7f065e
         name: a
@@ -27,6 +28,23 @@ exports:
     ret:
       kind: scalar
       id: behavior_tree.Status
-imports: []
+exports:
+  - type: function
+    id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
+    name: test_structured
+    parameters:
+      - id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
+        name: a
+        type:
+          kind: scalar
+          id: behavior_tree.Status
+      - id: 63086e48-804f-403a-8862-3358ddedc08d
+        name: b
+        type:
+          kind: scalar
+          id: TestStructure1
+    ret:
+      kind: scalar
+      id: i32
 dependencies: []
 executable_mime: application/wasm

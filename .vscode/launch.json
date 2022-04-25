@@ -29,9 +29,9 @@
             "program": "${workspaceFolder}/target/debug/arora-cli",
             "args": [
                 "--header",
-                "${workspaceFolder}/build/modules/test-cpp-2/arora/module.yaml",
+                "${workspaceFolder}/build/modules/test-cpp/arora/module.yaml",
                 "--exe",
-                "${workspaceFolder}/build/modules/test-cpp-2/test-cpp-2",
+                "${workspaceFolder}/build/modules/test-cpp/test-cpp",
                 "--call",
                 "id: b213a552-77ad-465a-a26d-352e8eccfd63\nargs:\n- id: 55dbec70-1c3a-433e-a6e6-27446b7f065e\n  value:\n    u32: 42\n- id: abf9ca4e-e03f-431a-a32b-4911f809c399\n  value:\n    u32: 64"
             ],
@@ -46,13 +46,13 @@
             "program": "${workspaceFolder}/target/debug/arora-cli",
             "args": [
                 "--header",
-                "${workspaceFolder}/build/modules/test-cpp/arora/module.yaml",
-                "--exe",
-                "${workspaceFolder}/build/modules/test-cpp/test-cpp",
-                "--header",
                 "${workspaceFolder}/build/modules/test-cpp-2/arora/module.yaml",
                 "--exe",
                 "${workspaceFolder}/build/modules/test-cpp-2/test-cpp-2",
+                "--header",
+                "${workspaceFolder}/build/modules/test-cpp/arora/module.yaml",
+                "--exe",
+                "${workspaceFolder}/build/modules/test-cpp/test-cpp",
                 "--call",
                 "id: 07f5740c-ba4a-45af-8ec5-bedde5737e99\nargs:\n- id: b41899c3-66dc-40d4-ab61-d1ccf5231c88\n  value:\n    enum:\n      id: 325a5767-e344-4532-860e-0749bcf2e428\n      variant_id: 766e9e9a-446d-4e46-83e6-14b7ca101169\n      value: unit\n- id: 63086e48-804f-403a-8862-3358ddedc08d\n  value:\n    struct:\n      id: 7f9aedf8-dbde-4020-b5f4-c28a6635ae7c\n      fields:\n      - id: 7d94a956-e50d-4cc4-9714-f62e1f9b134e\n        value:\n          enum[]:\n            id: 325a5767-e344-4532-860e-0749bcf2e428\n            elements:\n              - variant_id: 2468f46c-bb60-425c-9a4d-9ad326ccc7e2\n                value: unit\n      - id: 5ffa9104-1e5c-4026-943f-8db38bd34563\n        value:\n          i32: 113"
             ],
@@ -77,7 +77,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "C++ generation for test-cpp",
+            "name": "C++ generation for test-cpp-2",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
                 "--config",
@@ -85,25 +85,7 @@
                 "--include",
                 "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
                 "--include",
-                "${workspaceFolder}/build/modules/test-cpp-2/arora/records",
-                "generate",
-                "-l",
-                "cpp",
-                "-c",
-                "${workspaceFolder}/modules/test-cpp/module.yaml",
-                "-o",
-                "${workspaceFolder}/build/modules/test-cpp/arora"
-            ],
-            "cwd": "${workspaceFolder}/build/modules/test-cpp"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "C++ generation for test-cpp-2",
-            "program": "${workspaceFolder}/target/debug/arora-module-cli",
-            "args": [
-                "--include",
-                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
+                "${workspaceFolder}/build/modules/test-cpp/arora/records",
                 "generate",
                 "-l",
                 "cpp",
@@ -112,7 +94,25 @@
                 "-o",
                 "${workspaceFolder}/build/modules/test-cpp-2/arora"
             ],
-            "cwd": "${workspaceFolder}/build/modules/test-cpp-2",
+            "cwd": "${workspaceFolder}/build/modules/test-cpp-2"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "C++ generation for test-cpp",
+            "program": "${workspaceFolder}/target/debug/arora-module-cli",
+            "args": [
+                "--include",
+                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
+                "generate",
+                "-l",
+                "cpp",
+                "-c",
+                "${workspaceFolder}/modules/test-cpp/module.yaml",
+                "-o",
+                "${workspaceFolder}/build/modules/test-cpp/arora"
+            ],
+            "cwd": "${workspaceFolder}/build/modules/test-cpp",
             "env": {
                 "RUST_BACKTRACE": "1",
             }
