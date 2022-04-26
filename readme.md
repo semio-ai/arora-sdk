@@ -8,19 +8,19 @@ This project relies on a notion of records of type
 `Enumeration`, `Structure` or `Module`.
 They are provided by the following Semio projects:
 
-- [Semio Record](https://github.com/semio-ai/semio-record.git)
-- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc.git)
-- [Semio Client](https://github.com/semio-ai/semio-client.git)
+- [Semio Record](https://github.com/semio-ai/semio-record)
+- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
+- [Semio Client](https://github.com/semio-ai/semio-client)
 
 They provide the interface to connect to a
-[Semio Database](https://github.com/semio-ai/semio-db.git),
+[Semio Database](https://github.com/semio-ai/semio-db),
 which collects the records of the assets produced by Semio users.
 
 The database does not need to be specified and running at build time.
 At runtime, you can specify it by providing a
 [Semio Client Configuration](https://github.com/semio-ai/semio-client/blob/master/src/authentication.rs),
 with the command-line option `--config`.
-A config file is typically produced by [Semio Client (`semio-cli`)](https://github.com/semio-ai/semio-client.git),
+A config file is typically produced by [Semio Client (`semio-cli`)](https://github.com/semio-ai/semio-client),
 and can be reused in this context.
 
 ## Arora Engine
@@ -35,11 +35,11 @@ or anonymous functions registered on-the-fly
 The modules are described locally using a
 [specific schema](crates/arora-schema/readme.md),
 differing slightly from the `Module` data structure
-provided in [Semio Record](https://github.com/semio-ai/semio-record.git).
+provided in [Semio Record](https://github.com/semio-ai/semio-record).
 See [modules](#modules).
 
 The types (`Enumeration`s or `Structure`s) as
-[Semio Records](https://github.com/semio-ai/semio-record.git),
+[Semio Records](https://github.com/semio-ai/semio-record),
 usually available through a [registry](crates/arora-registry/readme.md).
 They can be saved into files that can be included by command-line tools.
 
@@ -112,7 +112,7 @@ for other uses.
 
 - [Arora Registry](crates/arora-registry/readme.md),
   to handle local and remote registry of
-  [Semio Records](https://github.com/semio-ai/semio-record.git).
+  [Semio Records](https://github.com/semio-ai/semio-record).
 
 - [Arora CLI](crates/arora-cli/readme.md),
   the CLI tool to load modules and run functions.
@@ -176,9 +176,9 @@ for other uses.
 
 You need a read access to the following repositories:
 
-- [Semio Record](https://github.com/semio-ai/semio-record.git)
-- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc.git)
-- [Semio Client](https://github.com/semio-ai/semio-client.git)
+- [Semio Record](https://github.com/semio-ai/semio-record)
+- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
+- [Semio Client](https://github.com/semio-ai/semio-client)
   
 #### Windows
 
@@ -192,7 +192,8 @@ cmake ..
 cmake --build .
 ```
 
-It will automatically download the [WASI C++ SDK](https://github.com/WebAssembly/wasi-sdk),
+It will automatically download the
+[WASI C++ SDK](https://github.com/WebAssembly/wasi-sdk),
 and configure the project to use it for C++ [modules](#modules).
 
 #### Debug
