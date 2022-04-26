@@ -3,6 +3,7 @@ pub mod ty;
 pub mod value;
 
 use derive_more::Display;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
@@ -11,6 +12,12 @@ pub struct SemanticVersion {
   pub major: u32,
   pub minor: u32,
   pub patch: u32,
+}
+
+impl Into<Version> for SemanticVersion {
+  fn into(self) -> Version {
+    Version::new(self.major.into(), self.minor.into(), self.patch.into())
+  }
 }
 
 #[cfg(test)]
@@ -75,7 +82,7 @@ id: 325c5e47-32db-4e23-a38f-7a2849647e0c
 author: Semio
 description: Test C++ module
 license: Proprietary
-name: test-cpp
+name: test-cpp-2
 version:
   major: 0
   minor: 1
@@ -105,6 +112,6 @@ dependencies: []
 executable_mime: application/wasm";
 
     let header: ModuleDefinition = serde_yaml::from_str(module_string).unwrap();
-    assert!(header.name == "test-cpp");
+    assert!(header.name == "test-cpp-2");
   }
 }
