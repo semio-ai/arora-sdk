@@ -25,7 +25,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Call Test C++ Module 2",
+            "name": "Call Test C++ Module 1",
             "program": "${workspaceFolder}/target/debug/arora-cli",
             "args": [
                 "--header",
@@ -42,7 +42,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Call Test C++ Module 1",
+            "name": "Call Test C++ Module 2",
             "program": "${workspaceFolder}/target/debug/arora-cli",
             "args": [
                 "--header",
@@ -66,6 +66,8 @@
             "name": "Call Rust WASM Module",
             "program": "${workspaceFolder}/target/debug/arora-cli",
             "args": [
+                "--include",
+                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
                 "--header",
                 "${workspaceFolder}/modules/test-rust-wasm/module.yaml",
                 "--exe",

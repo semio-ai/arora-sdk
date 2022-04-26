@@ -54,7 +54,9 @@ Modules are the building blocks of Semio Arora.
 Each module exports symbols for other modules to use.
 They can be implemented in C++ and in Rust, compiled into WebAssembly libraries.
 The symbols available in a compiled module is described in a `module.yaml` file.
-See [test-cpp-2](modules/test-cpp-2/module.yaml) or [test-wasm](modules/test-rust-wasm/module.yaml)
+See [test-cpp](modules/test-cpp-2/readme.md),
+[test-cpp-2](modules/test-cpp-2/readme.md) or
+[test-rust-wasm](modules/test-rust-wasm/readme.md)
 for working examples.
 
 Authors of modules should write a `module.yaml` file and
