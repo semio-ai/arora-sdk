@@ -21,7 +21,8 @@ if not more efficient for looking them up.
 
 The "high-level" [`ModuleDefinition`](src/module/high.rs)
 is used to describe completely a module to implement.
-It is usually saved as a `module.yaml` file.
+It is usually saved as a `module.yaml` file
+(using [`serde-yaml`](https://docs.serde.rs/serde_yaml/index.html)).
 It can be used by the code generators of
 [`arora-module-cli`](../arora-module-cli/readme.md)
 to produce the proper bindings for a module.
@@ -58,3 +59,13 @@ This library can describe:
   and do not necessarily translate into an integer.
 - structures, similar to Rust `struct`s and C / C++ PODs:
   each field has a name and holds a value.
+
+## Value
+
+A [`Value`](src/value.rs) describes a value defined
+in the low-level [type](#type) schema.
+It is generic and can also be serialized
+(using [`serde`](https://docs.serde.rs/serde/).
+For other kind of conversions
+a common error type is suggested:
+`arora-schema::value::ConversionError`.
