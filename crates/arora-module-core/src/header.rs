@@ -1,4 +1,8 @@
-use arora_registry::{ModulePublic, ReadableRegistry};
+use crate::{
+  resolve::{resolve_low_module, ModuleAndImports},
+  ImportAsset, ModuleDeclarationError,
+};
+use arora_registry::{ModuleFrozen, ReadableRegistry};
 use arora_schema::{
   module::low::{
     Executor, ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter,
@@ -12,22 +16,19 @@ use arora_schema::{
 };
 use arora_vfs::{Directory, Entry, File};
 use semio_record::{
-  module::v0::unfrozen::ExportKind,
-  ty::{PrimitiveKind, UnfrozenTy},
+  module::v0::frozen::ExportKind,
+  record::Freezer,
+  ty::{FrozenTy, PrimitiveKind},
 };
+use semver::Version;
 use std::path::Path;
 use tokio::fs::read_to_string;
 use uuid::Uuid;
 
-use crate::{
-  resolve::{resolve_low_module, ModuleAndImports},
-  ImportAsset, ModuleDeclarationError,
-};
-
 /// Creates a YAML header file named `module.yaml` describing the module.
 pub fn generate_header_file(
   id: &Uuid,
-  module: &ModulePublic,
+  module: &ModuleFrozen,
   imports: &Vec<ImportAsset>,
 ) -> Result<Directory, ModuleDeclarationError> {
   let header = Header {
@@ -55,17 +56,20 @@ pub fn generate_header_file(
           id: export_id.to_owned(),
           name: export.name.to_owned(),
           parameters: function
-            .parameters
+            .parameter_ordering
             .iter()
-            .map(|(parameter_id, parameter)| Parameter {
-              name: parameter.name.to_owned(),
-              ty: low_type_ref_fron_unfrozen_ty(&parameter.ty),
-              mutable: parameter.mutable,
-              id: parameter_id.to_owned(),
-              default_value: None,
+            .map(|parameter_id| {
+              let parameter = function.parameters.get(parameter_id).unwrap();
+              Parameter {
+                name: parameter.name.to_owned(),
+                ty: low_type_ref_from_unfrozen_ty(&parameter.ty),
+                mutable: parameter.mutable,
+                id: parameter_id.to_owned(),
+                default_value: None,
+              }
             })
             .collect(),
-          ret: low_type_ref_fron_unfrozen_ty(&function.return_ty),
+          ret: low_type_ref_from_unfrozen_ty(&function.return_ty),
         })
       })
       .collect(),
@@ -78,17 +82,20 @@ pub fn generate_header_file(
           name: import.import.name.to_owned(),
           module: import.module_id.to_owned(),
           parameters: import_function
-            .parameters
+            .parameter_ordering
             .iter()
-            .map(|(parameter_id, parameter)| Parameter {
-              name: parameter.name.to_owned(),
-              ty: low_type_ref_fron_unfrozen_ty(&parameter.ty),
-              mutable: parameter.mutable,
-              id: parameter_id.to_owned(),
-              default_value: None,
+            .map(|parameter_id| {
+              let parameter = import_function.parameters.get(parameter_id).unwrap();
+              Parameter {
+                name: parameter.name.to_owned(),
+                ty: low_type_ref_from_unfrozen_ty(&parameter.ty),
+                mutable: parameter.mutable,
+                id: parameter_id.to_owned(),
+                default_value: None,
+              }
             })
             .collect(),
-          ret: low_type_ref_fron_unfrozen_ty(&import_function.return_ty),
+          ret: low_type_ref_from_unfrozen_ty(&import_function.return_ty),
         })
       })
       .collect(),
@@ -104,10 +111,10 @@ pub fn generate_header_file(
 
 /// Reads the YAML header file at the given path
 /// and returns a description compatible with the registry.
-pub async fn module_public_from_header_file<P: AsRef<Path>>(
+pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry + Freezer>(
   header_path: P,
-  registry: &mut dyn ReadableRegistry,
-) -> Result<(Uuid, ModuleAndImports), ModuleDeclarationError> {
+  registry: &mut R,
+) -> Result<(Uuid, Version, ModuleAndImports), ModuleDeclarationError> {
   let header: Header = serde_yaml::from_str(
     &read_to_string(header_path.as_ref())
       .await
@@ -120,12 +127,16 @@ pub async fn module_public_from_header_file<P: AsRef<Path>>(
       e
     ))
   })?;
-  Ok((header.id.to_owned(), resolve_low_module(header, registry).await?))
+  Ok((
+    header.id.to_owned(),
+    header.version.to_owned().into(),
+    resolve_low_module(header, registry).await?,
+  ))
 }
 
-fn low_type_ref_fron_unfrozen_ty(unfrozen: &UnfrozenTy) -> TypeRef {
+fn low_type_ref_from_unfrozen_ty(unfrozen: &FrozenTy) -> TypeRef {
   match unfrozen {
-    UnfrozenTy::Primitive(primitive) => match primitive.kind {
+    FrozenTy::Primitive(primitive) => match primitive.kind {
       PrimitiveKind::Unit => TypeRef::Scalar {
         id: UNIT_ID.to_owned(),
       },
@@ -202,10 +213,10 @@ fn low_type_ref_fron_unfrozen_ty(unfrozen: &UnfrozenTy) -> TypeRef {
         id: STRING_ID.to_owned(),
       },
     },
-    UnfrozenTy::UnfrozenScalar(scalar) => TypeRef::Scalar {
+    FrozenTy::FrozenScalar(scalar) => TypeRef::Scalar {
       id: scalar.reference.id.to_owned(),
     },
-    UnfrozenTy::UnfrozenArray(array) => TypeRef::Array {
+    FrozenTy::FrozenArray(array) => TypeRef::Array {
       id: array.reference.id.to_owned(),
     },
   }

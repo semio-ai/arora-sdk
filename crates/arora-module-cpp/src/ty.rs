@@ -1,5 +1,5 @@
 use crate::{ast::TypeRef, Context};
-use semio_record::ty::{PrimitiveKind, UnfrozenTy};
+use semio_record::ty::{FrozenTy, PrimitiveKind};
 
 lazy_static::lazy_static! {
   pub static ref VOID: TypeRef = TypeRef {
@@ -64,9 +64,9 @@ lazy_static::lazy_static! {
   };
 }
 
-pub fn type_name<'a>(context: &'a Context<'a>, ty: &UnfrozenTy) -> String {
+pub fn type_name<'a>(context: &'a Context<'a>, ty: &FrozenTy) -> String {
   match ty {
-    UnfrozenTy::Primitive(primitive) => match primitive.kind {
+    FrozenTy::Primitive(primitive) => match primitive.kind {
       PrimitiveKind::Unit => "void".to_string(),
       PrimitiveKind::Boolean => "bool".to_string(),
       PrimitiveKind::U8 => "std::uint8_t".to_string(),
@@ -93,14 +93,14 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &UnfrozenTy) -> String {
       PrimitiveKind::ArrayF64 => "arora::buffer::View<double>".to_string(),
       PrimitiveKind::ArrayString => "arora::buffer::View<std::string_view>".to_string(),
     },
-    UnfrozenTy::UnfrozenScalar(scalar) => {
+    FrozenTy::FrozenScalar(scalar) => {
       let ty = context
         .types
         .get(&scalar.reference.id)
         .expect(format!("encountered unknown type {}", scalar.reference.id).as_str());
       ty.name().clone()
     }
-    UnfrozenTy::UnfrozenArray(array) => {
+    FrozenTy::FrozenArray(array) => {
       let ty = context.types.get(&array.reference.id).unwrap();
       format!("std::vector<{}>", ty.name())
     }

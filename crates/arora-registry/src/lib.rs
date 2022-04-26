@@ -10,32 +10,48 @@ use async_trait::async_trait;
 use derive_more::Display;
 use semio_client::common::{RecordType, Selector};
 use semio_record::{
-  enumeration::v0::Enumeration, module::v0::Module, record::RecordDefn, structure::v0::Structure,
-  ty::UnfrozenTy,
+  enumeration::v0::Enumeration as EnumerationDefn, folder::v0::Folder as FolderDefn,
+  module::v0::Module as ModuleDefn, organization::v0::Organization as OrganizationDefn,
+  record::RecordDefn, structure::v0::Structure as StructureDefn, ty::FrozenTy, ty::PrimitiveKind,
+  user::v0::User as UserDefn,
 };
-use semio_record::{
-  folder::v0::Folder, organization::v0::Organization, ty::PrimitiveKind, user::v0::User,
-};
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-#[async_trait(?Send)]
+#[async_trait]
 pub trait ReadableRegistry {
-  /// Gets the definition of a type record,
-  /// i.e. of a primitive, a structure or an enumeration.
+  /// Gets the definition of the latest version of a type matching the tag pattern.
+  /// It can be a primitive, a structure or an enumeration.
   /// Not to be confused with the [`type_of`] function,
   /// which retrieves the type of an record.
-  async fn get_type(&mut self, selector: &Selector) -> Result<TypeDefinition, RegistryError>;
+  /// Gets the definition
+  async fn get_type(
+    &mut self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<TypeDefinitionFrozen, RegistryError>;
 
-  /// Gets the definition of a module.
-  async fn get_module(&mut self, selector: &Selector) -> Result<ModulePublic, RegistryError>;
+  /// Gets the definition of the latest version of a type matching the tag pattern.
+  async fn get_module(
+    &mut self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<ModuleFrozen, RegistryError>;
 
   /// Resolves the given selector into an identifier.
-  async fn resolve_path(&mut self, path: &String) -> Result<Uuid, RegistryError>;
+  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError>;
 
   /// Resolves the given identifier into a path.
-  async fn resolve_id(&mut self, id: &Uuid) -> Result<String, RegistryError>;
+  async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError>;
+
+  /// Resolves the latest tag of a record matching the requirement.
+  async fn resolve_tag(
+    &self,
+    selector: &Selector,
+    tag_req: &VersionReq,
+  ) -> Result<Version, RegistryError>;
 
   /// Resolves the type of record identified by the given selector.
   /// Do not confuse with the [`get_type`] function,
@@ -43,9 +59,9 @@ pub trait ReadableRegistry {
   async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError>;
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 pub trait EditableRegistry {
-  /// Adds an [`EnumerationPublic`] to the registry.
+  /// Adds an [`EnumerationFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
@@ -55,10 +71,21 @@ pub trait EditableRegistry {
   async fn add_enumeration(
     &mut self,
     id: Uuid,
-    enumeration: EnumerationPublic,
-  ) -> Result<Uuid, RegistryError>;
+    tag: Version,
+    enumeration: EnumerationFrozen,
+  ) -> Result<(), RegistryError>;
 
-  /// Adds a [`StructurePublic`] to the registry.
+  /// Takes an unfrozen [`Enumeration`],
+  /// freezes it with what is currently available in the registry,
+  /// and adds it to the registry with the given identifier and version tag.
+  async fn tag_enumeration(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    enumeration: Enumeration,
+  ) -> Result<EnumerationFrozen, RegistryError>;
+
+  /// Adds a [`StructureFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
@@ -68,65 +95,101 @@ pub trait EditableRegistry {
   async fn add_structure(
     &mut self,
     id: Uuid,
-    structure: StructurePublic,
+    tag: Version,
+    structure: StructureFrozen,
   ) -> Result<(), RegistryError>;
 
-  /// Adds a [`ModulePublic`] to the registry.
+  /// Takes an unfrozen [`Structure`],
+  /// freezes it with what is currently available in the registry,
+  /// and adds it to the registry with the given identifier and version tag.
+  async fn tag_structure(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    structure: Structure,
+  ) -> Result<StructureFrozen, RegistryError>;
+
+  /// Adds a [`ModuleFrozen`] to the registry.
   /// Its parent must be found in the registry.
   /// Its name must be unique under the given parent.
   /// Its identifier must be unique in the registry.
   /// All fields will be registered too.
   /// Returns the identifier under which the module
   /// was registered.
-  async fn add_module(&mut self, id: Uuid, module: ModulePublic) -> Result<(), RegistryError>;
+  async fn add_module(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    module: ModuleFrozen,
+  ) -> Result<(), RegistryError>;
+
+  /// Takes an unfrozen [`Module`],
+  /// freezes it with what is currently available in the registry,
+  /// and adds it to the registry with the given identifier and version tag.
+  async fn tag_module(
+    &mut self,
+    id: Uuid,
+    tag: Version,
+    module: Module,
+  ) -> Result<ModuleFrozen, RegistryError>;
 
   /// Adds a folder to the registry, under the given identifier.
   async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError>;
 }
 
-pub type EnumerationPublic = <Enumeration as RecordDefn>::Public;
-pub type StructurePublic = <Structure as RecordDefn>::Public;
-pub type ModulePublic = <Module as RecordDefn>::Public;
-pub type UserPublic = <User as RecordDefn>::Public;
-pub type OrganizationPublic = <Organization as RecordDefn>::Public;
-pub type FolderPublic = <Folder as RecordDefn>::Public;
+pub type Enumeration = <EnumerationDefn as RecordDefn>::Unfrozen;
+pub type Structure = <StructureDefn as RecordDefn>::Unfrozen;
+pub type Module = <ModuleDefn as RecordDefn>::Unfrozen;
+pub type User = <UserDefn as RecordDefn>::Unfrozen;
+pub type Organization = <OrganizationDefn as RecordDefn>::Unfrozen;
+pub type Folder = <FolderDefn as RecordDefn>::Unfrozen;
+
+pub type UserPublic = <UserDefn as RecordDefn>::Public;
+pub type OrganizationPublic = <OrganizationDefn as RecordDefn>::Public;
+pub type FolderPublic = <FolderDefn as RecordDefn>::Public;
+
+pub type EnumerationFrozen = <EnumerationDefn as RecordDefn>::Frozen;
+pub type StructureFrozen = <StructureDefn as RecordDefn>::Frozen;
+pub type ModuleFrozen = <ModuleDefn as RecordDefn>::Frozen;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeDefinition {
+pub enum TypeDefinitionFrozen {
   Primitive(PrimitiveKind),
-  Enumeration(EnumerationPublic),
-  Structure(StructurePublic),
+  Enumeration(EnumerationFrozen),
+  Structure(StructureFrozen),
 }
 
-impl TypeDefinition {
+unsafe impl Send for TypeDefinitionFrozen {}
+
+impl TypeDefinitionFrozen {
   pub fn name(&self) -> String {
     match self {
-      TypeDefinition::Primitive(primitive) => primitive.to_string(),
-      TypeDefinition::Enumeration(enumeration) => enumeration.name.to_owned(),
-      TypeDefinition::Structure(structure) => structure.name.to_owned(),
+      Self::Primitive(primitive) => primitive.to_string(),
+      Self::Enumeration(enumeration, ..) => enumeration.name.to_owned(),
+      Self::Structure(structure, ..) => structure.name.to_owned(),
     }
   }
 
   pub fn direct_dependencies(&self) -> HashSet<Uuid> {
     let mut dependencies = HashSet::new();
-    let mut maybe_insert = |ty: &UnfrozenTy| {
+    let mut maybe_insert = |ty: &FrozenTy| {
       match ty {
-        UnfrozenTy::Primitive(_) => {}
-        UnfrozenTy::UnfrozenScalar(scalar) => {
+        FrozenTy::Primitive(_) => {}
+        FrozenTy::FrozenScalar(scalar) => {
           dependencies.insert(scalar.reference.id.to_owned());
         }
-        UnfrozenTy::UnfrozenArray(array) => {
+        FrozenTy::FrozenArray(array) => {
           dependencies.insert(array.reference.id.to_owned());
         }
       };
     };
     match self {
-      TypeDefinition::Primitive(_) => {}
-      TypeDefinition::Enumeration(enumeration) => enumeration
+      Self::Primitive(_) => {}
+      Self::Enumeration(enumeration, ..) => enumeration
         .variants
         .iter()
         .for_each(|(_, variant)| maybe_insert(&variant.ty)),
-      TypeDefinition::Structure(structure) => structure
+      Self::Structure(structure, ..) => structure
         .fields
         .iter()
         .for_each(|(_, field)| maybe_insert(&field.ty)),
@@ -140,6 +203,13 @@ pub enum RegistryError {
   /// No such record.
   #[display(fmt = "no such record \"{}\"", selector)]
   NoSuchRecord { selector: Selector },
+
+  /// No such version of a record.
+  #[display(fmt = "no version matching record \"{}@{}\"", selector, version_req)]
+  NoSuchVersion {
+    selector: Selector,
+    version_req: VersionReq,
+  },
 
   /// Record exists but is not a type.
   #[display(fmt = "record \"{}\" exists but is not a type", selector)]
@@ -159,6 +229,17 @@ pub enum RegistryError {
     selector
   )]
   DuplicateSelector { selector: Selector },
+
+  /// The name or identifier of the record being added is already taken by another record.
+  #[display(
+    fmt = "record selector {}@{} is already present in the registry",
+    selector,
+    version
+  )]
+  DuplicateVersion {
+    selector: Selector,
+    version: Version,
+  },
 
   /// Record being inserted uses a dependency that is not known locally.
   #[display(
@@ -181,6 +262,78 @@ pub enum RegistryError {
 }
 
 impl std::error::Error for RegistryError {}
+
+unsafe impl Send for RegistryError {}
+
+impl RegistryError {
+  pub fn no_such_record(selector: &Selector) -> Self {
+    RegistryError::NoSuchRecord {
+      selector: selector.to_owned(),
+    }
+  }
+
+  pub fn no_such_version(selector: &Selector, version_req: &VersionReq) -> Self {
+    RegistryError::NoSuchVersion {
+      selector: selector.to_owned(),
+      version_req: version_req.to_owned(),
+    }
+  }
+
+  pub fn not_a_type(selector: &Selector) -> Self {
+    RegistryError::NotAType {
+      selector: selector.to_owned(),
+    }
+  }
+
+  pub fn not_a_module(selector: &Selector) -> Self {
+    RegistryError::NotAModule {
+      selector: selector.to_owned(),
+    }
+  }
+
+  pub fn unknown_parent(name: &str) -> Self {
+    RegistryError::UnknownParent {
+      name: name.to_owned(),
+    }
+  }
+
+  pub fn duplicate_selector(selector: &Selector) -> Self {
+    RegistryError::DuplicateSelector {
+      selector: selector.to_owned(),
+    }
+  }
+
+  pub fn duplicate_version(selector: &Selector, version: &Version) -> Self {
+    RegistryError::DuplicateVersion {
+      selector: selector.to_owned(),
+      version: version.to_owned(),
+    }
+  }
+
+  pub fn unknown_dependency(selector: &Selector) -> Self {
+    RegistryError::UnknownDependency {
+      selector: selector.to_owned(),
+    }
+  }
+
+  pub fn remote_error<S: ToString>(message: S) -> Self {
+    RegistryError::RemoteError {
+      message: message.to_string(),
+    }
+  }
+
+  pub fn parsing_error(message: &str) -> Self {
+    RegistryError::ParsingError {
+      message: message.to_owned(),
+    }
+  }
+
+  pub fn generic(message: &str) -> Self {
+    RegistryError::Generic {
+      message: message.to_owned(),
+    }
+  }
+}
 
 pub fn get_primitive(selector: &Selector) -> Option<PrimitiveKind> {
   match selector {

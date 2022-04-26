@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 lazy_static = "*"
+semver = "1.0.5"
 uuid = "0.8.2"
 
 [dev-dependencies]

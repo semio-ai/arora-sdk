@@ -10,6 +10,8 @@ include = ["enumeration/**.yaml", "structure/**.yaml"]
 
 [build-dependencies]
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
+arora-registry = { path = "../arora-registry" }
+tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = "0.8.2"

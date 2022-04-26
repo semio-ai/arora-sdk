@@ -10,7 +10,7 @@ use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_schema::value::{ConversionError, StructureField, Value};
 use error::BehaviorTreeError;
 use schema::{CallExpression, Node, NodeParameterId};
-use semio_record::module::v0::unfrozen::Function;
+use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
@@ -159,18 +159,18 @@ fn tick(
         .first()
         .ok_or(BehaviorTreeError::MissingChildrenParameter {
           node: node.id.to_owned(),
-          function: node.function.to_owned()
+          function: node.function.to_owned(),
         })?;
     let first_parameter = function.parameters.get(&first_parameter_id).ok_or(
       BehaviorTreeError::MissingChildrenParameter {
         node: node.id.clone(),
-        function: node.function.to_owned()
+        function: node.function.to_owned(),
       },
     )?;
     if first_parameter.name != "children" {
       Err(BehaviorTreeError::MissingChildrenParameter {
         node: node.id.clone(),
-        function: node.function.to_owned()
+        function: node.function.to_owned(),
       })?;
     }
     let first_parameter_type_id = first_parameter
@@ -178,14 +178,14 @@ fn tick(
       .as_array()
       .ok_or(BehaviorTreeError::MissingChildrenParameter {
         node: node.id.clone(),
-        function: node.function.to_owned()
+        function: node.function.to_owned(),
       })?
       .reference
       .id;
     if first_parameter_type_id != Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID) {
       Err(BehaviorTreeError::MissingChildrenParameter {
         node: node.id.clone(),
-        function: node.function.to_owned()
+        function: node.function.to_owned(),
       })?;
     }
 

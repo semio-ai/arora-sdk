@@ -5,10 +5,10 @@ use crate::{
   },
   constant, func, id, identifier_name, identifier_uuid, ty, Context,
 };
-use arora_registry::{EnumerationPublic, StructurePublic, TypeDefinition};
+use arora_registry::{EnumerationFrozen, StructureFrozen, TypeDefinitionFrozen};
 use semio_record::{
-  structure::v0::unfrozen::StructureField,
-  ty::{PrimitiveKind, UnfrozenTy},
+  structure::v0::frozen::StructureField,
+  ty::{FrozenTy, PrimitiveKind},
 };
 use uuid::Uuid;
 
@@ -143,7 +143,7 @@ pub fn arora_buffer_reader_get_structure() -> Expression {
   func::ARORA_BUFFER_READER_GET_STRUCTURE.call(["reader"])
 }
 
-pub fn structure(context: &Context, name: &str, ty: &StructurePublic) -> Struct {
+pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct {
   let mut declarations = Vec::new();
   for (_, field) in &ty.fields {
     declarations.push(
@@ -221,7 +221,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructurePublic) -> Struct 
   }
 }
 
-pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationPublic) -> Vec<Declaration> {
+pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationFrozen) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -251,7 +251,7 @@ pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationPublic) -> Ve
   ret
 }
 
-pub fn structure_constants(_: &Uuid, name: &str, ty: &StructurePublic) -> Vec<Declaration> {
+pub fn structure_constants(_: &Uuid, name: &str, ty: &StructureFrozen) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -281,18 +281,20 @@ pub fn structure_constants(_: &Uuid, name: &str, ty: &StructurePublic) -> Vec<De
   ret
 }
 
-pub fn type_constants(id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+pub fn type_constants(id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declaration> {
   match &ty {
-    TypeDefinition::Structure(v) => structure_constants(id, &ty.name(), v),
-    TypeDefinition::Enumeration(v) => enumeration_constants(id, &ty.name(), v),
-    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", id.to_string()),
+    TypeDefinitionFrozen::Structure(v) => structure_constants(id, &ty.name(), v),
+    TypeDefinitionFrozen::Enumeration(v) => enumeration_constants(id, &ty.name(), v),
+    TypeDefinitionFrozen::Primitive(_) => {
+      panic!("forbidden to define primitive type {}", id.to_string())
+    }
   }
 }
 
 pub fn enumeration_constants_impl(
   id: &Uuid,
   name: &str,
-  ty: &EnumerationPublic,
+  ty: &EnumerationFrozen,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
@@ -323,7 +325,7 @@ pub fn enumeration_constants_impl(
   ret
 }
 
-pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructurePublic) -> Vec<Declaration> {
+pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructureFrozen) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   ret.push(
@@ -353,22 +355,24 @@ pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructurePublic) -> 
   ret
 }
 
-pub fn type_constants_impl(id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+pub fn type_constants_impl(id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declaration> {
   match ty {
-    TypeDefinition::Structure(v) => structure_constants_impl(id, &v.name, v),
-    TypeDefinition::Enumeration(v) => enumeration_constants_impl(id, &v.name, v),
-    TypeDefinition::Primitive(v) => panic!("forbidden to define primitive type {}", v.to_string()),
+    TypeDefinitionFrozen::Structure(v) => structure_constants_impl(id, &v.name, v),
+    TypeDefinitionFrozen::Enumeration(v) => enumeration_constants_impl(id, &v.name, v),
+    TypeDefinitionFrozen::Primitive(v) => {
+      panic!("forbidden to define primitive type {}", v.to_string())
+    }
   }
 }
 
-pub fn is_unit(ty: &UnfrozenTy) -> bool {
+pub fn is_unit(ty: &FrozenTy) -> bool {
   match ty {
-    UnfrozenTy::Primitive(as_primitive) => as_primitive.kind == PrimitiveKind::Unit,
+    FrozenTy::Primitive(as_primitive) => as_primitive.kind == PrimitiveKind::Unit,
     _ => false,
   }
 }
 
-pub fn enumeration(context: &Context, name: &str, ty: &EnumerationPublic) -> Struct {
+pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Struct {
   let mut enumeration_values = Vec::new();
   for (_, variant) in ty.variants.iter() {
     enumeration_values.push(variant.name.clone());
@@ -568,11 +572,11 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationPublic) -> Str
   }
 }
 
-pub fn ty(context: &Context, ty: &TypeDefinition) -> Struct {
+pub fn ty(context: &Context, ty: &TypeDefinitionFrozen) -> Struct {
   match ty {
-    TypeDefinition::Enumeration(value) => enumeration(context, &ty.name(), &value),
-    TypeDefinition::Structure(value) => structure(context, &ty.name(), &value),
-    TypeDefinition::Primitive(_) => panic!(
+    TypeDefinitionFrozen::Enumeration(value) => enumeration(context, &ty.name(), &value),
+    TypeDefinitionFrozen::Structure(value) => structure(context, &ty.name(), &value),
+    TypeDefinitionFrozen::Primitive(_) => panic!(
       "forbidden to define primitive type {}",
       ty.name().to_string()
     ),
@@ -583,7 +587,7 @@ pub fn enumeration_impl(
   context: &Context,
   _: &Uuid,
   name: &str,
-  ty: &EnumerationPublic,
+  ty: &EnumerationFrozen,
 ) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
@@ -770,11 +774,7 @@ fn structure_private_field_variable(id: &Uuid, field: &StructureField) -> Expres
   structure_private_field_variable_name(id, field).to_expression()
 }
 
-pub fn structure_impl(
-  context: &Context,
-  name: &str,
-  ty: &StructurePublic,
-) -> Vec<Declaration> {
+pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Vec<Declaration> {
   let mut ret = Vec::new();
 
   for (id, field) in ty.fields.iter() {
@@ -847,18 +847,20 @@ pub fn structure_impl(
   ret
 }
 
-pub fn ty_impl(context: &Context, id: &Uuid, ty: &TypeDefinition) -> Vec<Declaration> {
+pub fn ty_impl(context: &Context, id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declaration> {
   match ty {
-    TypeDefinition::Enumeration(value) => enumeration_impl(context, id, &value.name, &value),
-    TypeDefinition::Structure(value) => structure_impl(context, &value.name, &value),
-    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", id.to_string()),
+    TypeDefinitionFrozen::Enumeration(value) => enumeration_impl(context, id, &value.name, &value),
+    TypeDefinitionFrozen::Structure(value) => structure_impl(context, &value.name, &value),
+    TypeDefinitionFrozen::Primitive(_) => {
+      panic!("forbidden to define primitive type {}", id.to_string())
+    }
   }
 }
 
 pub fn structure_deserializer(
   context: &Context,
   name: &str,
-  ty: &StructurePublic,
+  ty: &StructureFrozen,
 ) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
 
@@ -1064,7 +1066,7 @@ pub fn enumeration_deserializer(
   context: &Context,
   _: &Uuid,
   name: &str,
-  ty: &EnumerationPublic,
+  ty: &EnumerationFrozen,
 ) -> FunctionImplementation {
   let mut function_statements = Vec::<Declaration>::new();
 
@@ -1190,11 +1192,13 @@ pub fn enumeration_deserializer(
   }
 }
 
-pub fn type_of(ty: &TypeDefinition) -> FunctionImplementation {
+pub fn type_of(ty: &TypeDefinitionFrozen) -> FunctionImplementation {
   let buffer_type_constant = match ty {
-    TypeDefinition::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
-    TypeDefinition::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
-    TypeDefinition::Primitive(_) => panic!("forbidden to define primitive type {}", ty.name()),
+    TypeDefinitionFrozen::Structure(_) => &*constant::ARORA_BUFFER_TYPE_STRUCTURE,
+    TypeDefinitionFrozen::Enumeration(_) => &*constant::ARORA_BUFFER_TYPE_ENUMERATION,
+    TypeDefinitionFrozen::Primitive(_) => {
+      panic!("forbidden to define primitive type {}", ty.name())
+    }
   };
 
   FunctionImplementation {
@@ -1220,13 +1224,13 @@ pub fn type_of(ty: &TypeDefinition) -> FunctionImplementation {
 pub fn deserializer(
   context: &Context,
   type_id: &Uuid,
-  ty: &TypeDefinition,
+  ty: &TypeDefinitionFrozen,
 ) -> FunctionImplementation {
   match ty {
-    TypeDefinition::Structure(ref structure) => {
+    TypeDefinitionFrozen::Structure(ref structure) => {
       structure_deserializer(context, &ty.name(), structure)
     }
-    TypeDefinition::Enumeration(ref enumeration) => {
+    TypeDefinitionFrozen::Enumeration(ref enumeration) => {
       enumeration_deserializer(&context, type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),
@@ -1236,7 +1240,7 @@ pub fn deserializer(
 pub fn structure_serializer(
   context: &Context,
   name: &str,
-  ty: &StructurePublic,
+  ty: &StructureFrozen,
 ) -> FunctionImplementation {
   let value_name = "value".to_string();
   let field_count = "field_count".to_string();
@@ -1354,7 +1358,7 @@ pub fn enumeration_serializer(
   _: &Context,
   _: &Uuid,
   enum_type_name: &str,
-  enum_type: &EnumerationPublic,
+  enum_type: &EnumerationFrozen,
 ) -> FunctionImplementation {
   let writer_name = "writer".to_string();
   let value_name = "value".to_string();
@@ -1426,13 +1430,13 @@ pub fn enumeration_serializer(
 pub fn serializer(
   context: &Context,
   type_id: &Uuid,
-  ty: &TypeDefinition,
+  ty: &TypeDefinitionFrozen,
 ) -> FunctionImplementation {
   match ty {
-    TypeDefinition::Structure(ref structure) => {
+    TypeDefinitionFrozen::Structure(ref structure) => {
       structure_serializer(context, &ty.name(), structure)
     }
-    TypeDefinition::Enumeration(ref enumeration) => {
+    TypeDefinitionFrozen::Enumeration(ref enumeration) => {
       enumeration_serializer(&context, &type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),

@@ -8,14 +8,17 @@ pub mod tests {
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_module_core::resolve::resolve_low_module;
-  use arora_registry::{local::LocalRegistry, EditableRegistry, ModulePublic, ReadableRegistry};
+  use arora_registry::local_yaml::load_records_from_yaml_dir;
+  use arora_registry::ModuleFrozen;
+  use arora_registry::{local::LocalRegistry, EditableRegistry, ReadableRegistry};
   use arora_schema::{
     module::low::{Header, ModuleDefinition},
     value::Value,
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
-  use semio_record::module::v0::unfrozen::ExportKind;
+  use semio_record::{module::v0::frozen::ExportKind, record::Freezer};
+  use semver::Version;
   use std::{
     cell::RefCell,
     collections::HashMap,
@@ -275,6 +278,11 @@ pub mod tests {
       .build();
     let mut index = HashMap::new();
     let mut registry = LocalRegistry::new();
+    let behavior_tree_types_yaml_dir =
+      crate_root_path("arora-behavior-tree-types-yaml").join("records");
+    load_records_from_yaml_dir(behavior_tree_types_yaml_dir, &mut registry)
+      .await
+      .unwrap();
     for module in modules {
       load_module(&mut engine, &mut index, &mut registry, module).await;
     }
@@ -282,7 +290,7 @@ pub mod tests {
   }
 
   /// Load a module built by this project, from under the `module/` directory
-  async fn load_module<R: ReadableRegistry + EditableRegistry>(
+  async fn load_module<R: ReadableRegistry + EditableRegistry + Freezer>(
     engine: &mut PinnedEngine,
     index: &mut HashMap<Uuid, ModuleFunction>,
     registry: &mut R,
@@ -294,6 +302,7 @@ pub mod tests {
     let module_root = module_root_path(name);
     let header = read_header_from_module_root(module_root.to_owned()).await;
     let module_id = header.id.to_owned();
+    let module_version = header.version.to_owned();
     let module = resolve_low_module(header.to_owned(), registry)
       .await
       .expect("failed to resolve module info from header")
@@ -301,7 +310,7 @@ pub mod tests {
     let actual_module_name = module.name.to_owned();
     add_module_functions_to_index(&module_id, &module, index);
     registry
-      .add_module(module_id.to_owned(), module)
+      .add_module(module_id.to_owned(), module_version.into(), module)
       .await
       .expect(format!("failed to add module {} to registry", module_id).as_str());
 
@@ -367,33 +376,37 @@ pub mod tests {
     header
   }
 
-  pub async fn read_header_to_index<R: ReadableRegistry + EditableRegistry>(
+  pub async fn read_header_to_index<R: ReadableRegistry + EditableRegistry + Freezer>(
     name: &String,
     index: &mut HashMap<Uuid, ModuleFunction>,
     registry: &mut R,
   ) {
-    let (module_id, module) = read_header(name.as_str(), registry).await;
+    let (module_id, module_version, module) = read_header(name.as_str(), registry).await;
     add_module_functions_to_index(&module_id, &module, index);
     registry
-      .add_module(module_id.to_owned(), module)
+      .add_module(module_id.to_owned(), module_version, module)
       .await
       .expect(format!("failed to add module {} to registry", module_id).as_str());
   }
 
-  async fn read_header(name: &str, registry: &mut dyn ReadableRegistry) -> (Uuid, ModulePublic) {
+  async fn read_header<R: ReadableRegistry + EditableRegistry + Freezer>(
+    name: &str,
+    registry: &mut R,
+  ) -> (Uuid, Version, ModuleFrozen) {
     let module_root = module_root_path(&name.to_string());
     let header = read_header_from_module_root(module_root).await;
     let module_id = header.id.to_owned();
+    let module_version = header.version.to_owned().into();
     let module = resolve_low_module(header, registry)
       .await
       .expect("failed to resolve module info from header")
       .module;
-    (module_id, module)
+    (module_id, module_version, module)
   }
 
   pub fn add_module_functions_to_index(
     module_id: &Uuid,
-    module: &ModulePublic,
+    module: &ModuleFrozen,
     index: &mut HashMap<Uuid, ModuleFunction>,
   ) {
     for (export_id, export) in &module.exports {
@@ -410,8 +423,17 @@ pub mod tests {
     }
   }
 
-  fn module_root_path(name: &String) -> PathBuf {
-    // Find the root directory of the repository.
+  fn module_root_path<P: AsRef<Path>>(name: P) -> PathBuf {
+    let repo_root = repo_root_path();
+    repo_root.join("modules").join(name)
+  }
+
+  pub fn crate_root_path<P: AsRef<Path>>(name: P) -> PathBuf {
+    let repo_root = repo_root_path();
+    repo_root.join("crates").join(name)
+  }
+
+  fn repo_root_path() -> PathBuf {
     let current_crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(file!().to_string());
     let mut path = Path::new(&current_crate_dir);
     loop {
@@ -422,10 +444,7 @@ pub mod tests {
         .parent()
         .expect("test not implemented from its git repository");
     }
-    let repo_root = path;
-
-    // The local modules are all under the same dir.
-    repo_root.join("modules").join(name)
+    path.to_path_buf()
   }
 
   lazy_static::lazy_static! {

@@ -1,9 +1,10 @@
 use anyhow::{Ok, Result};
 use arora_behavior_tree_types::{
   declare_behavior_tree_folder, declare_status_enumeration, declare_tick_id_structure,
-  BEHAVIOR_TREE_FOLDER_ID, STATUS_ENUMERATION_ID, TICK_ID_STRUCTURE_ID,
+  BEHAVIOR_TREE_FOLDER_ID, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION, TICK_ID_STRUCTURE_ID,
+  TICK_ID_STRUCTURE_VERSION,
 };
-use arora_module_core::{analyze_module_from_path, header::module_public_from_header_file};
+use arora_module_core::{analyze_module_from_path, header::module_frozen_from_header_file};
 use arora_module_rust::{generate_sources, rustfmt::apply_rustfmt};
 use arora_registry::{
   local::{LocalRegistry, ROOT_ID},
@@ -26,28 +27,35 @@ pub async fn main() -> Result<()> {
 
   // behavior_tree.Status
   registry
-    .add_enumeration(
+    .tag_enumeration(
       STATUS_ENUMERATION_ID.to_owned(),
+      STATUS_ENUMERATION_VERSION.to_owned(),
       declare_status_enumeration(BEHAVIOR_TREE_FOLDER_ID),
     )
     .await?;
 
   // behavior_tree.TickId
   registry
-    .add_structure(
+    .tag_structure(
       TICK_ID_STRUCTURE_ID.to_owned(),
+      TICK_ID_STRUCTURE_VERSION.to_owned(),
       declare_tick_id_structure(BEHAVIOR_TREE_FOLDER_ID),
     )
     .await?;
 
   // test_rust_wasm
-  let (test_rust_wasm_id, test_rust_wasm_module) = module_public_from_header_file(
-    Path::new("../test-rust-wasm/src/arora_generated/module.yaml"),
-    &mut registry
-  )
-  .await?;
+  let (test_rust_wasm_id, test_rust_wasm_version, test_rust_wasm_module) =
+    module_frozen_from_header_file(
+      Path::new("../test-rust-wasm/src/arora_generated/module.yaml"),
+      &mut registry,
+    )
+    .await?;
   registry
-    .add_module(test_rust_wasm_id, test_rust_wasm_module.module)
+    .add_module(
+      test_rust_wasm_id,
+      test_rust_wasm_version,
+      test_rust_wasm_module.module,
+    )
     .await?;
 
   // Generate sources for the module
