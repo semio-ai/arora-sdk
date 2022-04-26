@@ -7,6 +7,11 @@ It uses a code generation step using `arora-module-cli -l rust`,
 and puts all the sources under `src/arora-generated`,
 and provides bindings for the Arora engine.
 
+This module exports symbols imported by the module
+[Behavior Tree Nodes](../behavior-tree-nodes/readme.md),
+and is used in the tests of the
+[Behavior Tree library](../../crates/arora-behavior-tree/readme.md).
+
 ## Requirements
 
 You need Rust installed, and `cargo wasi` to be installed first.
@@ -25,6 +30,12 @@ Build for the host machine, for development and testing:
 ```bash
 $ cargo build [...]
 ```
+
+> **Note:**
+> Building the module for the host works here because
+> this module does not depend on other modules,
+> and therefore not on [the Arora Engine](../../crates/arora/readme.md)
+> and its functions `arora_dispatch` and `arora_dispatch_indirect`.
 
 Build into WASM so that it can be loaded by `wasmtime`,
 and therefore by the Arora engine, which uses it:

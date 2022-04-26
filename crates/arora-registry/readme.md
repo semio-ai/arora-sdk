@@ -23,4 +23,4 @@ if not explicit versions. Access to the latest non-tagged
 Use `EditableRegistry::tag_<record>` functions to produce tagged versions,
 with dependencies frozen according to the existing tagged records.
 
-Use `ReadableRegistry::get_<record>_tagged` functions to retrieve tagged versions.
+Use `ReadableRegistry::get_<record>` functions to retrieve tagged versions.
