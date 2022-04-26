@@ -43,10 +43,3 @@ before the function is called with a pointer to the memory segment.
 The module is in charge of deserializing it
 and serializing the result into a new buffer,
 that the engine will free using `arora_buffer_free`.
-
-## Miscellaneous
-
-Initially the implementation was asynchronous,
-but it had too much impact on the performance.
-The current implementation is synchronous,
-but we kept the [`Actor`](src/actor.rs) implementation around.
