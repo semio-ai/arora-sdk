@@ -47,8 +47,7 @@ Their declaration may involve references to existing [types](#type):
 ## Type (`ty`)
 
 Structured types can be described in both
-[high-level](crates/arora-schema/src/ty/high.rs) or
-[low-level](crates/arora-schema/src/ty/low.rs) ways,
+[high-level](src/ty/high.rs) or [low-level](src/ty/low.rs) ways,
 so that they can be used in both high-level or low-level modules.
 This library can describe:
 - [primitive types](src/ty/mod.rs), equivalent in Rust to:
@@ -69,3 +68,12 @@ It is generic and can also be serialized
 For other kind of conversions
 a common error type is suggested:
 `arora-schema::value::ConversionError`.
+
+[`Value`s](src/value.rs) are useful at runtime
+to pass arguments to functions,
+but also to describe `default_value`s
+for function parameters.
+
+> Note: we call "parameter" the declaration of
+> what function may accept as inputs (or outputs, if `mutable`).
+> We call "argument" the actual value passed to the function.
