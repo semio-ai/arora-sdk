@@ -1,7 +1,7 @@
 {
   "ignorePatterns": [
     {
-      "pattern": "http://github.com/semio-ai/"
+      "pattern": "^https://github.com/semio-ai/"
     }
   ]
 }
