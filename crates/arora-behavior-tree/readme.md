@@ -58,7 +58,8 @@ The return value is always expected to be a `behavior_tree::Status`.
 ## Basic Nodes and Helpers
 
 Some [helpers are also available to create behavior trees in code](src/nodes.rs),
-using basic nodes provided by the module [`behavior_tree_nodes`](../arora-behavior-tree-nodes/readme.md).
+using basic nodes provided by the module
+[`behavior_tree_nodes`](../../modules/behavior-tree-nodes/readme.md).
 [`TreeNode`](src/tree_node.rs) offers an alternative way to build behavior trees for Rust applications,
 where the nodes are directly created as trees (instead of being juxtaposed flatly),
 providing a build-time guarantee of the validity of the structure.

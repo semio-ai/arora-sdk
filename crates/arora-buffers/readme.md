@@ -10,6 +10,6 @@ for the details of the buffer format.
 
 This library provides functions to [serialize and deserialize buffers
 from generic `Value`s](src/serde_uuid.rs)),
-as defined in the [`arora-schema`](crates/arora-schema/readme.md)
+as defined in the [`arora-schema`](../arora-schema/readme.md)
 
 This library also provides [an exported function to allocate or free a buffer](src/alloc.rs).
