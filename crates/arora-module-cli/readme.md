@@ -35,3 +35,24 @@ Results depend on the generators.
 See [`arora-module-cpp`](../arora-module-cpp/readme.md)
 or [`arora-module-rust`](../arora-module-rust/readme.md)
 for more details.
+
+### Communication with the Code Generator
+
+`arora-module-cli` finds the generators from
+the `--language` option value `<language>`,
+by looking for the executable named `arora-module-<language>`.
+The generator will be started with the args
+`--self-id` and `--self-version`,
+corresponding respectively to the UUID of the module to generate,
+and to its version tag.
+
+Then, it is fed the list of resolved
+[`ModuleAsset`s](../arora-module-core/readme.md)
+in the standard input (serialized using [`serde`](https://crates.io/crates/serde)).
+It contains the description of all the dependent types and modules,
+and ends with the description of the module to generate.
+
+In return, the generator produces a serialized virtual directory
+using [`arora-vfs`](../arora-vfs/readme.md),
+that `arora-module-cli` will write to the location specified
+with the option `--output-directory`.
