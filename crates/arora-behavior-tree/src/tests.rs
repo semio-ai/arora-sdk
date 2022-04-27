@@ -1,9 +1,8 @@
 #[cfg(test)]
 pub mod tests {
   use crate::{
-    arora_generated::behavior_tree::status::Status, error::BehaviorTreeError,
-    load_behavior_tree_nodes, nodes::*, run_behavior_tree, schema::Expression, BehaviorTree,
-    BehaviorTreeRuntime, ModuleFunction,
+    arora_generated::behavior_tree::status::Status, load_behavior_tree_yaml, nodes::*,
+    run_behavior_tree, schema::Expression, BehaviorTree, BehaviorTreeRuntime, ModuleFunction,
   };
   use anyhow::Result;
   use arora::engine::{EngineBuilder, PinnedEngine};
@@ -30,10 +29,6 @@ pub mod tests {
     io::AsyncReadExt,
   };
   use uuid::Uuid;
-
-  pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
-    return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
-  }
 
   #[test]
   pub fn load_parse_error() -> Result<()> {

@@ -21,6 +21,7 @@ add_custom_target(module-cli ALL
     generate-test-cpp
 )
 
+# We need to make an executable to make a WASM module...
 add_executable(test-cpp-2
   src/main.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp-2.cpp
@@ -28,11 +29,11 @@ add_executable(test-cpp-2
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
 )
-
 target_include_directories(test-cpp-2 PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp-2 PRIVATE -g -pg -fPIC -flto -fno-exceptions)
 target_link_options(test-cpp-2 PRIVATE -Wl,--no-entry -Wl,--export=arora_buffer_alloc -Wl,--export=arora_buffer_free)
+# ... but we don't want it to have a main entry point to use it as a library!
 
 if(BUILD_TESTING)
   add_test(
