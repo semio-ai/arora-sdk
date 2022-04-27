@@ -69,3 +69,12 @@ It is generic and can also be serialized
 For other kind of conversions
 a common error type is suggested:
 `arora-schema::value::ConversionError`.
+
+[`Value`s](src/value.rs) are useful at runtime
+to pass arguments to functions,
+but also to describe `default_value`s
+for function parameters.
+
+> Note: we call "parameter" the declaration of
+> what function may accept as inputs (or outputs, if `mutable`).
+> We call "argument" the actual value passed to the function.

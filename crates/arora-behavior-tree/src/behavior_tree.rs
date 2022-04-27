@@ -373,6 +373,10 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
   })
 }
 
+pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
+  return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
+}
+
 // Other helpers
 //=======================================================
 fn get_variable<'a>(
