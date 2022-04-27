@@ -33,7 +33,7 @@ to create a `BehaviorTreeRuntime` instance, that proposes the general `tick` fun
 > what function may accept as inputs (or outputs, if `mutable`).
 > We call "argument" the actual value passed to the function.
 
-`behavior_tree::Status` is defined in [`behavior-tree-types`](../behavior-tree-types/readme.md),
+`behavior_tree::Status` is defined in [`arora-behavior-tree-types`](../arora-behavior-tree-types/readme.md),
 and can be `Success`, `Failure` or `Running`.
 **Any function of a module that returns a `behavior_tree::Status`
 can be used by a node, and nodes can refer only to such functions.**
@@ -44,7 +44,7 @@ The setup mechanism will compute every binding of node arguments,
 so that every node can be `tick`ed with no argument.
 Thus the tick functions can be registered to the engine in exchange of a `CallableId`.
 This identifier is wrapped in a structure called `TickId`,
-also defined in [`behavior-tree-types`](../behavior-tree-types/readme.md).
+also defined in [`arora-behavior-tree-types`](../arora-behavior-tree-types/readme.md).
 
 Nodes that have children are required to expose them as their first parameter,
 that should be named `children`,
@@ -58,7 +58,7 @@ The return value is always expected to be a `behavior_tree::Status`.
 ## Basic Nodes and Helpers
 
 Some [helpers are also available to create behavior trees in code](src/nodes.rs),
-using basic nodes provided by the module [`behavior_tree_nodes`](../behavior-tree-nodes/readme.md).
+using basic nodes provided by the module [`behavior_tree_nodes`](../arora-behavior-tree-nodes/readme.md).
 [`TreeNode`](src/tree_node.rs) offers an alternative way to build behavior trees for Rust applications,
 where the nodes are directly created as trees (instead of being juxtaposed flatly),
 providing a build-time guarantee of the validity of the structure.

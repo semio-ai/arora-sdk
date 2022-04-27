@@ -8,7 +8,7 @@ and puts all the sources under `src/arora-generated`,
 and provides bindings for the Arora engine.
 
 This module exports symbols imported by the module
-[Behavior Tree Nodes](../behavior-tree-nodes/readme.md),
+[Behavior Tree Nodes](../arora-behavior-tree-nodes/readme.md),
 and is used in the tests of the
 [Behavior Tree library](../../crates/arora-behavior-tree/readme.md).
 
