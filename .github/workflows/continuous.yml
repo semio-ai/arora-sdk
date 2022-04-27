@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build_and_test:
     # The CMake configure and build commands are platform agnostic and should work equally
     # well on Windows or Mac.  You can convert this to a matrix build if you need
     # cross-platform coverage.
@@ -54,3 +54,9 @@ jobs:
       run: ctest -V
       env:
         RUST_BACKTRACE: 1
+
+  markdown-link-check:
+      runs-on: ubuntu-latest
+      steps:
+      - uses: actions/checkout@master
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
