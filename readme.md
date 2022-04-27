@@ -47,8 +47,7 @@ Their declaration may involve references to existing [types](#type):
 ## Type (`ty`)
 
 Structured types can be described in both
-[high-level](crates/arora-schema/src/ty/high.rs) or
-[low-level](crates/arora-schema/src/ty/low.rs) ways,
+[high-level](src/ty/high.rs) or [low-level](src/ty/low.rs) ways,
 so that they can be used in both high-level or low-level modules.
 This library can describe:
 - [primitive types](src/ty/mod.rs), equivalent in Rust to:
