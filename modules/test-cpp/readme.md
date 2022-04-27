@@ -1,7 +1,7 @@
 # Test C++ Module #1
 
 This is an example module for the
-[Arora Engine](../../crates/arora/../../readme.md),
+[Arora Engine](../../crates/arora/readme.md),
 required for the automated tests of the project.
 It demonstrates the implementation of a module in C++,
 using CMake and the WASI SDK (managed at the root of the repository).
