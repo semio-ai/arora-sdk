@@ -1,8 +1,8 @@
 [package]
-name = "dummy"
+name = "arora-nao"
 version = "0.1.0"
 edition = "2021"
-links = "dummy_cpp"
+links = "nao"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,3 +10,5 @@ links = "dummy_cpp"
 
 [build-dependencies]
 cmake = "0.1"
+arora-buffers = { path = "../../crates/arora-buffers" }
+arora-util = { path = "../../crates/arora-util" }

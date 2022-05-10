@@ -11,21 +11,23 @@ on an i686 processor.
 
 ## Cross-compilation on Mac
 
-### Requirements
-
 Install [a cross-toolchain](https://github.com/messense/homebrew-macos-cross-toolchains)
 with [`brew`](https://brew.sh/):
+
 ```shell
 brew tap messense/macos-cross-toolchains
 brew install i686-unknown-linux-musl
 ```
 
-### Using CMake
+You need the Arora tools built for the host first:
 
 ```shell
-mkdir build
-cd build
-cmake .. -DCMAKE_TOOLCHAINE_FILE=../mac-homebrew-i686.toolchain.cmake
-cmake --build .
-cmake --install . --prefix /path/to/install
+cargo build
+```
+
+Build using CMake and the provided cross-toolchain:
+
+```shell
+cmake -B build-nao -DCMAKE_TOOLCHAIN_FILE=mac-homebrew-i686.toolchain.cmake -DARORA_BINARY_DIR=../../target/debug -DARORA_BEHAVIOR_TREE_INCLUDE=../../crates/behavior-tree-types-yaml/records
+cmake --build build-nao
 ```
