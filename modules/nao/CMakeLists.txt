@@ -21,8 +21,8 @@ add_custom_target(generate-nao ALL
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/nao.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/nao.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+    # ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
+    # ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
     ${CMAKE_CURRENT_BINARY_DIR}/arora/records/module/ed2a9b9b-a2b8-438e-a99c-29e0df09c1d4.yaml
 )
@@ -32,7 +32,7 @@ add_library(
   src/nao.cpp
   # Auto-generated sources for this module.
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/nao.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
+  # ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
 )
 
 # Makes Qi available.
@@ -46,18 +46,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(qi)
 
 # Other arora dependencies.
-set(ARORA_INCLUDE_DIR ${ARORA_BINARY_DIR}/../include)
+set(ARORA_INCLUDE_DIR ${ARORA_BINARY_DIR}/../../include)
 add_library(arora-buffers STATIC IMPORTED GLOBAL)
-set_property(TARGET arora-buffers PROPERTY IMPORTED_LOCATION ${ARORA_BINARY_DIR}/libarora-buffers.a)
+set_property(TARGET arora-buffers PROPERTY IMPORTED_LOCATION ${ARORA_BINARY_DIR}/libarora_buffers.a)
 set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
 
 add_library(arora-util STATIC IMPORTED GLOBAL)
-set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_BINARY_DIR}/libarora-util.a)
+set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_BINARY_DIR}/libarora_util.a)
 set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
 
-add_library(arora-cpp STATIC IMPORTED GLOBAL)
-set_property(TARGET arora-cpp PROPERTY IMPORTED_LOCATION ${ARORA_BINARY_DIR}/libarora-cpp.a)
-set_property(TARGET arora-cpp PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_BUFFERS_CPP_INCLUDE_DIR})
+add_subdirectory(arora-c) # exports arora-cpp
+add_subdirectory(arora-cpp) # exports arora-cpp
 
 # Includes and linking.
 add_dependencies(nao qi generate-nao)
