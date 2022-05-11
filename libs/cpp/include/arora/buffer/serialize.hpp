@@ -6,18 +6,15 @@ extern "C" {
 }
 
 #include <cstdint>
-#include <optional>
-#include <ranges>
-#include <string_view>
 #include <string>
+#include <vector>
 #include "types.hpp"
-#include "View.hpp"
 
 namespace arora
 {
   namespace buffer
   {
-    template<typename T>
+    template<typename T, typename _ = void>
     void serialize(arora_buffer_writer *const writer, const T &value) noexcept;
 
     template<typename T>
@@ -28,11 +25,11 @@ namespace arora
       }
     }
 
-    template<std::ranges::contiguous_range R>
-    void serialize(arora_buffer_writer *const writer, const R &range) noexcept {
-      uintptr_t size = std::size(range); // also casting to Arora buffer size type.
-      const auto *const data = range.data(); // if it was supported, I'd use std::ranges::cdata instead.
-      using T = std::ranges::range_value_t<R>;
+    template<typename C, std::enable_if_t<detail::is_container<C>::value>>
+    void serialize(arora_buffer_writer *const writer, const C &container) noexcept {
+      uintptr_t size = container.size(); // also casting to Arora buffer size type.
+      auto data = container.data();
+      using T = typename C::value_type;
       arora_buffer_writer_add_array_primitive(writer, arora_buffer_type_of<T>(), size);
       arora_buffer_writer_add_bulk<T>(writer, data, size);
     }
@@ -109,12 +106,6 @@ namespace arora
       arora_buffer_writer_add_string(writer, reinterpret_cast<const std::uint8_t *>(value.data()), value.size());
     }
 
-    template<>
-    inline void serialize<std::string_view>(arora_buffer_writer *const writer, const std::string_view &value) noexcept
-    {
-      arora_buffer_writer_add_string(writer, reinterpret_cast<const std::uint8_t *>(value.data()), value.size());
-    }
-    
     template<>
     inline void arora_buffer_writer_add_bulk<std::uint8_t>(arora_buffer_writer *const writer, const std::uint8_t *const data, std::size_t size) noexcept {
       return arora_buffer_writer_add_u8_raw_bulk(writer, data, size);

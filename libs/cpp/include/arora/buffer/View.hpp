@@ -9,6 +9,9 @@ namespace arora
     class View
     {
     public:
+      using value_type = T;
+      using size_type = std::size_t;
+
       View(const T *const data, const std::size_t size)
         : data_(data)
         , size_(size)
@@ -36,17 +39,17 @@ namespace arora
         return data_ + size_;
       }
 
-      std::size_t size() const
+      size_type size() const
       {
         return size_;
       }
 
-      const T &operator[](const std::size_t index) const
+      const T &operator[](const size_type index) const
       {
         return data_[index];
       }
 
-      const T &at(const std::size_t index) const
+      const T &at(const size_type index) const
       {
         return data_[index];
       }

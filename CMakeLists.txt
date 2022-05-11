@@ -3,8 +3,9 @@ cmake_minimum_required(VERSION 3.0)
 
 include(CTest)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 
 set(USE_RUST_DEBUG ON CACHE BOOL "Use Rust debug build")
 set(NAO OFF CACHE BOOL "Cross-compile for NAO and build its specific module")
