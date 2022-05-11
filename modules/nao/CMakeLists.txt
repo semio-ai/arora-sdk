@@ -41,7 +41,7 @@ include(FetchContent)
 FetchContent_Declare(
   qi
   GIT_REPOSITORY https://github.com/semio-ai/libqi.git
-  GIT_TAG bdd666e9d701c873d644465a76aafba71f0e4096
+  GIT_TAG 5663c31d674a32c5ec208864ca5acb802e425c40
 )
 FetchContent_MakeAvailable(qi)
 
