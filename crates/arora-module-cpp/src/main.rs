@@ -381,7 +381,7 @@ fn generate_module_imports<'a>(
             name: "__arora_return__".to_string(),
             ty: ty::optional_const(&TypeRef {
               ty: ty::type_name(context, &func.return_ty),
-              constant: true,
+              constant: false,
               ..Default::default()
             }),
             value: Some(
