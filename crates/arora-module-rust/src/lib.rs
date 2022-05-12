@@ -196,7 +196,7 @@ pub fn generate_enumeration_source(
     quote! { #variant_ident, }
   });
   let enum_declaration = quote! {
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Clone)]
     pub enum #enum_ident {
       #(#enum_contents)*
     }
