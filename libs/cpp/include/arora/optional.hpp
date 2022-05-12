@@ -538,15 +538,15 @@ public:
   }
 
   constexpr T const& value() const& {
-    return initialized() ? contained_val() : (throw bad_optional_access("bad optional access"), contained_val());
+    return initialized() ? contained_val() : (abort(), contained_val());
   }
   
   OPTIONAL_MUTABLE_CONSTEXPR T& value() & {
-    return initialized() ? contained_val() : (throw bad_optional_access("bad optional access"), contained_val());
+    return initialized() ? contained_val() : (abort(), contained_val());
   }
   
   OPTIONAL_MUTABLE_CONSTEXPR T&& value() && {
-    if (!initialized()) throw bad_optional_access("bad optional access");
+    if (!initialized()) abort();
 	return std::move(contained_val());
   }
   
@@ -702,7 +702,7 @@ public:
   }
   
   constexpr T& value() const {
-    return ref ? *ref : (throw bad_optional_access("bad optional access"), *ref);
+    return ref ? *ref : (abort(), *ref);
   }
   
   explicit constexpr operator bool() const noexcept {
