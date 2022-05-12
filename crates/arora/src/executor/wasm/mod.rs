@@ -85,7 +85,8 @@ impl Executor for WebAssemblyExecutor {
     let store = Store::new(&self.engine, ctx);
 
     let mut linker = Linker::new(&self.engine);
-    wasmtime_wasi::add_to_linker(&mut linker, |s| s).map_err(|_| LoadModuleError::Internal)?;
+    wasmtime_wasi::add_to_linker(&mut linker, |s| s)
+      .map_err(|err| LoadModuleError::Internal(format!("failed to map to wasm linker: {}", err)))?;
 
     Ok(Box::new(
       WebAssemblyModule::new(

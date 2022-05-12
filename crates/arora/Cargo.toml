@@ -18,9 +18,11 @@ async-trait = "0.1"
 bytes = "1"
 flatbuffers = "2.0.0"
 lazy_static = "*"
+libloading = "0.7"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
 wasmtime = { git = "https://github.com/semio-ai/wasmtime.git", branch = "release-0.33.0", features = ["async", "vtune"] }
