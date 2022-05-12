@@ -43,7 +43,7 @@ pub async fn generate_sources(
 ) -> Result<Directory, GenerationError> {
   let mut result = generate_common_sources()?;
   let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
-  let mut current_module = Option::<(Uuid, ModuleFrozen)>::None;
+  let mut current_module = Option::<(Uuid, ModuleFrozen, String)>::None;
   for asset in assets {
     match asset {
       ModuleAsset::Type(id, _, ty) => match ty {
@@ -73,11 +73,11 @@ pub async fn generate_sources(
           entry.insert(vec![import]);
         }
       },
-      ModuleAsset::Module(ref module_id, _, ref module) => {
+      ModuleAsset::Module(ref module_id, _, ref module, ref executor) => {
         let module_sources = generate_module_source(&module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.
-        current_module = Some((module_id.to_owned(), module.to_owned()));
+        current_module = Some((module_id.to_owned(), module.to_owned(), executor.to_owned()));
       }
     }
   }
@@ -98,7 +98,7 @@ pub async fn generate_sources(
   // Produce the stripped `module.yaml` file.
   let current_module = current_module.unwrap();
   result = result.merge_with(
-    &generate_header_file(&current_module.0, &current_module.1, &all_imports)
+    &generate_header_file(&current_module.0, &current_module.1, &all_imports, &current_module.2)
       .map_err(GenerationError::ModuleDeclarationError)?,
   );
 

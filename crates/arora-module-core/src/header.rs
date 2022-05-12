@@ -30,6 +30,7 @@ pub fn generate_header_file(
   id: &Uuid,
   module: &ModuleFrozen,
   imports: &Vec<ImportAsset>,
+  executor: &String,
 ) -> Result<Directory, ModuleDeclarationError> {
   let header = Header {
     id: id.to_owned(),
@@ -43,7 +44,7 @@ pub fn generate_header_file(
       patch: 0u32,
     },
     executor: Executor {
-      name: "wasm".to_owned(),
+      name: executor.to_owned(),
       min_version: None,
       max_version: None,
     },

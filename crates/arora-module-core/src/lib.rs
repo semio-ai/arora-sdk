@@ -44,6 +44,7 @@ pub async fn analyze_module<R: ReadableRegistry + Freezer>(
 
   // Resolve the module contents into a description compatible with the registry.
   // It already includes the dependencies (internal and external) as references.
+  let executor_name = module_definition.executor.name.to_owned();
   let resolved_module = resolve_high_module(module_definition, registry).await?;
 
   // Collect first the actual types behind the references.
@@ -76,6 +77,7 @@ pub async fn analyze_module<R: ReadableRegistry + Freezer>(
     module_id,
     module_version.into(),
     resolved_module.module,
+    executor_name,
   ));
   Ok(assets)
 }
@@ -87,8 +89,8 @@ pub enum ModuleAsset {
   Type(Uuid, Version, TypeDefinitionFrozen),
   /// Imported symbol, including the identifier of its origin module.
   Import(ImportAsset),
-  /// Module, including its identifier.
-  Module(Uuid, Version, ModuleFrozen),
+  /// Module, including its identifier, version and executor type.
+  Module(Uuid, Version, ModuleFrozen, String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

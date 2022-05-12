@@ -1098,7 +1098,7 @@ async fn main() -> anyhow::Result<()> {
           }
         }
       }
-      ModuleAsset::Module(module_id, _, module) => {
+      ModuleAsset::Module(module_id, _, module, _) => {
         if module_id != context.module_id {
           anyhow::bail!("Module ID differs from self ID");
         }
