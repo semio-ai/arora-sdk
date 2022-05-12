@@ -1,1 +1,3 @@
-/target
+src/arora_generated
+target
+build*/

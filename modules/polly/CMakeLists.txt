@@ -1,16 +1,23 @@
-# This module is meant to be native only
+# This module is meant to be native, and supposes it is building for the host.
 set(MODULE_NAME polly)
-if(APPLE)
+if(CMAKE_HOST_APPLE)
+  message(STATUS Apple)
   set(DYLIB_EXTENSION .dylib)
-elseif(UNIX)
+elseif(CMAKE_HOST_UNIX)
+  message(STATUS Unix)
   set(DYLIB_EXTENSION .so)
-else()
+elseif(CMAKE_HOST_WINDOWS)
+  message(STATUS Windows)
   set(DYLIB_EXTENSION .dll)
+else()
+  message(FATAL_ERROR "Unsupported host platform")
 endif()
+set(ARORA_GENERATED_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/arora_generated)
 set(MODULE_EXECUTABLE ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_TARGET_SUBDIR}/libpolly${DYLIB_EXTENSION})
 add_custom_target(${MODULE_NAME} ALL
   COMMAND cargo build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  BYPRODUCTS ${MODULE_EXECUTABLE}
 )
 
 if(BUILD_TESTING)
