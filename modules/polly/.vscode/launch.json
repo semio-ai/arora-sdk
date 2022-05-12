@@ -1,0 +1,45 @@
+{
+  // Utilisez IntelliSense pour en savoir plus sur les attributs possibles.
+  // Pointez pour afficher la description des attributs existants.
+  // Pour plus d'informations, visitez : https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'polly_trial'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=polly_trial",
+          "--package=polly_trial"
+        ],
+        "filter": {
+          "name": "polly_trial",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'polly_trial'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=polly_trial",
+          "--package=polly_trial"
+        ],
+        "filter": {
+          "name": "polly_trial",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
