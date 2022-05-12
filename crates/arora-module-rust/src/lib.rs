@@ -106,8 +106,8 @@ pub async fn generate_sources(
   let engine_functions_declarations = quote! {
     #[link(wasm_import_module = "env")]
     extern "C" {
-      pub fn arora_dispatch(module_id: i32, method_id: i32, arg: i32) -> i32;
-      pub fn arora_dispatch_indirect(callable_id: u64) -> i32;
+      pub fn arora_dispatch(module_id: usize, method_id: usize, arg: usize) -> usize;
+      pub fn arora_dispatch_indirect(callable_id: u64) -> usize;
     }
   };
   result = result.merge_with(
@@ -669,9 +669,9 @@ async fn generate_imports_from_module_source(
     let perform_call = quote! {
       let result_buffer_addr = unsafe {
         arora_dispatch(
-          #module_const_id_ident.as_ptr() as i32,
-          #function_const_id_ident.as_ptr() as i32,
-          arg.as_ptr() as i32,
+          #module_const_id_ident.as_ptr() as usize,
+          #function_const_id_ident.as_ptr() as usize,
+          arg.as_ptr() as usize,
         )
       };
     };
@@ -944,7 +944,7 @@ async fn generate_module_source(
       function_declarations.push(quote! {
         #[doc = #doc]
         #[no_mangle]
-        pub extern "C" fn #arora_function_ident (input_addr: i32) -> i32 {
+        pub extern "C" fn #arora_function_ident (input_addr: usize) -> usize {
           let input_ptr = input_addr as *const u8;
           const INPUT_SIZE_SIZE: usize = std::mem::size_of::<u32>();
           let input_size_bytes: &[u8; 4] = unsafe {
@@ -962,7 +962,7 @@ async fn generate_module_source(
           #call_and_write_result
           #(#write_mutated_params)*
           let result_buffer = writer.finalize();
-          Box::leak(result_buffer).as_ptr() as i32
+          Box::leak(result_buffer).as_ptr() as usize
         }
       });
     }
