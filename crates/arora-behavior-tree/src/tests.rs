@@ -1,5 +1,6 @@
 #[cfg(test)]
 pub mod tests {
+  use crate::schema_groot;
   use crate::tree_node::TreeNode;
   use crate::{
     arora_generated::behavior_tree::status::Status, load_behavior_tree_yaml, nodes::*,
@@ -272,12 +273,12 @@ pub mod tests {
   #[ignore]
   #[tokio::test]
   pub async fn polly_sequence_of_speech() -> Result<()> {
-    const NAMES: [&'static str; 3] = ["Ross", "Brad", "Victor"];
+    const NAMES: [&'static str; 3] = ["Ross", "Braden", "Victor"];
     let name = NAMES.choose(&mut thread_rng()).unwrap();
     let behavior = seq_star(vec![
       polly_say(Expression::Value(Value::String("Hello!".to_string()))),
       polly_say(Expression::Value(Value::String(format!(
-        "Oh it's you {}",
+        "Oh, it's you, {}",
         name
       )))),
       polly_say(Expression::Value(Value::String(
@@ -298,6 +299,191 @@ pub mod tests {
     let mut status = Status::Running;
     while status == Status::Running {
       status = runtime.tick().unwrap();
+      std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(status, Status::Success);
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn fake_listen_regex_dispatch() -> Result<()> {
+    let name: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let name_expr = Expression::Variable(name.to_owned());
+    let feeling: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let feeling_expr = Expression::Variable(feeling.to_owned());
+    let input: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let input_expr = Expression::Variable(input.to_owned());
+
+    let behavior: BehaviorTree = fallback(vec![
+      seq(vec![
+        is_str_set(name_expr.to_owned()),
+        is_str_set(feeling_expr.to_owned()),
+      ]),
+      seq(vec![
+        wait_str_set(input_expr.to_owned()),
+        fallback(vec![
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String("(Ross|Braden|Victor)".to_string())),
+            name_expr.to_owned(),
+          ),
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String(
+              "(fine|good|well|great|bad|terrible|tired|awkward)".to_string(),
+            )),
+            feeling_expr.to_owned(),
+          ),
+        ]),
+        run(),
+      ]),
+    ])
+    .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&vec![
+      "test-rust-wasm".to_string(),
+      "behavior-tree-nodes".to_string(),
+    ])
+    .await;
+
+    let mut runtime =
+      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut status = Status::Running;
+    let mut tick_count = 0;
+    let expected_name = "Ross".to_string();
+    let expected_feeling = "great".to_string();
+    while status == Status::Running {
+      tick_count += 1;
+      println!("tick {}", tick_count);
+      if tick_count == 5 {
+        *input.borrow_mut() = Value::String(expected_name.to_owned());
+      }
+      if tick_count == 10 {
+        *input.borrow_mut() = Value::String(expected_feeling.to_owned());
+      }
+      status = runtime.tick().unwrap();
+      std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(status, Status::Success);
+
+    if let Value::String(name_value) = &*name.borrow() {
+      assert_eq!(&expected_name, name_value);
+    } else {
+      panic!("name variable does not hold a string");
+    }
+
+    if let Value::String(feeling_value) = &*feeling.borrow() {
+      assert_eq!(&expected_feeling, feeling_value);
+    } else {
+      panic!("feeling variable does not hold a string");
+    }
+    Ok(())
+  }
+
+  #[ignore]
+  #[tokio::test]
+  pub async fn fake_listen_regex_dispatch_to_groot() -> Result<()> {
+    let name = Uuid::new_v4();
+    let name_expr = Expression::VariableId(name.to_owned());
+    let feeling = Uuid::new_v4();
+    let feeling_expr = Expression::VariableId(feeling.to_owned());
+    let input = Uuid::new_v4();
+    let input_expr = Expression::VariableId(input.to_owned());
+
+    let behavior = fallback(vec![
+      seq(vec![
+        is_str_set(name_expr.to_owned()),
+        is_str_set(feeling_expr.to_owned()),
+      ]),
+      seq(vec![
+        wait_str_set(input_expr.to_owned()),
+        fallback(vec![
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String("(Ross|Brad|Victor)".to_string())),
+            name_expr.to_owned(),
+          ),
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String(
+              "(fine|good|well|great|bad|terrible|tired|awkward)".to_string(),
+            )),
+            feeling_expr.to_owned(),
+          ),
+        ]),
+        run(),
+      ]),
+    ]);
+
+    let index = schema_groot::tests::setup_index().await;
+    let mut variables = HashMap::new();
+    variables.insert(name.to_owned(), "name".to_string());
+    variables.insert(feeling.to_owned(), "feeling".to_string());
+    variables.insert(input.to_owned(), "input".to_string());
+    let behavior = schema_groot::BehaviorTree {
+      root: schema_groot::Node::try_from_tree_node(&behavior, &index, &mut variables)?,
+    };
+
+    println!("{}", String::from_utf8(behavior.to_groot_xml()).unwrap());
+    Ok(())
+  }
+
+  #[ignore]
+  #[tokio::test]
+  pub async fn fake_listen_polly_dialogue() -> Result<()> {
+    let name: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let name_expr = Expression::Variable(name.to_owned());
+    let feeling: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let feeling_expr = Expression::Variable(feeling.to_owned());
+    let input: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
+    let input_expr = Expression::Variable(input.to_owned());
+
+    let behavior = fallback(vec![
+      seq(vec![
+        is_str_set(name_expr.to_owned()),
+        is_str_set(feeling_expr.to_owned()),
+      ]),
+      seq(vec![
+        wait_str_set(input_expr.to_owned()),
+        fallback(vec![
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String("(Ross|Brad|Victor)".to_string())),
+            name_expr.to_owned(),
+          ),
+          regex_match(
+            input_expr.to_owned(),
+            Expression::Value(Value::String(
+              "(fine|good|well|great|bad|terrible|tired|awkward)".to_string(),
+            )),
+            feeling_expr.to_owned(),
+          ),
+        ]),
+        run(),
+      ]),
+    ])
+    .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&vec![
+      "test-rust-wasm".to_string(),
+      "behavior-tree-nodes".to_string(),
+      "polly".to_string(),
+    ])
+    .await;
+
+    let mut runtime =
+      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut status = Status::Running;
+    let mut tick_count = 0;
+    while status == Status::Running {
+      if tick_count == 5 {
+        *input.borrow_mut() = Value::String("Ross".to_string());
+      }
+      if tick_count == 10 {
+        *input.borrow_mut() = Value::String("great".to_string());
+      }
+      status = runtime.tick().unwrap();
+      tick_count += 1;
       std::thread::sleep(std::time::Duration::from_millis(50));
     }
     assert_eq!(status, Status::Success);

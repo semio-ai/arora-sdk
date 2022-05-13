@@ -33,7 +33,7 @@ impl Display for Node {
 }
 
 /// An expression describing a variable in the context of the behavior tree.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Expression {
   /// Generic value description.
@@ -53,7 +53,7 @@ pub enum Expression {
 
 /// An expression describing a function to call.
 /// Every piece of it can be expressed dynamically.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct CallExpression {
   /// The module ID.
   /// The result of the expression must be an UUID.
