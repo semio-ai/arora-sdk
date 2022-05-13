@@ -3,7 +3,7 @@
 
 #include <arora/buffers.h>
 #include <cstdint>
-#include <string_view>
+#include <string>
 
 namespace arora
 {
@@ -25,7 +25,7 @@ namespace arora
       void add_i64(const std::int64_t value);
       void add_f32(const float value);
       void add_f64(const double value);
-      void add_string(const std::string_view &value);
+      void add_string(const std::string &value);
 
       std::uint8_t *finalize(std::size_t length);
 

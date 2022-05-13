@@ -4,72 +4,22 @@
 extern "C" {
   #include <arora/buffers.h>
 }
-
+#include <arora/optional.hpp>
 #include <cassert>
 #include <cstdint>
-#include <optional>
-#include <ranges>
-#include <string_view>
+#include <string>
 #include <vector>
 #include "types.hpp"
-#include "View.hpp"
 
 namespace arora
 {
   namespace buffer
   {
     template<typename T>
-    std::optional<T> deserialize(arora_buffer_reader *const reader) noexcept;
+    std::enable_if_t<!detail::is_container<T>::value, std::experimental::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept;
 
     template<typename T>
     T arora_buffer_reader_get(arora_buffer_reader *const reader) noexcept;
-
-    template<typename T>
-    const T *arora_buffer_reader_get_bulk(arora_buffer_reader *const reader, std::size_t count) {
-      auto* data = new T[count];
-      for (std::size_t i = 0; i < count; ++i) {
-        data[i] = deserialize<T>(reader).value();
-      }
-      return data;
-    }
-
-    void skip(arora_buffer_reader *const reader, const std::uint8_t type);
-    void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
-
-    template<typename T>
-    std::optional<T> deserialize(arora_buffer_reader *const reader) noexcept {
-        const std::uint8_t type = arora_buffer_reader_next_type(reader);
-        if (type == arora_buffer_type_of<T>())
-        {
-          return arora_buffer_reader_get<T>(reader);
-        }
-        else
-        {
-          skip(reader, type);
-          return std::nullopt;
-        }
-    }
-
-    template<std::ranges::contiguous_range R>
-    std::optional<R> deserialize(arora_buffer_reader *const reader) noexcept {
-      const std::uint8_t type = arora_buffer_reader_next_type(reader);
-      if (type != arora_buffer_type_of<R>())
-      {
-        skip(reader, type);
-        return std::nullopt;
-      }
-
-      using T = std::ranges::range_value_t<R>;
-      const arora_get_array_result res = arora_buffer_reader_get_array(reader);
-      if (res.ty != arora_buffer_type_of<T>())
-      {
-        skip_array(reader, res.ty, res.element_count);
-        return std::nullopt;
-      }
-
-      const auto * const data = arora_buffer_reader_get_bulk<T>(reader, res.element_count);
-      return R(data, data + res.element_count);
-    }
 
     template<>
     inline bool arora_buffer_reader_get<bool>(arora_buffer_reader *const reader) noexcept {
@@ -126,13 +76,40 @@ namespace arora
     }
     
     template<>
-    inline std::string_view arora_buffer_reader_get<std::string_view>(arora_buffer_reader *const reader) noexcept {
+    inline std::string arora_buffer_reader_get<std::string>(arora_buffer_reader *const reader) noexcept {
           std::uint32_t length = 0;
           const std::uint8_t *const data = arora_buffer_reader_get_string(reader, &length);
           assert(data != nullptr);
-          return std::string_view(reinterpret_cast<const char *>(data), length);
+          return std::string(reinterpret_cast<const char *>(data), length);
+    }
+    
+    void skip(arora_buffer_reader *const reader, const std::uint8_t type);
+    void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
+
+    template<typename T>
+    std::enable_if_t<!detail::is_container<T>::value, std::experimental::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept {
+        const std::uint8_t type = arora_buffer_reader_next_type(reader);
+        if (type == arora_buffer_type_of<T>())
+        {
+          return arora_buffer_reader_get<T>(reader);
+        }
+        else
+        {
+          skip(reader, type);
+          return std::experimental::nullopt;
+        }
     }
 
+    // Arrays
+    template<typename T>
+    const T *arora_buffer_reader_get_bulk(arora_buffer_reader *const reader, std::size_t count) {
+      auto* data = new T[count];
+      for (std::size_t i = 0; i < count; ++i) {
+        data[i] = deserialize<T>(reader).value();
+      }
+      return data;
+    }
+  
     template<>
     inline const std::uint8_t *arora_buffer_reader_get_bulk<std::uint8_t>(arora_buffer_reader *const reader, std::size_t count) {
       return arora_buffer_reader_get_u8_bulk(reader, count);
@@ -181,34 +158,52 @@ namespace arora
     inline const double *arora_buffer_reader_get_bulk<double>(arora_buffer_reader *const reader, std::size_t count) {
       return arora_buffer_reader_get_f64_bulk(reader, count);
     }
-    
-    template<>
-    inline std::optional<std::vector<std::string_view>> deserialize<std::vector<std::string_view>>(arora_buffer_reader *const reader) noexcept
-    {
-      const std::uint8_t type = arora_buffer_reader_next_type(reader);
-      if (type != ARORA_BUFFER_TYPE_ARRAY)
+
+    template<typename T>
+    std::experimental::optional<std::vector<T>> deserialize_elements(arora_buffer_reader *const reader) noexcept {
+      const arora_get_array_result res = arora_buffer_reader_get_array(reader);
+      if (res.ty != arora_buffer_type_of<T>())
       {
-        skip(reader, type);
-        return std::nullopt;
+        skip_array(reader, res.ty, res.element_count);
+        return std::experimental::nullopt;
       }
 
+      const auto * const data = arora_buffer_reader_get_bulk<T>(reader, res.element_count);
+      return std::vector<T>(data, data + res.element_count);
+    }
+
+    template<>
+    inline std::experimental::optional<std::vector<std::string>> deserialize_elements<std::string>(arora_buffer_reader *const reader) noexcept
+    {
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
       if (res.ty != ARORA_BUFFER_TYPE_STRING)
       {
         skip_array(reader, res.ty, res.element_count);
-        return std::nullopt;
+        return std::experimental::nullopt;
       }
 
-      std::vector<std::string_view> result;
+      std::vector<std::string> result;
       result.reserve(res.element_count);
       for (std::size_t i = 0; i < res.element_count; ++i)
       {
         std::uint32_t length = 0;
         const std::uint8_t *const str = arora_buffer_reader_get_string(reader, &length);
-        result.emplace_back(std::string_view(reinterpret_cast<const char *>(str), length));
+        result.emplace_back(std::string(reinterpret_cast<const char *>(str), length));
       }
 
       return result;
+    }
+
+    template<typename R>
+    std::enable_if_t<detail::is_container<R>::value, std::experimental::optional<R>> deserialize(arora_buffer_reader *const reader) noexcept {
+      const std::uint8_t type = arora_buffer_reader_next_type(reader);
+      if (type != arora_buffer_type_of<R>())
+      {
+        skip(reader, type);
+        return std::experimental::nullopt;
+      }
+      using T = typename R::value_type;
+      return deserialize_elements<T>(reader);
     }
   }
 }

@@ -165,6 +165,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
   let mut functions_modules = HashMap::new();
   let mut engine = EngineBuilder::new()
     .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
+    .add_executor(arora::executor::native::NativeExecutor::new())
     .build();
   for i in 0..args.header.len() {
     // Read the header.

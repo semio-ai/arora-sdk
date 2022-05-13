@@ -6,6 +6,7 @@ use crate::arora_generated::{
   test_rust_wasm,
 };
 use arora_buffers::BufferReader;
+use regex::Regex;
 
 // To simulate statuses
 //===============================================================
@@ -27,6 +28,62 @@ fn status_identity(value: Option<Status>) -> Status {
 
 // Basic data-oriented action nodes
 //==============================================================
+fn set_str(variable: &mut Option<String>, value: Option<String>) -> Status {
+  *variable = value;
+  Status::Success
+}
+
+fn unset_str(variable: &mut Option<String>) -> Status {
+  *variable = None;
+  Status::Success
+}
+
+fn is_str_set(value: Option<String>) -> Status {
+  if value.is_some() && !value.unwrap().is_empty() {
+    Status::Success
+  } else {
+    Status::Failure
+  }
+}
+
+fn wait_str_set(value: Option<String>) -> Status {
+  if value.is_some() && !value.unwrap().is_empty() {
+    Status::Success
+  } else {
+    Status::Running
+  }
+}
+
+fn regex_match(
+  value: Option<String>,
+  matcher: Option<String>,
+  first_match: &mut Option<String>,
+) -> Status {
+  let value = match value {
+    Some(value) => value,
+    None => return Status::Failure,
+  };
+  let matcher = match matcher {
+    Some(matcher) => matcher,
+    None => return Status::Failure,
+  };
+  let re = match Regex::new(matcher.as_str()) {
+    Ok(re) => re,
+    Err(_) => return Status::Failure,
+  };
+  match re.captures(value.as_str()) {
+    Some(captures) => {
+      if captures.len() == 0 {
+        *first_match = Some(String::new());
+      } else {
+        *first_match = Some(captures[0].to_string());
+      }
+      Status::Success
+    }
+    None => Status::Failure,
+  }
+}
+
 fn store(storage: &mut Option<f32>, value: Option<f32>) -> Status {
   *storage = value;
   Status::Success
@@ -78,14 +135,18 @@ fn seq_star(children_arg: Option<Vec<TickId>>, current_index_arg: &mut Option<u1
 }
 
 fn fallback(children: Option<Vec<TickId>>) -> Status {
-  for child in children.unwrap() {
+  let children = children.unwrap();
+  if children.len() == 0 {
+    return Status::Success;
+  }
+  for child in children {
     match call_tick_function(&child) {
       Status::Success => return Status::Success,
       Status::Failure => continue,
       Status::Running => return Status::Running,
     }
   }
-  Status::Success
+  Status::Failure
 }
 
 fn parallel(children: Option<Vec<TickId>>) -> Status {

@@ -53,6 +53,24 @@ impl<'a> BehaviorTreeRuntime<'a> {
       tree.variables.clone(),
       tree.node_arg_variables.clone(),
       caller,
+      TraceTick::No,
+    )?;
+    Ok(Self { caller, tick })
+  }
+
+  fn setup_debug(
+    tree: &'a BehaviorTree,
+    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    caller: &'a mut dyn CallBridge,
+  ) -> Result<Self, BehaviorTreeError> {
+    let tick = setup_tick_function(
+      tree.root.clone(),
+      &tree.node_index,
+      function_index.clone(),
+      tree.variables.clone(),
+      tree.node_arg_variables.clone(),
+      caller,
+      TraceTick::YesAll,
     )?;
     Ok(Self { caller, tick })
   }
@@ -76,6 +94,13 @@ pub fn run_behavior_tree(
   return Ok(status);
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum TraceTick {
+  YesAll,
+  YesThis,
+  No,
+}
+
 fn setup_tick_function(
   node: Rc<Node>,
   node_index: &HashMap<Uuid, Rc<Node>>,
@@ -83,6 +108,7 @@ fn setup_tick_function(
   variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   caller: &mut dyn CallBridge,
+  trace: TraceTick,
 ) -> Result<TickId, BehaviorTreeError> {
   let nof_children = node
     .children
@@ -91,6 +117,11 @@ fn setup_tick_function(
     .unwrap_or(0);
   let mut children_ticks: Vec<TickId> = Vec::with_capacity(nof_children);
   if let Some(children) = &node.children {
+    let child_trace = match trace {
+      TraceTick::YesAll => TraceTick::YesAll,
+      TraceTick::YesThis => TraceTick::No,
+      TraceTick::No => TraceTick::No,
+    };
     for child_id in children {
       let child_node = node_index
         .get(child_id)
@@ -106,6 +137,7 @@ fn setup_tick_function(
         variables.clone(),
         node_arg_variables.clone(),
         caller,
+        child_trace,
       )?;
       children_ticks.push(tick_function_with_id);
     }
@@ -116,6 +148,7 @@ fn setup_tick_function(
     locals: variables.to_owned(),
     node_arg_variables: node_arg_variables.to_owned(),
     children: children_ticks,
+    trace,
   });
   let callable_id = caller.arora_register_callable(tick_function);
   Ok(TickId {
@@ -130,6 +163,7 @@ fn tick(
   node_parameters_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   child_tick_ids: &Vec<TickId>,
   node: Rc<Node>,
+  trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
   let module_function = function_index
     .get(&node.function)
@@ -268,6 +302,12 @@ fn tick(
     .ret
     .try_into()
     .map_err(|e| BehaviorTreeError::ConversionError(e))
+    .map(|status| {
+      if trace != TraceTick::No {
+        println!("tick {} -> {:?}", node.id, status);
+      }
+      status
+    })
 }
 
 /// Specialization of Callable that returns a Status.
@@ -304,6 +344,7 @@ struct TickFunction {
   locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
   node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
   children: Vec<TickId>,
+  trace: TraceTick,
 }
 
 impl Tickable for TickFunction {
@@ -315,6 +356,7 @@ impl Tickable for TickFunction {
       self.node_arg_variables.clone(),
       &self.children,
       self.node.clone(),
+      self.trace,
     )
   }
 }

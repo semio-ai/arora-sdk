@@ -79,6 +79,22 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Call Polly Module",
+            "program": "${workspaceFolder}/target/debug/arora-cli",
+            "args": [
+                "--include",
+                "${workspaceFolder}/crates/arora-behavior-tree-types-yaml/records",
+                "--header",
+                "${workspaceFolder}/modules/polly/src/arora_generated/module.yaml",
+                "--exe",
+                "${workspaceFolder}/modules/polly/target/debug/libpolly.dylib",
+                "--call",
+                "id: e5a41333-4848-411f-878c-f1d662ebb4a0"
+            ]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "C++ generation for test-cpp-2",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [

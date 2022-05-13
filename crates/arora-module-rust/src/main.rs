@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         types.push((id.to_owned(), type_def.to_owned()));
       }
       ModuleAsset::Import(import) => imports.push(import.to_owned()),
-      ModuleAsset::Module(id, tag, module) => {
+      ModuleAsset::Module(id, tag, module, _) => {
         registry
           .add_module(id.to_owned(), tag.to_owned(), module.to_owned())
           .await?

@@ -1,0 +1,35 @@
+id: a1a6bb9a-334f-4617-a764-9a55817039d8
+author: Semio
+description: AWS Polly support module
+license: Proprietary
+name: polly
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: native
+exports:
+  - type: function
+    id: e5a41333-4848-411f-878c-f1d662ebb4a0
+    name: hello_world
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: e1b4bda7-1c7b-4322-b9a0-552201b8a011
+    name: say
+    parameters:
+      - id: fb3787f2-2151-49ce-8b61-6274984558ea
+        name: text
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+imports: []
+dependencies: []
+executable_mime: application/x-binary

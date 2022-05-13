@@ -43,7 +43,7 @@ pub async fn generate_sources(
 ) -> Result<Directory, GenerationError> {
   let mut result = generate_common_sources()?;
   let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
-  let mut current_module = Option::<(Uuid, ModuleFrozen)>::None;
+  let mut current_module = Option::<(Uuid, ModuleFrozen, String)>::None;
   for asset in assets {
     match asset {
       ModuleAsset::Type(id, _, ty) => match ty {
@@ -73,11 +73,11 @@ pub async fn generate_sources(
           entry.insert(vec![import]);
         }
       },
-      ModuleAsset::Module(ref module_id, _, ref module) => {
+      ModuleAsset::Module(ref module_id, _, ref module, ref executor) => {
         let module_sources = generate_module_source(&module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.
-        current_module = Some((module_id.to_owned(), module.to_owned()));
+        current_module = Some((module_id.to_owned(), module.to_owned(), executor.to_owned()));
       }
     }
   }
@@ -98,7 +98,7 @@ pub async fn generate_sources(
   // Produce the stripped `module.yaml` file.
   let current_module = current_module.unwrap();
   result = result.merge_with(
-    &generate_header_file(&current_module.0, &current_module.1, &all_imports)
+    &generate_header_file(&current_module.0, &current_module.1, &all_imports, &current_module.2)
       .map_err(GenerationError::ModuleDeclarationError)?,
   );
 
@@ -106,8 +106,8 @@ pub async fn generate_sources(
   let engine_functions_declarations = quote! {
     #[link(wasm_import_module = "env")]
     extern "C" {
-      pub fn arora_dispatch(module_id: i32, method_id: i32, arg: i32) -> i32;
-      pub fn arora_dispatch_indirect(callable_id: u64) -> i32;
+      pub fn arora_dispatch(module_id: usize, method_id: usize, arg: usize) -> usize;
+      pub fn arora_dispatch_indirect(callable_id: u64) -> usize;
     }
   };
   result = result.merge_with(
@@ -196,7 +196,7 @@ pub fn generate_enumeration_source(
     quote! { #variant_ident, }
   });
   let enum_declaration = quote! {
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Clone)]
     pub enum #enum_ident {
       #(#enum_contents)*
     }
@@ -669,9 +669,9 @@ async fn generate_imports_from_module_source(
     let perform_call = quote! {
       let result_buffer_addr = unsafe {
         arora_dispatch(
-          #module_const_id_ident.as_ptr() as i32,
-          #function_const_id_ident.as_ptr() as i32,
-          arg.as_ptr() as i32,
+          #module_const_id_ident.as_ptr() as usize,
+          #function_const_id_ident.as_ptr() as usize,
+          arg.as_ptr() as usize,
         )
       };
     };
@@ -944,7 +944,7 @@ async fn generate_module_source(
       function_declarations.push(quote! {
         #[doc = #doc]
         #[no_mangle]
-        pub extern "C" fn #arora_function_ident (input_addr: i32) -> i32 {
+        pub extern "C" fn #arora_function_ident (input_addr: usize) -> usize {
           let input_ptr = input_addr as *const u8;
           const INPUT_SIZE_SIZE: usize = std::mem::size_of::<u32>();
           let input_size_bytes: &[u8; 4] = unsafe {
@@ -962,7 +962,7 @@ async fn generate_module_source(
           #call_and_write_result
           #(#write_mutated_params)*
           let result_buffer = writer.finalize();
-          Box::leak(result_buffer).as_ptr() as i32
+          Box::leak(result_buffer).as_ptr() as usize
         }
       });
     }
@@ -1032,7 +1032,7 @@ async fn generate_serialize_from_frozen(
         PrimitiveKind::I64 => quote! { writer.add_i64(#value_expression) },
         PrimitiveKind::F32 => quote! { writer.add_f32(#value_expression) },
         PrimitiveKind::F64 => quote! { writer.add_f64(#value_expression) },
-        PrimitiveKind::String => quote! { writer.add_string(#value_expression) },
+        PrimitiveKind::String => quote! { writer.add_string(#value_expression.as_str()) },
         PrimitiveKind::ArrayBoolean => {
           generate_serialize_primitive_array(&BOOLEAN_ID, quote! { writer.add_boolean_bulk })
         }
@@ -1071,7 +1071,7 @@ async fn generate_serialize_from_frozen(
           quote! {
             writer.add_array_primitive(#id_bytes, #value_expression.len() as u32);
             for s in #value_expression {
-              writer.add_string(s);
+              writer.add_string(s.as_str());
             }
           }
         }

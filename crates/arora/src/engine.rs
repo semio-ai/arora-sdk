@@ -5,13 +5,16 @@ use arora_schema::value::Value;
 use uuid::Uuid;
 
 use crate::{
-  call::{serialize_to_arg, Call, CallBridge, CallError, Callable, CallableId, CallableRegistry, CallResult},
+  call::{
+    serialize_to_arg, Call, CallBridge, CallError, CallResult, Callable, CallableId,
+    CallableRegistry,
+  },
   executor::{self, Executor},
   module::{DispatchError, Module},
   schema::module::low::ModuleDefinition,
 };
 
-use derive_more::{Display, Error, From};
+use derive_more::{Display, From};
 
 pub struct EngineBuilder {
   executors: HashMap<&'static str, Box<dyn Executor>>,
@@ -34,33 +37,37 @@ impl EngineBuilder {
   }
 }
 
-#[derive(Debug, Display, Error, From, Clone)]
+#[derive(Debug, Display, From, Clone)]
 pub enum LoadModuleError {
   ExecutorNotFound,
   MalformedExecutable,
-  Internal,
+  Internal(String),
 }
+
+impl std::error::Error for LoadModuleError {}
 
 impl From<executor::LoadModuleError> for LoadModuleError {
   fn from(e: executor::LoadModuleError) -> Self {
     match e {
       executor::LoadModuleError::MalformedExecutable => LoadModuleError::MalformedExecutable,
-      executor::LoadModuleError::Internal => LoadModuleError::Internal,
+      executor::LoadModuleError::Internal(message) => LoadModuleError::Internal(message),
     }
   }
 }
 
-#[derive(Debug, Display, Error, From)]
+#[derive(Debug, Display, From)]
 pub enum UnloadModuleError {
   ModuleNotFound,
-  Internal,
+  Internal(String),
 }
+
+impl std::error::Error for UnloadModuleError {}
 
 impl From<executor::UnloadModuleError> for UnloadModuleError {
   fn from(e: executor::UnloadModuleError) -> Self {
     match e {
       executor::UnloadModuleError::ModuleNotFound => UnloadModuleError::ModuleNotFound,
-      executor::UnloadModuleError::Internal => UnloadModuleError::Internal,
+      executor::UnloadModuleError::Internal(message) => UnloadModuleError::Internal(message),
     }
   }
 }
@@ -148,7 +155,10 @@ impl CallBridge for Engine {
     if let Value::Structure(structure) = deserialize(result_data.as_ref()) {
       if call_id != structure.id {
         Err(CallError::Internal {
-          message: format!("result id {} differs from function id {}", structure.id, call_id)
+          message: format!(
+            "result id {} differs from function id {}",
+            structure.id, call_id
+          ),
         })?
       }
       let mut ret = None;
@@ -163,15 +173,12 @@ impl CallBridge for Engine {
         }
       }
       let ret = ret.ok_or(CallError::Internal {
-        message: "call result did not contain a return value".to_string()
+        message: "call result did not contain a return value".to_string(),
       })?;
-      Ok(CallResult {
-        ret,
-        mutated,
-      })
+      Ok(CallResult { ret, mutated })
     } else {
       Err(CallError::Internal {
-        message: "returned data was not a structure".to_string()
+        message: "returned data was not a structure".to_string(),
       })
     }
   }
