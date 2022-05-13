@@ -1,8 +1,9 @@
 # NAO Support Module
 
 This module is meant to be compiled into a native binary,
-and be loaded with the native executor.
-It compiles and uses libQi to perform calls for the robot NAO.
+and be loaded with the [native executor](../../crates/arora/readme.md#native-executor).
+It compiles and uses Semio's patched [libQi](https://github.com/semio-ai/libqi)
+to perform calls for the robot NAO.
 
 This module exports some behavior tree nodes to demonstrate
 the new Arora engine on a NAO v5,
@@ -19,15 +20,16 @@ brew tap messense/macos-cross-toolchains
 brew install i686-unknown-linux-musl
 ```
 
-You need the Arora tools built for the host first:
-
+Configure and build the engine project with NAO support:
+  
 ```shell
-cargo build
-```
-
-Build using CMake and the provided cross-toolchain:
-
-```shell
-cmake -B build-nao -DCMAKE_TOOLCHAIN_FILE=mac-homebrew-i686.toolchain.cmake -DARORA_BINARY_DIR=../../target/debug -DARORA_BEHAVIOR_TREE_INCLUDE=../../crates/behavior-tree-types-yaml/records
+cmake -B build-nao -DNAO=1
 cmake --build build-nao
 ```
+
+You should find the result binary under
+`<repo>/target/i686-unknown-linux-musl/debug/libnao.so`.
+
+> Currently `cmake` automatically configures itself for the target `wasi`,
+> then calls `cargo` for the target `i686-unknown-linux-musl`,
+> which in turn calls `cmake` for that target from the [`build.rs`](build.rs).

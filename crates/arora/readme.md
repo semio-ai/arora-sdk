@@ -10,6 +10,12 @@ to run WASM modules, advertised with
 This is called an [`Executor`](src/executor/mod.rs),
 and other ones may be supported in the future.
 
+## Native Executor
+
+A [`NativeExecutor`] is available and is capable of loading native dynamic libraries,
+and call the functions declared in the module description.
+Beware of figuring out the right dynamic library extension for the host platform.
+
 ## Calling Module Functions
 
 Once modules are loaded using [`load_module`](src/engine.rs),

@@ -149,6 +149,8 @@ for other uses.
     [`behavior-tree-types`](crates/arora-behavior-tree-types/readme.md).
   - [Behavior Tree Nodes](modules/behavior-tree-nodes/readme.md):
     an initial collection of behavior tree nodes as module functions.
+  - [NAO](modules/nao/readme.md): a tentative module for NAO support.
+  - [Polly](modules/polly/readme.md): a module providing nodes for AWS Polly TTS.
 
 - Behavior Tree:
   - [Types](crates/arora-behavior-tree-types/readme.md):
