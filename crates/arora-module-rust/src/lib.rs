@@ -1032,7 +1032,7 @@ async fn generate_serialize_from_frozen(
         PrimitiveKind::I64 => quote! { writer.add_i64(#value_expression) },
         PrimitiveKind::F32 => quote! { writer.add_f32(#value_expression) },
         PrimitiveKind::F64 => quote! { writer.add_f64(#value_expression) },
-        PrimitiveKind::String => quote! { writer.add_string(#value_expression) },
+        PrimitiveKind::String => quote! { writer.add_string(#value_expression.as_str()) },
         PrimitiveKind::ArrayBoolean => {
           generate_serialize_primitive_array(&BOOLEAN_ID, quote! { writer.add_boolean_bulk })
         }
@@ -1071,7 +1071,7 @@ async fn generate_serialize_from_frozen(
           quote! {
             writer.add_array_primitive(#id_bytes, #value_expression.len() as u32);
             for s in #value_expression {
-              writer.add_string(s);
+              writer.add_string(s.as_str());
             }
           }
         }
