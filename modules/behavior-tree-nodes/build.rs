@@ -44,12 +44,14 @@ pub async fn main() -> Result<()> {
     .await?;
 
   // test_rust_wasm
+  let test_rust_wasm_module_path = Path::new("../test-rust-wasm/src/arora_generated/module.yaml");
   let (test_rust_wasm_id, test_rust_wasm_version, test_rust_wasm_module) =
     module_frozen_from_header_file(
-      Path::new("../test-rust-wasm/src/arora_generated/module.yaml"),
+      test_rust_wasm_module_path.to_owned(),
       &mut registry,
     )
     .await?;
+  println!("cargo:rerun-if-changed={}", test_rust_wasm_module_path.display());
   registry
     .add_module(
       test_rust_wasm_id,
@@ -60,6 +62,7 @@ pub async fn main() -> Result<()> {
 
   // Generate sources for the module
   let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
+  println!("cargo:rerun-if-changed={}", "module.yaml");
   let generated_sources = generate_sources(assets, &mut registry).await?;
   let source_path = PathBuf::from("src/arora_generated/");
   generated_sources
@@ -72,6 +75,7 @@ pub async fn main() -> Result<()> {
         err
       )
     })?;
-  apply_rustfmt(source_path).await?;
+  apply_rustfmt(source_path.to_owned()).await?;
+  println!("cargo:rerun-if-changed={}", source_path.display());
   Ok(())
 }

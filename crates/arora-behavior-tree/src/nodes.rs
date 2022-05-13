@@ -1,6 +1,6 @@
 use crate::{schema::Expression, tree_node::TreeNode};
 use arora_schema::value::Value;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, str::FromStr};
 use uuid::Uuid;
 
 // To simulate statuses
@@ -31,6 +31,82 @@ pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
 
 // Basic data-oriented action nodes
 //==============================================================
+#[allow(unused)]
+pub fn set_str(variable: Expression, value: Expression) -> TreeNode {
+  TreeNode {
+    function: Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
+    children: None,
+    parameters: HashMap::from([
+      (
+        Uuid::from_str("8fa2f965-1eb5-40d9-baca-8facef0d31a8").unwrap(),
+        variable,
+      ),
+      (
+        Uuid::from_str("88438955-7872-44ad-8464-d636dc5fe26f").unwrap(),
+        value,
+      ),
+    ]),
+  }
+}
+
+#[allow(unused)]
+pub fn unset_str(variable: Expression) -> TreeNode {
+  TreeNode {
+    function: Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap(),
+    children: None,
+    parameters: HashMap::from([(
+      Uuid::from_str("2c84bf0f-4ec2-41a4-83ee-3f92a53be79d").unwrap(),
+      variable,
+    )]),
+  }
+}
+
+#[allow(unused)]
+pub fn is_str_set(value: Expression) -> TreeNode {
+  TreeNode {
+    function: Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap(),
+    children: None,
+    parameters: HashMap::from([(
+      Uuid::from_str("c4f1e72d-30fe-400b-a584-f08e93944026").unwrap(),
+      value,
+    )]),
+  }
+}
+
+#[allow(unused)]
+pub fn wait_str_set(value: Expression) -> TreeNode {
+  TreeNode {
+    function: Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap(),
+    children: None,
+    parameters: HashMap::from([(
+      Uuid::from_str("8f190079-e519-44d3-ac36-3bfc322e87eb").unwrap(),
+      value,
+    )]),
+  }
+}
+
+#[allow(unused)]
+pub fn regex_match(value: Expression, matcher: Expression, first_match: Expression) -> TreeNode {
+  TreeNode {
+    function: Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap(),
+    children: None,
+    parameters: HashMap::from([
+      (
+        Uuid::from_str("3267f093-8a7f-4b77-b74c-3bd2e7ad40f9").unwrap(),
+        value,
+      ),
+      (
+        Uuid::from_str("6702e02d-f6ba-4c5d-acab-9ade0a690afa").unwrap(),
+        matcher,
+      ),
+      (
+        Uuid::from_str("e8b71df7-2bb5-4498-8bc3-833c5bc8eadc").unwrap(),
+        first_match,
+      ),
+    ]),
+  }
+}
+
 #[allow(unused)]
 pub fn store(storage: Expression, value: Expression) -> TreeNode {
   TreeNode {

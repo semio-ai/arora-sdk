@@ -4,6 +4,7 @@ use quick_xml::Writer;
 use quick_xml::{escape::unescape, events::Event, Reader};
 use semio_record::module::v0::frozen::Parameter;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::{
   collections::HashMap,
   error::Error,
@@ -59,6 +60,11 @@ impl Node {
       FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
       PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
       COS_GROOT_ID => COS_FUNCTION_ID,
+      SET_STR_GROOT_ID => Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
+      UNSET_STR_GROOT_ID => Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap(),
+      IS_STR_SET_GROOT_ID => Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap(),
+      WAIT_STR_SET_GROOT_ID => Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap(),
+      REGEX_MATCH_GROOT_ID => Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
           message: format!("unexpected node id: {}", id.to_string()),
@@ -106,6 +112,7 @@ impl Node {
       FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
       PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
       COS_FUNCTION_ID => COS_GROOT_ID,
+      // Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap() => SET_STR_GROOT_ID,
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
           message: format!("unexpected node id: {}", id.to_string()),
@@ -174,6 +181,12 @@ const SEQ_STAR_GROOT_ID: &'static str = "SequenceStar";
 const FALLBACK_GROOT_ID: &'static str = "Fallback";
 const PARALLEL_GROOT_ID: &'static str = "Parallel";
 const COS_GROOT_ID: &'static str = "Cos";
+const SET_STR_GROOT_ID: &'static str = "SetString";
+const UNSET_STR_GROOT_ID: &'static str = "UnsetString";
+const IS_STR_SET_GROOT_ID: &'static str = "IsStringSet";
+const WAIT_STR_SET_GROOT_ID: &'static str = "WaitStringSet";
+const REGEX_MATCH_GROOT_ID: &'static str = "RegexMatch";
+const POLLY_SAY_GROOT_ID: &'static str = "PollySay";
 
 /// Converts a Groot parameter into an Arora one.
 /// Requires some context to do so:
@@ -736,7 +749,7 @@ pub mod tests {
     Ok(())
   }
 
-  async fn setup_index() -> HashMap<Uuid, ModuleFunction> {
+  pub async fn setup_index() -> HashMap<Uuid, ModuleFunction> {
     let mut registry = LocalRegistry::new();
     let behavior_tree_types_yaml_dir =
       crate_root_path("arora-behavior-tree-types-yaml").join("records");

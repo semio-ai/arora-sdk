@@ -49,6 +49,92 @@ exports:
 
   - type: function
     id: b8349b96-abc7-4a31-906c-da1ce6fa356e
+    name: set_str
+    parameters:
+      - id: 8fa2f965-1eb5-40d9-baca-8facef0d31a8
+        name: variable
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+
+      - id: 88438955-7872-44ad-8464-d636dc5fe26f
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 7dce01ed-9818-4b7d-b45a-2e7fdece3633
+    name: unset_str
+    parameters:
+      - id: 2c84bf0f-4ec2-41a4-83ee-3f92a53be79d
+        name: variable
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 20ba3f0f-309e-4cd2-adfc-aca6cc432526
+    name: is_str_set
+    parameters:
+      - id: c4f1e72d-30fe-400b-a584-f08e93944026
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 3180977c-25a1-458e-ab82-11f36c654518
+    name: wait_str_set
+    parameters:
+      - id: 8f190079-e519-44d3-ac36-3bfc322e87eb
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 8e3dbcc1-1a81-4cf6-a457-6e0c075456fd
+    name: regex_match
+    parameters:
+      - id: 3267f093-8a7f-4b77-b74c-3bd2e7ad40f9
+        name: value
+        type:
+          kind: scalar
+          id: str
+
+      - id: 6702e02d-f6ba-4c5d-acab-9ade0a690afa
+        name: matcher
+        type:
+          kind: scalar
+          id: str
+
+      - id: e8b71df7-2bb5-4498-8bc3-833c5bc8eadc
+        name: first_match
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: b8349b96-abc7-4a31-906c-da1ce6fa356e
     name: store
     parameters:
       - id: 2345a3a5-a80d-4480-9927-3c65bd2b7543
@@ -166,6 +252,7 @@ exports:
     ret:
       kind: scalar
       id: behavior_tree.Status
+
 imports:
   - type: function
     module: 665d6ec9-3fc9-4cfa-9100-5c8964e95aec
