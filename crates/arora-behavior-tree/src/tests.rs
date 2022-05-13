@@ -1,5 +1,6 @@
 #[cfg(test)]
 pub mod tests {
+  use crate::tree_node::TreeNode;
   use crate::{
     arora_generated::behavior_tree::status::Status, load_behavior_tree_yaml, nodes::*,
     run_behavior_tree, schema::Expression, BehaviorTree, BehaviorTreeRuntime, ModuleFunction,
@@ -16,8 +17,11 @@ pub mod tests {
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
+  use rand::seq::SliceRandom;
+  use rand::thread_rng;
   use semio_record::{module::v0::frozen::ExportKind, record::Freezer};
   use semver::Version;
+  use std::str::FromStr;
   use std::{
     cell::RefCell,
     collections::HashMap,
@@ -235,6 +239,71 @@ pub mod tests {
     Ok(())
   }
 
+  #[ignore]
+  #[tokio::test]
+  pub async fn hello_polly() -> Result<()> {
+    let behavior =
+      TreeNode::action_node(Uuid::from_str("e5a41333-4848-411f-878c-f1d662ebb4a0").unwrap())
+        .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&vec![
+      "test-rust-wasm".to_string(),
+      "behavior-tree-nodes".to_string(),
+      "polly".to_string(),
+    ])
+    .await;
+
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    while runtime.tick().unwrap() == Status::Running {}
+    Ok(())
+  }
+
+  fn polly_say(text: Expression) -> TreeNode {
+    TreeNode {
+      function: Uuid::from_str("e1b4bda7-1c7b-4322-b9a0-552201b8a011").unwrap(),
+      children: None,
+      parameters: HashMap::from([(
+        Uuid::from_str("fb3787f2-2151-49ce-8b61-6274984558ea").unwrap(),
+        text,
+      )]),
+    }
+  }
+
+  #[ignore]
+  #[tokio::test]
+  pub async fn polly_sequence_of_speech() -> Result<()> {
+    const NAMES: [&'static str; 3] = ["Ross", "Brad", "Victor"];
+    let name = NAMES.choose(&mut thread_rng()).unwrap();
+    let behavior = seq_star(vec![
+      polly_say(Expression::Value(Value::String("Hello!".to_string()))),
+      polly_say(Expression::Value(Value::String(format!(
+        "Oh it's you {}",
+        name
+      )))),
+      polly_say(Expression::Value(Value::String(
+        "How have you been?".to_string(),
+      ))),
+    ])
+    .try_into()?;
+
+    let (mut engine, index) = setup_engine_with_modules(&vec![
+      "test-rust-wasm".to_string(),
+      "behavior-tree-nodes".to_string(),
+      "polly".to_string(),
+    ])
+    .await;
+
+    let mut runtime =
+      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut status = Status::Running;
+    while status == Status::Running {
+      status = runtime.tick().unwrap();
+      std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(status, Status::Success);
+    Ok(())
+  }
+
   // Test helpers and data
   //==============================================================================
   fn set_value<T: Into<Value>>(rc: &mut Rc<RefCell<Value>>, v: T) {
@@ -270,6 +339,7 @@ pub mod tests {
   ) -> (PinnedEngine, HashMap<Uuid, ModuleFunction>) {
     let mut engine = EngineBuilder::new()
       .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
+      .add_executor(arora::executor::native::NativeExecutor::new())
       .build();
     let mut index = HashMap::new();
     let mut registry = LocalRegistry::new();
@@ -310,15 +380,35 @@ pub mod tests {
       .expect(format!("failed to add module {} to registry", module_id).as_str());
 
     // Find the executable in the right target directory (debug in priority)
-    let module_target_dir = module_root.join("target").join("wasm32-wasi");
+    let (module_target_dir, executable_prefix, executable_extension) =
+      match header.executor.name.as_str() {
+        "wasm" => (module_root.join("target").join("wasm32-wasi"), "", "wasm"),
+        "native" => {
+          let executable_extension =
+            if cfg!(target_os = "macos") || cfg!(target_os = "ios") || cfg!(target_os = "apple") {
+              "dylib"
+            } else if cfg!(target_family = "unix") {
+              "so"
+            } else if cfg!(target_family = "windows") {
+              "dll"
+            } else {
+              panic!("unsupported platform")
+            };
+          (module_root.join("target"), "lib", executable_extension) // supposes it's the host
+        }
+        _ => panic!("unsupported executor"),
+      };
     let target_subdir = if cfg!(debug_assertions) {
       "debug"
     } else {
       "release"
     };
-    let module_path = module_target_dir
-      .join(target_subdir)
-      .join(format!("{}.wasm", name.to_case(Case::Snake)));
+    let module_path = module_target_dir.join(target_subdir).join(format!(
+      "{}{}.{}",
+      executable_prefix,
+      name.to_case(Case::Snake),
+      executable_extension
+    ));
     println!("reading executable {:#?}", module_path);
     let mut executable_file = File::open(&module_path)
       .await
