@@ -1,7 +1,7 @@
 # Test Rust -> WASM module
 
 This is a module written in Rust and compiled to WASM to be executed by arora-engine.
-It relies on [wasmtime for Rust](https://docs.wasmtime.dev/wasm-rust.html).
+It relies on [wasmtime for Rust](https://docs.wasmtime.dev/lang-rust.html).
 
 It uses a code generation step using `arora-module-cli -l rust`,
 and puts all the sources under `src/arora-generated`,
