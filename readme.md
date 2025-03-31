@@ -167,7 +167,7 @@ for other uses.
 - Rust. You need to add first some WebAssembly targets:
   ```bash
   rustup target add wasm32-unknown-unknown
-  rustup target add wasm32-wasi
+  rustup target add wasm32-wasip1
   ```
 - Rust WASI, for Rust WASM modules:
   ```bash
@@ -183,7 +183,7 @@ You need a read access to the following repositories:
 - [Semio Record](https://github.com/semio-ai/semio-record)
 - [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
 - [Semio Client](https://github.com/semio-ai/semio-client)
-  
+
 #### Windows
 
 - Ninja

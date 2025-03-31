@@ -568,7 +568,7 @@ pub mod tests {
     // Find the executable in the right target directory (debug in priority)
     let (module_target_dir, executable_prefix, executable_extension) =
       match header.executor.name.as_str() {
-        "wasm" => (module_root.join("target").join("wasm32-wasi"), "", "wasm"),
+        "wasm" => (module_root.join("target").join("wasm32-wasip1"), "", "wasm"),
         "native" => {
           let executable_extension =
             if cfg!(target_os = "macos") || cfg!(target_os = "ios") || cfg!(target_os = "apple") {

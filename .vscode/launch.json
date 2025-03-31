@@ -71,7 +71,7 @@
                 "--header",
                 "${workspaceFolder}/modules/test-rust-wasm/module.yaml",
                 "--exe",
-                "${workspaceFolder}/modules/test-rust-wasm/target/wasm32-wasi/debug/test_rust_wasm.wasm",
+                "${workspaceFolder}/modules/test-rust-wasm/target/wasm32-wasip1/debug/test_rust_wasm.wasm",
                 "--call",
                 "id: 00cd31a8-2cf4-48e6-a957-69a55de90424"
             ]
