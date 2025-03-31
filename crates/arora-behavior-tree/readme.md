@@ -69,7 +69,7 @@ providing a build-time guarantee of the validity of the structure.
 [Groot](https://github.com/BehaviorTree/Groot) is a behavior tree editor in C++ Qt,
 that is used along the mainstream [BehaviorTreeCPP](https://github.com/BehaviorTree/BehaviorTree.CPP)
 C++ library for behavior trees.
-It is used in [Nav2](https://navigation.ros.org/tutorials/docs/using_groot.html),
+It is used in [Nav2](https://docs.nav2.org/tutorials/docs/using_groot.html),
 a well-known navigation for ROS.
 [`TreeNode`s](src/tree_node.rs) can be converted
 from and to [`groot::Node`s](src/schema_groot.rs).
