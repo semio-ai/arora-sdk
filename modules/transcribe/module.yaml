@@ -1,0 +1,29 @@
+id: 5cab03a0-5b33-480b-b74c-7b9351e0ba92
+author: Semio
+description: AWS Transcribe support module
+license: Proprietary
+name: transcribe
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: native
+exports:
+  - type: function
+    id: de931c37-371a-40fd-9a76-4868fa1d8177
+    name: listen
+    parameters:
+      - id: 3df34363-9dae-447c-8034-f66bdde1c7cd
+        name: text
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+imports: []
+dependencies: []
+executable_mime: application/x-binary
