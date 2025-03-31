@@ -7,7 +7,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
-#[display(fmt = "{}.{}.{}", major, minor, patch)]
+#[display("{}.{}.{}", major, minor, patch)]
 pub struct SemanticVersion {
   pub major: u32,
   pub minor: u32,
