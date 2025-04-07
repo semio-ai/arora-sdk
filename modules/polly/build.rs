@@ -2,7 +2,6 @@ use anyhow::{Ok, Result};
 use arora_module_core::analyze_module_from_path;
 use arora_module_rust::{generate_sources, rustfmt::apply_rustfmt};
 use arora_registry::{local::LocalRegistry, local_yaml::load_records_from_yaml_dir};
-use rustfmt::config::Config;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -33,6 +32,6 @@ pub async fn main() -> Result<()> {
     })?;
   apply_rustfmt(source_path).await?;
   println!("cargo:rerun-if-changed={}", generated_sources_path);
-  
+
   Ok(())
 }

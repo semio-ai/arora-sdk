@@ -10,7 +10,6 @@ use arora_registry::{
   local::{LocalRegistry, ROOT_ID},
   EditableRegistry,
 };
-use rustfmt::config::Config;
 use std::path::{Path, PathBuf};
 
 #[tokio::main]
