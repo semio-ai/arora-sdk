@@ -19,6 +19,16 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   registry: &mut dyn EditableRegistry,
 ) -> Result<(), RegistryError> {
   let path = path.as_ref();
+  if !path.exists() {
+    return Err(RegistryError::Generic {
+      message: format!("Path does not exist: {}", path.display()),
+    });
+  }
+  if !path.is_dir() {
+    return Err(RegistryError::Generic {
+      message: format!("Path is not a directory: {}", path.display()),
+    });
+  }
 
   let mut folders = Vec::new();
   for_each_yaml_record(&path.join("folder"), &mut |id, _, yaml: String| {
@@ -68,9 +78,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
   )
   .await?;
   for (id, tag, enumeration) in enumerations {
-    registry
-      .add_enumeration(id, tag, enumeration)
-      .await?;
+    registry.add_enumeration(id, tag, enumeration).await?;
   }
 
   let mut structures = Vec::new();
@@ -188,4 +196,29 @@ where
     f(id, tag, yaml)?;
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::local::LocalRegistry;
+  use crate::local_yaml::load_records_from_yaml_dir;
+  use crate::ReadableRegistry;
+  use std::path::PathBuf;
+
+  #[tokio::test]
+  async fn test_load_records_from_yaml_dir() {
+    let mut registry = LocalRegistry::new();
+    let path = PathBuf::from("test_data/behavior_tree_types");
+    load_records_from_yaml_dir(path, &mut registry)
+      .await
+      .unwrap();
+    assert_eq!(
+      registry
+        .resolve_id(&Uuid::from_str("325a5767-e344-4532-860e-0749bcf2e428").unwrap())
+        .await
+        .unwrap(),
+      "behavior_tree.Status"
+    );
+  }
 }

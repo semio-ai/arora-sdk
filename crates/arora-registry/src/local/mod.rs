@@ -48,7 +48,7 @@ impl LocalRegistry {
   pub fn find_frozen_by_id(&self, id: &Uuid) -> Option<&FrozenRegistryReference> {
     self
       .indexed
-      .get(&Selector::Id(id.to_owned()))
+      .get(&Selector::Id(id.clone()))
       .and_then(|version_index| get_latest_frozen(version_index))
   }
 
