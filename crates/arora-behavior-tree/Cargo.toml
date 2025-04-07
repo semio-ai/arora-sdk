@@ -16,7 +16,7 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 lazy_static = "*"
-quick-xml = "0.20.0"
+quick-xml = "0.37"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }

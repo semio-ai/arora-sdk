@@ -65,12 +65,17 @@ pub const STATUS_ENUMERATION_VERSION: Version = Version::new(1, 0, 0);
 
 #[cfg(test)]
 pub mod tests {
+
+  use semio_record::enumeration::v0::unfrozen::Enumeration;
+
   use crate::{declare_status_enumeration, BEHAVIOR_TREE_FOLDER_ID};
 
   #[test]
   pub fn serialize_status() {
     let status_declaration = declare_status_enumeration(BEHAVIOR_TREE_FOLDER_ID);
     let status_declaration_yaml = serde_yaml::to_string(&status_declaration).unwrap();
-    dbg!(status_declaration_yaml);
+    let parsed_status_declaration: Enumeration =
+      serde_yaml::from_str(&status_declaration_yaml).unwrap();
+    assert_eq!(status_declaration, parsed_status_declaration);
   }
 }

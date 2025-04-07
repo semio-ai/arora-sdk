@@ -6,7 +6,10 @@ include = ["enumeration/**.yaml", "structure/**.yaml"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[dev-dependencies]
+arora-registry = { path = "../arora-registry" }
+tokio = { version = "1", features = ["macros"] }
+uuid = { version = "0.8", features = ["v4"] }
 
 [build-dependencies]
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
