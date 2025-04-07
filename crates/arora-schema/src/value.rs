@@ -2,6 +2,68 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
+pub enum Type {
+  #[serde(rename = "unit")]
+  Unit,
+  #[serde(rename = "bool")]
+  Boolean,
+  #[serde(rename = "u8")]
+  U8,
+  #[serde(rename = "u16")]
+  U16,
+  #[serde(rename = "u32")]
+  U32,
+  #[serde(rename = "u64")]
+  U64,
+  #[serde(rename = "i8")]
+  I8,
+  #[serde(rename = "i16")]
+  I16,
+  #[serde(rename = "i32")]
+  I32,
+  #[serde(rename = "i64")]
+  I64,
+  #[serde(rename = "f32")]
+  F32,
+  #[serde(rename = "f64")]
+  F64,
+  #[serde(rename = "str")]
+  String,
+  #[serde(rename = "struct")]
+  Structure,
+  #[serde(rename = "enum")]
+  Enumeration,
+  #[serde(rename = "bool[]")]
+  ArrayBoolean,
+  #[serde(rename = "u8[]")]
+  ArrayU8,
+  #[serde(rename = "u16[]")]
+  ArrayU16,
+  #[serde(rename = "u32[]")]
+  ArrayU32,
+  #[serde(rename = "u64[]")]
+  ArrayU64,
+  #[serde(rename = "i8[]")]
+  ArrayI8,
+  #[serde(rename = "i16[]")]
+  ArrayI16,
+  #[serde(rename = "i32[]")]
+  ArrayI32,
+  #[serde(rename = "i64[]")]
+  ArrayI64,
+  #[serde(rename = "f32[]")]
+  ArrayF32,
+  #[serde(rename = "f64[]")]
+  ArrayF64,
+  #[serde(rename = "str[]")]
+  ArrayString,
+  #[serde(rename = "struct[]")]
+  ArrayStructure,
+  #[serde(rename = "enum[]")]
+  ArrayEnumeration
+}
+
 // Value representation for received parameters.
 //=====================================================================
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
