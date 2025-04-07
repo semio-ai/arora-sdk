@@ -93,7 +93,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.8.26",
  "tempfile",
- "uuid 0.8.2",
+ "uuid 1.16.0",
  "wasmtime",
  "wasmtime-wasi",
 ]
@@ -160,7 +160,7 @@ dependencies = [
  "cbindgen",
  "serde",
  "serde_yaml 0.8.26",
- "uuid 0.8.2",
+ "uuid 1.16.0",
 ]
 
 [[package]]
@@ -311,7 +311,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_yaml 0.8.26",
- "uuid 0.8.2",
+ "uuid 1.16.0",
 ]
 
 [[package]]
@@ -3124,6 +3124,10 @@ name = "uuid"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "458f7a779bf54acc9f347480ac654f68407d3aab21269a6e3c9f922acd9e2da9"
+dependencies = [
+ "getrandom 0.3.2",
+ "serde",
+]
 
 [[package]]
 name = "vec_map"
