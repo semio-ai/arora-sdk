@@ -1,7 +1,7 @@
 use arora_schema::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
-use quick_xml::{escape::unescape, events::Event, Reader};
+use quick_xml::{events::Event, Reader};
 use semio_record::module::v0::frozen::Parameter;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -317,7 +317,6 @@ impl BehaviorTree {
 
 fn parse_groot_xml(xml_str: &str) -> Result<BehaviorTree, BehaviorTreeError> {
   let mut reader = Reader::from_str(xml_str);
-  reader.trim_text(true);
   let mut buf = Vec::new();
   let root = parse_groot_root(&mut reader, &mut buf)?;
   // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
@@ -329,10 +328,10 @@ fn parse_groot_root(
   reader: &mut Reader<&[u8]>,
   buf: &mut Vec<u8>,
 ) -> Result<Node, BehaviorTreeError> {
-  let root = match reader.read_event(buf) {
+  let root = match reader.read_event() {
     Ok(Event::Decl(_)) => parse_groot_root(reader, buf)?,
     Ok(Event::Start(ref root_start)) => {
-      if root_start.name() != b"root" {
+      if root_start.name().as_ref() != b"root" {
         return Err(BehaviorTreeError::ParsingError {
           message: "root tag is not \"root\"".to_string(),
         });
@@ -349,9 +348,9 @@ fn parse_groot_behavior_tree_node(
   reader: &mut Reader<&[u8]>,
   buf: &mut Vec<u8>,
 ) -> Result<Node, BehaviorTreeError> {
-  match reader.read_event(buf) {
+  match reader.read_event() {
     Ok(Event::Start(ref node_start)) => {
-      if node_start.name() != b"BehaviorTree" {
+      if node_start.name().as_ref() != b"BehaviorTree" {
         return Err(BehaviorTreeError::ParsingError {
           message: "found node that is not a \"BehaviorTree\"".to_string(),
         });
@@ -369,9 +368,9 @@ fn parse_groot_node(
   reader: &mut Reader<&[u8]>,
   buf: &mut Vec<u8>,
 ) -> Result<Option<Node>, BehaviorTreeError> {
-  match reader.read_event(buf) {
+  match reader.read_event() {
     Ok(Event::Start(ref node_start)) => {
-      let id = String::from_utf8(node_start.name().to_vec());
+      let id = String::from_utf8(node_start.name().as_ref().to_vec());
       let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
 
       let mut attributes = collect_action_attributes(node_start, reader)?;
@@ -395,7 +394,7 @@ fn parse_groot_node(
         children,
       }))
     }
-    Ok(Event::Empty(ref node_empty)) => match node_empty.name() {
+    Ok(Event::Empty(ref node_empty)) => match node_empty.name().as_ref() {
       b"Action" => {
         let mut attributes = collect_action_attributes(node_empty, reader)?;
         let id = attributes
@@ -445,20 +444,15 @@ fn collect_action_attributes(
   let mut attributes = HashMap::new();
   for attr in node.attributes() {
     let attr = map_parsing_error(attr, "cannot get attribute", reader)?;
-    let key = String::from_utf8(attr.key.to_vec());
+    let key = String::from_utf8(attr.key.as_ref().to_vec());
     let key = map_parsing_error(key, "invalid utf8 in attribute key", reader)?;
-    let value = unescape(attr.value.as_ref());
+    let value = attr.unescape_value();
     let value = map_parsing_error(
       value,
       format!("error unescaping value of attribute {}", key).as_str(),
       reader,
     )?;
-    let value = String::from_utf8(value.to_vec());
-    let value = map_parsing_error(
-      value,
-      format!("invalid utf-8 in value of attribute {}", key).as_str(),
-      reader,
-    )?;
+    let value = value.to_string();
     match attributes.insert(key.clone(), value) {
       Some(_) => new_parsing_error_result(
         format!("error unescaping value of attribute {}", key).as_str(),
@@ -528,28 +522,25 @@ fn map_parsing_error<T, E: Error>(
 fn serialize_behavior_to_groot_xml(behavior: &BehaviorTree) -> Vec<u8> {
   use quick_xml::events::BytesEnd;
 
-  let xml = r#"<this_tag k1="v1" k2="v2"><child>text</child></this_tag>"#;
-  let mut reader = Reader::from_str(xml);
-  reader.trim_text(true);
   let mut writer = Writer::new(Cursor::new(Vec::new()));
 
-  const ROOT_NAME: &[u8; 4] = b"root";
-  let mut root_elem = BytesStart::owned(ROOT_NAME.to_vec(), ROOT_NAME.len());
+  const ROOT_NAME: &str = "root";
+  let mut root_elem = BytesStart::new(ROOT_NAME);
   root_elem.push_attribute(("main_tree_to_execute", "MainTree"));
   writer.write_event(Event::Start(root_elem)).unwrap();
 
-  const BEHAVIOR_TREE_NAME: &[u8; 12] = b"BehaviorTree";
-  let mut behavior_elem = BytesStart::owned(BEHAVIOR_TREE_NAME.to_vec(), BEHAVIOR_TREE_NAME.len());
+  const BEHAVIOR_TREE_NAME: &str = "BehaviorTree";
+  let mut behavior_elem = BytesStart::new(BEHAVIOR_TREE_NAME);
   behavior_elem.push_attribute((ID_ATTRIBUTE_KEY, "MainTree"));
   writer.write_event(Event::Start(behavior_elem)).unwrap();
 
   serialize_node_to_groot_xml(&behavior.root, &mut writer);
 
   writer
-    .write_event(Event::End(BytesEnd::owned(BEHAVIOR_TREE_NAME.to_vec())))
+    .write_event(Event::End(BytesEnd::new(BEHAVIOR_TREE_NAME)))
     .unwrap();
   writer
-    .write_event(Event::End(BytesEnd::owned(ROOT_NAME.to_vec())))
+    .write_event(Event::End(BytesEnd::new(ROOT_NAME)))
     .unwrap();
   writer.into_inner().into_inner()
 }
@@ -557,7 +548,7 @@ fn serialize_behavior_to_groot_xml(behavior: &BehaviorTree) -> Vec<u8> {
 fn serialize_node_to_groot_xml(node: &Node, writer: &mut Writer<Cursor<Vec<u8>>>) {
   use quick_xml::events::BytesEnd;
 
-  let mut elem = BytesStart::owned(node.id.as_bytes().to_vec(), node.id.as_bytes().len());
+  let mut elem = BytesStart::new(node.id.as_str());
   elem.push_attribute((NAME_ATTRIBUTE_KEY, node.name.as_str()));
   for (param, arg) in &node.param_args {
     elem.push_attribute((param.as_str(), arg.as_str()));
@@ -570,7 +561,7 @@ fn serialize_node_to_groot_xml(node: &Node, writer: &mut Writer<Cursor<Vec<u8>>>
       serialize_node_to_groot_xml(&child, writer);
     }
     writer
-      .write_event(Event::End(BytesEnd::owned(node.id.as_bytes().to_vec())))
+      .write_event(Event::End(BytesEnd::new(node.id.as_str())))
       .unwrap();
   }
 }
