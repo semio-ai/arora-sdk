@@ -45,6 +45,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
     tree: &'a BehaviorTree,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     caller: &'a mut dyn CallBridge,
+    trace: bool,
   ) -> Result<Self, BehaviorTreeError> {
     let tick = setup_tick_function(
       tree.root.clone(),
@@ -53,24 +54,11 @@ impl<'a> BehaviorTreeRuntime<'a> {
       tree.variables.clone(),
       tree.node_arg_variables.clone(),
       caller,
-      TraceTick::No,
-    )?;
-    Ok(Self { caller, tick })
-  }
-
-  fn setup_debug(
-    tree: &'a BehaviorTree,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    caller: &'a mut dyn CallBridge,
-  ) -> Result<Self, BehaviorTreeError> {
-    let tick = setup_tick_function(
-      tree.root.clone(),
-      &tree.node_index,
-      function_index.clone(),
-      tree.variables.clone(),
-      tree.node_arg_variables.clone(),
-      caller,
-      TraceTick::YesAll,
+      if trace {
+        TraceTick::YesAll
+      } else {
+        TraceTick::No
+      },
     )?;
     Ok(Self { caller, tick })
   }
@@ -85,8 +73,9 @@ pub fn run_behavior_tree(
   behavior: &BehaviorTree,
   function_index: Rc<HashMap<Uuid, ModuleFunction>>,
   caller: &mut dyn CallBridge,
+  trace: bool,
 ) -> Result<Status, BehaviorTreeError> {
-  let mut runtime = BehaviorTreeRuntime::setup(behavior, function_index, caller)?;
+  let mut runtime = BehaviorTreeRuntime::setup(behavior, function_index, caller, trace)?;
   let mut status = Status::Running;
   while status == Status::Running {
     status = runtime.tick()?;
@@ -97,7 +86,6 @@ pub fn run_behavior_tree(
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum TraceTick {
   YesAll,
-  YesThis,
   No,
 }
 
@@ -117,11 +105,6 @@ fn setup_tick_function(
     .unwrap_or(0);
   let mut children_ticks: Vec<TickId> = Vec::with_capacity(nof_children);
   if let Some(children) = &node.children {
-    let child_trace = match trace {
-      TraceTick::YesAll => TraceTick::YesAll,
-      TraceTick::YesThis => TraceTick::No,
-      TraceTick::No => TraceTick::No,
-    };
     for child_id in children {
       let child_node = node_index
         .get(child_id)
@@ -137,7 +120,7 @@ fn setup_tick_function(
         variables.clone(),
         node_arg_variables.clone(),
         caller,
-        child_trace,
+        trace,
       )?;
       children_ticks.push(tick_function_with_id);
     }

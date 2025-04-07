@@ -201,38 +201,38 @@ impl TypeDefinitionFrozen {
 #[derive(Display, Debug)]
 pub enum RegistryError {
   /// No such record.
-  #[display(fmt = "no such record \"{}\"", selector)]
+  #[display("no such record \"{}\"", selector)]
   NoSuchRecord { selector: Selector },
 
   /// No such version of a record.
-  #[display(fmt = "no version matching record \"{}@{}\"", selector, version_req)]
+  #[display("no version matching record \"{}@{}\"", selector, version_req)]
   NoSuchVersion {
     selector: Selector,
     version_req: VersionReq,
   },
 
   /// Record exists but is not a type.
-  #[display(fmt = "record \"{}\" exists but is not a type", selector)]
+  #[display("record \"{}\" exists but is not a type", selector)]
   NotAType { selector: Selector },
 
   /// Record exists but is not a module.
-  #[display(fmt = "record \"{}\" exists but is not a module", selector)]
+  #[display("record \"{}\" exists but is not a module", selector)]
   NotAModule { selector: Selector },
 
   /// Record being inserted has a parent defined, but it is unknown locally.
-  #[display(fmt = "parent of record \"{}\" is unknown to the registry", name)]
+  #[display("parent of record \"{}\" is unknown to the registry", name)]
   UnknownParent { name: String },
 
   /// The name or identifier of the record being added is already taken by another record.
   #[display(
-    fmt = "added record's selector {} is already taken in the registry",
+    "added record's selector {} is already taken in the registry",
     selector
   )]
   DuplicateSelector { selector: Selector },
 
   /// The name or identifier of the record being added is already taken by another record.
   #[display(
-    fmt = "record selector {}@{} is already present in the registry",
+    "record selector {}@{} is already present in the registry",
     selector,
     version
   )]
@@ -242,22 +242,19 @@ pub enum RegistryError {
   },
 
   /// Record being inserted uses a dependency that is not known locally.
-  #[display(
-    fmt = "record depends on \"{}\", which is unknown to the registry",
-    selector
-  )]
+  #[display("record depends on \"{}\", which is unknown to the registry", selector)]
   UnknownDependency { selector: Selector },
 
   /// Request to the registry failed because of an error in the remote service.
-  #[display(fmt = "remote service error: {}", message)]
+  #[display("remote service error: {}", message)]
   RemoteError { message: String },
 
   /// Error when parsing something, such as a behavior tree description.
-  #[display(fmt = "parsing error: {}", message)]
+  #[display("parsing error: {}", message)]
   ParsingError { message: String },
 
   /// For any other error.
-  #[display(fmt = "error: {}", message)]
+  #[display("error: {}", message)]
   Generic { message: String },
 }
 

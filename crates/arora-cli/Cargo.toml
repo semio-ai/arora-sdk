@@ -15,7 +15,9 @@ semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = 
 anyhow = "*"
 clap = { version = "3", features = ["derive"] }
 futures = "0.3"
-reqwest = { version = "0.11", default_features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = [
+  "rustls-tls",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }

@@ -167,7 +167,7 @@ pub enum ModuleDeclarationError {
   VfsError(VfsError),
 
   /// For any other error.
-  #[display(fmt = "error: {}", _0)]
+  #[display("error: {}", _0)]
   Generic(String),
 }
 

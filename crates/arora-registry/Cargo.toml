@@ -11,8 +11,10 @@ semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = 
 anyhow = "*"
 arora-schema = { path = "../arora-schema" }
 async-trait = "0.1"
-derive_more = "*"
-reqwest = { version = "0.11", default_features = false, features = ["rustls-tls"] }
+derive_more = "2"
+reqwest = { version = "0.11", default-features = false, features = [
+  "rustls-tls",
+] }
 semver = { version = "1.0.5", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"

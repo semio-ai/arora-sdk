@@ -287,7 +287,7 @@ pub extern "C" fn arora_buffer_writer_new() -> *mut BufferWriter {
 #[no_mangle]
 pub extern "C" fn arora_buffer_writer_free(writer: *mut BufferWriter) {
   unsafe {
-    Box::from_raw(writer);
+    drop(Box::from_raw(writer));
   }
 }
 

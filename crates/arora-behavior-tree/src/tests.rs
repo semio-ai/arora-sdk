@@ -63,7 +63,8 @@ pub mod tests {
     let behavior = status_identity(status_value.clone()).try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
     assert_eq!(Status::Success, runtime.tick().unwrap());
     set_value(&mut status_value, Status::Running);
@@ -116,7 +117,8 @@ pub mod tests {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     // First tick moves the sequence to the second node.
     assert_eq!(Status::Running, runtime.tick().unwrap());
 
@@ -189,7 +191,8 @@ pub mod tests {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     for i in 1..10 {
       println!("storage = {}", storage.borrow());
       assert_eq!(Status::Success, runtime.tick().unwrap());
@@ -219,7 +222,8 @@ pub mod tests {
       "behavior-tree-nodes".to_string(),
     ])
     .await;
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
     for i in 1..11 {
       assert_eq!(Status::Success, runtime.tick().unwrap());
@@ -254,7 +258,8 @@ pub mod tests {
     ])
     .await;
 
-    let mut runtime = BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     while runtime.tick().unwrap() == Status::Running {}
     Ok(())
   }
@@ -295,7 +300,7 @@ pub mod tests {
     .await;
 
     let mut runtime =
-      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     let mut status = Status::Running;
     while status == Status::Running {
       status = runtime.tick().unwrap();
@@ -347,7 +352,7 @@ pub mod tests {
     .await;
 
     let mut runtime =
-      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     let mut status = Status::Running;
     let mut tick_count = 0;
     let expected_name = "Ross".to_string();
@@ -472,7 +477,7 @@ pub mod tests {
     .await;
 
     let mut runtime =
-      BehaviorTreeRuntime::setup_debug(&behavior, Rc::new(index), &mut engine).unwrap();
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
     let mut status = Status::Running;
     let mut tick_count = 0;
     while status == Status::Running {
@@ -506,13 +511,14 @@ pub mod tests {
 
   async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
     let (mut engine, index) = setup_engine_with_modules(modules).await;
-    let mut runtime = BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine).unwrap();
+    let mut runtime =
+      BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine, true).unwrap();
     runtime.tick().unwrap()
   }
 
   async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
     let (mut engine, index) = setup_engine_with_modules(&modules).await;
-    run_behavior_tree(&behavior, Rc::new(index), &mut engine).unwrap()
+    run_behavior_tree(&behavior, Rc::new(index), &mut engine, true).unwrap()
   }
 
   async fn run_yaml_with_modules(tree_yaml: &str, modules: &Vec<String>) -> Status {
@@ -570,16 +576,15 @@ pub mod tests {
       match header.executor.name.as_str() {
         "wasm" => (module_root.join("target").join("wasm32-wasip1"), "", "wasm"),
         "native" => {
-          let executable_extension =
-            if cfg!(target_os = "macos") || cfg!(target_os = "ios") || cfg!(target_os = "apple") {
-              "dylib"
-            } else if cfg!(target_family = "unix") {
-              "so"
-            } else if cfg!(target_family = "windows") {
-              "dll"
-            } else {
-              panic!("unsupported platform")
-            };
+          let executable_extension = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
+            "dylib"
+          } else if cfg!(target_family = "unix") {
+            "so"
+          } else if cfg!(target_family = "windows") {
+            "dll"
+          } else {
+            panic!("unsupported platform")
+          };
           (module_root.join("target"), "lib", executable_extension) // supposes it's the host
         }
         _ => panic!("unsupported executor"),

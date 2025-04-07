@@ -186,7 +186,6 @@ const UNSET_STR_GROOT_ID: &'static str = "UnsetString";
 const IS_STR_SET_GROOT_ID: &'static str = "IsStringSet";
 const WAIT_STR_SET_GROOT_ID: &'static str = "WaitStringSet";
 const REGEX_MATCH_GROOT_ID: &'static str = "RegexMatch";
-const POLLY_SAY_GROOT_ID: &'static str = "PollySay";
 
 /// Converts a Groot parameter into an Arora one.
 /// Requires some context to do so:

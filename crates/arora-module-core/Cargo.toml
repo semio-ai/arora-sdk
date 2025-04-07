@@ -13,7 +13,7 @@ arora-schema = { path = "../arora-schema" }
 arora-vfs = { path = "../arora-vfs" }
 bytes = "1"
 convert_case = "0.5"
-derive_more = "*"
+derive_more = "2"
 semver = "1.0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

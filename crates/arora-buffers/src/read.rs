@@ -186,7 +186,7 @@ pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8) -> *mut BufferR
 #[no_mangle]
 pub extern "C" fn arora_buffer_reader_free(reader: *mut BufferReader) {
   unsafe {
-    Box::from_raw(reader);
+    drop(Box::from_raw(reader));
   }
 }
 

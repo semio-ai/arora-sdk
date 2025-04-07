@@ -15,10 +15,8 @@ use arora_vfs::{Directory, Entry as VfsEntry, File, VfsError};
 use async_recursion::async_recursion;
 use convert_case::{Case, Casing};
 use derive_more::Display;
-use quote::{
-  __private::{Ident, TokenStream},
-  format_ident, quote, ToTokens,
-};
+use proc_macro2::Ident;
+use quote::{__private::TokenStream, format_ident, quote, ToTokens};
 use semio_client::common::{RecordType, Selector};
 use semio_record::ty::PrimitiveKind;
 use semio_record::{
@@ -98,8 +96,13 @@ pub async fn generate_sources(
   // Produce the stripped `module.yaml` file.
   let current_module = current_module.unwrap();
   result = result.merge_with(
-    &generate_header_file(&current_module.0, &current_module.1, &all_imports, &current_module.2)
-      .map_err(GenerationError::ModuleDeclarationError)?,
+    &generate_header_file(
+      &current_module.0,
+      &current_module.1,
+      &all_imports,
+      &current_module.2,
+    )
+    .map_err(GenerationError::ModuleDeclarationError)?,
   );
 
   // Also declare arora engine functions.
@@ -161,7 +164,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 
     #[derive(Display, Debug)]
     pub struct DeserializationError {
-      #[display(fmt = "deserialization error: {}", message)]
+      #[display("deserialization error: {}", message)]
       pub message: String,
     }
 

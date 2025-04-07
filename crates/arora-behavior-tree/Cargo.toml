@@ -20,7 +20,7 @@ quick-xml = "0.20.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
-derive_more = "*"
+derive_more = "2"
 
 [dev-dependencies]
 anyhow = "*"

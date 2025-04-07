@@ -1,4 +1,3 @@
 /target
 /build*/
 /wasi-sdk*
-Cargo.lock

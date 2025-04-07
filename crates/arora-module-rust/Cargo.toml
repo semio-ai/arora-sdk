@@ -16,9 +16,10 @@ anyhow = "*"
 async-recursion = "1"
 clap = { version = "3.0.10", features = ["derive"] }
 convert_case = "0.5"
-derive_more = "*"
+derive_more = "2"
 itertools = "0.10"
 lazy_static = "*"
+proc-macro2 = "1"
 quote = "1.0"
 semver = "1.0.5"
 serde = { version = "1.0", features = ["derive"] }
