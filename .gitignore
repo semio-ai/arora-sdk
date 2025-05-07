@@ -1,0 +1,7 @@
+/target
+/.vscode
+firebase
+.env
+*.log
+.DS_Store
+/ids/
