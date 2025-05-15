@@ -13,4 +13,6 @@ uuid = { version = "0.8.2", features = ["serde", "v4", "stdweb"] }
 lazy_static = "*"
 
 [dev-dependencies]
+json5 = "0.4.1"
+pretty_assertions = "1.4.1"
 serde_yaml = "0.8"
