@@ -1,3 +1,4 @@
+pub mod call;
 pub mod module;
 pub mod ty;
 pub mod value;
