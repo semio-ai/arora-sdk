@@ -4,7 +4,6 @@ resolver = "2"
 members = [
   "crates/arora",
   "crates/arora-buffers",
-  "crates/arora-schema",
   "crates/arora-module-core",
   "crates/arora-module-cli",
   "crates/arora-module-cpp",
