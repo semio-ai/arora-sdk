@@ -9,14 +9,14 @@ message(STATUS "Generating C++ with:" ${ARORA_MODULE_CLI}
 --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
 generate
 -l cpp
--c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+-m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
 -o ${CMAKE_CURRENT_BINARY_DIR}/arora)
 add_custom_target(generate-nao ALL
   COMMAND ${ARORA_MODULE_CLI}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
   generate
   -l cpp
-  -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+  -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
   -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/nao.hpp

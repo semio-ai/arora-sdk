@@ -27,6 +27,8 @@ human-readable exports and imports to consider to the generators
 
 `arora-module-cli generate` also accepts these specific parameters:
 
+  - `--module-file` / `-m` - The module file to generate code for.
+    It should be the path to a module header file (`.yaml`).
   - `--language` / `-l` - The language to generate files for
     (*e.g.*, `cpp`, `rust`)
   - `--output-directory` / `-o` - The location generated files will be placed

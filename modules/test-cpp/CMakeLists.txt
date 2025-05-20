@@ -1,9 +1,9 @@
-add_custom_target(generate-test-cpp ALL
+add_custom_target(generate-test-cpp-wrapper ALL
   COMMAND ${ARORA_MODULE_CLI}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
   generate
   -l cpp
-  -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+  -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
   -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp.hpp
@@ -14,6 +14,7 @@ add_custom_target(generate-test-cpp ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/records/module/23a75559-025c-4be8-8b48-0784e30dc9ec.yaml
   DEPENDS
     arora
+    arora-host-tools
 )
 
 # We need to make an executable to make a WASM module...

@@ -1,11 +1,11 @@
-add_custom_target(module-cli ALL
+add_custom_target(generate-test-cpp2-wrapper ALL
   COMMAND ${ARORA_MODULE_CLI}
   --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
   --include ${CMAKE_BINARY_DIR}/modules/test-cpp/arora/records
   --include ${CMAKE_CURRENT_SOURCE_DIR}/records
   generate
   -l cpp
-  -c ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+  -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
   -o ${CMAKE_CURRENT_BINARY_DIR}/arora
   BYPRODUCTS
     ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp-2.hpp
@@ -18,7 +18,8 @@ add_custom_target(module-cli ALL
     ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
   DEPENDS
     arora
-    generate-test-cpp
+    arora-host-tools
+    generate-test-cpp-wrapper
 )
 
 # We need to make an executable to make a WASM module...
@@ -29,6 +30,8 @@ add_executable(test-cpp-2
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
 )
+add_dependencies(test-cpp-2 generate-test-cpp2-wrapper)
+
 target_include_directories(test-cpp-2 PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp-2 PRIVATE -g -pg -fPIC -flto -fno-exceptions)

@@ -9,7 +9,7 @@ use semio_record::record::Freezer;
 #[derive(Debug, Parser)]
 pub struct Generate {
   #[clap(short, long, name = "configuration-file")]
-  pub configuration_file: String,
+  pub module_file: String,
   #[clap(short, long)]
   pub language: String,
   #[clap(short, long, name = "output-directory")]
@@ -37,7 +37,7 @@ pub async fn generate<R: ReadableRegistry + Freezer>(
   cmd: Generate,
   registry: &mut R,
 ) -> anyhow::Result<()> {
-  let assets = analyze_module_from_path(cmd.configuration_file, registry).await?;
+  let assets = analyze_module_from_path(cmd.module_file, registry).await?;
   let (module_id, tag, module, executor) = match assets.last() {
     Some(ModuleAsset::Module(module_id, tag, module, executor)) => (
       module_id.to_owned(),

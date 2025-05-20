@@ -14,9 +14,11 @@ pub async fn main() {
   let mut registry = LocalRegistry::new();
 
   // Folders. They cannot be frozen, we can serialize them as-is.
-  let folders_dir = "records/folder/";
-  create_dir_all(folders_dir).unwrap();
-  println!("cargo:rerun-if-changed={}", folders_dir);
+  let crate_dir = std::path::Path::new(file!()).parent().unwrap();
+  let folders_dir = crate_dir.join("records/folder/");
+  create_dir_all(&folders_dir).unwrap();
+  let folders_dir_str = folders_dir.to_str().unwrap();
+  println!("cargo:rerun-if-changed={}", folders_dir_str);
 
   // behavior_tree
   let behavior_tree_folder = declare_behavior_tree_folder(ROOT_ID);
@@ -25,14 +27,15 @@ pub async fn main() {
     .add_folder(BEHAVIOR_TREE_FOLDER_ID, behavior_tree_folder)
     .await
     .unwrap();
-  let behavior_tree_folder_path = format!("{}/{}.yaml", folders_dir, BEHAVIOR_TREE_FOLDER_ID);
+  let behavior_tree_folder_path = format!("{}/{}.yaml", folders_dir_str, BEHAVIOR_TREE_FOLDER_ID);
   write(&behavior_tree_folder_path, behavior_tree_folder_yaml).unwrap();
   println!("cargo:rerun-if-changed={}", behavior_tree_folder_path);
 
   // Enumerations. They can be frozen, we serialize their frozen version.
-  let enumerations_dir = "records/enumeration/";
+  let enumerations_dir = crate_dir.join("records/enumeration/");
+  let enumerations_dir_str = enumerations_dir.to_str().unwrap();
   create_dir_all(&enumerations_dir).unwrap();
-  println!("cargo:rerun-if-changed={}", enumerations_dir);
+  println!("cargo:rerun-if-changed={}", enumerations_dir_str);
 
   // behavior_tree::Status
   let status_enumeration = declare_status_enumeration(BEHAVIOR_TREE_FOLDER_ID);
@@ -46,16 +49,17 @@ pub async fn main() {
     .unwrap();
   let status_enumeration_path = format!(
     "{}/{}@{}.yaml",
-    enumerations_dir, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION
+    enumerations_dir_str, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION
   );
   let status_enumeration_yaml = serde_yaml::to_string(&status_enumeration).unwrap();
   write(&status_enumeration_path, status_enumeration_yaml).unwrap();
   println!("cargo:rerun-if-changed={}", status_enumeration_path);
 
   // Structures. They can be frozen, we serialize their frozen version.
-  let structures_dir = "records/structure/";
+  let structures_dir = crate_dir.join("records/structure/");
+  let structures_dir_str = structures_dir.to_str().unwrap();
   create_dir_all(&structures_dir).unwrap();
-  println!("cargo:rerun-if-changed={}", structures_dir);
+  println!("cargo:rerun-if-changed={}", structures_dir_str);
 
   // behavior_tree::TickId
   let tick_id_structure = declare_tick_id_structure(BEHAVIOR_TREE_FOLDER_ID);
@@ -69,7 +73,7 @@ pub async fn main() {
     .unwrap();
   let tick_id_structure_path = format!(
     "{}/{}@{}.yaml",
-    structures_dir, TICK_ID_STRUCTURE_ID, TICK_ID_STRUCTURE_VERSION
+    structures_dir_str, TICK_ID_STRUCTURE_ID, TICK_ID_STRUCTURE_VERSION
   );
   let tick_id_structure_yaml = serde_yaml::to_string(&tick_id_structure).unwrap();
   write(&tick_id_structure_path, tick_id_structure_yaml).unwrap();
