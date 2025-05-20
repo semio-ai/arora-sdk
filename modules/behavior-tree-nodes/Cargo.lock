@@ -131,6 +131,7 @@ dependencies = [
 [[package]]
 name = "arora-schema"
 version = "0.1.0"
+source = "git+https://github.com/semio-ai/arora-schema.git?branch=main#5b837dd9c2522e7c6daa52586294b82bb774235e"
 dependencies = [
  "derive_more 2.0.1",
  "lazy_static",

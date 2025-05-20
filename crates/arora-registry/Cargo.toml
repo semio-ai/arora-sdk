@@ -9,7 +9,7 @@ edition = "2021"
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 anyhow = "*"
-arora-schema = { path = "../arora-schema" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
 async-trait = "0.1"
 derive_more = "2"
 reqwest = { version = "0.11", default-features = false, features = [

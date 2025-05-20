@@ -5,9 +5,12 @@ pub mod schema;
 pub mod schema_groot;
 mod tests;
 pub mod tree_node;
-use arora::call::{Call, CallBridge, CallError, Callable, CallableId};
+use arora::call::{CallBridge, CallError, Callable, CallableId};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
-use arora_schema::value::{ConversionError, StructureField, Value};
+use arora_schema::{
+  call::Call,
+  value::{ConversionError, StructureField, Value},
+};
 use error::BehaviorTreeError;
 use schema::{CallExpression, Node, NodeParameterId};
 use semio_record::module::v0::frozen::Function;

@@ -1,14 +1,14 @@
 use std::{collections::HashMap, fmt::Debug, ops::DerefMut, pin::Pin, rc::Rc};
 
 use arora_buffers::serde_uuid::deserialize;
-use arora_schema::value::Value;
+use arora_schema::{
+  call::{Call, CallResult},
+  value::Value,
+};
 use uuid::Uuid;
 
 use crate::{
-  call::{
-    serialize_to_arg, Call, CallBridge, CallError, CallResult, Callable, CallableId,
-    CallableRegistry,
-  },
+  call::{serialize_to_arg, CallBridge, CallError, Callable, CallableId, CallableRegistry},
   executor::{self, Executor},
   module::{DispatchError, Module},
   schema::module::low::ModuleDefinition,

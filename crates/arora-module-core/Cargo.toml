@@ -9,7 +9,7 @@ edition = "2021"
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 arora-registry = { path = "../arora-registry" }
-arora-schema = { path = "../arora-schema" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
 arora-vfs = { path = "../arora-vfs" }
 bytes = "1"
 convert_case = "0.5"

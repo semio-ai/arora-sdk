@@ -9,7 +9,7 @@ edition = "2021"
 crate-type = [ "staticlib", "rlib" ]
 
 [dependencies]
-arora-schema = { path = "../arora-schema" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
 bytes = "1"
 uuid = { version = "0.8.2", features = ["serde", "v4", "stdweb"] }
 serde = { version = "1", features = ["derive"] }

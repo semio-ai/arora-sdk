@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 arora-buffers = { path = "../../crates/arora-buffers" }
-arora-schema = { path = "../../crates/arora-schema" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
 bytes = "1"
 derive_more = "2"
 regex = "1"

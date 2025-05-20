@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 anyhow = "*"
 arora-buffers = { path = "../arora-buffers" }
-arora-schema = { path = "../arora-schema" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
 async-trait = "0.1"
 bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
