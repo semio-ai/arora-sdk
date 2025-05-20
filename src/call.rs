@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::value::StructureField;
+use crate::value::{StructureField, Value};
 
 /// A call is described like a structure in arora engine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,6 +15,13 @@ pub struct Call {
   /// Arguments to call the functions with.
   #[serde(default)]
   pub args: Vec<StructureField>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CallResult {
+  pub ret: Value,
+  #[serde(default)]
+  pub mutated: Vec<StructureField>,
 }
 
 #[cfg(test)]
