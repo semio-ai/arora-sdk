@@ -9,8 +9,12 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub fn generate_bb_id() -> String {
-  return format!("bb_{}", Uuid::new_v4().to_string());
+pub fn gen_bb_strid() -> String {
+  format!("bb_{}", Uuid::new_v4().to_string())
+}
+
+pub fn gen_bb_uuid() -> Uuid {
+  Uuid::new_v4()
 }
 
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
