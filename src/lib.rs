@@ -1,4 +1,5 @@
 pub mod call;
+pub mod keyvalue;
 pub mod module;
 pub mod ty;
 pub mod value;
@@ -6,6 +7,11 @@ pub mod value;
 use derive_more::Display;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+pub fn generate_bb_id() -> String {
+  return format!("bb_{}", Uuid::new_v4().to_string());
+}
 
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
 #[display("{}.{}.{}", major, minor, patch)]
