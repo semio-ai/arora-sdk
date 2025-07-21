@@ -66,6 +66,8 @@ pub enum Type {
   ArrayEnumeration,
   #[serde(rename = "keyvalue[]")]
   KeyValue,
+  #[serde(rename = "uuid[]")]
+  Uuid,
 }
 
 // Value representation for received parameters.
@@ -164,6 +166,9 @@ pub enum Value {
   },
   #[serde(rename = "keyvalue")]
   KeyValue(KeyValue),
+  #[serde(rename = "uuid")]
+  #[display("uuid({})", _0)]
+  Uuid(Uuid),
 }
 
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
