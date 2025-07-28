@@ -6,14 +6,22 @@ use uuid::Uuid;
 
 use crate::gen_bb_uuid;
 
-#[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
-#[display("{}", match self { ValueBlock::Value(v) => format!("{}", v), ValueBlock::KeyValue(kv) => format!("{}", kv) , ValueBlock::None => "ValueBlock::None".to_string() })]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ValueBlock {
   Value(Value),
   KeyValue(KeyValue),
   None,
 }
 
+impl std::fmt::Display for ValueBlock {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ValueBlock::Value(v) => write!(f, "{}", v),
+      ValueBlock::KeyValue(kv) => write!(f, "{}", kv),
+      ValueBlock::None => write!(f, "ValueBlock::None"),
+    }
+  }
+}
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 #[display("KV({:?})", fields)]
 pub struct KeyValue {
