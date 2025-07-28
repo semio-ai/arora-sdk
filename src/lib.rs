@@ -11,7 +11,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
-pub fn gen_bb_uuid_with_str(key: &String) -> uuid::Uuid {
+pub fn gen_uuid_from_str(key: &str) -> uuid::Uuid {
   let node_ref = match Uuid::parse_str(&key) {
     Ok(uuid) => uuid,
     Err(_) => {
