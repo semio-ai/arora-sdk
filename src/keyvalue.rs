@@ -36,7 +36,7 @@ impl KeyValue {
 
   pub fn new_with_id(id: Uuid) -> Self {
     KeyValue {
-      id: id,
+      id,
       fields: HashMap::new(),
     }
   }
