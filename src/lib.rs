@@ -1,4 +1,5 @@
 pub mod call;
+pub mod keyvalue;
 pub mod module;
 pub mod ty;
 pub mod value;
@@ -6,6 +7,41 @@ pub mod value;
 use derive_more::Display;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use uuid::Uuid;
+
+pub fn gen_uuid_from_str(key: &str) -> uuid::Uuid {
+  let node_ref = match Uuid::parse_str(&key) {
+    Ok(uuid) => uuid,
+    Err(_) => {
+      // Generate a UUID based on the string key
+      // Generate a deterministic UUID based on the string content
+      let mut hasher = DefaultHasher::new();
+      key.hash(&mut hasher);
+      let hash = hasher.finish();
+
+      // Create a byte array with the hash value
+      let mut bytes = [0u8; 16];
+      bytes[0..8].copy_from_slice(&hash.to_le_bytes());
+
+      // Use part of the hash again for the second half
+      let hash2 = hash.wrapping_mul(31);
+      bytes[8..16].copy_from_slice(&hash2.to_le_bytes());
+
+      // Set version to 4 and variant to RFC4122
+      bytes[6] = (bytes[6] & 0x0F) | 0x40; // version 4
+      bytes[8] = (bytes[8] & 0x3F) | 0x80; // variant
+
+      Uuid::from_bytes(bytes)
+    }
+  };
+  node_ref
+}
+
+pub fn gen_bb_uuid() -> Uuid {
+  Uuid::new_v4()
+}
 
 #[derive(Serialize, Deserialize, Debug, Display, Clone)]
 #[display("{}.{}.{}", major, minor, patch)]

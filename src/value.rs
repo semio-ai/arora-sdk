@@ -2,6 +2,8 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::keyvalue::KeyValue;
+
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 pub enum Type {
   #[serde(rename = "unit")]
@@ -61,7 +63,11 @@ pub enum Type {
   #[serde(rename = "struct[]")]
   ArrayStructure,
   #[serde(rename = "enum[]")]
-  ArrayEnumeration
+  ArrayEnumeration,
+  #[serde(rename = "keyvalue[]")]
+  KeyValue,
+  #[serde(rename = "uuid[]")]
+  Uuid,
 }
 
 // Value representation for received parameters.
@@ -158,6 +164,11 @@ pub enum Value {
     id: Uuid,
     elements: Vec<EnumerationWithoutId>,
   },
+  #[serde(rename = "keyvalue")]
+  KeyValue(KeyValue),
+  #[serde(rename = "uuid")]
+  #[display("uuid({})", _0)]
+  Uuid(Uuid),
 }
 
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
@@ -213,26 +224,52 @@ mod tests {
   // Helper function for testing serialization/deserialization roundtrip
   fn test_serde_roundtrip<T>(value: &T, name: &str)
   where
-    T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug + Clone
+    T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug + Clone,
   {
     let json = json5::to_string(value).unwrap();
     println!("{} JSON:\n{}", name, json);
 
     let deserialized: T = json5::from_str(&json).unwrap();
-    assert_eq!(value, &deserialized, "Roundtrip serialization failed for {}", name);
+    assert_eq!(
+      value, &deserialized,
+      "Roundtrip serialization failed for {}",
+      name
+    );
   }
 
   #[test]
   fn test_type_serialization() {
     // Test all variants of Type enum
     for typ in [
-      Type::Unit, Type::Boolean, Type::U8, Type::U16, Type::U32, Type::U64,
-      Type::I8, Type::I16, Type::I32, Type::I64, Type::F32, Type::F64,
-      Type::String, Type::Structure, Type::Enumeration,
-      Type::ArrayBoolean, Type::ArrayU8, Type::ArrayU16, Type::ArrayU32, Type::ArrayU64,
-      Type::ArrayI8, Type::ArrayI16, Type::ArrayI32, Type::ArrayI64,
-      Type::ArrayF32, Type::ArrayF64, Type::ArrayString,
-      Type::ArrayStructure, Type::ArrayEnumeration,
+      Type::Unit,
+      Type::Boolean,
+      Type::U8,
+      Type::U16,
+      Type::U32,
+      Type::U64,
+      Type::I8,
+      Type::I16,
+      Type::I32,
+      Type::I64,
+      Type::F32,
+      Type::F64,
+      Type::String,
+      Type::Structure,
+      Type::Enumeration,
+      Type::ArrayBoolean,
+      Type::ArrayU8,
+      Type::ArrayU16,
+      Type::ArrayU32,
+      Type::ArrayU64,
+      Type::ArrayI8,
+      Type::ArrayI16,
+      Type::ArrayI32,
+      Type::ArrayI64,
+      Type::ArrayF32,
+      Type::ArrayF64,
+      Type::ArrayString,
+      Type::ArrayStructure,
+      Type::ArrayEnumeration,
     ] {
       test_serde_roundtrip(&typ, &format!("Type::{:?}", typ));
     }
@@ -263,7 +300,10 @@ mod tests {
       ("F64_neg_inf", Value::F64(f64::NEG_INFINITY)),
       ("String_empty", Value::String("".to_string())),
       ("String_hello", Value::String("Hello, world!".to_string())),
-      ("String_special", Value::String("Special chars: \n\t\r\"\\".to_string())),
+      (
+        "String_special",
+        Value::String("Special chars: \n\t\r\"\\".to_string()),
+      ),
     ];
 
     for (name, value) in primitives {
@@ -296,8 +336,14 @@ mod tests {
       ("ArrayBoolean", Value::ArrayBoolean(vec![true, false])),
       ("ArrayU8", Value::ArrayU8(vec![0, 123, 255])),
       ("ArrayI32", Value::ArrayI32(vec![i32::MIN, 0, i32::MAX])),
-      ("ArrayF64", Value::ArrayF64(vec![-1.0, 0.0, 1.0, f64::INFINITY])),
-      ("ArrayString", Value::ArrayString(vec!["a".to_string(), "b".to_string()])),
+      (
+        "ArrayF64",
+        Value::ArrayF64(vec![-1.0, 0.0, 1.0, f64::INFINITY]),
+      ),
+      (
+        "ArrayString",
+        Value::ArrayString(vec!["a".to_string(), "b".to_string()]),
+      ),
     ];
 
     for (name, value) in arrays {
@@ -346,12 +392,10 @@ mod tests {
   #[test]
   fn test_structure_without_id_serialization() {
     let structure_without_id = StructureWithoutId {
-      fields: vec![
-        StructureField {
-          id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
-          value: Box::new(Value::String("field1".to_string())),
-        },
-      ],
+      fields: vec![StructureField {
+        id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+        value: Box::new(Value::String("field1".to_string())),
+      }],
     };
 
     test_serde_roundtrip(&structure_without_id, "StructureWithoutId");
@@ -381,27 +425,23 @@ mod tests {
   #[test]
   fn test_complex_nested_values() {
     // Complex nested structure with enumeration
-    let complex_value = Value::Structure(
-      Structure {
-        id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
-        fields: vec![
-          StructureField {
-            id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
-            value: Box::new(Value::String("name".to_string())),
-          },
-          StructureField {
-            id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap(),
-            value: Box::new(Value::Enumeration(
-              Enumeration {
-                id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap(),
-                variant_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440004").unwrap(),
-                value: Box::new(Value::Boolean(true)),
-              }
-            )),
-          },
-        ],
-      }
-    );
+    let complex_value = Value::Structure(Structure {
+      id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+      fields: vec![
+        StructureField {
+          id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+          value: Box::new(Value::String("name".to_string())),
+        },
+        StructureField {
+          id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap(),
+          value: Box::new(Value::Enumeration(Enumeration {
+            id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap(),
+            variant_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440004").unwrap(),
+            value: Box::new(Value::Boolean(true)),
+          })),
+        },
+      ],
+    });
 
     test_serde_roundtrip(&complex_value, "ComplexNestedValue");
   }
@@ -413,12 +453,10 @@ mod tests {
       id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
       elements: vec![
         StructureWithoutId {
-          fields: vec![
-            StructureField {
-              id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
-              value: Box::new(Value::String("element1".to_string())),
-            },
-          ],
+          fields: vec![StructureField {
+            id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+            value: Box::new(Value::String("element1".to_string())),
+          }],
         },
         StructureWithoutId { fields: vec![] }, // Empty structure
       ],
