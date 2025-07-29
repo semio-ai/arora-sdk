@@ -45,8 +45,8 @@ impl KeyValue {
     self.fields.insert(field.name.clone(), field);
   }
 
-  pub fn set_field_value<S: Into<String>>(&mut self, key: S, value: Value) {
-    let key_str = key.into();
+  pub fn set_field_value(&mut self, key: &str, value: Value) {
+    let key_str = key.to_string();
     if let Some(existing_field) = self.fields.get_mut(&key_str) {
       // Update the value of the existing field
       existing_field.value = Box::new(ValueBlock::Value(value));
@@ -65,8 +65,8 @@ impl KeyValue {
     self.fields.keys().cloned().collect()
   }
 
-  pub fn get_field<S: Into<String>>(&self, key: S) -> Option<&KeyValueField> {
-    self.fields.get(&key.into())
+  pub fn get_field(&self, key: &str) -> Option<&KeyValueField> {
+    self.fields.get(&key.to_string())
   }
 }
 
