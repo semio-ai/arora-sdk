@@ -6,22 +6,6 @@ use uuid::Uuid;
 
 use crate::gen_bb_uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ValueBlock {
-  Value(Value),
-  KeyValue(KeyValue),
-  None,
-}
-
-impl std::fmt::Display for ValueBlock {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ValueBlock::Value(v) => write!(f, "{}", v),
-      ValueBlock::KeyValue(kv) => write!(f, "{}", kv),
-      ValueBlock::None => write!(f, "ValueBlock::None"),
-    }
-  }
-}
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 #[display("KV({:?})", fields)]
 pub struct KeyValue {
@@ -35,7 +19,7 @@ impl KeyValue {
   }
 
   pub fn new_with_id(id: Uuid) -> Self {
-    KeyValue {
+    Self {
       id,
       fields: HashMap::new(),
     }
@@ -49,7 +33,7 @@ impl KeyValue {
     let key_str = key.to_string();
     if let Some(existing_field) = self.fields.get_mut(&key_str) {
       // Update the value of the existing field
-      existing_field.value = Box::new(ValueBlock::Value(value));
+      existing_field.value = Some(Box::new(value));
     } else {
       // Create a new field if it doesn't exist
       let field = KeyValueField::new(key_str.clone(), value);
@@ -68,64 +52,49 @@ impl KeyValue {
   pub fn get_field(&self, key: &str) -> Option<&KeyValueField> {
     self.fields.get(&key.to_string())
   }
-}
 
-#[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
-#[display("{} ({}): {}", name, id, value)]
-pub struct KeyValueField {
-  pub id: Uuid,
-  pub name: String,
-  pub value: Box<ValueBlock>,
-}
-
-// Enum for supporting either Value or a KeyValue block as input to set()
-impl From<Value> for ValueBlock {
-  fn from(value: Value) -> Self {
-    ValueBlock::Value(value)
-  }
-}
-
-impl From<KeyValue> for ValueBlock {
-  fn from(kv: KeyValue) -> Self {
-    ValueBlock::KeyValue(kv)
-  }
-}
-
-impl ValueBlock {
-  pub fn make_kv_from_hash(fields: HashMap<String, KeyValueField>) -> Self {
-    ValueBlock::make_kv_from_hash_with_id(gen_bb_uuid(), fields)
-  }
-  pub fn make_kv_from_hash_with_id(id: Uuid, fields: HashMap<String, KeyValueField>) -> Self {
-    ValueBlock::KeyValue(KeyValue { id, fields })
-  }
-
-  // Convenience function to create a KeyValue block from a vector of pairs
   pub fn make_kv_from_pairs<K: Into<String> + Clone>(
     kv_id: Uuid,
     pairs: &[(K, KeyValueField)],
-  ) -> Self {
+  ) -> Value {
     let fields: HashMap<String, KeyValueField> = pairs
       .iter()
       .map(|(k, v)| (k.clone().into(), v.clone()))
       .collect();
-    ValueBlock::KeyValue(KeyValue { id: kv_id, fields })
+    Value::KeyValue(KeyValue { id: kv_id, fields })
+  }
+
+  pub fn make_kv_from_hash(fields: HashMap<String, KeyValueField>) -> Value {
+    Self::make_kv_from_hash_with_id(gen_bb_uuid(), fields)
+  }
+
+  pub fn make_kv_from_hash_with_id(id: Uuid, fields: HashMap<String, KeyValueField>) -> Value {
+    KeyValue { id, fields }.as_value()
+  }
+
+  pub fn as_value(self) -> Value {
+    Value::KeyValue(self)
   }
 }
 
+#[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
+#[display("{} ({}): {:?}", name, id, value)]
+pub struct KeyValueField {
+  pub id: Uuid,
+  pub name: String,
+  pub value: Option<Box<Value>>,
+}
+
 impl KeyValueField {
-  pub fn new<S: Into<String>>(name: S, value: impl Into<ValueBlock>) -> Self {
-    KeyValueField {
-      name: name.into(),
-      id: gen_bb_uuid(),
-      value: Box::new(value.into()),
-    }
+  pub fn new<S: Into<String>>(name: S, value: Value) -> Self {
+    Self::new_with_id(name, gen_bb_uuid(), value)
   }
 
-  pub fn new_with_id<S: Into<String>>(name: S, id: Uuid, value: impl Into<ValueBlock>) -> Self {
-    KeyValueField {
+  pub fn new_with_id<S: Into<String>>(name: S, id: Uuid, value: Value) -> Self {
+    Self {
       name: name.into(),
       id,
-      value: Box::new(value.into()),
+      value: Some(Box::new(value)),
     }
   }
 
@@ -134,7 +103,7 @@ impl KeyValueField {
     kv_id: Uuid,
     pairs: &[(K, KeyValueField)],
   ) -> Self {
-    KeyValueField::new(kv_name, ValueBlock::make_kv_from_pairs(kv_id, pairs))
+    KeyValueField::new(kv_name, KeyValue::make_kv_from_pairs(kv_id, pairs))
   }
 
   pub fn new_nested_kv_with_id<S: Into<String>, K: Into<String> + Clone>(
@@ -146,7 +115,7 @@ impl KeyValueField {
     KeyValueField::new_with_id(
       kv_name,
       field_id,
-      ValueBlock::make_kv_from_pairs(kv_id, pairs),
+      KeyValue::make_kv_from_pairs(kv_id, pairs),
     )
   }
 }
@@ -175,9 +144,9 @@ mod tests {
     assert!(kv.fields.contains_key("health"));
 
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref() {
-      ValueBlock::Value(v) => assert_eq!(v, &health_value),
-      _ => panic!("Expected Value variant"),
+    match field.value.as_ref().unwrap().as_ref() {
+      Value::I32(value) => assert_eq!(*value, 100),
+      _ => panic!("Expected I32 value"),
     }
   }
 
@@ -193,9 +162,9 @@ mod tests {
 
     assert_eq!(kv.fields.len(), 1);
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref() {
-      ValueBlock::Value(Value::I32(50)) => {}
-      _ => panic!("Expected I32(50)"),
+    match field.value.as_ref().unwrap().as_ref() {
+      Value::I32(value) => assert_eq!(*value, 50),
+      _ => panic!("Expected I32 value"),
     }
   }
 
@@ -235,8 +204,8 @@ mod tests {
   fn test_keyvalue_field_new() {
     let field = KeyValueField::new("test_id", Value::String("test_value".to_string()));
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref() {
-      ValueBlock::Value(Value::String(s)) => assert_eq!(s, "test_value"),
+    match field.value.as_ref().unwrap().as_ref() {
+      Value::String(value) => assert_eq!(value, "test_value"),
       _ => panic!("Expected String value"),
     }
   }
@@ -245,11 +214,11 @@ mod tests {
   fn test_keyvalue_field_new_with_simple_nested_keyvalue() {
     let id = gen_bb_uuid();
     let inner_kv = KeyValue::new_with_id(id);
-    let field = KeyValueField::new("test_id", inner_kv.clone());
+    let field = KeyValueField::new("test_id", inner_kv.as_value());
 
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref() {
-      ValueBlock::KeyValue(kv) => assert_eq!(kv.id, id),
+    match field.value.as_ref().unwrap().as_ref() {
+      Value::KeyValue(kv) => assert_eq!(kv.id, id),
       _ => panic!("Expected KeyValue variant"),
     }
   }
@@ -267,35 +236,13 @@ mod tests {
     );
 
     assert_eq!(stats_field.name, "stats");
-    match stats_field.value.as_ref() {
-      ValueBlock::KeyValue(kv) => {
+    match stats_field.value.as_ref().unwrap().as_ref() {
+      Value::KeyValue(kv) => {
         assert_eq!(kv.id, nested_id);
         assert_eq!(kv.fields.len(), 2);
         assert!(kv.fields.contains_key("strength"));
         assert!(kv.fields.contains_key("agility"));
       }
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_from_value() {
-    let value = Value::I32(42);
-    let block: ValueBlock = value.clone().into();
-
-    match block {
-      ValueBlock::Value(v) => assert_eq!(v, value),
-      _ => panic!("Expected Value variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_from_keyvalue() {
-    let kv = KeyValue::new();
-    let block: ValueBlock = kv.clone().into();
-
-    match block {
-      ValueBlock::KeyValue(converted_kv) => assert_eq!(converted_kv.id, kv.id),
       _ => panic!("Expected KeyValue variant"),
     }
   }
@@ -308,10 +255,10 @@ mod tests {
       KeyValueField::new("field_id", Value::I32(100)),
     );
     let id = gen_bb_uuid();
-    let block = ValueBlock::make_kv_from_hash_with_id(id, fields.clone());
+    let kv = KeyValue::make_kv_from_hash_with_id(id, fields.clone());
 
-    match block {
-      ValueBlock::KeyValue(kv) => {
+    match kv {
+      Value::KeyValue(kv) => {
         assert_eq!(kv.id, id);
         assert_eq!(kv.fields, fields);
       }
@@ -327,26 +274,16 @@ mod tests {
     ];
 
     let id = gen_bb_uuid();
-    let block = ValueBlock::make_kv_from_pairs(id, pairs);
+    let kv = KeyValue::make_kv_from_pairs(id, pairs);
 
-    match block {
-      ValueBlock::KeyValue(kv) => {
+    match kv {
+      Value::KeyValue(kv) => {
         assert_eq!(kv.id, id);
         assert_eq!(kv.fields.len(), 2);
         assert!(kv.fields.contains_key("health"));
         assert!(kv.fields.contains_key("mana"));
       }
       _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_none() {
-    let block = ValueBlock::None;
-
-    match block {
-      ValueBlock::None => {}
-      _ => panic!("Expected None variant"),
     }
   }
 
@@ -359,7 +296,7 @@ mod tests {
     let inner_kv_id = gen_bb_uuid();
     let strength_id = gen_bb_uuid();
     let agility_id = gen_bb_uuid();
-    let player_kv = ValueBlock::make_kv_from_pairs(
+    let player_kv = KeyValue::make_kv_from_pairs(
       outer_id,
       &[
         (
@@ -388,7 +325,7 @@ mod tests {
     );
 
     match player_kv {
-      ValueBlock::KeyValue(player) => {
+      Value::KeyValue(player) => {
         assert_eq!(player.id, outer_id);
         assert_eq!(player.fields.len(), 2);
 
@@ -396,8 +333,8 @@ mod tests {
         let health_field = player.get_field("health").unwrap();
         assert_eq!(health_field.id, health_id);
         assert_eq!(health_field.name, "health");
-        match health_field.value.as_ref() {
-          ValueBlock::Value(Value::I32(100)) => {}
+        match health_field.value.as_ref().unwrap().as_ref() {
+          Value::I32(100) => {}
           _ => panic!("Expected I32(100) for health"),
         }
 
@@ -405,8 +342,8 @@ mod tests {
         let stats_field = player.get_field("stats").unwrap();
         assert_eq!(stats_field.name, "stats");
         assert_eq!(stats_field.id, inner_id);
-        match stats_field.value.as_ref() {
-          ValueBlock::KeyValue(stats_kv) => {
+        match stats_field.value.as_ref().unwrap().as_ref() {
+          Value::KeyValue(stats_kv) => {
             assert_eq!(stats_kv.id, inner_kv_id);
             assert_eq!(stats_kv.fields.len(), 2);
 
@@ -414,8 +351,8 @@ mod tests {
             let strength_field = stats_kv.get_field("strength").unwrap();
             assert_eq!(strength_field.id, strength_id);
             assert_eq!(strength_field.name, "strength");
-            match strength_field.value.as_ref() {
-              ValueBlock::Value(Value::I32(50)) => {}
+            match strength_field.value.as_ref().unwrap().as_ref() {
+              Value::I32(50) => {}
               _ => panic!("Expected I32(50) for strength"),
             }
 
@@ -423,8 +360,8 @@ mod tests {
             let agility_field = stats_kv.get_field("agility").unwrap();
             assert_eq!(agility_field.id, agility_id);
             assert_eq!(agility_field.name, "agility");
-            match agility_field.value.as_ref() {
-              ValueBlock::Value(Value::I32(75)) => {}
+            match agility_field.value.as_ref().unwrap().as_ref() {
+              Value::I32(75) => {}
               _ => panic!("Expected I32(75) for agility"),
             }
           }
@@ -453,25 +390,6 @@ mod tests {
     let display_str = format!("{}", field);
     assert!(display_str.contains("test_field"));
     assert!(display_str.contains("test_value"));
-  }
-
-  #[test]
-  fn test_valueblock_display() {
-    // Test Value variant
-    let value_block = ValueBlock::Value(Value::I32(42));
-    let display_str = format!("{}", value_block);
-    assert!(display_str.contains("42"));
-
-    // Test KeyValue variant
-    let kv = KeyValue::new();
-    let kv_block = ValueBlock::KeyValue(kv);
-    let kv_display = format!("{}", kv_block);
-    assert!(kv_display.contains("KV("));
-
-    // Test None variant
-    let none_block = ValueBlock::None;
-    let none_display = format!("{}", none_block);
-    assert_eq!(none_display, "ValueBlock::None");
   }
 
   #[test]
@@ -546,10 +464,13 @@ mod tests {
       kv.set_field_value(name, value.clone());
 
       let retrieved_field = kv.get_field(name).unwrap();
-      match retrieved_field.value.as_ref() {
-        ValueBlock::Value(v) => assert_eq!(v, &value, "Failed for type: {}", name),
-        _ => panic!("Expected Value variant for {}", name),
-      }
+
+      assert_eq!(
+        retrieved_field.value.as_ref().unwrap().as_ref(),
+        &value,
+        "Failed for type: {}",
+        name
+      );
     }
   }
 }
