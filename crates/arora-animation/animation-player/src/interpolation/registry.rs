@@ -1,9 +1,9 @@
 use crate::animation::AnimationTransition;
 use crate::interpolation::cache::InterpolationCacheKey;
 use crate::interpolation::functions::{
-    BezierInterpolation, CatmullRomInterpolation, CubicInterpolation, EaseInInterpolation,
-    EaseInOutInterpolation, EaseOutInterpolation, HermiteInterpolation, Interpolator,
-    LinearInterpolation, SpringInterpolation, StepInterpolation, BSplineInterpolation
+    BSplineInterpolation, BezierInterpolation, CatmullRomInterpolation, CubicInterpolation,
+    EaseInInterpolation, EaseInOutInterpolation, EaseOutInterpolation, HermiteInterpolation,
+    Interpolator, LinearInterpolation, SpringInterpolation, StepInterpolation,
 };
 use crate::interpolation::parameters::InterpolationParams;
 use crate::{AnimationError, Value};
