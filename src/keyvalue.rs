@@ -87,7 +87,11 @@ pub struct KeyValueField {
 
 impl KeyValueField {
   pub fn new<S: Into<String>>(name: S, value: Value) -> Self {
-    Self::new_with_id(name, gen_bb_uuid(), value)
+    Self::new_with_option(name, Some(value))
+  }
+
+  pub fn new_with_option<S: Into<String>>(name: S, value: Option<Value>) -> Self {
+    Self::new_with_id_and_option(name, gen_bb_uuid(), value)
   }
 
   pub fn new_with_id<S: Into<String>>(name: S, id: Uuid, value: Value) -> Self {
@@ -95,6 +99,14 @@ impl KeyValueField {
       name: name.into(),
       id,
       value: Some(Box::new(value)),
+    }
+  }
+
+  pub fn new_with_id_and_option<S: Into<String>>(name: S, id: Uuid, value: Option<Value>) -> Self {
+    Self {
+      name: name.into(),
+      id,
+      value: value.map(Box::new),
     }
   }
 
