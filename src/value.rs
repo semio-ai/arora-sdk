@@ -1,3 +1,7 @@
+/// This module provides the [`Value`] enum and related types for representing structured values,
+/// including conversions from primitive types, arrays, and collections.
+///
+/// Note: HashSet<f32> and HashSet<f64> are not implemented because floating point types don't implement Hash due to NaN issues.
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -311,142 +315,74 @@ impl From<KeyValue> for Value {
   }
 }
 
-// Array support for Vec specifically to avoid conflicts
-impl From<Vec<bool>> for Value {
-  fn from(vec: Vec<bool>) -> Self {
-    Value::ArrayBoolean(vec)
-  }
+// Macro to reduce repetition for Vec, slice, and HashSet conversions
+macro_rules! impl_array_conversions {
+    ($(($rust_type:ty, $variant:ident)),* $(,)?) => {
+        $(
+            // Vec<T> -> Value::Array*
+            impl From<Vec<$rust_type>> for Value {
+                fn from(vec: Vec<$rust_type>) -> Self {
+                    Value::$variant(vec)
+                }
+            }
+
+            // &[T] -> Value::Array*
+            impl From<&[$rust_type]> for Value {
+                fn from(slice: &[$rust_type]) -> Self {
+                    Value::$variant(slice.to_vec())
+                }
+            }
+
+            // HashSet<T> -> Value::Array* (for hashable types only)
+            impl From<std::collections::HashSet<$rust_type>> for Value {
+                fn from(set: std::collections::HashSet<$rust_type>) -> Self {
+                    Value::$variant(set.into_iter().collect())
+                }
+            }
+        )*
+    };
 }
 
-impl From<Vec<u8>> for Value {
-  fn from(vec: Vec<u8>) -> Self {
-    Value::ArrayU8(vec)
-  }
+// Apply the macro for all supported array types
+impl_array_conversions! {
+    (bool, ArrayBoolean),
+    (u8, ArrayU8),
+    (u16, ArrayU16),
+    (u32, ArrayU32),
+    (u64, ArrayU64),
+    (i8, ArrayI8),
+    (i16, ArrayI16),
+    (i32, ArrayI32),
+    (i64, ArrayI64),
+    (String, ArrayString),
 }
 
-impl From<Vec<u16>> for Value {
-  fn from(vec: Vec<u16>) -> Self {
-    Value::ArrayU16(vec)
-  }
+// Separate implementations for floating point types (no HashSet support)
+macro_rules! impl_float_array_conversions {
+    ($(($rust_type:ty, $variant:ident)),* $(,)?) => {
+        $(
+            // Vec<T> -> Value::Array*
+            impl From<Vec<$rust_type>> for Value {
+                fn from(vec: Vec<$rust_type>) -> Self {
+                    Value::$variant(vec)
+                }
+            }
+
+            // &[T] -> Value::Array*
+            impl From<&[$rust_type]> for Value {
+                fn from(slice: &[$rust_type]) -> Self {
+                    Value::$variant(slice.to_vec())
+                }
+            }
+        )*
+    };
 }
 
-impl From<Vec<u32>> for Value {
-  fn from(vec: Vec<u32>) -> Self {
-    Value::ArrayU32(vec)
-  }
+// Apply the macro for floating point types (no HashSet due to Hash requirements)
+impl_float_array_conversions! {
+    (f32, ArrayF32),
+    (f64, ArrayF64),
 }
-
-impl From<Vec<u64>> for Value {
-  fn from(vec: Vec<u64>) -> Self {
-    Value::ArrayU64(vec)
-  }
-}
-
-impl From<Vec<i8>> for Value {
-  fn from(vec: Vec<i8>) -> Self {
-    Value::ArrayI8(vec)
-  }
-}
-
-impl From<Vec<i16>> for Value {
-  fn from(vec: Vec<i16>) -> Self {
-    Value::ArrayI16(vec)
-  }
-}
-
-impl From<Vec<i32>> for Value {
-  fn from(vec: Vec<i32>) -> Self {
-    Value::ArrayI32(vec)
-  }
-}
-
-impl From<Vec<i64>> for Value {
-  fn from(vec: Vec<i64>) -> Self {
-    Value::ArrayI64(vec)
-  }
-}
-
-impl From<Vec<f32>> for Value {
-  fn from(vec: Vec<f32>) -> Self {
-    Value::ArrayF32(vec)
-  }
-}
-
-impl From<Vec<f64>> for Value {
-  fn from(vec: Vec<f64>) -> Self {
-    Value::ArrayF64(vec)
-  }
-}
-
-impl From<Vec<String>> for Value {
-  fn from(vec: Vec<String>) -> Self {
-    Value::ArrayString(vec)
-  }
-}
-
-// HashSet support - converts to Vec internally
-impl From<std::collections::HashSet<bool>> for Value {
-  fn from(set: std::collections::HashSet<bool>) -> Self {
-    Value::ArrayBoolean(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<u8>> for Value {
-  fn from(set: std::collections::HashSet<u8>) -> Self {
-    Value::ArrayU8(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<u16>> for Value {
-  fn from(set: std::collections::HashSet<u16>) -> Self {
-    Value::ArrayU16(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<u32>> for Value {
-  fn from(set: std::collections::HashSet<u32>) -> Self {
-    Value::ArrayU32(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<u64>> for Value {
-  fn from(set: std::collections::HashSet<u64>) -> Self {
-    Value::ArrayU64(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<i8>> for Value {
-  fn from(set: std::collections::HashSet<i8>) -> Self {
-    Value::ArrayI8(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<i16>> for Value {
-  fn from(set: std::collections::HashSet<i16>) -> Self {
-    Value::ArrayI16(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<i32>> for Value {
-  fn from(set: std::collections::HashSet<i32>) -> Self {
-    Value::ArrayI32(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<i64>> for Value {
-  fn from(set: std::collections::HashSet<i64>) -> Self {
-    Value::ArrayI64(set.into_iter().collect())
-  }
-}
-
-impl From<std::collections::HashSet<String>> for Value {
-  fn from(set: std::collections::HashSet<String>) -> Self {
-    Value::ArrayString(set.into_iter().collect())
-  }
-}
-
-// Note: HashSet<f32> and HashSet<f64> are not implemented because
-// floating point types don't implement Hash due to NaN issues
 
 // HashMap to KeyValue conversion
 impl<T> From<std::collections::HashMap<String, T>> for Value
@@ -454,7 +390,7 @@ where
   T: Into<Value>,
 {
   fn from(map: std::collections::HashMap<String, T>) -> Self {
-    use crate::keyvalue::{KeyValue, KeyValueField, ValueBlock};
+    use crate::keyvalue::{KeyValueField, ValueBlock};
     use uuid::Uuid;
 
     let mut kv = KeyValue::new();
@@ -470,78 +406,7 @@ where
   }
 }
 
-// Support for slice references
-impl From<&[bool]> for Value {
-  fn from(slice: &[bool]) -> Self {
-    Value::ArrayBoolean(slice.to_vec())
-  }
-}
-
-impl From<&[u8]> for Value {
-  fn from(slice: &[u8]) -> Self {
-    Value::ArrayU8(slice.to_vec())
-  }
-}
-
-impl From<&[u16]> for Value {
-  fn from(slice: &[u16]) -> Self {
-    Value::ArrayU16(slice.to_vec())
-  }
-}
-
-impl From<&[u32]> for Value {
-  fn from(slice: &[u32]) -> Self {
-    Value::ArrayU32(slice.to_vec())
-  }
-}
-
-impl From<&[u64]> for Value {
-  fn from(slice: &[u64]) -> Self {
-    Value::ArrayU64(slice.to_vec())
-  }
-}
-
-impl From<&[i8]> for Value {
-  fn from(slice: &[i8]) -> Self {
-    Value::ArrayI8(slice.to_vec())
-  }
-}
-
-impl From<&[i16]> for Value {
-  fn from(slice: &[i16]) -> Self {
-    Value::ArrayI16(slice.to_vec())
-  }
-}
-
-impl From<&[i32]> for Value {
-  fn from(slice: &[i32]) -> Self {
-    Value::ArrayI32(slice.to_vec())
-  }
-}
-
-impl From<&[i64]> for Value {
-  fn from(slice: &[i64]) -> Self {
-    Value::ArrayI64(slice.to_vec())
-  }
-}
-
-impl From<&[f32]> for Value {
-  fn from(slice: &[f32]) -> Self {
-    Value::ArrayF32(slice.to_vec())
-  }
-}
-
-impl From<&[f64]> for Value {
-  fn from(slice: &[f64]) -> Self {
-    Value::ArrayF64(slice.to_vec())
-  }
-}
-
-impl From<&[String]> for Value {
-  fn from(slice: &[String]) -> Self {
-    Value::ArrayString(slice.to_vec())
-  }
-}
+// All slice and HashSet conversions are now generated by the macros above
 
 #[cfg(test)]
 mod tests {
