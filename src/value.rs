@@ -36,6 +36,8 @@ pub enum Type {
   F64,
   #[serde(rename = "str")]
   String,
+  #[serde(rename = "v?")]
+  Option,
   #[serde(rename = "struct")]
   Structure,
   #[serde(rename = "enum")]
@@ -64,6 +66,8 @@ pub enum Type {
   ArrayF64,
   #[serde(rename = "str[]")]
   ArrayString,
+  #[serde(rename = "value[]")]
+  ArrayValue,
   #[serde(rename = "struct[]")]
   ArrayStructure,
   #[serde(rename = "enum[]")]
@@ -116,6 +120,9 @@ pub enum Value {
   #[serde(rename = "str")]
   #[display("\"{}\"", _0)]
   String(String),
+  #[serde(rename = "v?")]
+  #[display("[{}]", if let Some(v) = _0.as_ref() { format!("{}", v) } else { "null".to_string() })]
+  Option(Option<Box<Value>>),
   #[serde(rename = "struct")]
   Structure(Structure),
   #[serde(rename = "enum")]
@@ -156,6 +163,9 @@ pub enum Value {
   #[serde(rename = "str[]")]
   #[display("[{:?}]", _0)]
   ArrayString(Vec<String>),
+  #[serde(rename = "value[]")]
+  #[display("[{:?}]", _0)]
+  ArrayValue(Vec<Value>),
   #[serde(rename = "struct[]")]
   #[display("struct[]({}, {:?})", id, elements)]
   ArrayStructure {
