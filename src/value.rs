@@ -325,6 +325,33 @@ impl From<KeyValue> for Value {
   }
 }
 
+// Option<T> -> Value::Option conversion
+impl<T> From<Option<T>> for Value
+where
+  T: Into<Value>,
+{
+  fn from(opt: Option<T>) -> Self {
+    match opt {
+      Some(value) => Value::Option(Some(Box::new(value.into()))),
+      None => Value::Option(None),
+    }
+  }
+}
+
+// Vec<Value> -> Value::ArrayValue conversion
+impl From<Vec<Value>> for Value {
+  fn from(vec: Vec<Value>) -> Self {
+    Value::ArrayValue(vec)
+  }
+}
+
+// &[Value] -> Value::ArrayValue conversion
+impl From<&[Value]> for Value {
+  fn from(slice: &[Value]) -> Self {
+    Value::ArrayValue(slice.to_vec())
+  }
+}
+
 // Macro to reduce repetition for Vec, slice, and HashSet conversions
 macro_rules! impl_array_conversions {
     ($(($rust_type:ty, $variant:ident)),* $(,)?) => {
@@ -457,6 +484,7 @@ mod tests {
       Type::F32,
       Type::F64,
       Type::String,
+      Type::Option,
       Type::Structure,
       Type::Enumeration,
       Type::ArrayBoolean,
@@ -471,8 +499,11 @@ mod tests {
       Type::ArrayF32,
       Type::ArrayF64,
       Type::ArrayString,
+      Type::ArrayValue,
       Type::ArrayStructure,
       Type::ArrayEnumeration,
+      Type::KeyValue,
+      Type::Uuid,
     ] {
       test_serde_roundtrip(&typ, &format!("Type::{:?}", typ));
     }
@@ -905,6 +936,101 @@ mod tests {
     assert_eq!(
       Value::from(Vec::<String>::new()),
       Value::ArrayString(vec![])
+    );
+  }
+
+  #[test]
+  fn test_from_conversions_option() {
+    // Test Option<T> conversions for various primitive types
+
+    // Test Some variants
+    assert_eq!(
+      Value::from(Some(42u32)),
+      Value::Option(Some(Box::new(Value::U32(42))))
+    );
+    assert_eq!(
+      Value::from(Some(true)),
+      Value::Option(Some(Box::new(Value::Boolean(true))))
+    );
+    assert_eq!(
+      Value::from(Some("hello".to_string())),
+      Value::Option(Some(Box::new(Value::String("hello".to_string()))))
+    );
+    assert_eq!(
+      Value::from(Some(3.14f64)),
+      Value::Option(Some(Box::new(Value::F64(3.14))))
+    );
+
+    // Test None variants
+    assert_eq!(Value::from(None::<u32>), Value::Option(None));
+    assert_eq!(Value::from(None::<bool>), Value::Option(None));
+    assert_eq!(Value::from(None::<String>), Value::Option(None));
+    assert_eq!(Value::from(None::<f64>), Value::Option(None));
+
+    // Test nested Option with Value
+    let nested_value = Value::ArrayU32(vec![1, 2, 3]);
+    assert_eq!(
+      Value::from(Some(nested_value.clone())),
+      Value::Option(Some(Box::new(nested_value)))
+    );
+    assert_eq!(Value::from(None::<Value>), Value::Option(None));
+  }
+
+  #[test]
+  fn test_from_conversions_array_value() {
+    // Test Vec<Value> -> ArrayValue conversions
+
+    // Test empty Vec<Value>
+    assert_eq!(Value::from(Vec::<Value>::new()), Value::ArrayValue(vec![]));
+
+    // Test Vec<Value> with mixed types
+    let mixed_values = vec![
+      Value::U32(42),
+      Value::Boolean(true),
+      Value::String("test".to_string()),
+      Value::F64(3.14),
+      Value::Unit,
+    ];
+    assert_eq!(
+      Value::from(mixed_values.clone()),
+      Value::ArrayValue(mixed_values.clone())
+    );
+
+    // Test slice conversion
+    let values_slice = &[
+      Value::I32(-10),
+      Value::Boolean(false),
+      Value::String("slice".to_string()),
+    ][..];
+    assert_eq!(
+      Value::from(values_slice),
+      Value::ArrayValue(vec![
+        Value::I32(-10),
+        Value::Boolean(false),
+        Value::String("slice".to_string()),
+      ])
+    );
+
+    // Test ArrayValue with nested arrays
+    let nested_array = vec![
+      Value::ArrayU32(vec![1, 2, 3]),
+      Value::ArrayString(vec!["a".to_string(), "b".to_string()]),
+      Value::ArrayBoolean(vec![true, false]),
+    ];
+    assert_eq!(
+      Value::from(nested_array.clone()),
+      Value::ArrayValue(nested_array)
+    );
+
+    // Test ArrayValue with Options
+    let option_array = vec![
+      Value::Option(Some(Box::new(Value::U32(1)))),
+      Value::Option(None),
+      Value::Option(Some(Box::new(Value::String("test".to_string())))),
+    ];
+    assert_eq!(
+      Value::from(option_array.clone()),
+      Value::ArrayValue(option_array)
     );
   }
 }
