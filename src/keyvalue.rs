@@ -52,20 +52,21 @@ impl KeyValue {
   pub fn get_field(&self, key: &str) -> Option<&KeyValueField> {
     self.fields.get(&key.to_string())
   }
-
-  pub fn make_kv_from_pairs<K: Into<String> + Clone>(
-    kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
-  ) -> Value {
-    let fields: HashMap<String, KeyValueField> = pairs
-      .iter()
-      .map(|(k, v)| (k.clone().into(), v.clone()))
-      .collect();
-    Value::KeyValue(KeyValue { id: kv_id, fields })
+  /// Create a KeyValue from a collection (slice, Vec, KeyValueSet) of KeyValueField where each
+  /// field's own name is used as the key.
+  pub fn make_kv_from_fields<F: AsRef<[KeyValueField]>>(fields: F) -> Value {
+    Self::make_kv_from_fields_with_id(gen_bb_uuid(), fields)
   }
 
-  pub fn make_kv_from_hash(fields: HashMap<String, KeyValueField>) -> Value {
-    Self::make_kv_from_hash_with_id(gen_bb_uuid(), fields)
+  /// Same as `make_kv_from_fields` but allows specifying the KeyValue id explicitly.
+  pub fn make_kv_from_fields_with_id<F: AsRef<[KeyValueField]>>(kv_id: Uuid, fields: F) -> Value {
+    let slice = fields.as_ref();
+    let map: HashMap<String, KeyValueField> =
+      slice.iter().cloned().map(|f| (f.name.clone(), f)).collect();
+    Value::KeyValue(KeyValue {
+      id: kv_id,
+      fields: map,
+    })
   }
 
   pub fn make_kv_from_hash_with_id(id: Uuid, fields: HashMap<String, KeyValueField>) -> Value {
@@ -83,6 +84,87 @@ pub struct KeyValueField {
   pub id: Uuid,
   pub name: String,
   pub value: Option<Box<Value>>,
+}
+
+/// Wrapper type representing a collection of `KeyValueField`s. This allows us to
+/// extend functionality (validation, ordering rules, etc.) without changing all
+/// call sites that currently use `Vec<KeyValueField>` or slices.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct KeyValueSet(pub Vec<KeyValueField>);
+
+impl std::ops::Deref for KeyValueSet {
+  type Target = [KeyValueField];
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl IntoIterator for KeyValueSet {
+  type Item = KeyValueField;
+  type IntoIter = std::vec::IntoIter<KeyValueField>;
+  fn into_iter(self) -> Self::IntoIter {
+    self.0.into_iter()
+  }
+}
+
+impl From<Vec<KeyValueField>> for KeyValueSet {
+  fn from(v: Vec<KeyValueField>) -> Self {
+    KeyValueSet(v)
+  }
+}
+
+impl<'a> From<&'a [KeyValueField]> for KeyValueSet {
+  fn from(slice: &'a [KeyValueField]) -> Self {
+    KeyValueSet(slice.to_vec())
+  }
+}
+
+impl From<KeyValueSet> for Vec<KeyValueField> {
+  fn from(kvs: KeyValueSet) -> Self {
+    kvs.0
+  }
+}
+
+impl KeyValueSet {
+  pub fn new() -> Self {
+    Self(Vec::new())
+  }
+  pub fn push(&mut self, field: KeyValueField) {
+    self.0.push(field);
+  }
+  pub fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+  pub fn len(&self) -> usize {
+    self.0.len()
+  }
+  pub fn into_inner(self) -> Vec<KeyValueField> {
+    self.0
+  }
+  pub fn iter(&self) -> std::slice::Iter<'_, KeyValueField> {
+    self.0.iter()
+  }
+  pub fn get(&self, name: &str) -> Option<&KeyValueField> {
+    self.0.iter().find(|f| f.name == name)
+  }
+
+  pub fn from_hash<K>(pairs: impl IntoIterator<Item = (K, KeyValueField)>) -> KeyValueSet
+  where
+    K: Into<String>,
+  {
+    use std::collections::HashMap; // temporary map to de-duplicate by name
+    let mut map: HashMap<String, KeyValueField> = HashMap::new();
+    for (k, v) in pairs.into_iter() {
+      map.insert(k.into(), v); // last wins
+    }
+    KeyValueSet(map.into_iter().map(|(_, v)| v).collect())
+  }
+}
+
+impl AsRef<[KeyValueField]> for KeyValueSet {
+  fn as_ref(&self) -> &[KeyValueField] {
+    &self.0
+  }
 }
 
 impl KeyValueField {
@@ -110,24 +192,28 @@ impl KeyValueField {
     }
   }
 
-  pub fn new_nested_kv<S: Into<String>, K: Into<String> + Clone>(
-    kv_name: S,
-    kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
-  ) -> Self {
-    KeyValueField::new(kv_name, KeyValue::make_kv_from_pairs(kv_id, pairs))
+  pub fn new_nested_kv<S: Into<String>, F: AsRef<[KeyValueField]>>(kv_name: S, fields: &F) -> Self {
+    Self::new_nested_kv_with_kv_id(kv_name, gen_bb_uuid(), fields)
   }
 
-  pub fn new_nested_kv_with_id<S: Into<String>, K: Into<String> + Clone>(
+  pub fn new_nested_kv_with_kv_id<S: Into<String>, F: AsRef<[KeyValueField]>>(
+    kv_name: S,
+    kv_id: Uuid,
+    fields: &F,
+  ) -> Self {
+    Self::new_nested_kv_with_both_ids(kv_name, gen_bb_uuid(), kv_id, fields)
+  }
+
+  pub fn new_nested_kv_with_both_ids<S: Into<String>, F: AsRef<[KeyValueField]>>(
     kv_name: S,
     field_id: Uuid,
     kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
+    fields: &F,
   ) -> Self {
     KeyValueField::new_with_id(
       kv_name,
       field_id,
-      KeyValue::make_kv_from_pairs(kv_id, pairs),
+      KeyValue::make_kv_from_fields_with_id(kv_id, fields.as_ref()),
     )
   }
 }
@@ -149,6 +235,8 @@ mod tests {
   fn test_keyvalue_set_field_value_new() {
     let mut kv = KeyValue::new();
     let health_value = Value::I32(100);
+
+    // Directly set a field and value entry into the KV
 
     kv.set_field_value("health", health_value.clone());
 
@@ -184,6 +272,8 @@ mod tests {
   fn test_keyvalue_set_field() {
     let mut kv = KeyValue::new();
     let field = KeyValueField::new("health_id", Value::I32(100));
+
+    // Set an entry into the KV using a prebuilt key-value field
 
     kv.set_field(field.clone());
 
@@ -223,7 +313,7 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalue_field_new_with_simple_nested_keyvalue() {
+  fn test_keyvalue_field_simple_nested_keyvalue() {
     let id = gen_bb_uuid();
     let inner_kv = KeyValue::new_with_id(id);
     let field = KeyValueField::new("test_id", inner_kv.as_value());
@@ -236,58 +326,13 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalue_field_new_nested_kv() {
-    let nested_id = gen_bb_uuid();
-    let stats_field = KeyValueField::new_nested_kv(
-      "stats",
-      nested_id,
-      &[
-        ("strength", KeyValueField::new("str_id", Value::I32(50))),
-        ("agility", KeyValueField::new("agi_id", Value::I32(75))),
-      ],
-    );
-
-    assert_eq!(stats_field.name, "stats");
-    match stats_field.value.as_ref().unwrap().as_ref() {
-      Value::KeyValue(kv) => {
-        assert_eq!(kv.id, nested_id);
-        assert_eq!(kv.fields.len(), 2);
-        assert!(kv.fields.contains_key("strength"));
-        assert!(kv.fields.contains_key("agility"));
-      }
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_make_kv_from_hash() {
-    let mut fields = HashMap::new();
-    fields.insert(
-      "test_key".to_string(),
-      KeyValueField::new("field_id", Value::I32(100)),
-    );
-    let id = gen_bb_uuid();
-    let kv = KeyValue::make_kv_from_hash_with_id(id, fields.clone());
-
-    match kv {
-      Value::KeyValue(kv) => {
-        assert_eq!(kv.id, id);
-        assert_eq!(kv.fields, fields);
-      }
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_make_kv_from_pairs() {
-    let pairs = &[
-      ("health", KeyValueField::new("health_id", Value::I32(100))),
-      ("mana", KeyValueField::new("mana_id", Value::I32(50))),
+  fn test_valueblock_make_kv_from_fields_simple() {
+    let fields = vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("mana", Value::I32(50)),
     ];
-
     let id = gen_bb_uuid();
-    let kv = KeyValue::make_kv_from_pairs(id, pairs);
-
+    let kv = KeyValue::make_kv_from_fields_with_id(id, &fields);
     match kv {
       Value::KeyValue(kv) => {
         assert_eq!(kv.id, id);
@@ -300,81 +345,180 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalue_complex_nested_structure() {
-    // Create a complex nested structure similar to the blackboard test
+  fn test_keyvalue_nested_structure_without_ids() {
+    // Create a complex nested structure without caring for the ids, showing a clean and simple example
+    let player_kv = KeyValue::make_kv_from_fields(&[
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new_nested_kv(
+        "stats",
+        &KeyValueSet::from(vec![
+          KeyValueField::new("strength", Value::I32(50)),
+          KeyValueField::new("agility", Value::I32(75)),
+        ]),
+      ),
+      KeyValueField::new_nested_kv(
+        "position",
+        &KeyValueSet::from(vec![
+          KeyValueField::new("x", Value::F32(10.0)),
+          KeyValueField::new("y", Value::F32(20.0)),
+        ]),
+      ),
+    ]);
+
+    match player_kv {
+      Value::KeyValue(player) => {
+        // Now expect three top-level fields: health, stats, position
+        assert_eq!(player.fields.len(), 3);
+
+        // health
+        let health_field = player.get_field("health").expect("health field");
+        match health_field.value.as_ref().unwrap().as_ref() {
+          Value::I32(100) => {}
+          other => panic!("Expected I32(100) got {:?}", other),
+        }
+
+        // stats nested kv
+        let stats_field = player.get_field("stats").expect("stats field");
+        match stats_field.value.as_ref().unwrap().as_ref() {
+          Value::KeyValue(stats_kv) => {
+            assert_eq!(stats_kv.fields.len(), 2);
+            // strength
+            match stats_kv
+              .get_field("strength")
+              .unwrap()
+              .value
+              .as_ref()
+              .unwrap()
+              .as_ref()
+            {
+              Value::I32(50) => {}
+              other => panic!("Expected strength=50 got {:?}", other),
+            }
+            // agility
+            match stats_kv
+              .get_field("agility")
+              .unwrap()
+              .value
+              .as_ref()
+              .unwrap()
+              .as_ref()
+            {
+              Value::I32(75) => {}
+              other => panic!("Expected agility=75 got {:?}", other),
+            }
+          }
+          other => panic!("Expected KeyValue for stats got {:?}", other),
+        }
+
+        // position nested kv
+        let position_field = player.get_field("position").expect("position field");
+        match position_field.value.as_ref().unwrap().as_ref() {
+          Value::KeyValue(pos_kv) => {
+            assert_eq!(pos_kv.fields.len(), 2);
+            match pos_kv
+              .get_field("x")
+              .unwrap()
+              .value
+              .as_ref()
+              .unwrap()
+              .as_ref()
+            {
+              Value::F32(f) if (*f - 10.0).abs() < f32::EPSILON => {}
+              other => panic!("Expected x=10.0 got {:?}", other),
+            }
+            match pos_kv
+              .get_field("y")
+              .unwrap()
+              .value
+              .as_ref()
+              .unwrap()
+              .as_ref()
+            {
+              Value::F32(f) if (*f - 20.0).abs() < f32::EPSILON => {}
+              other => panic!("Expected y=20.0 got {:?}", other),
+            }
+          }
+          other => panic!("Expected KeyValue for position got {:?}", other),
+        }
+      }
+      _ => panic!("Expected KeyValue variant for player"),
+    }
+  }
+
+  #[test]
+  fn test_valueblock_make_kv_from_fields_duplicate_names_last_wins() {
+    let fields = vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("health", Value::I32(150)), // duplicate name
+    ];
+    let kv_value = KeyValue::make_kv_from_fields(&fields);
+    match kv_value {
+      Value::KeyValue(kv) => {
+        assert_eq!(kv.fields.len(), 1); // last wins
+        let health_field = kv.get_field("health").unwrap();
+        match health_field.value.as_ref().unwrap().as_ref() {
+          Value::I32(150) => {}
+          other => panic!("Expected 150 got {:?}", other),
+        }
+      }
+      _ => panic!("Expected KeyValue variant"),
+    }
+  }
+
+  #[test]
+  fn test_keyvalue_nested_structure_with_ids() {
     let outer_id = gen_bb_uuid();
     let health_id = gen_bb_uuid();
-    let inner_id = gen_bb_uuid();
+    let inner_field_id = gen_bb_uuid();
     let inner_kv_id = gen_bb_uuid();
     let strength_id = gen_bb_uuid();
     let agility_id = gen_bb_uuid();
-    let player_kv = KeyValue::make_kv_from_pairs(
+
+    let stats_set = KeyValueSet::from(vec![
+      KeyValueField::new_with_id("strength", strength_id, Value::I32(50)),
+      KeyValueField::new_with_id("agility", agility_id, Value::I32(75)),
+    ]);
+
+    let player_value = KeyValue::make_kv_from_fields_with_id(
       outer_id,
       &[
-        (
-          "health",
-          KeyValueField::new_with_id("health", health_id, Value::I32(100)),
-        ),
-        (
+        KeyValueField::new_with_id("health", health_id, Value::I32(100)),
+        KeyValueField::new_nested_kv_with_both_ids(
           "stats",
-          KeyValueField::new_nested_kv_with_id(
-            "stats",
-            inner_id,
-            inner_kv_id,
-            &[
-              (
-                "strength",
-                KeyValueField::new_with_id("strength", strength_id, Value::I32(50)),
-              ),
-              (
-                "agility",
-                KeyValueField::new_with_id("agility", agility_id, Value::I32(75)),
-              ),
-            ],
-          ),
+          inner_field_id,
+          inner_kv_id,
+          &stats_set,
         ),
       ],
     );
 
-    match player_kv {
+    match player_value {
       Value::KeyValue(player) => {
         assert_eq!(player.id, outer_id);
         assert_eq!(player.fields.len(), 2);
-
-        // Test health field
         let health_field = player.get_field("health").unwrap();
         assert_eq!(health_field.id, health_id);
-        assert_eq!(health_field.name, "health");
         match health_field.value.as_ref().unwrap().as_ref() {
           Value::I32(100) => {}
-          _ => panic!("Expected I32(100) for health"),
+          _ => panic!("Expected I32(100)"),
         }
-
-        // Test nested stats structure
         let stats_field = player.get_field("stats").unwrap();
-        assert_eq!(stats_field.name, "stats");
-        assert_eq!(stats_field.id, inner_id);
+        assert_eq!(stats_field.id, inner_field_id);
         match stats_field.value.as_ref().unwrap().as_ref() {
           Value::KeyValue(stats_kv) => {
             assert_eq!(stats_kv.id, inner_kv_id);
             assert_eq!(stats_kv.fields.len(), 2);
-
-            // Test strength
             let strength_field = stats_kv.get_field("strength").unwrap();
             assert_eq!(strength_field.id, strength_id);
-            assert_eq!(strength_field.name, "strength");
             match strength_field.value.as_ref().unwrap().as_ref() {
               Value::I32(50) => {}
-              _ => panic!("Expected I32(50) for strength"),
+              _ => panic!("Expected I32(50)"),
             }
-
-            // Test agility
             let agility_field = stats_kv.get_field("agility").unwrap();
             assert_eq!(agility_field.id, agility_id);
-            assert_eq!(agility_field.name, "agility");
             match agility_field.value.as_ref().unwrap().as_ref() {
               Value::I32(75) => {}
-              _ => panic!("Expected I32(75) for agility"),
+              _ => panic!("Expected I32(75)"),
             }
           }
           _ => panic!("Expected KeyValue for stats"),
@@ -483,6 +627,26 @@ mod tests {
         "Failed for type: {}",
         name
       );
+    }
+  }
+
+  #[test]
+  fn test_keyvalue_field_map_from_hash() {
+    let set = KeyValueSet::from_hash([
+      ("a", KeyValueField::new("a", Value::I32(1))),
+      ("b", KeyValueField::new("b", Value::I32(2))),
+      ("a", KeyValueField::new("a", Value::I32(10))), // overwrite
+    ]);
+    assert_eq!(set.len(), 2);
+    let a_field = set.get("a").expect("a field");
+    match a_field.value.as_ref().unwrap().as_ref() {
+      Value::I32(10) => {}
+      other => panic!("expected 10 got {:?}", other),
+    }
+    let b_field = set.get("b").expect("b field");
+    match b_field.value.as_ref().unwrap().as_ref() {
+      Value::I32(2) => {}
+      other => panic!("expected 2 got {:?}", other),
     }
   }
 }
