@@ -355,8 +355,8 @@ mod tests {
     assert!(kv.fields.contains_key("health"));
 
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref().unwrap().as_ref() {
-      Value::I32(value) => assert_eq!(*value, 100),
+    match field.value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 100),
       _ => panic!("Expected I32 value"),
     }
   }
@@ -373,8 +373,8 @@ mod tests {
 
     assert_eq!(kv.fields.len(), 1);
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref().unwrap().as_ref() {
-      Value::I32(value) => assert_eq!(*value, 50),
+    match field.value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 50),
       _ => panic!("Expected I32 value"),
     }
   }
@@ -417,8 +417,8 @@ mod tests {
   fn test_keyvalue_field_new() {
     let field = KeyValueField::new("test_id", Value::String("test_value".to_string()));
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref().unwrap().as_ref() {
-      Value::String(value) => assert_eq!(value, "test_value"),
+    match field.value.as_deref() {
+      Some(Value::String(value)) => assert_eq!(value, "test_value"),
       _ => panic!("Expected String value"),
     }
   }
@@ -430,8 +430,8 @@ mod tests {
     let field = KeyValueField::new("test_id", inner_kv.as_value());
 
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref().unwrap().as_ref() {
-      Value::KeyValue(kv) => assert_eq!(kv.id, id),
+    match field.value.as_deref() {
+      Some(Value::KeyValue(kv)) => assert_eq!(kv.id, id),
       _ => panic!("Expected KeyValue variant"),
     }
   }
@@ -448,29 +448,13 @@ mod tests {
     assert_eq!(kv.fields.len(), 2);
     assert!(kv.fields.contains_key("health"));
     assert!(kv.fields.contains_key("mana"));
-    match kv
-      .fields
-      .get("health")
-      .unwrap()
-      .value
-      .as_ref()
-      .unwrap()
-      .as_ref()
-    {
-      Value::I32(value) => assert_eq!(*value, 100),
+    match kv.fields.get("health").unwrap().value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 100),
       _ => panic!("Expected I32 value"),
     }
 
-    match kv
-      .fields
-      .get("mana")
-      .unwrap()
-      .value
-      .as_ref()
-      .unwrap()
-      .as_ref()
-    {
-      Value::I32(value) => assert_eq!(*value, 50),
+    match kv.fields.get("mana").unwrap().value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 50),
       _ => panic!("Expected I32 value"),
     }
   }
@@ -504,38 +488,24 @@ mod tests {
 
     // health
     let health_field = player.get_field("health").expect("health field");
-    match health_field.value.as_ref().unwrap().as_ref() {
-      Value::I32(100) => {}
+    match health_field.value.as_deref() {
+      Some(Value::I32(100)) => {}
       other => panic!("Expected I32(100) got {:?}", other),
     }
 
     // stats nested kv
     let stats_field = player.get_field("stats").expect("stats field");
-    match stats_field.value.as_ref().unwrap().as_ref() {
-      Value::KeyValue(stats_kv) => {
+    match stats_field.value.as_deref() {
+      Some(Value::KeyValue(stats_kv)) => {
         assert_eq!(stats_kv.fields.len(), 2);
         // strength
-        match stats_kv
-          .get_field("strength")
-          .unwrap()
-          .value
-          .as_ref()
-          .unwrap()
-          .as_ref()
-        {
-          Value::I32(50) => {}
+        match stats_kv.get_field("strength").unwrap().value.as_deref() {
+          Some(Value::I32(50)) => {}
           other => panic!("Expected strength=50 got {:?}", other),
         }
         // agility
-        match stats_kv
-          .get_field("agility")
-          .unwrap()
-          .value
-          .as_ref()
-          .unwrap()
-          .as_ref()
-        {
-          Value::I32(75) => {}
+        match stats_kv.get_field("agility").unwrap().value.as_deref() {
+          Some(Value::I32(75)) => {}
           other => panic!("Expected agility=75 got {:?}", other),
         }
       }
@@ -544,29 +514,15 @@ mod tests {
 
     // position nested kv
     let position_field = player.get_field("position").expect("position field");
-    match position_field.value.as_ref().unwrap().as_ref() {
-      Value::KeyValue(pos_kv) => {
+    match position_field.value.as_deref() {
+      Some(Value::KeyValue(pos_kv)) => {
         assert_eq!(pos_kv.fields.len(), 2);
-        match pos_kv
-          .get_field("x")
-          .unwrap()
-          .value
-          .as_ref()
-          .unwrap()
-          .as_ref()
-        {
-          Value::F32(f) if (*f - 10.0).abs() < f32::EPSILON => {}
+        match pos_kv.get_field("x").unwrap().value.as_deref() {
+          Some(Value::F32(f)) if (*f - 10.0).abs() < f32::EPSILON => {}
           other => panic!("Expected x=10.0 got {:?}", other),
         }
-        match pos_kv
-          .get_field("y")
-          .unwrap()
-          .value
-          .as_ref()
-          .unwrap()
-          .as_ref()
-        {
-          Value::F32(f) if (*f - 20.0).abs() < f32::EPSILON => {}
+        match pos_kv.get_field("y").unwrap().value.as_deref() {
+          Some(Value::F32(f)) if (*f - 20.0).abs() < f32::EPSILON => {}
           other => panic!("Expected y=20.0 got {:?}", other),
         }
       }
@@ -583,8 +539,8 @@ mod tests {
     let kv: KeyValue = KeyValue::from(fields);
     assert_eq!(kv.fields.len(), 1); // last wins
     let health_field = kv.get_field("health").unwrap();
-    match health_field.value.as_ref().unwrap().as_ref() {
-      Value::I32(150) => {}
+    match health_field.value.as_deref() {
+      Some(Value::I32(150)) => {}
       other => panic!("Expected 150 got {:?}", other),
     }
   }
@@ -626,20 +582,20 @@ mod tests {
     }
     let stats_field = player.get_field("stats").unwrap();
     assert_eq!(stats_field.id, inner_field_id);
-    match stats_field.value.as_ref().unwrap().as_ref() {
-      Value::KeyValue(stats_kv) => {
+    match stats_field.value.as_deref() {
+      Some(Value::KeyValue(stats_kv)) => {
         assert_eq!(stats_kv.id, inner_kv_id);
         assert_eq!(stats_kv.fields.len(), 2);
         let strength_field = stats_kv.get_field("strength").unwrap();
         assert_eq!(strength_field.id, strength_id);
-        match strength_field.value.as_ref().unwrap().as_ref() {
-          Value::I32(50) => {}
+        match strength_field.value.as_deref() {
+          Some(Value::I32(50)) => {}
           other => panic!("Expected I32(50) got {:?}", other),
         }
         let agility_field = stats_kv.get_field("agility").unwrap();
         assert_eq!(agility_field.id, agility_id);
-        match agility_field.value.as_ref().unwrap().as_ref() {
-          Value::I32(75) => {}
+        match agility_field.value.as_deref() {
+          Some(Value::I32(75)) => {}
           other => panic!("Expected I32(75) got {:?}", other),
         }
       }
@@ -741,8 +697,8 @@ mod tests {
       let retrieved_field = kv.get_field(name).unwrap();
 
       assert_eq!(
-        retrieved_field.value.as_ref().unwrap().as_ref(),
-        &value,
+        retrieved_field.value.as_deref(),
+        Some(&value),
         "Failed for type: {}",
         name
       );
@@ -761,26 +717,12 @@ mod tests {
     // Auto id conversion from HashMap
     let auto_kv: KeyValue = map.clone().into();
     assert_eq!(auto_kv.fields.len(), 2);
-    match auto_kv
-      .get_field("a")
-      .unwrap()
-      .value
-      .as_ref()
-      .unwrap()
-      .as_ref()
-    {
-      Value::I32(10) => {}
+    match auto_kv.get_field("a").unwrap().value.as_deref() {
+      Some(Value::I32(10)) => {}
       other => panic!("expected 10 got {:?}", other),
     }
-    match auto_kv
-      .get_field("b")
-      .unwrap()
-      .value
-      .as_ref()
-      .unwrap()
-      .as_ref()
-    {
-      Value::I32(2) => {}
+    match auto_kv.get_field("b").unwrap().value.as_deref() {
+      Some(Value::I32(2)) => {}
       other => panic!("expected 2 got {:?}", other),
     }
 
