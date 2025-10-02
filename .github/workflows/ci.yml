@@ -35,7 +35,10 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
+
+      - name: Check for WASM build
+        run: cargo build --locked --tests --target wasm32-unknown-unknown
 
       - name: Build for Production
-        run: cargo build --release
+        run: cargo build --locked --release
