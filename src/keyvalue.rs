@@ -17,7 +17,7 @@ use crate::gen_bb_uuid;
 /// * Any `KeyValue` -> `Value` via `into()`
 ///
 /// ```rust
-/// use arora_schema::keyvalue::{KeyValue, KeyValueField, KeyValueSet};
+/// use arora_schema::keyvalue::{KeyValue, KeyValueField, KeyValueItems};
 /// use arora_schema::value::Value;
 /// use arora_schema::gen_bb_uuid;
 ///
@@ -41,7 +41,7 @@ use crate::gen_bb_uuid;
 /// ]).into();
 ///
 /// // Nested structure via helper
-/// let stats_set = KeyValueSet::from(vec![
+/// let stats_set = KeyValueItems::from(vec![
 ///   KeyValueField::new("strength", Value::I32(50)),
 ///   KeyValueField::new("agility", Value::I32(75)),
 /// ]);
