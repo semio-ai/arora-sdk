@@ -118,16 +118,16 @@ pub struct KeyValueField {
 /// extend functionality (validation, ordering rules, etc.) without changing all
 /// call sites that currently use `Vec<KeyValueField>` or slices.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct KeyValueSet(pub Vec<KeyValueField>);
+pub struct KeyValueItems(pub Vec<KeyValueField>);
 
-impl std::ops::Deref for KeyValueSet {
+impl std::ops::Deref for KeyValueItems {
   type Target = [KeyValueField];
   fn deref(&self) -> &Self::Target {
     &self.0
   }
 }
 
-impl IntoIterator for KeyValueSet {
+impl IntoIterator for KeyValueItems {
   type Item = KeyValueField;
   type IntoIter = std::vec::IntoIter<KeyValueField>;
   fn into_iter(self) -> Self::IntoIter {
@@ -135,31 +135,51 @@ impl IntoIterator for KeyValueSet {
   }
 }
 
-impl From<Vec<KeyValueField>> for KeyValueSet {
+impl From<Vec<KeyValueField>> for KeyValueItems {
   fn from(v: Vec<KeyValueField>) -> Self {
-    KeyValueSet(v)
+    // Deduplicate preserving the last occurrence, O(n^2) worst case on small n.
+    let mut kvis = KeyValueItems::new();
+    for f in v.into_iter() {
+      kvis.set(f);
+    }
+    kvis
   }
 }
 
-impl<'a> From<&'a [KeyValueField]> for KeyValueSet {
+impl<'a> From<&'a [KeyValueField]> for KeyValueItems {
   fn from(slice: &'a [KeyValueField]) -> Self {
-    KeyValueSet(slice.to_vec())
+    let mut kvis = KeyValueItems::new();
+    for f in slice.iter().cloned() {
+      kvis.set(f);
+    }
+    kvis
   }
 }
 
-impl From<KeyValueSet> for Vec<KeyValueField> {
-  fn from(kvs: KeyValueSet) -> Self {
+impl From<KeyValueItems> for Vec<KeyValueField> {
+  fn from(kvs: KeyValueItems) -> Self {
     kvs.0
   }
 }
 
-impl KeyValueSet {
+impl KeyValueItems {
   pub fn new() -> Self {
     Self(Vec::new())
   }
-  pub fn push(&mut self, field: KeyValueField) {
-    self.0.push(field);
+  /// Insert a field replacing any existing field with the same name.
+  /// Returns the replaced field if there was one.
+  /// This follows the same behaviour of HashMap.
+  pub fn set(&mut self, field: KeyValueField) -> Option<KeyValueField> {
+    if let Some(idx) = self.0.iter().position(|f| f.name == field.name) {
+      let mut old = field; // we will swap to return the old value
+      std::mem::swap(&mut self.0[idx], &mut old);
+      Some(old)
+    } else {
+      self.0.push(field);
+      None
+    }
   }
+
   pub fn is_empty(&self) -> bool {
     self.0.is_empty()
   }
@@ -176,7 +196,7 @@ impl KeyValueSet {
     self.0.iter().find(|f| f.name == name)
   }
 
-  pub fn from_hash<K>(pairs: impl IntoIterator<Item = (K, KeyValueField)>) -> KeyValueSet
+  pub fn from_hash<K>(pairs: impl IntoIterator<Item = (K, KeyValueField)>) -> KeyValueItems
   where
     K: Into<String>,
   {
@@ -185,11 +205,11 @@ impl KeyValueSet {
     for (k, v) in pairs.into_iter() {
       map.insert(k.into(), v); // last wins
     }
-    KeyValueSet(map.into_iter().map(|(_, v)| v).collect())
+    KeyValueItems(map.into_iter().map(|(_, v)| v).collect())
   }
 }
 
-impl AsRef<[KeyValueField]> for KeyValueSet {
+impl AsRef<[KeyValueField]> for KeyValueItems {
   fn as_ref(&self) -> &[KeyValueField] {
     &self.0
   }
@@ -275,8 +295,8 @@ impl<const N: usize> From<[KeyValueField; N]> for KeyValue {
   }
 }
 
-impl From<KeyValueSet> for KeyValue {
-  fn from(set: KeyValueSet) -> Self {
+impl From<KeyValueItems> for KeyValue {
+  fn from(set: KeyValueItems) -> Self {
     let id = gen_bb_uuid();
     (id, set.0).into()
   }
@@ -302,8 +322,8 @@ impl From<(Uuid, &[KeyValueField])> for KeyValue {
   }
 }
 
-impl From<(Uuid, KeyValueSet)> for KeyValue {
-  fn from((id, set): (Uuid, KeyValueSet)) -> Self {
+impl From<(Uuid, KeyValueItems)> for KeyValue {
+  fn from((id, set): (Uuid, KeyValueItems)) -> Self {
     (id, set.0).into()
   }
 }
@@ -467,14 +487,14 @@ mod tests {
         KeyValueField::new("health", Value::I32(100)),
         KeyValueField::new_nested_kv(
           "stats",
-          &KeyValueSet::from(vec![
+          &KeyValueItems::from(vec![
             KeyValueField::new("strength", Value::I32(50)),
             KeyValueField::new("agility", Value::I32(75)),
           ]),
         ),
         KeyValueField::new_nested_kv(
           "position",
-          &KeyValueSet::from(vec![
+          &KeyValueItems::from(vec![
             KeyValueField::new("x", Value::F32(10.0)),
             KeyValueField::new("y", Value::F32(20.0)),
           ]),
@@ -554,7 +574,7 @@ mod tests {
     let strength_id = gen_bb_uuid();
     let agility_id = gen_bb_uuid();
 
-    let stats_set = KeyValueSet::from(vec![
+    let stats_set = KeyValueItems::from(vec![
       KeyValueField::new_with_id("strength", strength_id, Value::I32(50)),
       KeyValueField::new_with_id("agility", agility_id, Value::I32(75)),
     ]);
@@ -733,5 +753,52 @@ mod tests {
     assert_eq!(kv_with_id.fields.len(), 2);
     assert!(kv_with_id.get_field("a").is_some());
     assert!(kv_with_id.get_field("b").is_some());
+  }
+
+  // --------------------------- KeyValueSet uniqueness tests ---------------------------
+  #[test]
+  fn test_keyvalueset_from_vec_deduplicates_last_wins() {
+    let set = KeyValueItems::from(vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("mana", Value::I32(50)),
+      KeyValueField::new("health", Value::I32(150)), // duplicate later entry
+    ]);
+    assert_eq!(set.len(), 2);
+    let health = set.get("health").unwrap();
+    match health.value.as_deref() {
+      Some(Value::I32(150)) => {}
+      other => panic!("expected 150 got {:?}", other),
+    }
+  }
+
+  #[test]
+  fn test_keyvalueitems_set_replaces() {
+    let mut kvis = KeyValueItems::new();
+    let inserted = kvis.set(KeyValueField::new("speed", Value::I32(10)));
+    assert!(inserted.is_none());
+    let inserted2 = kvis.set(KeyValueField::new("speed", Value::I32(20))); // replace
+    assert!(inserted2.is_some());
+    assert_eq!(kvis.len(), 1);
+    match kvis.get("speed").unwrap().value.as_deref() {
+      Some(Value::I32(20)) => {}
+      other => panic!("expected 20 got {:?}", other),
+    }
+  }
+
+  #[test]
+  fn test_keyvalueitems_set_returns_old() {
+    let mut kvis = KeyValueItems::new();
+    assert!(kvis.set(KeyValueField::new("x", Value::I32(1))).is_none());
+    let old = kvis
+      .set(KeyValueField::new("x", Value::I32(2)))
+      .expect("old value");
+    match old.value.as_deref() {
+      Some(Value::I32(1)) => {}
+      other => panic!("expected old=1 got {:?}", other),
+    }
+    match kvis.get("x").unwrap().value.as_deref() {
+      Some(Value::I32(2)) => {}
+      other => panic!("expected new=2 got {:?}", other),
+    }
   }
 }
