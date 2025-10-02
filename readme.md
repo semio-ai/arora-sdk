@@ -1,19 +1,19 @@
-# Arora Schemas
+# Arora Types
 
-Common schemas used by the engine.
-These schemas are somewhat redundant with
+Common types used by the engine.
+These types are somewhat redundant with
 [Semio Records](https://github.com/semio-ai/semio-record),
 but it is quite a lot of work to switch to Semio Records.
 
-## High-level vs. low-level schemas
+## High-level vs. low-level types
 
-High-level schemas use names to reference other entities.
+High-level types use names to reference other entities.
 Names are meant to be resolved using a
 [registry](../arora-registry/readme.md),
 or local indexes associating
 [UUIDs](https://docs.rs/uuid/latest/uuid/index.html) to names.
 
-Low-level schemas are produced for contexts where
+Low-level types are produced for contexts where
 [UUIDs](https://docs.rs/uuid/latest/uuid/index.html) are sufficient,
 if not more efficient for looking them up.
 
@@ -39,6 +39,7 @@ Modules may also declare symbols to import from other modules,
 so that the right bindings are made available in the implementation.
 The only symbols supported so far are functions.
 Their declaration may involve references to existing [types](#type):
+
 - directly (`TypeRef::Scalar`)
 - as the element type of an array (`TypeRef::Array`)
 - as the key or value type of a map (`TypeRef::Map`).
@@ -50,6 +51,7 @@ Structured types can be described in both
 [high-level](src/ty/high.rs) or [low-level](src/ty/low.rs) ways,
 so that they can be used in both high-level or low-level modules.
 This library can describe:
+
 - [primitive types](src/ty/mod.rs), equivalent in Rust to:
   `bool`, `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`,
   `f32`, `f64`, `String`.
@@ -62,12 +64,12 @@ This library can describe:
 ## Value
 
 A [`Value`](src/value.rs) describes a value defined
-in the low-level [type](#type) schema.
+in the low-level [types](#type).
 It is generic and can also be serialized
 (using [`serde`](https://docs.serde.rs/serde/).
 For other kind of conversions
 a common error type is suggested:
-`arora-schema::value::ConversionError`.
+`arora_types::value::ConversionError`.
 
 [`Value`s](src/value.rs) are useful at runtime
 to pass arguments to functions,
