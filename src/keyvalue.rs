@@ -6,22 +6,54 @@ use uuid::Uuid;
 
 use crate::gen_bb_uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ValueBlock {
-  Value(Value),
-  KeyValue(KeyValue),
-  None,
-}
-
-impl std::fmt::Display for ValueBlock {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ValueBlock::Value(v) => write!(f, "{}", v),
-      ValueBlock::KeyValue(kv) => write!(f, "{}", kv),
-      ValueBlock::None => write!(f, "ValueBlock::None"),
-    }
-  }
-}
+/// A collection of named `KeyValueField`s identified by a UUID.
+///
+/// # Construction
+/// Use the provided `From` implementations. Supported conversions:
+/// * `Vec<KeyValueField>` -> `KeyValue`
+/// * `[KeyValueField; N]` (array) -> `KeyValue`
+/// * `KeyValueSet` -> `KeyValue`
+/// * `(Uuid, Vec<KeyValueField>)`, `(Uuid, [KeyValueField; N])`, `(Uuid, KeyValueSet)` and `(Uuid, HashMap<String, KeyValueField>)` -> `KeyValue` with explicit id
+/// * Any `KeyValue` -> `Value` via `into()`
+///
+/// ```rust
+/// use arora_schema::keyvalue::{KeyValue, KeyValueField, KeyValueItems};
+/// use arora_schema::value::Value;
+/// use arora_schema::gen_bb_uuid;
+///
+/// // From a Vec
+/// let kv: KeyValue = vec![
+///   KeyValueField::new("health", Value::I32(100)),
+///   KeyValueField::new("mana", Value::I32(50)),
+/// ].into();
+///
+/// // From an array
+/// let position: KeyValue = [
+///   KeyValueField::new("x", Value::F32(1.0)),
+///   KeyValueField::new("y", Value::F32(2.0)),
+/// ].into();
+///
+/// // Explicit id with a Vec
+/// let id = gen_bb_uuid();
+/// let kv_with_id: KeyValue = (id, vec![
+///   KeyValueField::new("level", Value::I32(5)),
+///   KeyValueField::new("xp", Value::I64(9000)),
+/// ]).into();
+///
+/// // Nested structure via helper
+/// let stats_set = KeyValueItems::from(vec![
+///   KeyValueField::new("strength", Value::I32(50)),
+///   KeyValueField::new("agility", Value::I32(75)),
+/// ]);
+/// let player: KeyValue = vec![
+///   KeyValueField::new("health", Value::I32(100)),
+///   KeyValueField::new_nested_kv("stats", &stats_set),
+/// ].into();
+///
+/// // Convert to Value only when needed
+/// let value: Value = player.clone().into();
+/// assert!(matches!(value, Value::KeyValue(_)));
+/// ```
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 #[display("KV({:?})", fields)]
 pub struct KeyValue {
@@ -35,7 +67,7 @@ impl KeyValue {
   }
 
   pub fn new_with_id(id: Uuid) -> Self {
-    KeyValue {
+    Self {
       id,
       fields: HashMap::new(),
     }
@@ -49,7 +81,7 @@ impl KeyValue {
     let key_str = key.to_string();
     if let Some(existing_field) = self.fields.get_mut(&key_str) {
       // Update the value of the existing field
-      existing_field.value = Box::new(ValueBlock::Value(value));
+      existing_field.value = Some(Box::new(value));
     } else {
       // Create a new field if it doesn't exist
       let field = KeyValueField::new(key_str.clone(), value);
@@ -68,88 +100,254 @@ impl KeyValue {
   pub fn get_field(&self, key: &str) -> Option<&KeyValueField> {
     self.fields.get(&key.to_string())
   }
+
+  pub fn as_value(self) -> Value {
+    Value::KeyValue(self)
+  }
 }
 
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
-#[display("{} ({}): {}", name, id, value)]
+#[display("{} ({}): {:?}", name, id, value)]
 pub struct KeyValueField {
   pub id: Uuid,
   pub name: String,
-  pub value: Box<ValueBlock>,
+  pub value: Option<Box<Value>>,
 }
 
-// Enum for supporting either Value or a KeyValue block as input to set()
-impl From<Value> for ValueBlock {
-  fn from(value: Value) -> Self {
-    ValueBlock::Value(value)
+/// Wrapper type representing a collection of `KeyValueField`s. This allows us to
+/// extend functionality (validation, ordering rules, etc.) without changing all
+/// call sites that currently use `Vec<KeyValueField>` or slices.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct KeyValueItems(pub Vec<KeyValueField>);
+
+impl std::ops::Deref for KeyValueItems {
+  type Target = [KeyValueField];
+  fn deref(&self) -> &Self::Target {
+    &self.0
   }
 }
 
-impl From<KeyValue> for ValueBlock {
-  fn from(kv: KeyValue) -> Self {
-    ValueBlock::KeyValue(kv)
+impl IntoIterator for KeyValueItems {
+  type Item = KeyValueField;
+  type IntoIter = std::vec::IntoIter<KeyValueField>;
+  fn into_iter(self) -> Self::IntoIter {
+    self.0.into_iter()
   }
 }
 
-impl ValueBlock {
-  pub fn make_kv_from_hash(fields: HashMap<String, KeyValueField>) -> Self {
-    ValueBlock::make_kv_from_hash_with_id(gen_bb_uuid(), fields)
+impl From<Vec<KeyValueField>> for KeyValueItems {
+  fn from(v: Vec<KeyValueField>) -> Self {
+    // Deduplicate preserving the last occurrence, O(n^2) worst case on small n.
+    let mut kvis = KeyValueItems::new();
+    for f in v.into_iter() {
+      kvis.set(f);
+    }
+    kvis
   }
-  pub fn make_kv_from_hash_with_id(id: Uuid, fields: HashMap<String, KeyValueField>) -> Self {
-    ValueBlock::KeyValue(KeyValue { id, fields })
+}
+
+impl<'a> From<&'a [KeyValueField]> for KeyValueItems {
+  fn from(slice: &'a [KeyValueField]) -> Self {
+    let mut kvis = KeyValueItems::new();
+    for f in slice.iter().cloned() {
+      kvis.set(f);
+    }
+    kvis
+  }
+}
+
+impl From<KeyValueItems> for Vec<KeyValueField> {
+  fn from(kvs: KeyValueItems) -> Self {
+    kvs.0
+  }
+}
+
+impl KeyValueItems {
+  pub fn new() -> Self {
+    Self(Vec::new())
+  }
+  /// Insert a field replacing any existing field with the same name.
+  /// Returns the replaced field if there was one.
+  /// This follows the same behaviour of HashMap.
+  pub fn set(&mut self, field: KeyValueField) -> Option<KeyValueField> {
+    if let Some(idx) = self.0.iter().position(|f| f.name == field.name) {
+      let mut old = field; // we will swap to return the old value
+      std::mem::swap(&mut self.0[idx], &mut old);
+      Some(old)
+    } else {
+      self.0.push(field);
+      None
+    }
   }
 
-  // Convenience function to create a KeyValue block from a vector of pairs
-  pub fn make_kv_from_pairs<K: Into<String> + Clone>(
-    kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
-  ) -> Self {
-    let fields: HashMap<String, KeyValueField> = pairs
-      .iter()
-      .map(|(k, v)| (k.clone().into(), v.clone()))
-      .collect();
-    ValueBlock::KeyValue(KeyValue { id: kv_id, fields })
+  pub fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+  pub fn len(&self) -> usize {
+    self.0.len()
+  }
+  pub fn into_inner(self) -> Vec<KeyValueField> {
+    self.0
+  }
+  pub fn iter(&self) -> std::slice::Iter<'_, KeyValueField> {
+    self.0.iter()
+  }
+  pub fn get(&self, name: &str) -> Option<&KeyValueField> {
+    self.0.iter().find(|f| f.name == name)
+  }
+
+  pub fn from_hash<K>(pairs: impl IntoIterator<Item = (K, KeyValueField)>) -> KeyValueItems
+  where
+    K: Into<String>,
+  {
+    use std::collections::HashMap; // temporary map to de-duplicate by name
+    let mut map: HashMap<String, KeyValueField> = HashMap::new();
+    for (k, v) in pairs.into_iter() {
+      map.insert(k.into(), v); // last wins
+    }
+    KeyValueItems(map.into_iter().map(|(_, v)| v).collect())
+  }
+}
+
+impl AsRef<[KeyValueField]> for KeyValueItems {
+  fn as_ref(&self) -> &[KeyValueField] {
+    &self.0
   }
 }
 
 impl KeyValueField {
-  pub fn new<S: Into<String>>(name: S, value: impl Into<ValueBlock>) -> Self {
-    KeyValueField {
-      name: name.into(),
-      id: gen_bb_uuid(),
-      value: Box::new(value.into()),
-    }
+  pub fn new<S: Into<String>>(name: S, value: Value) -> Self {
+    Self::new_with_option(name, Some(value))
   }
 
-  pub fn new_with_id<S: Into<String>>(name: S, id: Uuid, value: impl Into<ValueBlock>) -> Self {
-    KeyValueField {
+  pub fn new_with_option<S: Into<String>>(name: S, value: Option<Value>) -> Self {
+    Self::new_with_id_and_option(name, gen_bb_uuid(), value)
+  }
+
+  pub fn new_with_id<S: Into<String>>(name: S, id: Uuid, value: Value) -> Self {
+    Self {
       name: name.into(),
       id,
-      value: Box::new(value.into()),
+      value: Some(Box::new(value)),
     }
   }
 
-  pub fn new_nested_kv<S: Into<String>, K: Into<String> + Clone>(
-    kv_name: S,
-    kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
-  ) -> Self {
-    KeyValueField::new(kv_name, ValueBlock::make_kv_from_pairs(kv_id, pairs))
+  pub fn new_with_id_and_option<S: Into<String>>(name: S, id: Uuid, value: Option<Value>) -> Self {
+    Self {
+      name: name.into(),
+      id,
+      value: value.map(Box::new),
+    }
   }
 
-  pub fn new_nested_kv_with_id<S: Into<String>, K: Into<String> + Clone>(
+  pub fn new_nested_kv<S: Into<String>, F: AsRef<[KeyValueField]>>(kv_name: S, fields: &F) -> Self {
+    Self::new_nested_kv_with_kv_id(kv_name, gen_bb_uuid(), fields)
+  }
+
+  pub fn new_nested_kv_with_kv_id<S: Into<String>, F: AsRef<[KeyValueField]>>(
+    kv_name: S,
+    kv_id: Uuid,
+    fields: &F,
+  ) -> Self {
+    Self::new_nested_kv_with_both_ids(kv_name, gen_bb_uuid(), kv_id, fields)
+  }
+
+  pub fn new_nested_kv_with_both_ids<S: Into<String>, F: AsRef<[KeyValueField]>>(
     kv_name: S,
     field_id: Uuid,
     kv_id: Uuid,
-    pairs: &[(K, KeyValueField)],
+    fields: &F,
   ) -> Self {
-    KeyValueField::new_with_id(
-      kv_name,
-      field_id,
-      ValueBlock::make_kv_from_pairs(kv_id, pairs),
-    )
+    // Build KeyValue explicitly then convert to Value
+    let kv: KeyValue = (kv_id, fields.as_ref()).into();
+    KeyValueField::new_with_id(kv_name, field_id, kv.into())
   }
 }
+
+// ---------------------------------------------------------------------------
+// From conversions for vectors and hashmaps of fields
+// ---------------------------------------------------------------------------
+
+impl From<KeyValue> for Value {
+  fn from(kv: KeyValue) -> Self {
+    kv.as_value()
+  }
+}
+
+impl From<Vec<KeyValueField>> for KeyValue {
+  fn from(fields: Vec<KeyValueField>) -> Self {
+    let id = gen_bb_uuid();
+    (id, fields).into()
+  }
+}
+
+impl From<&[KeyValueField]> for KeyValue {
+  fn from(fields: &[KeyValueField]) -> Self {
+    let id = gen_bb_uuid();
+    (id, fields).into()
+  }
+}
+
+impl<const N: usize> From<[KeyValueField; N]> for KeyValue {
+  fn from(arr: [KeyValueField; N]) -> Self {
+    let id = gen_bb_uuid();
+    (id, arr.into_iter().collect::<Vec<_>>()).into()
+  }
+}
+
+impl From<KeyValueItems> for KeyValue {
+  fn from(set: KeyValueItems) -> Self {
+    let id = gen_bb_uuid();
+    (id, set.0).into()
+  }
+}
+
+impl From<(Uuid, Vec<KeyValueField>)> for KeyValue {
+  fn from((id, fields): (Uuid, Vec<KeyValueField>)) -> Self {
+    let mut map = HashMap::with_capacity(fields.len());
+    for f in fields.into_iter() {
+      map.insert(f.name.clone(), f); // last wins semantics inherently
+    }
+    KeyValue { id, fields: map }
+  }
+}
+
+impl From<(Uuid, &[KeyValueField])> for KeyValue {
+  fn from((id, fields): (Uuid, &[KeyValueField])) -> Self {
+    let mut map = HashMap::with_capacity(fields.len());
+    for f in fields.iter().cloned() {
+      map.insert(f.name.clone(), f);
+    }
+    KeyValue { id, fields: map }
+  }
+}
+
+impl From<(Uuid, KeyValueItems)> for KeyValue {
+  fn from((id, set): (Uuid, KeyValueItems)) -> Self {
+    (id, set.0).into()
+  }
+}
+
+impl From<(Uuid, HashMap<String, KeyValueField>)> for KeyValue {
+  fn from((id, map): (Uuid, HashMap<String, KeyValueField>)) -> Self {
+    KeyValue { id, fields: map }
+  }
+}
+
+impl<const N: usize> From<(Uuid, [KeyValueField; N])> for KeyValue {
+  fn from((id, arr): (Uuid, [KeyValueField; N])) -> Self {
+    (id, arr.into_iter().collect::<Vec<_>>()).into()
+  }
+}
+
+impl From<HashMap<String, KeyValueField>> for KeyValue {
+  fn from(map: HashMap<String, KeyValueField>) -> Self {
+    let id = gen_bb_uuid();
+    (id, map).into()
+  }
+}
+
+// Only retain Value conversion from KeyValue; callers build KeyValue explicitly first.
 
 #[cfg(test)]
 mod tests {
@@ -169,15 +367,17 @@ mod tests {
     let mut kv = KeyValue::new();
     let health_value = Value::I32(100);
 
+    // Directly set a field and value entry into the KV
+
     kv.set_field_value("health", health_value.clone());
 
     assert_eq!(kv.fields.len(), 1);
     assert!(kv.fields.contains_key("health"));
 
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref() {
-      ValueBlock::Value(v) => assert_eq!(v, &health_value),
-      _ => panic!("Expected Value variant"),
+    match field.value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 100),
+      _ => panic!("Expected I32 value"),
     }
   }
 
@@ -193,9 +393,9 @@ mod tests {
 
     assert_eq!(kv.fields.len(), 1);
     let field = kv.get_field("health").unwrap();
-    match field.value.as_ref() {
-      ValueBlock::Value(Value::I32(50)) => {}
-      _ => panic!("Expected I32(50)"),
+    match field.value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 50),
+      _ => panic!("Expected I32 value"),
     }
   }
 
@@ -203,6 +403,8 @@ mod tests {
   fn test_keyvalue_set_field() {
     let mut kv = KeyValue::new();
     let field = KeyValueField::new("health_id", Value::I32(100));
+
+    // Set an entry into the KV using a prebuilt key-value field
 
     kv.set_field(field.clone());
 
@@ -235,203 +437,189 @@ mod tests {
   fn test_keyvalue_field_new() {
     let field = KeyValueField::new("test_id", Value::String("test_value".to_string()));
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref() {
-      ValueBlock::Value(Value::String(s)) => assert_eq!(s, "test_value"),
+    match field.value.as_deref() {
+      Some(Value::String(value)) => assert_eq!(value, "test_value"),
       _ => panic!("Expected String value"),
     }
   }
 
   #[test]
-  fn test_keyvalue_field_new_with_simple_nested_keyvalue() {
+  fn test_keyvalue_field_simple_nested_keyvalue() {
     let id = gen_bb_uuid();
     let inner_kv = KeyValue::new_with_id(id);
-    let field = KeyValueField::new("test_id", inner_kv.clone());
+    let field = KeyValueField::new("test_id", inner_kv.as_value());
 
     assert_eq!(field.name, "test_id");
-    match field.value.as_ref() {
-      ValueBlock::KeyValue(kv) => assert_eq!(kv.id, id),
+    match field.value.as_deref() {
+      Some(Value::KeyValue(kv)) => assert_eq!(kv.id, id),
       _ => panic!("Expected KeyValue variant"),
     }
   }
 
   #[test]
-  fn test_keyvalue_field_new_nested_kv() {
-    let nested_id = gen_bb_uuid();
-    let stats_field = KeyValueField::new_nested_kv(
-      "stats",
-      nested_id,
-      &[
-        ("strength", KeyValueField::new("str_id", Value::I32(50))),
-        ("agility", KeyValueField::new("agi_id", Value::I32(75))),
-      ],
-    );
-
-    assert_eq!(stats_field.name, "stats");
-    match stats_field.value.as_ref() {
-      ValueBlock::KeyValue(kv) => {
-        assert_eq!(kv.id, nested_id);
-        assert_eq!(kv.fields.len(), 2);
-        assert!(kv.fields.contains_key("strength"));
-        assert!(kv.fields.contains_key("agility"));
-      }
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_from_value() {
-    let value = Value::I32(42);
-    let block: ValueBlock = value.clone().into();
-
-    match block {
-      ValueBlock::Value(v) => assert_eq!(v, value),
-      _ => panic!("Expected Value variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_from_keyvalue() {
-    let kv = KeyValue::new();
-    let block: ValueBlock = kv.clone().into();
-
-    match block {
-      ValueBlock::KeyValue(converted_kv) => assert_eq!(converted_kv.id, kv.id),
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_make_kv_from_hash() {
-    let mut fields = HashMap::new();
-    fields.insert(
-      "test_key".to_string(),
-      KeyValueField::new("field_id", Value::I32(100)),
-    );
-    let id = gen_bb_uuid();
-    let block = ValueBlock::make_kv_from_hash_with_id(id, fields.clone());
-
-    match block {
-      ValueBlock::KeyValue(kv) => {
-        assert_eq!(kv.id, id);
-        assert_eq!(kv.fields, fields);
-      }
-      _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_valueblock_make_kv_from_pairs() {
-    let pairs = &[
-      ("health", KeyValueField::new("health_id", Value::I32(100))),
-      ("mana", KeyValueField::new("mana_id", Value::I32(50))),
+  fn test_simple_make_kv_from_fields() {
+    let fields = vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("mana", Value::I32(50)),
     ];
-
     let id = gen_bb_uuid();
-    let block = ValueBlock::make_kv_from_pairs(id, pairs);
+    let kv: KeyValue = KeyValue::from((id, fields)).into();
+    assert_eq!(kv.id, id);
+    assert_eq!(kv.fields.len(), 2);
+    assert!(kv.fields.contains_key("health"));
+    assert!(kv.fields.contains_key("mana"));
+    match kv.fields.get("health").unwrap().value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 100),
+      _ => panic!("Expected I32 value"),
+    }
 
-    match block {
-      ValueBlock::KeyValue(kv) => {
-        assert_eq!(kv.id, id);
-        assert_eq!(kv.fields.len(), 2);
-        assert!(kv.fields.contains_key("health"));
-        assert!(kv.fields.contains_key("mana"));
+    match kv.fields.get("mana").unwrap().value.as_deref() {
+      Some(Value::I32(value)) => assert_eq!(*value, 50),
+      _ => panic!("Expected I32 value"),
+    }
+  }
+
+  #[test]
+  fn test_keyvalue_nested_structure_without_ids() {
+    // Create a complex nested structure without caring for the ids, showing a clean and simple example
+    let player: KeyValue = {
+      let fields = [
+        KeyValueField::new("health", Value::I32(100)),
+        KeyValueField::new_nested_kv(
+          "stats",
+          &KeyValueItems::from(vec![
+            KeyValueField::new("strength", Value::I32(50)),
+            KeyValueField::new("agility", Value::I32(75)),
+          ]),
+        ),
+        KeyValueField::new_nested_kv(
+          "position",
+          &KeyValueItems::from(vec![
+            KeyValueField::new("x", Value::F32(10.0)),
+            KeyValueField::new("y", Value::F32(20.0)),
+          ]),
+        ),
+      ];
+      KeyValue::from(fields).into()
+    };
+
+    // Now expect three top-level fields: health, stats, position
+    assert_eq!(player.fields.len(), 3);
+
+    // health
+    let health_field = player.get_field("health").expect("health field");
+    match health_field.value.as_deref() {
+      Some(Value::I32(100)) => {}
+      other => panic!("Expected I32(100) got {:?}", other),
+    }
+
+    // stats nested kv
+    let stats_field = player.get_field("stats").expect("stats field");
+    match stats_field.value.as_deref() {
+      Some(Value::KeyValue(stats_kv)) => {
+        assert_eq!(stats_kv.fields.len(), 2);
+        // strength
+        match stats_kv.get_field("strength").unwrap().value.as_deref() {
+          Some(Value::I32(50)) => {}
+          other => panic!("Expected strength=50 got {:?}", other),
+        }
+        // agility
+        match stats_kv.get_field("agility").unwrap().value.as_deref() {
+          Some(Value::I32(75)) => {}
+          other => panic!("Expected agility=75 got {:?}", other),
+        }
       }
-      _ => panic!("Expected KeyValue variant"),
+      other => panic!("Expected KeyValue for stats got {:?}", other),
+    }
+
+    // position nested kv
+    let position_field = player.get_field("position").expect("position field");
+    match position_field.value.as_deref() {
+      Some(Value::KeyValue(pos_kv)) => {
+        assert_eq!(pos_kv.fields.len(), 2);
+        match pos_kv.get_field("x").unwrap().value.as_deref() {
+          Some(Value::F32(f)) if (*f - 10.0).abs() < f32::EPSILON => {}
+          other => panic!("Expected x=10.0 got {:?}", other),
+        }
+        match pos_kv.get_field("y").unwrap().value.as_deref() {
+          Some(Value::F32(f)) if (*f - 20.0).abs() < f32::EPSILON => {}
+          other => panic!("Expected y=20.0 got {:?}", other),
+        }
+      }
+      other => panic!("Expected KeyValue for position got {:?}", other),
     }
   }
 
   #[test]
-  fn test_valueblock_none() {
-    let block = ValueBlock::None;
-
-    match block {
-      ValueBlock::None => {}
-      _ => panic!("Expected None variant"),
+  fn test_make_kv_from_fields_duplicate_names_last_wins() {
+    let fields = vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("health", Value::I32(150)), // duplicate name
+    ];
+    let kv: KeyValue = KeyValue::from(fields);
+    assert_eq!(kv.fields.len(), 1); // last wins
+    let health_field = kv.get_field("health").unwrap();
+    match health_field.value.as_deref() {
+      Some(Value::I32(150)) => {}
+      other => panic!("Expected 150 got {:?}", other),
     }
   }
 
   #[test]
-  fn test_keyvalue_complex_nested_structure() {
-    // Create a complex nested structure similar to the blackboard test
+  fn test_keyvalue_nested_structure_with_ids() {
     let outer_id = gen_bb_uuid();
     let health_id = gen_bb_uuid();
-    let inner_id = gen_bb_uuid();
+    let inner_field_id = gen_bb_uuid();
     let inner_kv_id = gen_bb_uuid();
     let strength_id = gen_bb_uuid();
     let agility_id = gen_bb_uuid();
-    let player_kv = ValueBlock::make_kv_from_pairs(
+
+    let stats_set = KeyValueItems::from(vec![
+      KeyValueField::new_with_id("strength", strength_id, Value::I32(50)),
+      KeyValueField::new_with_id("agility", agility_id, Value::I32(75)),
+    ]);
+
+    let player = KeyValue::from((
       outer_id,
-      &[
-        (
-          "health",
-          KeyValueField::new_with_id("health", health_id, Value::I32(100)),
-        ),
-        (
+      vec![
+        KeyValueField::new_with_id("health", health_id, Value::I32(100)),
+        KeyValueField::new_nested_kv_with_both_ids(
           "stats",
-          KeyValueField::new_nested_kv_with_id(
-            "stats",
-            inner_id,
-            inner_kv_id,
-            &[
-              (
-                "strength",
-                KeyValueField::new_with_id("strength", strength_id, Value::I32(50)),
-              ),
-              (
-                "agility",
-                KeyValueField::new_with_id("agility", agility_id, Value::I32(75)),
-              ),
-            ],
-          ),
+          inner_field_id,
+          inner_kv_id,
+          &stats_set,
         ),
       ],
-    );
+    ));
 
-    match player_kv {
-      ValueBlock::KeyValue(player) => {
-        assert_eq!(player.id, outer_id);
-        assert_eq!(player.fields.len(), 2);
-
-        // Test health field
-        let health_field = player.get_field("health").unwrap();
-        assert_eq!(health_field.id, health_id);
-        assert_eq!(health_field.name, "health");
-        match health_field.value.as_ref() {
-          ValueBlock::Value(Value::I32(100)) => {}
-          _ => panic!("Expected I32(100) for health"),
+    assert_eq!(player.id, outer_id);
+    assert_eq!(player.fields.len(), 2);
+    let health_field = player.get_field("health").unwrap();
+    assert_eq!(health_field.id, health_id);
+    match health_field.value.as_ref().unwrap().as_ref() {
+      Value::I32(100) => {}
+      _ => panic!("Expected I32(100)"),
+    }
+    let stats_field = player.get_field("stats").unwrap();
+    assert_eq!(stats_field.id, inner_field_id);
+    match stats_field.value.as_deref() {
+      Some(Value::KeyValue(stats_kv)) => {
+        assert_eq!(stats_kv.id, inner_kv_id);
+        assert_eq!(stats_kv.fields.len(), 2);
+        let strength_field = stats_kv.get_field("strength").unwrap();
+        assert_eq!(strength_field.id, strength_id);
+        match strength_field.value.as_deref() {
+          Some(Value::I32(50)) => {}
+          other => panic!("Expected I32(50) got {:?}", other),
         }
-
-        // Test nested stats structure
-        let stats_field = player.get_field("stats").unwrap();
-        assert_eq!(stats_field.name, "stats");
-        assert_eq!(stats_field.id, inner_id);
-        match stats_field.value.as_ref() {
-          ValueBlock::KeyValue(stats_kv) => {
-            assert_eq!(stats_kv.id, inner_kv_id);
-            assert_eq!(stats_kv.fields.len(), 2);
-
-            // Test strength
-            let strength_field = stats_kv.get_field("strength").unwrap();
-            assert_eq!(strength_field.id, strength_id);
-            assert_eq!(strength_field.name, "strength");
-            match strength_field.value.as_ref() {
-              ValueBlock::Value(Value::I32(50)) => {}
-              _ => panic!("Expected I32(50) for strength"),
-            }
-
-            // Test agility
-            let agility_field = stats_kv.get_field("agility").unwrap();
-            assert_eq!(agility_field.id, agility_id);
-            assert_eq!(agility_field.name, "agility");
-            match agility_field.value.as_ref() {
-              ValueBlock::Value(Value::I32(75)) => {}
-              _ => panic!("Expected I32(75) for agility"),
-            }
-          }
-          _ => panic!("Expected KeyValue for stats"),
+        let agility_field = stats_kv.get_field("agility").unwrap();
+        assert_eq!(agility_field.id, agility_id);
+        match agility_field.value.as_deref() {
+          Some(Value::I32(75)) => {}
+          other => panic!("Expected I32(75) got {:?}", other),
         }
       }
-      _ => panic!("Expected KeyValue variant for player"),
+      other => panic!("Expected KeyValue for stats got {:?}", other),
     }
   }
 
@@ -453,25 +641,6 @@ mod tests {
     let display_str = format!("{}", field);
     assert!(display_str.contains("test_field"));
     assert!(display_str.contains("test_value"));
-  }
-
-  #[test]
-  fn test_valueblock_display() {
-    // Test Value variant
-    let value_block = ValueBlock::Value(Value::I32(42));
-    let display_str = format!("{}", value_block);
-    assert!(display_str.contains("42"));
-
-    // Test KeyValue variant
-    let kv = KeyValue::new();
-    let kv_block = ValueBlock::KeyValue(kv);
-    let kv_display = format!("{}", kv_block);
-    assert!(kv_display.contains("KV("));
-
-    // Test None variant
-    let none_block = ValueBlock::None;
-    let none_display = format!("{}", none_block);
-    assert_eq!(none_display, "ValueBlock::None");
   }
 
   #[test]
@@ -546,10 +715,90 @@ mod tests {
       kv.set_field_value(name, value.clone());
 
       let retrieved_field = kv.get_field(name).unwrap();
-      match retrieved_field.value.as_ref() {
-        ValueBlock::Value(v) => assert_eq!(v, &value, "Failed for type: {}", name),
-        _ => panic!("Expected Value variant for {}", name),
-      }
+
+      assert_eq!(
+        retrieved_field.value.as_deref(),
+        Some(&value),
+        "Failed for type: {}",
+        name
+      );
+    }
+  }
+
+  #[test]
+  fn test_keyvalue_field_map_from_hash() {
+    use std::collections::HashMap;
+    // Build an explicit HashMap of KeyValueField entries
+    let mut map: HashMap<String, KeyValueField> = HashMap::new();
+    map.insert("a".into(), KeyValueField::new("a", Value::I32(1)));
+    map.insert("b".into(), KeyValueField::new("b", Value::I32(2)));
+    map.insert("a".into(), KeyValueField::new("a", Value::I32(10))); // overwrite a
+
+    // Auto id conversion from HashMap
+    let auto_kv: KeyValue = map.clone().into();
+    assert_eq!(auto_kv.fields.len(), 2);
+    match auto_kv.get_field("a").unwrap().value.as_deref() {
+      Some(Value::I32(10)) => {}
+      other => panic!("expected 10 got {:?}", other),
+    }
+    match auto_kv.get_field("b").unwrap().value.as_deref() {
+      Some(Value::I32(2)) => {}
+      other => panic!("expected 2 got {:?}", other),
+    }
+
+    // Explicit id conversion
+    let explicit_id = gen_bb_uuid();
+    let kv_with_id: KeyValue = (explicit_id, map).into();
+    assert_eq!(kv_with_id.id, explicit_id);
+    assert_eq!(kv_with_id.fields.len(), 2);
+    assert!(kv_with_id.get_field("a").is_some());
+    assert!(kv_with_id.get_field("b").is_some());
+  }
+
+  // --------------------------- KeyValueSet uniqueness tests ---------------------------
+  #[test]
+  fn test_keyvalueset_from_vec_deduplicates_last_wins() {
+    let set = KeyValueItems::from(vec![
+      KeyValueField::new("health", Value::I32(100)),
+      KeyValueField::new("mana", Value::I32(50)),
+      KeyValueField::new("health", Value::I32(150)), // duplicate later entry
+    ]);
+    assert_eq!(set.len(), 2);
+    let health = set.get("health").unwrap();
+    match health.value.as_deref() {
+      Some(Value::I32(150)) => {}
+      other => panic!("expected 150 got {:?}", other),
+    }
+  }
+
+  #[test]
+  fn test_keyvalueitems_set_replaces() {
+    let mut kvis = KeyValueItems::new();
+    let inserted = kvis.set(KeyValueField::new("speed", Value::I32(10)));
+    assert!(inserted.is_none());
+    let inserted2 = kvis.set(KeyValueField::new("speed", Value::I32(20))); // replace
+    assert!(inserted2.is_some());
+    assert_eq!(kvis.len(), 1);
+    match kvis.get("speed").unwrap().value.as_deref() {
+      Some(Value::I32(20)) => {}
+      other => panic!("expected 20 got {:?}", other),
+    }
+  }
+
+  #[test]
+  fn test_keyvalueitems_set_returns_old() {
+    let mut kvis = KeyValueItems::new();
+    assert!(kvis.set(KeyValueField::new("x", Value::I32(1))).is_none());
+    let old = kvis
+      .set(KeyValueField::new("x", Value::I32(2)))
+      .expect("old value");
+    match old.value.as_deref() {
+      Some(Value::I32(1)) => {}
+      other => panic!("expected old=1 got {:?}", other),
+    }
+    match kvis.get("x").unwrap().value.as_deref() {
+      Some(Value::I32(2)) => {}
+      other => panic!("expected new=2 got {:?}", other),
     }
   }
 }
