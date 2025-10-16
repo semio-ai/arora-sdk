@@ -464,6 +464,31 @@ impl Value {
   }
 }
 
+// Conversion traits for zero-copy conversions between WASM and native types
+impl From<NativeValue> for Value {
+  fn from(inner: NativeValue) -> Self {
+    Value { inner }
+  }
+}
+
+impl From<Value> for NativeValue {
+  fn from(value: Value) -> Self {
+    value.inner
+  }
+}
+
+impl AsRef<NativeValue> for Value {
+  fn as_ref(&self) -> &NativeValue {
+    &self.inner
+  }
+}
+
+impl AsMut<NativeValue> for Value {
+  fn as_mut(&mut self) -> &mut NativeValue {
+    &mut self.inner
+  }
+}
+
 /// Convert a NativeValue to JsValue
 fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue {
   match value {
