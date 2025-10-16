@@ -4,6 +4,9 @@ pub mod module;
 pub mod ty;
 pub mod value;
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_value;
+
 use derive_more::Display;
 use semver::Version;
 use serde::{Deserialize, Serialize};

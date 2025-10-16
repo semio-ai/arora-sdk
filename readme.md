@@ -38,7 +38,7 @@ so that they can be called by any client.
 Modules may also declare symbols to import from other modules,
 so that the right bindings are made available in the implementation.
 The only symbols supported so far are functions.
-Their declaration may involve references to existing [types](#type):
+Their declaration may involve references to existing [types](#type-ty):
 
 - directly (`TypeRef::Scalar`)
 - as the element type of an array (`TypeRef::Array`)
@@ -64,7 +64,7 @@ This library can describe:
 ## Value
 
 A [`Value`](src/value.rs) describes a value defined
-in the low-level [types](#type).
+in the low-level [types](#type-ty).
 It is generic and can also be serialized
 (using [`serde`](https://docs.serde.rs/serde/).
 For other kind of conversions
@@ -79,3 +79,92 @@ for function parameters.
 > Note: we call "parameter" the declaration of
 > what function may accept as inputs (or outputs, if `mutable`).
 > We call "argument" the actual value passed to the function.
+
+## WASM Interface
+
+The `Value` type is exposed to JavaScript/TypeScript via WebAssembly bindings. This allows you to work with Arora values from JavaScript environments.
+
+### Building for WASM
+
+```bash
+# Build the WASM module
+npm run build:wasm
+```
+
+This will:
+
+1. Compile the Rust code to WebAssembly (`wasm32-unknown-unknown` target)
+2. Generate JavaScript bindings in the `pkg/` directory
+
+### Using from JavaScript/TypeScript
+
+```typescript
+import { Value, ValueType } from './pkg/arora_types.js';
+
+// Create values with explicit types
+const num = new Value(ValueType.F64, 3.14);
+const str = new Value(ValueType.String, "hello");
+const bool = new Value(ValueType.Boolean, true);
+
+// Get the type and value
+console.log(num.type);  // ValueType.F64
+console.log(num.get()); // 3.14
+
+// Auto-detect types from JavaScript values
+const autoNum = Value.from(42);        // Detects as F64
+const autoStr = Value.from("world");   // Detects as String
+const autoBool = Value.from(false);    // Detects as Boolean
+const autoNull = Value.from(null);     // Converts to Unit
+
+// Arrays
+const numArr = new Value(ValueType.ArrayF64, [1.0, 2.0, 3.0]);
+const mixedArr = Value.from([42, "text", true]); // ArrayValue
+
+// Key-value objects
+const obj = Value.from({ name: "Alice", age: 30 });
+console.log(obj.type); // ValueType.KeyValue
+console.log(obj.get()); // { name: "Alice", age: 30 }
+
+// Mutable values with type checking
+const val = new Value(ValueType.I32, 10);
+val.set(20);  // OK
+val.set("x"); // Error: type mismatch
+```
+
+### Running Integration Tests
+
+```bash
+# Run the integration tests
+npm test
+
+# Build and test in one command
+npm run build:wasm && npm test
+```
+
+The integration tests verify that:
+
+- All `ValueType` enum values are properly exposed
+- Value construction and retrieval works for all primitive types
+- Integer range validation works correctly
+- Array types (homogeneous and mixed) work as expected
+- Auto-detection from JavaScript values works correctly
+- Type checking in `set()` method works
+- KeyValue objects can be created from plain JavaScript objects
+
+### Type Mapping
+
+| Rust Type                 | WASM ValueType            | JavaScript Type | Notes                            |
+|---------------------------|---------------------------|-----------------|----------------------------------|
+| `()`                      | `Unit`                    | `null`          |                                  |
+| `bool`                    | `Boolean`                 | `boolean`       |                                  |
+| `u8`, `u16`, `u32`, `u64` | `U8`, `U16`, `U32`, `U64` | `number`        | Range validated                  |
+| `i8`, `i16`, `i32`, `i64` | `I8`, `I16`, `I32`, `I64` | `number`        | Range validated                  |
+| `f32`, `f64`              | `F32`, `F64`              | `number`        | Default for auto-detection       |
+| `String`                  | `String`                  | `string`        |                                  |
+| `Option<T>`               | `Option`                  | `T \| null`     |                                  |
+| `Vec<T>`                  | `Array*`                  | `T[]`           | Typed arrays                     |
+| `Value[]`                 | `ArrayValue`              | `any[]`         | Mixed-type arrays                |
+| `KeyValue`                | `KeyValue`                | `object`        | Plain objects                    |
+| `Structure`               | `Structure`               | `object`        | With `id` and `fields`           |
+| `Enumeration`             | `Enumeration`             | `object`        | With `id`, `variant_id`, `value` |
+| `Uuid`                    | `Uuid`                    | `string`        | UUID string format               |
