@@ -1,0 +1,13 @@
+{
+  "name": "arora-types-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-wasm-modules --no-warnings tests/integration/wasm-api.test.js",
+    "build:wasm": "cargo build --target wasm32-unknown-unknown --release && wasm-bindgen --target bundler --out-dir pkg target/wasm32-unknown-unknown/release/arora_types.wasm"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
