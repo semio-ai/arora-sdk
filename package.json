@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-modules --no-warnings tests/integration/wasm-api.test.js",
-    "build:wasm": "cargo build --target wasm32-unknown-unknown --release && wasm-bindgen --target bundler --out-dir pkg target/wasm32-unknown-unknown/release/arora_types.wasm"
+    "test": "node --experimental-wasm-modules --no-warnings tests/integration/value.test.js",
+    "build:wasm": "wasm-pack build --target bundler --out-dir pkg"
   },
   "devDependencies": {
     "@types/node": "^20.0.0"
