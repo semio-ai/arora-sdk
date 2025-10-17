@@ -290,6 +290,7 @@ macro_rules! parse_typed_array {
 
 /// WASM wrapper for Value
 #[wasm_bindgen(js_name=Value)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WasmValue {
   inner: Value,
 }
