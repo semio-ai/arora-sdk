@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-wasm-modules --no-warnings tests/integration/value.test.js",
+    "test": "node --experimental-wasm-modules --no-warnings tests/integration/value.test.js && node --experimental-wasm-modules --no-warnings tests/integration/value-instanceof.test.js",
     "build:wasm": "wasm-pack build --target bundler --out-dir pkg"
   },
   "devDependencies": {

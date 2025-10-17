@@ -296,6 +296,12 @@ pub struct WasmValue {
 
 #[wasm_bindgen(js_class=Value)]
 impl WasmValue {
+  /// Create a Unit value (represents no value/void)
+  #[wasm_bindgen]
+  pub fn unit() -> WasmValue {
+    WasmValue { inner: Value::Unit }
+  }
+
   /// Create a new Value with the specified type and JavaScript value
   #[wasm_bindgen(constructor)]
   pub fn new(value_type: WasmType, value: JsValue) -> Result<WasmValue, String> {
@@ -532,7 +538,7 @@ impl AsMut<Value> for WasmValue {
 /// Convert a Value to JsValue
 fn value_to_js(value: &Value, _type_registry: Option<JsValue>) -> JsValue {
   match value {
-    Value::Unit => JsValue::NULL,
+    Value::Unit => JsValue::UNDEFINED,
     Value::Boolean(b) => JsValue::from(*b),
     Value::U8(n) => JsValue::from(*n),
     Value::U16(n) => JsValue::from(*n),
@@ -758,7 +764,7 @@ fn enumeration_without_id_to_js(e: &EnumerationWithoutId) -> JsValue {
 /// Convert JsValue to Value with automatic type detection
 fn js_to_value(value: &JsValue) -> Result<Value, String> {
   if value.is_null() || value.is_undefined() {
-    return Ok(Value::Unit);
+    return Ok(Value::Option(None));
   }
 
   if let Some(b) = value.as_bool() {
@@ -971,6 +977,21 @@ mod tests {
   }
 
   #[wasm_bindgen_test]
+  fn test_unit_constructor() {
+    // Test the unit() static constructor
+    let unit_val = WasmValue::unit();
+    assert_eq!(unit_val.r#type(), WasmType::Unit);
+
+    // Verify it returns UNDEFINED when extracted
+    let extracted = unit_val.get();
+    assert!(extracted.is_undefined());
+
+    // Verify it's identical to creating via new()
+    let unit_via_new = WasmValue::new(WasmType::Unit, JsValue::NULL).unwrap();
+    assert_eq!(unit_val.r#type(), unit_via_new.r#type());
+  }
+
+  #[wasm_bindgen_test]
   fn test_primitive_values() {
     // Test Unit
     let unit_val = WasmValue::new(WasmType::Unit, JsValue::NULL).unwrap();
@@ -1038,9 +1059,9 @@ mod tests {
     let val = WasmValue::from(JsValue::from("test")).unwrap();
     assert_eq!(val.r#type(), WasmType::String);
 
-    // Test null
+    // Test null - converts to Option(None) per js_to_value implementation
     let val = WasmValue::from(JsValue::NULL).unwrap();
-    assert_eq!(val.r#type(), WasmType::Unit);
+    assert_eq!(val.r#type(), WasmType::Option);
   }
 
   #[wasm_bindgen_test]

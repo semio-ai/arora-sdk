@@ -12,6 +12,13 @@ assert.strictEqual(ValueType.String, 12);
 assert.strictEqual(ValueType.Uuid, 32);
 console.log('✓ ValueType enum values match expected numbers\n');
 
+// Test 1.5: Value.unit() static constructor
+console.log('Test 1.5: Value.unit() static constructor');
+const unitValStatic = Value.unit();
+assert.strictEqual(unitValStatic.type, ValueType.Unit);
+assert.strictEqual(unitValStatic.get(), undefined);
+console.log('✓ Unit value created via static constructor\n');
+
 // Test 2: Value constructor for primitives
 console.log('Test 2: Value constructor for primitives');
 const boolVal = new Value(ValueType.Boolean, true);
@@ -52,7 +59,7 @@ console.log('✓ I32 negative value works\n');
 console.log('Test 4: Unit and Option types');
 const unitVal = new Value(ValueType.Unit, null);
 assert.strictEqual(unitVal.type, ValueType.Unit);
-assert.strictEqual(unitVal.get(), null);
+assert.strictEqual(unitVal.get(), undefined);
 console.log('✓ Unit value created\n');
 
 const someVal = new Value(ValueType.Option, 42);
@@ -100,8 +107,10 @@ assert.strictEqual(autoString.get(), "test");
 console.log('✓ Auto-detected string\n');
 
 const autoNull = Value.from(null);
-assert.strictEqual(autoNull.type, ValueType.Unit);
-console.log('✓ Auto-detected null as Unit\n');
+// Note: Value.from(null) returns Option(None), not Unit
+assert.strictEqual(autoNull.type, ValueType.Option);
+assert.strictEqual(autoNull.get(), null);
+console.log('✓ Auto-detected null as Option(None)\n');
 
 // Test 7: Auto-detected arrays
 console.log('Test 7: Auto-detected arrays');
