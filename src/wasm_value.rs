@@ -5,8 +5,7 @@ use wasm_bindgen::prelude::*;
 use crate::gen_bb_uuid;
 use crate::keyvalue::{KeyValue, KeyValueField};
 use crate::value::{
-  Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId,
-  Type as NativeType, Value as NativeValue,
+  Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Type, Value,
 };
 
 /// ValueType enum exposed to JavaScript/TypeScript
@@ -22,10 +21,10 @@ use crate::value::{
 /// let wasm_type: ValueType = native_type.into();
 /// let back: Type = wasm_type.into();
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(js_name=ValueType)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum ValueType {
+pub enum WasmType {
   Unit = 0,
   Boolean = 1,
   U8 = 2,
@@ -62,82 +61,122 @@ pub enum ValueType {
 }
 
 // Conversions between ValueType and Type
-impl From<NativeType> for ValueType {
-  fn from(t: NativeType) -> Self {
+impl From<Type> for WasmType {
+  fn from(t: Type) -> Self {
     match t {
-      NativeType::Unit => ValueType::Unit,
-      NativeType::Boolean => ValueType::Boolean,
-      NativeType::U8 => ValueType::U8,
-      NativeType::U16 => ValueType::U16,
-      NativeType::U32 => ValueType::U32,
-      NativeType::U64 => ValueType::U64,
-      NativeType::I8 => ValueType::I8,
-      NativeType::I16 => ValueType::I16,
-      NativeType::I32 => ValueType::I32,
-      NativeType::I64 => ValueType::I64,
-      NativeType::F32 => ValueType::F32,
-      NativeType::F64 => ValueType::F64,
-      NativeType::String => ValueType::String,
-      NativeType::Option => ValueType::Option,
-      NativeType::Structure => ValueType::Structure,
-      NativeType::Enumeration => ValueType::Enumeration,
-      NativeType::ArrayBoolean => ValueType::ArrayBoolean,
-      NativeType::ArrayU8 => ValueType::ArrayU8,
-      NativeType::ArrayU16 => ValueType::ArrayU16,
-      NativeType::ArrayU32 => ValueType::ArrayU32,
-      NativeType::ArrayU64 => ValueType::ArrayU64,
-      NativeType::ArrayI8 => ValueType::ArrayI8,
-      NativeType::ArrayI16 => ValueType::ArrayI16,
-      NativeType::ArrayI32 => ValueType::ArrayI32,
-      NativeType::ArrayI64 => ValueType::ArrayI64,
-      NativeType::ArrayF32 => ValueType::ArrayF32,
-      NativeType::ArrayF64 => ValueType::ArrayF64,
-      NativeType::ArrayString => ValueType::ArrayString,
-      NativeType::ArrayValue => ValueType::ArrayValue,
-      NativeType::ArrayStructure => ValueType::ArrayStructure,
-      NativeType::ArrayEnumeration => ValueType::ArrayEnumeration,
-      NativeType::KeyValue => ValueType::KeyValue,
-      NativeType::Uuid => ValueType::Uuid,
+      Type::Unit => WasmType::Unit,
+      Type::Boolean => WasmType::Boolean,
+      Type::U8 => WasmType::U8,
+      Type::U16 => WasmType::U16,
+      Type::U32 => WasmType::U32,
+      Type::U64 => WasmType::U64,
+      Type::I8 => WasmType::I8,
+      Type::I16 => WasmType::I16,
+      Type::I32 => WasmType::I32,
+      Type::I64 => WasmType::I64,
+      Type::F32 => WasmType::F32,
+      Type::F64 => WasmType::F64,
+      Type::String => WasmType::String,
+      Type::Option => WasmType::Option,
+      Type::Structure => WasmType::Structure,
+      Type::Enumeration => WasmType::Enumeration,
+      Type::ArrayBoolean => WasmType::ArrayBoolean,
+      Type::ArrayU8 => WasmType::ArrayU8,
+      Type::ArrayU16 => WasmType::ArrayU16,
+      Type::ArrayU32 => WasmType::ArrayU32,
+      Type::ArrayU64 => WasmType::ArrayU64,
+      Type::ArrayI8 => WasmType::ArrayI8,
+      Type::ArrayI16 => WasmType::ArrayI16,
+      Type::ArrayI32 => WasmType::ArrayI32,
+      Type::ArrayI64 => WasmType::ArrayI64,
+      Type::ArrayF32 => WasmType::ArrayF32,
+      Type::ArrayF64 => WasmType::ArrayF64,
+      Type::ArrayString => WasmType::ArrayString,
+      Type::ArrayValue => WasmType::ArrayValue,
+      Type::ArrayStructure => WasmType::ArrayStructure,
+      Type::ArrayEnumeration => WasmType::ArrayEnumeration,
+      Type::KeyValue => WasmType::KeyValue,
+      Type::Uuid => WasmType::Uuid,
     }
   }
 }
 
-impl From<ValueType> for NativeType {
-  fn from(vt: ValueType) -> Self {
+impl From<WasmType> for Type {
+  fn from(vt: WasmType) -> Self {
     match vt {
-      ValueType::Unit => NativeType::Unit,
-      ValueType::Boolean => NativeType::Boolean,
-      ValueType::U8 => NativeType::U8,
-      ValueType::U16 => NativeType::U16,
-      ValueType::U32 => NativeType::U32,
-      ValueType::U64 => NativeType::U64,
-      ValueType::I8 => NativeType::I8,
-      ValueType::I16 => NativeType::I16,
-      ValueType::I32 => NativeType::I32,
-      ValueType::I64 => NativeType::I64,
-      ValueType::F32 => NativeType::F32,
-      ValueType::F64 => NativeType::F64,
-      ValueType::String => NativeType::String,
-      ValueType::Option => NativeType::Option,
-      ValueType::Structure => NativeType::Structure,
-      ValueType::Enumeration => NativeType::Enumeration,
-      ValueType::ArrayBoolean => NativeType::ArrayBoolean,
-      ValueType::ArrayU8 => NativeType::ArrayU8,
-      ValueType::ArrayU16 => NativeType::ArrayU16,
-      ValueType::ArrayU32 => NativeType::ArrayU32,
-      ValueType::ArrayU64 => NativeType::ArrayU64,
-      ValueType::ArrayI8 => NativeType::ArrayI8,
-      ValueType::ArrayI16 => NativeType::ArrayI16,
-      ValueType::ArrayI32 => NativeType::ArrayI32,
-      ValueType::ArrayI64 => NativeType::ArrayI64,
-      ValueType::ArrayF32 => NativeType::ArrayF32,
-      ValueType::ArrayF64 => NativeType::ArrayF64,
-      ValueType::ArrayString => NativeType::ArrayString,
-      ValueType::ArrayValue => NativeType::ArrayValue,
-      ValueType::ArrayStructure => NativeType::ArrayStructure,
-      ValueType::ArrayEnumeration => NativeType::ArrayEnumeration,
-      ValueType::KeyValue => NativeType::KeyValue,
-      ValueType::Uuid => NativeType::Uuid,
+      WasmType::Unit => Type::Unit,
+      WasmType::Boolean => Type::Boolean,
+      WasmType::U8 => Type::U8,
+      WasmType::U16 => Type::U16,
+      WasmType::U32 => Type::U32,
+      WasmType::U64 => Type::U64,
+      WasmType::I8 => Type::I8,
+      WasmType::I16 => Type::I16,
+      WasmType::I32 => Type::I32,
+      WasmType::I64 => Type::I64,
+      WasmType::F32 => Type::F32,
+      WasmType::F64 => Type::F64,
+      WasmType::String => Type::String,
+      WasmType::Option => Type::Option,
+      WasmType::Structure => Type::Structure,
+      WasmType::Enumeration => Type::Enumeration,
+      WasmType::ArrayBoolean => Type::ArrayBoolean,
+      WasmType::ArrayU8 => Type::ArrayU8,
+      WasmType::ArrayU16 => Type::ArrayU16,
+      WasmType::ArrayU32 => Type::ArrayU32,
+      WasmType::ArrayU64 => Type::ArrayU64,
+      WasmType::ArrayI8 => Type::ArrayI8,
+      WasmType::ArrayI16 => Type::ArrayI16,
+      WasmType::ArrayI32 => Type::ArrayI32,
+      WasmType::ArrayI64 => Type::ArrayI64,
+      WasmType::ArrayF32 => Type::ArrayF32,
+      WasmType::ArrayF64 => Type::ArrayF64,
+      WasmType::ArrayString => Type::ArrayString,
+      WasmType::ArrayValue => Type::ArrayValue,
+      WasmType::ArrayStructure => Type::ArrayStructure,
+      WasmType::ArrayEnumeration => Type::ArrayEnumeration,
+      WasmType::KeyValue => Type::KeyValue,
+      WasmType::Uuid => Type::Uuid,
+    }
+  }
+}
+
+impl From<&Value> for WasmType {
+  fn from(value: &Value) -> Self {
+    match value {
+      Value::Unit => WasmType::Unit,
+      Value::Boolean(_) => WasmType::Boolean,
+      Value::U8(_) => WasmType::U8,
+      Value::U16(_) => WasmType::U16,
+      Value::U32(_) => WasmType::U32,
+      Value::U64(_) => WasmType::U64,
+      Value::I8(_) => WasmType::I8,
+      Value::I16(_) => WasmType::I16,
+      Value::I32(_) => WasmType::I32,
+      Value::I64(_) => WasmType::I64,
+      Value::F32(_) => WasmType::F32,
+      Value::F64(_) => WasmType::F64,
+      Value::String(_) => WasmType::String,
+      Value::Option(_) => WasmType::Option,
+      Value::Structure(_) => WasmType::Structure,
+      Value::Enumeration(_) => WasmType::Enumeration,
+      Value::ArrayBoolean(_) => WasmType::ArrayBoolean,
+      Value::ArrayU8(_) => WasmType::ArrayU8,
+      Value::ArrayU16(_) => WasmType::ArrayU16,
+      Value::ArrayU32(_) => WasmType::ArrayU32,
+      Value::ArrayU64(_) => WasmType::ArrayU64,
+      Value::ArrayI8(_) => WasmType::ArrayI8,
+      Value::ArrayI16(_) => WasmType::ArrayI16,
+      Value::ArrayI32(_) => WasmType::ArrayI32,
+      Value::ArrayI64(_) => WasmType::ArrayI64,
+      Value::ArrayF32(_) => WasmType::ArrayF32,
+      Value::ArrayF64(_) => WasmType::ArrayF64,
+      Value::ArrayString(_) => WasmType::ArrayString,
+      Value::ArrayValue(_) => WasmType::ArrayValue,
+      Value::ArrayStructure { .. } => WasmType::ArrayStructure,
+      Value::ArrayEnumeration { .. } => WasmType::ArrayEnumeration,
+      Value::KeyValue(_) => WasmType::KeyValue,
+      Value::Uuid(_) => WasmType::Uuid,
     }
   }
 }
@@ -250,62 +289,62 @@ macro_rules! parse_typed_array {
 }
 
 /// WASM wrapper for Value
-#[wasm_bindgen]
-pub struct Value {
-  inner: NativeValue,
+#[wasm_bindgen(js_name=Value)]
+pub struct WasmValue {
+  inner: Value,
 }
 
-#[wasm_bindgen]
-impl Value {
+#[wasm_bindgen(js_class=Value)]
+impl WasmValue {
   /// Create a new Value with the specified type and JavaScript value
   #[wasm_bindgen(constructor)]
-  pub fn new(value_type: ValueType, value: JsValue) -> Result<Value, String> {
+  pub fn new(value_type: WasmType, value: JsValue) -> Result<WasmValue, String> {
     let inner = match value_type {
-      ValueType::Unit => NativeValue::Unit,
+      WasmType::Unit => Value::Unit,
 
-      ValueType::Boolean => {
+      WasmType::Boolean => {
         let b = value
           .as_bool()
           .ok_or_else(|| "Expected boolean value".to_string())?;
-        NativeValue::Boolean(b)
+        Value::Boolean(b)
       }
 
-      ValueType::U8 => NativeValue::U8(parse_u8(&value)?),
-      ValueType::U16 => NativeValue::U16(parse_u16(&value)?),
-      ValueType::U32 => NativeValue::U32(parse_u32(&value)?),
-      ValueType::U64 => NativeValue::U64(parse_u64(&value)?),
-      ValueType::I8 => NativeValue::I8(parse_i8(&value)?),
-      ValueType::I16 => NativeValue::I16(parse_i16(&value)?),
-      ValueType::I32 => NativeValue::I32(parse_i32(&value)?),
-      ValueType::I64 => NativeValue::I64(parse_i64(&value)?),
-      ValueType::F32 => NativeValue::F32(parse_f32(&value)?),
-      ValueType::F64 => NativeValue::F64(parse_f64(&value)?),
+      WasmType::U8 => Value::U8(parse_u8(&value)?),
+      WasmType::U16 => Value::U16(parse_u16(&value)?),
+      WasmType::U32 => Value::U32(parse_u32(&value)?),
+      WasmType::U64 => Value::U64(parse_u64(&value)?),
+      WasmType::I8 => Value::I8(parse_i8(&value)?),
+      WasmType::I16 => Value::I16(parse_i16(&value)?),
+      WasmType::I32 => Value::I32(parse_i32(&value)?),
+      WasmType::I64 => Value::I64(parse_i64(&value)?),
+      WasmType::F32 => Value::F32(parse_f32(&value)?),
+      WasmType::F64 => Value::F64(parse_f64(&value)?),
 
-      ValueType::String => {
+      WasmType::String => {
         let s = value
           .as_string()
           .ok_or_else(|| "Expected string value".to_string())?;
-        NativeValue::String(s)
+        Value::String(s)
       }
 
-      ValueType::Option => {
+      WasmType::Option => {
         if value.is_null() || value.is_undefined() {
-          NativeValue::Option(None)
+          Value::Option(None)
         } else {
-          let inner_value = Value::from(value)?;
-          NativeValue::Option(Some(Box::new(inner_value.inner)))
+          let inner_value = WasmValue::from(value)?;
+          Value::Option(Some(Box::new(inner_value.inner)))
         }
       }
 
-      ValueType::Uuid => {
+      WasmType::Uuid => {
         let s = value
           .as_string()
           .ok_or_else(|| "Expected string value for UUID".to_string())?;
         let uuid = Uuid::parse_str(&s).map_err(|e| format!("Invalid UUID: {}", e))?;
-        NativeValue::Uuid(uuid)
+        Value::Uuid(uuid)
       }
 
-      ValueType::ArrayBoolean => {
+      WasmType::ArrayBoolean => {
         let vec = parse_typed_array!(
           &value,
           |v: &JsValue| {
@@ -314,21 +353,21 @@ impl Value {
           },
           "boolean"
         );
-        NativeValue::ArrayBoolean(vec)
+        Value::ArrayBoolean(vec)
       }
 
-      ValueType::ArrayU8 => NativeValue::ArrayU8(parse_typed_array!(&value, parse_u8, "u8")),
-      ValueType::ArrayU16 => NativeValue::ArrayU16(parse_typed_array!(&value, parse_u16, "u16")),
-      ValueType::ArrayU32 => NativeValue::ArrayU32(parse_typed_array!(&value, parse_u32, "u32")),
-      ValueType::ArrayU64 => NativeValue::ArrayU64(parse_typed_array!(&value, parse_u64, "u64")),
-      ValueType::ArrayI8 => NativeValue::ArrayI8(parse_typed_array!(&value, parse_i8, "i8")),
-      ValueType::ArrayI16 => NativeValue::ArrayI16(parse_typed_array!(&value, parse_i16, "i16")),
-      ValueType::ArrayI32 => NativeValue::ArrayI32(parse_typed_array!(&value, parse_i32, "i32")),
-      ValueType::ArrayI64 => NativeValue::ArrayI64(parse_typed_array!(&value, parse_i64, "i64")),
-      ValueType::ArrayF32 => NativeValue::ArrayF32(parse_typed_array!(&value, parse_f32, "f32")),
-      ValueType::ArrayF64 => NativeValue::ArrayF64(parse_typed_array!(&value, parse_f64, "f64")),
+      WasmType::ArrayU8 => Value::ArrayU8(parse_typed_array!(&value, parse_u8, "u8")),
+      WasmType::ArrayU16 => Value::ArrayU16(parse_typed_array!(&value, parse_u16, "u16")),
+      WasmType::ArrayU32 => Value::ArrayU32(parse_typed_array!(&value, parse_u32, "u32")),
+      WasmType::ArrayU64 => Value::ArrayU64(parse_typed_array!(&value, parse_u64, "u64")),
+      WasmType::ArrayI8 => Value::ArrayI8(parse_typed_array!(&value, parse_i8, "i8")),
+      WasmType::ArrayI16 => Value::ArrayI16(parse_typed_array!(&value, parse_i16, "i16")),
+      WasmType::ArrayI32 => Value::ArrayI32(parse_typed_array!(&value, parse_i32, "i32")),
+      WasmType::ArrayI64 => Value::ArrayI64(parse_typed_array!(&value, parse_i64, "i64")),
+      WasmType::ArrayF32 => Value::ArrayF32(parse_typed_array!(&value, parse_f32, "f32")),
+      WasmType::ArrayF64 => Value::ArrayF64(parse_typed_array!(&value, parse_f64, "f64")),
 
-      ValueType::ArrayString => {
+      WasmType::ArrayString => {
         let vec = parse_typed_array!(
           &value,
           |v: &JsValue| {
@@ -337,28 +376,28 @@ impl Value {
           },
           "string"
         );
-        NativeValue::ArrayString(vec)
+        Value::ArrayString(vec)
       }
 
-      ValueType::ArrayValue => {
+      WasmType::ArrayValue => {
         let arr = Array::from(&value);
         let mut vec = Vec::new();
         for i in 0..arr.length() {
           let item = arr.get(i);
-          let v = Value::from(item)?;
+          let v = WasmValue::from(item)?;
           vec.push(v.inner);
         }
-        NativeValue::ArrayValue(vec)
+        Value::ArrayValue(vec)
       }
 
-      ValueType::Structure
-      | ValueType::Enumeration
-      | ValueType::ArrayStructure
-      | ValueType::ArrayEnumeration => {
+      WasmType::Structure
+      | WasmType::Enumeration
+      | WasmType::ArrayStructure
+      | WasmType::ArrayEnumeration => {
         return Err("Structure and Enumeration types must be created from JSON".to_string());
       }
 
-      ValueType::KeyValue => {
+      WasmType::KeyValue => {
         // Convert JS object to KeyValue
         let obj = Object::from(value);
         let entries = Object::entries(&obj);
@@ -371,7 +410,7 @@ impl Value {
             .as_string()
             .ok_or_else(|| format!("Key {} is not a string", i))?;
           let val = entry.get(1);
-          let value = Value::from(val)?;
+          let value = WasmValue::from(val)?;
 
           let field = KeyValueField {
             id: gen_bb_uuid(),
@@ -385,62 +424,63 @@ impl Value {
           id: gen_bb_uuid(),
           fields,
         };
-        NativeValue::KeyValue(kv)
+        Value::KeyValue(kv)
       }
     };
 
-    Ok(Value { inner })
+    Ok(WasmValue { inner })
   }
 
   /// Get the type of this value
   #[wasm_bindgen(getter)]
-  pub fn r#type(&self) -> ValueType {
+  pub fn r#type(&self) -> WasmType {
     match &self.inner {
-      NativeValue::Unit => ValueType::Unit,
-      NativeValue::Boolean(_) => ValueType::Boolean,
-      NativeValue::U8(_) => ValueType::U8,
-      NativeValue::U16(_) => ValueType::U16,
-      NativeValue::U32(_) => ValueType::U32,
-      NativeValue::U64(_) => ValueType::U64,
-      NativeValue::I8(_) => ValueType::I8,
-      NativeValue::I16(_) => ValueType::I16,
-      NativeValue::I32(_) => ValueType::I32,
-      NativeValue::I64(_) => ValueType::I64,
-      NativeValue::F32(_) => ValueType::F32,
-      NativeValue::F64(_) => ValueType::F64,
-      NativeValue::String(_) => ValueType::String,
-      NativeValue::Option(_) => ValueType::Option,
-      NativeValue::Structure(_) => ValueType::Structure,
-      NativeValue::Enumeration(_) => ValueType::Enumeration,
-      NativeValue::ArrayBoolean(_) => ValueType::ArrayBoolean,
-      NativeValue::ArrayU8(_) => ValueType::ArrayU8,
-      NativeValue::ArrayU16(_) => ValueType::ArrayU16,
-      NativeValue::ArrayU32(_) => ValueType::ArrayU32,
-      NativeValue::ArrayU64(_) => ValueType::ArrayU64,
-      NativeValue::ArrayI8(_) => ValueType::ArrayI8,
-      NativeValue::ArrayI16(_) => ValueType::ArrayI16,
-      NativeValue::ArrayI32(_) => ValueType::ArrayI32,
-      NativeValue::ArrayI64(_) => ValueType::ArrayI64,
-      NativeValue::ArrayF32(_) => ValueType::ArrayF32,
-      NativeValue::ArrayF64(_) => ValueType::ArrayF64,
-      NativeValue::ArrayString(_) => ValueType::ArrayString,
-      NativeValue::ArrayValue(_) => ValueType::ArrayValue,
-      NativeValue::ArrayStructure { .. } => ValueType::ArrayStructure,
-      NativeValue::ArrayEnumeration { .. } => ValueType::ArrayEnumeration,
-      NativeValue::KeyValue(_) => ValueType::KeyValue,
-      NativeValue::Uuid(_) => ValueType::Uuid,
+      Value::Unit => WasmType::Unit,
+      Value::Boolean(_) => WasmType::Boolean,
+      Value::U8(_) => WasmType::U8,
+      Value::U16(_) => WasmType::U16,
+      Value::U32(_) => WasmType::U32,
+      Value::U64(_) => WasmType::U64,
+      Value::I8(_) => WasmType::I8,
+      Value::I16(_) => WasmType::I16,
+      Value::I32(_) => WasmType::I32,
+      Value::I64(_) => WasmType::I64,
+      Value::F32(_) => WasmType::F32,
+      Value::F64(_) => WasmType::F64,
+      Value::String(_) => WasmType::String,
+      Value::Option(_) => WasmType::Option,
+      Value::Structure(_) => WasmType::Structure,
+      Value::Enumeration(_) => WasmType::Enumeration,
+      Value::ArrayBoolean(_) => WasmType::ArrayBoolean,
+      Value::ArrayU8(_) => WasmType::ArrayU8,
+      Value::ArrayU16(_) => WasmType::ArrayU16,
+      Value::ArrayU32(_) => WasmType::ArrayU32,
+      Value::ArrayU64(_) => WasmType::ArrayU64,
+      Value::ArrayI8(_) => WasmType::ArrayI8,
+      Value::ArrayI16(_) => WasmType::ArrayI16,
+      Value::ArrayI32(_) => WasmType::ArrayI32,
+      Value::ArrayI64(_) => WasmType::ArrayI64,
+      Value::ArrayF32(_) => WasmType::ArrayF32,
+      Value::ArrayF64(_) => WasmType::ArrayF64,
+      Value::ArrayString(_) => WasmType::ArrayString,
+      Value::ArrayValue(_) => WasmType::ArrayValue,
+      Value::ArrayStructure { .. } => WasmType::ArrayStructure,
+      Value::ArrayEnumeration { .. } => WasmType::ArrayEnumeration,
+      Value::KeyValue(_) => WasmType::KeyValue,
+      Value::Uuid(_) => WasmType::Uuid,
     }
   }
 
   /// Set the value with type checking
   pub fn set(&mut self, value: JsValue) -> Result<(), String> {
     let value_type = self.r#type();
-    let new_value = Value::new(value_type, value)?;
+    let new_value = WasmValue::new(value_type, value)?;
     self.inner = new_value.inner;
     Ok(())
   }
 
   /// Get the value as a JavaScript value
+  #[wasm_bindgen]
   pub fn get(&self) -> JsValue {
     value_to_js(&self.inner, None)
   }
@@ -458,61 +498,61 @@ impl Value {
   }
 
   /// Create a Value from a JavaScript value with automatic type detection
-  pub fn from(value: JsValue) -> Result<Value, String> {
+  pub fn from(value: JsValue) -> Result<WasmValue, String> {
     let inner = js_to_value(&value)?;
-    Ok(Value { inner })
+    Ok(WasmValue { inner })
   }
 }
 
 // Conversion traits for zero-copy conversions between WASM and native types
-impl From<NativeValue> for Value {
-  fn from(inner: NativeValue) -> Self {
-    Value { inner }
+impl From<Value> for WasmValue {
+  fn from(inner: Value) -> Self {
+    WasmValue { inner }
   }
 }
 
-impl From<Value> for NativeValue {
-  fn from(value: Value) -> Self {
+impl From<WasmValue> for Value {
+  fn from(value: WasmValue) -> Self {
     value.inner
   }
 }
 
-impl AsRef<NativeValue> for Value {
-  fn as_ref(&self) -> &NativeValue {
+impl AsRef<Value> for WasmValue {
+  fn as_ref(&self) -> &Value {
     &self.inner
   }
 }
 
-impl AsMut<NativeValue> for Value {
-  fn as_mut(&mut self) -> &mut NativeValue {
+impl AsMut<Value> for WasmValue {
+  fn as_mut(&mut self) -> &mut Value {
     &mut self.inner
   }
 }
 
-/// Convert a NativeValue to JsValue
-fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue {
+/// Convert a Value to JsValue
+fn value_to_js(value: &Value, _type_registry: Option<JsValue>) -> JsValue {
   match value {
-    NativeValue::Unit => JsValue::NULL,
-    NativeValue::Boolean(b) => JsValue::from(*b),
-    NativeValue::U8(n) => JsValue::from(*n),
-    NativeValue::U16(n) => JsValue::from(*n),
-    NativeValue::U32(n) => JsValue::from(*n),
-    NativeValue::U64(n) => JsValue::from(*n as f64),
-    NativeValue::I8(n) => JsValue::from(*n),
-    NativeValue::I16(n) => JsValue::from(*n),
-    NativeValue::I32(n) => JsValue::from(*n),
-    NativeValue::I64(n) => JsValue::from(*n as f64),
-    NativeValue::F32(n) => JsValue::from(*n),
-    NativeValue::F64(n) => JsValue::from(*n),
-    NativeValue::String(s) => JsValue::from(s.as_str()),
-    NativeValue::Uuid(u) => JsValue::from(u.to_string()),
+    Value::Unit => JsValue::NULL,
+    Value::Boolean(b) => JsValue::from(*b),
+    Value::U8(n) => JsValue::from(*n),
+    Value::U16(n) => JsValue::from(*n),
+    Value::U32(n) => JsValue::from(*n),
+    Value::U64(n) => JsValue::from(*n as f64),
+    Value::I8(n) => JsValue::from(*n),
+    Value::I16(n) => JsValue::from(*n),
+    Value::I32(n) => JsValue::from(*n),
+    Value::I64(n) => JsValue::from(*n as f64),
+    Value::F32(n) => JsValue::from(*n),
+    Value::F64(n) => JsValue::from(*n),
+    Value::String(s) => JsValue::from(s.as_str()),
+    Value::Uuid(u) => JsValue::from(u.to_string()),
 
-    NativeValue::Option(opt) => match opt {
+    Value::Option(opt) => match opt {
       Some(v) => value_to_js(v, _type_registry.clone()),
       None => JsValue::NULL,
     },
 
-    NativeValue::ArrayBoolean(arr) => {
+    Value::ArrayBoolean(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -520,7 +560,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayU8(arr) => {
+    Value::ArrayU8(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -528,7 +568,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayU16(arr) => {
+    Value::ArrayU16(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -536,7 +576,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayU32(arr) => {
+    Value::ArrayU32(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -544,7 +584,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayU64(arr) => {
+    Value::ArrayU64(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item as f64));
@@ -552,7 +592,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayI8(arr) => {
+    Value::ArrayI8(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -560,7 +600,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayI16(arr) => {
+    Value::ArrayI16(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -568,7 +608,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayI32(arr) => {
+    Value::ArrayI32(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -576,7 +616,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayI64(arr) => {
+    Value::ArrayI64(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item as f64));
@@ -584,7 +624,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayF32(arr) => {
+    Value::ArrayF32(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -592,7 +632,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayF64(arr) => {
+    Value::ArrayF64(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(*item));
@@ -600,7 +640,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayString(arr) => {
+    Value::ArrayString(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&JsValue::from(item.as_str()));
@@ -608,7 +648,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::ArrayValue(arr) => {
+    Value::ArrayValue(arr) => {
       let js_arr = Array::new();
       for item in arr {
         js_arr.push(&value_to_js(item, _type_registry.clone()));
@@ -616,10 +656,10 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       js_arr.into()
     }
 
-    NativeValue::Structure(s) => structure_to_js(s),
-    NativeValue::Enumeration(e) => enumeration_to_js(e),
+    Value::Structure(s) => structure_to_js(s),
+    Value::Enumeration(e) => enumeration_to_js(e),
 
-    NativeValue::ArrayStructure { id, elements } => {
+    Value::ArrayStructure { id, elements } => {
       let obj = Object::new();
       Reflect::set(&obj, &JsValue::from("id"), &JsValue::from(id.to_string())).unwrap();
 
@@ -631,7 +671,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       obj.into()
     }
 
-    NativeValue::ArrayEnumeration { id, elements } => {
+    Value::ArrayEnumeration { id, elements } => {
       let obj = Object::new();
       Reflect::set(&obj, &JsValue::from("id"), &JsValue::from(id.to_string())).unwrap();
 
@@ -643,7 +683,7 @@ fn value_to_js(value: &NativeValue, _type_registry: Option<JsValue>) -> JsValue 
       obj.into()
     }
 
-    NativeValue::KeyValue(kv) => {
+    Value::KeyValue(kv) => {
       let obj = Object::new();
       for (key, field) in &kv.fields {
         if let Some(val) = &field.value {
@@ -715,23 +755,23 @@ fn enumeration_without_id_to_js(e: &EnumerationWithoutId) -> JsValue {
   obj.into()
 }
 
-/// Convert JsValue to NativeValue with automatic type detection
-fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
+/// Convert JsValue to Value with automatic type detection
+fn js_to_value(value: &JsValue) -> Result<Value, String> {
   if value.is_null() || value.is_undefined() {
-    return Ok(NativeValue::Unit);
+    return Ok(Value::Unit);
   }
 
   if let Some(b) = value.as_bool() {
-    return Ok(NativeValue::Boolean(b));
+    return Ok(Value::Boolean(b));
   }
 
   if let Some(n) = value.as_f64() {
     // Default to f64 for JavaScript numbers
-    return Ok(NativeValue::F64(n));
+    return Ok(Value::F64(n));
   }
 
   if let Some(s) = value.as_string() {
-    return Ok(NativeValue::String(s));
+    return Ok(Value::String(s));
   }
 
   // Check if it's an array
@@ -739,7 +779,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
     let arr = Array::from(value);
     if arr.length() == 0 {
       // Empty array defaults to ArrayValue
-      return Ok(NativeValue::ArrayValue(vec![]));
+      return Ok(Value::ArrayValue(vec![]));
     }
 
     // Check if all elements are of the same primitive type
@@ -774,7 +814,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
         let item = arr.get(i);
         vec.push(item.as_bool().unwrap());
       }
-      return Ok(NativeValue::ArrayBoolean(vec));
+      return Ok(Value::ArrayBoolean(vec));
     }
 
     if all_number {
@@ -784,7 +824,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
         let item = arr.get(i);
         vec.push(item.as_f64().unwrap());
       }
-      return Ok(NativeValue::ArrayF64(vec));
+      return Ok(Value::ArrayF64(vec));
     }
 
     if all_string {
@@ -794,7 +834,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
         let item = arr.get(i);
         vec.push(item.as_string().unwrap());
       }
-      return Ok(NativeValue::ArrayString(vec));
+      return Ok(Value::ArrayString(vec));
     }
 
     // Mixed or complex array - use ArrayValue
@@ -803,7 +843,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
       let item = arr.get(i);
       vec.push(js_to_value(&item)?);
     }
-    return Ok(NativeValue::ArrayValue(vec));
+    return Ok(Value::ArrayValue(vec));
   }
 
   // Check if it's an object
@@ -821,7 +861,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
                 let value_val = Reflect::get(&obj, &JsValue::from("value"))
                   .map_err(|_| "Missing value field in enumeration".to_string())?;
                 let inner_value = js_to_value(&value_val)?;
-                return Ok(NativeValue::Enumeration(Enumeration {
+                return Ok(Value::Enumeration(Enumeration {
                   id,
                   variant_id,
                   value: Box::new(inner_value),
@@ -852,7 +892,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
                 });
               }
 
-              return Ok(NativeValue::Structure(Structure { id, fields }));
+              return Ok(Value::Structure(Structure { id, fields }));
             }
           }
         }
@@ -884,7 +924,7 @@ fn js_to_value(value: &JsValue) -> Result<NativeValue, String> {
       id: gen_bb_uuid(),
       fields,
     };
-    return Ok(NativeValue::KeyValue(kv));
+    return Ok(Value::KeyValue(kv));
   }
 
   Err(format!("Unsupported JavaScript value type"))
@@ -900,70 +940,70 @@ mod tests {
   #[wasm_bindgen_test]
   fn test_value_type_numbers() {
     // Verify enum values match expected numbers
-    assert_eq!(ValueType::Unit as u8, 0);
-    assert_eq!(ValueType::Boolean as u8, 1);
-    assert_eq!(ValueType::U8 as u8, 2);
-    assert_eq!(ValueType::F64 as u8, 11);
-    assert_eq!(ValueType::Uuid as u8, 32);
+    assert_eq!(WasmType::Unit as u8, 0);
+    assert_eq!(WasmType::Boolean as u8, 1);
+    assert_eq!(WasmType::U8 as u8, 2);
+    assert_eq!(WasmType::F64 as u8, 11);
+    assert_eq!(WasmType::Uuid as u8, 32);
   }
 
   #[wasm_bindgen_test]
   fn test_type_conversions() {
-    // Test conversion from NativeType to ValueType
-    assert_eq!(ValueType::from(NativeType::Unit), ValueType::Unit);
-    assert_eq!(ValueType::from(NativeType::Boolean), ValueType::Boolean);
-    assert_eq!(ValueType::from(NativeType::F64), ValueType::F64);
-    assert_eq!(ValueType::from(NativeType::String), ValueType::String);
-    assert_eq!(ValueType::from(NativeType::ArrayF32), ValueType::ArrayF32);
+    // Test conversion from Type to ValueType
+    assert_eq!(WasmType::from(Type::Unit), WasmType::Unit);
+    assert_eq!(WasmType::from(Type::Boolean), WasmType::Boolean);
+    assert_eq!(WasmType::from(Type::F64), WasmType::F64);
+    assert_eq!(WasmType::from(Type::String), WasmType::String);
+    assert_eq!(WasmType::from(Type::ArrayF32), WasmType::ArrayF32);
 
-    // Test conversion from ValueType to NativeType
-    assert_eq!(NativeType::from(ValueType::Unit), NativeType::Unit);
-    assert_eq!(NativeType::from(ValueType::Boolean), NativeType::Boolean);
-    assert_eq!(NativeType::from(ValueType::F64), NativeType::F64);
-    assert_eq!(NativeType::from(ValueType::String), NativeType::String);
-    assert_eq!(NativeType::from(ValueType::ArrayF32), NativeType::ArrayF32);
+    // Test conversion from ValueType to Type
+    assert_eq!(Type::from(WasmType::Unit), Type::Unit);
+    assert_eq!(Type::from(WasmType::Boolean), Type::Boolean);
+    assert_eq!(Type::from(WasmType::F64), Type::F64);
+    assert_eq!(Type::from(WasmType::String), Type::String);
+    assert_eq!(Type::from(WasmType::ArrayF32), Type::ArrayF32);
 
     // Test round-trip conversion
-    let original = NativeType::Structure;
-    let wasm_type: ValueType = original.clone().into();
-    let back: NativeType = wasm_type.into();
+    let original = Type::Structure;
+    let wasm_type: WasmType = original.clone().into();
+    let back: Type = wasm_type.into();
     assert_eq!(original, back);
   }
 
   #[wasm_bindgen_test]
   fn test_primitive_values() {
     // Test Unit
-    let unit_val = Value::new(ValueType::Unit, JsValue::NULL).unwrap();
-    assert_eq!(unit_val.r#type(), ValueType::Unit);
+    let unit_val = WasmValue::new(WasmType::Unit, JsValue::NULL).unwrap();
+    assert_eq!(unit_val.r#type(), WasmType::Unit);
 
     // Test Boolean
-    let bool_val = Value::new(ValueType::Boolean, JsValue::from(true)).unwrap();
-    assert_eq!(bool_val.r#type(), ValueType::Boolean);
+    let bool_val = WasmValue::new(WasmType::Boolean, JsValue::from(true)).unwrap();
+    assert_eq!(bool_val.r#type(), WasmType::Boolean);
     assert_eq!(bool_val.get().as_bool(), Some(true));
 
     // Test F64
-    let f64_val = Value::new(ValueType::F64, JsValue::from(3.14)).unwrap();
-    assert_eq!(f64_val.r#type(), ValueType::F64);
+    let f64_val = WasmValue::new(WasmType::F64, JsValue::from(3.14)).unwrap();
+    assert_eq!(f64_val.r#type(), WasmType::F64);
     assert_eq!(f64_val.get().as_f64(), Some(3.14));
 
     // Test String
-    let str_val = Value::new(ValueType::String, JsValue::from("hello")).unwrap();
-    assert_eq!(str_val.r#type(), ValueType::String);
+    let str_val = WasmValue::new(WasmType::String, JsValue::from("hello")).unwrap();
+    assert_eq!(str_val.r#type(), WasmType::String);
     assert_eq!(str_val.get().as_string(), Some("hello".to_string()));
   }
 
   #[wasm_bindgen_test]
   fn test_integer_types() {
     // Test U8
-    let u8_val = Value::new(ValueType::U8, JsValue::from(255)).unwrap();
-    assert_eq!(u8_val.r#type(), ValueType::U8);
+    let u8_val = WasmValue::new(WasmType::U8, JsValue::from(255)).unwrap();
+    assert_eq!(u8_val.r#type(), WasmType::U8);
 
     // Test I32
-    let i32_val = Value::new(ValueType::I32, JsValue::from(-42)).unwrap();
-    assert_eq!(i32_val.r#type(), ValueType::I32);
+    let i32_val = WasmValue::new(WasmType::I32, JsValue::from(-42)).unwrap();
+    assert_eq!(i32_val.r#type(), WasmType::I32);
 
     // Test out of range
-    let result = Value::new(ValueType::U8, JsValue::from(256));
+    let result = WasmValue::new(WasmType::U8, JsValue::from(256));
     assert!(result.is_err());
   }
 
@@ -973,34 +1013,34 @@ mod tests {
     let arr = Array::new();
     arr.push(&JsValue::from(true));
     arr.push(&JsValue::from(false));
-    let bool_arr = Value::new(ValueType::ArrayBoolean, arr.into()).unwrap();
-    assert_eq!(bool_arr.r#type(), ValueType::ArrayBoolean);
+    let bool_arr = WasmValue::new(WasmType::ArrayBoolean, arr.into()).unwrap();
+    assert_eq!(bool_arr.r#type(), WasmType::ArrayBoolean);
 
     // Test number array
     let arr = Array::new();
     arr.push(&JsValue::from(1.5));
     arr.push(&JsValue::from(2.5));
-    let f64_arr = Value::new(ValueType::ArrayF64, arr.into()).unwrap();
-    assert_eq!(f64_arr.r#type(), ValueType::ArrayF64);
+    let f64_arr = WasmValue::new(WasmType::ArrayF64, arr.into()).unwrap();
+    assert_eq!(f64_arr.r#type(), WasmType::ArrayF64);
   }
 
   #[wasm_bindgen_test]
   fn test_from_auto_detection() {
     // Test boolean
-    let val = Value::from(JsValue::from(true)).unwrap();
-    assert_eq!(val.r#type(), ValueType::Boolean);
+    let val = WasmValue::from(JsValue::from(true)).unwrap();
+    assert_eq!(val.r#type(), WasmType::Boolean);
 
     // Test number (defaults to f64)
-    let val = Value::from(JsValue::from(42.0)).unwrap();
-    assert_eq!(val.r#type(), ValueType::F64);
+    let val = WasmValue::from(JsValue::from(42.0)).unwrap();
+    assert_eq!(val.r#type(), WasmType::F64);
 
     // Test string
-    let val = Value::from(JsValue::from("test")).unwrap();
-    assert_eq!(val.r#type(), ValueType::String);
+    let val = WasmValue::from(JsValue::from("test")).unwrap();
+    assert_eq!(val.r#type(), WasmType::String);
 
     // Test null
-    let val = Value::from(JsValue::NULL).unwrap();
-    assert_eq!(val.r#type(), ValueType::Unit);
+    let val = WasmValue::from(JsValue::NULL).unwrap();
+    assert_eq!(val.r#type(), WasmType::Unit);
   }
 
   #[wasm_bindgen_test]
@@ -1009,27 +1049,27 @@ mod tests {
     let arr = Array::new();
     arr.push(&JsValue::from(true));
     arr.push(&JsValue::from(false));
-    let val = Value::from(arr.into()).unwrap();
-    assert_eq!(val.r#type(), ValueType::ArrayBoolean);
+    let val = WasmValue::from(arr.into()).unwrap();
+    assert_eq!(val.r#type(), WasmType::ArrayBoolean);
 
     // Test number array
     let arr = Array::new();
     arr.push(&JsValue::from(1.0));
     arr.push(&JsValue::from(2.0));
-    let val = Value::from(arr.into()).unwrap();
-    assert_eq!(val.r#type(), ValueType::ArrayF64);
+    let val = WasmValue::from(arr.into()).unwrap();
+    assert_eq!(val.r#type(), WasmType::ArrayF64);
 
     // Test string array
     let arr = Array::new();
     arr.push(&JsValue::from("a"));
     arr.push(&JsValue::from("b"));
-    let val = Value::from(arr.into()).unwrap();
-    assert_eq!(val.r#type(), ValueType::ArrayString);
+    let val = WasmValue::from(arr.into()).unwrap();
+    assert_eq!(val.r#type(), WasmType::ArrayString);
   }
 
   #[wasm_bindgen_test]
   fn test_set_method() {
-    let mut val = Value::new(ValueType::F64, JsValue::from(1.0)).unwrap();
+    let mut val = WasmValue::new(WasmType::F64, JsValue::from(1.0)).unwrap();
     assert_eq!(val.get().as_f64(), Some(1.0));
 
     val.set(JsValue::from(2.0)).unwrap();
@@ -1043,12 +1083,12 @@ mod tests {
   #[wasm_bindgen_test]
   fn test_option_value() {
     // Some value
-    let some_val = Value::new(ValueType::Option, JsValue::from(42.0)).unwrap();
-    assert_eq!(some_val.r#type(), ValueType::Option);
+    let some_val = WasmValue::new(WasmType::Option, JsValue::from(42.0)).unwrap();
+    assert_eq!(some_val.r#type(), WasmType::Option);
 
     // None value
-    let none_val = Value::new(ValueType::Option, JsValue::NULL).unwrap();
-    assert_eq!(none_val.r#type(), ValueType::Option);
+    let none_val = WasmValue::new(WasmType::Option, JsValue::NULL).unwrap();
+    assert_eq!(none_val.r#type(), WasmType::Option);
     assert!(none_val.get().is_null());
   }
 }
