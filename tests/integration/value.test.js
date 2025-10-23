@@ -182,4 +182,38 @@ const retrieved2 = val.getAs(null);
 assert.strictEqual(retrieved2, 123.45);
 console.log('✓ getAs() retrieves value (type registry placeholder)\n');
 
+// Test 13: Type switching/matching pattern
+console.log('Test 13: Type switching/matching pattern');
+const unknownValue = Value.from(42.5);
+
+switch (unknownValue.type) {
+    case ValueType.Boolean:
+        console.log('  Value is boolean:', unknownValue.get());
+        break;
+    case ValueType.F64:
+        console.log('  Value is F64:', unknownValue.get());
+        assert.strictEqual(unknownValue.get(), 42.5);
+        break;
+    case ValueType.String:
+        console.log('  Value is string:', unknownValue.get());
+        break;
+    case ValueType.ArrayF64:
+        console.log('  Value is F64 array:', unknownValue.get());
+        break;
+    case ValueType.KeyValue:
+        console.log('  Value is KeyValue object:', unknownValue.get());
+        break;
+    case ValueType.Option:
+        const optVal = unknownValue.get();
+        if (optVal === null) {
+            console.log('  Value is Option(None)');
+        } else {
+            console.log('  Value is Option(Some):', optVal);
+        }
+        break;
+    default:
+        console.log('  Unknown or unhandled type:', unknownValue.type);
+}
+console.log('✓ Type switching works correctly\n');
+
 console.log('\n✅ All tests passed!');
