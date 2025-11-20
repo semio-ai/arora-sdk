@@ -80,7 +80,7 @@ args:
       fields:
       - id: 7d94a956-e50d-4cc4-9714-f62e1f9b134e
         value:
-          enum[]:
+          enums:
             id: 325a5767-e344-4532-860e-0749bcf2e428
             elements:
               - variant_id: 2468f46c-bb60-425c-9a4d-9ad326ccc7e2

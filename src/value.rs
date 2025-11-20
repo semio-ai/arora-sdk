@@ -36,45 +36,45 @@ pub enum Type {
   F64,
   #[serde(rename = "str")]
   String,
-  #[serde(rename = "v?")]
+  #[serde(rename = "option")]
   Option,
   #[serde(rename = "struct")]
   Structure,
   #[serde(rename = "enum")]
   Enumeration,
-  #[serde(rename = "bool[]")]
+  #[serde(rename = "bools")]
   ArrayBoolean,
-  #[serde(rename = "u8[]")]
+  #[serde(rename = "u8s")]
   ArrayU8,
-  #[serde(rename = "u16[]")]
+  #[serde(rename = "u16s")]
   ArrayU16,
-  #[serde(rename = "u32[]")]
+  #[serde(rename = "u32s")]
   ArrayU32,
-  #[serde(rename = "u64[]")]
+  #[serde(rename = "u64s")]
   ArrayU64,
-  #[serde(rename = "i8[]")]
+  #[serde(rename = "i8s")]
   ArrayI8,
-  #[serde(rename = "i16[]")]
+  #[serde(rename = "i16s")]
   ArrayI16,
-  #[serde(rename = "i32[]")]
+  #[serde(rename = "i32s")]
   ArrayI32,
-  #[serde(rename = "i64[]")]
+  #[serde(rename = "i64s")]
   ArrayI64,
-  #[serde(rename = "f32[]")]
+  #[serde(rename = "f32s")]
   ArrayF32,
-  #[serde(rename = "f64[]")]
+  #[serde(rename = "f64s")]
   ArrayF64,
-  #[serde(rename = "str[]")]
+  #[serde(rename = "strs")]
   ArrayString,
-  #[serde(rename = "value[]")]
+  #[serde(rename = "values")]
   ArrayValue,
-  #[serde(rename = "struct[]")]
+  #[serde(rename = "structs")]
   ArrayStructure,
-  #[serde(rename = "enum[]")]
+  #[serde(rename = "enums")]
   ArrayEnumeration,
-  #[serde(rename = "keyvalue[]")]
+  #[serde(rename = "keyvalues")]
   KeyValue,
-  #[serde(rename = "uuid[]")]
+  #[serde(rename = "uuids")]
   Uuid,
 }
 
@@ -120,60 +120,60 @@ pub enum Value {
   #[serde(rename = "str")]
   #[display("\"{}\"", _0)]
   String(String),
-  #[serde(rename = "v?")]
+  #[serde(rename = "option")]
   #[display("[{}]", if let Some(v) = _0.as_ref() { format!("{}", v) } else { "null".to_string() })]
   Option(Option<Box<Value>>),
   #[serde(rename = "struct")]
   Structure(Structure),
   #[serde(rename = "enum")]
   Enumeration(Enumeration),
-  #[serde(rename = "bool[]")]
+  #[serde(rename = "bools")]
   #[display("[{:?}]", _0)]
   ArrayBoolean(Vec<bool>),
-  #[serde(rename = "u8[]")]
+  #[serde(rename = "u8s")]
   #[display("u8[{:?}]", _0)]
   ArrayU8(Vec<u8>),
-  #[serde(rename = "u16[]")]
+  #[serde(rename = "u16s")]
   #[display("u16[{:?}]", _0)]
   ArrayU16(Vec<u16>),
-  #[serde(rename = "u32[]")]
+  #[serde(rename = "u32s")]
   #[display("u32[{:?}]", _0)]
   ArrayU32(Vec<u32>),
-  #[serde(rename = "u64[]")]
+  #[serde(rename = "u64s")]
   #[display("u64[{:?}]", _0)]
   ArrayU64(Vec<u64>),
-  #[serde(rename = "i8[]")]
+  #[serde(rename = "i8s")]
   #[display("i8[{:?}]", _0)]
   ArrayI8(Vec<i8>),
-  #[serde(rename = "i16[]")]
+  #[serde(rename = "i16s")]
   #[display("i16[{:?}]", _0)]
   ArrayI16(Vec<i16>),
-  #[serde(rename = "i32[]")]
+  #[serde(rename = "i32s")]
   #[display("i32[{:?}]", _0)]
   ArrayI32(Vec<i32>),
-  #[serde(rename = "i64[]")]
+  #[serde(rename = "i64s")]
   #[display("i64[{:?}]", _0)]
   ArrayI64(Vec<i64>),
-  #[serde(rename = "f32[]")]
+  #[serde(rename = "f32s")]
   #[display("f32[{:?}]", _0)]
   ArrayF32(Vec<f32>),
-  #[serde(rename = "f64[]")]
+  #[serde(rename = "f64s")]
   #[display("f64[{:?}]", _0)]
   ArrayF64(Vec<f64>),
-  #[serde(rename = "str[]")]
+  #[serde(rename = "strs")]
   #[display("[{:?}]", _0)]
   ArrayString(Vec<String>),
-  #[serde(rename = "value[]")]
+  #[serde(rename = "values")]
   #[display("[{:?}]", _0)]
   ArrayValue(Vec<Value>),
-  #[serde(rename = "struct[]")]
-  #[display("struct[]({}, {:?})", id, elements)]
+  #[serde(rename = "structs")]
+  #[display("structs({}, {:?})", id, elements)]
   ArrayStructure {
     id: Uuid,
     elements: Vec<StructureWithoutId>,
   },
-  #[serde(rename = "enum[]")]
-  #[display("enum[]({}, {:?})", id, elements)]
+  #[serde(rename = "enums")]
+  #[display("enums({}, {:?})", id, elements)]
   ArrayEnumeration {
     id: Uuid,
     elements: Vec<EnumerationWithoutId>,
@@ -428,14 +428,23 @@ mod tests {
   where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug + Clone,
   {
+    // First with JSON
     let json = json5::to_string(value).unwrap();
     println!("{} JSON:\n{}", name, json);
 
     let deserialized: T = json5::from_str(&json).unwrap();
     assert_eq!(
       value, &deserialized,
-      "Roundtrip serialization failed for {}",
-      name
+      "Roundtrip JSON serialization failed for {name}"
+    );
+
+    // Then with RON
+    let ron = ron::to_string(value).unwrap();
+    println!("{} RON:\n{}", name, ron);
+    let deserialized: T = ron::from_str(&ron).unwrap();
+    assert_eq!(
+      value, &deserialized,
+      "Roundtrip RON serialization failed for {name}"
     );
   }
 

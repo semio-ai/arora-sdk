@@ -22,6 +22,7 @@ js-sys = "0.3"
 
 [dev-dependencies]
 json5 = "0.4"
+ron = "0.12"
 pretty_assertions = "1"
 serde_yaml = "0.8"
 
