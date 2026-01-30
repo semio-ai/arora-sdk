@@ -67,6 +67,13 @@ assert.strictEqual(someVal.type, ValueType.Option);
 assert.strictEqual(someVal.get(), 42);
 console.log('✓ Option(Some) value created\n');
 
+const innerU64 = new Value(ValueType.U64, 42);
+const someTypedVal = new Value(ValueType.Option, innerU64);
+assert.strictEqual(someTypedVal.type, ValueType.Option);
+const innerVal = someTypedVal.get();
+assert.ok(innerVal !== null && innerVal !== undefined, 'Inner value should exist');
+console.log('✓ Option(Some(U64)) value created with nested Value\n');
+
 const noneVal = new Value(ValueType.Option, null);
 assert.strictEqual(noneVal.type, ValueType.Option);
 assert.strictEqual(noneVal.get(), null);
