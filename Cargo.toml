@@ -1,7 +1,11 @@
 [package]
 name = "arora-types"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
+description = "Shared type definitions for the Arora AI framework"
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-types"
+homepage = "https://github.com/semio-ai/arora-types"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -13,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 derive_more = { version = "2", features = ["display"] }
 semver = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-lazy_static = "*"
+lazy_static = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { version = "1", features = ["js", "serde", "v4"] }

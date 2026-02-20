@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Default to read-only; the publish job escalates only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Release version: ${VERSION}"
+
+      - name: Package
+        run: cargo package
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CRATE_FILE=$(ls target/package/*.crate | head -1)
+          TAG="v${{ steps.version.outputs.version }}"
+
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists — skipping GitHub release creation."
+          else
+            gh release create "${TAG}" \
+              --title "Release ${TAG}" \
+              --generate-notes \
+              "${CRATE_FILE}"
+          fi
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          OUTPUT=$(cargo publish 2>&1)
+          EXIT_CODE=$?
+          echo "${OUTPUT}"
+          if [ ${EXIT_CODE} -ne 0 ]; then
+            if echo "${OUTPUT}" | grep -q "already uploaded"; then
+              echo "Version already exists on crates.io — skipping."
+            else
+              exit ${EXIT_CODE}
+            fi
+          fi
