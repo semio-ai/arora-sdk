@@ -41,6 +41,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-index-
 
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Linting
+        run: cargo clippy --all-targets -- -D warnings
+
       - name: Test
         run: cargo test --locked
 
@@ -68,68 +74,6 @@ jobs:
             exit 1
           fi
           echo "Version bumped: $MAIN_VERSION -> $CURRENT_VERSION ✓"
-
-  pre-release:
-    name: Publish Pre-release
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    needs: [check-version-bump, build_and_test]
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Compute pre-release version
-        id: version
-        run: |
-          BASE_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
-          # Sanitize branch name: keep alphanumerics and hyphens only (dots are reserved
-          # as semver pre-release identifier separators); truncate to 20 chars.
-          BRANCH=$(echo "${GITHUB_HEAD_REF}" | sed 's/[^a-zA-Z0-9-]/-/g' | tr '[:upper:]' '[:lower:]' | cut -c1-20)
-          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-6)
-          PR_VERSION="${BASE_VERSION}-${BRANCH}.${SHORT_SHA}"
-          echo "version=${PR_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "Pre-release version: ${PR_VERSION}"
-
-      - name: Set pre-release version in Cargo.toml
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
-
-      - name: Package
-        run: cargo package --allow-dirty
-
-      - name: Create GitHub Pre-release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          CRATE_FILE=$(ls target/package/*.crate | head -1)
-          TAG="v${{ steps.version.outputs.version }}"
-
-          printf '**Pre-release** from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n\nBranch: `${{ github.head_ref }}`\nCommit: `${{ github.sha }}`\n\nThis is an automated pre-release build. For official releases see the [releases page](../../releases).\n' > release-notes.md
-
-          # Remove existing pre-release for this tag (handles workflow re-runs)
-          gh release delete "${TAG}" --yes 2>/dev/null || true
-          git push --delete origin "${TAG}" 2>/dev/null || true
-
-          gh release create "${TAG}" \
-            --title "Pre-release ${TAG}" \
-            --notes-file release-notes.md \
-            --prerelease \
-            "${CRATE_FILE}"
 
   publish:
     name: Publish Release
@@ -164,6 +108,14 @@ jobs:
 
       - name: Package
         run: cargo package
+
+      - name: Tag and push
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "${TAG}"
 
       - name: Create GitHub Release
         env:
