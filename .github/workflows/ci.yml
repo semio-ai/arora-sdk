@@ -53,17 +53,20 @@ jobs:
       - name: Check for WASM build
         run: cargo build --locked --tests --target wasm32-unknown-unknown
 
-  # For PRs: check that the version was bumped and publish a pre-release.
+  # For PRs: check that the version was bumped.
+  # On main: always succeed (version already validated before merge).
   check-version-bump:
     name: Check Version Bump
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Check version bump
+        if: github.event_name == 'pull_request'
         run: |
           CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
           MAIN_VERSION=$(git show origin/main:Cargo.toml | grep '^version' | head -1 | sed 's/version = "//;s/"//')
@@ -76,18 +79,22 @@ jobs:
           echo "Version bumped: $MAIN_VERSION -> $CURRENT_VERSION ✓"
 
   publish:
-    name: Publish Release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request')
     runs-on: ubuntu-latest
-    needs: [build_and_test]
+    needs: [build_and_test, check-version-bump]
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+          target: wasm32-unknown-unknown
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -106,10 +113,50 @@ jobs:
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Release version: ${VERSION}"
 
-      - name: Package
+      - name: Compute publish parameters
+        id: params
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "registry_url=https://npm.pkg.github.com" >> "$GITHUB_OUTPUT"
+            echo "npm_token=${{ secrets.GITHUB_TOKEN }}" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "registry_url=https://registry.npmjs.org" >> "$GITHUB_OUTPUT"
+            echo "npm_token=${{ secrets.NPM_TOKEN }}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Rust Crate (release only)
+      - name: Package crate
+        if: steps.params.outputs.is_release == 'true'
         run: cargo package
 
+      # WASM / NPM
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: ${{ steps.params.outputs.registry_url }}
+          scope: "@semio-ai"
+          always-auth: true
+
+      - name: Build & Test WASM
+        run: wasm-pack test --headless --firefox
+
+      - name: Build WASM for release
+        run: wasm-pack build --release --scope=semio-ai
+
+      - name: Run JS integration tests
+        run: |
+          npm install
+          npm ci
+          npm test
+
       - name: Tag and push
+        if: steps.params.outputs.is_release == 'true'
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
@@ -118,10 +165,12 @@ jobs:
           git push origin "${TAG}"
 
       - name: Create GitHub Release
+        if: steps.params.outputs.is_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           CRATE_FILE=$(ls target/package/*.crate | head -1)
+          NPM_TGZ=$(ls pkg/*.tgz | head -1)
           TAG="v${{ steps.version.outputs.version }}"
 
           if gh release view "${TAG}" > /dev/null 2>&1; then
@@ -130,10 +179,31 @@ jobs:
             gh release create "${TAG}" \
               --title "Release ${TAG}" \
               --generate-notes \
-              "${CRATE_FILE}"
+              "${CRATE_FILE}" \
+              "${NPM_TGZ}"
           fi
 
       - name: Publish to crates.io
+        if: steps.params.outputs.is_release == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish
+
+      # Pre-release version (PR only)
+      - name: Set pre-release version
+        if: steps.params.outputs.is_release == 'false'
+        run: |
+          PREID="pr.${{ github.event.pull_request.number }}.${{ github.run_number }}"
+          cd pkg && npm version "${{ steps.version.outputs.version }}-${PREID}" --no-git-tag-version
+
+      - name: Authenticate to GitHub Packages
+        if: steps.params.outputs.is_release == 'false'
+        run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # NPM publish (both PR and release)
+      - name: Publish NPM package
+        run: wasm-pack publish
+        env:
+          NODE_AUTH_TOKEN: ${{ steps.params.outputs.npm_token }}
