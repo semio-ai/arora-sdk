@@ -25,26 +25,26 @@ lazy_static::lazy_static! {
 
   pub static ref PRIMITIVE_IDS: HashSet<Uuid> = {
     let mut ids = HashSet::new();
-    ids.insert(UNIT_ID.clone());
-    ids.insert(BOOLEAN_ID.clone());
-    ids.insert(I8_ID.clone());
-    ids.insert(I16_ID.clone());
-    ids.insert(I32_ID.clone());
-    ids.insert(I64_ID.clone());
-    ids.insert(U8_ID.clone());
-    ids.insert(U16_ID.clone());
-    ids.insert(U32_ID.clone());
-    ids.insert(U64_ID.clone());
-    ids.insert(F32_ID.clone());
-    ids.insert(F64_ID.clone());
-    ids.insert(STRING_ID.clone());
+    ids.insert(*UNIT_ID);
+    ids.insert(*BOOLEAN_ID);
+    ids.insert(*I8_ID);
+    ids.insert(*I16_ID);
+    ids.insert(*I32_ID);
+    ids.insert(*I64_ID);
+    ids.insert(*U8_ID);
+    ids.insert(*U16_ID);
+    ids.insert(*U32_ID);
+    ids.insert(*U64_ID);
+    ids.insert(*F32_ID);
+    ids.insert(*F64_ID);
+    ids.insert(*STRING_ID);
     ids
   };
 
   pub static ref PRIMITIVE_LOW_TYPE_REFS: HashMap<Uuid, TypeRef> = {
     let mut types: HashMap<Uuid, TypeRef> = HashMap::new();
-    let make_scalar = |id: &Uuid| TypeRef::Scalar { id: id.clone() };
-    let mut insert_scalar_id = |id: &Uuid| types.insert(id.clone(), make_scalar(id));
+    let make_scalar = |id: &Uuid| TypeRef::Scalar { id: *id };
+    let mut insert_scalar_id = |id: &Uuid| types.insert(*id, make_scalar(id));
     insert_scalar_id(&UNIT_ID);
     insert_scalar_id(&BOOLEAN_ID);
     insert_scalar_id(&I8_ID);
@@ -64,13 +64,13 @@ lazy_static::lazy_static! {
   pub static ref PRIMITIVE_TYPES: HashMap<Uuid, Type> = {
     let mut types: HashMap<Uuid, Type> = HashMap::new();
     let mut insert_primitive_type = |id: &Uuid, name: &str, description: &str| {
-      types.insert(id.clone(), Type {
+      types.insert(*id, Type {
         name: name.to_string(),
-        id: id.clone(),
+        id: *id,
         description: description.to_string(),
         kind: TypeKind::Primitive(PRIMITIVE_LOW_TYPE_REFS.get(id).unwrap().clone()),
       });
-      ()
+
     };
     insert_primitive_type(&UNIT_ID, "unit", "a.k.a. \"nothing\"");
     insert_primitive_type(&BOOLEAN_ID, "boolean", "either true or false");

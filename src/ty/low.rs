@@ -20,7 +20,7 @@ pub struct Structure {
 impl Structure {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
-    for (_, value) in &self.fields {
+    for value in self.fields.values() {
       deps.extend(value.type_ref.type_dependencies());
     }
     deps
@@ -42,7 +42,7 @@ pub struct Enumeration {
 impl Enumeration {
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
-    for (_, value) in &self.values {
+    for value in self.values.values() {
       deps.extend(value.type_ref.type_dependencies());
     }
     deps

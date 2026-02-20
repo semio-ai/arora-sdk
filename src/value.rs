@@ -714,10 +714,13 @@ mod tests {
     assert_eq!(Value::from(-123456i32), Value::I32(-123456));
     assert_eq!(Value::from(-12345678901234i64), Value::I64(-12345678901234));
 
-    assert_eq!(Value::from(3.14f32), Value::F32(3.14f32));
     assert_eq!(
-      Value::from(3.141592653589793f64),
-      Value::F64(3.141592653589793f64)
+      Value::from(std::f32::consts::PI),
+      Value::F32(std::f32::consts::PI)
+    );
+    assert_eq!(
+      Value::from(std::f64::consts::PI),
+      Value::F64(std::f64::consts::PI)
     );
 
     assert_eq!(
@@ -878,8 +881,8 @@ mod tests {
       Value::Option(Some(Box::new(Value::String("hello".to_string()))))
     );
     assert_eq!(
-      Value::from(Some(3.14f64)),
-      Value::Option(Some(Box::new(Value::F64(3.14))))
+      Value::from(Some(std::f64::consts::PI)),
+      Value::Option(Some(Box::new(Value::F64(std::f64::consts::PI))))
     );
 
     // Test None variants
@@ -909,7 +912,7 @@ mod tests {
       Value::U32(42),
       Value::Boolean(true),
       Value::String("test".to_string()),
-      Value::F64(3.14),
+      Value::F64(std::f64::consts::PI),
       Value::Unit,
     ];
     assert_eq!(
