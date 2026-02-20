@@ -2,7 +2,7 @@
 name = "arora-types"
 version = "1.0.1"
 edition = "2021"
-description = "Shared type definitions for the Arora AI framework"
+description = "Shared type definitions for the Semio Arora framework"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-types"
 homepage = "https://github.com/semio-ai/arora-types"
