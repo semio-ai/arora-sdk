@@ -61,6 +61,12 @@ pub struct KeyValue {
   pub fields: HashMap<String, KeyValueField>,
 }
 
+impl Default for KeyValue {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl KeyValue {
   pub fn new() -> Self {
     KeyValue::new_with_id(gen_bb_uuid())
@@ -98,7 +104,7 @@ impl KeyValue {
   }
 
   pub fn get_field(&self, key: &str) -> Option<&KeyValueField> {
-    self.fields.get(&key.to_string())
+    self.fields.get(key)
   }
 
   pub fn as_value(self) -> Value {
@@ -205,7 +211,7 @@ impl KeyValueItems {
     for (k, v) in pairs.into_iter() {
       map.insert(k.into(), v); // last wins
     }
-    KeyValueItems(map.into_iter().map(|(_, v)| v).collect())
+    KeyValueItems(map.into_values().collect())
   }
 }
 
@@ -463,7 +469,7 @@ mod tests {
       KeyValueField::new("mana", Value::I32(50)),
     ];
     let id = gen_bb_uuid();
-    let kv: KeyValue = KeyValue::from((id, fields)).into();
+    let kv: KeyValue = KeyValue::from((id, fields));
     assert_eq!(kv.id, id);
     assert_eq!(kv.fields.len(), 2);
     assert!(kv.fields.contains_key("health"));
@@ -500,7 +506,7 @@ mod tests {
           ]),
         ),
       ];
-      KeyValue::from(fields).into()
+      KeyValue::from(fields)
     };
 
     // Now expect three top-level fields: health, stats, position
@@ -704,8 +710,8 @@ mod tests {
       ("i16", Value::I16(-32768)),
       ("i32", Value::I32(-2147483648)),
       ("i64", Value::I64(-9223372036854775808)),
-      ("f32", Value::F32(3.14159)),
-      ("f64", Value::F64(2.718281828)),
+      ("f32", Value::F32(std::f32::consts::PI)),
+      ("f64", Value::F64(std::f64::consts::E)),
       ("string", Value::String("test string".to_string())),
       ("unit", Value::Unit),
     ];

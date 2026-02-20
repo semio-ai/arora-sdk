@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
 pub fn gen_uuid_from_str(key: &str) -> uuid::Uuid {
-  let node_ref = match Uuid::parse_str(&key) {
+  match Uuid::parse_str(key) {
     Ok(uuid) => uuid,
     Err(_) => {
       // Generate a UUID based on the string key
@@ -38,8 +38,7 @@ pub fn gen_uuid_from_str(key: &str) -> uuid::Uuid {
 
       Uuid::from_bytes(bytes)
     }
-  };
-  node_ref
+  }
 }
 
 pub fn gen_bb_uuid() -> Uuid {
@@ -54,9 +53,9 @@ pub struct SemanticVersion {
   pub patch: u32,
 }
 
-impl Into<Version> for SemanticVersion {
-  fn into(self) -> Version {
-    Version::new(self.major.into(), self.minor.into(), self.patch.into())
+impl From<SemanticVersion> for Version {
+  fn from(val: SemanticVersion) -> Self {
+    Version::new(val.major.into(), val.minor.into(), val.patch.into())
   }
 }
 

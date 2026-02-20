@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{SemanticVersion, ty::UNIT_ID, value::Value};
+use crate::{ty::UNIT_ID, value::Value, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -234,7 +234,7 @@ impl Header {
     let mut deps = HashSet::new();
 
     for import in &self.imports {
-      deps.insert(import.module().clone());
+      deps.insert(*import.module());
     }
 
     deps
