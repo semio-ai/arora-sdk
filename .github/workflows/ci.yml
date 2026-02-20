@@ -147,7 +147,9 @@ jobs:
         run: wasm-pack test --headless --firefox
 
       - name: Build WASM for release
-        run: wasm-pack build --release --scope=semio-ai
+        run: |
+          wasm-pack build --release --scope=semio-ai
+          wasm-pack pack
 
       - name: Run JS integration tests
         run: |
