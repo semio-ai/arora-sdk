@@ -80,21 +80,54 @@ for function parameters.
 > what function may accept as inputs (or outputs, if `mutable`).
 > We call "argument" the actual value passed to the function.
 
-## WASM Interface
+## Web Bindings
 
 The `Value` type is exposed to JavaScript/TypeScript via WebAssembly bindings. This allows you to work with Arora values from JavaScript environments.
 
-### Building for WASM
+### Running Integration Tests
 
 ```bash
 # Build the WASM module
-npm run build:wasm
+npm run build:wasm # Creates a pkg/ directory
+npm test # Tests the pkg/ built locally
 ```
 
 This will:
 
 1. Compile the Rust code to WebAssembly (`wasm32-unknown-unknown` target)
-2. Generate JavaScript bindings in the `pkg/` directory
+2. Generate JavaScript bindings and a ready-to-publish NPM package in the `pkg/` directory
+
+The integration tests verify that:
+
+- All `ValueType` enum values are properly exposed
+- Value construction and retrieval works for all primitive types
+- Integer range validation works correctly
+- Array types (homogeneous and mixed) work as expected
+- Auto-detection from JavaScript values works correctly
+- Type checking in `set()` method works
+- KeyValue objects can be created from plain JavaScript objects
+
+### Publishing the NPM Package
+
+The package is published as `@semio-ai/arora-types`.
+
+**CI publishes automatically:**
+
+- **Pull requests** publish a pre-release to the GitHub Packages registry.
+- **Pushes to `main`** publish the release version to the public NPM registry.
+
+**To publish manually** (requires `wasm-pack` and NPM credentials):
+
+```bash
+# Build and publish to npm in one step
+wasm-pack publish --scope semio-ai --target bundler
+```
+
+> **Prerequisites:**
+>
+> - `wasm-pack` must be installed (`cargo install wasm-pack`)
+> - The `wasm32-unknown-unknown` target must be available (`rustup target add wasm32-unknown-unknown`)
+> - You must be logged into npm (`npm login`) or have `NPM_TOKEN` set
 
 ### Using from JavaScript/TypeScript
 
@@ -131,25 +164,6 @@ val.set(20);  // OK
 val.set("x"); // Error: type mismatch
 ```
 
-### Running Integration Tests
-
-```bash
-# Run the integration tests
-npm test
-
-# Build and test in one command
-npm run build:wasm && npm test
-```
-
-The integration tests verify that:
-
-- All `ValueType` enum values are properly exposed
-- Value construction and retrieval works for all primitive types
-- Integer range validation works correctly
-- Array types (homogeneous and mixed) work as expected
-- Auto-detection from JavaScript values works correctly
-- Type checking in `set()` method works
-- KeyValue objects can be created from plain JavaScript objects
 
 ### Type Mapping
 
