@@ -151,6 +151,7 @@ jobs:
 
       - name: Run JS integration tests
         run: |
+          npm install
           npm ci
           npm test
 
