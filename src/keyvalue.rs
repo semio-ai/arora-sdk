@@ -17,9 +17,9 @@ use crate::gen_bb_uuid;
 /// * Any `KeyValue` -> `Value` via `into()`
 ///
 /// ```rust
-/// use arora_schema::keyvalue::{KeyValue, KeyValueField, KeyValueItems};
-/// use arora_schema::value::Value;
-/// use arora_schema::gen_bb_uuid;
+/// use arora_types::keyvalue::{KeyValue, KeyValueField, KeyValueItems};
+/// use arora_types::value::Value;
+/// use arora_types::gen_bb_uuid;
 ///
 /// // From a Vec
 /// let kv: KeyValue = vec![

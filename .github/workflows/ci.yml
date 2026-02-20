@@ -18,6 +18,12 @@ jobs:
         with:
           submodules: recursive
 
+      # Use rustup to add the wasm32 toolchai
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
       - name: Cache Cargo registry
         uses: actions/cache@v3
         with:
@@ -35,7 +41,10 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
+
+      - name: Check for WASM build
+        run: cargo build --locked --tests --target wasm32-unknown-unknown
 
       - name: Build for Production
-        run: cargo build --release
+        run: cargo build --locked --release

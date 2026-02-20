@@ -86,7 +86,6 @@ __pycache__/
 ## Node
 node_modules
 package-lock.json
-package.json
 /src/doc/rustc-dev-guide/mermaid.min.js
 
 ## Rustdoc GUI tests
@@ -102,3 +101,6 @@ flake.lock
 /default.nix
 
 # Before adding new lines, see the comment at the top.
+
+pkg/
+node_modules/
