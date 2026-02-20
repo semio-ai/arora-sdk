@@ -136,14 +136,4 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          OUTPUT=$(cargo publish 2>&1)
-          EXIT_CODE=$?
-          echo "${OUTPUT}"
-          if [ ${EXIT_CODE} -ne 0 ]; then
-            if echo "${OUTPUT}" | grep -q "already uploaded"; then
-              echo "Version already exists on crates.io — skipping."
-            else
-              exit ${EXIT_CODE}
-            fi
-          fi
+        run: cargo publish
