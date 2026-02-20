@@ -110,7 +110,7 @@ jobs:
           sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
 
       - name: Package
-        run: cargo package --allow-dirty --locked
+        run: cargo package --allow-dirty
 
       - name: Create GitHub Pre-release
         env:
