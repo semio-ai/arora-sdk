@@ -10,7 +10,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # General build and test job, runs on both pushes and PRs.
+  build_and_test:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,7 +19,7 @@ jobs:
         with:
           submodules: recursive
 
-      # Use rustup to add the wasm32 toolchai
+      # Use rustup to add the wasm32 toolchain
       - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
@@ -45,3 +46,155 @@ jobs:
 
       - name: Check for WASM build
         run: cargo build --locked --tests --target wasm32-unknown-unknown
+
+  # For PRs: check that the version was bumped and publish a pre-release.
+  check-version-bump:
+    name: Check Version Bump
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version bump
+        run: |
+          CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+          MAIN_VERSION=$(git show origin/main:Cargo.toml | grep '^version' | head -1 | sed 's/version = "//;s/"//')
+          echo "Main version:    $MAIN_VERSION"
+          echo "Current version: $CURRENT_VERSION"
+          if [ "$CURRENT_VERSION" = "$MAIN_VERSION" ]; then
+            echo "::error::Version not bumped. Please update the version in Cargo.toml before merging."
+            exit 1
+          fi
+          echo "Version bumped: $MAIN_VERSION -> $CURRENT_VERSION ✓"
+
+  pre-release:
+    name: Publish Pre-release
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [check-version-bump, build_and_test]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Compute pre-release version
+        id: version
+        run: |
+          BASE_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+          # Sanitize branch name: keep alphanumerics and hyphens only (dots are reserved
+          # as semver pre-release identifier separators); truncate to 20 chars.
+          BRANCH=$(echo "${GITHUB_HEAD_REF}" | sed 's/[^a-zA-Z0-9-]/-/g' | tr '[:upper:]' '[:lower:]' | cut -c1-20)
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-6)
+          PR_VERSION="${BASE_VERSION}-${BRANCH}.${SHORT_SHA}"
+          echo "version=${PR_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Pre-release version: ${PR_VERSION}"
+
+      - name: Set pre-release version in Cargo.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
+
+      - name: Package
+        run: cargo package --allow-dirty --locked
+
+      - name: Create GitHub Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CRATE_FILE=$(ls target/package/*.crate | head -1)
+          TAG="v${{ steps.version.outputs.version }}"
+
+          # Remove existing pre-release for this tag (handles workflow re-runs)
+          gh release delete "${TAG}" --yes 2>/dev/null || true
+          git push --delete origin "${TAG}" 2>/dev/null || true
+
+          gh release create "${TAG}" \
+            --title "Pre-release ${TAG}" \
+            --notes "**Pre-release** from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+
+Branch: \`${{ github.head_ref }}\`
+Commit: \`${{ github.sha }}\`
+
+This is an automated pre-release build. For official releases see the [releases page](../../releases)." \
+            --prerelease \
+            "${CRATE_FILE}"
+
+  publish:
+    name: Publish Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [build_and_test]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Release version: ${VERSION}"
+
+      - name: Package
+        run: cargo package
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CRATE_FILE=$(ls target/package/*.crate | head -1)
+          TAG="v${{ steps.version.outputs.version }}"
+
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists — skipping GitHub release creation."
+          else
+            gh release create "${TAG}" \
+              --title "Release ${TAG}" \
+              --generate-notes \
+              "${CRATE_FILE}"
+          fi
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          OUTPUT=$(cargo publish 2>&1)
+          EXIT_CODE=$?
+          echo "${OUTPUT}"
+          if [ ${EXIT_CODE} -ne 0 ]; then
+            if echo "${OUTPUT}" | grep -q "already uploaded"; then
+              echo "Version already exists on crates.io — skipping."
+            else
+              exit ${EXIT_CODE}
+            fi
+          fi
