@@ -45,6 +45,3 @@ jobs:
 
       - name: Check for WASM build
         run: cargo build --locked --tests --target wasm32-unknown-unknown
-
-      - name: Build for Production
-        run: cargo build --locked --release
