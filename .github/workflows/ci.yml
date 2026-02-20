@@ -119,18 +119,15 @@ jobs:
           CRATE_FILE=$(ls target/package/*.crate | head -1)
           TAG="v${{ steps.version.outputs.version }}"
 
+          printf '**Pre-release** from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n\nBranch: `${{ github.head_ref }}`\nCommit: `${{ github.sha }}`\n\nThis is an automated pre-release build. For official releases see the [releases page](../../releases).\n' > release-notes.md
+
           # Remove existing pre-release for this tag (handles workflow re-runs)
           gh release delete "${TAG}" --yes 2>/dev/null || true
           git push --delete origin "${TAG}" 2>/dev/null || true
 
           gh release create "${TAG}" \
             --title "Pre-release ${TAG}" \
-            --notes "**Pre-release** from PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
-
-Branch: \`${{ github.head_ref }}\`
-Commit: \`${{ github.sha }}\`
-
-This is an automated pre-release build. For official releases see the [releases page](../../releases)." \
+            --notes-file release-notes.md \
             --prerelease \
             "${CRATE_FILE}"
 
