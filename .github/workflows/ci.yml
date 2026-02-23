@@ -69,7 +69,7 @@ jobs:
         run: |
           npm install
           npm ci
-          npm build:wasm
+          npm run build:wasm
           npm test
 
   # For PRs: check that the version was bumped.
