@@ -57,7 +57,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Build & Test WASM
         run: wasm-pack test --headless --firefox
@@ -205,5 +205,4 @@ jobs:
 
       - name: Publish NPM package
         run: |
-          npm adduser
           npm publish
