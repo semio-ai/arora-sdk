@@ -204,4 +204,4 @@ jobs:
           fi
 
       - name: Publish NPM package
-        run: wasm-pack publish
+        run: npm publish # wasm-pack sets NODE_AUTH_TOKEN, which isn't right for trusted publishing
