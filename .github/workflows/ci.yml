@@ -58,9 +58,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: ${{ steps.params.outputs.registry_url }}
-          scope: "@semio-ai"
-          always-auth: true
 
       - name: Build & Test WASM
         run: wasm-pack test --headless --firefox
@@ -137,13 +134,9 @@ jobs:
         id: params
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "registry_url=https://npm.pkg.github.com" >> "$GITHUB_OUTPUT"
-            echo "npm_token=${{ secrets.GITHUB_TOKEN }}" >> "$GITHUB_OUTPUT"
             echo "is_release=false" >> "$GITHUB_OUTPUT"
           else
-            echo "registry_url=https://registry.npmjs.org" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "access=public" >> "$GITHUB_OUTPUT"
           fi
 
       # Rust Crate (release only)
@@ -154,14 +147,6 @@ jobs:
       # WASM / NPM
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: ${{ steps.params.outputs.registry_url }}
-          scope: "@semio-ai"
-          always-auth: true
 
       - name: Build WASM for release
         run: |
@@ -202,21 +187,20 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish
 
-      # Pre-release version (PR only)
-      - name: Set pre-release version
-        if: steps.params.outputs.is_release == 'false'
+      # NPM publish (to GHR for PRs, to npmjs for main)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Configure NPM registry
         run: |
-          PREID="pr.${{ github.event.pull_request.number }}.${{ github.run_number }}"
-          cd pkg && npm version "${{ steps.version.outputs.version }}-${PREID}" --no-git-tag-version
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "@semio-ai:registry=https://npm.pkg.github.com" >> ~/.npmrc
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
+          else
+            echo "@semio-ai:registry=https://registry.npmjs.org" >> ~/.npmrc
+          fi
 
-      - name: Authenticate to GitHub Packages
-        if: steps.params.outputs.is_release == 'false'
-        run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # NPM publish (both PR and release)
       - name: Publish NPM package
         run: wasm-pack publish
-        env:
-          NODE_AUTH_TOKEN: ${{ steps.params.outputs.npm_token }}
