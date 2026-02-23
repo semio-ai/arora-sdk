@@ -122,7 +122,7 @@ jobs:
             echo "is_release=false" >> "$GITHUB_OUTPUT"
           else
             echo "registry_url=https://registry.npmjs.org" >> "$GITHUB_OUTPUT"
-            echo "npm_token=${{ secrets.NPM_TOKEN }}" >> "$GITHUB_OUTPUT"
+            echo "npm_token=${{ secrets.NPM_PUBLISH_TOKEN }}" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
           fi
 
