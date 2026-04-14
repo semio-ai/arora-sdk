@@ -185,6 +185,37 @@ pub enum Value {
   Uuid(Uuid),
 }
 
+impl Value {
+  /// Returns the type UUID for this value, if known.
+  ///
+  /// Primitives map to well-known UUIDs from `ty::mod`. Structures and enumerations
+  /// carry their own type ID. Arrays of structures/enumerations use the element type ID.
+  /// Other compound types (plain arrays, Option, KeyValue, Uuid) return `None`.
+  pub fn type_uuid(&self) -> Option<Uuid> {
+    use crate::ty;
+    match self {
+      Value::Unit => Some(*ty::UNIT_ID),
+      Value::Boolean(_) => Some(*ty::BOOLEAN_ID),
+      Value::I8(_) => Some(*ty::I8_ID),
+      Value::I16(_) => Some(*ty::I16_ID),
+      Value::I32(_) => Some(*ty::I32_ID),
+      Value::I64(_) => Some(*ty::I64_ID),
+      Value::U8(_) => Some(*ty::U8_ID),
+      Value::U16(_) => Some(*ty::U16_ID),
+      Value::U32(_) => Some(*ty::U32_ID),
+      Value::U64(_) => Some(*ty::U64_ID),
+      Value::F32(_) => Some(*ty::F32_ID),
+      Value::F64(_) => Some(*ty::F64_ID),
+      Value::String(_) => Some(*ty::STRING_ID),
+      Value::Structure(s) => Some(s.id),
+      Value::Enumeration(e) => Some(e.id),
+      Value::ArrayStructure { id, .. } => Some(*id),
+      Value::ArrayEnumeration { id, .. } => Some(*id),
+      _ => None,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 #[display("{}::{}({})", id, variant_id, value)]
 pub struct Enumeration {
