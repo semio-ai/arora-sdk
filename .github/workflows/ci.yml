@@ -142,7 +142,7 @@ jobs:
       # Rust Crate (release only)
       - name: Package crate
         if: steps.params.outputs.is_release == 'true'
-        run: cargo package
+        run: cargo package --locked
 
       # WASM / NPM
       - name: Install wasm-pack
