@@ -139,22 +139,18 @@ jobs:
             echo "is_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Rust Crate (release only) — must run before wasm-pack which dirties Cargo.lock
+      # Rust Crate (release only)
       - name: Package crate
         if: steps.params.outputs.is_release == 'true'
         run: cargo package
 
-      - name: Publish to crates.io (Trusted Publisher / OIDC)
-        if: steps.params.outputs.is_release == 'true'
-        run: cargo publish
-
-      # WASM build for GitHub Release artifact
+      # WASM / NPM
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build WASM for release
         run: |
-          wasm-pack build --release --scope=semio-ai
+          wasm-pack build --release --scope=semio-ai -- --locked
           wasm-pack pack
 
       - name: Tag and push
@@ -184,3 +180,7 @@ jobs:
               "${CRATE_FILE}" \
               "${NPM_TGZ}"
           fi
+
+      - name: Publish to crates.io (Trusted Publisher / OIDC)
+        if: steps.params.outputs.is_release == 'true'
+        run: cargo publish
