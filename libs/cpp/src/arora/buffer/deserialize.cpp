@@ -63,6 +63,35 @@ void arora::buffer::skip(arora_buffer_reader *const reader, const std::uint8_t t
     {
       arora_get_array_result res = arora_buffer_reader_get_array(reader);
       arora::buffer::skip_array(reader, res.ty, res.element_count);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_UNIT:
+      break;
+    case ARORA_BUFFER_TYPE_OPTION:
+    {
+      bool present = arora_buffer_reader_get_option_presence(reader);
+      if (present)
+      {
+        skip(reader, arora_buffer_reader_next_type(reader));
+      }
+      break;
+    }
+    case ARORA_BUFFER_TYPE_UUID:
+    {
+      arora_buffer_reader_get_uuid(reader);
+      break;
+    }
+    case ARORA_BUFFER_TYPE_MAP:
+    {
+      arora_get_map_result res = arora_buffer_reader_get_map(reader);
+      for (std::uint32_t i = 0; i < res.field_count; ++i)
+      {
+        std::uint32_t key_len = 0;
+        arora_buffer_reader_get_map_field_key(reader, &key_len);
+        arora_buffer_reader_get_uuid(reader);
+        skip(reader, arora_buffer_reader_next_type(reader));
+      }
+      break;
     }
   }
 }
@@ -140,6 +169,14 @@ void arora::buffer::skip_array(arora_buffer_reader *const reader, const std::uin
         {
           arora::buffer::skip(reader, arora_buffer_reader_next_type(reader));
         }
+      }
+      break;
+    }
+    case ARORA_BUFFER_TYPE_VALUE:
+    {
+      for (std::uint32_t i = 0; i < element_count; ++i)
+      {
+        arora::buffer::skip(reader, arora_buffer_reader_next_type(reader));
       }
       break;
     }
