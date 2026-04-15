@@ -33,7 +33,7 @@ impl Executor for NativeExecutor {
 
   fn load_module(
     &mut self,
-    module_definition: arora_schema::module::low::ModuleDefinition,
+    module_definition: arora_types::module::low::ModuleDefinition,
   ) -> Result<Box<dyn Module>, LoadModuleError> {
     let tmp_dir = tempdir().map_err(|err| {
       LoadModuleError::Internal(format!(

@@ -7,7 +7,7 @@ use arora_registry::{
   EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError, StructureFrozen,
   TypeDefinitionFrozen,
 };
-use arora_schema::ty::{
+use arora_types::ty::{
   BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
   U8_ID,
 };
@@ -176,7 +176,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 /// Generates a Rust source file for the given enumeration.
 /// It contains the type declaration and some functions
 /// to serialize and deserialize values.
-/// It depends on `arora_buffers`, `arora_schema` and `uuid`.
+/// It depends on `arora_buffers`, `arora_types` and `uuid`.
 pub fn generate_enumeration_source(
   id: &Uuid,
   enumeration: &EnumerationFrozen,
@@ -185,7 +185,7 @@ pub fn generate_enumeration_source(
   let uses = quote! {
     use crate::arora_generated::error::DeserializationError;
     use arora_buffers::*;
-    use arora_schema::value::{ConversionError, Enumeration, Value};
+    use arora_types::value::{ConversionError, Enumeration, Value};
     use uuid::Uuid;
   };
 
@@ -376,7 +376,7 @@ pub fn generate_enumeration_source(
 /// Generates a Rust source file for the given structure.
 /// It contains the type declaration and some functions
 /// to serialize and deserialize values.
-/// It depends on `arora-buffers`, `arora-schema`, `arora-registry` and `uuid`.
+/// It depends on `arora-buffers`, `arora-types`, `arora-registry` and `uuid`.
 pub async fn generate_structure_source(
   id: &Uuid,
   structure: &StructureFrozen,

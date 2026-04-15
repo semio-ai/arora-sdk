@@ -1,5 +1,5 @@
 use arora::call::CallError;
-use arora_schema::value::ConversionError;
+use arora_types::value::ConversionError;
 use derive_more::Display;
 use uuid::Uuid;
 

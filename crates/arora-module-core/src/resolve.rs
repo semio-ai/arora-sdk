@@ -1,8 +1,8 @@
 use crate::{ImportAsset, ModuleDeclarationError};
 use arora_registry::local::ROOT_ID;
 use arora_registry::{get_primitive, Module, ModuleFrozen, ReadableRegistry, RegistryError};
-use arora_schema::module::low::Header;
-use arora_schema::module::{
+use arora_types::module::low::Header;
+use arora_types::module::{
   high::{
     ExportSymbol as HighExportSymbol, ImportSymbol as HighImportSymbol,
     ModuleDefinition as HighModuleDefinition, Parameter as HighParameter, TypeRef as HighTypeRef,

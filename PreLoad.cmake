@@ -27,6 +27,7 @@ message(STATUS "Retrieving WASI SDK ${WASI_VERSION_FULL}...")
 set(FETCHCONTENT_QUIET FALSE)
 FetchContent_Declare(wasi_sdk
   URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION_FULL}-${WASI_HOST_ARCH}-${WASI_HOST_OS}.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP ON
 )
 FetchContent_MakeAvailable(wasi_sdk)
 set(WASI_SDK_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/_deps/wasi_sdk-src" CACHE STRING "WASI SDK Prefix")

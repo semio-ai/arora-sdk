@@ -1,13 +1,10 @@
 # This module is meant to be native, and supposes it is building for the host.
 set(MODULE_NAME polly)
 if(CMAKE_HOST_APPLE)
-  message(STATUS Apple)
   set(DYLIB_EXTENSION .dylib)
 elseif(CMAKE_HOST_UNIX)
-  message(STATUS Unix)
   set(DYLIB_EXTENSION .so)
 elseif(CMAKE_HOST_WINDOWS)
-  message(STATUS Windows)
   set(DYLIB_EXTENSION .dll)
 else()
   message(FATAL_ERROR "Unsupported host platform")

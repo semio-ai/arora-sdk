@@ -12,14 +12,14 @@ pub mod tests {
   use arora_registry::local_yaml::load_records_from_yaml_dir;
   use arora_registry::ModuleFrozen;
   use arora_registry::{local::LocalRegistry, EditableRegistry, ReadableRegistry};
-  use arora_schema::{
+  use arora_types::{
     module::low::{Header, ModuleDefinition},
     value::Value,
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
-  use rand::seq::SliceRandom;
-  use rand::thread_rng;
+  use rand::prelude::IndexedRandom;
+  use rand::rng;
   use semio_record::{module::v0::frozen::ExportKind, record::Freezer};
   use semver::Version;
   use std::str::FromStr;
@@ -279,7 +279,7 @@ pub mod tests {
   #[tokio::test]
   pub async fn polly_sequence_of_speech() -> Result<()> {
     const NAMES: [&'static str; 3] = ["Ross", "Braden", "Victor"];
-    let name = NAMES.choose(&mut thread_rng()).unwrap();
+    let name = NAMES.choose(&mut rng()).unwrap();
     let behavior = seq_star(vec![
       polly_say(Expression::Value(Value::String("Hello!".to_string()))),
       polly_say(Expression::Value(Value::String(format!(

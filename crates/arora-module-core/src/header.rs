@@ -3,7 +3,7 @@ use crate::{
   ImportAsset, ModuleDeclarationError,
 };
 use arora_registry::{ModuleFrozen, ReadableRegistry};
-use arora_schema::{
+use arora_types::{
   module::low::{
     Executor, ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter,
     TypeRef,

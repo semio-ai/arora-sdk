@@ -3,7 +3,7 @@ use crate::{
   schema::{Expression, Node, NodeParameterId},
   setup_node_parameter_variable, BehaviorTree,
 };
-use arora_schema::value::Value;
+use arora_types::value::Value;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 

@@ -8,13 +8,13 @@ edition = "2021"
 [dependencies]
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
-arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
+arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
 arora-vfs = { path = "../arora-vfs" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "update" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
 anyhow = "*"
 clap = { version = "3.0.10", features = ["derive"] }
-env_logger = "0.9"
+env_logger = "0.11"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
@@ -23,4 +23,4 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["full"] }
 url = "2"
-uuid = { version = "0.8.2", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }

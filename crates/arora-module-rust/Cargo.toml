@@ -8,10 +8,10 @@ include = ["/src"]
 [dependencies]
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
-arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
+arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
 arora-vfs = { path = "../arora-vfs" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "update" }
 anyhow = "*"
 async-recursion = "1"
 clap = { version = "3.0.10", features = ["derive"] }
@@ -25,4 +25,4 @@ semver = "1.0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "*"
 tokio = { version = "1", features = ["full"] }
-uuid = { version = "0.8.2", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }

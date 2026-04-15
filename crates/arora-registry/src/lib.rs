@@ -3,7 +3,7 @@ pub mod local;
 pub mod local_yaml;
 pub mod remote;
 pub mod remote_cached;
-use arora_schema::ty::{
+use arora_types::ty::{
   F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID, U8_ID, UNIT_ID,
 };
 use async_trait::async_trait;

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, ops::DerefMut, pin::Pin, rc::Rc};
 
 use arora_buffers::serde_uuid::deserialize;
-use arora_schema::{
+use arora_types::{
   call::{Call, CallResult},
   value::Value,
 };

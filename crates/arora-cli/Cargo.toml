@@ -10,8 +10,8 @@ arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "update" }
 anyhow = "*"
 clap = { version = "3", features = ["derive"] }
 futures = "0.3"
@@ -22,4 +22,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
 url = "2"
-uuid = { version = "0.8.2", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }

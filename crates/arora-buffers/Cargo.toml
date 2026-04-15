@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-crate-type = [ "staticlib", "rlib" ]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
+arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
 bytes = "1"
-uuid = { version = "0.8.2", features = ["serde", "v4", "stdweb"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 

@@ -1,12 +1,12 @@
 use std::{collections::HashMap, rc::Rc};
 
 use derive_more::Display;
-use rand::{thread_rng, Rng};
+use rand::{rng, Rng};
 use uuid::Uuid;
 
 use arora_buffers::serde_uuid::serialize;
-pub use arora_schema::call::{Call, CallResult};
-use arora_schema::value::{Structure, Value};
+pub use arora_types::call::{Call, CallResult};
+use arora_types::value::{Structure, Value};
 
 use crate::module::DispatchError;
 
@@ -119,12 +119,12 @@ impl CallableRegistry {
   }
 
   fn generate_unique_callable_id(&self) -> CallableId {
-    let mut rng = thread_rng();
+    let mut rng = rng();
     let mut tick_id = CallableId {
-      id: rng.gen::<u64>(),
+      id: rng.random::<u64>(),
     };
     while self.callables_by_id.contains_key(&tick_id) {
-      tick_id.id = rng.gen::<u64>();
+      tick_id.id = rng.random::<u64>();
     }
     tick_id
   }
