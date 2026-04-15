@@ -15,7 +15,7 @@ use wasmtime_wasi::IoView;
 use wasmtime_wasi::{preview1::WasiP1Ctx, WasiCtxBuilder};
 
 use arora_buffers::serde_uuid::serialize;
-use arora_schema::module::low::{ExportSymbol, ModuleDefinition};
+use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};

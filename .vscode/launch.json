@@ -7,13 +7,21 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Polly Build Binary",
+            "program": "/Users/victor.paleologue/Code/Semio/engine/modules/polly/target/debug/build/polly-2059e7d1bb314a2f/build-script-build",
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Generate Behavior Tree Nodes Bindings",
             "program": "${workspaceFolder}/target/debug/arora-module-cli",
             "args": [
                 "generate",
                 "-l",
                 "rust",
-                "-c",
+                "-m",
                 "${workspaceFolder}/modules/behavior-tree-nodes/module.yaml",
                 "-o",
                 "${workspaceFolder}/modules/behavior-tree-nodes/src/arora_generated",
@@ -107,7 +115,7 @@
                 "generate",
                 "-l",
                 "cpp",
-                "-c",
+                "-m",
                 "${workspaceFolder}/modules/test-cpp-2/module.yaml",
                 "-o",
                 "${workspaceFolder}/build/modules/test-cpp-2/arora"
@@ -125,7 +133,7 @@
                 "generate",
                 "-l",
                 "cpp",
-                "-c",
+                "-m",
                 "${workspaceFolder}/modules/test-cpp/module.yaml",
                 "-o",
                 "${workspaceFolder}/build/modules/test-cpp/arora"
@@ -157,16 +165,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'arora-schema'",
+            "name": "Debug unit tests in library 'arora-types'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=arora-schema"
+                    "--package=arora-types"
                 ],
                 "filter": {
-                    "name": "arora-schema",
+                    "name": "arora-types",
                     "kind": "lib"
                 }
             },

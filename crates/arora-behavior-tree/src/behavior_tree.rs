@@ -7,7 +7,7 @@ mod tests;
 pub mod tree_node;
 use arora::call::{CallBridge, CallError, Callable, CallableId};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
-use arora_schema::{
+use arora_types::{
   call::Call,
   value::{ConversionError, StructureField, Value},
 };
@@ -212,7 +212,7 @@ fn tick(
     // Pass the tick ids of the children.
     let mut children_arg = Vec::with_capacity(child_tick_ids.len());
     for child_tick_id in child_tick_ids {
-      children_arg.push(arora_schema::value::StructureWithoutId {
+      children_arg.push(arora_types::value::StructureWithoutId {
         fields: vec![StructureField {
           id: Uuid::from_bytes(TICK_ID_CALLABLE_ID_FIELD_RAW_ID),
           value: Box::new(Value::U64(child_tick_id.callable_id)),

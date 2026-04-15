@@ -1,6 +1,6 @@
-use arora_schema::{module::high::TypeRef, value::Value};
+use arora_types::{module::high::TypeRef, value::Value};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,7 +41,7 @@ pub enum Expression {
   /// Specific UUID value.
   Uuid(Uuid),
   /// Reference to an anonymous variable.
-  #[serde(skip)] 
+  #[serde(skip)]
   Variable(Rc<RefCell<Value>>),
   /// Reference to a variable by ID.
   VariableId(Uuid),
@@ -76,7 +76,10 @@ pub struct NodeParameterId {
 
 impl Display for NodeParameterId {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_fmt(format_args!("node parameter {}.{}", self.node, self.parameter))
+    f.write_fmt(format_args!(
+      "node parameter {}.{}",
+      self.node, self.parameter
+    ))
   }
 }
 

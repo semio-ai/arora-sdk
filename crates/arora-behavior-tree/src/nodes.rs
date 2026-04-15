@@ -1,5 +1,5 @@
 use crate::{schema::Expression, tree_node::TreeNode};
-use arora_schema::value::Value;
+use arora_types::value::Value;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, str::FromStr};
 use uuid::Uuid;
 

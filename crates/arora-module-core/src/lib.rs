@@ -1,7 +1,7 @@
 pub mod header;
 pub mod resolve;
 use arora_registry::{ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
-use arora_schema::module::high::ModuleDefinition;
+use arora_types::module::high::ModuleDefinition;
 use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
@@ -175,7 +175,7 @@ impl std::error::Error for ModuleDeclarationError {}
 
 #[cfg(test)]
 mod tests {
-  use arora_schema::module::high::ModuleDefinition;
+  use arora_types::module::high::ModuleDefinition;
   use std::str::FromStr;
   use uuid::Uuid;
 
