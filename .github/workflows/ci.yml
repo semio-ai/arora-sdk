@@ -181,24 +181,13 @@ jobs:
               "${NPM_TGZ}"
           fi
 
-      - name: Exchange OIDC token for crates.io publish token
+      - name: Authenticate with crates.io (Trusted Publisher)
         if: steps.params.outputs.is_release == 'true'
-        id: crates-token
-        run: |
-          OIDC_TOKEN=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://crates.io" \
-            | jq -r '.value')
-          CRATES_TOKEN=$(curl -sS -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"oidc_token\": \"$OIDC_TOKEN\"}" \
-            "https://crates.io/api/v1/trusted_publishing/tokens" \
-            | jq -r '.token')
-          echo "::add-mask::${CRATES_TOKEN}"
-          echo "token=${CRATES_TOKEN}" >> "$GITHUB_OUTPUT"
+        uses: rust-lang/crates-io-auth-action@v1
+        id: crates-auth
 
-      - name: Publish to crates.io (Trusted Publisher)
+      - name: Publish to crates.io
         if: steps.params.outputs.is_release == 'true'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-token.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish
