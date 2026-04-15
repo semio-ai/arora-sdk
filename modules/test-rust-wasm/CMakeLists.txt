@@ -2,13 +2,13 @@
 # Use `cargo` normally to build this project separately.
 # See readme.md for more information.
 set(MODULE_NAME test-rust-wasm)
-set(TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/target/wasm32-wasi/${RUST_TARGET_SUBDIR}")
+set(TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/target/wasm32-wasip1/${RUST_TARGET_SUBDIR}")
 set(ARORA_GENERATED_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/arora_generated")
 
 # Build the WASM module.
 set(MODULE_EXECUTABLE "${TARGET_DIR}/test_rust_wasm.wasm")
 add_custom_target(${MODULE_NAME} ALL
-  COMMAND cargo wasi build ${CARGO_BUILD_FLAGS}
+  COMMAND cargo component build ${CARGO_BUILD_FLAGS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   BYPRODUCTS ${MODULE_EXECUTABLE}
 )
