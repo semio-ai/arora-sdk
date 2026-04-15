@@ -1,4 +1,4 @@
-use arora_schema::value::Value;
+use arora_types::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{events::Event, Reader};
@@ -317,6 +317,8 @@ impl BehaviorTree {
 
 fn parse_groot_xml(xml_str: &str) -> Result<BehaviorTree, BehaviorTreeError> {
   let mut reader = Reader::from_str(xml_str);
+  reader.config_mut().trim_text_start = true;
+  reader.config_mut().trim_text_end = true;
   let mut buf = Vec::new();
   let root = parse_groot_root(&mut reader, &mut buf)?;
   // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
@@ -624,7 +626,7 @@ pub mod tests {
   };
   use anyhow::Result;
   use arora_registry::{local::LocalRegistry, local_yaml::load_records_from_yaml_dir};
-  use arora_schema::value::Value;
+  use arora_types::value::Value;
   use std::{collections::HashMap, path::Path};
   use tokio::fs::read_to_string;
   use uuid::Uuid;
