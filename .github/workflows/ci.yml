@@ -183,4 +183,6 @@ jobs:
 
       - name: Publish to crates.io (Trusted Publisher / OIDC)
         if: steps.params.outputs.is_release == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: oidc:github
         run: cargo publish
