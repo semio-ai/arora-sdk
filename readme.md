@@ -33,7 +33,7 @@ or anonymous functions registered on-the-fly
 (named `arora_dispatch_indirect`).
 
 The modules are described locally using a
-[specific schema](crates/arora-schema/readme.md),
+[specific schema](https://crates.io/crates/arora-types),
 differing slightly from the `Module` data structure
 provided in [Semio Record](https://github.com/semio-ai/semio-record).
 See [modules](#modules).
@@ -97,9 +97,9 @@ for other uses.
 
 ## Full Project Layout
 
-- [Arora Schema](crates/arora-schema/readme.md)
+- [Arora Types](https://crates.io/crates/arora-types)
   defines the data formats used to communicate between modules,
-  and to advertise them locally.
+  and to advertise them locally. Published as an external crate on crates.io.
 
 - [Arora Buffers](crates/arora-buffers/readme.md),
   provides Rust, C and C++ implementations to read and write buffers.
@@ -191,9 +191,8 @@ You need a read access to the following repositories:
 ### Build
 
 ```bash
-mkdir build
-cmake ..
-cmake --build .
+cmake -S . -B build
+cmake --build build
 ```
 
 It will automatically download the
@@ -208,7 +207,7 @@ To get backtraces from fatal errors in code generation tools,
 try this from the build directory:
 
 ```bash
-RUST_BACKTRACE=1 cmake --build .
+RUST_BACKTRACE=1 cmake --build build
 ```
 
 #### Release
