@@ -19,7 +19,7 @@ for information about client configuration files.
 Then, a function can be called by providing a `--call` description in YAML.
 The description format corresponds to the YAML serialization
 of the [`Call` structure of the Arora Engine](../arora/src/call.rs),
-using the usual [generic `Value` YAML serialization](../arora-schema/src/value.rs).
+using the usual [generic `Value` YAML serialization](../arora-types/src/value.rs).
 
 For instance, a call to `arora-cli` may look like this:
 ```bash

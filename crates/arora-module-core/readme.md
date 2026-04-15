@@ -4,7 +4,7 @@ Core library underneath [`arora-module-cli`](../arora-module-cli/readme.md).
 
 It can be used separately: the functions
 [`analyze_module` and `analyze_module_from_path`](src/lib.rs)
-can read a [`ModuleDefinition`](../arora-schema/readme.md#module)
+can read a [`ModuleDefinition`](../arora-types/readme.md#module)
 (usually in a `module.yaml` file),
 and resolve all its dependencies in the context of the given
 [registry](../arora-registry/readme.md).
