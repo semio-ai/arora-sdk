@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build_and_test, check-version-bump]
     permissions:
-      id-token: write  # Required for OIDC (NPM trusted publish)
+      id-token: write  # Required for OIDC (crates.io trusted publish)
       contents: write
       packages: write
     steps:
@@ -139,12 +139,16 @@ jobs:
             echo "is_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Rust Crate (release only)
+      # Rust Crate (release only) — must run before wasm-pack which dirties Cargo.lock
       - name: Package crate
         if: steps.params.outputs.is_release == 'true'
         run: cargo package
 
-      # WASM / NPM
+      - name: Publish to crates.io (Trusted Publisher / OIDC)
+        if: steps.params.outputs.is_release == 'true'
+        run: cargo publish
+
+      # WASM build for GitHub Release artifact
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
@@ -180,9 +184,3 @@ jobs:
               "${CRATE_FILE}" \
               "${NPM_TGZ}"
           fi
-
-      - name: Publish to crates.io
-        if: steps.params.outputs.is_release == 'true'
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish
