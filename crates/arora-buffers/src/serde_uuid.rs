@@ -1,12 +1,13 @@
-use arora_schema::value::{
-  Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value,
+use arora_types::{
+  keyvalue::{KeyValue, KeyValueField},
+  value::{Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value},
 };
 use uuid::Uuid;
 
 use crate::{
   read::BufferReader, write::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32,
-  TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32,
-  TYPE_U64, TYPE_U8, TYPE_UNIT,
+  TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_MAP, TYPE_OPTION, TYPE_STRING,
+  TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UUID, TYPE_VALUE,
 };
 
 pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
@@ -102,12 +103,43 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
         serialize_to_writer(enumeration.value.as_ref(), writer);
       }
     }
+    Value::ArrayValue(values) => {
+      writer.add_array_primitive(TYPE_VALUE, values.len() as u32);
+      for value in values {
+        serialize_to_writer(value, writer);
+      }
+    }
+    Value::Option(opt) => match opt {
+      Some(inner) => {
+        writer.add_option_some();
+        serialize_to_writer(inner.as_ref(), writer);
+      }
+      None => {
+        writer.add_option_none();
+      }
+    },
+    Value::KeyValue(kv) => {
+      let fields = kv.get_fields();
+      writer.begin_map(kv.id.as_bytes(), fields.len() as u32);
+      for (key, field) in fields {
+        writer.add_map_field_key(key);
+        writer.add_uuid_raw(field.id.as_bytes());
+        match &field.value {
+          Some(v) => serialize_to_writer(v.as_ref(), writer),
+          None => writer.add_unit(),
+        }
+      }
+    }
+    Value::Uuid(uuid) => {
+      writer.add_uuid(uuid.as_bytes());
+    }
   }
 }
 
 fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
   match reader.next_type() {
     Some(TYPE_UNIT) => Value::Unit,
+    Some(TYPE_BOOLEAN) => Value::Boolean(reader.get_boolean()),
     Some(TYPE_U8) => Value::U8(reader.get_u8()),
     Some(TYPE_U16) => Value::U16(reader.get_u16()),
     Some(TYPE_U32) => Value::U32(reader.get_u32()),
@@ -201,9 +233,44 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
               elements: enumerations,
             }
           }
-          _ => panic!("unsupported array type"),
+          TYPE_VALUE => {
+            let mut values = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+              values.push(deserialize_from_reader(reader));
+            }
+            Value::ArrayValue(values)
+          }
+          _ => panic!("unsupported array type {}", ty),
         }
       }
+    }
+    Some(TYPE_OPTION) => {
+      if reader.get_option_presence() {
+        Value::Option(Some(Box::new(deserialize_from_reader(reader))))
+      } else {
+        Value::Option(None)
+      }
+    }
+    Some(TYPE_UUID) => {
+      let uuid_bytes = reader.get_uuid();
+      Value::Uuid(Uuid::from_slice(uuid_bytes).unwrap())
+    }
+    Some(TYPE_MAP) => {
+      let (id_bytes, field_count) = reader.get_map();
+      let id = Uuid::from_slice(id_bytes).unwrap();
+      let mut kv = KeyValue::new_with_id(id);
+      for _ in 0..field_count {
+        let key = reader.get_map_field_key().to_string();
+        let field_id_bytes = reader.get_uuid();
+        let field_id = Uuid::from_slice(field_id_bytes).unwrap();
+        let value = deserialize_from_reader(reader);
+        let field_value = match value {
+          Value::Unit => None,
+          other => Some(other),
+        };
+        kv.set_field(KeyValueField::new_with_id_and_option(key, field_id, field_value));
+      }
+      Value::KeyValue(kv)
     }
     Some(kind) => panic!("Invalid type kind {}", kind),
     None => panic!("Invalid type of no kind"),

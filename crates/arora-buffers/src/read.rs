@@ -166,6 +166,30 @@ impl<'a> BufferReader<'a> {
     id
   }
 
+  pub fn get_option_presence(&mut self) -> bool {
+    self.backing.get_u8() != 0
+  }
+
+  pub fn get_uuid(&mut self) -> &'a [u8] {
+    let id = &self.backing[0..16];
+    self.backing.advance(16);
+    id
+  }
+
+  pub fn get_map(&mut self) -> (&'a [u8], u32) {
+    let id = &self.backing[0..16];
+    self.backing.advance(16);
+    let field_count = self.backing.get_u32_le();
+    (id, field_count)
+  }
+
+  pub fn get_map_field_key(&mut self) -> &'a str {
+    let len = self.backing.get_u32_le();
+    let ret = std::str::from_utf8(&self.backing[0..len as usize]).unwrap();
+    self.backing.advance(len as usize);
+    ret
+  }
+
   pub fn get_array(&mut self) -> (u8, u32) {
     (self.backing.get_u8(), self.backing.get_u32_le())
   }
@@ -481,5 +505,52 @@ pub extern "C" fn arora_buffer_reader_get_string(
     let string = reader.get_string();
     *length = string.len() as u32;
     string.as_ptr()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_option_presence(reader: *mut BufferReader) -> bool {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_option_presence()
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_uuid(reader: *mut BufferReader) -> *const u8 {
+  unsafe {
+    let reader = &mut *reader;
+    reader.get_uuid().as_ptr()
+  }
+}
+
+#[repr(C)]
+pub struct GetMapResult {
+  pub id: *const u8,
+  pub field_count: u32,
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_map(reader: *mut BufferReader) -> GetMapResult {
+  unsafe {
+    let reader = &mut *reader;
+    let (id, field_count) = reader.get_map();
+    GetMapResult {
+      id: id.as_ptr(),
+      field_count,
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_get_map_field_key(
+  reader: *mut BufferReader,
+  length: *mut u32,
+) -> *const u8 {
+  unsafe {
+    let reader = &mut *reader;
+    let key = reader.get_map_field_key();
+    *length = key.len() as u32;
+    key.as_ptr()
   }
 }
