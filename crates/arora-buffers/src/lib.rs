@@ -24,6 +24,9 @@ pub const TYPE_STRUCTURE: u8 = 13;
 pub const TYPE_ENUMERATION: u8 = 14;
 pub const TYPE_ARRAY: u8 = 15;
 pub const TYPE_MAP: u8 = 16;
+pub const TYPE_OPTION: u8 = 17;
+pub const TYPE_UUID: u8 = 18;
+pub const TYPE_VALUE: u8 = 19;
 
 const ALIGNMENT: usize = 8;
 
