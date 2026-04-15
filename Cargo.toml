@@ -1,6 +1,6 @@
 [package]
 name = "arora-types"
-version = "1.1.3"
+version = "1.1.4"
 edition = "2021"
 description = "Shared type definitions for the Semio Arora framework"
 license = "MIT"
