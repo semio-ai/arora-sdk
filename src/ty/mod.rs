@@ -22,6 +22,22 @@ lazy_static::lazy_static! {
   pub static ref F32_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap();
   pub static ref F64_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000b").unwrap();
   pub static ref STRING_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000c").unwrap();
+  pub static ref OPTION_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000d").unwrap();
+  pub static ref ARRAY_BOOLEAN_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000e").unwrap();
+  pub static ref ARRAY_U8_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000000f").unwrap();
+  pub static ref ARRAY_U16_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap();
+  pub static ref ARRAY_U32_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap();
+  pub static ref ARRAY_U64_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000012").unwrap();
+  pub static ref ARRAY_I8_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap();
+  pub static ref ARRAY_I16_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000014").unwrap();
+  pub static ref ARRAY_I32_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000015").unwrap();
+  pub static ref ARRAY_I64_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000016").unwrap();
+  pub static ref ARRAY_F32_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000017").unwrap();
+  pub static ref ARRAY_F64_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000018").unwrap();
+  pub static ref ARRAY_STRING_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000019").unwrap();
+  pub static ref ARRAY_VALUE_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000001a").unwrap();
+  pub static ref KEY_VALUE_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000001b").unwrap();
+  pub static ref UUID_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-00000000001c").unwrap();
 
   pub static ref PRIMITIVE_IDS: HashSet<Uuid> = {
     let mut ids = HashSet::new();
@@ -38,6 +54,27 @@ lazy_static::lazy_static! {
     ids.insert(*F32_ID);
     ids.insert(*F64_ID);
     ids.insert(*STRING_ID);
+    ids
+  };
+
+  pub static ref WELL_KNOWN_IDS: HashSet<Uuid> = {
+    let mut ids = PRIMITIVE_IDS.clone();
+    ids.insert(*OPTION_ID);
+    ids.insert(*ARRAY_BOOLEAN_ID);
+    ids.insert(*ARRAY_U8_ID);
+    ids.insert(*ARRAY_U16_ID);
+    ids.insert(*ARRAY_U32_ID);
+    ids.insert(*ARRAY_U64_ID);
+    ids.insert(*ARRAY_I8_ID);
+    ids.insert(*ARRAY_I16_ID);
+    ids.insert(*ARRAY_I32_ID);
+    ids.insert(*ARRAY_I64_ID);
+    ids.insert(*ARRAY_F32_ID);
+    ids.insert(*ARRAY_F64_ID);
+    ids.insert(*ARRAY_STRING_ID);
+    ids.insert(*ARRAY_VALUE_ID);
+    ids.insert(*KEY_VALUE_ID);
+    ids.insert(*UUID_ID);
     ids
   };
 

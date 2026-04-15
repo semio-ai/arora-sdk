@@ -185,6 +185,52 @@ pub enum Value {
   Uuid(Uuid),
 }
 
+impl Value {
+  /// Returns the type UUID for this value.
+  ///
+  /// Primitives map to well-known UUIDs from `ty::mod`. Structures and enumerations
+  /// carry their own type ID. Arrays of structures/enumerations use the element type ID.
+  /// Other compound types (plain arrays, Option, KeyValue, Uuid) have their own well-known UUIDs.
+  pub fn type_uuid(&self) -> Uuid {
+    use crate::ty;
+    match self {
+      Value::Unit => *ty::UNIT_ID,
+      Value::Boolean(_) => *ty::BOOLEAN_ID,
+      Value::I8(_) => *ty::I8_ID,
+      Value::I16(_) => *ty::I16_ID,
+      Value::I32(_) => *ty::I32_ID,
+      Value::I64(_) => *ty::I64_ID,
+      Value::U8(_) => *ty::U8_ID,
+      Value::U16(_) => *ty::U16_ID,
+      Value::U32(_) => *ty::U32_ID,
+      Value::U64(_) => *ty::U64_ID,
+      Value::F32(_) => *ty::F32_ID,
+      Value::F64(_) => *ty::F64_ID,
+      Value::String(_) => *ty::STRING_ID,
+      Value::Option(_) => *ty::OPTION_ID,
+      Value::Structure(s) => s.id,
+      Value::Enumeration(e) => e.id,
+      Value::ArrayBoolean(_) => *ty::ARRAY_BOOLEAN_ID,
+      Value::ArrayU8(_) => *ty::ARRAY_U8_ID,
+      Value::ArrayU16(_) => *ty::ARRAY_U16_ID,
+      Value::ArrayU32(_) => *ty::ARRAY_U32_ID,
+      Value::ArrayU64(_) => *ty::ARRAY_U64_ID,
+      Value::ArrayI8(_) => *ty::ARRAY_I8_ID,
+      Value::ArrayI16(_) => *ty::ARRAY_I16_ID,
+      Value::ArrayI32(_) => *ty::ARRAY_I32_ID,
+      Value::ArrayI64(_) => *ty::ARRAY_I64_ID,
+      Value::ArrayF32(_) => *ty::ARRAY_F32_ID,
+      Value::ArrayF64(_) => *ty::ARRAY_F64_ID,
+      Value::ArrayString(_) => *ty::ARRAY_STRING_ID,
+      Value::ArrayValue(_) => *ty::ARRAY_VALUE_ID,
+      Value::ArrayStructure { id, .. } => *id,
+      Value::ArrayEnumeration { id, .. } => *id,
+      Value::KeyValue(_) => *ty::KEY_VALUE_ID,
+      Value::Uuid(_) => *ty::UUID_ID,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Display, Serialize, Deserialize, PartialEq)]
 #[display("{}::{}({})", id, variant_id, value)]
 pub struct Enumeration {
@@ -956,5 +1002,95 @@ mod tests {
       Value::from(option_array.clone()),
       Value::ArrayValue(option_array)
     );
+  }
+
+  #[test]
+  fn test_type_uuid() {
+    use crate::ty;
+
+    // Primitives → well-known UUIDs
+    assert_eq!(Value::Unit.type_uuid(), *ty::UNIT_ID);
+    assert_eq!(Value::Boolean(false).type_uuid(), *ty::BOOLEAN_ID);
+    assert_eq!(Value::I8(0).type_uuid(), *ty::I8_ID);
+    assert_eq!(Value::I16(0).type_uuid(), *ty::I16_ID);
+    assert_eq!(Value::I32(0).type_uuid(), *ty::I32_ID);
+    assert_eq!(Value::I64(0).type_uuid(), *ty::I64_ID);
+    assert_eq!(Value::U8(0).type_uuid(), *ty::U8_ID);
+    assert_eq!(Value::U16(0).type_uuid(), *ty::U16_ID);
+    assert_eq!(Value::U32(0).type_uuid(), *ty::U32_ID);
+    assert_eq!(Value::U64(0).type_uuid(), *ty::U64_ID);
+    assert_eq!(Value::F32(0.0).type_uuid(), *ty::F32_ID);
+    assert_eq!(Value::F64(0.0).type_uuid(), *ty::F64_ID);
+    assert_eq!(Value::String("".into()).type_uuid(), *ty::STRING_ID);
+
+    // Typed compounds → embedded ID
+    let test_id = uuid::Uuid::from_u128(0xdeadbeef);
+    let variant_id = uuid::Uuid::from_u128(0xcafebabe);
+
+    assert_eq!(
+      Value::Structure(Structure {
+        id: test_id,
+        fields: vec![],
+      })
+      .type_uuid(),
+      test_id
+    );
+    assert_eq!(
+      Value::Enumeration(Enumeration {
+        id: test_id,
+        variant_id,
+        value: Box::new(Value::Unit),
+      })
+      .type_uuid(),
+      test_id
+    );
+    assert_eq!(
+      Value::ArrayStructure {
+        id: test_id,
+        elements: vec![],
+      }
+      .type_uuid(),
+      test_id
+    );
+    assert_eq!(
+      Value::ArrayEnumeration {
+        id: test_id,
+        elements: vec![],
+      }
+      .type_uuid(),
+      test_id
+    );
+
+    // Compound types → well-known UUIDs
+    assert_eq!(Value::Option(None).type_uuid(), *ty::OPTION_ID);
+    assert_eq!(
+      Value::Option(Some(Box::new(Value::Unit))).type_uuid(),
+      *ty::OPTION_ID
+    );
+    assert_eq!(
+      Value::ArrayBoolean(vec![]).type_uuid(),
+      *ty::ARRAY_BOOLEAN_ID
+    );
+    assert_eq!(Value::ArrayU8(vec![]).type_uuid(), *ty::ARRAY_U8_ID);
+    assert_eq!(Value::ArrayU16(vec![]).type_uuid(), *ty::ARRAY_U16_ID);
+    assert_eq!(Value::ArrayU32(vec![]).type_uuid(), *ty::ARRAY_U32_ID);
+    assert_eq!(Value::ArrayU64(vec![]).type_uuid(), *ty::ARRAY_U64_ID);
+    assert_eq!(Value::ArrayI8(vec![]).type_uuid(), *ty::ARRAY_I8_ID);
+    assert_eq!(Value::ArrayI16(vec![]).type_uuid(), *ty::ARRAY_I16_ID);
+    assert_eq!(Value::ArrayI32(vec![]).type_uuid(), *ty::ARRAY_I32_ID);
+    assert_eq!(Value::ArrayI64(vec![]).type_uuid(), *ty::ARRAY_I64_ID);
+    assert_eq!(Value::ArrayF32(vec![]).type_uuid(), *ty::ARRAY_F32_ID);
+    assert_eq!(Value::ArrayF64(vec![]).type_uuid(), *ty::ARRAY_F64_ID);
+    assert_eq!(Value::ArrayString(vec![]).type_uuid(), *ty::ARRAY_STRING_ID);
+    assert_eq!(Value::ArrayValue(vec![]).type_uuid(), *ty::ARRAY_VALUE_ID);
+    assert_eq!(
+      Value::KeyValue(KeyValue::default()).type_uuid(),
+      *ty::KEY_VALUE_ID
+    );
+    assert_eq!(Value::Uuid(uuid::Uuid::nil()).type_uuid(), *ty::UUID_ID);
+
+    // All well-known IDs are distinct
+    let all_wellknown: Vec<uuid::Uuid> = ty::WELL_KNOWN_IDS.iter().copied().collect();
+    assert_eq!(all_wellknown.len(), 29); // 13 primitives + 16 compounds
   }
 }

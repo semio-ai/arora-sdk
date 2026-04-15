@@ -186,23 +186,3 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish
-
-      # NPM publish (to GHR for PRs, to npmjs for main)
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Configure NPM registry
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "@semio-ai:registry=https://npm.pkg.github.com" >> .npmrc
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
-          else
-            echo "@semio-ai:registry=https://registry.npmjs.org" >> .npmrc
-            echo "access=public" >> .npmrc
-          fi
-
-      - name: Publish NPM package
-        run: |
-          npm publish

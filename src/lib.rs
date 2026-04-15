@@ -4,7 +4,7 @@ pub mod module;
 pub mod ty;
 pub mod value;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub mod wasm_value;
 
 use derive_more::Display;
