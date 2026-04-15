@@ -6,7 +6,7 @@ Welcome to the core of the project!
 
 The Arora engine uses [`wasmtime`](https://docs.wasmtime.dev/)
 to run WASM modules, advertised with
-[a custom module description format (or schema)](../arora-types/readme.md).
+[a custom module description format (or schema)](https://github.com/semio-ai/arora-types).
 This is called an [`Executor`](src/executor/mod.rs),
 and other ones may be supported in the future.
 
