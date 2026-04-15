@@ -1067,7 +1067,10 @@ mod tests {
       Value::Option(Some(Box::new(Value::Unit))).type_uuid(),
       *ty::OPTION_ID
     );
-    assert_eq!(Value::ArrayBoolean(vec![]).type_uuid(), *ty::ARRAY_BOOLEAN_ID);
+    assert_eq!(
+      Value::ArrayBoolean(vec![]).type_uuid(),
+      *ty::ARRAY_BOOLEAN_ID
+    );
     assert_eq!(Value::ArrayU8(vec![]).type_uuid(), *ty::ARRAY_U8_ID);
     assert_eq!(Value::ArrayU16(vec![]).type_uuid(), *ty::ARRAY_U16_ID);
     assert_eq!(Value::ArrayU32(vec![]).type_uuid(), *ty::ARRAY_U32_ID);
@@ -1084,10 +1087,7 @@ mod tests {
       Value::KeyValue(KeyValue::default()).type_uuid(),
       *ty::KEY_VALUE_ID
     );
-    assert_eq!(
-      Value::Uuid(uuid::Uuid::nil()).type_uuid(),
-      *ty::UUID_ID
-    );
+    assert_eq!(Value::Uuid(uuid::Uuid::nil()).type_uuid(), *ty::UUID_ID);
 
     // All well-known IDs are distinct
     let all_wellknown: Vec<uuid::Uuid> = ty::WELL_KNOWN_IDS.iter().copied().collect();

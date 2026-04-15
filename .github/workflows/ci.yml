@@ -196,13 +196,16 @@ jobs:
       - name: Configure NPM registry
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "@semio-ai:registry=https://npm.pkg.github.com" >> .npmrc
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
+            echo "@semio-ai:registry=https://npm.pkg.github.com" >> ~/.npmrc
           else
-            echo "@semio-ai:registry=https://registry.npmjs.org" >> .npmrc
-            echo "access=public" >> .npmrc
+            echo "@semio-ai:registry=https://registry.npmjs.org" >> ~/.npmrc
           fi
 
       - name: Publish NPM package
         run: |
-          npm publish
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            npm publish
+          else
+            npm publish --provenance --access public
+          fi
