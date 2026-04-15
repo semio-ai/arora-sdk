@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 arora-buffers = { path = "../../crates/arora-buffers" }
-arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
+arora-types = "1"
 bytes = "1"
 derive_more = "2"
 regex = "1"

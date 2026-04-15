@@ -130,8 +130,9 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "1.0.13"
-source = "git+https://github.com/semio-ai/arora-types.git?branch=zenoh-type-uuid#b9800df7465c6ac635e54191558321eb59fe9985"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94902682a52824140ca7be81898c08cd73f67b3a3d27bcce37af5191df502f84"
 dependencies = [
  "derive_more 2.1.1",
  "js-sys",

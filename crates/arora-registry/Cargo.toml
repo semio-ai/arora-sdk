@@ -9,7 +9,7 @@ edition = "2021"
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "update" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
 anyhow = "*"
-arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
+arora-types = "1"
 async-trait = "0.1"
 derive_more = "2"
 reqwest = { version = "0.11", default-features = false, features = [

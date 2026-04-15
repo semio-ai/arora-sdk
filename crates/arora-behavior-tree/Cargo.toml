@@ -11,7 +11,7 @@ path = "src/behavior_tree.rs"
 [dependencies]
 arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
-arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "zenoh-type-uuid" }
+arora-types = "1"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "update" }
