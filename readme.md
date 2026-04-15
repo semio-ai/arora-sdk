@@ -33,7 +33,7 @@ or anonymous functions registered on-the-fly
 (named `arora_dispatch_indirect`).
 
 The modules are described locally using a
-[specific schema](https://crates.io/crates/arora-types),
+[specific schema](https://github.com/semio-ai/arora-types),
 differing slightly from the `Module` data structure
 provided in [Semio Record](https://github.com/semio-ai/semio-record).
 See [modules](#modules).
@@ -97,9 +97,9 @@ for other uses.
 
 ## Full Project Layout
 
-- [Arora Types](https://crates.io/crates/arora-types)
+- [Arora Types](https://github.com/semio-ai/arora-types)
   defines the data formats used to communicate between modules,
-  and to advertise them locally. Published as an external crate on crates.io.
+  and to advertise them locally. Published as an external crate.
 
 - [Arora Buffers](crates/arora-buffers/readme.md),
   provides Rust, C and C++ implementations to read and write buffers.

@@ -15,7 +15,7 @@ The YAML format to the schema defined in [`src/schema.rs`](src/schema.rs).
 It consist of a list of nodes,
 which arguments can be expressed dynamically with a flexible `Expression`.
 It can be:
-- a serialized [`Value`, like defined in `arora-types`](../arora-types/readme.md#value),
+- a serialized [`Value`, like defined in `arora-types`](https://github.com/semio-ai/arora-types),
   or more specifically an [UUID](https://docs.rs/uuid/latest/uuid/),
 - a reference to a variable, in-memory or identified with the
   [UUID](https://docs.rs/uuid/latest/uuid/) of blackboard variable.
@@ -88,7 +88,7 @@ Instead, stateful information is meant to be passed as mutable parameters
 to the node functions. Thus, it is the behavior tree that holds this state
 in variables (anonymously or in the blackboard),
 and it is capable of resetting them to their default values,
-if they are mentioned in the [module function description](../arora-types/readme.md#value).
+if they are mentioned in the [module function description](https://github.com/semio-ai/arora-types).
 
 Statelessness is important in a client / server architecture - behavior tree / module, here -
 to ensure that the server is designed to not maintain resources busy

@@ -10,6 +10,6 @@ for the details of the buffer format.
 
 This library provides functions to [serialize and deserialize buffers
 from generic `Value`s](src/serde_uuid.rs)),
-as defined in the [`arora-types`](../arora-types/readme.md)
+as defined in the [`arora-types`](https://github.com/semio-ai/arora-types)
 
 This library also provides [an exported function to allocate or free a buffer](src/alloc.rs).
