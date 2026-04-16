@@ -67,6 +67,11 @@ endif()
 
 set(CARGO_COMMAND ${CMAKE_COMMAND} -E env ${NAO_ENV} cargo)
 
+add_custom_target(arora-behavior-tree-records
+  COMMAND cargo build -p arora-behavior-tree-types-yaml
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
 add_custom_target(arora-host-tools
   COMMAND cargo build --bins # no target flag, building for the host
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -75,6 +80,7 @@ add_custom_target(arora-host-tools
     ${ARORA_MODULE_CPP}
     ${ARORA_MODULE_RUST}
 )
+add_dependencies(arora-host-tools arora-behavior-tree-records)
 
 add_custom_target(arora ALL
   COMMAND ${CARGO_COMMAND} build ${CARGO_BUILD_FLAGS} ${NATIVE_TARGET_FLAG}
