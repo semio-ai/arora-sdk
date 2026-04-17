@@ -14,7 +14,7 @@ pub async fn main() {
   let mut registry = LocalRegistry::new();
 
   // Folders. They cannot be frozen, we can serialize them as-is.
-  let crate_dir = std::path::Path::new(file!()).parent().unwrap();
+  let crate_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
   let folders_dir = crate_dir.join("records/folder/");
   create_dir_all(&folders_dir).unwrap();
   let folders_dir_str = folders_dir.to_str().unwrap();
