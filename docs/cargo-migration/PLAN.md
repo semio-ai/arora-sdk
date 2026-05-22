@@ -93,19 +93,21 @@ ergonomics; NAO is annoying because it depends on Homebrew state.
 - **WASM target:** standardize on `wasm32-wasip1` (Tier 2, well-supported, the
   default of `wasi-sdk` ≥ 31). Bump `wasi-sdk` 25 → **33** (latest, April 2026).
   Defer `wasm32-wasip2` (component model) to a future migration.
-- **Host tools from cross-target builds:** stable-Rust pattern, no nightly. Each
-  consumer `build.rs` uses this order of preference:
-  1. If `$ARORA_MODULE_CLI` is set, use it as-is.
-  2. Otherwise, invoke `cargo build -p arora-module-cli --release
-     --target-dir <shared-host-dir>` with cross-target env vars scrubbed
-     (`CARGO_BUILD_TARGET`, `CARGO_TARGET_DIR`, `CARGO_ENCODED_RUSTFLAGS`,
-     `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`) and `env::var_os("CARGO")` as
-     the binary. Then use the binary from the shared host dir.
-  The shared host-tools dir is `target/host-tools/` (sibling of the per-target
-  dirs). All consumer crates point at it, so the host tool builds once.
-  Rationale: `-Z bindeps` artifact-dependencies (the ergonomic answer) is still
-  nightly-only as of May 2026 (cargo issue #9096). We will revisit if it
-  stabilizes.
+- **Host tools from cross-target builds:** use nightly `-Z bindeps`
+  artifact-dependencies (RFC 3028, cargo issue #9096). Consumer crates declare
+  the host tool with:
+  ```toml
+  [build-dependencies]
+  arora-module-cli = { path = "...", artifact = "bin", target = "target" }
+  ```
+  Wait — `target = "target"` would build it for the *consumer's* target. To
+  pin to host we use `target = "host"` (the RFC spelling) or omit `target`
+  and rely on bindeps' default behavior for build-deps (which is host). The
+  `build.rs` then reads `$CARGO_BIN_FILE_ARORA_MODULE_CLI` (cargo exports this
+  for bindeps).
+  Requires `cargo-features = ["bindeps"]` in the top-level `Cargo.toml` and a
+  `rust-toolchain.toml` pinning nightly. Acceptable trade-off given how much
+  simpler the consumer code becomes vs. recursive-cargo env-scrubbing.
 - **xtask vs build.rs:** code generation per crate stays in `build.rs`. An
   `xtask` is added only if the test runner ends up needing more than `cargo
   test` can express.

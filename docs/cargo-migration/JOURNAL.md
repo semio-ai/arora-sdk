@@ -102,3 +102,64 @@ This will be factored into a small helper crate `crates/arora-host-tools` (or
 similar) so every consumer doesn't repeat the env-scrubbing dance. Name TBD.
 
 **Branch created:** `cargo-first-build`, off `arora-types-crates-io`.
+
+---
+
+## 2026-05-22 — Reversal: use nightly bindeps
+
+User chose nightly `-Z bindeps` over the stable recursive-cargo pattern. Trade:
+we pin nightly via `rust-toolchain.toml` in exchange for losing the env-scrub
+boilerplate in every consumer `build.rs`. With bindeps, a consumer says
+
+```toml
+cargo-features = ["bindeps"]   # at top-level Cargo.toml
+# ...
+[build-dependencies]
+arora-module-cli = { path = "...", artifact = "bin" }
+```
+
+and cargo exports `CARGO_BIN_FILE_ARORA_MODULE_CLI` to the `build.rs`. By
+default for build-dependencies, the artifact is built for the host — which is
+exactly what we want. Need to verify the `target = "host"` keyword spelling vs.
+default behavior once we hit it in practice (RFC 3028 vs current cargo
+implementation may differ).
+
+This simplifies the migration's "Stage 2": no helper crate for env-scrubbing,
+no shared `target/host-tools/` dir to manage manually — cargo handles it.
+
+---
+
+## 2026-05-22 — libqi stub landed; nao builds without real libqi
+
+**Surface needed for nao.** `modules/nao/src/nao.cpp` is the only consumer.
+Total qi surface used:
+
+- `qi::registerBaseTypes()`
+- `qi::Session` with `connect(string)` and `service(string) -> Future<AnyObject>`
+- `qi::AnyObject::call<T>(name, args...)`
+- `Future<T>::value() -> T`
+
+Generated module code under `arora/source/nao.cpp` and the static `arora-cpp`
+helper do **not** touch qi. So a header-only stub at this surface is enough.
+
+**Stub.** `libs/qi-stub/include/qi/{session,registration}.hpp` — every function
+inline, body is `__builtin_trap()`. Marked `[[noreturn]]` where the return type
+allows. `libs/qi-stub/CMakeLists.txt` defines `qi-stub` and an alias `qi` so
+nothing else needs to know. Wired into `modules/nao/CMakeLists.txt` behind
+`option(USE_QI_STUB ON)`. Default is stub.
+
+**Verification.** Configured NAO build (`-DNAO=ON`), then
+`cmake --build build-nao --target arora`. The nao module builds:
+```
+[ 60%] Building CXX object CMakeFiles/nao.dir/src/nao.cpp.o
+[ 80%] Building CXX object CMakeFiles/nao.dir/arora/source/nao.cpp.o
+[100%] Linking CXX shared library libnao.so
+[100%] Built target nao
+```
+The eventual cargo failure is downstream of nao, in `arora-c/cmake_install.cmake`
+trying to install a missing `//libarora_buffers.a`. This is a *pre-existing*
+breakage in the cross-compile install path, not caused by the stub. Tracked as
+a known issue to fix later in Stage 2 when we rework orchestration.
+
+**Takeaway:** Stage 1 unblocked. Next iteration on nao.cpp no longer has to
+build OpenSSL + Boost + libqi.

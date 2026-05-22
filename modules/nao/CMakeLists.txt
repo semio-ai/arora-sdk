@@ -36,14 +36,23 @@ add_library(
 )
 
 # Makes Qi available.
-# Also makes OpenSSL and Boost available.
-include(FetchContent)
-FetchContent_Declare(
-  qi
-  GIT_REPOSITORY https://github.com/semio-ai/libqi.git
-  GIT_TAG 5663c31d674a32c5ec208864ca5acb802e425c40
-)
-FetchContent_MakeAvailable(qi)
+# Default: use the in-tree header-only stub at libs/qi-stub. The stub is
+# enough to compile + link nao but every qi:: call traps at runtime. Set
+# USE_QI_STUB=OFF to fetch the real libqi (slow: pulls Boost + OpenSSL).
+option(USE_QI_STUB "Use the header-only libqi stub instead of the real libqi" ON)
+if(USE_QI_STUB)
+  add_library(qi INTERFACE)
+  target_include_directories(qi INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/qi-stub/include)
+  set(QI_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/qi-stub/include)
+else()
+  include(FetchContent)
+  FetchContent_Declare(
+    qi
+    GIT_REPOSITORY https://github.com/semio-ai/libqi.git
+    GIT_TAG 5663c31d674a32c5ec208864ca5acb802e425c40
+  )
+  FetchContent_MakeAvailable(qi)
+endif()
 
 # Other arora dependencies.
 set(ARORA_INCLUDE_DIR ${ARORA_BINARY_DIR}/../../include)
