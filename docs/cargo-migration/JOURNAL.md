@@ -237,3 +237,73 @@ So the design for the C++ module pilot is now concrete:
   default.
 
 Next session: build the pilot and verify a .wasm comes out.
+
+---
+
+## 2026-05-22 — Iso-features reached; legacy CMake retired
+
+All three targets build under `cargo` alone. Wrapping up the migration in one
+push:
+
+**C++ module pattern, generalized.** `test-cpp` (pilot), `test-cpp-2`, and
+`nao` all follow the same shape: standalone `CMakeLists.txt` that takes
+`-D` cache vars + a `build.rs` that resolves bindeps and calls `cmake::Config`.
+The standalone CMake files still work for ad-hoc invocation; the cargo entry
+is the default. test-cpp-2 additionally depends on `test-cpp` as a regular
+path dep so test-cpp's build.rs runs first and publishes its records before
+test-cpp-2's codegen reads them.
+
+**cmake-rs target override.** cmake-rs reads the build script's `TARGET` and
+injects host C flags (`--target=arm64-apple-macosx`,
+`CMAKE_OSX_ARCHITECTURES=arm64`) — fatal for wasm and i686 cross builds.
+Override with `.target("wasm32-wasi").host("wasm32-wasi").no_default_flags(true)`
+(or the i686 spelling). The cmake "target triple" here is purely a hint to
+cmake-rs's flag synthesis; the actual toolchain comes from
+`CMAKE_TOOLCHAIN_FILE`.
+
+**Bindeps generator staging.** arora-module-cli locates the language-specific
+generator (`arora-module-cpp`) as a sibling of its own argv[0]. Bindeps puts
+each artifact in its own dir, so we copy both binaries into
+`OUT_DIR/arora-tools/` with canonical names and invoke from there.
+
+**derive_more 2.x feature split.** The crate split derives into Cargo features
+in 2.x. `arora-module-cpp` needs `["from"]`, `arora-module-core` needs
+`["display"]`. CMake builds didn't expose this because they only compiled the
+crates they used; `cargo build --workspace` exposes everyone.
+
+**Per-package wasm-only targets.** `behavior-tree-nodes` and `test-rust-wasm`
+are wasm-only by nature. Setting `forced-target = "wasm32-wasip1"` requires
+nightly `-Z per-package-target` plus `[unstable] per-package-target = true` in
+`.cargo/config.toml`. Cargo then refuses to build them for the host
+automatically — clean.
+
+**NAO cross.** Mac Homebrew's `i686-unknown-linux-musl-{gcc,g++,ar}` at
+`/opt/homebrew/bin/` is good enough. `.cargo/config.toml` pins linker/ar
+there. nao's build.rs gates on `ENABLE_NAO=1` (Homebrew formula is not
+ubiquitous). Output: 32-bit i686 Linux ELF `libnao.so` (~6.9 MB) linking
+against the libqi stub.
+
+**Integration tests.** New `tests/` crate at workspace root replaces the old
+CMake `add_test()` calls. arora-cli is bindep'd (`artifact = "bin"`) and its
+path piped through via `cargo:rustc-env=ARORA_CLI_BIN`. Wasm-only modules are
+bindep'd as `artifact = "cdylib", target = "wasm32-wasip1"` to force their
+build before tests run; host-targeted modules (`test-cpp`, `test-cpp-2`,
+`polly`) are regular path deps so their `build.rs` publishes artifacts to
+`target/<profile>/modules/` without forcing a cdylib output.
+
+**Test status.** 2/3 pass. `call_test_cpp_2_from_engine_with_struct` is
+marked `#[ignore]` — arora-cli panics with "Cannot start a runtime from
+within a runtime" on multi-module `--call`. Reproducible pre-migration on
+master; tracked separately. Test data also needed an unrelated fix: the old
+CMake invocation used `enum[]` YAML syntax not accepted by current arora-cli
+(now `enums:`).
+
+**Retired files.** `CMakeLists.txt` (root), `PreLoad.cmake`,
+`modules/CMakeLists.txt`, and the pure-Rust modules' CMakeLists
+(`behavior-tree-nodes`, `polly`, `test-rust-wasm`) are gone. C++ modules
+keep self-contained CMakeLists invocable standalone.
+
+**Final shape.** `cargo build --workspace` produces every host artifact and
+all wasm guests; `ENABLE_NAO=1 cargo build -p arora-nao` adds the i686 .so;
+`cargo test -p arora-integration-tests` runs the engine-level smoke tests.
+No top-level CMake invocation anywhere in the path.

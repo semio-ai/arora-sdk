@@ -22,6 +22,7 @@ members = [
   "modules/behavior-tree-nodes",
   "modules/test-cpp",
   "modules/test-cpp-2",
+  "tests",
 ]
 
 [profile.release]

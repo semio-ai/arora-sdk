@@ -114,6 +114,26 @@ ergonomics; NAO is annoying because it depends on Homebrew state.
 - **Stub location:** `libs/qi-stub/` (sibling of `libs/cpp`). Header-only
   initially.
 
+## Status (2026-05-22, end of migration)
+
+All stages complete:
+
+- **Stage 1 (libqi stub):** done. `libs/qi-stub/include/qi/{session,registration}.hpp` provide header-only declarations that `__builtin_trap()` on call. `modules/nao/CMakeLists.txt` defaults to the stub via `USE_QI_STUB=ON`; setting it `OFF` falls back to `FetchContent` of the real libqi.
+- **Stage 2 (cargo-first orchestration):** done. Top-level `CMakeLists.txt`, `modules/CMakeLists.txt`, and the pure-Rust modules' CMakeLists are gone. C++ modules (`test-cpp`, `test-cpp-2`, `nao`) keep self-contained `CMakeLists.txt` files invokable standalone with `-D` overrides, but the cargo entry (`build.rs` + `cmake-rs`) is the default.
+- **Stage 3 (WASI SDK from Rust):** done. `crates/wasi-sdk` downloads + caches WASI SDK 33 to `target/wasi-sdk-33/`; build scripts consume `wasi_sdk::locate_or_download()` and `cmake_toolchain_file()`.
+- **Stage 4 (tests):** done. `tests/` crate runs the former CMake integration tests via `cargo test`. Modules publish their generated `module.yaml` and records to `target/<profile>/modules/<name>/` for the tests to point `arora-cli --header` at.
+- **Stage 5 (three targets):** verified.
+  - **host:** `cargo build --workspace` produces all host artifacts.
+  - **wasm32-wasip1:** `target/debug/modules/{test-cpp,test-cpp-2}.wasm` plus `target/wasm32-wasip1/debug/{behavior_tree_nodes,test_rust_wasm}.wasm`.
+  - **NAO (i686-unknown-linux-musl):** `ENABLE_NAO=1 cargo build -p arora-nao` produces `target/debug/modules/libnao.so` (32-bit i686 Linux ELF). Gated behind `ENABLE_NAO` so it stays opt-in for users without the Homebrew formula.
+
+## Key implementation notes
+
+- cmake-rs derives its target from the build script's `TARGET`. For cross-compiling C++ from a host cargo build script, override with `.target("wasm32-wasi")` / `.target("i686-unknown-linux-musl")` plus `.no_default_flags(true)` to keep cmake-rs from injecting host C flags (e.g. `--target=arm64-apple-macosx`, `CMAKE_OSX_ARCHITECTURES=arm64`).
+- arora-module-cli locates its language-specific generator (`arora-module-<lang>`) as a sibling of its own argv[0]. Bindeps put each binary in its own artifact dir, so each C++ module's build.rs stages both `arora-module-cli` and `arora-module-cpp` into one `OUT_DIR/arora-tools/` directory.
+- derive_more 2.x split derives into features. `arora-module-cpp` needs `["from"]`, `arora-module-core` needs `["display"]`. The old CMake build masked this because it only ever compiled the crates it needed; cargo workspace builds everything.
+- `forced-target = "wasm32-wasip1"` on wasm-only modules (`behavior-tree-nodes`, `test-rust-wasm`) requires nightly `-Zper-package-target` and `[unstable] per-package-target = true` in `.cargo/config.toml`.
+
 ## Non-goals (for now)
 
 - Replacing CMake *inside* individual C++ modules. As long as the orchestrator
