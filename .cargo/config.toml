@@ -6,13 +6,11 @@
 # CARGO_BIN_FILE_<CRATE>_<BIN>. This is how cross-target crates reach the
 # arora-module-cli code generator without a recursive cargo invocation.
 #
-# per-package-target: lets a [package] declare forced-target /
-# default-target. We use this so wasm-only modules (behavior-tree-nodes,
-# test-rust-wasm) always build for wasm32-wasip1 even when the workspace
-# is being built for the host.
+# `per-package-target` (used by wasm-only modules to force wasm32-wasip1)
+# is opted into per-crate via `cargo-features = ["per-package-target"]` in
+# the consuming Cargo.toml; nightly cargo no longer accepts it here.
 [unstable]
 bindeps = true
-per-package-target = true
 
 # Cross-compilation linker for the NAO target. The NAO modules link C++
 # (libqi, arora-cpp) compiled by the Homebrew i686-unknown-linux-musl
