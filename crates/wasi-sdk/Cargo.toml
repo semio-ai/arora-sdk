@@ -1,0 +1,12 @@
+[package]
+name = "wasi-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Downloads and locates the WASI SDK toolchain for use from build scripts"
+license = "Proprietary"
+
+[dependencies]
+anyhow = "1"
+flate2 = "1"
+tar = "0.4"
+ureq = { version = "2", default-features = false, features = ["tls"] }
