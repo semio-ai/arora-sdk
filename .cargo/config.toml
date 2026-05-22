@@ -1,0 +1,9 @@
+# Enable nightly cargo features used by this workspace.
+#
+# bindeps (RFC 3028, cargo issue #9096): artifact dependencies. Lets a
+# build-dependency declare it wants the *binary* output of another crate,
+# always built for the host, with the path exposed to build.rs via
+# CARGO_BIN_FILE_<CRATE>_<BIN>. This is how cross-target crates reach the
+# arora-module-cli code generator without a recursive cargo invocation.
+[unstable]
+bindeps = true

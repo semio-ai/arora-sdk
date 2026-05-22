@@ -163,3 +163,28 @@ a known issue to fix later in Stage 2 when we rework orchestration.
 
 **Takeaway:** Stage 1 unblocked. Next iteration on nao.cpp no longer has to
 build OpenSSL + Boost + libqi.
+
+---
+
+## 2026-05-22 — Workspace unified, nightly + bindeps enabled
+
+Brought the previously standalone module crates (`polly`, `test-rust-wasm`,
+`behavior-tree-nodes`) into the top-level Cargo workspace alongside `nao` and
+the `crates/*`. Each module's `Cargo.toml` had a `[workspace]` table at the
+bottom that isolated it from the parent workspace — removed those four lines
+per module.
+
+Added `rust-toolchain.toml` pinning the channel to `nightly` with targets
+`wasm32-wasip1` and `i686-unknown-linux-musl`. Added `.cargo/config.toml`
+enabling `bindeps` via `[unstable]`. Note that `cargo-features = ["bindeps"]`
+inside `Cargo.toml` does **not** work as of cargo 1.96 nightly — the canonical
+spelling is `[unstable] bindeps = true` in `.cargo/config.toml` (or
+`-Zbindeps` on the CLI).
+
+Verified `cargo metadata` resolves the unified workspace and `cargo check
+--workspace` succeeds (a couple of pre-existing dead-code warnings, unrelated).
+
+Next: pick the migration's pilot C++ module. Lean toward `modules/test-cpp`
+because it's the simplest C++ WASM target. Wrap it in a Cargo crate whose
+`build.rs` does codegen + WASI SDK compile, then carry the pattern over to
+`test-cpp-2`, `libs/cpp`, and `modules/nao`.

@@ -1,0 +1,11 @@
+# Pin nightly because the cargo-first build relies on -Z bindeps
+# (artifact-dependencies) to depend on host tools (arora-module-cli) from
+# crates that cross-compile for wasm32-wasip1 or i686-unknown-linux-musl.
+# See docs/cargo-migration/PLAN.md.
+[toolchain]
+channel = "nightly"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = [
+  "wasm32-wasip1",
+  "i686-unknown-linux-musl",
+]
