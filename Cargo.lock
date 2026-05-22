@@ -331,7 +331,10 @@ dependencies = [
 name = "arora-nao"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arora-buffers",
+ "arora-module-cli",
+ "arora-module-cpp",
  "arora-util",
  "cmake",
 ]

@@ -13,3 +13,12 @@
 [unstable]
 bindeps = true
 per-package-target = true
+
+# Cross-compilation linker for the NAO target. The NAO modules link C++
+# (libqi, arora-cpp) compiled by the Homebrew i686-unknown-linux-musl
+# cross-gcc, so Rust must use the matching linker. The brew formula
+# provides the toolchain at /opt/homebrew/bin (Apple Silicon) — on Intel
+# Macs override CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER.
+[target.i686-unknown-linux-musl]
+linker = "/opt/homebrew/bin/i686-unknown-linux-musl-gcc"
+ar = "/opt/homebrew/bin/i686-unknown-linux-musl-ar"
