@@ -4,29 +4,22 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 
 fn main() -> Result<()> {
-    // Re-run if any of these change.
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?);
     println!("cargo:rerun-if-changed=CMakeLists.txt");
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=module.yaml");
+    println!("cargo:rerun-if-changed=records");
     println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
 
-    // Locate the WASI SDK (downloads if needed).
-    let sdk_root = wasi_sdk::locate_or_download()
-        .context("locating or downloading WASI SDK")?;
+    let sdk_root = wasi_sdk::locate_or_download().context("locating or downloading WASI SDK")?;
     let toolchain_file = wasi_sdk::cmake_toolchain_file(&sdk_root);
 
-    // Resolve the bindeps artifact paths.
     let arora_module_cli_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CLI")?;
     let arora_module_cpp_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CPP")?;
     let arora_buffers_lib = env_path("CARGO_STATICLIB_FILE_ARORA_BUFFERS")?;
     let arora_util_lib = env_path("CARGO_STATICLIB_FILE_ARORA_UTIL")?;
 
-    // Stage host generators side-by-side under OUT_DIR. arora-module-cli
-    // discovers the language generator by appending its --language argument
-    // to its own exe directory ("arora-module-cpp"), so the cli + cpp bins
-    // must live in the same directory with their canonical names.
     let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
     let tools_dir = out_dir.join("arora-tools");
     std::fs::create_dir_all(&tools_dir).ok();
@@ -35,8 +28,6 @@ fn main() -> Result<()> {
     copy_executable(&arora_module_cli_src, &arora_module_cli)?;
     copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
-    // Records produced by arora-behavior-tree-types-yaml during its build.
-    // The path is stable: <workspace_root>/crates/arora-behavior-tree-types-yaml/records.
     let workspace_root = workspace_root(&manifest_dir)?;
     let behavior_tree_include = workspace_root
         .join("crates")
@@ -44,12 +35,15 @@ fn main() -> Result<()> {
         .join("records");
     let arora_cpp_source = workspace_root.join("libs").join("cpp");
     let arora_include_dir = workspace_root.join("target").join("include");
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let test_cpp_records = workspace_root
+        .join("target")
+        .join(&profile)
+        .join("modules")
+        .join("test-cpp")
+        .join("records");
+    let local_records = manifest_dir.join("records");
 
-    // Build via cmake. We must override target/host flags: cmake-rs picks up
-    // the build script's TARGET (host triple) and injects --target=arm64-apple-macosx
-    // plus CMAKE_OSX_ARCHITECTURES=arm64 by default, which conflicts with the WASI
-    // toolchain. target("wasm32-wasi") suppresses the OSX flags; no_default_flags
-    // stops the C/CXX/ASM_FLAGS injection so the toolchain file's flags win.
     let dst = cmake::Config::new(&manifest_dir)
         .target("wasm32-wasi")
         .host("wasm32-wasi")
@@ -61,57 +55,25 @@ fn main() -> Result<()> {
         .define("ARORA_UTIL_LIB", &arora_util_lib)
         .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)
         .define("ARORA_INCLUDE_DIR", &arora_include_dir)
-        .build_target("test-cpp")
+        .define("TEST_CPP_RECORDS", &test_cpp_records)
+        .define("LOCAL_RECORDS", &local_records)
+        .build_target("test-cpp-2")
         .very_verbose(false)
         .build();
 
-    // Locate produced wasm. cmake::Config builds in <out>/build by default.
-    let wasm = dst.join("build").join("test-cpp");
+    let wasm = dst.join("build").join("test-cpp-2");
     if !wasm.exists() {
         return Err(anyhow!("expected wasm at {} but not found", wasm.display()));
     }
     println!("cargo:wasm={}", wasm.display());
-    println!("cargo:rustc-env=TEST_CPP_WASM={}", wasm.display());
 
-    // Also drop a copy in a stable location for external consumers.
-    let stable = workspace_root
-        .join("target")
-        .join(env::var("PROFILE").unwrap_or_else(|_| "debug".to_string()))
-        .join("modules");
+    let stable = workspace_root.join("target").join(&profile).join("modules");
     std::fs::create_dir_all(&stable).ok();
-    let stable_wasm = stable.join("test-cpp.wasm");
+    let stable_wasm = stable.join("test-cpp-2.wasm");
     std::fs::copy(&wasm, &stable_wasm).with_context(|| {
         format!("copying {} to {}", wasm.display(), stable_wasm.display())
     })?;
     println!("cargo:wasm-stable={}", stable_wasm.display());
-
-    // Re-publish the generated records dir at a stable path. Downstream
-    // modules that import types from this module (e.g. test-cpp-2) need to
-    // be able to pass it as an --include to arora-module-cli.
-    let generated_records = dst.join("build").join("arora").join("records");
-    let stable_records = stable.join("test-cpp").join("records");
-    if generated_records.is_dir() {
-        let _ = std::fs::remove_dir_all(&stable_records);
-        std::fs::create_dir_all(&stable_records).ok();
-        copy_dir_recursive(&generated_records, &stable_records)?;
-        println!("cargo:records={}", stable_records.display());
-    }
-    Ok(())
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst).ok();
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)
-                .with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
-        }
-    }
     Ok(())
 }
 

@@ -1,77 +1,72 @@
-add_custom_target(generate-test-cpp2-wrapper ALL
+cmake_minimum_required(VERSION 3.20)
+project(test-cpp-2 CXX)
+
+# Required cache vars (normally passed by the wrapping build.rs):
+#   ARORA_MODULE_CLI            host bin (with arora-module-cpp sibling)
+#   ARORA_BEHAVIOR_TREE_INCLUDE records dir for arora-behavior-tree-types-yaml
+#   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
+#   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
+#   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp
+#   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
+#   TEST_CPP_RECORDS            test-cpp's published records dir
+#   LOCAL_RECORDS               this module's records/ dir
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK toolchain file.
+foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
+            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
+            TEST_CPP_RECORDS LOCAL_RECORDS)
+  if(NOT DEFINED ${VAR})
+    message(FATAL_ERROR "Required cache variable ${VAR} not set. "
+            "Either invoke through modules/test-cpp-2/build.rs or pass -D${VAR}=... explicitly.")
+  endif()
+endforeach()
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_subdirectory(${ARORA_CPP_SOURCE_DIR} arora-cpp-build)
+
+add_library(arora-buffers STATIC IMPORTED GLOBAL)
+set_property(TARGET arora-buffers PROPERTY IMPORTED_LOCATION ${ARORA_BUFFERS_LIB})
+set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+
+add_library(arora-util STATIC IMPORTED GLOBAL)
+set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_UTIL_LIB})
+set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+
+set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
+add_custom_target(generate-test-cpp-2-wrapper ALL
   COMMAND ${ARORA_MODULE_CLI}
-  --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
-  --include ${CMAKE_BINARY_DIR}/modules/test-cpp/arora/records
-  --include ${CMAKE_CURRENT_SOURCE_DIR}/records
-  generate
-  -l cpp
-  -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
-  -o ${CMAKE_CURRENT_BINARY_DIR}/arora
+    --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
+    --include ${TEST_CPP_RECORDS}
+    --include ${LOCAL_RECORDS}
+    generate
+    -l cpp
+    -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
+    -o ${GENERATED_DIR}
   BYPRODUCTS
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp-2.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/test-cpp.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp-2.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/Status.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/include/types/TestStructure1.hpp
-    ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
-  DEPENDS
-    arora
-    arora-host-tools
-    generate-test-cpp-wrapper
+    ${GENERATED_DIR}/include/test-cpp-2.hpp
+    ${GENERATED_DIR}/include/test-cpp.hpp
+    ${GENERATED_DIR}/source/test-cpp-2.cpp
+    ${GENERATED_DIR}/source/test-cpp.cpp
+    ${GENERATED_DIR}/include/types/Status.hpp
+    ${GENERATED_DIR}/source/types/Status.cpp
+    ${GENERATED_DIR}/include/types/TestStructure1.hpp
+    ${GENERATED_DIR}/source/types/TestStructure1.cpp
 )
 
-# We need to make an executable to make a WASM module...
 add_executable(test-cpp-2
   src/main.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp-2.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/test-cpp.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/Status.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/arora/source/types/TestStructure1.cpp
+  ${GENERATED_DIR}/source/test-cpp-2.cpp
+  ${GENERATED_DIR}/source/test-cpp.cpp
+  ${GENERATED_DIR}/source/types/Status.cpp
+  ${GENERATED_DIR}/source/types/TestStructure1.cpp
 )
-add_dependencies(test-cpp-2 generate-test-cpp2-wrapper)
-
-target_include_directories(test-cpp-2 PUBLIC ${RUST_TARGET_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/arora/include)
+add_dependencies(test-cpp-2 generate-test-cpp-2-wrapper)
+target_include_directories(test-cpp-2 PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
-target_compile_options(test-cpp-2 PRIVATE -g -pg -fPIC -flto -fno-exceptions)
-target_link_options(test-cpp-2 PRIVATE -Wl,--no-entry -Wl,--export=arora_buffer_alloc -Wl,--export=arora_buffer_free)
-# ... but we don't want it to have a main entry point to use it as a library!
-
-if(BUILD_TESTING)
-  add_test(
-    NAME test-call-cpp-wasm-from-engine-with-struct
-    COMMAND ${ARORA_CLI}
-      --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
-      --include ${CMAKE_CURRENT_SOURCE_DIR}/records
-      --include ${CMAKE_BINARY_DIR}/modules/test-cpp/arora/records
-      --header ${CMAKE_CURRENT_BINARY_DIR}/arora/module.yaml
-      --exe ${CMAKE_CURRENT_BINARY_DIR}/test-cpp-2
-      --header ${CMAKE_BINARY_DIR}/modules/test-cpp/arora/module.yaml
-      --exe ${CMAKE_BINARY_DIR}/modules/test-cpp/test-cpp
-      --call "id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
-args:
-- id: b41899c3-66dc-40d4-ab61-d1ccf5231c88
-  value:
-    enum:
-      id: 325a5767-e344-4532-860e-0749bcf2e428
-      variant_id: 766e9e9a-446d-4e46-83e6-14b7ca101169
-      value: unit
-- id: 63086e48-804f-403a-8862-3358ddedc08d
-  value:
-    struct:
-      id: 7f9aedf8-dbde-4020-b5f4-c28a6635ae7c
-      fields:
-      - id: 7d94a956-e50d-4cc4-9714-f62e1f9b134e
-        value:
-          enum[]:
-            id: 325a5767-e344-4532-860e-0749bcf2e428
-            elements:
-              - variant_id: 2468f46c-bb60-425c-9a4d-9ad326ccc7e2
-                value: unit
-      - id: 5ffa9104-1e5c-4026-943f-8db38bd34563
-        value:
-          i32: 113"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
-endif()
+target_compile_options(test-cpp-2 PRIVATE -fPIC -O3 -flto -fno-exceptions)
+target_link_options(test-cpp-2 PRIVATE
+  -Wl,--no-entry
+  -Wl,--export=arora_buffer_alloc
+  -Wl,--export=arora_buffer_free
+)

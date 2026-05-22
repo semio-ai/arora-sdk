@@ -3607,6 +3607,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-cpp-2"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-buffers",
+ "arora-module-cli",
+ "arora-module-cpp",
+ "arora-util",
+ "cmake",
+ "test-cpp",
+ "wasi-sdk",
+]
+
+[[package]]
 name = "test-rust-wasm"
 version = "0.1.0"
 dependencies = [
