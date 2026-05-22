@@ -9,22 +9,18 @@ description = "End-to-end tests that exercise built modules via arora-cli"
 [lib]
 path = "src/lib.rs"
 
-# These tests invoke arora-cli as a subprocess against modules published to
-# target/<profile>/modules/. They depend on the modules' build scripts having
-# already produced their artifacts; we list them as build-deps so cargo
-# orders things correctly.
-[build-dependencies]
-arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
-# Force upstream modules to build first. Host-targeted ones (test-cpp,
-# test-cpp-2, polly) come in as regular rlib deps so their build.rs runs.
-# Wasm-only modules (behavior-tree-nodes, test-rust-wasm) use forced-target
-# and would clash with host linking, so we take them as wasm cdylib
-# artifacts instead.
-test-cpp = { path = "../modules/test-cpp" }
-test-cpp-2 = { path = "../modules/test-cpp-2" }
-polly = { path = "../modules/polly" }
-behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
-test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+# The integration tests spawn `arora-cli` against artifacts that the rest
+# of the workspace produces at known paths under <workspace>/target. We
+# intentionally do NOT declare bindeps or path build-deps on those crates:
+# bindeps on workspace members that expose a cdylib (arora, polly) produce
+# duplicate compilation units and the cargo "output filename collision"
+# warnings (cargo#6313). The expected workflow is:
+#
+#     cargo build --workspace
+#     cargo test -p arora-integration-tests
+#
+# The first command builds arora-cli, the module artifacts, and the wasm
+# guests. The second runs the tests against those artifacts.
 
 [dev-dependencies]
 anyhow = "1"
