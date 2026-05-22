@@ -96,6 +96,14 @@ fn main() -> Result<()> {
         copy_dir_recursive(&generated_records, &stable_records)?;
         println!("cargo:records={}", stable_records.display());
     }
+
+    // Publish the generated module.yaml too — integration tests pass it
+    // as --header to arora-cli.
+    let generated_module_yaml = dst.join("build").join("arora").join("module.yaml");
+    if generated_module_yaml.is_file() {
+        let stable_yaml = stable.join("test-cpp").join("module.yaml");
+        std::fs::copy(&generated_module_yaml, &stable_yaml).ok();
+    }
     Ok(())
 }
 

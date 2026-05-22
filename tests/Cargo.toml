@@ -1,0 +1,30 @@
+[package]
+name = "arora-integration-tests"
+version = "0.0.0"
+edition = "2021"
+license = "Proprietary"
+publish = false
+description = "End-to-end tests that exercise built modules via arora-cli"
+
+[lib]
+path = "src/lib.rs"
+
+# These tests invoke arora-cli as a subprocess against modules published to
+# target/<profile>/modules/. They depend on the modules' build scripts having
+# already produced their artifacts; we list them as build-deps so cargo
+# orders things correctly.
+[build-dependencies]
+arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
+# Force upstream modules to build first. Host-targeted ones (test-cpp,
+# test-cpp-2, polly) come in as regular rlib deps so their build.rs runs.
+# Wasm-only modules (behavior-tree-nodes, test-rust-wasm) use forced-target
+# and would clash with host linking, so we take them as wasm cdylib
+# artifacts instead.
+test-cpp = { path = "../modules/test-cpp" }
+test-cpp-2 = { path = "../modules/test-cpp-2" }
+polly = { path = "../modules/polly" }
+behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
+test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+
+[dev-dependencies]
+anyhow = "1"

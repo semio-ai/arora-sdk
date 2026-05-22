@@ -74,6 +74,13 @@ fn main() -> Result<()> {
         format!("copying {} to {}", wasm.display(), stable_wasm.display())
     })?;
     println!("cargo:wasm-stable={}", stable_wasm.display());
+
+    let generated_module_yaml = dst.join("build").join("arora").join("module.yaml");
+    if generated_module_yaml.is_file() {
+        let stable_dir = stable.join("test-cpp-2");
+        std::fs::create_dir_all(&stable_dir).ok();
+        std::fs::copy(&generated_module_yaml, stable_dir.join("module.yaml")).ok();
+    }
     Ok(())
 }
 
