@@ -1,3 +1,5 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "behavior-tree-nodes"
 version = "0.1.0"
@@ -6,6 +8,11 @@ description = "Core behavior tree nodes"
 license = "Proprietary"
 edition = "2021"
 readme = "readme.md"
+# This module is a wasm guest loaded by the engine. The arora_dispatch
+# imports it references only resolve when targeting wasm. Use the nightly
+# forced-target so the package always builds for wasm32-wasip1, even when
+# the rest of the workspace is being built for the host.
+forced-target = "wasm32-wasip1"
 
 [lib]
 crate-type = ["cdylib"]
