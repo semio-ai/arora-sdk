@@ -188,3 +188,52 @@ Next: pick the migration's pilot C++ module. Lean toward `modules/test-cpp`
 because it's the simplest C++ WASM target. Wrap it in a Cargo crate whose
 `build.rs` does codegen + WASI SDK compile, then carry the pattern over to
 `test-cpp-2`, `libs/cpp`, and `modules/nao`.
+
+---
+
+## 2026-05-22 — WASI SDK crate landed; bindeps surface confirmed
+
+Added `crates/wasi-sdk`. Pure Rust, downloads wasi-sdk-33 from the upstream
+GitHub release if `WASI_SDK_PATH` isn't set. Caches under
+`<workspace>/target/wasi-sdk-33/`. Exposes `clang()`, `clangpp()`,
+`cmake_toolchain_file()`. Tarball naming verified for arm64-macos against
+HTTP HEAD.
+
+Surveyed crates.io for an existing maintained `wasi-sdk` crate — there is
+none. `lucet-wasi-sdk` exists but hasn't shipped since 2020. In-tree is
+correct.
+
+Bumped target version 25 → 33 (April 2026, latest). v33 still defaults clang's
+target to `wasm32-wasip1`, matching the Rust side of the migration.
+
+Confirmed Cargo's `-Z bindeps` surface for the patterns we need:
+
+- Host bin (codegen tool):
+  ```toml
+  [build-dependencies]
+  arora-module-cli = { path = "...", artifact = "bin" }
+  ```
+  Cargo exports `CARGO_BIN_FILE_ARORA_MODULE_CLI`. Build-deps default to host.
+- Cross-target staticlib (for wasm modules that link against arora-buffers /
+  arora-util):
+  ```toml
+  [build-dependencies]
+  arora-buffers = { path = "...", artifact = "staticlib", target = "wasm32-wasip1" }
+  ```
+  Cargo exports `CARGO_STATICLIB_FILE_ARORA_BUFFERS` and
+  `CARGO_STATICLIB_DIR_ARORA_BUFFERS`.
+
+So the design for the C++ module pilot is now concrete:
+- `modules/test-cpp/Cargo.toml`: host crate, lib.rs empty, build.rs only.
+  Build-deps via bindeps: `arora-module-cli` (host bin), `arora-buffers` and
+  `arora-util` (wasm32-wasip1 staticlibs), `wasi-sdk` (regular dep).
+- `build.rs`: locate wasi-sdk → run codegen → invoke cmake on
+  `modules/test-cpp/CMakeLists.txt` with `-D` paths to everything.
+- `modules/test-cpp/CMakeLists.txt`: promoted to a self-contained CMake project
+  (adds `cmake_minimum_required` + `project()`). Accepts `ARORA_MODULE_CLI`,
+  `ARORA_BUFFERS_LIB`, `ARORA_UTIL_LIB`, `ARORA_BEHAVIOR_TREE_INCLUDE` as
+  cache vars. Still buildable by hand with `cmake -B build -S
+  modules/test-cpp` if you set those — the cargo entry just becomes the
+  default.
+
+Next session: build the pilot and verify a .wasm comes out.
