@@ -16,6 +16,9 @@ members = [
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree-types-yaml",
   "modules/nao",
+  "modules/polly",
+  "modules/test-rust-wasm",
+  "modules/behavior-tree-nodes",
 ]
 
 [profile.release]
