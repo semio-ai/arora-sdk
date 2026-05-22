@@ -1,0 +1,31 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "test-cpp"
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+description = "C++ test module — wasm guest, built via cargo + cmake + WASI SDK"
+build = "build.rs"
+
+# This crate is the cargo-side entry point for a C++ wasm guest. The Rust
+# source is empty; the build script invokes cmake against the in-tree
+# CMakeLists.txt to produce the actual .wasm. The output path is exported
+# to dependents via cargo:metadata.
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+anyhow = "1"
+wasi-sdk = { path = "../../crates/wasi-sdk" }
+cmake = "0.1"
+# Host bin for code generation (module.yaml -> C++ source). arora-module-cli
+# locates the language-specific generator by appending the language name to
+# its own argv[0] directory, so the cpp generator must be co-located with
+# the cli. The build script stages both binaries into one directory.
+arora-module-cli = { path = "../../crates/arora-module-cli", artifact = "bin" }
+arora-module-cpp = { path = "../../crates/arora-module-cpp", artifact = "bin" }
+# wasm32-wasip1 static libraries the C++ links against.
+arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip1" }
+arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip1" }
