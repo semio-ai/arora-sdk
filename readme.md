@@ -233,48 +233,47 @@ pre-existing arora-cli tokio runtime issue when handling multi-module
 ### Dependency overview
 
 ```mermaid
-graph TD
-  subgraph host_bins["Host binaries (built for host)"]
-    cli["arora-cli"]
-    mcli["arora-module-cli"]
-    mcpp["arora-module-cpp"]
-    mrust["arora-module-rust (lib + bin)"]
+flowchart TD
+  subgraph host_bins [Host binaries]
+    cli[arora-cli]
+    mcli[arora-module-cli]
+    mcpp[arora-module-cpp]
+    mrust[arora-module-rust]
   end
 
-  subgraph host_libs["Host libraries"]
-    arora["arora (engine, cdylib + rlib)"]
-    bt["arora-behavior-tree"]
-    registry["arora-registry"]
-    vfs["arora-vfs"]
-    buffers["arora-buffers (staticlib + rlib)"]
-    util["arora-util (staticlib)"]
-    bttypes["arora-behavior-tree-types"]
-    bttypes_yaml["arora-behavior-tree-types-yaml"]
-    mcore["arora-module-core"]
-    wasi["wasi-sdk fetcher"]
+  subgraph host_libs [Host libraries]
+    arora[arora engine]
+    bt[arora-behavior-tree]
+    registry[arora-registry]
+    vfs[arora-vfs]
+    buffers[arora-buffers]
+    util[arora-util]
+    bttypes[arora-behavior-tree-types]
+    bttypes_yaml[arora-behavior-tree-types-yaml]
+    mcore[arora-module-core]
+    wasi[wasi-sdk fetcher]
   end
 
-  subgraph host_modules["Host-loadable modules (cdylib)"]
-    polly["polly (libpolly.dylib)"]
+  subgraph host_modules [Host modules cdylib]
+    polly[polly libpolly]
   end
 
-  subgraph nao_module["NAO module (ENABLE_NAO=1)"]
-    nao["arora-nao → libnao.so (i686-musl)"]
-    qistub["libs/qi-stub"]
+  subgraph nao_module [NAO module ENABLE_NAO=1]
+    nao[arora-nao libnao.so i686-musl]
+    qistub[libs qi-stub]
   end
 
-  subgraph wasm_guests["wasm32-wasip1 guests"]
-    tcpp["test-cpp.wasm"]
-    tcpp2["test-cpp-2.wasm"]
-    btn["behavior-tree-nodes (host by default, wasm on demand)"]
-    trw["test-rust-wasm (host by default, wasm on demand)"]
+  subgraph wasm_guests [wasm32-wasip1 guests]
+    tcpp[test-cpp.wasm]
+    tcpp2[test-cpp-2.wasm]
+    btn[behavior-tree-nodes]
+    trw[test-rust-wasm]
   end
 
-  subgraph tests["arora-integration-tests"]
-    itest["tests/ (cargo test)"]
+  subgraph tests [arora-integration-tests]
+    itest[cargo test]
   end
 
-  %% Engine + CLI
   cli --> arora
   cli --> buffers
   cli --> mcore
@@ -285,7 +284,6 @@ graph TD
   bt --> bttypes
   bt --> registry
 
-  %% Code generators
   mcli --> mcore
   mcpp --> mcore
   mrust --> mcore
@@ -293,7 +291,6 @@ graph TD
   mcore --> bttypes
   mcore --> registry
 
-  %% Rust modules build.rs uses arora-module-rust
   btn -->|build.rs| mrust
   trw -->|build.rs| mrust
   polly -->|build.rs| mrust
@@ -301,33 +298,30 @@ graph TD
   trw --> buffers
   polly --> buffers
 
-  %% C++ wasm guests via bindeps
-  tcpp -->|build.rs bindep: bin| mcli
-  tcpp -->|build.rs bindep: bin| mcpp
-  tcpp -->|build.rs bindep: staticlib wasm32-wasip1| buffers
-  tcpp -->|build.rs bindep: staticlib wasm32-wasip1| util
+  tcpp -->|bindep bin| mcli
+  tcpp -->|bindep bin| mcpp
+  tcpp -->|bindep staticlib wasm| buffers
+  tcpp -->|bindep staticlib wasm| util
   tcpp -->|build.rs| wasi
-  tcpp2 -->|build.rs bindep: bin| mcli
-  tcpp2 -->|build.rs bindep: bin| mcpp
-  tcpp2 -->|build.rs bindep: staticlib wasm32-wasip1| buffers
-  tcpp2 -->|build.rs bindep: staticlib wasm32-wasip1| util
+  tcpp2 -->|bindep bin| mcli
+  tcpp2 -->|bindep bin| mcpp
+  tcpp2 -->|bindep staticlib wasm| buffers
+  tcpp2 -->|bindep staticlib wasm| util
   tcpp2 -->|build.rs| wasi
-  tcpp2 -->|publishes records before| tcpp
+  tcpp2 -->|records before| tcpp
 
-  %% NAO
-  nao -->|build.rs bindep: bin| mcli
-  nao -->|build.rs bindep: bin| mcpp
-  nao -->|build.rs bindep: staticlib i686-musl| buffers
-  nao -->|build.rs bindep: staticlib i686-musl| util
+  nao -->|bindep bin| mcli
+  nao -->|bindep bin| mcpp
+  nao -->|bindep staticlib i686-musl| buffers
+  nao -->|bindep staticlib i686-musl| util
   nao --> qistub
 
-  %% Integration tests
-  itest -->|build-dep bindep: cdylib wasm32-wasip1| btn
-  itest -->|build-dep bindep: cdylib wasm32-wasip1| trw
-  itest -.->|spawned at runtime from target/<profile>/| cli
-  itest -.->|loaded at runtime from target/<profile>/modules/| polly
-  itest -.->|loaded at runtime from target/<profile>/modules/| tcpp
-  itest -.->|loaded at runtime from target/<profile>/modules/| tcpp2
+  itest -->|bindep cdylib wasm| btn
+  itest -->|bindep cdylib wasm| trw
+  itest -.->|runtime lookup| cli
+  itest -.->|runtime lookup| polly
+  itest -.->|runtime lookup| tcpp
+  itest -.->|runtime lookup| tcpp2
 ```
 
 Solid arrows are `cargo` dependency edges (regular, build-, or
