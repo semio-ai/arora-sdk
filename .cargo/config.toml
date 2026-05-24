@@ -16,3 +16,9 @@ bindeps = true
 [target.i686-unknown-linux-musl]
 linker = "/opt/homebrew/bin/i686-unknown-linux-musl-gcc"
 ar = "/opt/homebrew/bin/i686-unknown-linux-musl-ar"
+
+# Browser host build: getrandom 0.3 requires this cfg to pick its
+# WebCrypto backend on wasm32-unknown-unknown (in addition to the
+# `wasm_js` feature). Without it the build errors out at compile time.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

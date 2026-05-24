@@ -9,6 +9,13 @@ crate-type = ["cdylib", "rlib"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["wasmtime-host", "native-host"]
+# Native host using wasmtime to instantiate guest modules.
+wasmtime-host = ["dep:wasmtime", "dep:wasmtime-wasi"]
+# Native host using libloading to load .so/.dylib modules.
+native-host = ["dep:libloading", "dep:tempfile"]
+
 [dependencies]
 anyhow = "*"
 arora-buffers = { path = "../arora-buffers" }
@@ -18,14 +25,28 @@ bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
 flatbuffers = "2.0.0"
 lazy_static = "*"
-libloading = "0.7"
 rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tempfile = "3"
 uuid = { version = "1", features = ["serde", "v4"] }
-wasmtime = { version = "31", features = ["async"] }
-wasmtime-wasi = "31"
+
+# Native-only optional deps. Disabled when targeting wasm32 (browser host).
+libloading = { version = "0.7", optional = true }
+tempfile = { version = "3", optional = true }
+wasmtime = { version = "31", features = ["async"], optional = true }
+wasmtime-wasi = { version = "31", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = ["console"] }
+# Browser RNG backend for `rand` (used in CallableId generation).
+# The matching `--cfg getrandom_backend="wasm_js"` rustflag is set in
+# .cargo/config.toml for the wasm32-unknown-unknown target.
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [build-dependencies]
 cbindgen = "0.20.0"
