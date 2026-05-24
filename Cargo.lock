@@ -242,6 +242,8 @@ name = "arora-integration-tests"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "behavior-tree-nodes",
+ "test-rust-wasm",
 ]
 
 [[package]]
