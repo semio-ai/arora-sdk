@@ -20,3 +20,11 @@ bindeps = true
 [target.i686-unknown-linux-musl]
 linker = "/opt/homebrew/bin/i686-unknown-linux-musl-gcc"
 ar = "/opt/homebrew/bin/i686-unknown-linux-musl-ar"
+
+# Runner for wasm32-wasip1 unit tests. Modules with `forced-target =
+# "wasm32-wasip1"` (behavior-tree-nodes, test-rust-wasm) produce wasm
+# binaries that cargo cannot execute directly; cargo test --all needs a
+# runner to invoke them. wasmtime 33 matches the WASI SDK version used by
+# the C++ guests. Install: `curl https://wasmtime.dev/install.sh -sSf | bash`.
+[target.wasm32-wasip1]
+runner = "wasmtime"
