@@ -1,5 +1,9 @@
+#[cfg(feature = "wasmtime-host")]
 pub mod wasm;
+#[cfg(feature = "native-host")]
 pub mod native;
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
 
 use crate::{
   engine::EngineRef,
