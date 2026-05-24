@@ -12,6 +12,7 @@ members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
+  "crates/arora-web",
   "crates/arora-behavior-tree",
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree-types-yaml",
