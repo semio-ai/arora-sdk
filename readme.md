@@ -162,58 +162,202 @@ for other uses.
 
 ## Building
 
+The build is driven by Cargo. The repo is a single workspace pinned to
+nightly (`rust-toolchain.toml`) so that the
+[`bindeps`](https://doc.rust-lang.org/cargo/reference/unstable.html#artifact-dependencies)
+unstable feature is available: cross-target artifacts (wasm guests,
+static libs, host code generators) are expressed as artifact
+dependencies and resolved by cargo itself. There is no top-level CMake;
+C++ modules each carry their own `CMakeLists.txt` invoked from a
+`build.rs` via the `cmake` crate.
+
 ### Prerequisites
 
-- Rust. You need to add first some WebAssembly targets:
-  ```bash
-  rustup target add wasm32-unknown-unknown
-  rustup target add wasm32-wasip1
-  ```
-- Rust WASI, for Rust WASM modules:
-  ```bash
-  $ cargo install cargo-wasi
-  ```
-- Python 3
-- CMake 3
-
-#### Repositories
-
-You need a read access to the following repositories:
-
-- [Semio Record](https://github.com/semio-ai/semio-record)
-- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
-- [Semio Client](https://github.com/semio-ai/semio-client)
-
-#### Windows
-
-- Ninja
+- Rust nightly with the standard toolchain. The pinned `rust-toolchain.toml`
+  also requests the `wasm32-wasip1` and `i686-unknown-linux-musl` targets.
+- A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
+  Linux).
+- For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`.
+  Enable the build with `ENABLE_NAO=1`.
+- The WASI SDK is downloaded automatically by `crates/wasi-sdk` into
+  `target/wasi-sdk-33/` on first use; no manual install needed.
 
 ### Build
 
 ```bash
-cmake -S . -B build
-cmake --build build
+cargo build --workspace
 ```
 
-It will automatically download the
-[WASI C++ SDK](https://github.com/WebAssembly/wasi-sdk),
-and configure the project to use it for C++ [modules](#modules).
+This produces:
 
-#### Debug
+- Host binaries (`arora-cli`, `arora-module-cli`, `arora-module-cpp`, …)
+  under `target/<profile>/`.
+- Host cdylibs for native modules (`libpolly.dylib` / `.so`).
+- C++ wasm guests (`test-cpp.wasm`, `test-cpp-2.wasm`) staged under
+  `target/<profile>/modules/`.
+- Rust modules (`behavior-tree-nodes`, `test-rust-wasm`) built for the
+  **host** by default — `cargo test -p test-rust-wasm` runs natively.
+  Their wasm flavour is produced on demand (see *Testing* below).
 
-By default it builds in debug.
-
-To get backtraces from fatal errors in code generation tools,
-try this from the build directory:
+The NAO module is gated:
 
 ```bash
-RUST_BACKTRACE=1 cmake --build build
+ENABLE_NAO=1 cargo build -p arora-nao
 ```
 
-#### Release
+It cross-compiles to `i686-unknown-linux-musl`, producing
+`target/debug/modules/libnao.so` linked against the libqi header-only
+stub in `libs/qi-stub/`.
 
-To build in release, use:
+### Testing
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DUSE_RUST_DEBUG=0 ..
+cargo build --workspace
+cargo test --all
 ```
+
+The `arora-integration-tests` crate (`tests/`) spawns `arora-cli` against
+the freshly built module artifacts. It pulls in the wasm builds of the
+Rust modules through artifact dependencies pinned to `wasm32-wasip1`, so
+running the tests is enough to force those wasm guests to compile.
+Artifacts produced by `build.rs` of `polly`, `test-cpp`, `test-cpp-2`
+(host-side cdylibs and wasm executables) are picked up from
+`target/<profile>/modules/`, which is why a workspace build must precede
+the test invocation.
+
+The C++-into-wasm integration test
+`call_test_cpp_2_from_engine_with_struct` is marked `#[ignore]` due to a
+pre-existing arora-cli tokio runtime issue when handling multi-module
+`--call`; everything else runs green.
+
+### Dependency overview
+
+```mermaid
+graph TD
+  subgraph host_bins["Host binaries (built for host)"]
+    cli["arora-cli"]
+    mcli["arora-module-cli"]
+    mcpp["arora-module-cpp"]
+    mrust["arora-module-rust (lib + bin)"]
+  end
+
+  subgraph host_libs["Host libraries"]
+    arora["arora (engine, cdylib + rlib)"]
+    bt["arora-behavior-tree"]
+    registry["arora-registry"]
+    vfs["arora-vfs"]
+    buffers["arora-buffers (staticlib + rlib)"]
+    util["arora-util (staticlib)"]
+    bttypes["arora-behavior-tree-types"]
+    bttypes_yaml["arora-behavior-tree-types-yaml"]
+    mcore["arora-module-core"]
+    wasi["wasi-sdk fetcher"]
+  end
+
+  subgraph host_modules["Host-loadable modules (cdylib)"]
+    polly["polly (libpolly.dylib)"]
+  end
+
+  subgraph nao_module["NAO module (ENABLE_NAO=1)"]
+    nao["arora-nao → libnao.so (i686-musl)"]
+    qistub["libs/qi-stub"]
+  end
+
+  subgraph wasm_guests["wasm32-wasip1 guests"]
+    tcpp["test-cpp.wasm"]
+    tcpp2["test-cpp-2.wasm"]
+    btn["behavior-tree-nodes (host by default, wasm on demand)"]
+    trw["test-rust-wasm (host by default, wasm on demand)"]
+  end
+
+  subgraph tests["arora-integration-tests"]
+    itest["tests/ (cargo test)"]
+  end
+
+  %% Engine + CLI
+  cli --> arora
+  cli --> buffers
+  cli --> mcore
+  cli --> registry
+  arora --> buffers
+  arora --> bttypes
+  bt --> arora
+  bt --> bttypes
+  bt --> registry
+
+  %% Code generators
+  mcli --> mcore
+  mcpp --> mcore
+  mrust --> mcore
+  mrust --> vfs
+  mcore --> bttypes
+  mcore --> registry
+
+  %% Rust modules build.rs uses arora-module-rust
+  btn -->|build.rs| mrust
+  trw -->|build.rs| mrust
+  polly -->|build.rs| mrust
+  btn --> buffers
+  trw --> buffers
+  polly --> buffers
+
+  %% C++ wasm guests via bindeps
+  tcpp -->|build.rs bindep: bin| mcli
+  tcpp -->|build.rs bindep: bin| mcpp
+  tcpp -->|build.rs bindep: staticlib wasm32-wasip1| buffers
+  tcpp -->|build.rs bindep: staticlib wasm32-wasip1| util
+  tcpp -->|build.rs| wasi
+  tcpp2 -->|build.rs bindep: bin| mcli
+  tcpp2 -->|build.rs bindep: bin| mcpp
+  tcpp2 -->|build.rs bindep: staticlib wasm32-wasip1| buffers
+  tcpp2 -->|build.rs bindep: staticlib wasm32-wasip1| util
+  tcpp2 -->|build.rs| wasi
+  tcpp2 -->|publishes records before| tcpp
+
+  %% NAO
+  nao -->|build.rs bindep: bin| mcli
+  nao -->|build.rs bindep: bin| mcpp
+  nao -->|build.rs bindep: staticlib i686-musl| buffers
+  nao -->|build.rs bindep: staticlib i686-musl| util
+  nao --> qistub
+
+  %% Integration tests
+  itest -->|build-dep bindep: cdylib wasm32-wasip1| btn
+  itest -->|build-dep bindep: cdylib wasm32-wasip1| trw
+  itest -.->|spawned at runtime from target/<profile>/| cli
+  itest -.->|loaded at runtime from target/<profile>/modules/| polly
+  itest -.->|loaded at runtime from target/<profile>/modules/| tcpp
+  itest -.->|loaded at runtime from target/<profile>/modules/| tcpp2
+```
+
+Solid arrows are `cargo` dependency edges (regular, build-, or
+artifact-dependencies); dotted arrows are runtime lookups that rely on a
+prior `cargo build --workspace`. Bindeps surface paths to the consumer's
+`build.rs` via `CARGO_BIN_FILE_<DEP>` (host bins) and
+`CARGO_STATICLIB_FILE_<DEP>` / `CARGO_CDYLIB_FILE_<DEP>` (per-target
+libraries), so each consumer can splice the cross-built artefact into
+its own cmake / linker invocation without a recursive cargo call.
+
+What the integration test crate actually drags in:
+
+- **`behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip1"` — forces a wasm32-wasip1 build of the Rust behavior-tree-nodes module and exposes the path to its `.wasm`.
+- **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip1"` — same, for the Rust test module.
+- `arora-cli`, `polly`, `test-cpp`, `test-cpp-2` are **not** declared as
+  dependencies of the test crate (declaring them as bindeps causes
+  cdylib output filename collisions, cargo#6313). They are picked up
+  from their canonical workspace paths under `target/<profile>/`, which
+  is why a workspace build is a prerequisite.
+
+### Build flags & options
+
+- `ENABLE_NAO=1` — enables the NAO cross-compile (off by default).
+- `USE_QI_STUB=OFF` (cmake cache variable for `modules/nao/CMakeLists.txt`
+  when invoked standalone) — fetches the real `libqi` from GitHub
+  instead of the in-tree stub. The cargo entry always uses the stub.
+- `cargo build --release` for an optimized build; the release profile
+  pins `lto = "thin"` and `debug = 1`.
+
+The individual C++ modules' `CMakeLists.txt` files remain invokable
+standalone with `-D` overrides, mainly for IDE integration; the
+authoritative entry point is `cargo`.
+
