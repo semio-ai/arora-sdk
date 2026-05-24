@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Arora engine in the browser</title>
+  <style>
+    body { font-family: ui-monospace, monospace; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    button { padding: 0.5rem 1rem; font: inherit; }
+    pre { background: #f4f4f4; padding: 0.75rem; white-space: pre-wrap; }
+    .row { display: flex; gap: 0.5rem; align-items: center; }
+    label { font-size: 0.9rem; color: #555; }
+    input[type=number] { width: 6rem; padding: 0.25rem; font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Arora engine demo</h1>
+  <p>
+    Loads <code>test-rust-wasm</code> through the arora engine compiled
+    to wasm32. The engine instantiates the guest module via the browser's
+    native <code>WebAssembly</code> API. Open devtools to see panics.
+  </p>
+
+  <div class="row">
+    <button id="run">Run ping / succeed / cos</button>
+    <label>cos angle: <input id="angle" type="number" step="0.1" value="0" /></label>
+  </div>
+
+  <h3>Output</h3>
+  <pre id="out">(click Run)</pre>
+
+  <script type="module" src="./index.js"></script>
+</body>
+</html>

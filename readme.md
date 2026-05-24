@@ -119,6 +119,10 @@ for other uses.
 - [Arora CLI](crates/arora-cli/readme.md),
   the CLI tool to load modules and run functions.
 
+- [Arora Web](crates/arora-web/readme.md),
+  a `wasm-bindgen` entry point that hosts the engine inside a browser
+  (browser-native `WebAssembly` instead of wasmtime).
+
 - [`arora-vfs`](crates/arora-vfs/readme.md),
   provides a virtual file system mostly used in code generation.
   It is potentially useful for WebAssembly modules.
@@ -229,6 +233,21 @@ The C++-into-wasm integration test
 `call_test_cpp_2_from_engine_with_struct` is marked `#[ignore]` due to a
 pre-existing arora-cli tokio runtime issue when handling multi-module
 `--call`; everything else runs green.
+
+### Browser target
+
+The engine also builds for `wasm32-unknown-unknown`. The `arora-web`
+crate is the JS-facing wrapper; it hosts guest modules through the
+browser's native `WebAssembly` runtime (no wasmtime).
+
+```bash
+wasm-pack build crates/arora-web --target web --dev
+wasm-pack test  crates/arora-web --headless --firefox
+crates/arora-web/www/serve.sh    # demo page on :8080
+```
+
+See [`crates/arora-web/readme.md`](crates/arora-web/readme.md) for
+details.
 
 ### Dependency overview
 
