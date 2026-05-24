@@ -2,7 +2,8 @@ use anyhow::bail;
 use arora::{
   call::{Call, CallBridge},
   engine::EngineBuilder,
-  schema::module::low::{Header, ModuleDefinition},
+  load::load_module_from_parts,
+  schema::module::low::Header,
 };
 use arora_module_core::header::module_frozen_from_header_file;
 use arora_registry::{
@@ -209,12 +210,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
     let executable = executable.into_boxed_slice();
 
     let module_name = header.name.clone();
-    engine
-      .load_module(ModuleDefinition {
-        schema_version: 0,
-        header,
-        executable,
-      })
+    load_module_from_parts(&mut *engine, header, executable)
       .expect(format!("failed to load module {}", module_name).as_str());
   }
 
