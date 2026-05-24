@@ -95,6 +95,13 @@ pub struct Args {
 async fn main() -> anyhow::Result<()> {
   let args = Args::parse();
 
+  if args.header.is_empty() && args.call.is_none() {
+    let mut cmd = <Args as clap::CommandFactory>::command();
+    cmd.print_help()?;
+    println!();
+    std::process::exit(2);
+  }
+
   if args.header.len() != args.exe.len() {
     bail!(Error::raw(
       ErrorKind::WrongNumberOfValues,
