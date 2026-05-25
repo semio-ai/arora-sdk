@@ -13,7 +13,7 @@ arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
 arora-types = "1"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 lazy_static = "*"
 quick-xml = "0.37"
@@ -27,7 +27,7 @@ anyhow = "*"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "update" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
 assert_float_eq = "1.1.3"
 convert_case = "0.5"
