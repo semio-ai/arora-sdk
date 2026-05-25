@@ -20,10 +20,11 @@ fn main() {
     .join("src")
     .join("arora_generated")
     .join("module.yaml");
+  let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
   let wasm = workspace_root
     .join("target")
     .join("wasm32-wasip1")
-    .join("debug")
+    .join(&profile)
     .join("test_rust_wasm.wasm");
 
   println!("cargo:rustc-env=TEST_RUST_WASM_HEADER_YAML={}", header_yaml.display());
