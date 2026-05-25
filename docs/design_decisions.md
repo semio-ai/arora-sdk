@@ -128,18 +128,11 @@ not universally installed. It is excluded from `default-members` in the
 workspace `Cargo.toml`. CI does not build it. Users with the cross-toolchain
 can build it explicitly with `cargo build -p arora-nao`.
 
-### libqi header-only stub
+### libqi fetched via FetchContent
 
-`libs/qi-stub/` provides headers that match the surface NAO consumes from
-libqi (`qi::Session`, `qi::AnyObject::call`, `Future<T>::value`,
-`qi::registerBaseTypes`). Function bodies are `__builtin_trap()` so the
-symbols link but calling them aborts loudly.
-
-**Why:** the real libqi pulled OpenSSL, Boost, and itself via CMake
-`FetchContent` — a 10+ minute cold build that made iterating on
-`modules/nao/src/nao.cpp` painful. The stub unblocks compile-time work; the
-real libqi can still be fetched by setting `USE_QI_STUB=OFF` on the
-standalone CMake invocation.
+`modules/nao/CMakeLists.txt` fetches libqi from
+`github.com/semio-ai/libqi.git` via CMake `FetchContent` (pinned commit).
+This pulls Boost and OpenSSL transitively — expect ~10 min on a cold build.
 
 ## Engine architecture
 

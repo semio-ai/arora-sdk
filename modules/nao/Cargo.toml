@@ -15,9 +15,6 @@ build = "build.rs"
 
 [features]
 default = []
-# Fetch and link the real libqi (Boost, OpenSSL, slow FetchContent) instead
-# of the header-only stub. Adds ~10 min to a cold build.
-real-libqi = []
 
 [lib]
 path = "src/lib.rs"
