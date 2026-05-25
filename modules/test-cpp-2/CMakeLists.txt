@@ -69,4 +69,5 @@ target_link_options(test-cpp-2 PRIVATE
   -Wl,--no-entry
   -Wl,--export=arora_buffer_alloc
   -Wl,--export=arora_buffer_free
+  -Wl,--allow-multiple-definition
 )
