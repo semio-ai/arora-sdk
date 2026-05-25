@@ -806,6 +806,7 @@ dependencies = [
  "derive_more 2.0.1",
  "regex",
  "serde",
+ "test-rust-wasm",
  "tokio",
  "uuid",
 ]
@@ -1494,7 +1495,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1877,12 +1878,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashbrown"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
-
-[[package]]
 name = "heck"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2161,7 +2156,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.5",
  "serde",
  "serde_core",
 ]
@@ -3028,7 +3023,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3226,7 +3221,7 @@ dependencies = [
 [[package]]
 name = "semio-client"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-client.git?branch=update#877c36fdb133a542f3ca30599fcd690ed3ba01a2"
+source = "git+https://github.com/semio-ai/semio-client.git?branch=update#ad678a33375575227adb4a373a706d6e112c7221"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3249,7 +3244,7 @@ dependencies = [
 [[package]]
 name = "semio-record"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-record.git?branch=update#a79b08cca79a770aafbd5a290ad85751e6d77289"
+source = "git+https://github.com/semio-ai/semio-record.git?branch=master#47950330975ff09d7ee17c23f20642a50ffa6e95"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3266,7 +3261,7 @@ dependencies = [
 [[package]]
 name = "semio-store-rpc"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-store-rpc.git?branch=update#fc42ca9d3348f3de40a57ea3ed5482739e29b90d"
+source = "git+https://github.com/semio-ai/semio-store-rpc.git?branch=update#3d89d39cb5105eea2118521ccce3f8f7406fb8f3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3649,7 +3644,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3675,6 +3670,7 @@ name = "test-cpp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arora-behavior-tree-types-yaml",
  "arora-buffers",
  "arora-module-cli",
  "arora-module-cpp",
@@ -4855,7 +4851,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
