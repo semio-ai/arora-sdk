@@ -41,26 +41,27 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Build workspace
-        run: cargo build --workspace
+        run: cargo build --workspace --release
 
       # Force the wasm32-wasip1 guest module builds before `cargo test`.
       # The arora-behavior-tree tests load the .wasm artifacts from
-      # <workspace>/target/wasm32-wasip1/debug/.
+      # <workspace>/target/wasm32-wasip1/release/ (cfg!(debug_assertions)
+      # is off under --release, so the loader picks the release subdir).
       - name: Build wasm guest modules (wasm32-wasip1)
         run: |
-          cargo build -p test-rust-wasm --target wasm32-wasip1
-          cargo build -p behavior-tree-nodes --target wasm32-wasip1
+          cargo build -p test-rust-wasm --target wasm32-wasip1 --release
+          cargo build -p behavior-tree-nodes --target wasm32-wasip1 --release
 
       # `cargo test --all` covers the wasm-loading-via-wasmtime
       # integration tests under `tests/`. Bindeps drag in the
       # wasm32-wasip1 build of test-rust-wasm + behavior-tree-nodes.
       - name: Test workspace (native + wasm modules via wasmtime)
-        run: cargo test --all
+        run: cargo test --all --release
 
       # Verify arora builds standalone for the browser target with no
       # native host features pulled in.
       - name: Build arora for wasm32-unknown-unknown
-        run: cargo build -p arora --target wasm32-unknown-unknown --no-default-features
+        run: cargo build -p arora --target wasm32-unknown-unknown --no-default-features --release
 
   browser_test:
     runs-on: ubuntu-latest
@@ -107,12 +108,13 @@ jobs:
           version: latest
 
       # The arora-web browser test consumes the wasm32-wasip1 build of
-      # test-rust-wasm; force it via the integration-tests bindep.
+      # test-rust-wasm; build it directly (release to match the host
+      # release build and keep the cache hot).
       - name: Build test guest wasm (wasm32-wasip1)
-        run: cargo build -p arora-integration-tests --tests
+        run: cargo build -p test-rust-wasm --target wasm32-wasip1 --release
 
       - name: Run arora-web browser test (headless Firefox)
-        run: wasm-pack test --headless --firefox crates/arora-web
+        run: wasm-pack test --headless --firefox --release crates/arora-web
 
   markdown-link-check:
     runs-on: ubuntu-latest
