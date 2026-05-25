@@ -92,9 +92,13 @@ jobs:
 
       - name: Install Firefox + geckodriver
         run: |
-          sudo apt-get update
-          sudo apt-get install -y firefox firefox-geckodriver
+          # ubuntu-latest ships Firefox via snap; install geckodriver from
+          # its GitHub release (the apt package "firefox-geckodriver" is
+          # gone on noble).
           firefox --version
+          GECKO_VERSION=v0.34.0
+          curl -sSL "https://github.com/mozilla/geckodriver/releases/download/${GECKO_VERSION}/geckodriver-${GECKO_VERSION}-linux64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin
           geckodriver --version
 
       - name: Install wasm-pack
