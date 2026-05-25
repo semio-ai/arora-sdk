@@ -8,11 +8,9 @@ project(nao CXX)
 #   ARORA_UTIL_LIB              i686-musl static lib (.a)
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp
 #   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
-#   QI_STUB_INCLUDE             libs/qi-stub/include
 # CMAKE_TOOLCHAIN_FILE must be the Mac Homebrew i686-musl toolchain.
 foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
-            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
-            QI_STUB_INCLUDE)
+            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set.")
   endif()
@@ -36,22 +34,13 @@ add_custom_target(generate-nao ALL
     ${GENERATED_DIR}/module.yaml
 )
 
-# libqi: use the in-tree header-only stub. The real libqi is fetched
-# via USE_QI_STUB=OFF but pulls Boost + OpenSSL (slow). Stub functions
-# trap at runtime, which is fine for build-system validation.
-option(USE_QI_STUB "Use header-only libqi stub instead of fetching libqi" ON)
-if(USE_QI_STUB)
-  add_library(qi INTERFACE)
-  target_include_directories(qi INTERFACE ${QI_STUB_INCLUDE})
-else()
-  include(FetchContent)
-  FetchContent_Declare(
-    qi
-    GIT_REPOSITORY https://github.com/semio-ai/libqi.git
-    GIT_TAG 5663c31d674a32c5ec208864ca5acb802e425c40
-  )
-  FetchContent_MakeAvailable(qi)
-endif()
+include(FetchContent)
+FetchContent_Declare(
+  qi
+  GIT_REPOSITORY https://github.com/semio-ai/libqi.git
+  GIT_TAG 5663c31d674a32c5ec208864ca5acb802e425c40
+)
+FetchContent_MakeAvailable(qi)
 
 # Imported targets pointing at the bindep static libs.
 add_library(arora-buffers STATIC IMPORTED GLOBAL)
@@ -71,7 +60,6 @@ add_library(nao SHARED
 )
 add_dependencies(nao generate-nao)
 target_include_directories(nao PRIVATE
-  ${QI_STUB_INCLUDE}
   ${ARORA_INCLUDE_DIR}
   ${GENERATED_DIR}/include
 )

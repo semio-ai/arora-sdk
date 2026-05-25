@@ -31,8 +31,7 @@ engine/
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
 │   └── nao                    cross-built i686-musl cdylib (opt-in)
 ├── libs/
-│   ├── cpp/                   shared C++ helpers used by C++ modules
-│   └── qi-stub/               header-only libqi stub for NAO builds
+│   └── cpp/                   shared C++ helpers used by C++ modules
 ├── tests/                arora-integration-tests crate; end-to-end smoke tests
 ├── docs/
 │   ├── architecture.md        this file

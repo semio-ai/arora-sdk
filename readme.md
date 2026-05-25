@@ -221,9 +221,8 @@ cargo build -p arora-nao
 ```
 
 It cross-compiles to `i686-unknown-linux-musl`, producing
-`target/debug/modules/libnao.so` linked against the libqi header-only
-stub in `libs/qi-stub/`. To fetch and link the real libqi (Boost,
-OpenSSL, slow), add `--features real-libqi`.
+`target/debug/modules/libnao.so` linked against libqi (fetched via CMake
+`FetchContent` on first build; expect ~10 min cold).
 
 ### Testing
 
@@ -299,7 +298,6 @@ flowchart TD
 
   subgraph nao_module [NAO module (opt-in)]
     nao[arora-nao libnao.so i686-musl]
-    qistub[libs qi-stub]
   end
 
   subgraph wasm_guests [wasm32-wasip1 guests]
@@ -386,13 +384,6 @@ What the integration test crate actually drags in:
 - `cargo build -p arora-nao` — builds the NAO cross-compile (opt-in; requires
   i686-unknown-linux-musl toolchain). NAO is excluded from `default-members`,
   so `cargo build --workspace` skips it.
-- `cargo build -p arora-nao --features real-libqi` — fetches and links
-  the real libqi (Boost, OpenSSL) instead of the stub; adds ~10 min to
-  a cold build.
-- `USE_QI_STUB=OFF` (cmake cache variable for `modules/nao/CMakeLists.txt`
-  when invoked standalone) — fetches the real `libqi` from GitHub
-  instead of the in-tree stub. The cargo entry uses `--features real-libqi`
-  instead.
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 
