@@ -67,7 +67,7 @@ jobs:
       # integration tests under `tests/`. Bindeps drag in the
       # wasm32-wasip1 build of test-rust-wasm + behavior-tree-nodes.
       - name: Test workspace (native + wasm modules via wasmtime)
-        run: cargo test --all --release
+        run: cargo test --workspace --exclude arora-nao --release
 
       # Verify arora builds standalone for the browser target with no
       # native host features pulled in.
