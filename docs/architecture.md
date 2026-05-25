@@ -48,39 +48,33 @@ engine/
 
 ## Layers
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│  Front-ends                                                            │
-│  ─ arora-cli (host binary)         ─ arora-web (browser, wasm-bindgen) │
-└─────────────────────────┬──────────────────────────┬───────────────────┘
-                          │                          │
-                          ▼                          ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  Engine: crates/arora                                                  │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ EngineBuilder + Engine (pinned)                                 │   │
-│  │   load_module(ModuleDefinition) → ModuleId                      │   │
-│  │   call(Call) → CallResult                                       │   │
-│  │   arora_dispatch / arora_dispatch_indirect host callbacks       │   │
-│  ├─────────────────────────────────────────────────────────────────┤   │
-│  │  Executor trait                                                 │   │
-│  │   ├─ NativeExecutor   (libloading, host only)    feature: native-host │
-│  │   ├─ WebAssemblyExec. (wasmtime + WASI, host only) feature: wasmtime-host │
-│  │   └─ BrowserExecutor  (js-sys WebAssembly + WASI stubs)             │
-│  │                       (cfg(target_arch = "wasm32"))                  │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────┘
-                          ▲                          ▲
-                          │                          │
-                          │ runtime contract: arora-types Module + Call   │
-                          │                                               │
-┌─────────────────────────┴───────────────────────────────────────────────┐
-│  Modules                                                                │
-│   ─ Rust → wasm32-wasip1     (behavior-tree-nodes, test-rust-wasm)      │
-│   ─ C++  → wasm32-wasip1     (test-cpp, test-cpp-2)                     │
-│   ─ Native cdylib            (polly)                                    │
-│   ─ Cross-compiled cdylib    (nao, i686-musl, opt-in build)             │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph fe["Front-ends"]
+        cli["arora-cli\n(host binary)"]
+        web["arora-web\n(browser · wasm-bindgen)"]
+    end
+
+    subgraph eng["Engine · crates/arora"]
+        subgraph engine_api["EngineBuilder + Engine (pinned)"]
+            api["load_module(ModuleDefinition) → ModuleId\ncall(Call) → CallResult\narora_dispatch / arora_dispatch_indirect"]
+        end
+        subgraph executors["Executor trait"]
+            native_exec["NativeExecutor\nlibloading · host only\nfeature: native-host"]
+            wasm_exec["WebAssemblyExecutor\nwasmtime + WASI · host only\nfeature: wasmtime-host"]
+            browser_exec["BrowserExecutor\njs-sys WebAssembly + WASI stubs\ncfg(target_arch = wasm32)"]
+        end
+    end
+
+    subgraph mods["Modules"]
+        rust_wasm["Rust → wasm32-wasip1\nbehavior-tree-nodes, test-rust-wasm"]
+        cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2"]
+        native_cdylib["Native cdylib\npolly"]
+        cross_cdylib["Cross-compiled cdylib\nnao · i686-musl · opt-in"]
+    end
+
+    fe --> eng
+    mods -->|"runtime contract: arora-types Module + Call"| eng
 ```
 
 ## Engine
