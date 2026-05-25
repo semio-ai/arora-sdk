@@ -2,6 +2,10 @@
 
 Semio Arora is a runtime dedicated to Semio's robotics software.
 
+For a top-down tour of the codebase see [`docs/architecture.md`](docs/architecture.md);
+for the *why* behind the build setup and engine layout see
+[`docs/design_decisions.md`](docs/design_decisions.md).
+
 ## Arora Engine
 
 The engine is the core component, capable of putting together heterogenous modules
@@ -190,7 +194,6 @@ C++ modules each carry their own `CMakeLists.txt` invoked from a
 - A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
   Linux).
 - For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`.
-  Enable the build with `ENABLE_NAO=1`.
 - The WASI SDK is downloaded automatically by `crates/wasi-sdk` into
   `target/wasi-sdk-33/` on first use; no manual install needed.
 
@@ -211,15 +214,16 @@ This produces:
   **host** by default — `cargo test -p test-rust-wasm` runs natively.
   Their wasm flavour is produced on demand (see *Testing* below).
 
-The NAO module is gated:
+The NAO module is opt-in and requires the i686-unknown-linux-musl cross-toolchain:
 
 ```bash
-ENABLE_NAO=1 cargo build -p arora-nao
+cargo build -p arora-nao
 ```
 
 It cross-compiles to `i686-unknown-linux-musl`, producing
 `target/debug/modules/libnao.so` linked against the libqi header-only
-stub in `libs/qi-stub/`.
+stub in `libs/qi-stub/`. To fetch and link the real libqi (Boost,
+OpenSSL, slow), add `--features real-libqi`.
 
 ### Testing
 
@@ -293,7 +297,7 @@ flowchart TD
     polly[polly libpolly]
   end
 
-  subgraph nao_module [NAO module ENABLE_NAO=1]
+  subgraph nao_module [NAO module (opt-in)]
     nao[arora-nao libnao.so i686-musl]
     qistub[libs qi-stub]
   end
@@ -379,10 +383,16 @@ What the integration test crate actually drags in:
 
 ### Build flags & options
 
-- `ENABLE_NAO=1` — enables the NAO cross-compile (off by default).
+- `cargo build -p arora-nao` — builds the NAO cross-compile (opt-in; requires
+  i686-unknown-linux-musl toolchain). NAO is excluded from `default-members`,
+  so `cargo build --workspace` skips it.
+- `cargo build -p arora-nao --features real-libqi` — fetches and links
+  the real libqi (Boost, OpenSSL) instead of the stub; adds ~10 min to
+  a cold build.
 - `USE_QI_STUB=OFF` (cmake cache variable for `modules/nao/CMakeLists.txt`
   when invoked standalone) — fetches the real `libqi` from GitHub
-  instead of the in-tree stub. The cargo entry always uses the stub.
+  instead of the in-tree stub. The cargo entry uses `--features real-libqi`
+  instead.
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 
