@@ -52,7 +52,7 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Build workspace
-        run: cargo build --workspace --release
+        run: cargo build --workspace --exclude arora-nao --release
 
       # Force the wasm32-wasip1 guest module builds before `cargo test`.
       # The arora-behavior-tree tests load the .wasm artifacts from
