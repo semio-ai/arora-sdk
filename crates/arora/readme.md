@@ -4,21 +4,37 @@ Welcome to the core of the project!
 
 ## WASM Executor
 
-The Arora engine uses [`wasmtime`](https://docs.wasmtime.dev/)
-to run WASM modules, advertised with
-[a custom module description format (or schema)](https://github.com/semio-ai/arora-types).
-This is called an [`Executor`](src/executor/mod.rs),
-and other ones may be supported in the future.
+The Arora engine runs WASM modules — advertised with
+[a custom module description format (or schema)](https://github.com/semio-ai/arora-types) —
+through pluggable [`Executor`](src/executor/mod.rs) implementations.
+Two are shipped today:
+
+- [`wasm::WebAssemblyExecutor`](src/executor/wasm/mod.rs) hosts modules
+  via [`wasmtime`](https://docs.wasmtime.dev/) on native targets.
+  Gated behind the default `wasmtime-host` feature.
+- [`browser::BrowserExecutor`](src/executor/browser/mod.rs) hosts modules
+  via the browser's native `WebAssembly` runtime when `arora` itself is
+  compiled to `wasm32-unknown-unknown`. The JS-facing wrapper lives in
+  [`arora-web`](../arora-web/readme.md).
+
+Both expose the same ABI to guests (`arora_buffer_alloc`/`free`,
+`arora_function_<uuid>` exports, `arora_dispatch` / `arora_dispatch_indirect`
+imports), so a module compiled once runs in either host.
 
 ## Native Executor
 
-A [`NativeExecutor`] is available and is capable of loading native dynamic libraries,
-and call the functions declared in the module description.
-Beware of figuring out the right dynamic library extension for the host platform.
+A [`native::NativeExecutor`](src/executor/native.rs) is available and is
+capable of loading native dynamic libraries, and call the functions
+declared in the module description. Beware of figuring out the right
+dynamic library extension for the host platform. Gated behind the
+default `native-host` feature; disabled on `wasm32-*` targets.
 
 ## Calling Module Functions
 
-Once modules are loaded using [`load_module`](src/engine.rs),
+Once modules are loaded — either via [`Engine::load_module`](src/engine.rs)
+directly, or via the [`load::load_module_from_parts`](src/load.rs)
+convenience that takes a parsed `Header` plus the executable bytes and
+also returns the module's function IDs —
 their functions can be called using engine's
 implementation of the [`CallBridge` trait](src/call.rs).
 `arora_call` takes a `Call` description holding generic `Value`s as an input,

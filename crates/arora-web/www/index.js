@@ -48,7 +48,7 @@ async function run() {
     const angle = parseFloat(angleEl.value) || 0;
     const cosCall = {
       id: COS_FN_ID,
-      args: [{ id: COS_ANGLE_PARAM_ID, value: { kind: "scalar", id: "f32", value: angle } }],
+      args: [{ id: COS_ANGLE_PARAM_ID, value: { f32: angle } }],
     };
     const cos = engine.call(JSON.stringify(cosCall));
     log(`cos(${angle}) ->`, cos);

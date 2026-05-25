@@ -37,8 +37,8 @@ swap `--target web` for `--target bundler`.
 cargo test -p arora-integration-tests
 
 # Then run the wasm-bindgen-test in a headless browser:
-wasm-pack test crates/arora-web --headless --firefox
-# (or --chrome — see note below)
+GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox crates/arora-web
+# (or --chrome — see notes below)
 ```
 
 The test loads `test-rust-wasm.wasm` through `Engine.loadModule` and
@@ -47,6 +47,13 @@ calls `ping`, asserting the round-trip works.
 > **Browser pick:** `wasm-pack` downloads a pinned `chromedriver`; if it
 > doesn't match the locally installed Chrome it 404s. Firefox /
 > geckodriver is more forgiving; CI uses `--firefox`.
+>
+> **Apple Silicon:** the `geckodriver` wasm-pack auto-downloads is
+> x86_64 and SIGABRTs under Rosetta with a "rosetta error: Attachment
+> of code signature supplement failed" message. Install a native arm64
+> driver (`brew install geckodriver`) and point at it via the
+> `GECKODRIVER` env var (as shown above). Same idea for `chromedriver`
+> via the `CHROMEDRIVER` env var.
 
 ## Demo page
 
