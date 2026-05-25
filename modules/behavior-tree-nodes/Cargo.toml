@@ -31,3 +31,8 @@ arora-module-core = { path = "../../crates/arora-module-core" }
 arora-module-rust = { path = "../../crates/arora-module-rust" }
 arora-registry = { path = "../../crates/arora-registry" }
 tokio = { version = "1", features = ["full"] }
+# The build script reads test-rust-wasm's generated module.yaml header
+# (produced by test-rust-wasm's own build.rs). Declared here to force
+# build order on a cold checkout where the generated dir doesn't yet
+# exist; the artifact itself is unused.
+test-rust-wasm = { path = "../test-rust-wasm" }
