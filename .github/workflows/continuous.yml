@@ -45,10 +45,11 @@ jobs:
 
       # Force the wasm32-wasip1 guest module builds before `cargo test`.
       # The arora-behavior-tree tests load the .wasm artifacts from
-      # <workspace>/target/wasm32-wasip1/debug/; arora-integration-tests'
-      # bindeps populate that directory.
+      # <workspace>/target/wasm32-wasip1/debug/.
       - name: Build wasm guest modules (wasm32-wasip1)
-        run: cargo build -p arora-integration-tests --tests
+        run: |
+          cargo build -p test-rust-wasm --target wasm32-wasip1
+          cargo build -p behavior-tree-nodes --target wasm32-wasip1
 
       # `cargo test --all` covers the wasm-loading-via-wasmtime
       # integration tests under `tests/`. Bindeps drag in the
