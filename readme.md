@@ -1,52 +1,35 @@
 # Semio Arora
 
-Semio Arora is a C library (written in Rust) and associated tooling for executing behavior trees in a sandboxed environment.
-
-## Semio Records
-
-This project relies on a notion of records of type
-`Enumeration`, `Structure` or `Module`.
-They are provided by the following Semio projects:
-
-- [Semio Record](https://github.com/semio-ai/semio-record)
-- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
-- [Semio Client](https://github.com/semio-ai/semio-client)
-
-They provide the interface to connect to a
-[Semio Database](https://github.com/semio-ai/semio-db),
-which collects the records of the assets produced by Semio users.
-
-The database does not need to be specified and running at build time.
-At runtime, you can specify it by providing a
-[Semio Client Configuration](https://github.com/semio-ai/semio-client/blob/master/src/authentication.rs),
-with the command-line option `--config`.
-A config file is typically produced by [Semio Client (`semio-cli`)](https://github.com/semio-ai/semio-client),
-and can be reused in this context.
+Semio Arora is a runtime dedicated to Semio's robotics software.
 
 ## Arora Engine
 
-The Arora Engine is capable of loading types (`Enumeration`s or `Structure`s)
-and `Module`s compiled into WebAssembly modules.
-It can run functions, and provide hooks for the modules to call functions
+The engine is the core component, capable of putting together heterogenous modules
+under an uniform entry point.
+
+Concretely, the Arora Engine is capable of loading `Module`s
+(as defined in [Arora Types](https://docs.rs/arora-types/latest/arora_types/)
+["low" `Module`](https://docs.rs/arora-types/latest/arora_types/module/low/struct.ModuleDefinition.html)),
+and their binary payload, executed either [natively](crates/arora/src/executor/native.rs),
+by [`wasmtime`](crates/arora/src/executor/wasm/mod.rs) or
+a [browser host](crates/arora/src/executor/browser/mod.rs).
+
+It loads and exposes the types declared in the modules (`Enumeration`s or `Structure`s),
+functions, and provides hooks for the modules to call functions
 from the other modules (named `arora_dispatch`),
 or anonymous functions registered on-the-fly
 (named `arora_dispatch_indirect`).
 
-The modules are described locally using a
-[specific schema](https://github.com/semio-ai/arora-types),
-differing slightly from the `Module` data structure
+Note that the module description are described locally using the
+[Arora Types crate](https://github.com/semio-ai/arora-types),
+differing slightly from the `Module`, `Enumeration` or `Structure` data structures
 provided in [Semio Record](https://github.com/semio-ai/semio-record).
-See [modules](#modules).
-
-The types (`Enumeration`s or `Structure`s) as
-[Semio Records](https://github.com/semio-ai/semio-record),
-usually available through a [registry](crates/arora-registry/readme.md).
-They can be saved into files that can be included by command-line tools.
+See [modules](#modules) and [records](#semio-records)
 
 The main command-line tool is [`arora-cli`](crates/arora-cli/readme.md).
 It is used to start an engine, load modules and run functions.
-It is meant to be compiled into native bytecode,
-and load module executables compiled into WebAssembly (wasm32).
+In browsers, the crate [`arora`](crates/arora/readme.md) (the engine's crate),
+should already provide similar functions to start an engine.
 
 ## Modules
 
@@ -75,6 +58,31 @@ corresponds to the function called.
 The first field must be of the same `id` as the function
 and contains the return value.
 The remaining fields correspond to parameters that the call has mutated.
+
+## Semio Records
+
+This project relies on a notion of records of type
+`Enumeration`, `Structure` or `Module`.
+They are provided by the following Semio projects:
+
+- [Semio Record](https://github.com/semio-ai/semio-record)
+- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
+- [Semio Client](https://github.com/semio-ai/semio-client)
+
+They provide the interface to connect to a
+[Semio Database](https://github.com/semio-ai/semio-db),
+which collects the records of the assets produced by Semio users.
+
+The database does not need to be specified and running at build time.
+At runtime, you can specify it by providing a
+[Semio Client Configuration](https://github.com/semio-ai/semio-client/blob/master/src/authentication.rs),
+with the command-line option `--config`.
+A config file is typically produced by [Semio Client (`semio-cli`)](https://github.com/semio-ai/semio-client),
+and can be reused in this context.
+
+The types provided by [Semio Records](https://github.com/semio-ai/semio-record),
+are usually made available through a [registry](crates/arora-registry/readme.md).
+They can be saved into files that can be included by command-line tools.
 
 ## Behavior Trees
 
@@ -241,10 +249,18 @@ crate is the JS-facing wrapper; it hosts guest modules through the
 browser's native `WebAssembly` runtime (no wasmtime).
 
 ```bash
-wasm-pack build crates/arora-web --target web --dev
-wasm-pack test  crates/arora-web --headless --firefox
+wasm-pack build --target web --dev crates/arora-web
+GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox crates/arora-web
 crates/arora-web/www/serve.sh    # demo page on :8080
 ```
+
+> `wasm-pack test` requires flags **before** the crate path.
+>
+> On Apple Silicon, the `geckodriver` wasm-pack auto-downloads is
+> x86_64-only and SIGABRTs under Rosetta. Install a native arm64
+> build (`brew install geckodriver`) and point at it via the
+> `GECKODRIVER` env var. The same applies to `--chrome` /
+> `chromedriver`.
 
 See [`crates/arora-web/readme.md`](crates/arora-web/readme.md) for
 details.
