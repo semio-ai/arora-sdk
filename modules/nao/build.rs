@@ -10,13 +10,12 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=module.yaml");
     println!("cargo:rerun-if-changed=mac-homebrew-i686.toolchain.cmake");
-    println!("cargo:rerun-if-env-changed=ENABLE_NAO");
 
-    if env::var("ENABLE_NAO").unwrap_or_else(|_| "0".to_string()) != "1" {
+    let use_real_libqi = cfg!(feature = "real-libqi");
+    if use_real_libqi {
         println!(
-            "cargo:warning=arora-nao: ENABLE_NAO != 1, skipping cross-build. Set ENABLE_NAO=1 to build the NAO module."
+            "cargo:warning=arora-nao: feature 'real-libqi' enabled — will fetch real libqi (Boost, OpenSSL; slow)"
         );
-        return Ok(());
     }
 
     let arora_module_cli_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CLI")?;
@@ -45,6 +44,7 @@ fn main() -> Result<()> {
     // We override cmake-rs's HOST target derivation: it defaults to the
     // build script's TARGET (aarch64-apple-darwin) and injects OSX-specific
     // flags, which collide with the i686-unknown-linux-musl cross toolchain.
+    let use_qi_stub = if use_real_libqi { "OFF" } else { "ON" };
     let dst = cmake::Config::new(&manifest_dir)
         .target("i686-unknown-linux-musl")
         .host("i686-unknown-linux-musl")
@@ -57,6 +57,7 @@ fn main() -> Result<()> {
         .define("ARORA_BUFFERS_LIB", &arora_buffers_lib)
         .define("ARORA_UTIL_LIB", &arora_util_lib)
         .define("QI_STUB_INCLUDE", &qi_stub_include)
+        .define("USE_QI_STUB", use_qi_stub)
         .build_target("nao")
         .very_verbose(false)
         .build();

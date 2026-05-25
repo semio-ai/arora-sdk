@@ -8,6 +8,17 @@ license = "Proprietary"
 description = "NAO bridge module — cross-compiled for i686-unknown-linux-musl"
 build = "build.rs"
 
+# Building this crate requires:
+#   - Mac: brew install messense/macos-cross-toolchains/i686-unknown-linux-musl
+#   - Linux: i686-unknown-linux-musl-gcc in $PATH (or configured in .cargo/config.toml)
+# Without the cross-toolchain, cargo build -p arora-nao will fail.
+
+[features]
+default = []
+# Fetch and link the real libqi (Boost, OpenSSL, slow FetchContent) instead
+# of the header-only stub. Adds ~10 min to a cold build.
+real-libqi = []
+
 [lib]
 path = "src/lib.rs"
 

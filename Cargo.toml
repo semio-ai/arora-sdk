@@ -26,6 +26,33 @@ members = [
   "tests",
 ]
 
+# NAO module is opt-in: it requires i686-unknown-linux-musl cross-toolchain
+# (Mac: brew install messense/macos-cross-toolchains/i686-unknown-linux-musl)
+# Build explicitly with: cargo build -p arora-nao
+default-members = [
+  "crates/arora",
+  "crates/arora-buffers",
+  "crates/arora-module-core",
+  "crates/arora-module-cli",
+  "crates/arora-module-cpp",
+  "crates/arora-module-rust",
+  "crates/arora-registry",
+  "crates/arora-cli",
+  "crates/arora-util",
+  "crates/arora-vfs",
+  "crates/arora-web",
+  "crates/arora-behavior-tree",
+  "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree-types-yaml",
+  "crates/wasi-sdk",
+  "modules/polly",
+  "modules/test-rust-wasm",
+  "modules/behavior-tree-nodes",
+  "modules/test-cpp",
+  "modules/test-cpp-2",
+  "tests",
+]
+
 [profile.release]
 lto = "thin"
 debug = 1
