@@ -29,3 +29,7 @@ arora-module-cpp = { path = "../../crates/arora-module-cpp", artifact = "bin" }
 # wasm32-wasip1 static libraries the C++ links against.
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip1" }
 arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip1" }
+# The build.rs reads the records/ directory populated by this crate's
+# build script — declared here purely to force build-order so a cold
+# `cargo build --workspace` works without prior builds.
+arora-behavior-tree-types-yaml = { path = "../../crates/arora-behavior-tree-types-yaml" }
