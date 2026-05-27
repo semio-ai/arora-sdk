@@ -296,7 +296,7 @@ flowchart TD
     polly[polly libpolly]
   end
 
-  subgraph nao_module [NAO module (opt-in)]
+  subgraph nao_module [NAO module - opt-in]
     nao[arora-nao libnao.so i686-musl]
   end
 
