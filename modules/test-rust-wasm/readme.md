@@ -12,6 +12,15 @@ This module exports symbols imported by the module
 and is used in the tests of the
 [Behavior Tree library](../../crates/arora-behavior-tree/readme.md).
 
+Exported functions:
+
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `ping` | `() -> string` | Returns `"pong"` |
+| `succeed` | `() -> Status` | Always `Status::Success` |
+| `cos` | `(angle: f32) -> f32` | Wraps `f32::cos` |
+| `add` | `(a: f32, b: f32) -> f32` | Returns `a + b` |
+
 ## Requirements
 
 You need Rust installed, and `cargo component` to be installed first.

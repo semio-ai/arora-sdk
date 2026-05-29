@@ -38,6 +38,12 @@ and can be `Success`, `Failure` or `Running`.
 **Any function of a module that returns a `behavior_tree::Status`
 can be used by a node, and nodes can refer only to such functions.**
 
+Alternatively, a node may set `return_binding` to an `Expression`
+pointing at a blackboard variable. In that case the function's raw
+return value is written to the variable after each tick, and the node
+always reports `Status::Success` to its parent. This lets non-Status
+functions (e.g. `add`, `cos`) participate in a behavior tree.
+
 Setting up the runtime requires a [`CallBridge`](../arora/readme.md#calling-module-functions),
 which the [Arora engine](../arora/readme.md) implements.
 The setup mechanism will compute every binding of node arguments,
