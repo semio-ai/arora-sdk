@@ -807,11 +807,10 @@ pub mod tests {
   /// Pass a String where add() expects f32. The WASM export handler asserts the
   /// type, causing a trap. Currently the trap cleanup path panics (wasmtime-wasi
   /// tries to block_on inside a tokio runtime) rather than returning a clean Err.
-  /// This test documents the observed behaviour; the TODO is to make export
-  /// handlers return an error code instead of asserting.
-  #[should_panic]
+  /// Passing a String where a Float is expected now returns a clean Guest error
+  /// instead of panicking via WASM trap.
   #[tokio::test]
-  pub async fn type_mismatch_panics() {
+  pub async fn type_mismatch_returns_error() {
     let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
     let behavior = add_raw(
       Expression::Value(Value::String("hello".to_string())),
@@ -826,8 +825,12 @@ pub mod tests {
     let mut runtime =
       BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
-    // This panics (via WASM trap + async cleanup failure) rather than returning Err.
-    let _ = runtime.tick();
+    let tick_result = runtime.tick();
+    assert!(
+      tick_result.is_err(),
+      "expected an error from type mismatch, got: {:?}",
+      tick_result
+    );
   }
 
   lazy_static::lazy_static! {
