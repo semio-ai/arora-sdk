@@ -15,6 +15,7 @@ use wasmtime_wasi::IoView;
 use wasmtime_wasi::{preview1::WasiP1Ctx, WasiCtxBuilder};
 
 use arora_buffers::serde_uuid::serialize;
+use arora_buffers::{BUFFER_SIZE_SIZE, TYPE_ERROR};
 use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
@@ -397,6 +398,21 @@ impl Module for WebAssemblyModule {
           e
         ),
       })?;
+
+    // Check for a guest-side error (TYPE_ERROR at payload start).
+    if result_buffer.get(BUFFER_SIZE_SIZE) == Some(&TYPE_ERROR) {
+      let msg_start = BUFFER_SIZE_SIZE + 1;
+      let message = if result_buffer.len() >= msg_start + 4 {
+        let len = u32::from_le_bytes(result_buffer[msg_start..msg_start + 4].try_into().unwrap()) as usize;
+        let str_start = msg_start + 4;
+        std::str::from_utf8(&result_buffer[str_start..str_start + len])
+          .unwrap_or("<invalid utf-8>")
+          .to_string()
+      } else {
+        "guest returned error (no message)".to_string()
+      };
+      return Err(DispatchError::Guest { message });
+    }
 
     Ok(result_buffer.into_boxed_slice())
   }
