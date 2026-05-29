@@ -1,0 +1,81 @@
+id: aa32e080-b002-428c-9994-6143aab3bf08
+author: Semio
+description: Vizij animation core exposed as an Arora module facade
+license: Proprietary
+name: vizij-animation
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: c4133d3e-7810-407b-9a56-a766dcd4bcc4
+    name: reset_engine
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 1c33962c-15d9-4145-bacd-8587ad90c1f1
+    name: load_stored_animation
+    parameters:
+      - id: 1492dad1-ee96-4c47-aea4-d0d5d2a7246b
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: babce4a6-3726-448d-8827-f6e83c782846
+    name: create_player
+    parameters:
+      - id: 66487751-dd85-4303-8e8d-63b0c486fd63
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 29556829-cb8c-41e0-9bd1-a3b0a5350032
+    name: add_instance
+    parameters:
+      - id: ec7b89f6-7d81-4e31-9b29-38fdc78a461b
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 80f5c157-bfc0-457d-9a08-531ba04f5305
+    name: update_nodes_writes
+    parameters:
+      - id: b2894b48-8514-4c6d-8b01-ff310c3e7de9
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 0ad5154a-d349-4e10-a270-02e535af27f1
+    name: list_animations
+    ret:
+      kind: scalar
+      id: str
+
+imports: []
+dependencies: []
+executable_mime: application/wasm

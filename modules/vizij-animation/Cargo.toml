@@ -1,0 +1,31 @@
+[package]
+name = "vizij-animation"
+version = "0.1.0"
+edition = "2021"
+description = "Arora module facade for Vizij animation core"
+license = "Proprietary"
+readme = "readme.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arora-buffers = { path = "../../crates/arora-buffers" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
+derive_more = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "0.8.2", features = ["serde", "v4", "stdweb"] }
+vizij-animation-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/animation/vizij-animation-core" }
+
+[dev-dependencies]
+anyhow = "*"
+
+[build-dependencies]
+anyhow = "*"
+arora-module-core = { path = "../../crates/arora-module-core" }
+arora-module-rust = { path = "../../crates/arora-module-rust" }
+arora-registry = { path = "../../crates/arora-registry" }
+tokio = { version = "1", features = ["full"] }
+
+[workspace]
