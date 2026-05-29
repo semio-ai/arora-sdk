@@ -804,6 +804,32 @@ pub mod tests {
     path.to_path_buf()
   }
 
+  /// Pass a String where add() expects f32. The WASM export handler asserts the
+  /// type, causing a trap. Currently the trap cleanup path panics (wasmtime-wasi
+  /// tries to block_on inside a tokio runtime) rather than returning a clean Err.
+  /// This test documents the observed behaviour; the TODO is to make export
+  /// handlers return an error code instead of asserting.
+  #[should_panic]
+  #[tokio::test]
+  pub async fn type_mismatch_panics() {
+    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
+    let behavior = add_raw(
+      Expression::Value(Value::String("hello".to_string())),
+      Expression::Value(Value::F32(1.0)),
+      result.clone(),
+    )
+    .try_into()
+    .expect("tree conversion failed");
+
+    let (mut engine, index) =
+      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+
+    // This panics (via WASM trap + async cleanup failure) rather than returning Err.
+    let _ = runtime.tick();
+  }
+
   lazy_static::lazy_static! {
     pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["test-rust-wasm".to_string(), "behavior-tree-nodes".to_string()];
   }
