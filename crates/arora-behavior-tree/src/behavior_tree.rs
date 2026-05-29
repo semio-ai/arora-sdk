@@ -12,7 +12,7 @@ use arora_types::{
   value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
-use schema::{CallExpression, Node, NodeParameterId};
+use schema::{CallExpression, Expression, Node, NodeParameterId};
 use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
@@ -21,7 +21,6 @@ use crate::{
   arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
   },
-  schema::Expression,
 };
 
 // Runtime.
@@ -284,16 +283,21 @@ fn tick(
     *variable.borrow_mut() = *mutated.value;
   }
 
-  result
-    .ret
-    .try_into()
-    .map_err(|e| BehaviorTreeError::ConversionError(e))
-    .map(|status| {
-      if trace != TraceTick::No {
-        println!("tick {} -> {:?}", node.id, status);
-      }
-      status
-    })
+  if let Some(binding_expr) = &node.return_binding {
+    let var: Option<Rc<RefCell<Value>>> = match binding_expr {
+      Expression::Variable(rc) => Some(rc.clone()),
+      Expression::VariableId(var_id) => variables.borrow().get(var_id).cloned(),
+      _ => None,
+    };
+    if let Some(var) = var {
+      *var.borrow_mut() = result.ret.clone();
+    }
+  }
+  let status: Status = result.ret.try_into().unwrap_or(Status::Success);
+  if trace != TraceTick::No {
+    println!("tick {} -> {:?}", node.id, status);
+  }
+  Ok(status)
 }
 
 /// Specialization of Callable that returns a Status.
