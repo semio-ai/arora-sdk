@@ -7,6 +7,8 @@ pub enum DispatchError {
   FunctionNotFound { id: Uuid },
   Trap { message: String },
   Internal { message: String },
+  /// The guest returned a TYPE_ERROR buffer instead of a result.
+  Guest { message: String },
 }
 
 pub trait Module {
