@@ -26,6 +26,7 @@ pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
     children: None,
     parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), Expression::Variable(value))]),
+    return_binding: None,
   }
 }
 
@@ -46,6 +47,7 @@ pub fn set_str(variable: Expression, value: Expression) -> TreeNode {
         value,
       ),
     ]),
+    return_binding: None,
   }
 }
 
@@ -58,6 +60,7 @@ pub fn unset_str(variable: Expression) -> TreeNode {
       Uuid::from_str("2c84bf0f-4ec2-41a4-83ee-3f92a53be79d").unwrap(),
       variable,
     )]),
+    return_binding: None,
   }
 }
 
@@ -70,6 +73,7 @@ pub fn is_str_set(value: Expression) -> TreeNode {
       Uuid::from_str("c4f1e72d-30fe-400b-a584-f08e93944026").unwrap(),
       value,
     )]),
+    return_binding: None,
   }
 }
 
@@ -82,6 +86,7 @@ pub fn wait_str_set(value: Expression) -> TreeNode {
       Uuid::from_str("8f190079-e519-44d3-ac36-3bfc322e87eb").unwrap(),
       value,
     )]),
+    return_binding: None,
   }
 }
 
@@ -104,6 +109,7 @@ pub fn regex_match(value: Expression, matcher: Expression, first_match: Expressi
         first_match,
       ),
     ]),
+    return_binding: None,
   }
 }
 
@@ -116,6 +122,7 @@ pub fn store(storage: Expression, value: Expression) -> TreeNode {
       (STORE_STORAGE_PARAM_ID.clone(), storage),
       (STORE_VALUE_PARAM_ID.clone(), value),
     ]),
+    return_binding: None,
   }
 }
 
@@ -128,6 +135,7 @@ pub fn increase(storage: Expression, delta: Expression) -> TreeNode {
       (INCREASE_STORAGE_PARAM_ID.clone(), storage),
       (INCREASE_DELTA_PARAM_ID.clone(), delta),
     ]),
+    return_binding: None,
   }
 }
 
@@ -147,6 +155,7 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
       SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(),
       Expression::Value(Value::U16(0)),
     )]),
+    return_binding: None,
   }
 }
 
@@ -171,6 +180,7 @@ pub fn cos(angle: Expression, res: Expression) -> TreeNode {
       (COS_ANGLE_PARAM_ID.clone(), angle),
       (COS_RES_PARAM_ID.clone(), res),
     ]),
+    return_binding: None,
   }
 }
 
@@ -226,6 +236,46 @@ pub const PARALLEL_FUNCTION_ID: Uuid = Uuid::from_bytes([
   0xa9, 0x34, 0x02, 0x89, 0x1f, 0x30, 0x41, 0x1f, 0x9f, 0xaa, 0x0f, 0x07, 0xd5, 0x46, 0x13, 0xe8,
 ]);
 
+// Direct action nodes from test-rust-wasm (non-Status returns via return_binding)
+//==============================================================
+#[allow(unused)]
+pub fn cos_raw(angle: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
+  TreeNode {
+    function: TEST_RUST_WASM_COS_FUNCTION_ID,
+    children: None,
+    parameters: HashMap::from([(TEST_RUST_WASM_COS_ANGLE_PARAM_ID, angle)]),
+    return_binding: Some(result),
+  }
+}
+
+#[allow(unused)]
+pub fn add_raw(a: Expression, b: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
+  TreeNode {
+    function: TEST_RUST_WASM_ADD_FUNCTION_ID,
+    children: None,
+    parameters: HashMap::from([
+      (TEST_RUST_WASM_ADD_A_PARAM_ID, a),
+      (TEST_RUST_WASM_ADD_B_PARAM_ID, b),
+    ]),
+    return_binding: Some(result),
+  }
+}
+
+pub const TEST_RUST_WASM_COS_FUNCTION_ID: Uuid = Uuid::from_bytes([
+  0xc1, 0x37, 0x57, 0xcb, 0x23, 0x11, 0x4c, 0x93, 0xab, 0xcc, 0xcb, 0x12, 0xd6, 0xcb, 0xb8, 0x59,
+]);
+pub const TEST_RUST_WASM_COS_ANGLE_PARAM_ID: Uuid = Uuid::from_bytes([
+  0x6c, 0x2a, 0x15, 0x7c, 0x42, 0x35, 0x47, 0xb0, 0xbf, 0xf3, 0x1e, 0xee, 0xf3, 0xe5, 0x74, 0x7d,
+]);
+pub const TEST_RUST_WASM_ADD_FUNCTION_ID: Uuid = Uuid::from_bytes([
+  0xe4, 0xb0, 0xa2, 0xf3, 0x6c, 0x7d, 0x4e, 0x8f, 0x9a, 0x0b, 0x1c, 0x2d, 0x3e, 0x4f, 0x5a, 0x6b,
+]);
+pub const TEST_RUST_WASM_ADD_A_PARAM_ID: Uuid = Uuid::from_bytes([
+  0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x4a, 0x8b, 0x9c, 0x0d, 0xe1, 0xf2, 0xa3, 0xb4, 0xc5, 0xd6,
+]);
+pub const TEST_RUST_WASM_ADD_B_PARAM_ID: Uuid = Uuid::from_bytes([
+  0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0xa7, 0x4b, 0x9c, 0x8d, 0x1e, 0xf2, 0xa3, 0xb4, 0xc5, 0xd6, 0xe7,
+]);
 pub const COS_FUNCTION_ID: Uuid = Uuid::from_bytes([
   0x10, 0x4b, 0x97, 0x10, 0x5d, 0x43, 0x4a, 0x93, 0x94, 0x4c, 0xd6, 0x4b, 0xdd, 0xb3, 0x0e, 0xf8,
 ]);
