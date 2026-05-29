@@ -94,13 +94,12 @@ impl Executor for BrowserExecutor {
     // env.arora_dispatch_indirect
     let late_di = late.clone();
     let dispatch_indirect_cb =
-      Closure::<dyn FnMut(f64) -> u32>::new(move |callable_id_f: f64| {
+      Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
         let late = late_di.borrow();
         let late = late.as_ref().expect("late-bound state not set");
         let engine = unsafe { &mut *(engine_ptr as *mut Engine) };
-        let callable_id = callable_id_f as u64;
         let value = engine
-          .arora_call_indirect(&CallableId { id: callable_id })
+          .arora_call_indirect(&CallableId { id: callable_id as u64 })
           .expect("arora_dispatch_indirect: engine call failed");
         let buf = serialize_value(&value);
         let addr = call_u32_u32(&late.malloc, buf.len() as u32)
@@ -194,7 +193,7 @@ struct BrowserModule {
   arora_functions: HashMap<Uuid, Function>,
   // Closures must outlive the instance.
   _dispatch_cb: Closure<dyn FnMut(u32, u32, u32) -> u32>,
-  _dispatch_indirect_cb: Closure<dyn FnMut(f64) -> u32>,
+  _dispatch_indirect_cb: Closure<dyn Fn(i64) -> u32>,
   _wasi_keepalive: Vec<JsValue>,
   _late: Rc<RefCell<Option<LateBound>>>,
 }
