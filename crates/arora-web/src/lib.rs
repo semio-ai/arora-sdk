@@ -228,6 +228,20 @@ impl Callable for NodeCallable {
       });
     }
 
+    // Build a map of param_id -> variable_id for mutable arguments so we can
+    // write mutated values back to the variable store after the call.
+    let mutable_param_vars: HashMap<Uuid, Uuid> = self
+      .arguments
+      .iter()
+      .filter_map(|(&param_id, expr)| {
+        if let BtExpression::VariableId(var_id) = expr {
+          Some((param_id, *var_id))
+        } else {
+          None
+        }
+      })
+      .collect();
+
     let result = caller.arora_call(
       &self.module_id,
       Call {
@@ -236,6 +250,13 @@ impl Callable for NodeCallable {
         args,
       },
     )?;
+
+    // Write back mutated parameter values to bound variables.
+    for mutated in &result.mutated {
+      if let Some(&var_id) = mutable_param_vars.get(&mutated.id) {
+        self.variables.borrow_mut().insert(var_id, *mutated.value.clone());
+      }
+    }
 
     if let Some(var_id) = &self.return_binding {
       self.variables.borrow_mut().insert(*var_id, result.ret.clone());
