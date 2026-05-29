@@ -38,6 +38,7 @@ fn main() {
     .rename_item("TYPE_OPTION", "ARORA_BUFFER_TYPE_OPTION")
     .rename_item("TYPE_UUID", "ARORA_BUFFER_TYPE_UUID")
     .rename_item("TYPE_VALUE", "ARORA_BUFFER_TYPE_VALUE")
+    .rename_item("TYPE_ERROR", "ARORA_BUFFER_TYPE_ERROR")
     .rename_item("GetMapResult", "arora_get_map_result")
     .with_include_guard("_ARORA_BUFFER_H_")
     .generate()

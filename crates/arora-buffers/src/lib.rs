@@ -27,6 +27,7 @@ pub const TYPE_MAP: u8 = 16;
 pub const TYPE_OPTION: u8 = 17;
 pub const TYPE_UUID: u8 = 18;
 pub const TYPE_VALUE: u8 = 19;
+pub const TYPE_ERROR: u8 = 20;
 
 const ALIGNMENT: usize = 8;
 
