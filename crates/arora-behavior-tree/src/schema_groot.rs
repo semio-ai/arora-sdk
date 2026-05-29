@@ -85,6 +85,7 @@ impl Node {
       function: function.function_id,
       children: None,
       parameters,
+      return_binding: None,
     })
   }
 

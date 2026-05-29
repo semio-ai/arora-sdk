@@ -24,6 +24,11 @@ pub struct Node {
   /// Child nodes, if any.
   #[serde(default)]
   pub children: Option<Vec<Uuid>>,
+
+  /// If set, the function's return value is written here on each tick.
+  /// Useful for non-Status-returning functions; the node always reports Success.
+  #[serde(default)]
+  pub return_binding: Option<Expression>,
 }
 
 impl Display for Node {
