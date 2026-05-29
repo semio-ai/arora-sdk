@@ -864,10 +864,16 @@ async fn generate_module_source(
       let call_check = quote! {
         let mut reader = BufferReader::new(&input);
         let type_raw_id_opt = reader.next_type();
-        assert!(!type_raw_id_opt.is_none());
-        assert_eq!(type_raw_id_opt.unwrap(), TYPE_STRUCTURE);
+        if type_raw_id_opt.is_none() {
+          return Err("input is empty".to_string());
+        }
+        if type_raw_id_opt.unwrap() != TYPE_STRUCTURE {
+          return Err(format!("expected structure input, got type {:?}", type_raw_id_opt));
+        }
         let (structure_raw_id, field_count) = reader.get_structure();
-        assert_eq!(#const_id_ident, structure_raw_id);
+        if structure_raw_id != &#const_id_ident {
+          return Err("function id mismatch in input".to_string());
+        }
       };
 
       let param_declarations = {
@@ -888,7 +894,7 @@ async fn generate_module_source(
           let param_const_id_ident = function_param_const_id_ident(&export.name, &param.name);
           let param_var_ident = param_ident(param_id, param);
           let deserialize =
-            generate_deserialize_from_frozen(&param.ty, registry, CheckType::Yes).await?;
+            generate_deserialize_from_frozen(&param.ty, registry, CheckType::YesResult).await?;
           deserialization_cases.push(quote! {
             if field_raw_id == #param_const_id_ident {
               #param_var_ident = Some(#deserialize);
@@ -900,7 +906,9 @@ async fn generate_module_source(
 
       let deserialize_params = if function_symbol.parameters.is_empty() {
         quote! {
-          assert_eq!(0, field_count);
+          if field_count != 0 {
+            return Err(format!("expected 0 parameters but got {}", field_count));
+          }
         }
       } else {
         quote! {
@@ -908,7 +916,7 @@ async fn generate_module_source(
           for _ in 0..field_count {
             let field_raw_id = reader.get_structure_field();
             #(#deserialization_cases else)* {
-              panic!("buffer contains an unexpected parameter: {:?}", field_raw_id);
+              return Err(format!("unexpected parameter {:?}", field_raw_id));
             }
           }
         }
@@ -979,15 +987,24 @@ async fn generate_module_source(
           let input = unsafe {
             std::slice::from_raw_parts(input_ptr, INPUT_SIZE_SIZE + input_size)
           };
-          #call_check
-          #deserialize_params
-          let mut writer = BufferWriter::new();
-          writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
-          writer.add_structure_field(&#const_id_ident);
-          #call_and_write_result
-          #(#write_mutated_params)*
-          let result_buffer = writer.finalize();
-          Box::leak(result_buffer).as_ptr() as usize
+          let _result: ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> = (|| {
+            #call_check
+            #deserialize_params
+            let mut writer = BufferWriter::new();
+            writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
+            writer.add_structure_field(&#const_id_ident);
+            #call_and_write_result
+            #(#write_mutated_params)*
+            ::std::result::Result::Ok(writer.finalize())
+          })();
+          match _result {
+            ::std::result::Result::Ok(buf) => ::std::boxed::Box::leak(buf).as_ptr() as usize,
+            ::std::result::Result::Err(msg) => {
+              let mut writer = BufferWriter::new();
+              writer.add_error(&msg);
+              ::std::boxed::Box::leak(writer.finalize()).as_ptr() as usize
+            }
+          }
         }
       });
     }
@@ -1157,14 +1174,25 @@ async fn generate_deserialize_from_frozen(
       let generate_deserialize = |deserialize: TokenStream| {
         let type_check = match check_type {
           CheckType::Yes => quote! {
-            assert_eq!(reader.next_type(), Some(#type_kind_ident));
+            {
+              let _next_type = reader.next_type();
+              assert_eq!(_next_type, Some(#type_kind_ident), "type mismatch");
+            }
+          },
+          CheckType::YesResult => quote! {
+            {
+              let _next_type = reader.next_type();
+              if _next_type != Some(#type_kind_ident) {
+                return Err(format!("type mismatch: expected {:?} but got {:?}", #type_kind_ident, _next_type));
+              }
+            }
           },
           CheckType::No => quote! {},
         };
-        quote! {(|| {
+        quote! {{
             #type_check
             #deserialize
-          })()
+          }
         }
       };
 
@@ -1174,15 +1202,32 @@ async fn generate_deserialize_from_frozen(
       };
 
       let generate_deserialize_array = |deserialize_array: TokenStream| {
-        let array_type_check = quote! {
-          assert_eq!(reader.next_type(), Some(TYPE_ARRAY));
-          let (ty, count) = reader.get_array();
-          assert_eq!(ty, #type_kind_ident);
+        let array_type_check = match check_type {
+          CheckType::Yes => quote! {
+            {
+              let _at = reader.next_type();
+              assert_eq!(_at, Some(TYPE_ARRAY));
+            }
+            let (ty, count) = reader.get_array();
+            assert_eq!(ty, #type_kind_ident);
+          },
+          _ => quote! {
+            {
+              let _at = reader.next_type();
+              if _at != Some(TYPE_ARRAY) {
+                return Err(format!("expected array, got {:?}", _at));
+              }
+            }
+            let (ty, count) = reader.get_array();
+            if ty != #type_kind_ident {
+              return Err(format!("expected array element type {:?}, got {:?}", #type_kind_ident, ty));
+            }
+          },
         };
-        quote! {(|| {
+        quote! {{
             #array_type_check
             #deserialize_array
-          })()
+          }
         }
       };
       Ok(match primitive.kind {
@@ -1252,14 +1297,20 @@ async fn generate_deserialize_from_frozen(
       let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
         .await
         .map_err(GenerationError::RegistryError)?;
-      let check_type = check_type == CheckType::Yes;
+      let check_type_bool = check_type != CheckType::No;
       let type_ident =
         type_ident_from_id(&scalar.reference.id, registry, PrefixWithMod::Yes).await?;
       let type_str = type_ident.to_string();
-      Ok(
-        quote! { #mod_prefix deserialize_from_reader(&mut reader, #check_type)
-        .expect(format!("failed to deserialize value of type {}", #type_str).as_str()) },
-      )
+      Ok(match check_type {
+        CheckType::YesResult => quote! {
+          #mod_prefix deserialize_from_reader(&mut reader, #check_type_bool)
+            .map_err(|e| format!("failed to deserialize {}: {}", #type_str, e))?
+        },
+        _ => quote! {
+          #mod_prefix deserialize_from_reader(&mut reader, #check_type_bool)
+            .expect(&format!("failed to deserialize {}", #type_str))
+        },
+      })
     }
     FrozenTy::FrozenArray(array) => {
       let type_ident =
@@ -1282,17 +1333,46 @@ async fn generate_deserialize_from_frozen(
         _ => unreachable!("unexpected type of element in array"),
       };
       let raw_id = RawUuidValue(&array.reference.id);
-      Ok(quote! {(|| {
-        assert_eq!(reader.next_type(), Some(TYPE_ARRAY));
-        let (ty, count) = reader.get_array();
-        assert_eq!(ty, #type_enum);
-        assert_eq!(reader.get_structure_field(), #raw_id);
+      let array_checks = match check_type {
+        CheckType::Yes => quote! {
+          {
+            let _at = reader.next_type();
+            assert_eq!(_at, Some(TYPE_ARRAY));
+          }
+          let (ty, count) = reader.get_array();
+          assert_eq!(ty, #type_enum);
+          {
+            let _id = reader.get_structure_field();
+            assert_eq!(_id, &#raw_id);
+          }
+        },
+        _ => quote! {
+          {
+            let _at = reader.next_type();
+            if _at != Some(TYPE_ARRAY) {
+              return Err(format!("expected array, got {:?}", _at));
+            }
+          }
+          let (ty, count) = reader.get_array();
+          if ty != #type_enum {
+            return Err(format!("expected array element type {:?}, got {:?}", #type_enum, ty));
+          }
+          {
+            let _id = reader.get_structure_field();
+            if _id != &#raw_id {
+              return Err("array type id mismatch".to_string());
+            }
+          }
+        },
+      };
+      Ok(quote! {{
+        #array_checks
         let mut res = Vec::<#type_ident>::with_capacity(count as usize);
         for _i in 0..count {
           res.push(#deserialize_element);
         }
         res
-      })()})
+      }})
     }
   }
 }
@@ -1579,7 +1659,10 @@ fn mod_ident_from_path(path: &String) -> TokenStream {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CheckType {
+  /// assert_eq!-based checks — panics on mismatch (struct/import deserialization contexts)
   Yes,
+  /// return Err(String) — for export handler Result<Box<[u8]>, String> closure context
+  YesResult,
   No,
 }
 
