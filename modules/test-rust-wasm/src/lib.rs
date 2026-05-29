@@ -16,6 +16,10 @@ fn cos(angle: Option<f32>) -> f32 {
   angle.unwrap().cos()
 }
 
+fn add(a: Option<f32>, b: Option<f32>) -> f32 {
+  a.unwrap() + b.unwrap()
+}
+
 // Tests
 //====================================================================================
 #[cfg(test)]
