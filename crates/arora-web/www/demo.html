@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>add+cos behavior-tree demo — Arora engine</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: ui-monospace, monospace;
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 1.25rem 2rem 0.75rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.2rem; color: #f8fafc; }
+    header p  { margin: 0; font-size: 0.8rem; color: #94a3b8; }
+    main { flex: 1; display: flex; gap: 0; }
+
+    #tree-panel {
+      flex: 1;
+      padding: 1.5rem 2rem;
+      overflow: auto;
+    }
+    #tree-panel h2 { margin: 0 0 1rem; font-size: 0.85rem; letter-spacing: 0.05em; color: #94a3b8; text-transform: uppercase; }
+    #tree-svg { display: block; width: 100%; max-width: 640px; }
+
+    #side-panel {
+      width: 300px;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid #1e293b;
+      padding: 1.25rem;
+      gap: 1rem;
+    }
+    #side-panel h2 { margin: 0; font-size: 0.85rem; letter-spacing: 0.05em; color: #94a3b8; text-transform: uppercase; }
+
+    button {
+      padding: 0.6rem 1.2rem;
+      font: inherit;
+      font-weight: 600;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: #2563eb; }
+    button:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+    #reset-btn { background: #475569; }
+    #reset-btn:hover:not(:disabled) { background: #334155; }
+    .btn-row { display: flex; gap: 0.5rem; align-items: center; }
+    .tick-badge {
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+
+    .var-box {
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.75rem;
+    }
+    .var-box .label { font-size: 0.75rem; color: #64748b; margin-bottom: 0.5rem; }
+    .var-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 0.25rem 0;
+      border-bottom: 1px solid #0f172a;
+    }
+    .var-row:last-child { border-bottom: none; }
+    .var-name { font-size: 0.85rem; color: #93c5fd; }
+    .var-value { font-size: 0.95rem; font-weight: bold; color: #4ade80; }
+
+    #status-box {
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.75rem;
+    }
+    #status-box .label { font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem; }
+    #status-value { font-size: 1.1rem; font-weight: bold; color: #94a3b8; }
+    #status-value.success { color: #4ade80; }
+    #status-value.failure { color: #f87171; }
+    #status-value.running { color: #fbbf24; }
+
+    #log-box {
+      flex: 1;
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.75rem;
+      overflow-y: auto;
+    }
+    #log-box .label { font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem; }
+    #log { font-size: 0.75rem; color: #94a3b8; white-space: pre-wrap; }
+
+    .bt-node rect, .bt-node polygon { stroke-width: 2; transition: fill 0.3s, stroke 0.3s; }
+    .bt-node.unvisited rect, .bt-node.unvisited polygon { fill: #1e293b; stroke: #475569; }
+    .bt-node.success  rect, .bt-node.success  polygon { fill: #14532d; stroke: #4ade80; }
+    .bt-node.failure  rect, .bt-node.failure  polygon { fill: #7f1d1d; stroke: #f87171; }
+    .bt-node.running  rect, .bt-node.running  polygon { fill: #78350f; stroke: #fbbf24; }
+    .bt-node text { fill: #e2e8f0; font-family: ui-monospace, monospace; font-size: 11px; pointer-events: none; }
+    .bt-node .sub { fill: #94a3b8; font-size: 9px; }
+    .bt-edge { stroke: #334155; stroke-width: 1.5; fill: none; transition: stroke 0.3s; }
+    .bt-edge.active { stroke: #3b82f6; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>add + cos behavior-tree demo — Arora engine in the browser</h1>
+    <p>Each tick: <code>x += 0.1</code> via <code>add</code>, then <code>cos_result = cos(x)</code>.
+       Variables persist across ticks via <code>return_binding</code>.</p>
+  </header>
+  <main>
+    <section id="tree-panel">
+      <h2>Tree</h2>
+      <svg id="tree-svg" viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg"></svg>
+    </section>
+    <aside id="side-panel">
+      <h2>Controls</h2>
+      <div class="btn-row">
+        <button id="tick-btn" disabled>Tick</button>
+        <button id="reset-btn" disabled>Reset</button>
+        <span class="tick-badge">tick <span id="tick-count">0</span></span>
+      </div>
+
+      <div id="status-box">
+        <div class="label">Last status</div>
+        <div id="status-value">—</div>
+      </div>
+
+      <div class="var-box">
+        <div class="label">Variables</div>
+        <div class="var-row">
+          <span class="var-name">x</span>
+          <span class="var-value" id="var-x">0.0000</span>
+        </div>
+        <div class="var-row">
+          <span class="var-name">cos(x)</span>
+          <span class="var-value" id="var-cos">1.0000</span>
+        </div>
+      </div>
+
+      <div id="log-box">
+        <div class="label">Log</div>
+        <pre id="log">Loading…</pre>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>
