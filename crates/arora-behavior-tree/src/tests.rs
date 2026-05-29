@@ -244,6 +244,86 @@ pub mod tests {
     Ok(())
   }
 
+  #[tokio::test]
+  pub async fn non_status_cos() -> Result<()> {
+    let angle: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(std::f32::consts::PI)));
+    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
+    let behavior = cos_raw(Expression::Variable(angle.clone()), result.clone()).try_into()?;
+
+    let (mut engine, index) =
+      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+    if let Value::F32(cos_value) = *result.borrow() {
+      assert_f32_near!(std::f32::consts::PI.cos(), cos_value);
+    } else {
+      panic!("result does not hold an f32, got {:?}", *result.borrow());
+    }
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn non_status_add() -> Result<()> {
+    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
+    let behavior = add_raw(
+      Expression::Value(Value::F32(3.0)),
+      Expression::Value(Value::F32(4.0)),
+      result.clone(),
+    )
+    .try_into()?;
+
+    let (mut engine, index) =
+      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+
+    assert_eq!(Status::Success, runtime.tick().unwrap());
+    if let Value::F32(sum) = *result.borrow() {
+      assert_f32_near!(7.0_f32, sum);
+    } else {
+      panic!("result does not hold an f32, got {:?}", *result.borrow());
+    }
+    Ok(())
+  }
+
+  #[tokio::test]
+  pub async fn add_then_cos() -> Result<()> {
+    let x: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
+    let cos_result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
+    let behavior = seq(vec![
+      add_raw(
+        Expression::Variable(x.clone()),
+        Expression::Value(Value::F32(0.1)),
+        x.clone(),
+      ),
+      cos_raw(Expression::Variable(x.clone()), cos_result.clone()),
+    ])
+    .try_into()?;
+
+    let (mut engine, index) =
+      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let mut runtime =
+      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+
+    for i in 1..=5 {
+      assert_eq!(Status::Success, runtime.tick().unwrap());
+      let expected_x = i as f32 * 0.1;
+      if let Value::F32(x_val) = *x.borrow() {
+        assert_f32_near!(expected_x, x_val);
+      } else {
+        panic!("x does not hold an f32");
+      }
+      if let Value::F32(cos_val) = *cos_result.borrow() {
+        assert_f32_near!(expected_x.cos(), cos_val);
+      } else {
+        panic!("cos_result does not hold an f32");
+      }
+    }
+    Ok(())
+  }
+
   #[ignore]
   #[tokio::test]
   pub async fn hello_polly() -> Result<()> {
@@ -272,6 +352,7 @@ pub mod tests {
         Uuid::from_str("fb3787f2-2151-49ce-8b61-6274984558ea").unwrap(),
         text,
       )]),
+      return_binding: None,
     }
   }
 
