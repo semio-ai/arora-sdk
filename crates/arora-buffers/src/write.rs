@@ -1,9 +1,9 @@
 use bytes::BufMut;
 
 use crate::{
-  ALIGNMENT, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32,
-  TYPE_I64, TYPE_I8, TYPE_MAP, TYPE_OPTION, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32,
-  TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UUID,
+  ALIGNMENT, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_ERROR, TYPE_F32, TYPE_F64, TYPE_I16,
+  TYPE_I32, TYPE_I64, TYPE_I8, TYPE_MAP, TYPE_OPTION, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16,
+  TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UUID,
 };
 
 pub struct BufferWriter {
@@ -303,6 +303,11 @@ impl BufferWriter {
   pub fn add_map_field_key(&mut self, key: &str) {
     self.backing.put_u32_le(key.len() as u32);
     self.backing.put_slice(key.as_bytes());
+  }
+
+  pub fn add_error(&mut self, message: &str) {
+    self.backing.put_u8(TYPE_ERROR);
+    self.add_string_raw(message);
   }
 
   pub fn finalize(&mut self) -> Box<[u8]> {
@@ -795,6 +800,19 @@ pub extern "C" fn arora_buffer_writer_add_map_field_key(
     let writer = &mut *writer;
     let key = std::slice::from_raw_parts(key, key_len as usize);
     writer.add_map_field_key(std::str::from_utf8(key).unwrap());
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_add_error(
+  writer: *mut BufferWriter,
+  message: *const u8,
+  message_len: u32,
+) {
+  unsafe {
+    let writer = &mut *writer;
+    let message = std::slice::from_raw_parts(message, message_len as usize);
+    writer.add_error(std::str::from_utf8(message).unwrap_or("invalid utf-8 in error"));
   }
 }
 
