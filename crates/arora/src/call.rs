@@ -45,6 +45,8 @@ pub enum CallError {
   FunctionNotFound { id: Uuid },
   Trap { message: String },
   Internal { message: String },
+  /// The guest returned a structured error via TYPE_ERROR instead of trapping.
+  Guest { message: String },
 }
 
 impl From<DispatchError> for CallError {
@@ -54,6 +56,7 @@ impl From<DispatchError> for CallError {
       DispatchError::FunctionNotFound { id } => CallError::FunctionNotFound { id },
       DispatchError::Trap { message } => CallError::Trap { message },
       DispatchError::Internal { message } => CallError::Internal { message },
+      DispatchError::Guest { message } => CallError::Guest { message },
     }
   }
 }
