@@ -1,0 +1,28 @@
+id: 144358c2-b7e0-414d-8755-56d7ac03f811
+author: Semio
+description: Vizij orchestrator exposed as an Arora module JSON facade
+license: Proprietary
+name: vizij-orchestrator
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: debf32e5-1650-48ac-af4a-da2da617aef7
+    name: dispatch_json
+    parameters:
+      - id: 71b4a759-ded6-42a3-b59d-9716472ac045
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+imports: []
+dependencies: []
+executable_mime: application/wasm

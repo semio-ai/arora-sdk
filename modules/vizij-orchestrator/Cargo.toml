@@ -1,0 +1,32 @@
+[package]
+name = "vizij-orchestrator"
+version = "0.1.0"
+edition = "2021"
+description = "Arora module facade for the Vizij orchestrator runtime"
+license = "Proprietary"
+readme = "readme.md"
+
+[lib]
+name = "arora_vizij_orchestrator"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arora-buffers = { path = "../../crates/arora-buffers" }
+arora-schema = { git = "https://github.com/semio-ai/arora-schema.git", branch = "main" }
+derive_more = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "0.8.2", features = ["serde", "v4", "stdweb"] }
+vizij-orchestrator-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/orchestrator/vizij-orchestrator-core" }
+
+[dev-dependencies]
+anyhow = "*"
+
+[build-dependencies]
+anyhow = "*"
+arora-module-core = { path = "../../crates/arora-module-core" }
+arora-module-rust = { path = "../../crates/arora-module-rust" }
+arora-registry = { path = "../../crates/arora-registry" }
+tokio = { version = "1", features = ["full"] }
+
+[workspace]
