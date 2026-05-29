@@ -1,3 +1,5 @@
 pkg/
 www/pkg/
+www/modules/
+www/behavior-tree-nodes/
 www/test-rust-wasm/

@@ -29,8 +29,8 @@ async function run() {
 
     log("fetching guest header + bytes…");
     const [headerYaml, wasmBytes] = await Promise.all([
-      fetch("./test-rust-wasm/module.yaml").then((r) => r.text()),
-      fetch("./test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
+      fetch("./modules/test-rust-wasm/module.yaml").then((r) => r.text()),
+      fetch("./modules/test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
     ]);
     const header = jsyaml.load(headerYaml);
     const headerJson = JSON.stringify(header);
