@@ -47,7 +47,9 @@ pub struct Engine {
 impl Engine {
   #[wasm_bindgen(constructor)]
   pub fn new() -> Engine {
-    let inner = EngineBuilder::new().add_executor(BrowserExecutor::new()).build();
+    let inner = EngineBuilder::new()
+      .add_executor(BrowserExecutor::new())
+      .build();
     Engine {
       inner,
       function_module: HashMap::new(),
@@ -58,8 +60,8 @@ impl Engine {
   /// Returns the module's UUID as a string.
   #[wasm_bindgen(js_name = loadModule)]
   pub fn load_module(&mut self, header_json: &str, executable: &[u8]) -> Result<String, JsValue> {
-    let header: Header =
-      serde_json::from_str(header_json).map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+    let header: Header = serde_json::from_str(header_json)
+      .map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
     let loaded = load_module_from_parts(
       &mut *self.inner,
       header,
@@ -218,9 +220,12 @@ impl Callable for NodeCallable {
     for (&param_id, expr) in &self.arguments {
       let value = match expr {
         BtExpression::Value(v) => v.clone(),
-        BtExpression::VariableId(var_id) => {
-          self.variables.borrow().get(var_id).cloned().unwrap_or(Value::Unit)
-        }
+        BtExpression::VariableId(var_id) => self
+          .variables
+          .borrow()
+          .get(var_id)
+          .cloned()
+          .unwrap_or(Value::Unit),
       };
       args.push(StructureField {
         id: param_id,
@@ -254,12 +259,18 @@ impl Callable for NodeCallable {
     // Write back mutated parameter values to bound variables.
     for mutated in &result.mutated {
       if let Some(&var_id) = mutable_param_vars.get(&mutated.id) {
-        self.variables.borrow_mut().insert(var_id, *mutated.value.clone());
+        self
+          .variables
+          .borrow_mut()
+          .insert(var_id, *mutated.value.clone());
       }
     }
 
     if let Some(var_id) = &self.return_binding {
-      self.variables.borrow_mut().insert(*var_id, result.ret.clone());
+      self
+        .variables
+        .borrow_mut()
+        .insert(*var_id, result.ret.clone());
     }
 
     let s = if self.return_binding.is_some() {
@@ -340,7 +351,9 @@ pub struct BehaviorTreeRunner {
 impl BehaviorTreeRunner {
   #[wasm_bindgen(constructor)]
   pub fn new() -> BehaviorTreeRunner {
-    let inner = EngineBuilder::new().add_executor(BrowserExecutor::new()).build();
+    let inner = EngineBuilder::new()
+      .add_executor(BrowserExecutor::new())
+      .build();
     BehaviorTreeRunner {
       inner,
       fn_meta: HashMap::new(),
@@ -353,8 +366,8 @@ impl BehaviorTreeRunner {
   /// Returns the module UUID string.
   #[wasm_bindgen(js_name = loadModule)]
   pub fn load_module(&mut self, header_json: &str, executable: &[u8]) -> Result<String, JsValue> {
-    let header: Header =
-      serde_json::from_str(header_json).map_err(|e| JsValue::from_str(&format!("invalid header: {e}")))?;
+    let header: Header = serde_json::from_str(header_json)
+      .map_err(|e| JsValue::from_str(&format!("invalid header: {e}")))?;
     let module_id = header.id;
 
     for export in &header.exports {
@@ -380,9 +393,13 @@ impl BehaviorTreeRunner {
       );
     }
 
-    load_module_from_parts(&mut *self.inner, header, executable.to_vec().into_boxed_slice())
-      .map(|m| m.id.to_string())
-      .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))
+    load_module_from_parts(
+      &mut *self.inner,
+      header,
+      executable.to_vec().into_boxed_slice(),
+    )
+    .map(|m| m.id.to_string())
+    .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))
   }
 
   /// Initialize or update a variable. `var_id` is a UUID string; `value_json`
@@ -405,8 +422,8 @@ impl BehaviorTreeRunner {
   ///
   /// Returns: `{ "status": "...", "trace": [...], "variables": { varId: value } }`
   pub fn tick(&mut self, nodes_json: &str) -> Result<String, JsValue> {
-    let nodes: Vec<BtNode> =
-      serde_json::from_str(nodes_json).map_err(|e| JsValue::from_str(&format!("bad nodes JSON: {e}")))?;
+    let nodes: Vec<BtNode> = serde_json::from_str(nodes_json)
+      .map_err(|e| JsValue::from_str(&format!("bad nodes JSON: {e}")))?;
     if nodes.is_empty() {
       return Err(JsValue::from_str("tree has no nodes"));
     }
@@ -416,11 +433,19 @@ impl BehaviorTreeRunner {
     let trace: Rc<RefCell<Vec<(Uuid, &'static str)>>> = Rc::new(RefCell::new(Vec::new()));
 
     let fn_meta = &self.fn_meta;
-    let root_callable_id =
-      register_node(&mut *self.inner, root_id, &node_index, fn_meta, &trace, &self.variables)
-        .map_err(|e| JsValue::from_str(&format!("setup error: {e}")))?;
+    let root_callable_id = register_node(
+      &mut *self.inner,
+      root_id,
+      &node_index,
+      fn_meta,
+      &trace,
+      &self.variables,
+    )
+    .map_err(|e| JsValue::from_str(&format!("setup error: {e}")))?;
 
-    let callable_id = CallableId { id: root_callable_id };
+    let callable_id = CallableId {
+      id: root_callable_id,
+    };
     let result = Callable::call(&callable_id, &mut *self.inner)
       .map_err(|e| JsValue::from_str(&format!("tick error: {e}")))?;
     let status = value_to_status(&result);
@@ -438,12 +463,14 @@ impl BehaviorTreeRunner {
       .filter_map(|(id, v)| serde_json::to_value(v).ok().map(|jv| (id.to_string(), jv)))
       .collect();
 
-    Ok(serde_json::json!({
-      "status": status,
-      "trace": trace_json,
-      "variables": vars_json,
-    })
-    .to_string())
+    Ok(
+      serde_json::json!({
+        "status": status,
+        "trace": trace_json,
+        "variables": vars_json,
+      })
+      .to_string(),
+    )
   }
 
   /// Run a behavior tree to completion (ticks until not Running).
@@ -456,8 +483,8 @@ impl BehaviorTreeRunner {
   ///   `{ "status": "success"|"failure"|"running",
   ///      "trace": [{"nodeId": "<uuid>", "status": "..."}] }`
   pub fn run(&mut self, nodes_json: &str) -> Result<String, JsValue> {
-    let nodes: Vec<BtNode> =
-      serde_json::from_str(nodes_json).map_err(|e| JsValue::from_str(&format!("bad nodes JSON: {e}")))?;
+    let nodes: Vec<BtNode> = serde_json::from_str(nodes_json)
+      .map_err(|e| JsValue::from_str(&format!("bad nodes JSON: {e}")))?;
     if nodes.is_empty() {
       return Err(JsValue::from_str("tree has no nodes"));
     }
@@ -467,11 +494,19 @@ impl BehaviorTreeRunner {
     let trace: Rc<RefCell<Vec<(Uuid, &'static str)>>> = Rc::new(RefCell::new(Vec::new()));
 
     let fn_meta = &self.fn_meta;
-    let root_callable_id =
-      register_node(&mut *self.inner, root_id, &node_index, fn_meta, &trace, &self.variables)
-        .map_err(|e| JsValue::from_str(&format!("setup error: {e}")))?;
+    let root_callable_id = register_node(
+      &mut *self.inner,
+      root_id,
+      &node_index,
+      fn_meta,
+      &trace,
+      &self.variables,
+    )
+    .map_err(|e| JsValue::from_str(&format!("setup error: {e}")))?;
 
-    let callable_id = CallableId { id: root_callable_id };
+    let callable_id = CallableId {
+      id: root_callable_id,
+    };
 
     let mut last_status = "running";
     for _ in 0..10_000 {
