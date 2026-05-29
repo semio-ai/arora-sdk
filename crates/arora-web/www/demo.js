@@ -1,91 +1,233 @@
-// demo.js — add+cos behavior-tree demo for the Arora browser engine.
-//
-// Each tick: add(x, 0.1) → x, then cos(x) → cos_result.
-// Variables persist across ticks via BehaviorTreeRunner.setVariable / tick().
+// demo.js — multi-tree behavior-tree demo for the Arora browser engine.
 
 import init, { BehaviorTreeRunner } from "./pkg/arora_web.js";
 import jsyaml from "https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/+esm";
 
 // ── UUIDs ─────────────────────────────────────────────────────────────────────
 
-const VAR = {
-  X:          "aaaa0001-0000-0000-0000-000000000000",
-  COS_RESULT: "aaaa0002-0000-0000-0000-000000000000",
-};
-
 const FN = {
-  SEQ:       "32246df6-ab5d-4f18-9221-23e28731de93",
-  ADD:       "e4b0a2f3-6c7d-4e8f-9a0b-1c2d3e4f5a6b",
-  COS:       "c13757cb-2311-4c93-abcc-cb12d6cbb859",
+  SEQ:          "32246df6-ab5d-4f18-9221-23e28731de93",
+  FALLBACK:     "bfa89a4e-c369-430e-be78-0dc07311391c",
+  SUCCEED:      "6696f0bd-e781-40cd-aeb5-8dc616f810d2",
+  FAIL:         "3abbbfb6-d00d-41eb-88bb-97874267eaf6",
+  ADD:          "e4b0a2f3-6c7d-4e8f-9a0b-1c2d3e4f5a6b",
+  COS:          "c13757cb-2311-4c93-abcc-cb12d6cbb859",
+  IS_STR_SET:   "20ba3f0f-309e-4cd2-adfc-aca6cc432526",
+  WAIT_STR_SET: "3180977c-25a1-458e-ab82-11f36c654518",
+  REGEX_MATCH:  "8e3dbcc1-1a81-4cf6-a457-6e0c075456fd",
+  UNSET_STR:    "7dce01ed-9818-4b7d-b45a-2e7fdece3633",
 };
 
 const PARAM = {
-  ADD_A:     "a1b2c3d4-e5f6-4a8b-9c0d-e1f2a3b4c5d6",
-  ADD_B:     "b2c3d4e5-f6a7-4b9c-8d1e-f2a3b4c5d6e7",
-  COS_ANGLE: "6c2a157c-4235-47b0-bff3-1eeef3e5747d",
+  // behavior-tree-nodes children parameter (seq/fallback/parallel)
+  CHILDREN:         "5b6e9515-dbcc-411d-bee9-3d8cba5fedda",
+  // test-rust-wasm add
+  ADD_A:            "a1b2c3d4-e5f6-4a8b-9c0d-e1f2a3b4c5d6",
+  ADD_B:            "b2c3d4e5-f6a7-4b9c-8d1e-f2a3b4c5d6e7",
+  // cos (imported from test-rust-wasm, re-exported via behavior-tree-nodes)
+  COS_ANGLE:        "6c2a157c-4235-47b0-bff3-1eeef3e5747d",
+  // is_str_set / wait_str_set value param
+  IS_STR_SET_VALUE: "c4f1e72d-30fe-400b-a584-f08e93944026",
+  WAIT_STR_VALUE:   "8f190079-e519-44d3-ac36-3bfc322e87eb",
+  // regex_match
+  REGEX_VALUE:      "3267f093-8a7f-4b77-b74c-3bd2e7ad40f9",
+  REGEX_MATCHER:    "6702e02d-f6ba-4c5d-acab-9ade0a690afa",
+  REGEX_FIRST_MATCH:"e8b71df7-2bb5-4498-8bc3-833c5bc8eadc",
+  // unset_str
+  UNSET_VAR:        "2c84bf0f-4ec2-41a4-83ee-3f92a53be79d",
 };
 
-// ── Tree definition ───────────────────────────────────────────────────────────
+// ── Variables ─────────────────────────────────────────────────────────────────
 //
-//   Sequence
-//   ├── add(x, 0.1) → x
-//   └── cos(x) → cos_result
+// Each tree declares its own variable set. The runner is recreated on tree
+// switch so variables don't bleed across trees.
 
-const TREE = [
-  {
-    id: "20000001-0000-0000-0000-000000000000",
-    function: FN.SEQ,
-    children: [
-      "20000002-0000-0000-0000-000000000000",
-      "20000003-0000-0000-0000-000000000000",
+const TREES = {
+  classic: {
+    label: "Classic (fallback/seq)",
+    variables: {},
+    initial: {},
+    nodes: [
+      {
+        id: "c0000001-0000-0000-0000-000000000000",
+        function: FN.FALLBACK, label: "Fallback", kind: "control",
+        children: ["c0000002-0000-0000-0000-000000000000",
+                   "c0000003-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "c0000002-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence", kind: "control",
+        children: ["c0000004-0000-0000-0000-000000000000",
+                   "c0000005-0000-0000-0000-000000000000",
+                   "c0000006-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "c0000003-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence", kind: "control",
+        children: ["c0000007-0000-0000-0000-000000000000",
+                   "c0000008-0000-0000-0000-000000000000"],
+      },
+      { id: "c0000004-0000-0000-0000-000000000000", function: FN.SUCCEED, label: "succeed", kind: "action" },
+      { id: "c0000005-0000-0000-0000-000000000000", function: FN.FAIL,    label: "fail",    kind: "action" },
+      { id: "c0000006-0000-0000-0000-000000000000", function: FN.SUCCEED, label: "succeed", kind: "action" },
+      { id: "c0000007-0000-0000-0000-000000000000", function: FN.SUCCEED, label: "succeed", kind: "action" },
+      { id: "c0000008-0000-0000-0000-000000000000", function: FN.SUCCEED, label: "succeed", kind: "action" },
     ],
-    label: "Sequence",
-    kind: "control",
   },
-  {
-    id: "20000002-0000-0000-0000-000000000000",
-    function: FN.ADD,
-    arguments: {
-      [PARAM.ADD_A]: { variable_id: VAR.X },
-      [PARAM.ADD_B]: { value: { f32: 0.1 } },
-    },
-    return_binding: VAR.X,
-    label: "add(x, 0.1) → x",
-    kind: "action",
-  },
-  {
-    id: "20000003-0000-0000-0000-000000000000",
-    function: FN.COS,
-    arguments: {
-      [PARAM.COS_ANGLE]: { variable_id: VAR.X },
-    },
-    return_binding: VAR.COS_RESULT,
-    label: "cos(x) → cos",
-    kind: "action",
-  },
-];
 
-function toRustNodes(tree) {
-  return tree.map(({ id, function: fn, children, arguments: args, return_binding }) => {
-    const n = { id, function: fn };
-    if (children) n.children = children;
-    if (args) n.arguments = args;
-    if (return_binding) n.return_binding = return_binding;
-    return n;
-  });
-}
+  addcos: {
+    label: "Add + Cos",
+    variables: {
+      "aaaa0001-0000-0000-0000-000000000000": { name: "x",         type: "f32", init: 0.0 },
+      "aaaa0002-0000-0000-0000-000000000000": { name: "cos(x)",    type: "f32", init: 1.0 },
+    },
+    initial: {
+      "aaaa0001-0000-0000-0000-000000000000": { f32: 0.0 },
+      "aaaa0002-0000-0000-0000-000000000000": { f32: 1.0 },
+    },
+    nodes: [
+      {
+        id: "20000001-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence", kind: "control",
+        children: ["20000002-0000-0000-0000-000000000000",
+                   "20000003-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "20000002-0000-0000-0000-000000000000",
+        function: FN.ADD, label: "add(x, 0.1)\n→ x", kind: "action",
+        arguments: {
+          [PARAM.ADD_A]: { variable_id: "aaaa0001-0000-0000-0000-000000000000" },
+          [PARAM.ADD_B]: { value: { f32: 0.1 } },
+        },
+        return_binding: "aaaa0001-0000-0000-0000-000000000000",
+        // variable connections drawn as dashed lines
+        reads:  ["aaaa0001-0000-0000-0000-000000000000"],
+        writes: ["aaaa0001-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "20000003-0000-0000-0000-000000000000",
+        function: FN.COS, label: "cos(x)\n→ cos(x)", kind: "action",
+        arguments: {
+          [PARAM.COS_ANGLE]: { variable_id: "aaaa0001-0000-0000-0000-000000000000" },
+        },
+        return_binding: "aaaa0002-0000-0000-0000-000000000000",
+        reads:  ["aaaa0001-0000-0000-0000-000000000000"],
+        writes: ["aaaa0002-0000-0000-0000-000000000000"],
+      },
+    ],
+  },
+
+  mixed: {
+    label: "Mixed (cross-branch vars)",
+    variables: {
+      "bbbb0001-0000-0000-0000-000000000000": { name: "x",      type: "f32", init: 0.0 },
+      "bbbb0002-0000-0000-0000-000000000000": { name: "cos(x)", type: "f32", init: 0.0 },
+    },
+    initial: {
+      "bbbb0001-0000-0000-0000-000000000000": { f32: 0.0 },
+      "bbbb0002-0000-0000-0000-000000000000": { f32: 0.0 },
+    },
+    nodes: [
+      {
+        id: "30000001-0000-0000-0000-000000000000",
+        function: FN.FALLBACK, label: "Fallback", kind: "control",
+        children: ["30000002-0000-0000-0000-000000000000",
+                   "30000003-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "30000002-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence A", kind: "control",
+        children: ["30000004-0000-0000-0000-000000000000",
+                   "30000005-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "30000003-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence B", kind: "control",
+        children: ["30000006-0000-0000-0000-000000000000",
+                   "30000007-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "30000004-0000-0000-0000-000000000000",
+        function: FN.ADD, label: "add(x, 0.1)\n→ x", kind: "action",
+        arguments: {
+          [PARAM.ADD_A]: { variable_id: "bbbb0001-0000-0000-0000-000000000000" },
+          [PARAM.ADD_B]: { value: { f32: 0.1 } },
+        },
+        return_binding: "bbbb0001-0000-0000-0000-000000000000",
+        reads:  ["bbbb0001-0000-0000-0000-000000000000"],
+        writes: ["bbbb0001-0000-0000-0000-000000000000"],
+      },
+      { id: "30000005-0000-0000-0000-000000000000", function: FN.FAIL, label: "fail", kind: "action" },
+      {
+        id: "30000006-0000-0000-0000-000000000000",
+        function: FN.COS, label: "cos(x)\n→ cos(x)", kind: "action",
+        arguments: {
+          [PARAM.COS_ANGLE]: { variable_id: "bbbb0001-0000-0000-0000-000000000000" },
+        },
+        return_binding: "bbbb0002-0000-0000-0000-000000000000",
+        reads:  ["bbbb0001-0000-0000-0000-000000000000"],
+        writes: ["bbbb0002-0000-0000-0000-000000000000"],
+      },
+      { id: "30000007-0000-0000-0000-000000000000", function: FN.SUCCEED, label: "succeed", kind: "action" },
+    ],
+  },
+
+  strings: {
+    label: "String (wait + regex)",
+    variables: {
+      "cccc0001-0000-0000-0000-000000000000": { name: "message",     type: "string", init: "" },
+      "cccc0002-0000-0000-0000-000000000000": { name: "first_match", type: "string", init: "" },
+    },
+    initial: {
+      "cccc0001-0000-0000-0000-000000000000": { string: "" },
+      "cccc0002-0000-0000-0000-000000000000": { string: "" },
+    },
+    nodes: [
+      {
+        id: "40000001-0000-0000-0000-000000000000",
+        function: FN.SEQ, label: "Sequence", kind: "control",
+        children: ["40000002-0000-0000-0000-000000000000",
+                   "40000003-0000-0000-0000-000000000000",
+                   "40000004-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "40000002-0000-0000-0000-000000000000",
+        function: FN.WAIT_STR_SET, label: "wait_str_set\n(message)", kind: "action",
+        arguments: {
+          [PARAM.WAIT_STR_VALUE]: { variable_id: "cccc0001-0000-0000-0000-000000000000" },
+        },
+        reads: ["cccc0001-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "40000003-0000-0000-0000-000000000000",
+        function: FN.REGEX_MATCH, label: "regex_match\n(message, hello.*)", kind: "action",
+        arguments: {
+          [PARAM.REGEX_VALUE]:       { variable_id: "cccc0001-0000-0000-0000-000000000000" },
+          [PARAM.REGEX_MATCHER]:     { value: { string: "hello.*" } },
+          [PARAM.REGEX_FIRST_MATCH]: { variable_id: "cccc0002-0000-0000-0000-000000000000" },
+        },
+        reads:  ["cccc0001-0000-0000-0000-000000000000"],
+        writes: ["cccc0002-0000-0000-0000-000000000000"],
+      },
+      {
+        id: "40000004-0000-0000-0000-000000000000",
+        function: FN.SUCCEED, label: "succeed", kind: "action",
+      },
+    ],
+  },
+};
 
 // ── SVG layout ────────────────────────────────────────────────────────────────
 
-const SVG_W = 640;
-const SVG_H = 240;
-const LEVEL_H = 100;
-const NODE_W = 140;
-const NODE_H = 38;
+const SVG_W = 700;
+const SVG_H = 280;
+const LEVEL_H = 110;
+const NODE_W = 150;
+const NODE_H = 44;
 
-function buildNodeMap(tree) {
+function buildNodeMap(nodes) {
   const map = new Map();
-  for (const n of tree) map.set(n.id, { ...n, x: 0, y: 0 });
+  for (const n of nodes) map.set(n.id, { ...n, x: 0, y: 0 });
   return map;
 }
 
@@ -102,10 +244,31 @@ function layout(nodeId, map, x, y, availableWidth) {
   }
 }
 
-function renderSVG(map, nodeStatuses) {
+function renderSVG(map, varMap, nodeStatuses) {
   const svg = document.getElementById("tree-svg");
   svg.innerHTML = "";
 
+  // Build variable positions: for each variable UUID, find nodes that
+  // read/write it, and pick the midpoint of reader/writer positions.
+  const varPos = new Map(); // varId -> {x, y}
+  for (const [, node] of map) {
+    const allVarIds = [...(node.reads || []), ...(node.writes || [])];
+    for (const vId of allVarIds) {
+      if (!varPos.has(vId)) {
+        // Place var ellipse at bottom of SVG area, distributed
+        varPos.set(vId, null); // placeholder
+      }
+    }
+  }
+  // Assign horizontal positions to variable ellipses below the tree
+  const varIds = [...varPos.keys()];
+  const varY = SVG_H - 30;
+  varIds.forEach((id, i) => {
+    const x = (SVG_W / (varIds.length + 1)) * (i + 1);
+    varPos.set(id, { x, y: varY });
+  });
+
+  // Draw tree edges
   for (const [, node] of map) {
     if (!node.children) continue;
     for (const cid of node.children) {
@@ -114,13 +277,42 @@ function renderSVG(map, nodeStatuses) {
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
       line.setAttribute("class", "bt-edge" + (isActive ? " active" : ""));
       line.setAttribute("x1", node.x);
-      line.setAttribute("y1", node.y + 24);
+      line.setAttribute("y1", node.y + (node.kind === "control" ? 24 : NODE_H / 2));
       line.setAttribute("x2", child.x);
-      line.setAttribute("y2", child.y - 24);
+      line.setAttribute("y2", child.y - (child.kind === "control" ? 24 : NODE_H / 2));
       svg.appendChild(line);
     }
   }
 
+  // Draw dashed variable reference lines (reads = dashed blue, writes = dashed green)
+  for (const [, node] of map) {
+    for (const vId of (node.reads || [])) {
+      const vp = varPos.get(vId);
+      if (!vp) continue;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "var-edge read");
+      line.setAttribute("x1", node.x);
+      line.setAttribute("y1", node.y + NODE_H / 2);
+      line.setAttribute("x2", vp.x);
+      line.setAttribute("y2", vp.y - 10);
+      svg.appendChild(line);
+    }
+    for (const vId of (node.writes || [])) {
+      const vp = varPos.get(vId);
+      if (!vp) continue;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "var-edge write");
+      line.setAttribute("x1", vp.x);
+      line.setAttribute("y1", vp.y - 10);
+      line.setAttribute("x2", node.x);
+      line.setAttribute("y2", node.y + NODE_H / 2);
+      // arrowhead marker defined via marker-end
+      line.setAttribute("marker-end", "url(#arrow-write)");
+      svg.appendChild(line);
+    }
+  }
+
+  // Draw tree nodes
   for (const [, node] of map) {
     const status = nodeStatuses.get(node.id) || "unvisited";
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -164,6 +356,94 @@ function renderSVG(map, nodeStatuses) {
 
     svg.appendChild(g);
   }
+
+  // Draw variable ellipses
+  for (const [vId, pos] of varPos) {
+    if (!pos) continue;
+    const meta = varMap[vId];
+    const name = meta ? meta.name : vId.slice(0, 8);
+
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "var-node");
+
+    const ellipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+    ellipse.setAttribute("cx", pos.x);
+    ellipse.setAttribute("cy", pos.y);
+    ellipse.setAttribute("rx", 48);
+    ellipse.setAttribute("ry", 16);
+    g.appendChild(ellipse);
+
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("dominant-baseline", "middle");
+    t.setAttribute("x", pos.x);
+    t.setAttribute("y", pos.y);
+    t.textContent = name;
+    g.appendChild(t);
+
+    svg.appendChild(g);
+  }
+}
+
+function svgDefs() {
+  const svg = document.getElementById("tree-svg");
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.setAttribute("id", "arrow-write");
+  marker.setAttribute("markerWidth", "8");
+  marker.setAttribute("markerHeight", "8");
+  marker.setAttribute("refX", "6");
+  marker.setAttribute("refY", "3");
+  marker.setAttribute("orient", "auto");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M0,0 L0,6 L8,3 z");
+  path.setAttribute("fill", "#4ade80");
+  marker.appendChild(path);
+  defs.appendChild(marker);
+  svg.prepend(defs);
+}
+
+// ── Variable table ────────────────────────────────────────────────────────────
+
+function renderVarTable(varMeta, values) {
+  const tbody = document.getElementById("var-tbody");
+  tbody.innerHTML = "";
+  for (const [id, meta] of Object.entries(varMeta)) {
+    const val = values[id];
+    let display = "";
+    if (val !== undefined) {
+      if (val.f32 !== undefined) display = val.f32.toFixed(4);
+      else if (val.string !== undefined) display = val.string;
+      else display = JSON.stringify(val);
+    } else if (meta.type === "f32") {
+      display = meta.init.toFixed(4);
+    } else {
+      display = String(meta.init);
+    }
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="var-name-cell">${meta.name}</td>
+      <td><input class="var-input" data-id="${id}" data-type="${meta.type}" value="${display}" /></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function collectVarOverrides(varMeta) {
+  const overrides = {};
+  document.querySelectorAll(".var-input").forEach((inp) => {
+    const id = inp.dataset.id;
+    const type = inp.dataset.type;
+    const raw = inp.value.trim();
+    if (type === "f32") {
+      const n = parseFloat(raw);
+      overrides[id] = { f32: isNaN(n) ? 0.0 : n };
+    } else {
+      overrides[id] = { string: raw };
+    }
+  });
+  return overrides;
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -180,11 +460,115 @@ function setStatus(status) {
   el.className = status || "";
 }
 
-function updateVars(vars) {
-  const xVal = vars[VAR.X]?.f32 ?? 0;
-  const cosVal = vars[VAR.COS_RESULT]?.f32 ?? 0;
-  document.getElementById("var-x").textContent = xVal.toFixed(4);
-  document.getElementById("var-cos").textContent = cosVal.toFixed(4);
+// ── Runner state ──────────────────────────────────────────────────────────────
+
+let runner = null;
+let modules = null; // { btHeaderYaml, btWasm, testHeaderYaml, testWasm }
+let currentTree = null;
+let nodeMap = null;
+let nodeStatuses = new Map();
+let tickCount = 0;
+let currentVars = {};
+
+function loadModules(r) {
+  r.loadModule(JSON.stringify(jsyaml.load(modules.btHeaderYaml)), new Uint8Array(modules.btWasm));
+  r.loadModule(JSON.stringify(jsyaml.load(modules.testHeaderYaml)), new Uint8Array(modules.testWasm));
+}
+
+function switchTree(treeKey) {
+  runner = new BehaviorTreeRunner();
+  loadModules(runner);
+
+  currentTree = TREES[treeKey];
+  nodeMap = buildNodeMap(currentTree.nodes);
+  layout(currentTree.nodes[0].id, nodeMap, SVG_W / 2, 50, SVG_W - 80);
+  nodeStatuses = new Map();
+  tickCount = 0;
+  currentVars = {};
+
+  document.getElementById("tick-count").textContent = 0;
+  setStatus(null);
+
+  // Initialise runner variables
+  for (const [id, val] of Object.entries(currentTree.initial)) {
+    runner.setVariable(id, JSON.stringify(val));
+  }
+
+  renderVarTable(currentTree.variables, currentVars);
+  renderSVG(nodeMap, currentTree.variables, nodeStatuses);
+  svgDefs();
+
+  document.getElementById("tick-btn").disabled = false;
+  document.getElementById("reset-btn").disabled = true;
+  log(`\n--- switched to: ${currentTree.label} ---`);
+}
+
+function doTick() {
+  // Apply any manual overrides from the table before ticking
+  const overrides = collectVarOverrides(currentTree.variables);
+  for (const [id, val] of Object.entries(overrides)) {
+    runner.setVariable(id, JSON.stringify(val));
+  }
+
+  const nodesJson = JSON.stringify(toRustNodes(currentTree.nodes));
+  try {
+    const result = JSON.parse(runner.tick(nodesJson));
+    tickCount++;
+    document.getElementById("tick-count").textContent = tickCount;
+
+    for (const entry of result.trace) {
+      nodeStatuses.set(entry.nodeId, entry.status);
+    }
+    renderSVG(nodeMap, currentTree.variables, nodeStatuses);
+    setStatus(result.status);
+
+    currentVars = result.variables || {};
+    renderVarTable(currentTree.variables, currentVars);
+
+    const varSummary = Object.entries(currentTree.variables)
+      .map(([id, m]) => {
+        const v = currentVars[id];
+        if (!v) return "";
+        if (v.f32 !== undefined) return `${m.name}=${v.f32.toFixed(4)}`;
+        if (v.string !== undefined) return `${m.name}="${v.string}"`;
+        return "";
+      })
+      .filter(Boolean).join(", ");
+    log(`tick ${tickCount}: ${result.status}${varSummary ? " | " + varSummary : ""}`);
+
+    document.getElementById("reset-btn").disabled = false;
+  } catch (e) {
+    log(`ERROR: ${e}`);
+    console.error(e);
+  }
+}
+
+function doReset() {
+  runner = new BehaviorTreeRunner();
+  loadModules(runner);
+
+  for (const [id, val] of Object.entries(currentTree.initial)) {
+    runner.setVariable(id, JSON.stringify(val));
+  }
+  tickCount = 0;
+  document.getElementById("tick-count").textContent = 0;
+  nodeStatuses = new Map();
+  currentVars = {};
+  renderSVG(nodeMap, currentTree.variables, nodeStatuses);
+  renderVarTable(currentTree.variables, currentVars);
+  setStatus(null);
+  document.getElementById("reset-btn").disabled = true;
+  log("\n--- reset ---");
+}
+
+function toRustNodes(nodes) {
+  return nodes.map(({ id, function: fn, children, arguments: args, return_binding }) => {
+    const n = { id, function: fn };
+    if (children) n.children = children;
+    if (args) n.arguments = args;
+    if (return_binding) n.return_binding = return_binding;
+    return n;
+  });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -200,63 +584,23 @@ async function main() {
     fetch("./modules/test-rust-wasm/module.yaml").then((r) => r.text()),
     fetch("./modules/test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
   ]);
-
-  const runner = new BehaviorTreeRunner();
-  runner.loadModule(JSON.stringify(jsyaml.load(btHeaderYaml)), new Uint8Array(btWasm));
-  runner.loadModule(JSON.stringify(jsyaml.load(testHeaderYaml)), new Uint8Array(testWasm));
+  modules = { btHeaderYaml, btWasm, testHeaderYaml, testWasm };
   log("modules loaded");
 
-  // Initialize variables.
-  runner.setVariable(VAR.X, JSON.stringify({ f32: 0.0 }));
-  runner.setVariable(VAR.COS_RESULT, JSON.stringify({ f32: 1.0 }));
+  // Populate tree dropdown
+  const sel = document.getElementById("tree-select");
+  for (const [key, tree] of Object.entries(TREES)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = tree.label;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener("change", () => switchTree(sel.value));
 
-  const nodeMap = buildNodeMap(TREE);
-  const rootId = TREE[0].id;
-  layout(rootId, nodeMap, SVG_W / 2, 50, SVG_W - 60);
-  const nodeStatuses = new Map();
-  renderSVG(nodeMap, nodeStatuses);
+  document.getElementById("tick-btn").addEventListener("click", doTick);
+  document.getElementById("reset-btn").addEventListener("click", doReset);
 
-  log("ready — click Tick");
-
-  let tickCount = 0;
-  const tickBtn = document.getElementById("tick-btn");
-  const resetBtn = document.getElementById("reset-btn");
-  tickBtn.disabled = false;
-
-  const nodesJson = JSON.stringify(toRustNodes(TREE));
-
-  tickBtn.addEventListener("click", () => {
-    try {
-      const result = JSON.parse(runner.tick(nodesJson));
-      tickCount++;
-      document.getElementById("tick-count").textContent = tickCount;
-
-      for (const entry of result.trace) {
-        nodeStatuses.set(entry.nodeId, entry.status);
-      }
-      renderSVG(nodeMap, nodeStatuses);
-      setStatus(result.status);
-      updateVars(result.variables);
-      log(`tick ${tickCount}: x=${result.variables[VAR.X]?.f32?.toFixed(4)}, cos(x)=${result.variables[VAR.COS_RESULT]?.f32?.toFixed(4)}`);
-      resetBtn.disabled = false;
-    } catch (e) {
-      log(`ERROR: ${e}`);
-      console.error(e);
-    }
-  });
-
-  resetBtn.addEventListener("click", () => {
-    runner.setVariable(VAR.X, JSON.stringify({ f32: 0.0 }));
-    runner.setVariable(VAR.COS_RESULT, JSON.stringify({ f32: 1.0 }));
-    tickCount = 0;
-    document.getElementById("tick-count").textContent = 0;
-    nodeStatuses.clear();
-    renderSVG(nodeMap, nodeStatuses);
-    setStatus(null);
-    updateVars({ [VAR.X]: { f32: 0.0 }, [VAR.COS_RESULT]: { f32: 1.0 } });
-    log("\n--- reset ---");
-    resetBtn.disabled = true;
-  });
+  switchTree("classic");
 }
 
 main();
