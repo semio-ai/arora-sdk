@@ -1,0 +1,28 @@
+id: 580d9cef-88be-4f1c-b649-f87032acd8fe
+author: Semio
+description: Vizij orchestrator facade composed from independent Vizij animation and node graph modules
+license: Proprietary
+name: vizij-orchestrator-composed
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: 90725b7e-a4d9-4a3f-99af-8e227612bed7
+    name: dispatch_json
+    parameters:
+      - id: 323d47be-3b30-46ff-882f-bc7f7ffacd57
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+imports: []
+dependencies: []
+executable_mime: application/wasm

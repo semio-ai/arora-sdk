@@ -7,14 +7,16 @@ use vizij_animation_core::{
   parse_stored_animation_json, AnimId, Config, Engine, Inputs, InstanceCfg, PlayerId,
 };
 
-static ENGINE: OnceLock<Mutex<Engine>> = OnceLock::new();
+static FACADE: OnceLock<Mutex<AnimationModuleFacade>> = OnceLock::new();
 
-fn engine() -> &'static Mutex<Engine> {
-  ENGINE.get_or_init(|| Mutex::new(Engine::new(Config::default())))
+fn facade() -> &'static Mutex<AnimationModuleFacade> {
+  FACADE.get_or_init(|| Mutex::new(AnimationModuleFacade::new()))
 }
 
-fn with_engine<T>(f: impl FnOnce(&mut Engine) -> Result<T, String>) -> Result<T, String> {
-  let mut guard = engine()
+fn with_facade<T>(
+  f: impl FnOnce(&mut AnimationModuleFacade) -> Result<T, String>,
+) -> Result<T, String> {
+  let mut guard = facade()
     .lock()
     .map_err(|_| "vizij animation engine lock is poisoned".to_string())?;
   f(&mut guard)
@@ -67,6 +69,17 @@ struct AddInstanceRequest {
   config: Option<InstanceConfigPatch>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationSetup {
+  #[serde(default)]
+  animation: Option<JsonValue>,
+  #[serde(default)]
+  player: Option<CreatePlayerRequest>,
+  #[serde(default)]
+  instance: Option<InstanceConfigPatch>,
+}
+
 #[derive(Deserialize)]
 struct UpdateNodesWritesRequest {
   dt: f32,
@@ -109,10 +122,97 @@ impl From<InstanceConfigPatch> for InstanceCfg {
   }
 }
 
+#[derive(Debug)]
+pub struct AnimationModuleFacade {
+  engine: Engine,
+}
+
+impl Default for AnimationModuleFacade {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl AnimationModuleFacade {
+  pub fn new() -> Self {
+    Self {
+      engine: Engine::new(Config::default()),
+    }
+  }
+
+  pub fn reset(&mut self) {
+    self.engine = Engine::new(Config::default());
+  }
+
+  pub fn load_stored_animation_value(&mut self, animation: JsonValue) -> Result<AnimId, String> {
+    let animation_json = match animation {
+      JsonValue::String(value) => value,
+      other => serde_json::to_string(&other)
+        .map_err(|error| format!("failed to serialize animation payload: {error}"))?,
+    };
+    let data = parse_stored_animation_json(&animation_json)
+      .map_err(|error| format!("failed to parse stored animation: {error}"))?;
+    Ok(self.engine.load_animation(data))
+  }
+
+  pub fn create_player(&mut self, name: &str) -> PlayerId {
+    self.engine.create_player(name)
+  }
+
+  pub fn add_instance(
+    &mut self,
+    player: PlayerId,
+    animation: AnimId,
+    config: InstanceCfg,
+  ) -> vizij_animation_core::ids::InstId {
+    self.engine.add_instance(player, animation, config)
+  }
+
+  pub fn configure_from_setup_value(&mut self, setup: JsonValue) -> Result<(), String> {
+    if setup.is_null() {
+      return Ok(());
+    }
+    let setup = serde_json::from_value::<AnimationSetup>(setup)
+      .map_err(|error| format!("invalid animation setup: {error}"))?;
+    let Some(animation) = setup.animation else {
+      return Ok(());
+    };
+    let animation_id = self.load_stored_animation_value(animation)?;
+    let player_name = setup
+      .player
+      .as_ref()
+      .map(|player| player.name.as_str())
+      .unwrap_or("arora-vizij-player");
+    let player_id = self.create_player(player_name);
+    let config = setup.instance.map(InstanceCfg::from).unwrap_or_default();
+    self.add_instance(player_id, animation_id, config);
+    Ok(())
+  }
+
+  pub fn update_writebatch(
+    &mut self,
+    dt: f32,
+    inputs: Option<Inputs>,
+  ) -> Result<vizij_api_core::WriteBatch, String> {
+    if !dt.is_finite() || dt < 0.0 {
+      return Err("dt must be finite and non-negative".to_string());
+    }
+    Ok(
+      self
+        .engine
+        .update_writebatch(dt, inputs.unwrap_or_default()),
+    )
+  }
+
+  pub fn list_animations(&self) -> Vec<vizij_animation_core::engine::AnimationInfo> {
+    self.engine.list_animations()
+  }
+}
+
 fn reset_engine() -> String {
-  match engine().lock() {
+  match facade().lock() {
     Ok(mut guard) => {
-      *guard = Engine::new(Config::default());
+      guard.reset();
       ok(json!({ "reset": true }))
     }
     Err(_) => err("vizij animation engine lock is poisoned"),
@@ -129,20 +229,7 @@ fn load_stored_animation(request_json: Option<String>) -> String {
       animation
     }
   };
-  let animation_json = match animation {
-    JsonValue::String(value) => value,
-    other => match serde_json::to_string(&other) {
-      Ok(value) => value,
-      Err(error) => return err(format!("failed to serialize animation payload: {error}")),
-    },
-  };
-
-  let data = match parse_stored_animation_json(&animation_json) {
-    Ok(data) => data,
-    Err(error) => return err(format!("failed to parse stored animation: {error}")),
-  };
-
-  match with_engine(|engine| Ok(engine.load_animation(data))) {
+  match with_facade(|facade| facade.load_stored_animation_value(animation)) {
     Ok(id) => ok(json!({ "animationId": id.0 })),
     Err(error) => err(error),
   }
@@ -154,7 +241,7 @@ fn create_player(request_json: Option<String>) -> String {
     Err(error) => return err(error),
   };
 
-  match with_engine(|engine| Ok(engine.create_player(&request.name))) {
+  match with_facade(|facade| Ok(facade.create_player(&request.name))) {
     Ok(id) => ok(json!({ "playerId": id.0 })),
     Err(error) => err(error),
   }
@@ -167,8 +254,8 @@ fn add_instance(request_json: Option<String>) -> String {
   };
   let config = request.config.map(InstanceCfg::from).unwrap_or_default();
 
-  match with_engine(|engine| {
-    Ok(engine.add_instance(
+  match with_facade(|facade| {
+    Ok(facade.add_instance(
       PlayerId(request.player_id),
       AnimId(request.animation_id),
       config,
@@ -188,8 +275,8 @@ fn update_nodes_writes(request_json: Option<String>) -> String {
     return err("dt must be finite and non-negative");
   }
 
-  match with_engine(|engine| {
-    let batch = engine.update_writebatch(request.dt, request.inputs.unwrap_or_default());
+  match with_facade(|facade| {
+    let batch = facade.update_writebatch(request.dt, request.inputs)?;
     serde_json::to_value(&batch)
       .map(|writes| json!({ "nodes": {}, "writes": writes }))
       .map_err(|error| format!("failed to serialize write batch: {error}"))
@@ -200,8 +287,8 @@ fn update_nodes_writes(request_json: Option<String>) -> String {
 }
 
 fn list_animations() -> String {
-  match with_engine(|engine| {
-    serde_json::to_value(engine.list_animations())
+  match with_facade(|facade| {
+    serde_json::to_value(facade.list_animations())
       .map_err(|error| format!("failed to serialize animation list: {error}"))
   }) {
     Ok(value) => ok(value),

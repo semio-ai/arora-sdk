@@ -5,6 +5,10 @@ module contract. It intentionally wraps `vizij-orchestrator-core` instead of
 copying graph, animation, scheduling, or blackboard semantics into the engine
 repo.
 
+This is the all-in-one compatibility orchestrator. The split-module migration
+target lives beside it as `vizij-orchestrator-composed`, which composes the
+promoted `vizij-animation` and `vizij-node-graph` module facades.
+
 ## Export
 
 The module exports one function:

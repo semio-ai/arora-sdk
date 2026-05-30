@@ -1,12 +1,13 @@
 [package]
-name = "vizij-animation"
+name = "vizij-orchestrator-composed"
 version = "0.1.0"
 edition = "2021"
-description = "Arora module facade for Vizij animation core"
+description = "Composed Arora module facade for Vizij animation and node graph modules"
 license = "Proprietary"
 readme = "readme.md"
 
 [lib]
+name = "arora_vizij_orchestrator_composed"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -16,8 +17,9 @@ derive_more = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-vizij-animation-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/animation/vizij-animation-core" }
+vizij-animation = { path = "../vizij-animation" }
 vizij-api-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/api/vizij-api-core" }
+vizij-node-graph = { path = "../vizij-node-graph" }
 
 [dev-dependencies]
 anyhow = "*"

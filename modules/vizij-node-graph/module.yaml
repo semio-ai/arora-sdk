@@ -1,0 +1,74 @@
+id: 098bd478-8375-4f3a-b649-d64cb1284944
+author: Semio
+description: Vizij node graph core exposed as an Arora module facade
+license: Proprietary
+name: vizij-node-graph
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: 36d3d93b-583c-4549-90c0-d62490eae173
+    name: reset_graph
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 14e86906-c4e4-45e8-936d-725dc43ec9bb
+    name: load_graph
+    parameters:
+      - id: 50227486-ec74-4869-b335-82c4cb41b3dd
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 64afe1b3-a1c6-435e-a22d-0d87f5fde7ec
+    name: stage_input
+    parameters:
+      - id: ce24261b-617b-49fc-ad5a-89af31903a6c
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: d898a9d4-516d-4cda-bd8c-7dbf3fa75b70
+    name: evaluate
+    parameters:
+      - id: ac378ef0-fb8c-4667-9507-48be505078eb
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 9a026e16-bbf3-4eec-88de-73acb4d1b628
+    name: normalize_graph
+    parameters:
+      - id: 11624d55-0377-4d89-bbcf-4842b94cb977
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+imports: []
+dependencies: []
+executable_mime: application/wasm

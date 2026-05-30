@@ -4408,6 +4408,7 @@ dependencies = [
  "tokio",
  "uuid",
  "vizij-animation-core",
+ "vizij-api-core",
 ]
 
 [[package]]
@@ -4444,6 +4445,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vizij-node-graph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-buffers",
+ "arora-module-core",
+ "arora-module-rust",
+ "arora-registry",
+ "arora-types",
+ "derive_more 2.0.1",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "vizij-api-core",
+ "vizij-graph-core",
+]
+
+[[package]]
 name = "vizij-orchestrator"
 version = "0.1.0"
 dependencies = [
@@ -4459,6 +4479,26 @@ dependencies = [
  "tokio",
  "uuid",
  "vizij-orchestrator-core",
+]
+
+[[package]]
+name = "vizij-orchestrator-composed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-buffers",
+ "arora-module-core",
+ "arora-module-rust",
+ "arora-registry",
+ "arora-types",
+ "derive_more 2.0.1",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "vizij-animation",
+ "vizij-api-core",
+ "vizij-node-graph",
 ]
 
 [[package]]
