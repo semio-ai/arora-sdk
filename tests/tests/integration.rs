@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use arora::{
   call::{Call, CallBridge},
   engine::{EngineBuilder, PinnedEngine},
-  load::load_module_from_parts,
+  load::{load_module_from_parts, load_module_from_parts_with_executor},
   schema::module::low::Header,
 };
 use arora_types::value::{StructureField, Value};
@@ -74,6 +74,32 @@ fn load_wasm_module(engine: &mut PinnedEngine, header: PathBuf, wasm: PathBuf) -
     .into_boxed_slice();
   load_module_from_parts(&mut **engine, header, executable)
     .with_context(|| format!("load module {module_name}"))?;
+  Ok(())
+}
+
+fn native_library_extension() -> &'static str {
+  if cfg!(target_os = "macos") {
+    "dylib"
+  } else if cfg!(target_os = "windows") {
+    "dll"
+  } else {
+    "so"
+  }
+}
+
+fn load_native_module(engine: &mut PinnedEngine, header: PathBuf, library: PathBuf) -> Result<()> {
+  let header_name = header.display().to_string();
+  let header: Header = serde_yaml::from_str(
+    &std::fs::read_to_string(&header)
+      .with_context(|| format!("read module header {header_name}"))?,
+  )
+  .with_context(|| format!("parse module header {header_name}"))?;
+  let module_name = header.name.clone();
+  let executable = std::fs::read(&library)
+    .with_context(|| format!("read native module {}", library.display()))?
+    .into_boxed_slice();
+  load_module_from_parts_with_executor(&mut **engine, header, executable, "native")
+    .with_context(|| format!("load native module {module_name}"))?;
   Ok(())
 }
 
@@ -270,35 +296,6 @@ fn call_test_rust_wasm_from_engine() {
 }
 
 #[test]
-#[ignore = "browser-hosted arora-web covers this path; native Wasmtime currently spins on this guest and needs a separate executor investigation"]
-fn call_vizij_orchestrator_wasm_from_engine() {
-  let module_root = workspace_root().join("modules").join("vizij-orchestrator");
-  let module_yaml = module_root
-    .join("src")
-    .join("arora_generated")
-    .join("module.yaml");
-  let wasm = workspace_root()
-    .join("target")
-    .join("wasm32-wasip1")
-    .join("debug")
-    .join("arora_vizij_orchestrator.wasm");
-  run(&[
-    "--header",
-    module_yaml.to_str().unwrap(),
-    "--exe",
-    wasm.to_str().unwrap(),
-    "--call",
-    concat!(
-      "id: debf32e5-1650-48ac-af4a-da2da617aef7\n",
-      "args:\n",
-      "- id: 71b4a759-ded6-42a3-b59d-9716472ac045\n",
-      "  value:\n",
-      "    str: '{\"call\":\"runtime.create\",\"requestId\":\"integration-runtime\",\"args\":{\"schedule\":\"SinglePass\"}}'\n",
-    ),
-  ]);
-}
-
-#[test]
 #[ignore = "requires release-built Vizij wasm guests; run after building vizij-animation, vizij-node-graph, and vizij-orchestrator-composed for wasm32-wasip1 --release"]
 fn call_vizij_composed_release_wasm_modules_from_native_engine() -> Result<()> {
   // Use release wasm here. The debug Vizij guests are large enough that
@@ -330,6 +327,76 @@ fn call_vizij_composed_release_wasm_modules_from_native_engine() -> Result<()> {
     "animation.register",
     json!({
       "id": "anim:native-smoke",
+      "setup": {
+        "animation": fixture_animation_for_path("face/smile.amount"),
+        "instance": { "timescale": 1.0, "active": true }
+      }
+    }),
+  )?;
+  assert_eq!(animation["module"], "vizij-animation");
+
+  let frame = call_vizij_dispatch(&mut engine, "orchestrator.step", json!({ "dt": 0.5 }))?;
+  let paths = write_paths(&frame);
+  assert!(
+    paths.contains(&"face/smile.amount".to_string()),
+    "animation write missing: {frame}"
+  );
+  assert!(
+    paths.contains(&"face/graph.value".to_string()),
+    "graph write missing: {frame}"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn call_vizij_composed_native_module_from_desktop_engine() -> Result<()> {
+  let mut engine = EngineBuilder::new()
+    .add_executor(arora::executor::native::NativeExecutor::new())
+    .build();
+  let root = workspace_root();
+  let build_hint = "cargo build -p vizij-orchestrator-composed";
+  let native_lib = required_artifact(
+    root.join("target").join("debug").join(format!(
+      "libarora_vizij_orchestrator_composed.{}",
+      native_library_extension()
+    )),
+    build_hint,
+  )?;
+
+  load_native_module(
+    &mut engine,
+    root
+      .join("modules")
+      .join("vizij-orchestrator-composed")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    native_lib,
+  )?;
+
+  let runtime = call_vizij_dispatch(
+    &mut engine,
+    "runtime.create",
+    json!({ "schedule": "SinglePass" }),
+  )?;
+  assert_eq!(runtime["composition"], "independent-modules");
+
+  let graph = call_vizij_dispatch(
+    &mut engine,
+    "graph.register",
+    json!({
+      "id": "graph:desktop-native-smoke",
+      "spec": graph_constant_output("face/graph.value", 3.0),
+    }),
+  )?;
+  assert_eq!(graph["module"], "vizij-node-graph");
+
+  let animation = call_vizij_dispatch(
+    &mut engine,
+    "animation.register",
+    json!({
+      "id": "anim:desktop-native-smoke",
       "setup": {
         "animation": fixture_animation_for_path("face/smile.amount"),
         "instance": { "timescale": 1.0, "active": true }

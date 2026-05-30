@@ -5,7 +5,7 @@ use crate::{
   engine::EngineRef,
   module::{DispatchError, Module},
 };
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 use uuid::Uuid;
 
 pub struct NativeExecutor {
@@ -42,9 +42,11 @@ impl Executor for NativeExecutor {
       ))
     })?;
 
-    let tmp_file_path = tmp_dir
-      .path()
-      .join(format!("{}.bin", module_definition.header.name));
+    let tmp_file_path = tmp_dir.path().join(format!(
+      "lib{}.{}",
+      module_definition.header.name,
+      native_library_extension()
+    ));
 
     std::fs::write(&tmp_file_path, module_definition.executable).map_err(|err| {
       LoadModuleError::Internal(format!("failed to write module to file: {}", err))
@@ -55,7 +57,10 @@ impl Executor for NativeExecutor {
         .map_err(|err| LoadModuleError::Internal(format!("failed to load module: {}", err)))?
     };
 
-    Ok(Box::new(NativeModule { lib }))
+    Ok(Box::new(NativeModule {
+      lib,
+      _tmp_dir: tmp_dir,
+    }))
   }
 
   fn unload_module(&mut self, module_id: uuid::Uuid) -> Result<(), super::UnloadModuleError> {
@@ -72,6 +77,17 @@ impl Executor for NativeExecutor {
 
 struct NativeModule {
   lib: libloading::Library,
+  _tmp_dir: TempDir,
+}
+
+fn native_library_extension() -> &'static str {
+  if cfg!(target_os = "macos") {
+    "dylib"
+  } else if cfg!(target_os = "windows") {
+    "dll"
+  } else {
+    "so"
+  }
 }
 
 impl Module for NativeModule {

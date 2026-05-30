@@ -44,3 +44,17 @@ pub fn load_module_from_parts(
   engine.load_module(module_definition_from_parts(header, executable))?;
   Ok(LoadedModule { id, function_ids })
 }
+
+/// Load a module while overriding the executor declared in its generated
+/// header. This is useful when one module source can be built for multiple
+/// host modes, for example a Rust cdylib on desktop and a Wasm guest in the
+/// browser.
+pub fn load_module_from_parts_with_executor(
+  engine: &mut Engine,
+  mut header: Header,
+  executable: Box<[u8]>,
+  executor_name: impl Into<String>,
+) -> Result<LoadedModule, LoadModuleError> {
+  header.executor.name = executor_name.into();
+  load_module_from_parts(engine, header, executable)
+}

@@ -34,6 +34,7 @@ uuid = "1"
 #
 #     cargo +nightly build -p test-rust-wasm -p behavior-tree-nodes -p vizij-orchestrator --target wasm32-wasip1
 #     cargo +nightly build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed --target wasm32-wasip1 --release
+#     cargo build -p vizij-orchestrator-composed
 #
 # We intentionally avoid artifact dependencies here because the expanded
 # Vizij dependency graph currently trips a nightly Cargo artifact-dep

@@ -2,7 +2,7 @@ use anyhow::bail;
 use arora::{
   call::{Call, CallBridge},
   engine::EngineBuilder,
-  load::load_module_from_parts,
+  load::{load_module_from_parts, load_module_from_parts_with_executor},
   schema::module::low::Header,
 };
 use arora_module_core::header::module_frozen_from_header_file;
@@ -78,6 +78,12 @@ pub struct Args {
   /// Binaries of modules to load. Order must match --header arguments.
   #[clap(short, long)]
   pub exe: Vec<String>,
+
+  /// Override the executor declared by loaded headers. Useful for modules
+  /// whose generated header is shared between browser Wasm and desktop-native
+  /// builds.
+  #[clap(long, name = "executor")]
+  pub executor_override: Option<String>,
 
   /// If set, performs a call described in yaml.
   #[clap(short, long)]
@@ -210,8 +216,12 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
     let executable = executable.into_boxed_slice();
 
     let module_name = header.name.clone();
-    load_module_from_parts(&mut *engine, header, executable)
-      .expect(format!("failed to load module {}", module_name).as_str());
+    let loaded_module = if let Some(executor_name) = args.executor_override.as_ref() {
+      load_module_from_parts_with_executor(&mut *engine, header, executable, executor_name.clone())
+    } else {
+      load_module_from_parts(&mut *engine, header, executable)
+    };
+    loaded_module.expect(format!("failed to load module {}", module_name).as_str());
   }
 
   if let Some(call_yaml) = &args.call {

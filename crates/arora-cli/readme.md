@@ -8,7 +8,9 @@ into another codebase.
 ## In a Nutshell
 
 `arora-cli` loads modules by parsing their `--header` file,
-and loading their associated `--exe`, a WebAssembly binary.
+and loading their associated `--exe`. The executable can be a WebAssembly
+guest or a native dynamic library, depending on the executor declared by the
+header.
 The modules may depend on other modules or types,
 which can be provided locally as a folder to `--include`,
 or as a remote registry, reachable given the right `--config` file.
@@ -44,3 +46,26 @@ a configuration file will be created under `~/.semio/cli.yaml`.
 You can then pass it to `arora-cli` with the `--config` option.
 
 Try `arora-cli --help` for more options.
+
+For modules that share one generated header between browser Wasm and
+desktop-native builds, pass `--executor-override native` with a native
+dynamic library. If the header declares imports, pass those imported module
+headers first so the local registry can resolve them:
+
+```bash
+cargo build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed
+
+target/debug/arora-cli \
+  --header modules/vizij-animation/src/arora_generated/module.yaml \
+  --exe target/debug/libvizij_animation.so \
+  --header modules/vizij-node-graph/src/arora_generated/module.yaml \
+  --exe target/debug/libvizij_node_graph.so \
+  --header modules/vizij-orchestrator-composed/src/arora_generated/module.yaml \
+  --exe target/debug/libarora_vizij_orchestrator_composed.so \
+  --executor-override native \
+  --call "id: 90725b7e-a4d9-4a3f-99af-8e227612bed7
+args:
+- id: 323d47be-3b30-46ff-882f-bc7f7ffacd57
+  value:
+    str: '{\"call\":\"runtime.create\",\"requestId\":\"desktop-native\",\"args\":{\"schedule\":\"SinglePass\"}}'"
+```
