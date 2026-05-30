@@ -13,11 +13,13 @@ class Engine {
   constructor();
   loadModule(headerJson: string, executable: Uint8Array): string; // returns module id
   call(callJson: string): string;                                   // returns result JSON
+  listModules(): string;                                            // returns JSON array of loaded module headers
 }
 
 class BehaviorTreeRunner {
   constructor();
   loadModule(headerJson: string, executable: Uint8Array): string;
+  listModules(): string;                                            // returns JSON array of loaded module headers
   setVariable(varId: string, valueJson: string): void;
   tick(nodesJson: string): string;  // returns {status, trace, variables}
   run(nodesJson: string): string;   // runs until not Running
