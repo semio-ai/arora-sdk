@@ -78,10 +78,13 @@ struct UpdateNodesWritesRequest {
 #[serde(rename_all = "camelCase")]
 struct InstanceConfigPatch {
   weight: Option<f32>,
-  #[serde(alias = "time_scale")]
+  #[serde(alias = "time_scale", alias = "timescale")]
   time_scale: Option<f32>,
   #[serde(alias = "start_offset")]
   start_offset: Option<f32>,
+  /// Studio instance offset in milliseconds. `start_offset`/`startOffset` remain seconds.
+  offset: Option<f32>,
+  #[serde(alias = "active")]
   enabled: Option<bool>,
 }
 
@@ -96,6 +99,8 @@ impl From<InstanceConfigPatch> for InstanceCfg {
     }
     if let Some(start_offset) = patch.start_offset {
       config.start_offset = start_offset;
+    } else if let Some(offset_ms) = patch.offset {
+      config.start_offset = offset_ms / 1000.0;
     }
     if let Some(enabled) = patch.enabled {
       config.enabled = enabled;
@@ -234,6 +239,25 @@ mod tests {
     let parsed: Value = serde_json::from_str(response).expect("response json");
     assert_eq!(parsed["ok"], true, "{parsed}");
     parsed["value"].clone()
+  }
+
+  #[test]
+  fn instance_config_accepts_studio_settings_aliases() {
+    let request: AddInstanceRequest = serde_json::from_value(json!({
+      "playerId": 7,
+      "animationId": 13,
+      "config": {
+        "timescale": 2.0,
+        "offset": 250.0,
+        "active": false
+      }
+    }))
+    .expect("deserialize Studio-shaped add-instance request");
+
+    let config = InstanceCfg::from(request.config.expect("config patch"));
+    assert_eq!(config.time_scale, 2.0);
+    assert_eq!(config.start_offset, 0.25);
+    assert!(!config.enabled);
   }
 
   #[test]

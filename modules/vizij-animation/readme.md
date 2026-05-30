@@ -31,6 +31,11 @@ or:
 | `update_nodes_writes` | `{ "dt": number, "inputs"?: Inputs }` | `{ "nodes": {}, "writes": WriteBatchJSON }` |
 | `list_animations` | no request | animation metadata array |
 
+`add_instance.config` accepts the core `InstanceCfg` field names and Studio-shaped
+instance settings. Studio `timescale` maps to core `time_scale`, Studio `offset`
+is interpreted as milliseconds and converted to core `start_offset` seconds, and
+Studio `active` maps to core `enabled`.
+
 ## Local Build
 
 This module currently depends on the sibling Vizij Rust experiment worktree:
