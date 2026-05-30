@@ -4492,13 +4492,16 @@ dependencies = [
  "arora-registry",
  "arora-types",
  "derive_more 2.0.1",
+ "indexmap 2.11.4",
  "serde",
  "serde_json",
  "tokio",
  "uuid",
  "vizij-animation",
  "vizij-api-core",
+ "vizij-graph-core",
  "vizij-node-graph",
+ "vizij-orchestrator-core",
 ]
 
 [[package]]

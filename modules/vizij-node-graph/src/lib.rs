@@ -95,12 +95,15 @@ impl NodeGraphModuleFacade {
   }
 
   pub fn load_graph_value(&mut self, spec: JsonValue) -> Result<(), String> {
-    let normalized = Self::normalize_graph_value(spec)?;
-    let spec = serde_json::from_value::<GraphSpec>(normalized)
-      .map_err(|error| format!("graph spec deserialize error: {error}"))?
-      .with_cache();
+    let spec = parse_graph_spec_value(spec)?;
     self.spec = Some(spec);
     self.runtime = GraphRuntime::default();
+    self.plan_ready = false;
+    Ok(())
+  }
+
+  pub fn replace_graph_value(&mut self, spec: JsonValue) -> Result<(), String> {
+    self.spec = Some(parse_graph_spec_value(spec)?);
     self.plan_ready = false;
     Ok(())
   }
@@ -157,6 +160,13 @@ impl NodeGraphModuleFacade {
 
     Ok(std::mem::take(&mut self.runtime.writes))
   }
+}
+
+fn parse_graph_spec_value(spec: JsonValue) -> Result<GraphSpec, String> {
+  let normalized = NodeGraphModuleFacade::normalize_graph_value(spec)?;
+  serde_json::from_value::<GraphSpec>(normalized)
+    .map_err(|error| format!("graph spec deserialize error: {error}"))
+    .map(GraphSpec::with_cache)
 }
 
 fn graph_value_from_envelope(envelope: GraphSpecEnvelope) -> JsonValue {

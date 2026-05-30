@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use vizij_animation_core::{
   parse_stored_animation_json, AnimId, Config, Engine, Inputs, InstanceCfg, PlayerId,
 };
+use vizij_api_core::WriteBatch;
 
 static FACADE: OnceLock<Mutex<AnimationModuleFacade>> = OnceLock::new();
 
@@ -193,15 +194,28 @@ impl AnimationModuleFacade {
     &mut self,
     dt: f32,
     inputs: Option<Inputs>,
-  ) -> Result<vizij_api_core::WriteBatch, String> {
+  ) -> Result<WriteBatch, String> {
+    self
+      .update_outputs(dt, inputs)
+      .map(|(batch, _events)| batch)
+  }
+
+  pub fn update_outputs(
+    &mut self,
+    dt: f32,
+    inputs: Option<Inputs>,
+  ) -> Result<(WriteBatch, Vec<JsonValue>), String> {
     if !dt.is_finite() || dt < 0.0 {
       return Err("dt must be finite and non-negative".to_string());
     }
-    Ok(
-      self
-        .engine
-        .update_writebatch(dt, inputs.unwrap_or_default()),
-    )
+    let outputs = self.engine.update_values(dt, inputs.unwrap_or_default());
+    let batch = outputs.to_writebatch();
+    let events = outputs
+      .events
+      .iter()
+      .filter_map(|event| serde_json::to_value(event).ok())
+      .collect();
+    Ok((batch, events))
   }
 
   pub fn list_animations(&self) -> Vec<vizij_animation_core::engine::AnimationInfo> {

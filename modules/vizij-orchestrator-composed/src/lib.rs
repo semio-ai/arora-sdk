@@ -1,12 +1,20 @@
 mod arora_generated;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use vizij_animation::AnimationModuleFacade;
-use vizij_api_core::{json as api_json, Shape, TypedPath, Value as ApiValue, WriteBatch};
+use vizij_api_core::{json as api_json, TypedPath, WriteBatch};
+use vizij_graph_core::GraphSpec;
 use vizij_node_graph::NodeGraphModuleFacade;
+use vizij_orchestrator::controllers::animation::AnimationController;
+use vizij_orchestrator::module_facade::filter_unchanged_writes;
+use vizij_orchestrator::{
+  Blackboard, ConflictLog, GraphControllerConfig, GraphMergeOptions, OutputConflictStrategy,
+  Subscriptions,
+};
 
 pub const MODULE_FACADE_VERSION: u32 = 1;
 
@@ -41,26 +49,24 @@ pub struct ComposedOrchestratorFacade {
   runtime_counter: u64,
   graph_counter: u32,
   anim_counter: u32,
+  output_version: u64,
+  last_version: u64,
+  last_writes: WriteBatch,
 }
 
 #[derive(Debug)]
 struct ComposedRuntime {
   schedule: Schedule,
   epoch: u64,
-  graphs: BTreeMap<String, GraphModule>,
-  anims: BTreeMap<String, AnimationModuleFacade>,
-  blackboard: BTreeMap<String, BlackboardEntry>,
+  graphs: IndexMap<String, GraphModule>,
+  anims: IndexMap<String, AnimationModuleFacade>,
+  blackboard: Blackboard,
 }
 
 #[derive(Debug)]
 struct GraphModule {
   facade: NodeGraphModuleFacade,
-}
-
-#[derive(Debug, Clone)]
-struct BlackboardEntry {
-  value: ApiValue,
-  shape: Option<Shape>,
+  subs: Subscriptions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +90,9 @@ impl ComposedOrchestratorFacade {
       runtime_counter: 0,
       graph_counter: 0,
       anim_counter: 0,
+      output_version: 0,
+      last_version: 0,
+      last_writes: WriteBatch::default(),
     }
   }
 
@@ -124,6 +133,14 @@ impl ComposedOrchestratorFacade {
         self.validate_runtime_handle(request.runtime_handle.as_deref())?;
         self.register_graph(request.args)
       }
+      "graph.replace" => {
+        self.validate_runtime_handle(request.runtime_handle.as_deref())?;
+        self.replace_graph(request.args)
+      }
+      "graph.merge" | "graph.registerMerged" | "graph.register_merged" => {
+        self.validate_runtime_handle(request.runtime_handle.as_deref())?;
+        self.register_merged_graph(request.args)
+      }
       "graph.remove" => {
         self.validate_runtime_handle(request.runtime_handle.as_deref())?;
         self.remove_graph(request.args)
@@ -144,9 +161,13 @@ impl ComposedOrchestratorFacade {
         self.validate_runtime_handle(request.runtime_handle.as_deref())?;
         self.remove_input(request.args)
       }
-      "orchestrator.step" | "orchestrator.stepDelta" | "orchestrator.step_delta" => {
+      "orchestrator.step" => {
         self.validate_runtime_handle(request.runtime_handle.as_deref())?;
         self.step(request.args)
+      }
+      "orchestrator.stepDelta" | "orchestrator.step_delta" => {
+        self.validate_runtime_handle(request.runtime_handle.as_deref())?;
+        self.step_delta(request.args)
       }
       other => Err(format!("unknown facade call '{other}'")),
     }
@@ -164,13 +185,16 @@ impl ComposedOrchestratorFacade {
     self.runtime = Some(ComposedRuntime {
       schedule,
       epoch: 0,
-      graphs: BTreeMap::new(),
-      anims: BTreeMap::new(),
-      blackboard: BTreeMap::new(),
+      graphs: IndexMap::new(),
+      anims: IndexMap::new(),
+      blackboard: Blackboard::new(),
     });
     self.runtime_handle = Some(handle.clone());
     self.graph_counter = 0;
     self.anim_counter = 0;
+    self.output_version = 0;
+    self.last_version = 0;
+    self.last_writes = WriteBatch::default();
 
     Ok(json!({
       "runtimeHandle": handle,
@@ -182,6 +206,9 @@ impl ComposedOrchestratorFacade {
   fn dispose_runtime(&mut self) -> Result<JsonValue, String> {
     let disposed = self.runtime.take().is_some();
     self.runtime_handle = None;
+    self.output_version = 0;
+    self.last_version = 0;
+    self.last_writes = WriteBatch::default();
     Ok(json!({ "disposed": disposed }))
   }
 
@@ -198,20 +225,83 @@ impl ComposedOrchestratorFacade {
   }
 
   fn register_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
-    let args = parse_args::<GraphRegistrationArgs>(args)?;
-    let id = args.id.unwrap_or_else(|| self.next_graph_id());
+    let cfg = build_graph_controller_config(
+      parse_args::<GraphRegistrationArgs>(args)?,
+      self.next_graph_id(),
+    )?;
+    let id = cfg.id.clone();
     let mut graph = NodeGraphModuleFacade::new();
-    graph.load_graph_value(args.spec)?;
-    self
-      .runtime_mut()?
-      .graphs
-      .insert(id.clone(), GraphModule { facade: graph });
+    let spec = serde_json::to_value(&cfg.spec)
+      .map_err(|error| format!("failed to serialize graph spec '{id}': {error}"))?;
+    graph.load_graph_value(spec)?;
+    self.runtime_mut()?.graphs.insert(
+      id.clone(),
+      GraphModule {
+        facade: graph,
+        subs: cfg.subs,
+      },
+    );
+    self.reset_delta_baseline();
     Ok(json!({ "graphId": id, "module": "vizij-node-graph" }))
+  }
+
+  fn replace_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
+    let cfg = build_graph_controller_config(
+      parse_args::<GraphRegistrationArgs>(args)?,
+      self.next_graph_id(),
+    )?;
+    let id = cfg.id.clone();
+    let spec = serde_json::to_value(&cfg.spec)
+      .map_err(|error| format!("failed to serialize graph spec '{id}': {error}"))?;
+    let runtime = self.runtime_mut()?;
+    let module = runtime
+      .graphs
+      .get_mut(&id)
+      .ok_or_else(|| format!("graph '{id}' is not registered"))?;
+    module.facade.replace_graph_value(spec)?;
+    module.subs = cfg.subs;
+    self.reset_delta_baseline();
+    Ok(json!({ "graphId": id, "replaced": true, "module": "vizij-node-graph" }))
+  }
+
+  fn register_merged_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
+    let args = parse_args::<MergedGraphRegistrationArgs>(args)?;
+    if args.graphs.is_empty() {
+      return Err("graph.merge requires at least one graph".to_string());
+    }
+
+    let merged_id = args.id.unwrap_or_else(|| self.next_graph_id());
+    let options = map_merge_options(args.strategy)?;
+    let mut configs = Vec::with_capacity(args.graphs.len());
+    for (idx, graph) in args.graphs.into_iter().enumerate() {
+      let fallback_id = format!("{merged_id}::{idx}");
+      configs.push(build_graph_controller_config(graph, fallback_id)?);
+    }
+
+    let merged_cfg =
+      GraphControllerConfig::merged_with_options(merged_id.clone(), configs, options)
+        .map_err(|error| format!("graph merge error: {error}"))?;
+    let mut graph = NodeGraphModuleFacade::new();
+    let spec = serde_json::to_value(&merged_cfg.spec)
+      .map_err(|error| format!("failed to serialize merged graph spec '{merged_id}': {error}"))?;
+    graph.load_graph_value(spec)?;
+    self.runtime_mut()?.graphs.insert(
+      merged_id.clone(),
+      GraphModule {
+        facade: graph,
+        subs: merged_cfg.subs,
+      },
+    );
+    self.reset_delta_baseline();
+    Ok(json!({ "graphId": merged_id, "module": "vizij-node-graph" }))
   }
 
   fn remove_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let args = parse_args::<RemoveControllerArgs>(args)?;
-    let removed = self.runtime_mut()?.graphs.remove(&args.id).is_some();
+    let removed = self.runtime_mut()?.graphs.shift_remove(&args.id).is_some();
+    if removed {
+      self.reset_delta_baseline();
+    }
     Ok(json!({ "removed": removed }))
   }
 
@@ -223,35 +313,34 @@ impl ComposedOrchestratorFacade {
       animation.configure_from_setup_value(setup)?;
     }
     self.runtime_mut()?.anims.insert(id.clone(), animation);
+    self.reset_delta_baseline();
     Ok(json!({ "animationId": id, "module": "vizij-animation" }))
   }
 
   fn remove_animation(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let args = parse_args::<RemoveControllerArgs>(args)?;
-    let removed = self.runtime_mut()?.anims.remove(&args.id).is_some();
+    let removed = self.runtime_mut()?.anims.shift_remove(&args.id).is_some();
+    if removed {
+      self.reset_delta_baseline();
+    }
     Ok(json!({ "removed": removed }))
   }
 
   fn set_input(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let args = parse_args::<SetInputArgs>(args)?;
-    let path = TypedPath::parse(&args.path)
-      .map_err(|error| format!("invalid input path '{}': {error}", args.path))?;
-    let normalized = api_json::normalize_value_json_staging(args.value);
-    let value = serde_json::from_value::<ApiValue>(normalized)
-      .map_err(|error| format!("invalid input value for '{}': {error}", args.path))?;
-    let shape = match args.shape {
-      Some(shape) => Some(
-        serde_json::from_value::<Shape>(shape)
-          .map_err(|error| format!("invalid input shape for '{}': {error}", args.path))?,
-      ),
-      None => None,
-    };
-    let path_string = path.to_string();
-    self
-      .runtime_mut()?
+    let path = args.path.clone();
+    let runtime = self.runtime_mut()?;
+    runtime
       .blackboard
-      .insert(path_string.clone(), BlackboardEntry { value, shape });
-    Ok(json!({ "path": path_string }))
+      .set(
+        path.clone(),
+        args.value,
+        args.shape,
+        runtime.epoch,
+        "host".to_string(),
+      )
+      .map_err(|error| error.to_string())?;
+    Ok(json!({ "path": path }))
   }
 
   fn remove_input(&mut self, args: JsonValue) -> Result<JsonValue, String> {
@@ -262,36 +351,44 @@ impl ComposedOrchestratorFacade {
 
   fn step(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let args = parse_args::<StepArgs>(args)?;
-    if !args.dt.is_finite() || args.dt < 0.0 {
+    let frame = self.step_runtime(args.dt)?;
+    frame.to_json_value()
+  }
+
+  fn step_delta(&mut self, args: JsonValue) -> Result<JsonValue, String> {
+    let args = parse_args::<StepDeltaArgs>(args)?;
+    let frame = self.step_runtime(args.dt)?;
+    self.output_version = self.output_version.saturating_add(1);
+    let version = self.output_version;
+    let since = args.since_version.unwrap_or(0);
+
+    let merged_writes = if since == self.last_version {
+      filter_unchanged_writes(&frame.merged_writes, &self.last_writes)
+    } else {
+      frame.merged_writes.clone()
+    };
+
+    self.last_version = version;
+    self.last_writes = frame.merged_writes;
+
+    Ok(json!({
+      "version": version,
+      "epoch": frame.epoch,
+      "dt": frame.dt,
+      "merged_writes": merged_writes,
+      "conflicts": frame.conflicts,
+      "events": frame.events,
+      "timings_ms": frame.timings_ms,
+    }))
+  }
+
+  fn step_runtime(&mut self, dt: f32) -> Result<ComposedFrame, String> {
+    if !dt.is_finite() || dt < 0.0 {
       return Err("dt must be finite and non-negative".to_string());
     }
     let runtime = self.runtime_mut()?;
     runtime.epoch = runtime.epoch.wrapping_add(1);
-    let mut merged_writes = WriteBatch::new();
-
-    match runtime.schedule {
-      Schedule::SinglePass | Schedule::RateDecoupled => {
-        run_animation_pass(runtime, args.dt, &mut merged_writes)?;
-        run_graph_pass(runtime, args.dt, &mut merged_writes)?;
-      }
-      Schedule::TwoPass => {
-        run_graph_pass(runtime, args.dt, &mut merged_writes)?;
-        run_animation_pass(runtime, args.dt, &mut merged_writes)?;
-        run_graph_pass(runtime, args.dt, &mut merged_writes)?;
-      }
-    }
-
-    Ok(json!({
-      "epoch": runtime.epoch,
-      "dt": args.dt,
-      "merged_writes": merged_writes,
-      "conflicts": [],
-      "events": [],
-      "timings_ms": {
-        "total_ms": args.dt * 1000.0,
-        "composition": 1.0
-      },
-    }))
+    run_schedule(runtime, dt)
   }
 
   fn runtime_mut(&mut self) -> Result<&mut ComposedRuntime, String> {
@@ -327,21 +424,104 @@ impl ComposedOrchestratorFacade {
     self.anim_counter = self.anim_counter.wrapping_add(1);
     id
   }
+
+  fn reset_delta_baseline(&mut self) {
+    self.last_version = 0;
+    self.last_writes = WriteBatch::default();
+  }
+}
+
+#[derive(Debug)]
+struct ComposedFrame {
+  epoch: u64,
+  dt: f32,
+  merged_writes: WriteBatch,
+  conflicts: Vec<ConflictLog>,
+  events: Vec<JsonValue>,
+  timings_ms: BTreeMap<String, f32>,
+}
+
+impl ComposedFrame {
+  fn to_json_value(self) -> Result<JsonValue, String> {
+    serde_json::to_value(json!({
+      "epoch": self.epoch,
+      "dt": self.dt,
+      "merged_writes": self.merged_writes,
+      "conflicts": self.conflicts,
+      "events": self.events,
+      "timings_ms": self.timings_ms,
+    }))
+    .map_err(|error| format!("failed to serialize frame: {error}"))
+  }
+}
+
+fn run_schedule(runtime: &mut ComposedRuntime, dt: f32) -> Result<ComposedFrame, String> {
+  let mut merged_writes = WriteBatch::new();
+  let mut conflicts = Vec::new();
+  let mut events = Vec::new();
+  let mut timings_ms = BTreeMap::new();
+
+  match runtime.schedule {
+    Schedule::SinglePass | Schedule::RateDecoupled => {
+      run_animation_pass(runtime, dt, &mut merged_writes, &mut conflicts, &mut events)?;
+      if !runtime.anims.is_empty() {
+        timings_ms.insert("animations_ms".to_string(), dt * 1000.0);
+      }
+      run_graph_pass(runtime, dt, &mut merged_writes, &mut conflicts)?;
+      if !runtime.graphs.is_empty() {
+        timings_ms.insert("graphs_ms".to_string(), dt * 1000.0);
+      }
+    }
+    Schedule::TwoPass => {
+      run_graph_pass(runtime, dt, &mut merged_writes, &mut conflicts)?;
+      if !runtime.graphs.is_empty() {
+        timings_ms.insert("graphs_pass1_ms".to_string(), dt * 1000.0);
+      }
+      run_animation_pass(runtime, dt, &mut merged_writes, &mut conflicts, &mut events)?;
+      if !runtime.anims.is_empty() {
+        timings_ms.insert("animations_ms".to_string(), dt * 1000.0);
+      }
+      run_graph_pass(runtime, dt, &mut merged_writes, &mut conflicts)?;
+      if !runtime.graphs.is_empty() {
+        timings_ms.insert("graphs_pass2_ms".to_string(), dt * 1000.0);
+      }
+    }
+  }
+
+  timings_ms.insert("total_ms".to_string(), dt * 1000.0);
+
+  Ok(ComposedFrame {
+    epoch: runtime.epoch,
+    dt,
+    merged_writes,
+    conflicts,
+    events,
+    timings_ms,
+  })
 }
 
 fn run_animation_pass(
   runtime: &mut ComposedRuntime,
   dt: f32,
   merged_writes: &mut WriteBatch,
+  conflicts_out: &mut Vec<ConflictLog>,
+  events_out: &mut Vec<JsonValue>,
 ) -> Result<(), String> {
   let ids: Vec<String> = runtime.anims.keys().cloned().collect();
   for id in ids {
-    let batch = runtime
+    let inputs = AnimationController::inputs_from_blackboard(&runtime.blackboard);
+    let (batch, events) = runtime
       .anims
       .get_mut(&id)
       .ok_or_else(|| format!("animation '{id}' disappeared during pass"))?
-      .update_writebatch(dt, None)?;
-    apply_writes(runtime, batch, merged_writes)?;
+      .update_outputs(dt, Some(inputs))?;
+    merged_writes.append(batch.clone());
+    conflicts_out.extend(runtime.blackboard.apply_writebatch(
+      batch,
+      runtime.epoch,
+      format!("anim:{id}"),
+    ));
+    events_out.extend(events);
   }
   Ok(())
 }
@@ -350,48 +530,77 @@ fn run_graph_pass(
   runtime: &mut ComposedRuntime,
   dt: f32,
   merged_writes: &mut WriteBatch,
+  conflicts_out: &mut Vec<ConflictLog>,
 ) -> Result<(), String> {
   let ids: Vec<String> = runtime.graphs.keys().cloned().collect();
   for id in ids {
-    let staged = runtime.blackboard.clone();
-    let graph = runtime
-      .graphs
-      .get_mut(&id)
-      .ok_or_else(|| format!("graph '{id}' disappeared during pass"))?;
-    for (path, entry) in staged {
-      let value = serde_json::to_value(&entry.value)
-        .map_err(|error| format!("failed to stage graph input '{path}': {error}"))?;
-      let shape = match entry.shape {
-        Some(shape) => Some(
-          serde_json::to_value(shape)
-            .map_err(|error| format!("failed to stage graph input shape '{path}': {error}"))?,
-        ),
-        None => None,
-      };
-      graph.facade.stage_input_value(path, value, shape)?;
-    }
-    let batch = graph.facade.evaluate_writebatch(dt)?;
-    apply_writes(runtime, batch, merged_writes)?;
+    let staged = collect_graph_staged_inputs(runtime, &id)?;
+    let (batch, subs) = {
+      let graph = runtime
+        .graphs
+        .get_mut(&id)
+        .ok_or_else(|| format!("graph '{id}' disappeared during pass"))?;
+      for (path, value, shape) in staged {
+        graph.facade.stage_input_value(path, value, shape)?;
+      }
+      let batch = graph.facade.evaluate_writebatch(dt)?;
+      let subs = graph.subs.clone();
+      (batch, subs)
+    };
+
+    let publish_batch = filter_published_writes(&batch, &subs.outputs);
+    merged_writes.append(publish_batch.clone());
+
+    let apply_batch = if subs.mirror_writes {
+      batch
+    } else {
+      publish_batch
+    };
+    conflicts_out.extend(runtime.blackboard.apply_writebatch(
+      apply_batch,
+      runtime.epoch,
+      format!("graph:{id}"),
+    ));
   }
   Ok(())
 }
 
-fn apply_writes(
-  runtime: &mut ComposedRuntime,
-  batch: WriteBatch,
-  merged_writes: &mut WriteBatch,
-) -> Result<(), String> {
-  for op in batch.iter() {
-    runtime.blackboard.insert(
-      op.path.to_string(),
-      BlackboardEntry {
-        value: op.value.clone(),
-        shape: op.shape.clone(),
-      },
-    );
+fn collect_graph_staged_inputs(
+  runtime: &ComposedRuntime,
+  id: &str,
+) -> Result<Vec<(String, JsonValue, Option<JsonValue>)>, String> {
+  let graph = runtime
+    .graphs
+    .get(id)
+    .ok_or_else(|| format!("graph '{id}' disappeared during input staging"))?;
+  let mut staged = Vec::with_capacity(graph.subs.inputs.len());
+  for path in &graph.subs.inputs {
+    if let Some(entry) = runtime.blackboard.get_tp(path) {
+      let value = serde_json::to_value(&entry.value)
+        .map_err(|error| format!("failed to stage graph input '{path}': {error}"))?;
+      let shape = entry
+        .shape
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|error| format!("failed to stage graph input shape '{path}': {error}"))?;
+      staged.push((path.to_string(), value, shape));
+    }
   }
-  merged_writes.append(batch);
-  Ok(())
+  Ok(staged)
+}
+
+fn filter_published_writes(batch: &WriteBatch, outputs: &[TypedPath]) -> WriteBatch {
+  if outputs.is_empty() {
+    return batch.clone();
+  }
+  let mut filtered = WriteBatch::new();
+  for op in batch.iter() {
+    if outputs.iter().any(|path| path == &op.path) {
+      filtered.push(op.clone());
+    }
+  }
+  filtered
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -466,6 +675,36 @@ struct GraphRegistrationArgs {
   #[serde(default)]
   id: Option<String>,
   spec: JsonValue,
+  #[serde(default)]
+  subs: Option<GraphSubscriptionsArgs>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphSubscriptionsArgs {
+  #[serde(default)]
+  inputs: Vec<String>,
+  #[serde(default)]
+  outputs: Vec<String>,
+  #[serde(default, alias = "mirror_writes")]
+  mirror_writes: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct MergedGraphRegistrationArgs {
+  #[serde(default)]
+  id: Option<String>,
+  graphs: Vec<GraphRegistrationArgs>,
+  #[serde(default)]
+  strategy: Option<MergeStrategyArgs>,
+}
+
+#[derive(Default, Deserialize)]
+struct MergeStrategyArgs {
+  #[serde(default)]
+  outputs: Option<String>,
+  #[serde(default)]
+  intermediate: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -499,6 +738,14 @@ struct StepArgs {
   dt: f32,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StepDeltaArgs {
+  dt: f32,
+  #[serde(default, alias = "since_version")]
+  since_version: Option<u64>,
+}
+
 fn parse_args<T: for<'de> Deserialize<'de>>(args: JsonValue) -> Result<T, String> {
   serde_json::from_value(args).map_err(|error| format!("invalid facade args: {error}"))
 }
@@ -524,9 +771,87 @@ fn schedule_name(schedule: Schedule) -> &'static str {
   }
 }
 
+fn build_graph_controller_config(
+  mut graph: GraphRegistrationArgs,
+  fallback_id: String,
+) -> Result<GraphControllerConfig, String> {
+  api_json::normalize_graph_spec_value(&mut graph.spec)
+    .map_err(|error| format!("normalize graph spec error: {error}"))?;
+  let spec = serde_json::from_value::<GraphSpec>(graph.spec)
+    .map_err(|error| format!("graph spec deserialize error: {error}"))?
+    .with_cache();
+  Ok(GraphControllerConfig {
+    id: graph.id.unwrap_or(fallback_id),
+    spec,
+    subs: map_graph_subscriptions(graph.subs)?,
+  })
+}
+
+fn map_graph_subscriptions(cfg: Option<GraphSubscriptionsArgs>) -> Result<Subscriptions, String> {
+  let mut subs = Subscriptions::default();
+  if let Some(conf) = cfg {
+    subs.inputs = conf
+      .inputs
+      .into_iter()
+      .map(|input| {
+        TypedPath::parse(&input)
+          .map_err(|error| format!("invalid input subscription '{input}': {error}"))
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+    subs.outputs = conf
+      .outputs
+      .into_iter()
+      .map(|output| {
+        TypedPath::parse(&output)
+          .map_err(|error| format!("invalid output subscription '{output}': {error}"))
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+    if let Some(mirror_writes) = conf.mirror_writes {
+      subs.mirror_writes = mirror_writes;
+    }
+  }
+  Ok(subs)
+}
+
+fn map_merge_options(cfg: Option<MergeStrategyArgs>) -> Result<GraphMergeOptions, String> {
+  let mut options = GraphMergeOptions::default();
+  if let Some(strategy) = cfg {
+    if let Some(outputs) = strategy.outputs {
+      options.output_conflicts = parse_conflict_strategy(&outputs)?;
+    }
+    if let Some(intermediate) = strategy.intermediate {
+      options.intermediate_conflicts = parse_conflict_strategy(&intermediate)?;
+    }
+  }
+  Ok(options)
+}
+
+fn parse_conflict_strategy(value: &str) -> Result<OutputConflictStrategy, String> {
+  match value.trim().to_ascii_lowercase().as_str() {
+    "error" => Ok(OutputConflictStrategy::Error),
+    "namespace" => Ok(OutputConflictStrategy::Namespace),
+    "blend" | "blend_equal" | "blend_equal_weights" => {
+      Ok(OutputConflictStrategy::BlendEqualWeights)
+    }
+    "add" | "sum" | "blend_sum" | "blend-sum" | "additive" => {
+      Ok(OutputConflictStrategy::Add)
+    }
+    "default_blend"
+    | "default-blend"
+    | "blend-default"
+    | "blend_weights"
+    | "blend-weights"
+    | "weights" => Ok(OutputConflictStrategy::DefaultBlend),
+    other => Err(format!(
+      "unknown merge conflict strategy '{other}'; expected 'error', 'namespace', 'blend', 'add', or 'default-blend'"
+    )),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use vizij_orchestrator::VizijModuleFacade;
 
   fn unwrap_result(response: &str) -> JsonValue {
     let parsed: JsonValue = serde_json::from_str(response).expect("response json");
@@ -545,6 +870,55 @@ mod tests {
         .to_string(),
       ),
     )
+  }
+
+  fn call_compat(facade: &mut VizijModuleFacade, name: &str, args: JsonValue) -> JsonValue {
+    unwrap_result(
+      &facade.dispatch_json(
+        &json!({
+          "call": name,
+          "requestId": format!("req:{name}"),
+          "args": args,
+        })
+        .to_string(),
+      ),
+    )
+  }
+
+  fn create_pair(schedule: &str) -> (ComposedOrchestratorFacade, VizijModuleFacade) {
+    let mut composed = ComposedOrchestratorFacade::new();
+    let mut compat = VizijModuleFacade::new();
+    call(
+      &mut composed,
+      "runtime.create",
+      json!({ "schedule": schedule }),
+    );
+    call_compat(
+      &mut compat,
+      "runtime.create",
+      json!({ "schedule": schedule }),
+    );
+    (composed, compat)
+  }
+
+  fn write_paths(frame: &JsonValue) -> Vec<String> {
+    frame["merged_writes"]
+      .as_array()
+      .expect("writes array")
+      .iter()
+      .map(|write| write["path"].as_str().expect("write path").to_string())
+      .collect()
+  }
+
+  fn write_value_float(frame: &JsonValue, path: &str) -> f64 {
+    frame["merged_writes"]
+      .as_array()
+      .expect("writes array")
+      .iter()
+      .find(|write| write["path"] == path)
+      .unwrap_or_else(|| panic!("missing write for {path}: {frame}"))["value"]["data"]
+      .as_f64()
+      .expect("float write value")
   }
 
   fn fixture_animation() -> JsonValue {
@@ -568,18 +942,18 @@ mod tests {
     })
   }
 
-  fn fixture_graph() -> JsonValue {
+  fn graph_constant_output(path: &str, value: f32) -> JsonValue {
     json!({
       "nodes": [
         {
           "id": "source",
           "type": "constant",
-          "params": { "value": { "type": "float", "data": 3.0 } }
+          "params": { "value": { "type": "float", "data": value } }
         },
         {
           "id": "out",
           "type": "output",
-          "params": { "path": "face/graph.value" }
+          "params": { "path": path }
         }
       ],
       "edges": [
@@ -589,6 +963,58 @@ mod tests {
         }
       ]
     })
+  }
+
+  fn graph_input_to_output(input_path: &str, output_path: &str) -> JsonValue {
+    json!({
+      "nodes": [
+        {
+          "id": "in",
+          "type": "input",
+          "params": {
+            "path": input_path,
+            "value": { "type": "float", "data": 0.0 }
+          }
+        },
+        {
+          "id": "out",
+          "type": "output",
+          "params": { "path": output_path }
+        }
+      ],
+      "edges": [
+        {
+          "from": { "node_id": "in", "output": "out" },
+          "to": { "node_id": "out", "input": "in" }
+        }
+      ]
+    })
+  }
+
+  fn graph_time_output(path: &str) -> JsonValue {
+    json!({
+      "nodes": [
+        {
+          "id": "time",
+          "type": "time"
+        },
+        {
+          "id": "out",
+          "type": "output",
+          "params": { "path": path }
+        }
+      ],
+      "edges": [
+        {
+          "from": { "node_id": "time", "output": "out" },
+          "to": { "node_id": "out", "input": "in" }
+        }
+      ]
+    })
+  }
+
+  fn fixture_graph() -> JsonValue {
+    graph_constant_output("face/graph.value", 3.0)
   }
 
   #[test]
@@ -635,5 +1061,337 @@ mod tests {
         .any(|write| write["path"] == "face/graph.value"),
       "graph write missing: {writes:?}"
     );
+  }
+
+  #[test]
+  fn composed_matches_compat_for_subscribed_graph_inputs() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let graph = json!({
+      "id": "graph:input",
+      "spec": graph_input_to_output("control/smile.amount", "face/smile.amount"),
+      "subs": {
+        "inputs": ["control/smile.amount"],
+        "outputs": ["face/smile.amount"]
+      }
+    });
+
+    call(&mut composed, "graph.register", graph.clone());
+    call_compat(&mut compat, "graph.register", graph);
+    let input = json!({
+      "path": "control/smile.amount",
+      "value": { "type": "float", "data": 0.75 }
+    });
+    call(&mut composed, "input.set", input.clone());
+    call_compat(&mut compat, "input.set", input);
+
+    let composed_frame = call(
+      &mut composed,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    let compat_frame = call_compat(
+      &mut compat,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert_eq!(write_paths(&composed_frame), vec!["face/smile.amount"]);
+  }
+
+  #[test]
+  fn composed_matches_compat_for_graph_merge() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let merged = json!({
+      "id": "graph:merged",
+      "graphs": [
+        {
+          "id": "driver",
+          "spec": graph_constant_output("control/driver.value", 0.5),
+          "subs": {
+            "outputs": ["control/driver.value"],
+            "mirrorWrites": true
+          }
+        },
+        {
+          "id": "consumer",
+          "spec": graph_input_to_output("control/driver.value", "face/merged.value"),
+          "subs": {
+            "inputs": ["control/driver.value"],
+            "outputs": ["face/merged.value"]
+          }
+        }
+      ],
+      "strategy": {
+        "outputs": "add",
+        "intermediate": "add"
+      }
+    });
+
+    call(&mut composed, "graph.merge", merged.clone());
+    call_compat(&mut compat, "graph.merge", merged);
+    let composed_frame = call(
+      &mut composed,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    let compat_frame = call_compat(
+      &mut compat,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert_eq!(
+      write_paths(&composed_frame),
+      vec!["control/driver.value", "face/merged.value"]
+    );
+  }
+
+  #[test]
+  fn composed_matches_compat_for_insertion_order_conflicts() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let first = json!({
+      "id": "graph:z",
+      "spec": graph_constant_output("face/order.value", 0.25)
+    });
+    let second = json!({
+      "id": "graph:a",
+      "spec": graph_constant_output("face/order.value", 0.75)
+    });
+
+    call(&mut composed, "graph.register", first.clone());
+    call_compat(&mut compat, "graph.register", first);
+    call(&mut composed, "graph.register", second.clone());
+    call_compat(&mut compat, "graph.register", second);
+
+    let composed_frame = call(
+      &mut composed,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    let compat_frame = call_compat(
+      &mut compat,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert_eq!(composed_frame["conflicts"], compat_frame["conflicts"]);
+    let values: Vec<f64> = composed_frame["merged_writes"]
+      .as_array()
+      .expect("writes array")
+      .iter()
+      .map(|write| write["value"]["data"].as_f64().expect("float value"))
+      .collect();
+    assert_eq!(values, vec![0.25, 0.75]);
+  }
+
+  #[test]
+  fn composed_matches_compat_for_graph_replace() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let initial = json!({
+      "id": "graph:replace",
+      "spec": graph_constant_output("face/replaced.value", 0.25)
+    });
+    let replacement = json!({
+      "id": "graph:replace",
+      "spec": graph_constant_output("face/replaced.value", 0.9)
+    });
+
+    call(&mut composed, "graph.register", initial.clone());
+    call_compat(&mut compat, "graph.register", initial);
+    call(&mut composed, "graph.replace", replacement.clone());
+    call_compat(&mut compat, "graph.replace", replacement);
+
+    let composed_frame = call(
+      &mut composed,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    let compat_frame = call_compat(
+      &mut compat,
+      "orchestrator.step",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    let value = composed_frame["merged_writes"][0]["value"]["data"]
+      .as_f64()
+      .expect("float write value");
+    assert!((value - 0.9).abs() < 0.0001, "{value}");
+  }
+
+  #[test]
+  fn composed_matches_compat_for_graph_replace_preserving_runtime_time() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let initial = json!({
+      "id": "graph:time",
+      "spec": graph_time_output("face/time.value")
+    });
+    let replacement = json!({
+      "id": "graph:time",
+      "spec": graph_time_output("face/time.value")
+    });
+
+    call(&mut composed, "graph.register", initial.clone());
+    call_compat(&mut compat, "graph.register", initial);
+    call(&mut composed, "orchestrator.step", json!({ "dt": 0.25 }));
+    call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.25 }));
+    call(&mut composed, "graph.replace", replacement.clone());
+    call_compat(&mut compat, "graph.replace", replacement);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.25 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.25 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!((write_value_float(&composed_frame, "face/time.value") - 0.5).abs() < 0.0001);
+  }
+
+  #[test]
+  fn composed_matches_compat_for_two_pass_animation_to_graph() {
+    let (mut composed, mut compat) = create_pair("TwoPass");
+    let animation = json!({
+      "id": "anim:two-pass",
+      "setup": {
+        "animation": fixture_animation(),
+        "instance": { "timescale": 1.0, "active": true }
+      }
+    });
+    let graph = json!({
+      "id": "graph:two-pass",
+      "spec": graph_input_to_output("face/smile.amount", "face/two_pass.value"),
+      "subs": {
+        "inputs": ["face/smile.amount"],
+        "outputs": ["face/two_pass.value"]
+      }
+    });
+    call(&mut composed, "animation.register", animation.clone());
+    call_compat(&mut compat, "animation.register", animation);
+    call(&mut composed, "graph.register", graph.clone());
+    call_compat(&mut compat, "graph.register", graph);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.5 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.5 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    let paths = write_paths(&composed_frame);
+    assert!(
+      paths.contains(&"face/smile.amount".to_string()),
+      "{paths:?}"
+    );
+    assert!(
+      paths.contains(&"face/two_pass.value".to_string()),
+      "{paths:?}"
+    );
+  }
+
+  #[test]
+  fn composed_matches_compat_for_conflicts_and_delta_frames() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let first = json!({
+      "id": "graph:a",
+      "spec": graph_constant_output("face/conflict.value", 0.25)
+    });
+    let second = json!({
+      "id": "graph:b",
+      "spec": graph_constant_output("face/conflict.value", 0.75)
+    });
+    call(&mut composed, "graph.register", first.clone());
+    call_compat(&mut compat, "graph.register", first);
+    call(&mut composed, "graph.register", second.clone());
+    call_compat(&mut compat, "graph.register", second);
+
+    let composed_delta = call(
+      &mut composed,
+      "orchestrator.stepDelta",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    let compat_delta = call_compat(
+      &mut compat,
+      "orchestrator.stepDelta",
+      json!({ "dt": 1.0 / 60.0 }),
+    );
+    assert_eq!(
+      composed_delta["merged_writes"],
+      compat_delta["merged_writes"]
+    );
+    assert_eq!(composed_delta["conflicts"], compat_delta["conflicts"]);
+    assert_eq!(composed_delta["version"], 1);
+
+    let composed_suppressed = call(
+      &mut composed,
+      "orchestrator.stepDelta",
+      json!({ "dt": 1.0 / 60.0, "sinceVersion": 1 }),
+    );
+    let compat_suppressed = call_compat(
+      &mut compat,
+      "orchestrator.stepDelta",
+      json!({ "dt": 1.0 / 60.0, "sinceVersion": 1 }),
+    );
+    assert_eq!(
+      composed_suppressed["merged_writes"],
+      compat_suppressed["merged_writes"]
+    );
+    assert_eq!(
+      composed_suppressed["merged_writes"]
+        .as_array()
+        .expect("writes array")
+        .len(),
+      0
+    );
+  }
+
+  #[test]
+  fn composed_matches_compat_for_partial_delta_frames() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let static_graph = json!({
+      "id": "graph:static",
+      "spec": graph_constant_output("face/static.value", 0.25)
+    });
+    let time_graph = json!({
+      "id": "graph:time",
+      "spec": graph_time_output("face/time.value")
+    });
+    call(&mut composed, "graph.register", static_graph.clone());
+    call_compat(&mut compat, "graph.register", static_graph);
+    call(&mut composed, "graph.register", time_graph.clone());
+    call_compat(&mut compat, "graph.register", time_graph);
+
+    call(
+      &mut composed,
+      "orchestrator.stepDelta",
+      json!({ "dt": 0.25 }),
+    );
+    call_compat(&mut compat, "orchestrator.stepDelta", json!({ "dt": 0.25 }));
+
+    let composed_delta = call(
+      &mut composed,
+      "orchestrator.stepDelta",
+      json!({ "dt": 0.25, "sinceVersion": 1 }),
+    );
+    let compat_delta = call_compat(
+      &mut compat,
+      "orchestrator.stepDelta",
+      json!({ "dt": 0.25, "sinceVersion": 1 }),
+    );
+    assert_eq!(
+      composed_delta["merged_writes"],
+      compat_delta["merged_writes"]
+    );
+    assert_eq!(write_paths(&composed_delta), vec!["face/time.value"]);
+    assert!((write_value_float(&composed_delta, "face/time.value") - 0.5).abs() < 0.0001);
   }
 }
