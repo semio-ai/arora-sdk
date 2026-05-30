@@ -2,20 +2,21 @@ mod arora_generated;
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use vizij_animation_core::{
   parse_stored_animation_json, AnimId, Config, Engine, Inputs, InstanceCfg, PlayerId,
 };
 use vizij_api_core::WriteBatch;
 
-static FACADE: OnceLock<Mutex<AnimationModuleFacade>> = OnceLock::new();
+static FACADE: OnceLock<Mutex<AnimationModuleManager>> = OnceLock::new();
 
-fn facade() -> &'static Mutex<AnimationModuleFacade> {
-  FACADE.get_or_init(|| Mutex::new(AnimationModuleFacade::new()))
+fn facade() -> &'static Mutex<AnimationModuleManager> {
+  FACADE.get_or_init(|| Mutex::new(AnimationModuleManager::new()))
 }
 
 fn with_facade<T>(
-  f: impl FnOnce(&mut AnimationModuleFacade) -> Result<T, String>,
+  f: impl FnOnce(&mut AnimationModuleManager) -> Result<T, String>,
 ) -> Result<T, String> {
   let mut guard = facade()
     .lock()
@@ -47,12 +48,28 @@ fn parse_request<T: for<'de> Deserialize<'de>>(request_json: Option<String>) -> 
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum StoredAnimationEnvelope {
-  Wrapped { animation: JsonValue },
+  Wrapped {
+    #[serde(
+      default,
+      rename = "controllerId",
+      alias = "controller_id",
+      alias = "id"
+    )]
+    controller_id: Option<String>,
+    animation: JsonValue,
+  },
   Direct(JsonValue),
 }
 
 #[derive(Deserialize)]
 struct CreatePlayerRequest {
+  #[serde(
+    default,
+    rename = "controllerId",
+    alias = "controller_id",
+    alias = "id"
+  )]
+  controller_id: Option<String>,
   #[serde(default = "default_player_name")]
   name: String,
 }
@@ -64,6 +81,13 @@ fn default_player_name() -> String {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AddInstanceRequest {
+  #[serde(
+    default,
+    rename = "controllerId",
+    alias = "controller_id",
+    alias = "id"
+  )]
+  controller_id: Option<String>,
   player_id: u32,
   animation_id: u32,
   #[serde(default)]
@@ -83,9 +107,31 @@ struct AnimationSetup {
 
 #[derive(Deserialize)]
 struct UpdateNodesWritesRequest {
+  #[serde(
+    default,
+    rename = "controllerId",
+    alias = "controller_id",
+    alias = "id"
+  )]
+  controller_id: Option<String>,
   dt: f32,
   #[serde(default)]
   inputs: Option<Inputs>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigureControllerRequest {
+  #[serde(alias = "controller_id", alias = "id")]
+  controller_id: String,
+  #[serde(default)]
+  setup: JsonValue,
+}
+
+#[derive(Deserialize)]
+struct RemoveControllerRequest {
+  #[serde(rename = "controllerId", alias = "controller_id", alias = "id")]
+  controller_id: String,
 }
 
 #[derive(Deserialize)]
@@ -223,6 +269,117 @@ impl AnimationModuleFacade {
   }
 }
 
+#[derive(Debug)]
+pub struct AnimationModuleManager {
+  default: AnimationModuleFacade,
+  controllers: HashMap<String, AnimationModuleFacade>,
+}
+
+impl Default for AnimationModuleManager {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl AnimationModuleManager {
+  pub fn new() -> Self {
+    Self {
+      default: AnimationModuleFacade::new(),
+      controllers: HashMap::new(),
+    }
+  }
+
+  pub fn reset(&mut self) {
+    *self = Self::new();
+  }
+
+  fn facade_mut(
+    &mut self,
+    controller_id: Option<&str>,
+  ) -> Result<&mut AnimationModuleFacade, String> {
+    match controller_id {
+      Some(id) => self
+        .controllers
+        .get_mut(id)
+        .ok_or_else(|| format!("animation controller '{id}' is not configured")),
+      None => Ok(&mut self.default),
+    }
+  }
+
+  fn facade_ref(&self, controller_id: Option<&str>) -> Result<&AnimationModuleFacade, String> {
+    match controller_id {
+      Some(id) => self
+        .controllers
+        .get(id)
+        .ok_or_else(|| format!("animation controller '{id}' is not configured")),
+      None => Ok(&self.default),
+    }
+  }
+
+  pub fn configure_controller(
+    &mut self,
+    controller_id: String,
+    setup: JsonValue,
+  ) -> Result<(), String> {
+    let mut controller = AnimationModuleFacade::new();
+    controller.configure_from_setup_value(setup)?;
+    self.controllers.insert(controller_id, controller);
+    Ok(())
+  }
+
+  pub fn remove_controller(&mut self, controller_id: &str) -> bool {
+    self.controllers.remove(controller_id).is_some()
+  }
+
+  pub fn load_stored_animation_value(
+    &mut self,
+    controller_id: Option<&str>,
+    animation: JsonValue,
+  ) -> Result<AnimId, String> {
+    self
+      .facade_mut(controller_id)?
+      .load_stored_animation_value(animation)
+  }
+
+  pub fn create_player(
+    &mut self,
+    controller_id: Option<&str>,
+    name: &str,
+  ) -> Result<PlayerId, String> {
+    Ok(self.facade_mut(controller_id)?.create_player(name))
+  }
+
+  pub fn add_instance(
+    &mut self,
+    controller_id: Option<&str>,
+    player: PlayerId,
+    animation: AnimId,
+    config: InstanceCfg,
+  ) -> Result<vizij_animation_core::ids::InstId, String> {
+    Ok(
+      self
+        .facade_mut(controller_id)?
+        .add_instance(player, animation, config),
+    )
+  }
+
+  pub fn update_outputs(
+    &mut self,
+    controller_id: Option<&str>,
+    dt: f32,
+    inputs: Option<Inputs>,
+  ) -> Result<(WriteBatch, Vec<JsonValue>), String> {
+    self.facade_mut(controller_id)?.update_outputs(dt, inputs)
+  }
+
+  pub fn list_animations(
+    &self,
+    controller_id: Option<&str>,
+  ) -> Result<Vec<vizij_animation_core::engine::AnimationInfo>, String> {
+    Ok(self.facade_ref(controller_id)?.list_animations())
+  }
+}
+
 fn reset_engine() -> String {
   match facade().lock() {
     Ok(mut guard) => {
@@ -238,13 +395,17 @@ fn load_stored_animation(request_json: Option<String>) -> String {
     Ok(request) => request,
     Err(error) => return err(error),
   };
-  let animation = match request {
-    StoredAnimationEnvelope::Wrapped { animation } | StoredAnimationEnvelope::Direct(animation) => {
-      animation
-    }
+  let (controller_id, animation) = match request {
+    StoredAnimationEnvelope::Wrapped {
+      controller_id,
+      animation,
+    } => (controller_id, animation),
+    StoredAnimationEnvelope::Direct(animation) => (None, animation),
   };
-  match with_facade(|facade| facade.load_stored_animation_value(animation)) {
-    Ok(id) => ok(json!({ "animationId": id.0 })),
+  match with_facade(|facade| {
+    facade.load_stored_animation_value(controller_id.as_deref(), animation)
+  }) {
+    Ok(id) => ok(json!({ "controllerId": controller_id, "animationId": id.0 })),
     Err(error) => err(error),
   }
 }
@@ -255,8 +416,9 @@ fn create_player(request_json: Option<String>) -> String {
     Err(error) => return err(error),
   };
 
-  match with_facade(|facade| Ok(facade.create_player(&request.name))) {
-    Ok(id) => ok(json!({ "playerId": id.0 })),
+  let controller_id = request.controller_id.clone();
+  match with_facade(|facade| facade.create_player(controller_id.as_deref(), &request.name)) {
+    Ok(id) => ok(json!({ "controllerId": controller_id, "playerId": id.0 })),
     Err(error) => err(error),
   }
 }
@@ -267,15 +429,17 @@ fn add_instance(request_json: Option<String>) -> String {
     Err(error) => return err(error),
   };
   let config = request.config.map(InstanceCfg::from).unwrap_or_default();
+  let controller_id = request.controller_id.clone();
 
   match with_facade(|facade| {
-    Ok(facade.add_instance(
+    facade.add_instance(
+      controller_id.as_deref(),
       PlayerId(request.player_id),
       AnimId(request.animation_id),
       config,
-    ))
+    )
   }) {
-    Ok(id) => ok(json!({ "instanceId": id.0 })),
+    Ok(id) => ok(json!({ "controllerId": controller_id, "instanceId": id.0 })),
     Err(error) => err(error),
   }
 }
@@ -288,11 +452,13 @@ fn update_nodes_writes(request_json: Option<String>) -> String {
   if !request.dt.is_finite() || request.dt < 0.0 {
     return err("dt must be finite and non-negative");
   }
+  let controller_id = request.controller_id.clone();
 
   match with_facade(|facade| {
-    let batch = facade.update_writebatch(request.dt, request.inputs)?;
+    let (batch, events) =
+      facade.update_outputs(controller_id.as_deref(), request.dt, request.inputs)?;
     serde_json::to_value(&batch)
-      .map(|writes| json!({ "nodes": {}, "writes": writes }))
+      .map(|writes| json!({ "nodes": {}, "writes": writes, "events": events }))
       .map_err(|error| format!("failed to serialize write batch: {error}"))
   }) {
     Ok(value) => ok(value),
@@ -302,10 +468,34 @@ fn update_nodes_writes(request_json: Option<String>) -> String {
 
 fn list_animations() -> String {
   match with_facade(|facade| {
-    serde_json::to_value(facade.list_animations())
+    serde_json::to_value(facade.list_animations(None)?)
       .map_err(|error| format!("failed to serialize animation list: {error}"))
   }) {
     Ok(value) => ok(value),
+    Err(error) => err(error),
+  }
+}
+
+fn configure_controller(request_json: Option<String>) -> String {
+  let request = match parse_request::<ConfigureControllerRequest>(request_json) {
+    Ok(request) => request,
+    Err(error) => return err(error),
+  };
+  let controller_id = request.controller_id;
+  match with_facade(|facade| facade.configure_controller(controller_id.clone(), request.setup)) {
+    Ok(()) => ok(json!({ "controllerId": controller_id, "configured": true })),
+    Err(error) => err(error),
+  }
+}
+
+fn remove_controller(request_json: Option<String>) -> String {
+  let request = match parse_request::<RemoveControllerRequest>(request_json) {
+    Ok(request) => request,
+    Err(error) => return err(error),
+  };
+  let controller_id = request.controller_id;
+  match with_facade(|facade| Ok(facade.remove_controller(&controller_id))) {
+    Ok(removed) => ok(json!({ "controllerId": controller_id, "removed": removed })),
     Err(error) => err(error),
   }
 }
@@ -316,6 +506,10 @@ mod tests {
   use serde_json::Value;
 
   fn fixture_animation() -> Value {
+    fixture_animation_for_path("face/smile.amount")
+  }
+
+  fn fixture_animation_for_path(path: &str) -> Value {
     json!({
       "id": "arora-module-smoke",
       "name": "Arora Module Smoke",
@@ -326,7 +520,7 @@ mod tests {
         {
           "id": "smile-track",
           "name": "Smile",
-          "animatableId": "face/smile.amount",
+          "animatableId": path,
           "points": [
             { "id": "smile-0", "stamp": 0, "value": 0, "transitions": { "out": "linear" } },
             { "id": "smile-1", "stamp": 1000, "value": 1, "transitions": { "in": "linear" } }
@@ -397,5 +591,55 @@ mod tests {
     assert_eq!(writes[0]["path"], "face/smile.amount");
     assert_eq!(writes[0]["value"]["type"], "float");
     assert!(writes[0]["value"]["data"].as_f64().unwrap() > 0.0);
+  }
+
+  #[test]
+  fn controller_handles_preserve_independent_animation_state() {
+    unwrap_value(&reset_engine());
+    unwrap_value(&configure_controller(Some(
+      json!({
+        "controllerId": "anim:a",
+        "setup": {
+          "animation": fixture_animation_for_path("face/a.smile"),
+          "instance": { "weight": 1.0 }
+        }
+      })
+      .to_string(),
+    )));
+    unwrap_value(&configure_controller(Some(
+      json!({
+        "controllerId": "anim:b",
+        "setup": {
+          "animation": fixture_animation_for_path("face/b.smile"),
+          "instance": { "weight": 1.0 }
+        }
+      })
+      .to_string(),
+    )));
+
+    let anim_a_first = unwrap_value(&update_nodes_writes(Some(
+      json!({ "controllerId": "anim:a", "dt": 0.25 }).to_string(),
+    )));
+    assert_eq!(anim_a_first["writes"][0]["path"], "face/a.smile");
+    assert!((anim_a_first["writes"][0]["value"]["data"].as_f64().unwrap() - 0.25).abs() < 0.0001);
+
+    let anim_b = unwrap_value(&update_nodes_writes(Some(
+      json!({ "controllerId": "anim:b", "dt": 0.5 }).to_string(),
+    )));
+    assert_eq!(anim_b["writes"][0]["path"], "face/b.smile");
+    assert!((anim_b["writes"][0]["value"]["data"].as_f64().unwrap() - 0.5).abs() < 0.0001);
+
+    let anim_a_second = unwrap_value(&update_nodes_writes(Some(
+      json!({ "controllerId": "anim:a", "dt": 0.25 }).to_string(),
+    )));
+    assert_eq!(anim_a_second["writes"][0]["path"], "face/a.smile");
+    assert!(
+      (anim_a_second["writes"][0]["value"]["data"]
+        .as_f64()
+        .unwrap()
+        - 0.5)
+        .abs()
+        < 0.0001
+    );
   }
 }

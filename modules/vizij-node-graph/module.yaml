@@ -31,6 +31,19 @@ exports:
       id: str
 
   - type: function
+    id: 38855e0d-60da-4b4b-a85b-760ff4cd5e73
+    name: replace_graph
+    parameters:
+      - id: cce0d531-932f-4a1a-b53f-bf9d488ca5d6
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
     id: 64afe1b3-a1c6-435e-a22d-0d87f5fde7ec
     name: stage_input
     parameters:
@@ -48,6 +61,19 @@ exports:
     name: evaluate
     parameters:
       - id: ac378ef0-fb8c-4667-9507-48be505078eb
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 0e2c6953-3948-4165-af97-de7c142e7b36
+    name: remove_graph
+    parameters:
+      - id: 7e6b08b8-3fff-497c-a328-a6af116ab326
         name: request_json
         type:
           kind: scalar

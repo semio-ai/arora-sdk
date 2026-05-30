@@ -23,6 +23,131 @@ exports:
       kind: scalar
       id: str
 
-imports: []
+imports:
+  - type: function
+    module: aa32e080-b002-428c-9994-6143aab3bf08
+    id: 80f5c157-bfc0-457d-9a08-531ba04f5305
+    name: update_nodes_writes
+    parameters:
+      - id: b2894b48-8514-4c6d-8b01-ff310c3e7de9
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: aa32e080-b002-428c-9994-6143aab3bf08
+    id: 9a5bb659-1165-4a8c-bc94-83ab52976639
+    name: configure_controller
+    parameters:
+      - id: 5bdaa40d-af3b-448d-b9e5-80912654d940
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: aa32e080-b002-428c-9994-6143aab3bf08
+    id: 09ff986e-05ad-4df5-b56f-e25b0683d152
+    name: remove_controller
+    parameters:
+      - id: ef2753d9-3830-4f5d-9c03-72c438559134
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: 14e86906-c4e4-45e8-936d-725dc43ec9bb
+    name: load_graph
+    parameters:
+      - id: 50227486-ec74-4869-b335-82c4cb41b3dd
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: 38855e0d-60da-4b4b-a85b-760ff4cd5e73
+    name: replace_graph
+    parameters:
+      - id: cce0d531-932f-4a1a-b53f-bf9d488ca5d6
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: 64afe1b3-a1c6-435e-a22d-0d87f5fde7ec
+    name: stage_input
+    parameters:
+      - id: ce24261b-617b-49fc-ad5a-89af31903a6c
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: d898a9d4-516d-4cda-bd8c-7dbf3fa75b70
+    name: evaluate
+    parameters:
+      - id: ac378ef0-fb8c-4667-9507-48be505078eb
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: 0e2c6953-3948-4165-af97-de7c142e7b36
+    name: remove_graph
+    parameters:
+      - id: 7e6b08b8-3fff-497c-a328-a6af116ab326
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    module: 098bd478-8375-4f3a-b649-d64cb1284944
+    id: 9a026e16-bbf3-4eec-88de-73acb4d1b628
+    name: normalize_graph
+    parameters:
+      - id: 11624d55-0377-4d89-bbcf-4842b94cb977
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
 dependencies: []
 executable_mime: application/wasm

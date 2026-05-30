@@ -19,6 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 vizij-animation = { path = "../vizij-animation" }
+vizij-animation-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/animation/vizij-animation-core" }
 vizij-api-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/api/vizij-api-core" }
 vizij-node-graph = { path = "../vizij-node-graph" }
 vizij-orchestrator-core = { path = "../../../vizij-rs-vizij-engine-backend-experiment/crates/orchestrator/vizij-orchestrator-core" }

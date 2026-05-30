@@ -5,9 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
+#[cfg(not(target_arch = "wasm32"))]
 use vizij_animation::AnimationModuleFacade;
+use vizij_animation_core::Inputs;
 use vizij_api_core::{json as api_json, TypedPath, WriteBatch};
 use vizij_graph_core::GraphSpec;
+#[cfg(not(target_arch = "wasm32"))]
 use vizij_node_graph::NodeGraphModuleFacade;
 use vizij_orchestrator::controllers::animation::AnimationController;
 use vizij_orchestrator::module_facade::filter_unchanged_writes;
@@ -59,14 +62,21 @@ struct ComposedRuntime {
   schedule: Schedule,
   epoch: u64,
   graphs: IndexMap<String, GraphModule>,
-  anims: IndexMap<String, AnimationModuleFacade>,
+  anims: IndexMap<String, AnimationModuleHandle>,
   blackboard: Blackboard,
 }
 
 #[derive(Debug)]
 struct GraphModule {
+  #[cfg(not(target_arch = "wasm32"))]
   facade: NodeGraphModuleFacade,
   subs: Subscriptions,
+}
+
+#[derive(Debug)]
+struct AnimationModuleHandle {
+  #[cfg(not(target_arch = "wasm32"))]
+  facade: AnimationModuleFacade,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +192,10 @@ impl ComposedOrchestratorFacade {
       handle
     });
 
+    if let Some(runtime) = self.runtime.as_ref() {
+      clear_domain_handles(runtime)?;
+    }
+
     self.runtime = Some(ComposedRuntime {
       schedule,
       epoch: 0,
@@ -204,7 +218,13 @@ impl ComposedOrchestratorFacade {
   }
 
   fn dispose_runtime(&mut self) -> Result<JsonValue, String> {
-    let disposed = self.runtime.take().is_some();
+    let disposed = if let Some(runtime) = self.runtime.as_ref() {
+      clear_domain_handles(runtime)?;
+      self.runtime = None;
+      true
+    } else {
+      false
+    };
     self.runtime_handle = None;
     self.output_version = 0;
     self.last_version = 0;
@@ -221,7 +241,7 @@ impl ComposedOrchestratorFacade {
 
   fn normalize_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let spec = parse_args::<GraphNormalizeArgs>(args)?.spec;
-    NodeGraphModuleFacade::normalize_graph_value(spec)
+    normalize_graph_module(spec)
   }
 
   fn register_graph(&mut self, args: JsonValue) -> Result<JsonValue, String> {
@@ -230,17 +250,10 @@ impl ComposedOrchestratorFacade {
       self.next_graph_id(),
     )?;
     let id = cfg.id.clone();
-    let mut graph = NodeGraphModuleFacade::new();
     let spec = serde_json::to_value(&cfg.spec)
       .map_err(|error| format!("failed to serialize graph spec '{id}': {error}"))?;
-    graph.load_graph_value(spec)?;
-    self.runtime_mut()?.graphs.insert(
-      id.clone(),
-      GraphModule {
-        facade: graph,
-        subs: cfg.subs,
-      },
-    );
+    let graph = load_graph_module(&id, spec, cfg.subs)?;
+    self.runtime_mut()?.graphs.insert(id.clone(), graph);
     self.reset_delta_baseline();
     Ok(json!({ "graphId": id, "module": "vizij-node-graph" }))
   }
@@ -258,7 +271,7 @@ impl ComposedOrchestratorFacade {
       .graphs
       .get_mut(&id)
       .ok_or_else(|| format!("graph '{id}' is not registered"))?;
-    module.facade.replace_graph_value(spec)?;
+    replace_graph_module(&id, module, spec)?;
     module.subs = cfg.subs;
     self.reset_delta_baseline();
     Ok(json!({ "graphId": id, "replaced": true, "module": "vizij-node-graph" }))
@@ -281,17 +294,10 @@ impl ComposedOrchestratorFacade {
     let merged_cfg =
       GraphControllerConfig::merged_with_options(merged_id.clone(), configs, options)
         .map_err(|error| format!("graph merge error: {error}"))?;
-    let mut graph = NodeGraphModuleFacade::new();
     let spec = serde_json::to_value(&merged_cfg.spec)
       .map_err(|error| format!("failed to serialize merged graph spec '{merged_id}': {error}"))?;
-    graph.load_graph_value(spec)?;
-    self.runtime_mut()?.graphs.insert(
-      merged_id.clone(),
-      GraphModule {
-        facade: graph,
-        subs: merged_cfg.subs,
-      },
-    );
+    let graph = load_graph_module(&merged_id, spec, merged_cfg.subs)?;
+    self.runtime_mut()?.graphs.insert(merged_id.clone(), graph);
     self.reset_delta_baseline();
     Ok(json!({ "graphId": merged_id, "module": "vizij-node-graph" }))
   }
@@ -300,6 +306,7 @@ impl ComposedOrchestratorFacade {
     let args = parse_args::<RemoveControllerArgs>(args)?;
     let removed = self.runtime_mut()?.graphs.shift_remove(&args.id).is_some();
     if removed {
+      remove_graph_module(&args.id)?;
       self.reset_delta_baseline();
     }
     Ok(json!({ "removed": removed }))
@@ -308,10 +315,7 @@ impl ComposedOrchestratorFacade {
   fn register_animation(&mut self, args: JsonValue) -> Result<JsonValue, String> {
     let args = parse_args::<AnimationRegistrationArgs>(args)?;
     let id = args.id.unwrap_or_else(|| self.next_anim_id());
-    let mut animation = AnimationModuleFacade::new();
-    if let Some(setup) = args.setup {
-      animation.configure_from_setup_value(setup)?;
-    }
+    let animation = configure_animation_module(&id, args.setup.unwrap_or(JsonValue::Null))?;
     self.runtime_mut()?.anims.insert(id.clone(), animation);
     self.reset_delta_baseline();
     Ok(json!({ "animationId": id, "module": "vizij-animation" }))
@@ -321,6 +325,7 @@ impl ComposedOrchestratorFacade {
     let args = parse_args::<RemoveControllerArgs>(args)?;
     let removed = self.runtime_mut()?.anims.shift_remove(&args.id).is_some();
     if removed {
+      remove_animation_module(&args.id)?;
       self.reset_delta_baseline();
     }
     Ok(json!({ "removed": removed }))
@@ -431,6 +436,16 @@ impl ComposedOrchestratorFacade {
   }
 }
 
+fn clear_domain_handles(runtime: &ComposedRuntime) -> Result<(), String> {
+  for id in runtime.graphs.keys() {
+    remove_graph_module(id)?;
+  }
+  for id in runtime.anims.keys() {
+    remove_animation_module(id)?;
+  }
+  Ok(())
+}
+
 #[derive(Debug)]
 struct ComposedFrame {
   epoch: u64,
@@ -452,6 +467,236 @@ impl ComposedFrame {
       "timings_ms": self.timings_ms,
     }))
     .map_err(|error| format!("failed to serialize frame: {error}"))
+  }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Deserialize)]
+struct DomainModuleResponse {
+  ok: bool,
+  #[serde(default)]
+  value: JsonValue,
+  #[serde(default)]
+  error: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unwrap_domain_value(response: String, op: &str) -> Result<JsonValue, String> {
+  let parsed: DomainModuleResponse = serde_json::from_str(&response)
+    .map_err(|error| format!("{op} returned invalid response json: {error}"))?;
+  if parsed.ok {
+    Ok(parsed.value)
+  } else {
+    Err(format!(
+      "{op} failed: {}",
+      parsed.error.unwrap_or_else(|| "unknown error".to_string())
+    ))
+  }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn writebatch_from_domain_value(value: &JsonValue, op: &str) -> Result<WriteBatch, String> {
+  let writes = value
+    .get("writes")
+    .cloned()
+    .unwrap_or_else(|| JsonValue::Array(Vec::new()));
+  serde_json::from_value(writes).map_err(|error| format!("{op} returned invalid writes: {error}"))
+}
+
+fn normalize_graph_module(spec: JsonValue) -> Result<JsonValue, String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    return unwrap_domain_value(
+      arora_generated::vizij_node_graph::normalize_graph(json!({ "spec": spec }).to_string()),
+      "vizij-node-graph.normalize_graph",
+    );
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    NodeGraphModuleFacade::normalize_graph_value(spec)
+  }
+}
+
+fn load_graph_module(
+  id: &str,
+  spec: JsonValue,
+  subs: Subscriptions,
+) -> Result<GraphModule, String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    unwrap_domain_value(
+      arora_generated::vizij_node_graph::load_graph(
+        json!({ "graphId": id, "spec": spec }).to_string(),
+      ),
+      "vizij-node-graph.load_graph",
+    )?;
+    Ok(GraphModule { subs })
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    let mut graph = NodeGraphModuleFacade::new();
+    graph.load_graph_value(spec)?;
+    Ok(GraphModule {
+      facade: graph,
+      subs,
+    })
+  }
+}
+
+fn replace_graph_module(id: &str, graph: &mut GraphModule, spec: JsonValue) -> Result<(), String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    let _ = graph;
+    unwrap_domain_value(
+      arora_generated::vizij_node_graph::replace_graph(
+        json!({ "graphId": id, "spec": spec }).to_string(),
+      ),
+      "vizij-node-graph.replace_graph",
+    )?;
+    Ok(())
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    graph.facade.replace_graph_value(spec)
+  }
+}
+
+fn remove_graph_module(id: &str) -> Result<(), String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    unwrap_domain_value(
+      arora_generated::vizij_node_graph::remove_graph(json!({ "graphId": id }).to_string()),
+      "vizij-node-graph.remove_graph",
+    )?;
+  }
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+  }
+  Ok(())
+}
+
+fn stage_graph_input(
+  id: &str,
+  graph: &mut GraphModule,
+  path: String,
+  value: JsonValue,
+  shape: Option<JsonValue>,
+) -> Result<(), String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    let _ = graph;
+    unwrap_domain_value(
+      arora_generated::vizij_node_graph::stage_input(
+        json!({
+          "graphId": id,
+          "path": path,
+          "value": value,
+          "shape": shape
+        })
+        .to_string(),
+      ),
+      "vizij-node-graph.stage_input",
+    )?;
+    Ok(())
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    graph.facade.stage_input_value(path, value, shape)
+  }
+}
+
+fn evaluate_graph_module(id: &str, graph: &mut GraphModule, dt: f32) -> Result<WriteBatch, String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    let _ = graph;
+    let value = unwrap_domain_value(
+      arora_generated::vizij_node_graph::evaluate(json!({ "graphId": id, "dt": dt }).to_string()),
+      "vizij-node-graph.evaluate",
+    )?;
+    writebatch_from_domain_value(&value, "vizij-node-graph.evaluate")
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    graph.facade.evaluate_writebatch(dt)
+  }
+}
+
+fn configure_animation_module(id: &str, setup: JsonValue) -> Result<AnimationModuleHandle, String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    unwrap_domain_value(
+      arora_generated::vizij_animation::configure_controller(
+        json!({ "controllerId": id, "setup": setup }).to_string(),
+      ),
+      "vizij-animation.configure_controller",
+    )?;
+    Ok(AnimationModuleHandle {})
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    let mut animation = AnimationModuleFacade::new();
+    animation.configure_from_setup_value(setup)?;
+    Ok(AnimationModuleHandle { facade: animation })
+  }
+}
+
+fn remove_animation_module(id: &str) -> Result<(), String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    unwrap_domain_value(
+      arora_generated::vizij_animation::remove_controller(
+        json!({ "controllerId": id }).to_string(),
+      ),
+      "vizij-animation.remove_controller",
+    )?;
+  }
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+  }
+  Ok(())
+}
+
+fn update_animation_module(
+  id: &str,
+  animation: &mut AnimationModuleHandle,
+  dt: f32,
+  inputs: Inputs,
+) -> Result<(WriteBatch, Vec<JsonValue>), String> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    let _ = animation;
+    let value = unwrap_domain_value(
+      arora_generated::vizij_animation::update_nodes_writes(
+        json!({ "controllerId": id, "dt": dt, "inputs": inputs }).to_string(),
+      ),
+      "vizij-animation.update_nodes_writes",
+    )?;
+    let batch = writebatch_from_domain_value(&value, "vizij-animation.update_nodes_writes")?;
+    let events = value
+      .get("events")
+      .and_then(JsonValue::as_array)
+      .cloned()
+      .unwrap_or_default();
+    Ok((batch, events))
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let _ = id;
+    animation.facade.update_outputs(dt, Some(inputs))
   }
 }
 
@@ -510,11 +755,11 @@ fn run_animation_pass(
   let ids: Vec<String> = runtime.anims.keys().cloned().collect();
   for id in ids {
     let inputs = AnimationController::inputs_from_blackboard(&runtime.blackboard);
-    let (batch, events) = runtime
+    let animation = runtime
       .anims
       .get_mut(&id)
-      .ok_or_else(|| format!("animation '{id}' disappeared during pass"))?
-      .update_outputs(dt, Some(inputs))?;
+      .ok_or_else(|| format!("animation '{id}' disappeared during pass"))?;
+    let (batch, events) = update_animation_module(&id, animation, dt, inputs)?;
     merged_writes.append(batch.clone());
     conflicts_out.extend(runtime.blackboard.apply_writebatch(
       batch,
@@ -541,9 +786,9 @@ fn run_graph_pass(
         .get_mut(&id)
         .ok_or_else(|| format!("graph '{id}' disappeared during pass"))?;
       for (path, value, shape) in staged {
-        graph.facade.stage_input_value(path, value, shape)?;
+        stage_graph_input(&id, graph, path, value, shape)?;
       }
-      let batch = graph.facade.evaluate_writebatch(dt)?;
+      let batch = evaluate_graph_module(&id, graph, dt)?;
       let subs = graph.subs.clone();
       (batch, subs)
     };
@@ -1015,6 +1260,19 @@ mod tests {
 
   fn fixture_graph() -> JsonValue {
     graph_constant_output("face/graph.value", 3.0)
+  }
+
+  #[test]
+  fn module_manifest_declares_domain_imports() {
+    let manifest = include_str!("../module.yaml");
+    assert!(
+      manifest.contains("module: aa32e080-b002-428c-9994-6143aab3bf08"),
+      "composed orchestrator must import vizij-animation by module id"
+    );
+    assert!(
+      manifest.contains("module: 098bd478-8375-4f3a-b649-d64cb1284944"),
+      "composed orchestrator must import vizij-node-graph by module id"
+    );
   }
 
   #[test]

@@ -17,15 +17,56 @@ const HEADER_YAML: &str = include_str!(env!("TEST_RUST_WASM_HEADER_YAML"));
 const WASM_BYTES: &[u8] = include_bytes!(env!("TEST_RUST_WASM_BYTES"));
 const VIZIJ_ORCHESTRATOR_HEADER_YAML: &str = include_str!(env!("VIZIJ_ORCHESTRATOR_HEADER_YAML"));
 const VIZIJ_ORCHESTRATOR_WASM_BYTES: &[u8] = include_bytes!(env!("VIZIJ_ORCHESTRATOR_WASM_BYTES"));
+const VIZIJ_ANIMATION_HEADER_YAML: &str = include_str!(env!("VIZIJ_ANIMATION_HEADER_YAML"));
+const VIZIJ_ANIMATION_WASM_BYTES: &[u8] = include_bytes!(env!("VIZIJ_ANIMATION_WASM_BYTES"));
+const VIZIJ_NODE_GRAPH_HEADER_YAML: &str = include_str!(env!("VIZIJ_NODE_GRAPH_HEADER_YAML"));
+const VIZIJ_NODE_GRAPH_WASM_BYTES: &[u8] = include_bytes!(env!("VIZIJ_NODE_GRAPH_WASM_BYTES"));
+const VIZIJ_ORCHESTRATOR_COMPOSED_HEADER_YAML: &str =
+  include_str!(env!("VIZIJ_ORCHESTRATOR_COMPOSED_HEADER_YAML"));
+const VIZIJ_ORCHESTRATOR_COMPOSED_WASM_BYTES: &[u8] =
+  include_bytes!(env!("VIZIJ_ORCHESTRATOR_COMPOSED_WASM_BYTES"));
 
 // `ping` from modules/test-rust-wasm/src/arora_generated/module.yaml.
 const PING_FN_ID: &str = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6";
 const VIZIJ_ORCHESTRATOR_DISPATCH_FN_ID: &str = "debf32e5-1650-48ac-af4a-da2da617aef7";
 const VIZIJ_ORCHESTRATOR_REQUEST_PARAM_ID: &str = "71b4a759-ded6-42a3-b59d-9716472ac045";
+const VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID: &str = "90725b7e-a4d9-4a3f-99af-8e227612bed7";
+const VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID: &str = "323d47be-3b30-46ff-882f-bc7f7ffacd57";
 
 fn yaml_header_to_json(yaml: &str) -> String {
   let header: Header = serde_yaml::from_str(yaml).expect("parse header yaml");
   serde_json::to_string(&header).expect("re-serialize header to json")
+}
+
+fn load_guest(engine: &mut Engine, header_yaml: &str, wasm_bytes: &[u8]) -> String {
+  engine
+    .load_module(&yaml_header_to_json(header_yaml), wasm_bytes)
+    .map_err(jsval_to_string)
+    .expect("load guest module succeeded")
+}
+
+fn call_json_dispatch(
+  engine: &mut Engine,
+  function_id: &str,
+  request_param_id: &str,
+  request_json: &str,
+) -> Result<serde_json::Value, String> {
+  let call_json = serde_json::json!({
+    "id": function_id,
+    "args": [
+      {
+        "id": request_param_id,
+        "value": { "str": request_json }
+      }
+    ]
+  })
+  .to_string();
+  let result = engine.call(&call_json).map_err(jsval_to_string)?;
+  let result: serde_json::Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
+  let response_json = result["ret"]["str"]
+    .as_str()
+    .ok_or_else(|| "dispatch return was not a string".to_string())?;
+  serde_json::from_str(response_json).map_err(|e| e.to_string())
 }
 
 #[wasm_bindgen_test]
@@ -89,6 +130,194 @@ fn load_and_call_vizij_orchestrator_wasm() {
   assert_eq!(response["ok"], true, "{response}");
   assert_eq!(response["result"]["runtimeHandle"], "runtime:0");
   assert_eq!(response["result"]["schedule"], "SinglePass");
+}
+
+#[wasm_bindgen_test]
+fn composed_orchestrator_requires_domain_modules_in_browser() {
+  let mut engine = Engine::new();
+  load_guest(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_HEADER_YAML,
+    VIZIJ_ORCHESTRATOR_COMPOSED_WASM_BYTES,
+  );
+
+  let create_response = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    r#"{"call":"runtime.create","requestId":"composed-missing-domains","args":{"schedule":"SinglePass"}}"#,
+  )
+  .expect("runtime.create does not need domain modules");
+  assert_eq!(create_response["ok"], true, "{create_response}");
+
+  let request_json = serde_json::json!({
+    "call": "graph.register",
+    "requestId": "missing-node-graph",
+    "args": {
+      "id": "graph:missing",
+      "spec": {
+        "nodes": [
+          {
+            "id": "source",
+            "type": "constant",
+            "params": { "value": { "type": "float", "data": 1.0 } }
+          },
+          {
+            "id": "out",
+            "type": "output",
+            "params": { "path": "face/missing.graph" }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "node_id": "source", "output": "out" },
+            "to": { "node_id": "out", "input": "in" }
+          }
+        ]
+      }
+    }
+  })
+  .to_string();
+  let err = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    &request_json,
+  )
+  .expect_err("composed module should fail when its imported domain modules are not loaded");
+  assert!(err.contains("call failed"), "{err}");
+}
+
+#[wasm_bindgen_test]
+fn load_and_call_composed_vizij_orchestrator_wasm() {
+  let mut engine = Engine::new();
+  load_guest(
+    &mut engine,
+    VIZIJ_ANIMATION_HEADER_YAML,
+    VIZIJ_ANIMATION_WASM_BYTES,
+  );
+  load_guest(
+    &mut engine,
+    VIZIJ_NODE_GRAPH_HEADER_YAML,
+    VIZIJ_NODE_GRAPH_WASM_BYTES,
+  );
+  load_guest(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_HEADER_YAML,
+    VIZIJ_ORCHESTRATOR_COMPOSED_WASM_BYTES,
+  );
+
+  let create_response = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    r#"{"call":"runtime.create","requestId":"composed-runtime","args":{"schedule":"SinglePass"}}"#,
+  )
+  .expect("runtime.create succeeded");
+  assert_eq!(create_response["ok"], true, "{create_response}");
+  assert_eq!(
+    create_response["result"]["composition"],
+    "independent-modules"
+  );
+
+  let graph_request = serde_json::json!({
+    "call": "graph.register",
+    "requestId": "composed-graph",
+    "args": {
+      "id": "graph:browser",
+      "spec": {
+        "nodes": [
+          {
+            "id": "source",
+            "type": "constant",
+            "params": { "value": { "type": "float", "data": 3.0 } }
+          },
+          {
+            "id": "out",
+            "type": "output",
+            "params": { "path": "face/browser.graph" }
+          }
+        ],
+        "edges": [
+          {
+            "from": { "node_id": "source", "output": "out" },
+            "to": { "node_id": "out", "input": "in" }
+          }
+        ]
+      }
+    }
+  })
+  .to_string();
+  let graph_response = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    &graph_request,
+  )
+  .expect("graph.register succeeded");
+  assert_eq!(graph_response["ok"], true, "{graph_response}");
+
+  let animation_request = serde_json::json!({
+    "call": "animation.register",
+    "requestId": "composed-animation",
+    "args": {
+      "id": "anim:browser",
+      "setup": {
+        "animation": {
+          "id": "browser-animation",
+          "name": "Browser Animation",
+          "formatVersion": 2,
+          "defaultViewportExtent": 1000,
+          "groups": [],
+          "tracks": [
+            {
+              "id": "smile-track",
+              "name": "Smile",
+              "animatableId": "face/browser.smile",
+              "points": [
+                { "id": "smile-0", "stamp": 0, "value": 0, "transitions": { "out": "linear" } },
+                { "id": "smile-1", "stamp": 1000, "value": 1, "transitions": { "in": "linear" } }
+              ]
+            }
+          ]
+        },
+        "instance": { "weight": 1.0 }
+      }
+    }
+  })
+  .to_string();
+  let animation_response = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    &animation_request,
+  )
+  .expect("animation.register succeeded");
+  assert_eq!(animation_response["ok"], true, "{animation_response}");
+
+  let step_response = call_json_dispatch(
+    &mut engine,
+    VIZIJ_ORCHESTRATOR_COMPOSED_DISPATCH_FN_ID,
+    VIZIJ_ORCHESTRATOR_COMPOSED_REQUEST_PARAM_ID,
+    r#"{"call":"orchestrator.step","requestId":"composed-step","args":{"dt":0.5}}"#,
+  )
+  .expect("orchestrator.step succeeded");
+  assert_eq!(step_response["ok"], true, "{step_response}");
+  let writes = step_response["result"]["merged_writes"]
+    .as_array()
+    .expect("writes array");
+  assert!(
+    writes
+      .iter()
+      .any(|write| write["path"] == "face/browser.graph"),
+    "graph write missing: {writes:?}"
+  );
+  assert!(
+    writes
+      .iter()
+      .any(|write| write["path"] == "face/browser.smile"),
+    "animation write missing: {writes:?}"
+  );
 }
 
 fn jsval_to_string(v: JsValue) -> String {

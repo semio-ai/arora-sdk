@@ -4498,6 +4498,7 @@ dependencies = [
  "tokio",
  "uuid",
  "vizij-animation",
+ "vizij-animation-core",
  "vizij-api-core",
  "vizij-graph-core",
  "vizij-node-graph",

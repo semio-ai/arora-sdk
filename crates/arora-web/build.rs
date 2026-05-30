@@ -36,6 +36,39 @@ fn main() {
     .join("wasm32-wasip1")
     .join(&profile)
     .join("arora_vizij_orchestrator.wasm");
+  let vizij_animation_header_yaml = workspace_root
+    .join("modules")
+    .join("vizij-animation")
+    .join("src")
+    .join("arora_generated")
+    .join("module.yaml");
+  let vizij_animation_wasm = workspace_root
+    .join("target")
+    .join("wasm32-wasip1")
+    .join(&profile)
+    .join("vizij_animation.wasm");
+  let vizij_node_graph_header_yaml = workspace_root
+    .join("modules")
+    .join("vizij-node-graph")
+    .join("src")
+    .join("arora_generated")
+    .join("module.yaml");
+  let vizij_node_graph_wasm = workspace_root
+    .join("target")
+    .join("wasm32-wasip1")
+    .join(&profile)
+    .join("vizij_node_graph.wasm");
+  let vizij_orchestrator_composed_header_yaml = workspace_root
+    .join("modules")
+    .join("vizij-orchestrator-composed")
+    .join("src")
+    .join("arora_generated")
+    .join("module.yaml");
+  let vizij_orchestrator_composed_wasm = workspace_root
+    .join("target")
+    .join("wasm32-wasip1")
+    .join(&profile)
+    .join("arora_vizij_orchestrator_composed.wasm");
 
   println!(
     "cargo:rustc-env=TEST_RUST_WASM_HEADER_YAML={}",
@@ -52,6 +85,30 @@ fn main() {
   println!(
     "cargo:rustc-env=VIZIJ_ORCHESTRATOR_WASM_BYTES={}",
     vizij_orchestrator_wasm.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_ANIMATION_HEADER_YAML={}",
+    vizij_animation_header_yaml.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_ANIMATION_WASM_BYTES={}",
+    vizij_animation_wasm.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_NODE_GRAPH_HEADER_YAML={}",
+    vizij_node_graph_header_yaml.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_NODE_GRAPH_WASM_BYTES={}",
+    vizij_node_graph_wasm.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_ORCHESTRATOR_COMPOSED_HEADER_YAML={}",
+    vizij_orchestrator_composed_header_yaml.display()
+  );
+  println!(
+    "cargo:rustc-env=VIZIJ_ORCHESTRATOR_COMPOSED_WASM_BYTES={}",
+    vizij_orchestrator_composed_wasm.display()
   );
   println!("cargo:rerun-if-changed=build.rs");
 }

@@ -70,6 +70,32 @@ exports:
       id: str
 
   - type: function
+    id: 9a5bb659-1165-4a8c-bc94-83ab52976639
+    name: configure_controller
+    parameters:
+      - id: 5bdaa40d-af3b-448d-b9e5-80912654d940
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
+    id: 09ff986e-05ad-4df5-b56f-e25b0683d152
+    name: remove_controller
+    parameters:
+      - id: ef2753d9-3830-4f5d-9c03-72c438559134
+        name: request_json
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: str
+
+  - type: function
     id: 0ad5154a-d349-4e10-a270-02e535af27f1
     name: list_animations
     ret:
