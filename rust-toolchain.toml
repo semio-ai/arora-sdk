@@ -3,7 +3,7 @@
 # crates that cross-compile for wasm32-wasip1 or i686-unknown-linux-musl.
 # See docs/cargo-migration/PLAN.md.
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-05-27"
 components = ["rustfmt", "clippy", "rust-src"]
 targets = [
   "wasm32-wasip1",
