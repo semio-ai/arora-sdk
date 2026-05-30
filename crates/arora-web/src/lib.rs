@@ -41,6 +41,7 @@ pub fn _start() {
 pub struct Engine {
   inner: std::pin::Pin<Box<arora::engine::Engine>>,
   function_module: HashMap<Uuid, Uuid>,
+  module_headers: HashMap<Uuid, String>,
 }
 
 #[wasm_bindgen]
@@ -51,6 +52,7 @@ impl Engine {
     Engine {
       inner,
       function_module: HashMap::new(),
+      module_headers: HashMap::new(),
     }
   }
 
@@ -60,6 +62,7 @@ impl Engine {
   pub fn load_module(&mut self, header_json: &str, executable: &[u8]) -> Result<String, JsValue> {
     let header: Header =
       serde_json::from_str(header_json).map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+    let header_json_str = header_json.to_string();
     let loaded = load_module_from_parts(
       &mut *self.inner,
       header,
@@ -69,7 +72,19 @@ impl Engine {
     for fn_id in &loaded.function_ids {
       self.function_module.insert(*fn_id, loaded.id);
     }
+    self.module_headers.insert(loaded.id, header_json_str);
     Ok(loaded.id.to_string())
+  }
+
+  /// Returns a JSON array of all loaded module headers.
+  #[wasm_bindgen(js_name = listModules)]
+  pub fn list_modules(&self) -> String {
+    let headers: Vec<serde_json::Value> = self
+      .module_headers
+      .values()
+      .filter_map(|s| serde_json::from_str(s).ok())
+      .collect();
+    serde_json::to_string(&headers).unwrap_or_else(|_| "[]".to_string())
   }
 
   /// Call a function. `call_json` is a JSON document matching
@@ -334,6 +349,7 @@ pub struct BehaviorTreeRunner {
   inner: Pin<Box<arora::engine::Engine>>,
   fn_meta: HashMap<Uuid, FnMeta>,
   variables: Rc<RefCell<HashMap<Uuid, Value>>>,
+  module_headers: HashMap<Uuid, String>,
 }
 
 #[wasm_bindgen]
@@ -345,6 +361,7 @@ impl BehaviorTreeRunner {
       inner,
       fn_meta: HashMap::new(),
       variables: Rc::new(RefCell::new(HashMap::new())),
+      module_headers: HashMap::new(),
     }
   }
 
@@ -356,6 +373,7 @@ impl BehaviorTreeRunner {
     let header: Header =
       serde_json::from_str(header_json).map_err(|e| JsValue::from_str(&format!("invalid header: {e}")))?;
     let module_id = header.id;
+    let header_json_str = header_json.to_string();
 
     for export in &header.exports {
       let arora::schema::module::low::ExportSymbol::Function(f) = export;
@@ -380,10 +398,23 @@ impl BehaviorTreeRunner {
       );
     }
 
-    load_module_from_parts(&mut *self.inner, header, executable.to_vec().into_boxed_slice())
-      .map(|m| m.id.to_string())
-      .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))
+    let result = load_module_from_parts(&mut *self.inner, header, executable.to_vec().into_boxed_slice())
+      .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))?;
+    self.module_headers.insert(result.id, header_json_str);
+    Ok(result.id.to_string())
   }
+
+  /// Returns a JSON array of all loaded module headers.
+  #[wasm_bindgen(js_name = listModules)]
+  pub fn list_modules(&self) -> String {
+    let headers: Vec<serde_json::Value> = self
+      .module_headers
+      .values()
+      .filter_map(|s| serde_json::from_str(s).ok())
+      .collect();
+    serde_json::to_string(&headers).unwrap_or_else(|_| "[]".to_string())
+  }
+
 
   /// Initialize or update a variable. `var_id` is a UUID string; `value_json`
   /// is the serialized `Value` (e.g. `{"f32": 0.0}`).
