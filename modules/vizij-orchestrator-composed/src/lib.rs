@@ -754,7 +754,8 @@ fn run_animation_pass(
 ) -> Result<(), String> {
   let ids: Vec<String> = runtime.anims.keys().cloned().collect();
   for id in ids {
-    let inputs = AnimationController::inputs_from_blackboard(&runtime.blackboard);
+    let inputs =
+      AnimationController::inputs_from_blackboard_for_controller(&runtime.blackboard, &id);
     let animation = runtime
       .anims
       .get_mut(&id)
@@ -1167,6 +1168,10 @@ mod tests {
   }
 
   fn fixture_animation() -> JsonValue {
+    fixture_animation_for_path("face/smile.amount")
+  }
+
+  fn fixture_animation_for_path(output_path: &str) -> JsonValue {
     json!({
       "id": "composed-animation",
       "name": "Composed Animation",
@@ -1177,7 +1182,7 @@ mod tests {
         {
           "id": "smile-track",
           "name": "Smile",
-          "animatableId": "face/smile.amount",
+          "animatableId": output_path,
           "points": [
             { "id": "smile-0", "stamp": 0, "value": 0, "transitions": { "out": "linear" } },
             { "id": "smile-1", "stamp": 1000, "value": 1, "transitions": { "in": "linear" } }
@@ -1631,6 +1636,79 @@ mod tests {
       compat_frame["merged_writes"]
     );
     assert!(write_paths(&composed_frame).is_empty());
+  }
+
+  #[test]
+  fn composed_matches_compat_for_scoped_animation_commands() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    for (id, path) in [
+      ("default/animation/blink", "face/blink.amount"),
+      ("default/animation/smile", "face/smile.amount"),
+    ] {
+      let animation = json!({
+        "id": id,
+        "setup": {
+          "animation": fixture_animation_for_path(path),
+          "player": { "speed": 0.0 }
+        }
+      });
+      call(&mut composed, "animation.register", animation.clone());
+      call_compat(&mut compat, "animation.register", animation);
+    }
+
+    let command = json!({
+      "path": "anim/controller/default/animation/blink/player/0/cmd/seek",
+      "value": { "type": "float", "data": 0.75 }
+    });
+    call(&mut composed, "input.set", command.clone());
+    call_compat(&mut compat, "input.set", command);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.0 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.0 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!((write_value_float(&composed_frame, "face/blink.amount") - 0.75).abs() < 0.0001);
+    assert!(
+      write_value_float(&composed_frame, "face/smile.amount").abs() < 0.0001,
+      "scoped command should not move smile: {composed_frame}"
+    );
+  }
+
+  #[test]
+  fn composed_keeps_legacy_animation_commands_broadcast_compatible() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    for (id, path) in [
+      ("default/animation/blink", "face/blink.amount"),
+      ("default/animation/smile", "face/smile.amount"),
+    ] {
+      let animation = json!({
+        "id": id,
+        "setup": {
+          "animation": fixture_animation_for_path(path),
+          "player": { "speed": 0.0 }
+        }
+      });
+      call(&mut composed, "animation.register", animation.clone());
+      call_compat(&mut compat, "animation.register", animation);
+    }
+
+    let command = json!({
+      "path": "anim/player/0/cmd/seek",
+      "value": { "type": "float", "data": 0.5 }
+    });
+    call(&mut composed, "input.set", command.clone());
+    call_compat(&mut compat, "input.set", command);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.0 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.0 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!((write_value_float(&composed_frame, "face/blink.amount") - 0.5).abs() < 0.0001);
+    assert!((write_value_float(&composed_frame, "face/smile.amount") - 0.5).abs() < 0.0001);
   }
 
   #[test]
