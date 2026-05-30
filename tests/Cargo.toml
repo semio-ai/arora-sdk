@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 license = "Proprietary"
 publish = false
-description = "End-to-end tests that exercise built modules via arora-cli"
+description = "End-to-end tests that exercise built modules through Arora hosts"
 
 [lib]
 path = "src/lib.rs"
@@ -24,10 +24,16 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 anyhow = "1"
+arora = { path = "../crates/arora" }
+arora-types = "1"
+serde_json = "1"
+serde_yaml = "0.8"
+uuid = "1"
 
 # The wasm guests must be built before running tests that load them:
 #
 #     cargo +nightly build -p test-rust-wasm -p behavior-tree-nodes -p vizij-orchestrator --target wasm32-wasip1
+#     cargo +nightly build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed --target wasm32-wasip1 --release
 #
 # We intentionally avoid artifact dependencies here because the expanded
 # Vizij dependency graph currently trips a nightly Cargo artifact-dep

@@ -1,9 +1,21 @@
-//! Mirror of the CMake-era integration tests. Each invokes arora-cli
+//! Mirror of the CMake-era integration tests. Most cases invoke arora-cli
 //! against a module artifact published under target/<profile>/modules/
-//! (or the module's own target dir for cargo-component cases).
+//! (or the module's own target dir for cargo-component cases). The Vizij
+//! composed-module proof drives `arora::Engine` directly so multiple facade
+//! calls can share one loaded runtime.
 
+use anyhow::{bail, Context, Result};
+use arora::{
+  call::{Call, CallBridge},
+  engine::{EngineBuilder, PinnedEngine},
+  load::load_module_from_parts,
+  schema::module::low::Header,
+};
+use arora_types::value::{StructureField, Value};
+use serde_json::{json, Value as JsonValue};
 use std::path::PathBuf;
 use std::process::Command;
+use uuid::Uuid;
 
 const ARORA_CLI: &str = env!("ARORA_CLI_BIN");
 
@@ -32,6 +44,166 @@ fn run(args: &[&str]) {
     eprintln!("{}", String::from_utf8_lossy(&output.stderr));
     panic!("arora-cli {args:?} failed with status {}", output.status);
   }
+}
+
+fn parse_uuid(id: &str) -> Uuid {
+  Uuid::parse_str(id).expect("static uuid")
+}
+
+fn required_artifact(path: PathBuf, build_hint: &str) -> Result<PathBuf> {
+  if !path.exists() {
+    bail!(
+      "required artifact is missing: {}\nBuild it first with:\n{}",
+      path.display(),
+      build_hint
+    );
+  }
+  Ok(path)
+}
+
+fn load_wasm_module(engine: &mut PinnedEngine, header: PathBuf, wasm: PathBuf) -> Result<()> {
+  let header_name = header.display().to_string();
+  let header: Header = serde_yaml::from_str(
+    &std::fs::read_to_string(&header)
+      .with_context(|| format!("read module header {header_name}"))?,
+  )
+  .with_context(|| format!("parse module header {header_name}"))?;
+  let module_name = header.name.clone();
+  let executable = std::fs::read(&wasm)
+    .with_context(|| format!("read wasm module {}", wasm.display()))?
+    .into_boxed_slice();
+  load_module_from_parts(&mut **engine, header, executable)
+    .with_context(|| format!("load module {module_name}"))?;
+  Ok(())
+}
+
+fn load_vizij_release_modules(engine: &mut PinnedEngine) -> Result<()> {
+  let root = workspace_root();
+  let build_hint = "cargo +nightly build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed --target wasm32-wasip1 --release";
+  let release_wasm_dir = root.join("target").join("wasm32-wasip1").join("release");
+
+  load_wasm_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-animation")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(release_wasm_dir.join("vizij_animation.wasm"), build_hint)?,
+  )?;
+  load_wasm_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-node-graph")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(release_wasm_dir.join("vizij_node_graph.wasm"), build_hint)?,
+  )?;
+  load_wasm_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-orchestrator-composed")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(
+      release_wasm_dir.join("arora_vizij_orchestrator_composed.wasm"),
+      build_hint,
+    )?,
+  )?;
+  Ok(())
+}
+
+fn call_vizij_dispatch(
+  engine: &mut PinnedEngine,
+  call: &str,
+  args: JsonValue,
+) -> Result<JsonValue> {
+  let composed_module_id = parse_uuid("580d9cef-88be-4f1c-b649-f87032acd8fe");
+  let dispatch_json_id = parse_uuid("90725b7e-a4d9-4a3f-99af-8e227612bed7");
+  let request_json_param_id = parse_uuid("323d47be-3b30-46ff-882f-bc7f7ffacd57");
+  let request = json!({
+    "call": call,
+    "requestId": format!("native:{call}"),
+    "args": args,
+  });
+  let result = engine.arora_call(
+    &composed_module_id,
+    Call {
+      module_id: Some(composed_module_id),
+      id: dispatch_json_id,
+      args: vec![StructureField {
+        id: request_json_param_id,
+        value: Box::new(Value::String(request.to_string())),
+      }],
+    },
+  )?;
+  let Value::String(response_json) = result.ret else {
+    bail!("dispatch_json returned non-string value: {:?}", result.ret);
+  };
+  let response: JsonValue = serde_json::from_str(&response_json)
+    .with_context(|| format!("parse dispatch_json response for {call}"))?;
+  if response["ok"] != true {
+    bail!("dispatch_json {call} failed: {response}");
+  }
+  Ok(response["result"].clone())
+}
+
+fn fixture_animation_for_path(output_path: &str) -> JsonValue {
+  json!({
+    "id": "native-composed-animation",
+    "name": "Native Composed Animation",
+    "formatVersion": 2,
+    "defaultViewportExtent": 1000,
+    "groups": [],
+    "tracks": [
+      {
+        "id": "smile-track",
+        "name": "Smile",
+        "animatableId": output_path,
+        "points": [
+          { "id": "smile-0", "stamp": 0, "value": 0, "transitions": { "out": "linear" } },
+          { "id": "smile-1", "stamp": 1000, "value": 1, "transitions": { "in": "linear" } }
+        ]
+      }
+    ]
+  })
+}
+
+fn graph_constant_output(path: &str, value: f32) -> JsonValue {
+  json!({
+    "nodes": [
+      {
+        "id": "source",
+        "type": "constant",
+        "params": { "value": { "type": "float", "data": value } }
+      },
+      {
+        "id": "out",
+        "type": "output",
+        "params": { "path": path }
+      }
+    ],
+    "edges": [
+      {
+        "from": { "node_id": "source", "output": "out" },
+        "to": { "node_id": "out", "input": "in" }
+      }
+    ]
+  })
+}
+
+fn write_paths(frame: &JsonValue) -> Vec<String> {
+  frame["merged_writes"]
+    .as_array()
+    .expect("writes array")
+    .iter()
+    .map(|write| write["path"].as_str().expect("write path").to_string())
+    .collect()
 }
 
 #[test]
@@ -124,6 +296,60 @@ fn call_vizij_orchestrator_wasm_from_engine() {
       "    str: '{\"call\":\"runtime.create\",\"requestId\":\"integration-runtime\",\"args\":{\"schedule\":\"SinglePass\"}}'\n",
     ),
   ]);
+}
+
+#[test]
+#[ignore = "requires release-built Vizij wasm guests; run after building vizij-animation, vizij-node-graph, and vizij-orchestrator-composed for wasm32-wasip1 --release"]
+fn call_vizij_composed_release_wasm_modules_from_native_engine() -> Result<()> {
+  // Use release wasm here. The debug Vizij guests are large enough that
+  // Wasmtime startup can look like a hang, which obscures the module proof.
+  let mut engine = EngineBuilder::new()
+    .add_executor(arora::executor::wasm::WebAssemblyExecutor::new()?)
+    .build();
+  load_vizij_release_modules(&mut engine)?;
+
+  let runtime = call_vizij_dispatch(
+    &mut engine,
+    "runtime.create",
+    json!({ "schedule": "SinglePass" }),
+  )?;
+  assert_eq!(runtime["composition"], "independent-modules");
+
+  let graph = call_vizij_dispatch(
+    &mut engine,
+    "graph.register",
+    json!({
+      "id": "graph:native-smoke",
+      "spec": graph_constant_output("face/graph.value", 3.0),
+    }),
+  )?;
+  assert_eq!(graph["module"], "vizij-node-graph");
+
+  let animation = call_vizij_dispatch(
+    &mut engine,
+    "animation.register",
+    json!({
+      "id": "anim:native-smoke",
+      "setup": {
+        "animation": fixture_animation_for_path("face/smile.amount"),
+        "instance": { "timescale": 1.0, "active": true }
+      }
+    }),
+  )?;
+  assert_eq!(animation["module"], "vizij-animation");
+
+  let frame = call_vizij_dispatch(&mut engine, "orchestrator.step", json!({ "dt": 0.5 }))?;
+  let paths = write_paths(&frame);
+  assert!(
+    paths.contains(&"face/smile.amount".to_string()),
+    "animation write missing: {frame}"
+  );
+  assert!(
+    paths.contains(&"face/graph.value".to_string()),
+    "graph write missing: {frame}"
+  );
+
+  Ok(())
 }
 
 #[test]
