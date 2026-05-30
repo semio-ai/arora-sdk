@@ -118,11 +118,20 @@ jobs:
         with:
           version: latest
 
-      # The arora-web browser test consumes the wasm32-wasip1 build of
-      # test-rust-wasm; build it directly (release to match the host
-      # release build and keep the cache hot).
-      - name: Build test guest wasm (wasm32-wasip1)
-        run: cargo build -p test-rust-wasm --target wasm32-wasip1 --release
+      # The arora-web browser tests include the wasm32-wasip1 guest
+      # artifacts directly, including the composed Vizij module stack.
+      # Build them explicitly so the tests do not depend on stale cache
+      # state from another job.
+      - name: Build browser guest wasm modules (wasm32-wasip1)
+        run: |
+          cargo build \
+            -p test-rust-wasm \
+            -p vizij-animation \
+            -p vizij-node-graph \
+            -p vizij-orchestrator \
+            -p vizij-orchestrator-composed \
+            --target wasm32-wasip1 \
+            --release
 
       - name: Run arora-web browser test (headless Firefox)
         run: wasm-pack test --headless --firefox --release crates/arora-web
