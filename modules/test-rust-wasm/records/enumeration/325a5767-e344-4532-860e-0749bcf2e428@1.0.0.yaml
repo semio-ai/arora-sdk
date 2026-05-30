@@ -1,0 +1,21 @@
+parent: 1232d7c4-d5af-4f91-9a34-8c707b0c9693
+name: Status
+variants:
+  766e9e9a-446d-4e46-83e6-14b7ca101169:
+    name: Success
+    type:
+      type: primitive
+      value:
+        kind: unit
+  2468f46c-bb60-425c-9a4d-9ad326ccc7e2:
+    name: Failure
+    type:
+      type: primitive
+      value:
+        kind: unit
+  acd79ec6-0c44-401a-82f8-5da5422d3eec:
+    name: Running
+    type:
+      type: primitive
+      value:
+        kind: unit

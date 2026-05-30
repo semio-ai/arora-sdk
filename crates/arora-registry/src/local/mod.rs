@@ -89,6 +89,16 @@ impl LocalRegistry {
     };
     Ok(path)
   }
+
+  pub fn record_name_and_parent(&self, id: &Uuid) -> Option<(String, Option<Uuid>)> {
+    let reg_ref = self.find_frozen_by_id(id)?;
+    if reg_ref.is_root() {
+      return None;
+    }
+    let name = reg_ref.name()?.clone();
+    let parent = reg_ref.parent().cloned();
+    Some((name, parent))
+  }
 }
 
 #[async_trait]

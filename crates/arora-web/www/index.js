@@ -1,4 +1,4 @@
-import init, { Engine } from "./pkg/arora_web.js";
+import init, { Engine, Registry } from "./pkg/arora_web.js";
 import jsyaml from "https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/+esm";
 
 // ── hard-coded IDs for the built-in quick-call demo ──────────────────────────
@@ -9,6 +9,7 @@ const COS_ANGLE_PARAM_ID = "6c2a157c-4235-47b0-bff3-1eeef3e5747d";
 
 // ── one engine instance for the whole page ───────────────────────────────────
 let engine = null;
+let registry = null;
 let testWasmLoaded = false;
 
 const outEl     = document.getElementById("out");
@@ -23,10 +24,9 @@ const noModules  = document.getElementById("no-modules");
 function renderTypeRef(typeRef) {
   if (!typeRef) return "unit";
   const id = typeof typeRef === "string" ? typeRef : (typeRef.id ?? "?");
-  const array = (typeRef.kind === "array") ? "[]" : "";
-  // Shorten long dotted paths to just the last segment for display.
-  const short = id.includes(".") ? id.split(".").pop() : id;
-  return `${short}${array}`;
+  const array = typeRef?.kind === "array" ? "[]" : "";
+  const name = registry?.resolveId(id) ?? id.slice(-8);
+  return `${name}${array}`;
 }
 
 // ── module list rendering ─────────────────────────────────────────────────────
@@ -115,11 +115,26 @@ async function fetchAndLoad(yamlPath, wasmPath, statusEl) {
   return loadModule(yamlText, wasmBuffer, statusEl);
 }
 
+async function fetchLoadAndRegister(yamlPath, wasmPath, recordsPath, statusEl) {
+  statusEl.textContent = "loading…";
+  statusEl.className = "load-status";
+  const [yamlText, wasmBuffer, recordsText] = await Promise.all([
+    fetch(yamlPath).then(r => r.text()),
+    fetch(wasmPath).then(r => r.arrayBuffer()),
+    fetch(recordsPath).then(r => r.text()).catch(() => null),
+  ]);
+  if (recordsText) {
+    try { registry.loadRecordsJson(recordsText); } catch (e) { console.warn("records load failed:", e); }
+  }
+  return loadModule(yamlText, wasmBuffer, statusEl);
+}
+
 document.getElementById("load-test-wasm-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("load-builtin-status");
-  const id = await fetchAndLoad(
+  const id = await fetchLoadAndRegister(
     "./modules/test-rust-wasm/module.yaml",
     "./modules/test-rust-wasm/test_rust_wasm.wasm",
+    "./modules/test-rust-wasm/records.json",
     statusEl,
   );
   if (id) {
@@ -130,9 +145,10 @@ document.getElementById("load-test-wasm-btn").addEventListener("click", async ()
 
 document.getElementById("load-bt-nodes-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("load-builtin-status");
-  await fetchAndLoad(
+  await fetchLoadAndRegister(
     "./modules/behavior-tree-nodes/module.yaml",
     "./modules/behavior-tree-nodes/behavior_tree_nodes.wasm",
+    "./modules/behavior-tree-nodes/records.json",
     statusEl,
   );
 });
@@ -168,3 +184,4 @@ runBtn.addEventListener("click", () => {
 // ── boot ──────────────────────────────────────────────────────────────────────
 await init();
 engine = new Engine();
+registry = new Registry();
