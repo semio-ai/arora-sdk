@@ -4,12 +4,12 @@ use arora_module_core::{
   header::generate_header_file, ImportAsset, ModuleAsset, ModuleDeclarationError,
 };
 use arora_registry::{
-  EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError, StructureFrozen,
-  TypeDefinitionFrozen,
+  local::LocalRegistry, EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError,
+  StructureFrozen, TypeDefinitionFrozen,
 };
 use arora_types::ty::{
   BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
-  U8_ID,
+  U8_ID, UNIT_ID,
 };
 use arora_vfs::{Directory, Entry as VfsEntry, File, VfsError};
 use async_recursion::async_recursion;
@@ -45,8 +45,7 @@ pub async fn generate_sources(
   for asset in assets {
     match asset {
       ModuleAsset::Type(id, _, ty) => match ty {
-        TypeDefinitionFrozen::Primitive(_) => (),
-        TypeDefinitionFrozen::Enumeration(enumeration) => {
+        TypeDefinitionFrozen::Primitive(_kind) => {}        TypeDefinitionFrozen::Enumeration(enumeration) => {
           let parent_path = registry
             .resolve_id(&enumeration.parent)
             .await
@@ -177,9 +176,144 @@ pub fn generate_mods_in_directories(dir: &mut Directory) -> Result<bool, Generat
   }
 }
 
-/// Generates sources that are common dependencies to
-/// other generated sources.
-/// Always call this function before generating sources.
+/// Generates YAML record files alongside a `records.json` index from the type assets
+/// produced by [`arora_module_core::analyze_module`].
+/// Must be called BEFORE [`generate_sources`] because `generate_sources` consumes `assets`.
+pub fn generate_records(
+  assets: &[ModuleAsset],
+  registry: &LocalRegistry,
+) -> Result<Directory, GenerationError> {
+  use arora_registry::local::ROOT_ID;
+
+  let mut vfs = Directory::new();
+  vfs
+    .ensure_directories(&path::PathBuf::from("folder"))
+    .map_err(GenerationError::VfsError)?;
+  vfs
+    .ensure_directories(&path::PathBuf::from("enumeration"))
+    .map_err(GenerationError::VfsError)?;
+  vfs
+    .ensure_directories(&path::PathBuf::from("structure"))
+    .map_err(GenerationError::VfsError)?;
+
+  let mut json_records: Vec<serde_json::Value> = vec![
+    serde_json::json!({"id": UNIT_ID.to_string(), "name": "unit"}),
+    serde_json::json!({"id": BOOLEAN_ID.to_string(), "name": "bool"}),
+    serde_json::json!({"id": U8_ID.to_string(), "name": "u8"}),
+    serde_json::json!({"id": U16_ID.to_string(), "name": "u16"}),
+    serde_json::json!({"id": U32_ID.to_string(), "name": "u32"}),
+    serde_json::json!({"id": U64_ID.to_string(), "name": "u64"}),
+    serde_json::json!({"id": I8_ID.to_string(), "name": "i8"}),
+    serde_json::json!({"id": I16_ID.to_string(), "name": "i16"}),
+    serde_json::json!({"id": I32_ID.to_string(), "name": "i32"}),
+    serde_json::json!({"id": I64_ID.to_string(), "name": "i64"}),
+    serde_json::json!({"id": F32_ID.to_string(), "name": "f32"}),
+    serde_json::json!({"id": F64_ID.to_string(), "name": "f64"}),
+    serde_json::json!({"id": STRING_ID.to_string(), "name": "str"}),
+  ];
+
+  let mut seen_folders: HashSet<Uuid> = HashSet::new();
+
+  for asset in assets {
+    let (id, version, ty) = match asset {
+      ModuleAsset::Type(id, version, ty) => (id, version, ty),
+      _ => continue,
+    };
+
+    match ty {
+      TypeDefinitionFrozen::Primitive(_) => {}
+      TypeDefinitionFrozen::Enumeration(e) => {
+        let yaml = serde_yaml::to_string(e)
+          .map_err(|err| GenerationError::Generic(err.to_string()))?;
+        let file_name = format!("{}@{}.yaml", id, version);
+        vfs
+          .insert_at_path(
+            path::PathBuf::from("enumeration").join(&file_name),
+            File::new(yaml.as_bytes()),
+          )
+          .map_err(GenerationError::VfsError)?;
+
+        let mut entry = serde_json::json!({"id": id.to_string(), "name": e.name});
+        if e.parent != ROOT_ID {
+          entry["parent"] = serde_json::json!(e.parent.to_string());
+        }
+        json_records.push(entry);
+        add_folder_chain(&e.parent, registry, &mut vfs, &mut json_records, &mut seen_folders)?;
+      }
+      TypeDefinitionFrozen::Structure(s) => {
+        let yaml = serde_yaml::to_string(s)
+          .map_err(|err| GenerationError::Generic(err.to_string()))?;
+        let file_name = format!("{}@{}.yaml", id, version);
+        vfs
+          .insert_at_path(
+            path::PathBuf::from("structure").join(&file_name),
+            File::new(yaml.as_bytes()),
+          )
+          .map_err(GenerationError::VfsError)?;
+
+        let mut entry = serde_json::json!({"id": id.to_string(), "name": s.name});
+        if s.parent != ROOT_ID {
+          entry["parent"] = serde_json::json!(s.parent.to_string());
+        }
+        json_records.push(entry);
+        add_folder_chain(&s.parent, registry, &mut vfs, &mut json_records, &mut seen_folders)?;
+      }
+    }
+  }
+
+  let records_json = serde_json::to_string(&json_records)
+    .map_err(|err| GenerationError::Generic(err.to_string()))?;
+  vfs
+    .insert("records.json", File::new(records_json.as_bytes()))
+    .map_err(GenerationError::VfsError)?;
+
+  Ok(vfs)
+}
+
+fn add_folder_chain(
+  folder_id: &Uuid,
+  registry: &LocalRegistry,
+  vfs: &mut Directory,
+  json_records: &mut Vec<serde_json::Value>,
+  seen: &mut HashSet<Uuid>,
+) -> Result<(), GenerationError> {
+  use arora_registry::local::ROOT_ID;
+
+  if *folder_id == ROOT_ID || seen.contains(folder_id) {
+    return Ok(());
+  }
+
+  let Some((name, parent_opt)) = registry.record_name_and_parent(folder_id) else {
+    return Ok(());
+  };
+
+  seen.insert(*folder_id);
+
+  let yaml = match parent_opt {
+    Some(p) => format!("name: {}\nparent: {}\n", name, p),
+    None => format!("name: {}\n", name),
+  };
+  let file_name = format!("{}.yaml", folder_id);
+  vfs
+    .insert_at_path(
+      path::PathBuf::from("folder").join(&file_name),
+      File::new(yaml.as_bytes()),
+    )
+    .map_err(GenerationError::VfsError)?;
+
+  let mut entry = serde_json::json!({"id": folder_id.to_string(), "name": name});
+  if let Some(p) = parent_opt {
+    if p != ROOT_ID {
+      entry["parent"] = serde_json::json!(p.to_string());
+    }
+    add_folder_chain(&p, registry, vfs, json_records, seen)?;
+  }
+  json_records.push(entry);
+
+  Ok(())
+}
+
+
 pub fn generate_common_sources() -> Result<Directory, GenerationError> {
   let source = quote! {
     use derive_more::Display;

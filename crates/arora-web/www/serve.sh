@@ -17,9 +17,11 @@ workspace_root="$(cd "$crate_dir/../.." && pwd)"
 
 guest_wasm="$workspace_root/target/wasm32-wasip1/debug/test_rust_wasm.wasm"
 guest_yaml="$workspace_root/modules/test-rust-wasm/src/arora_generated/module.yaml"
+guest_records="$workspace_root/modules/test-rust-wasm/records/records.json"
 
 bt_nodes_wasm="$workspace_root/target/wasm32-wasip1/debug/behavior_tree_nodes.wasm"
 bt_nodes_yaml="$workspace_root/modules/behavior-tree-nodes/src/arora_generated/module.yaml"
+bt_nodes_records="$workspace_root/modules/behavior-tree-nodes/records/records.json"
 
 if [[ ! -f "$guest_wasm" ]]; then
   echo "missing $guest_wasm" >&2
@@ -27,8 +29,20 @@ if [[ ! -f "$guest_wasm" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$guest_records" ]]; then
+  echo "missing $guest_records" >&2
+  echo "run: cargo build -p test-rust-wasm --target wasm32-wasip1" >&2
+  exit 1
+fi
+
 if [[ ! -f "$bt_nodes_wasm" ]]; then
   echo "missing $bt_nodes_wasm" >&2
+  echo "run: cargo build -p behavior-tree-nodes --target wasm32-wasip1" >&2
+  exit 1
+fi
+
+if [[ ! -f "$bt_nodes_records" ]]; then
+  echo "missing $bt_nodes_records" >&2
   echo "run: cargo build -p behavior-tree-nodes --target wasm32-wasip1" >&2
   exit 1
 fi
@@ -43,8 +57,10 @@ cp "$crate_dir/pkg/arora_web.js" "$here/pkg/"
 cp "$crate_dir/pkg/arora_web_bg.wasm" "$here/pkg/"
 cp "$guest_yaml" "$here/modules/test-rust-wasm/module.yaml"
 cp "$guest_wasm" "$here/modules/test-rust-wasm/test_rust_wasm.wasm"
+cp "$guest_records" "$here/modules/test-rust-wasm/records.json"
 cp "$bt_nodes_yaml" "$here/modules/behavior-tree-nodes/module.yaml"
 cp "$bt_nodes_wasm" "$here/modules/behavior-tree-nodes/behavior_tree_nodes.wasm"
+cp "$bt_nodes_records" "$here/modules/behavior-tree-nodes/records.json"
 
 port="${PORT:-8080}"
 echo "==> serving on http://localhost:$port"

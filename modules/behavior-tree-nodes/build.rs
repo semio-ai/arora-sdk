@@ -5,7 +5,7 @@ use arora_behavior_tree_types::{
   TICK_ID_STRUCTURE_VERSION,
 };
 use arora_module_core::{analyze_module_from_path, header::module_frozen_from_header_file};
-use arora_module_rust::{generate_sources, rustfmt::apply_rustfmt};
+use arora_module_rust::{generate_records, generate_sources, rustfmt::apply_rustfmt};
 use arora_registry::{
   local::{LocalRegistry, ROOT_ID},
   EditableRegistry,
@@ -62,6 +62,14 @@ pub async fn main() -> Result<()> {
   // Generate sources for the module
   let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
   println!("cargo:rerun-if-changed={}", "module.yaml");
+  let records = generate_records(&assets, &registry)
+    .map_err(|e| anyhow::anyhow!("records: {e}"))?;
+  let records_path = PathBuf::from("records/");
+  records
+    .sync(records_path.clone())
+    .await
+    .map_err(|e| anyhow::anyhow!("sync records: {e}"))?;
+  println!("cargo:rerun-if-changed={}", records_path.display());
   let generated_sources = generate_sources(assets, &mut registry).await?;
   let source_path = PathBuf::from("src/arora_generated/");
   generated_sources

@@ -533,3 +533,68 @@ impl Default for BehaviorTreeRunner {
     Self::new()
   }
 }
+
+// =============================================================================
+// Type registry
+//
+// A minimal wasm-compatible registry for resolving type UUIDs to names.
+// Loads from the records.json files emitted by arora-module-rust::generate_records.
+// =============================================================================
+
+/// JS-callable type registry that resolves type UUIDs to human-readable names.
+#[wasm_bindgen]
+pub struct Registry {
+  entries: HashMap<Uuid, (String, Option<Uuid>)>,
+}
+
+#[derive(serde::Deserialize)]
+struct RecordEntry {
+  id: Uuid,
+  name: String,
+  parent: Option<Uuid>,
+}
+
+#[wasm_bindgen]
+impl Registry {
+  #[wasm_bindgen(constructor)]
+  pub fn new() -> Registry {
+    Registry {
+      entries: HashMap::new(),
+    }
+  }
+
+  /// Load type records from a JSON array: `[{id, name, parent?}, ...]`.
+  #[wasm_bindgen(js_name = loadRecordsJson)]
+  pub fn load_records_json(&mut self, json: &str) -> Result<(), JsValue> {
+    let records: Vec<RecordEntry> = serde_json::from_str(json)
+      .map_err(|e| JsValue::from_str(&format!("invalid records JSON: {e}")))?;
+    for r in records {
+      self.entries.insert(r.id, (r.name, r.parent));
+    }
+    Ok(())
+  }
+
+  /// Resolve a UUID string to a dot-separated name path (e.g. `"behavior_tree.Status"`).
+  /// Returns `None` if the UUID is not known.
+  #[wasm_bindgen(js_name = resolveId)]
+  pub fn resolve_id(&self, id: &str) -> Option<String> {
+    let uuid: Uuid = id.parse().ok()?;
+    self.compute_path(&uuid)
+  }
+
+  fn compute_path(&self, id: &Uuid) -> Option<String> {
+    let (name, parent) = self.entries.get(id)?;
+    match parent {
+      None => Some(name.clone()),
+      Some(parent_id) if !self.entries.contains_key(parent_id) => Some(name.clone()),
+      Some(parent_id) => Some(format!("{}.{}", self.compute_path(parent_id)?, name)),
+    }
+  }
+}
+
+impl Default for Registry {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
