@@ -1557,6 +1557,83 @@ mod tests {
   }
 
   #[test]
+  fn composed_matches_compat_for_studio_animation_setup_aliases() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let animation = json!({
+      "id": "anim:studio-aliases",
+      "setup": {
+        "animation": fixture_animation(),
+        "player": { "name": "studio-player", "loopMode": "once" },
+        "instance": {
+          "timeScale": 2.0,
+          "offset": 250.0,
+          "active": true
+        }
+      }
+    });
+
+    call(&mut composed, "animation.register", animation.clone());
+    call_compat(&mut compat, "animation.register", animation);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.375 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.375 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!((write_value_float(&composed_frame, "face/smile.amount") - 0.25).abs() < 0.0001);
+  }
+
+  #[test]
+  fn composed_matches_compat_for_legacy_animation_setup_aliases() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let animation = json!({
+      "id": "anim:legacy-aliases",
+      "setup": {
+        "animation": fixture_animation(),
+        "instance": {
+          "timescale": 2.0,
+          "startOffset": 0.25
+        }
+      }
+    });
+
+    call(&mut composed, "animation.register", animation.clone());
+    call_compat(&mut compat, "animation.register", animation);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.375 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.375 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!((write_value_float(&composed_frame, "face/smile.amount") - 0.25).abs() < 0.0001);
+  }
+
+  #[test]
+  fn composed_matches_compat_for_inactive_studio_animation_setup() {
+    let (mut composed, mut compat) = create_pair("SinglePass");
+    let animation = json!({
+      "id": "anim:inactive",
+      "setup": {
+        "animation": fixture_animation(),
+        "instance": { "active": false }
+      }
+    });
+
+    call(&mut composed, "animation.register", animation.clone());
+    call_compat(&mut compat, "animation.register", animation);
+
+    let composed_frame = call(&mut composed, "orchestrator.step", json!({ "dt": 0.5 }));
+    let compat_frame = call_compat(&mut compat, "orchestrator.step", json!({ "dt": 0.5 }));
+    assert_eq!(
+      composed_frame["merged_writes"],
+      compat_frame["merged_writes"]
+    );
+    assert!(write_paths(&composed_frame).is_empty());
+  }
+
+  #[test]
   fn composed_matches_compat_for_conflicts_and_delta_frames() {
     let (mut composed, mut compat) = create_pair("SinglePass");
     let first = json!({

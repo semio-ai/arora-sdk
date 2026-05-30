@@ -6,10 +6,10 @@ This module is the migration target beside the compatibility
 JSON facade style but composes the promoted `vizij-animation` and
 `vizij-node-graph` module facades internally.
 
-The first version intentionally uses in-process Rust facade calls so the browser
-and Arora Web path can load one composed orchestrator module. That is the
-stepping stone toward replacing the in-process calls with real Arora
-module-to-module imports once that contract is ready.
+On `wasm32`, the composed module calls the promoted domain modules through the
+generated Arora module import wrappers declared in `module.yaml`. On native
+targets, it uses the same Rust-backed facades in process so the core
+implementations remain usable outside the browser.
 
 ## Export
 
@@ -37,5 +37,6 @@ adds a graph pass before the animation pass, then repeats graph evaluation after
 animation writes. This mirrors the existing orchestrator's pass shape while the
 module split matures.
 
-Conflict diagnostics are currently minimal in the composed version: writes are
-applied in pass order with later writes replacing the blackboard value.
+The compatibility module remains available for the all-in-one fallback path,
+while this module is the preferred target for proving animation and graph
+execution as independent first-class Arora modules.
