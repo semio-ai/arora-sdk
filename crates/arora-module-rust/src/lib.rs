@@ -106,9 +106,10 @@ pub async fn generate_sources(
   );
 
   // Also declare arora engine functions.
-  // On wasm32 these are real imports from the host engine; on other
-  // targets (host iteration / `cargo test`) we emit panicking stubs so
-  // the crate still links and trivial tests can run natively.
+  // On wasm32 these are real imports from the host engine. On native
+  // targets the native executor installs function pointers into the loaded
+  // dynamic library after `libloading` opens it, which lets one cdylib module
+  // call another through the owning Arora engine.
   let engine_functions_declarations = quote! {
     #[cfg(target_arch = "wasm32")]
     #[link(wasm_import_module = "env")]
@@ -118,22 +119,56 @@ pub async fn generate_sources(
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub unsafe extern "C" fn arora_dispatch(
-      _module_id: usize,
-      _method_id: usize,
-      _arg: usize,
-    ) -> usize {
-      panic!(
-        "arora_dispatch called on the host; this module is meant to run as a wasm guest under the arora engine"
-      );
+    #[allow(dead_code)]
+    mod native_host {
+      use std::sync::atomic::{AtomicUsize, Ordering};
+
+      type HostDispatch = unsafe extern "C" fn(usize, usize, usize) -> usize;
+      type HostDispatchIndirect = unsafe extern "C" fn(u64) -> usize;
+
+      static HOST_DISPATCH: AtomicUsize = AtomicUsize::new(0);
+      static HOST_DISPATCH_INDIRECT: AtomicUsize = AtomicUsize::new(0);
+
+      #[no_mangle]
+      pub unsafe extern "C" fn arora_set_host_dispatcher(dispatcher: usize) {
+        HOST_DISPATCH.store(dispatcher, Ordering::SeqCst);
+      }
+
+      #[no_mangle]
+      pub unsafe extern "C" fn arora_set_host_dispatch_indirect(dispatcher: usize) {
+        HOST_DISPATCH_INDIRECT.store(dispatcher, Ordering::SeqCst);
+      }
+
+      pub unsafe extern "C" fn arora_dispatch(
+        module_id: usize,
+        method_id: usize,
+        arg: usize,
+      ) -> usize {
+        let dispatcher = HOST_DISPATCH.load(Ordering::SeqCst);
+        if dispatcher == 0 {
+          panic!(
+            "arora_dispatch called on a native module before the native executor installed a host dispatcher"
+          );
+        }
+        let dispatch: HostDispatch = std::mem::transmute(dispatcher);
+        dispatch(module_id, method_id, arg)
+      }
+
+      pub unsafe extern "C" fn arora_dispatch_indirect(callable_id: u64) -> usize {
+        let dispatcher = HOST_DISPATCH_INDIRECT.load(Ordering::SeqCst);
+        if dispatcher == 0 {
+          panic!(
+            "arora_dispatch_indirect called on a native module before the native executor installed a host dispatcher"
+          );
+        }
+        let dispatch: HostDispatchIndirect = std::mem::transmute(dispatcher);
+        dispatch(callable_id)
+      }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub unsafe extern "C" fn arora_dispatch_indirect(_callable_id: u64) -> usize {
-      panic!(
-        "arora_dispatch_indirect called on the host; this module is meant to run as a wasm guest under the arora engine"
-      );
-    }
+    #[allow(unused_imports)]
+    pub use native_host::{arora_dispatch, arora_dispatch_indirect};
   };
   result = result.merge_with(
     &token_stream_to_file("arora.rs", &engine_functions_declarations)

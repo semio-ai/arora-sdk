@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 use vizij_animation::AnimationModuleFacade;
 use vizij_animation_core::Inputs;
 use vizij_api_core::{json as api_json, TypedPath, WriteBatch};
 use vizij_graph_core::GraphSpec;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 use vizij_node_graph::NodeGraphModuleFacade;
 use vizij_orchestrator::controllers::animation::AnimationController;
 use vizij_orchestrator::module_facade::filter_unchanged_writes;
@@ -68,14 +68,14 @@ struct ComposedRuntime {
 
 #[derive(Debug)]
 struct GraphModule {
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   facade: NodeGraphModuleFacade,
   subs: Subscriptions,
 }
 
 #[derive(Debug)]
 struct AnimationModuleHandle {
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   facade: AnimationModuleFacade,
 }
 
@@ -213,7 +213,7 @@ impl ComposedOrchestratorFacade {
     Ok(json!({
       "runtimeHandle": handle,
       "schedule": schedule_name(schedule),
-      "composition": "independent-modules",
+      "composition": "arora-module-imports",
     }))
   }
 
@@ -470,7 +470,6 @@ impl ComposedFrame {
   }
 }
 
-#[cfg(target_arch = "wasm32")]
 #[derive(Deserialize)]
 struct DomainModuleResponse {
   ok: bool,
@@ -480,7 +479,6 @@ struct DomainModuleResponse {
   error: Option<String>,
 }
 
-#[cfg(target_arch = "wasm32")]
 fn unwrap_domain_value(response: String, op: &str) -> Result<JsonValue, String> {
   let parsed: DomainModuleResponse = serde_json::from_str(&response)
     .map_err(|error| format!("{op} returned invalid response json: {error}"))?;
@@ -494,7 +492,6 @@ fn unwrap_domain_value(response: String, op: &str) -> Result<JsonValue, String> 
   }
 }
 
-#[cfg(target_arch = "wasm32")]
 fn writebatch_from_domain_value(value: &JsonValue, op: &str) -> Result<WriteBatch, String> {
   let writes = value
     .get("writes")
@@ -504,15 +501,15 @@ fn writebatch_from_domain_value(value: &JsonValue, op: &str) -> Result<WriteBatc
 }
 
 fn normalize_graph_module(spec: JsonValue) -> Result<JsonValue, String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
-    return unwrap_domain_value(
+    unwrap_domain_value(
       arora_generated::vizij_node_graph::normalize_graph(json!({ "spec": spec }).to_string()),
       "vizij-node-graph.normalize_graph",
-    );
+    )
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     NodeGraphModuleFacade::normalize_graph_value(spec)
   }
@@ -523,7 +520,7 @@ fn load_graph_module(
   spec: JsonValue,
   subs: Subscriptions,
 ) -> Result<GraphModule, String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     unwrap_domain_value(
       arora_generated::vizij_node_graph::load_graph(
@@ -534,7 +531,7 @@ fn load_graph_module(
     Ok(GraphModule { subs })
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     let mut graph = NodeGraphModuleFacade::new();
@@ -547,7 +544,7 @@ fn load_graph_module(
 }
 
 fn replace_graph_module(id: &str, graph: &mut GraphModule, spec: JsonValue) -> Result<(), String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     let _ = graph;
     unwrap_domain_value(
@@ -559,7 +556,7 @@ fn replace_graph_module(id: &str, graph: &mut GraphModule, spec: JsonValue) -> R
     Ok(())
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     graph.facade.replace_graph_value(spec)
@@ -567,14 +564,14 @@ fn replace_graph_module(id: &str, graph: &mut GraphModule, spec: JsonValue) -> R
 }
 
 fn remove_graph_module(id: &str) -> Result<(), String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     unwrap_domain_value(
       arora_generated::vizij_node_graph::remove_graph(json!({ "graphId": id }).to_string()),
       "vizij-node-graph.remove_graph",
     )?;
   }
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
   }
@@ -588,7 +585,7 @@ fn stage_graph_input(
   value: JsonValue,
   shape: Option<JsonValue>,
 ) -> Result<(), String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     let _ = graph;
     unwrap_domain_value(
@@ -606,7 +603,7 @@ fn stage_graph_input(
     Ok(())
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     graph.facade.stage_input_value(path, value, shape)
@@ -614,7 +611,7 @@ fn stage_graph_input(
 }
 
 fn evaluate_graph_module(id: &str, graph: &mut GraphModule, dt: f32) -> Result<WriteBatch, String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     let _ = graph;
     let value = unwrap_domain_value(
@@ -624,7 +621,7 @@ fn evaluate_graph_module(id: &str, graph: &mut GraphModule, dt: f32) -> Result<W
     writebatch_from_domain_value(&value, "vizij-node-graph.evaluate")
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     graph.facade.evaluate_writebatch(dt)
@@ -632,7 +629,7 @@ fn evaluate_graph_module(id: &str, graph: &mut GraphModule, dt: f32) -> Result<W
 }
 
 fn configure_animation_module(id: &str, setup: JsonValue) -> Result<AnimationModuleHandle, String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     unwrap_domain_value(
       arora_generated::vizij_animation::configure_controller(
@@ -643,7 +640,7 @@ fn configure_animation_module(id: &str, setup: JsonValue) -> Result<AnimationMod
     Ok(AnimationModuleHandle {})
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     let mut animation = AnimationModuleFacade::new();
@@ -653,7 +650,7 @@ fn configure_animation_module(id: &str, setup: JsonValue) -> Result<AnimationMod
 }
 
 fn remove_animation_module(id: &str) -> Result<(), String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     unwrap_domain_value(
       arora_generated::vizij_animation::remove_controller(
@@ -662,7 +659,7 @@ fn remove_animation_module(id: &str) -> Result<(), String> {
       "vizij-animation.remove_controller",
     )?;
   }
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
   }
@@ -675,7 +672,7 @@ fn update_animation_module(
   dt: f32,
   inputs: Inputs,
 ) -> Result<(WriteBatch, Vec<JsonValue>), String> {
-  #[cfg(target_arch = "wasm32")]
+  #[cfg(not(test))]
   {
     let _ = animation;
     let value = unwrap_domain_value(
@@ -693,7 +690,7 @@ fn update_animation_module(
     Ok((batch, events))
   }
 
-  #[cfg(not(target_arch = "wasm32"))]
+  #[cfg(test)]
   {
     let _ = id;
     animation.facade.update_outputs(dt, Some(inputs))
@@ -1288,7 +1285,7 @@ mod tests {
       "runtime.create",
       json!({ "schedule": "SinglePass" }),
     );
-    assert_eq!(runtime["composition"], "independent-modules");
+    assert_eq!(runtime["composition"], "arora-module-imports");
 
     let graph = call(
       &mut facade,

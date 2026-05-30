@@ -4,12 +4,13 @@ This module is the migration target beside the compatibility
 `vizij-orchestrator` module. The compatibility module wraps
 `vizij-orchestrator-core` as one all-in-one runtime. This module keeps the same
 JSON facade style but composes the promoted `vizij-animation` and
-`vizij-node-graph` module facades internally.
+`vizij-node-graph` modules through Arora imports.
 
-On `wasm32`, the composed module calls the promoted domain modules through the
-generated Arora module import wrappers declared in `module.yaml`. On native
-targets, it uses the same Rust-backed facades in process so the core
-implementations remain usable outside the browser.
+The composed module calls the promoted domain modules through the generated
+Arora module import wrappers declared in `module.yaml`. In the browser those
+imports are wired by the Wasm executor. On desktop and service hosts, the native
+executor installs an equivalent host dispatcher into the loaded cdylib so the
+same import wrappers call back through the owning Arora engine.
 
 ## Desktop-Native Execution
 
@@ -18,7 +19,7 @@ browser path consumes it directly. Desktop hosts can load the native cdylib with
 Arora's native executor by overriding the executor at load time.
 
 ```bash
-cargo build -p vizij-orchestrator-composed
+cargo build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed
 cargo test -p arora-integration-tests call_vizij_composed_native_module_from_desktop_engine -- --nocapture
 ```
 
@@ -43,9 +44,9 @@ args:
 ```
 
 The domain module headers are included first so the CLI's local registry can
-resolve the imports declared for the browser path. The composed native runtime
-still executes its in-process Rust facades. Use `.dylib` on macOS and `.dll` on
-Windows.
+resolve imports before the composed module is loaded. The composed native
+runtime then calls `vizij-animation` and `vizij-node-graph` through Arora's
+native module boundary. Use `.dylib` on macOS and `.dll` on Windows.
 
 ## Export
 

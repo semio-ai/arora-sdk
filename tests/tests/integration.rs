@@ -144,6 +144,48 @@ fn load_vizij_release_modules(engine: &mut PinnedEngine) -> Result<()> {
   Ok(())
 }
 
+fn load_vizij_native_modules(engine: &mut PinnedEngine) -> Result<()> {
+  let root = workspace_root();
+  let build_hint = "cargo build -p vizij-animation -p vizij-node-graph -p vizij-orchestrator-composed";
+  let debug_dir = root.join("target").join("debug");
+  let ext = native_library_extension();
+
+  load_native_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-animation")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(debug_dir.join(format!("libvizij_animation.{ext}")), build_hint)?,
+  )?;
+  load_native_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-node-graph")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(debug_dir.join(format!("libvizij_node_graph.{ext}")), build_hint)?,
+  )?;
+  load_native_module(
+    engine,
+    root
+      .join("modules")
+      .join("vizij-orchestrator-composed")
+      .join("src")
+      .join("arora_generated")
+      .join("module.yaml"),
+    required_artifact(
+      debug_dir.join(format!("libarora_vizij_orchestrator_composed.{ext}")),
+      build_hint,
+    )?,
+  )?;
+  Ok(())
+}
+
 fn call_vizij_dispatch(
   engine: &mut PinnedEngine,
   call: &str,
@@ -310,7 +352,7 @@ fn call_vizij_composed_release_wasm_modules_from_native_engine() -> Result<()> {
     "runtime.create",
     json!({ "schedule": "SinglePass" }),
   )?;
-  assert_eq!(runtime["composition"], "independent-modules");
+  assert_eq!(runtime["composition"], "arora-module-imports");
 
   let graph = call_vizij_dispatch(
     &mut engine,
@@ -354,33 +396,14 @@ fn call_vizij_composed_native_module_from_desktop_engine() -> Result<()> {
   let mut engine = EngineBuilder::new()
     .add_executor(arora::executor::native::NativeExecutor::new())
     .build();
-  let root = workspace_root();
-  let build_hint = "cargo build -p vizij-orchestrator-composed";
-  let native_lib = required_artifact(
-    root.join("target").join("debug").join(format!(
-      "libarora_vizij_orchestrator_composed.{}",
-      native_library_extension()
-    )),
-    build_hint,
-  )?;
-
-  load_native_module(
-    &mut engine,
-    root
-      .join("modules")
-      .join("vizij-orchestrator-composed")
-      .join("src")
-      .join("arora_generated")
-      .join("module.yaml"),
-    native_lib,
-  )?;
+  load_vizij_native_modules(&mut engine)?;
 
   let runtime = call_vizij_dispatch(
     &mut engine,
     "runtime.create",
     json!({ "schedule": "SinglePass" }),
   )?;
-  assert_eq!(runtime["composition"], "independent-modules");
+  assert_eq!(runtime["composition"], "arora-module-imports");
 
   let graph = call_vizij_dispatch(
     &mut engine,
