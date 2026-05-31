@@ -4,7 +4,11 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    branches:
+      - master
+      - cargo-first-build
+      - feat/guest-error-signaling
+      - feat/web-demo-introspection
 
 env:
   CARGO_TERM_COLOR: always
