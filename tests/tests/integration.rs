@@ -48,9 +48,10 @@ fn call_polly_from_engine() {
         "so"
     };
     let module_yaml = polly_root.join("src").join("arora_generated").join("module.yaml");
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     let module_exe = polly_root
         .join("target")
-        .join("debug")
+        .join(profile)
         .join(format!("libpolly.{polly_lib_ext}"));
     // Fall back to the workspace target dir (cargo puts host artifacts there).
     let module_exe = if module_exe.exists() {
@@ -58,7 +59,7 @@ fn call_polly_from_engine() {
     } else {
         workspace_root()
             .join("target")
-            .join("debug")
+            .join(profile)
             .join(format!("libpolly.{polly_lib_ext}"))
     };
     run(&[
