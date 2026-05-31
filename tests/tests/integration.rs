@@ -77,10 +77,11 @@ fn call_polly_from_engine() {
 fn call_test_rust_wasm_from_engine() {
     let module_root = workspace_root().join("modules").join("test-rust-wasm");
     let module_yaml = module_root.join("src").join("arora_generated").join("module.yaml");
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     let wasm = workspace_root()
         .join("target")
         .join("wasm32-wasip1")
-        .join("debug")
+        .join(profile)
         .join("test_rust_wasm.wasm");
     run(&[
         "--include",
