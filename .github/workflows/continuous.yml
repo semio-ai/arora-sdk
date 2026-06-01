@@ -22,6 +22,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ubuntu-latest ships ~14 GB free; Rust multi-target --release builds
+      # need ~35 GB. Stripping irrelevant pre-installed toolchains (Android,
+      # .NET, Haskell, large-packages) recovers ~25 GB before we start.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Configure cargo git access
         run: |
           mkdir -p ~/.cargo
@@ -74,6 +88,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # large-packages: false preserves the pre-installed Firefox needed for
+      # wasm-pack --headless --firefox.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: true
 
       - name: Configure cargo git access
         run: |
