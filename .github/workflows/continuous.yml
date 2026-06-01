@@ -2,10 +2,10 @@ name: Build and Test
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
     branches:
-      - master
+      - main
       - cargo-first-build
       - feat/guest-error-signaling
       - feat/web-demo-introspection
