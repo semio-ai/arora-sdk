@@ -352,7 +352,6 @@ pub mod tests {
         Uuid::from_str("fb3787f2-2151-49ce-8b61-6274984558ea").unwrap(),
         text,
       )]),
-      return_binding: None,
     }
   }
 

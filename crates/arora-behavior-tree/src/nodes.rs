@@ -1,4 +1,4 @@
-use crate::{schema::Expression, tree_node::TreeNode};
+use crate::{schema::{Expression, _RET_PARAM_ID}, tree_node::TreeNode};
 use arora_types::value::Value;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, str::FromStr};
 use uuid::Uuid;
@@ -26,7 +26,6 @@ pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
     function: STATUS_IDENTITY_FUNCTION_ID.clone(),
     children: None,
     parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), Expression::Variable(value))]),
-    return_binding: None,
   }
 }
 
@@ -47,7 +46,6 @@ pub fn set_str(variable: Expression, value: Expression) -> TreeNode {
         value,
       ),
     ]),
-    return_binding: None,
   }
 }
 
@@ -60,7 +58,6 @@ pub fn unset_str(variable: Expression) -> TreeNode {
       Uuid::from_str("2c84bf0f-4ec2-41a4-83ee-3f92a53be79d").unwrap(),
       variable,
     )]),
-    return_binding: None,
   }
 }
 
@@ -73,7 +70,6 @@ pub fn is_str_set(value: Expression) -> TreeNode {
       Uuid::from_str("c4f1e72d-30fe-400b-a584-f08e93944026").unwrap(),
       value,
     )]),
-    return_binding: None,
   }
 }
 
@@ -86,7 +82,6 @@ pub fn wait_str_set(value: Expression) -> TreeNode {
       Uuid::from_str("8f190079-e519-44d3-ac36-3bfc322e87eb").unwrap(),
       value,
     )]),
-    return_binding: None,
   }
 }
 
@@ -109,7 +104,6 @@ pub fn regex_match(value: Expression, matcher: Expression, first_match: Expressi
         first_match,
       ),
     ]),
-    return_binding: None,
   }
 }
 
@@ -122,7 +116,6 @@ pub fn store(storage: Expression, value: Expression) -> TreeNode {
       (STORE_STORAGE_PARAM_ID.clone(), storage),
       (STORE_VALUE_PARAM_ID.clone(), value),
     ]),
-    return_binding: None,
   }
 }
 
@@ -135,7 +128,6 @@ pub fn increase(storage: Expression, delta: Expression) -> TreeNode {
       (INCREASE_STORAGE_PARAM_ID.clone(), storage),
       (INCREASE_DELTA_PARAM_ID.clone(), delta),
     ]),
-    return_binding: None,
   }
 }
 
@@ -155,7 +147,6 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
       SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(),
       Expression::Value(Value::U16(0)),
     )]),
-    return_binding: None,
   }
 }
 
@@ -180,7 +171,6 @@ pub fn cos(angle: Expression, res: Expression) -> TreeNode {
       (COS_ANGLE_PARAM_ID.clone(), angle),
       (COS_RES_PARAM_ID.clone(), res),
     ]),
-    return_binding: None,
   }
 }
 
@@ -236,15 +226,17 @@ pub const PARALLEL_FUNCTION_ID: Uuid = Uuid::from_bytes([
   0xa9, 0x34, 0x02, 0x89, 0x1f, 0x30, 0x41, 0x1f, 0x9f, 0xaa, 0x0f, 0x07, 0xd5, 0x46, 0x13, 0xe8,
 ]);
 
-// Direct action nodes from test-rust-wasm (non-Status returns via return_binding)
+// Direct action nodes from test-rust-wasm (non-Status returns via _ret out-parameter)
 //==============================================================
 #[allow(unused)]
 pub fn cos_raw(angle: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
   TreeNode {
     function: TEST_RUST_WASM_COS_FUNCTION_ID,
     children: None,
-    parameters: HashMap::from([(TEST_RUST_WASM_COS_ANGLE_PARAM_ID, angle)]),
-    return_binding: Some(result),
+    parameters: HashMap::from([
+      (TEST_RUST_WASM_COS_ANGLE_PARAM_ID, angle),
+      (_RET_PARAM_ID, Expression::Variable(result)),
+    ]),
   }
 }
 
@@ -256,8 +248,8 @@ pub fn add_raw(a: Expression, b: Expression, result: Rc<RefCell<Value>>) -> Tree
     parameters: HashMap::from([
       (TEST_RUST_WASM_ADD_A_PARAM_ID, a),
       (TEST_RUST_WASM_ADD_B_PARAM_ID, b),
+      (_RET_PARAM_ID, Expression::Variable(result)),
     ]),
-    return_binding: Some(result),
   }
 }
 

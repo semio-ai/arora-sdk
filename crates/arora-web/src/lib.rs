@@ -143,6 +143,10 @@ const STATUS_FAILURE_BYTES: [u8; 16] = [
 const STATUS_ENUM_BYTES: [u8; 16] = [
   0x32, 0x5a, 0x57, 0x67, 0xe3, 0x44, 0x45, 0x32, 0x86, 0x0e, 0x07, 0x49, 0xbc, 0xf2, 0xe4, 0x28,
 ];
+// _ret special out-parameter: 5f726574-0000-4000-8000-000000000000 ("_ret" in ASCII)
+const RET_PARAM_BYTES: [u8; 16] = [
+  0x5f, 0x72, 0x65, 0x74, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 
 fn value_to_status(v: &Value) -> &'static str {
   if let Value::Enumeration(e) = v {
@@ -173,13 +177,10 @@ struct BtNode {
   #[serde(default)]
   children: Option<Vec<Uuid>>,
   /// Parameter arguments: maps parameter UUID to a literal value or variable.
+  /// Use the special key `5f726574-0000-4000-8000-000000000000` (_ret) to
+  /// capture the return value into a variable; the node then always succeeds.
   #[serde(default)]
   arguments: HashMap<Uuid, BtExpression>,
-  /// If set, the raw return value of this node's function is stored in this
-  /// variable UUID instead of being interpreted as a Status. The node always
-  /// succeeds in the trace.
-  #[serde(default)]
-  return_binding: Option<Uuid>,
 }
 
 /// Metadata extracted from a module header for one exported function.
@@ -198,7 +199,6 @@ struct NodeCallable {
   children_param_id: Option<Uuid>,
   children_callable_ids: Vec<u64>,
   arguments: HashMap<Uuid, BtExpression>,
-  return_binding: Option<Uuid>,
   variables: Rc<RefCell<HashMap<Uuid, Value>>>,
   trace: Rc<RefCell<Vec<(Uuid, &'static str)>>>,
 }
@@ -207,6 +207,7 @@ impl Callable for NodeCallable {
   fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, arora::call::CallError> {
     let tick_id_type = Uuid::from_bytes(TICK_ID_STRUCT_BYTES);
     let callable_field = Uuid::from_bytes(TICK_ID_CALLABLE_FIELD_BYTES);
+    let ret_param_id = Uuid::from_bytes(RET_PARAM_BYTES);
 
     let mut args = Vec::new();
 
@@ -231,6 +232,9 @@ impl Callable for NodeCallable {
     }
 
     for (&param_id, expr) in &self.arguments {
+      if param_id == ret_param_id {
+        continue;
+      }
       let value = match expr {
         BtExpression::Value(v) => v.clone(),
         BtExpression::VariableId(var_id) => {
@@ -249,6 +253,9 @@ impl Callable for NodeCallable {
       .arguments
       .iter()
       .filter_map(|(&param_id, expr)| {
+        if param_id == ret_param_id {
+          return None;
+        }
         if let BtExpression::VariableId(var_id) = expr {
           Some((param_id, *var_id))
         } else {
@@ -273,18 +280,21 @@ impl Callable for NodeCallable {
       }
     }
 
-    if let Some(var_id) = &self.return_binding {
-      self.variables.borrow_mut().insert(*var_id, result.ret.clone());
+    let has_ret = self.arguments.contains_key(&ret_param_id);
+    if has_ret {
+      if let Some(BtExpression::VariableId(var_id)) = self.arguments.get(&ret_param_id) {
+        self.variables.borrow_mut().insert(*var_id, result.ret.clone());
+      }
     }
 
-    let s = if self.return_binding.is_some() {
+    let s = if has_ret {
       "success"
     } else {
       value_to_status(&result.ret)
     };
     self.trace.borrow_mut().push((self.node_id, s));
 
-    if self.return_binding.is_some() {
+    if has_ret {
       Ok(Value::Enumeration(Enumeration {
         id: Uuid::from_bytes(STATUS_ENUM_BYTES),
         variant_id: Uuid::from_bytes(STATUS_SUCCESS_BYTES),
@@ -328,7 +338,6 @@ fn register_node(
     children_param_id: meta.children_param_id,
     children_callable_ids,
     arguments: node.arguments.clone(),
-    return_binding: node.return_binding,
     variables: variables.clone(),
     trace: trace.clone(),
   });

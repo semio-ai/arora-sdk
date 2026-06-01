@@ -12,7 +12,7 @@ use arora_types::{
   value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
-use schema::{CallExpression, Expression, Node, NodeParameterId};
+use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
@@ -260,6 +260,9 @@ fn tick(
       };
 
       locals.insert(param_id.clone(), variable.clone());
+      if param_id == &_RET_PARAM_ID {
+        continue;
+      }
       call.args.push(StructureField {
         id: param_id.clone(),
         value: Box::new(variable.borrow().clone()),
@@ -283,17 +286,14 @@ fn tick(
     *variable.borrow_mut() = *mutated.value;
   }
 
-  if let Some(binding_expr) = &node.return_binding {
-    let var: Option<Rc<RefCell<Value>>> = match binding_expr {
-      Expression::Variable(rc) => Some(rc.clone()),
-      Expression::VariableId(var_id) => variables.borrow().get(var_id).cloned(),
-      _ => None,
-    };
-    if let Some(var) = var {
-      *var.borrow_mut() = result.ret.clone();
-    }
-  }
-  let status: Status = result.ret.try_into().unwrap_or(Status::Success);
+  // If the node has a _ret argument (function does not return a status),
+  // write the return value to the bound variable.
+  let status = if let Some(var) = locals.get(&_RET_PARAM_ID) {
+    *var.borrow_mut() = result.ret.clone();
+    Status::Success
+  } else {
+    result.ret.try_into().unwrap_or(Status::Success)
+  };
   if trace != TraceTick::No {
     println!("tick {} -> {:?}", node.id, status);
   }

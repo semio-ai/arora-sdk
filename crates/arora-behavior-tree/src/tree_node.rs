@@ -13,8 +13,6 @@ pub struct TreeNode {
   pub function: Uuid,
   pub children: Option<Vec<TreeNode>>,
   pub parameters: HashMap<Uuid, Expression>,
-  /// If set, the function's return value is written to this variable on each tick.
-  pub return_binding: Option<Rc<RefCell<Value>>>,
 }
 
 /// Represents a tree of node with direct relations to children,
@@ -27,7 +25,6 @@ impl TreeNode {
       function,
       children: None,
       parameters: HashMap::new(),
-      return_binding: None,
     }
   }
 
@@ -37,7 +34,6 @@ impl TreeNode {
       function,
       children: Some(children),
       parameters: HashMap::new(),
-      return_binding: None,
     }
   }
 
@@ -82,7 +78,6 @@ impl TreeNode {
       function: self.function,
       arguments,
       children,
-      return_binding: self.return_binding.map(Expression::Variable),
     }))
   }
 }
