@@ -22,7 +22,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure cargo git access
-        run: git config --global url."https://${{ secrets.SEMIO_GIT_CREDENTIAL }}@github.com".insteadOf "https://github.com"
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
 
       # rust-toolchain.toml pins nightly + wasm32-wasip1;
       # add wasm32-unknown-unknown for the browser executor build.
@@ -71,7 +75,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure cargo git access
-        run: git config --global url."https://${{ secrets.SEMIO_GIT_CREDENTIAL }}@github.com".insteadOf "https://github.com"
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
 
       - name: Install wasm32-unknown-unknown target
         run: rustup target add wasm32-unknown-unknown
