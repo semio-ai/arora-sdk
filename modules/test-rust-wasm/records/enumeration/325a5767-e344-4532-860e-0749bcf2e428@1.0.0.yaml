@@ -7,14 +7,14 @@ variants:
       type: primitive
       value:
         kind: unit
-  2468f46c-bb60-425c-9a4d-9ad326ccc7e2:
-    name: Failure
+  acd79ec6-0c44-401a-82f8-5da5422d3eec:
+    name: Running
     type:
       type: primitive
       value:
         kind: unit
-  acd79ec6-0c44-401a-82f8-5da5422d3eec:
-    name: Running
+  2468f46c-bb60-425c-9a4d-9ad326ccc7e2:
+    name: Failure
     type:
       type: primitive
       value:
