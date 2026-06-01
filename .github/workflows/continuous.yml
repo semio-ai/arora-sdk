@@ -33,11 +33,7 @@ jobs:
           swap-storage: true
 
       - name: Configure cargo git access
-        run: |
-          mkdir -p ~/.cargo
-          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
-          git config --global credential.helper 'store --file ~/.my-credentials'
+        run: git config --global url."https://${{ secrets.SEMIO_GIT_CREDENTIAL }}@github.com".insteadOf "https://github.com"
 
       # rust-toolchain.toml pins nightly + wasm32-wasip1 + i686-musl;
       # add wasm32-unknown-unknown for the browser executor build.
@@ -85,23 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: true
-
       - name: Configure cargo git access
-        run: |
-          mkdir -p ~/.cargo
-          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
-          git config --global credential.helper 'store --file ~/.my-credentials'
+        run: git config --global url."https://${{ secrets.SEMIO_GIT_CREDENTIAL }}@github.com".insteadOf "https://github.com"
 
       - name: Install wasm32-unknown-unknown target
         run: rustup target add wasm32-unknown-unknown
@@ -117,25 +98,9 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Install Firefox + geckodriver
-        run: |
-          # ubuntu-latest ships Firefox via snap; install geckodriver from
-          # its GitHub release (the apt package "firefox-geckodriver" is
-          # gone on noble).
-          firefox --version
-          GECKO_VERSION=v0.34.0
-          curl -sSL "https://github.com/mozilla/geckodriver/releases/download/${GECKO_VERSION}/geckodriver-${GECKO_VERSION}-linux64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin
-          geckodriver --version
-
       - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
-        with:
-          version: latest
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      # The arora-web browser test consumes the wasm32-wasip1 build of
-      # test-rust-wasm; build it directly (release to match the host
-      # release build and keep the cache hot).
       - name: Build test guest wasm (wasm32-wasip1)
         run: cargo build -p test-rust-wasm --target wasm32-wasip1 --release
 
