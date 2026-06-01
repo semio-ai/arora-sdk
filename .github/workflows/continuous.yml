@@ -9,6 +9,7 @@ on:
       - cargo-first-build
       - feat/guest-error-signaling
       - feat/web-demo-introspection
+      - feat/type-registry
 
 env:
   CARGO_TERM_COLOR: always
