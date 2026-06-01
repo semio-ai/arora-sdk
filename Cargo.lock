@@ -807,7 +807,6 @@ dependencies = [
  "derive_more 2.0.1",
  "regex",
  "serde",
- "test-rust-wasm",
  "tokio",
  "uuid",
 ]
