@@ -15,6 +15,7 @@ pub trait ReadWasmMemory {
   fn read_wasm_memory<T, C: AsContext<Data = T>>(context: &C, memory: Memory, offset: u32) -> Self;
 }
 
+#[allow(dead_code)]
 pub trait WriteWasmMemory {
   fn write_wasm_memory<T, C: AsContextMut<Data = T>>(
     &self,

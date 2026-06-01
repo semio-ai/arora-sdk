@@ -48,7 +48,7 @@ exports:
       id: behavior_tree.Status
 
   - type: function
-    id: b8349b96-abc7-4a31-906c-da1ce6fa356e
+    id: c803889f-4757-4b56-908f-4b2b47041eff
     name: set_str
     parameters:
       - id: 8fa2f965-1eb5-40d9-baca-8facef0d31a8
@@ -234,38 +234,6 @@ exports:
       kind: scalar
       id: behavior_tree.Status
 
-  - type: function
-    id: 104b9710-5d43-4a93-944c-d64bddb30ef8
-    name: cos
-    parameters:
-      - id: 272fbafd-c2a5-4ffe-a294-9cabe6e6c1e7
-        name: angle
-        type:
-          kind: scalar
-          id: f32
-      - id: 1d101686-05d8-47b4-9292-fdc9e5a0daeb
-        name: res
-        type:
-          kind: scalar
-          id: f32
-        mutable: true
-    ret:
-      kind: scalar
-      id: behavior_tree.Status
-
-imports:
-  - type: function
-    module: 665d6ec9-3fc9-4cfa-9100-5c8964e95aec
-    id: c13757cb-2311-4c93-abcc-cb12d6cbb859
-    name: cos
-    parameters:
-      - id: 6c2a157c-4235-47b0-bff3-1eeef3e5747d
-        name: angle
-        type:
-          kind: scalar
-          id: f32
-    ret:
-      kind: scalar
-      id: f32
+imports: []
 dependencies: []
 executable_mime: application/wasm

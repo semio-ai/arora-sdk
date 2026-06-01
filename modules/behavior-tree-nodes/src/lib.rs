@@ -3,7 +3,6 @@ mod arora_generated;
 use crate::arora_generated::{
   arora::arora_dispatch_indirect,
   behavior_tree::{status, status::Status, tick_id::TickId},
-  test_rust_wasm,
 };
 use arora_buffers::BufferReader;
 use regex::Regex;
@@ -190,9 +189,4 @@ fn call_tick_function(tick_id: &TickId) -> Status {
   status::deserialize_from_reader(&mut reader, true).unwrap()
 }
 
-// Other functions
-//================================================================
-fn cos(angle: Option<f32>, res: &mut Option<f32>) -> Status {
-  *res = Some(test_rust_wasm::cos(angle.unwrap()));
-  Status::Success
-}
+// Calling tick functions through arora_call_indirect.
