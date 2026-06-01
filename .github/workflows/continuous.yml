@@ -35,7 +35,7 @@ jobs:
       - name: Configure cargo git access
         run: git config --global url."https://${{ secrets.SEMIO_GIT_CREDENTIAL }}@github.com".insteadOf "https://github.com"
 
-      # rust-toolchain.toml pins nightly + wasm32-wasip1 + i686-musl;
+      # rust-toolchain.toml pins nightly + wasm32-wasip1;
       # add wasm32-unknown-unknown for the browser executor build.
       - name: Install wasm32-unknown-unknown target
         run: rustup target add wasm32-unknown-unknown
