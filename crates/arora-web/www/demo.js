@@ -21,6 +21,8 @@ const FN = {
 const PARAM = {
   // behavior-tree-nodes children parameter (seq/fallback/parallel)
   CHILDREN:         "5b6e9515-dbcc-411d-bee9-3d8cba5fedda",
+  // _ret special out-parameter (captures function return value into a variable)
+  RET:              "5f726574-0000-4000-8000-000000000000",
   // test-rust-wasm add
   ADD_A:            "a1b2c3d4-e5f6-4a8b-9c0d-e1f2a3b4c5d6",
   ADD_B:            "b2c3d4e5-f6a7-4b9c-8d1e-f2a3b4c5d6e7",
@@ -98,8 +100,8 @@ const TREES = {
         arguments: {
           [PARAM.ADD_A]: { variable_id: "aaaa0001-0000-0000-0000-000000000000" },
           [PARAM.ADD_B]: { value: { f32: 0.1 } },
+          [PARAM.RET]:   { variable_id: "aaaa0001-0000-0000-0000-000000000000" },
         },
-        return_binding: "aaaa0001-0000-0000-0000-000000000000",
         // variable connections drawn as dashed lines
         reads:  ["aaaa0001-0000-0000-0000-000000000000"],
         writes: ["aaaa0001-0000-0000-0000-000000000000"],
@@ -109,8 +111,8 @@ const TREES = {
         function: FN.COS, label: "cos(x)\n→ cos(x)", kind: "action",
         arguments: {
           [PARAM.COS_ANGLE]: { variable_id: "aaaa0001-0000-0000-0000-000000000000" },
+          [PARAM.RET]:       { variable_id: "aaaa0002-0000-0000-0000-000000000000" },
         },
-        return_binding: "aaaa0002-0000-0000-0000-000000000000",
         reads:  ["aaaa0001-0000-0000-0000-000000000000"],
         writes: ["aaaa0002-0000-0000-0000-000000000000"],
       },
@@ -152,8 +154,8 @@ const TREES = {
         arguments: {
           [PARAM.ADD_A]: { variable_id: "bbbb0001-0000-0000-0000-000000000000" },
           [PARAM.ADD_B]: { value: { f32: 0.1 } },
+          [PARAM.RET]:   { variable_id: "bbbb0001-0000-0000-0000-000000000000" },
         },
-        return_binding: "bbbb0001-0000-0000-0000-000000000000",
         reads:  ["bbbb0001-0000-0000-0000-000000000000"],
         writes: ["bbbb0001-0000-0000-0000-000000000000"],
       },
@@ -163,8 +165,8 @@ const TREES = {
         function: FN.COS, label: "cos(x)\n→ cos(x)", kind: "action",
         arguments: {
           [PARAM.COS_ANGLE]: { variable_id: "bbbb0001-0000-0000-0000-000000000000" },
+          [PARAM.RET]:       { variable_id: "bbbb0002-0000-0000-0000-000000000000" },
         },
-        return_binding: "bbbb0002-0000-0000-0000-000000000000",
         reads:  ["bbbb0001-0000-0000-0000-000000000000"],
         writes: ["bbbb0002-0000-0000-0000-000000000000"],
       },
@@ -562,11 +564,10 @@ function doReset() {
 }
 
 function toRustNodes(nodes) {
-  return nodes.map(({ id, function: fn, children, arguments: args, return_binding }) => {
+  return nodes.map(({ id, function: fn, children, arguments: args }) => {
     const n = { id, function: fn };
     if (children) n.children = children;
     if (args) n.arguments = args;
-    if (return_binding) n.return_binding = return_binding;
     return n;
   });
 }

@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 use uuid::Uuid;
 
+/// Special parameter UUID used to capture a node's return value into a variable.
+/// When present in a node's `arguments`, the function's return value is written
+/// to the bound variable and the node always reports Success.
+/// UUID: 5f726574-0000-4000-8000-000000000000 ("_ret" in ASCII)
+pub const _RET_PARAM_ID: Uuid = Uuid::from_bytes([
+  0x5f, 0x72, 0x65, 0x74, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]);
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Variable {
   name: String,
@@ -24,11 +32,6 @@ pub struct Node {
   /// Child nodes, if any.
   #[serde(default)]
   pub children: Option<Vec<Uuid>>,
-
-  /// If set, the function's return value is written here on each tick.
-  /// Useful for non-Status-returning functions; the node always reports Success.
-  #[serde(default)]
-  pub return_binding: Option<Expression>,
 }
 
 impl Display for Node {
