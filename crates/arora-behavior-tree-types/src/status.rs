@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use semio_record::{
   acl::Acl,
   enumeration::v0::unfrozen::{Enumeration, EnumerationVariant},
@@ -15,7 +13,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
   Enumeration {
     name: "Status".to_string(),
     parent,
-    variants: HashMap::from([
+    variants: [
       (
         STATUS_SUCCESS_VARIANT_ID,
         EnumerationVariant {
@@ -43,7 +41,7 @@ pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
           }),
         },
       ),
-    ]),
+    ].into_iter().collect(),
     acl: <Acl as Default>::default(),
   }
 }

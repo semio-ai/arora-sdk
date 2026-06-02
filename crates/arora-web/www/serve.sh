@@ -5,9 +5,8 @@
 # wasm into www/pkg/, copies guest modules into www/modules/<name>/,
 # then runs `python3 -m http.server`.
 #
-# Requires: wasm-pack, python3, and a prior `cargo test
-# -p arora-integration-tests` (or `cargo build --workspace`) so that
-# target/wasm32-wasip1/debug/*.wasm artifacts exist.
+# Requires: wasm-pack and python3. Guest WASM modules are built
+# automatically if their artifacts are missing or stale.
 
 set -euo pipefail
 
@@ -23,29 +22,8 @@ bt_nodes_wasm="$workspace_root/target/wasm32-wasip1/debug/behavior_tree_nodes.wa
 bt_nodes_yaml="$workspace_root/modules/behavior-tree-nodes/src/arora_generated/module.yaml"
 bt_nodes_records="$workspace_root/modules/behavior-tree-nodes/records/records.json"
 
-if [[ ! -f "$guest_wasm" ]]; then
-  echo "missing $guest_wasm" >&2
-  echo "run: cargo test -p arora-integration-tests" >&2
-  exit 1
-fi
-
-if [[ ! -f "$guest_records" ]]; then
-  echo "missing $guest_records" >&2
-  echo "run: cargo build -p test-rust-wasm --target wasm32-wasip1" >&2
-  exit 1
-fi
-
-if [[ ! -f "$bt_nodes_wasm" ]]; then
-  echo "missing $bt_nodes_wasm" >&2
-  echo "run: cargo build -p behavior-tree-nodes --target wasm32-wasip1" >&2
-  exit 1
-fi
-
-if [[ ! -f "$bt_nodes_records" ]]; then
-  echo "missing $bt_nodes_records" >&2
-  echo "run: cargo build -p behavior-tree-nodes --target wasm32-wasip1" >&2
-  exit 1
-fi
+echo "==> cargo build guest modules (wasm32-wasip1)"
+(cd "$workspace_root" && cargo build -p test-rust-wasm -p behavior-tree-nodes --target wasm32-wasip1)
 
 echo "==> wasm-pack build $crate_dir"
 (cd "$crate_dir" && wasm-pack build --target web --dev)

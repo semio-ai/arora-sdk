@@ -153,7 +153,7 @@ mod tests {
     ty::{FrozenScalar, FrozenTy, Primitive, PrimitiveKind},
   };
   use semver::{Version, VersionReq};
-  use std::collections::{BTreeMap, HashMap};
+  use std::collections::BTreeMap;
   use uuid::Uuid;
 
   #[tokio::test]
@@ -163,7 +163,7 @@ mod tests {
     let status = EnumerationFrozen {
       name: "Status".to_owned(),
       parent: ROOT_ID,
-      variants: HashMap::from([(
+      variants: [(
         Uuid::new_v4(),
         EnumerationVariant {
           name: "Ok".to_owned(),
@@ -171,7 +171,7 @@ mod tests {
             kind: semio_record::ty::PrimitiveKind::Unit,
           }),
         },
-      )]),
+      )].into_iter().collect(),
     };
     let status_version = Version::new(1, 0, 0);
     let enum_id = Uuid::new_v4();
@@ -213,7 +213,7 @@ mod tests {
     let enumeration = EnumerationFrozen {
       name: "Status".to_string(),
       parent: ROOT_ID,
-      variants: HashMap::from([
+      variants: [
         (
           Uuid::new_v4(),
           EnumerationVariant {
@@ -241,7 +241,7 @@ mod tests {
             }),
           },
         ),
-      ]),
+      ].into_iter().collect(),
     };
     let version = Version::parse("1.0.0").unwrap();
     let mut enumerations_by_version = BTreeMap::new();

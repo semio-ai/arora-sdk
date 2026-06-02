@@ -181,8 +181,8 @@ const TREES = {
       "cccc0002-0000-0000-0000-000000000000": { name: "first_match", type: "string", init: "" },
     },
     initial: {
-      "cccc0001-0000-0000-0000-000000000000": { string: "" },
-      "cccc0002-0000-0000-0000-000000000000": { string: "" },
+      "cccc0001-0000-0000-0000-000000000000": { str: "" },
+      "cccc0002-0000-0000-0000-000000000000": { str: "" },
     },
     nodes: [
       {
@@ -205,7 +205,7 @@ const TREES = {
         function: FN.REGEX_MATCH, label: "regex_match\n(message, hello.*)", kind: "action",
         arguments: {
           [PARAM.REGEX_VALUE]:       { variable_id: "cccc0001-0000-0000-0000-000000000000" },
-          [PARAM.REGEX_MATCHER]:     { value: { string: "hello.*" } },
+          [PARAM.REGEX_MATCHER]:     { value: { str: "hello.*" } },
           [PARAM.REGEX_FIRST_MATCH]: { variable_id: "cccc0002-0000-0000-0000-000000000000" },
         },
         reads:  ["cccc0001-0000-0000-0000-000000000000"],
@@ -415,7 +415,7 @@ function renderVarTable(varMeta, values) {
     let display = "";
     if (val !== undefined) {
       if (val.f32 !== undefined) display = val.f32.toFixed(4);
-      else if (val.string !== undefined) display = val.string;
+      else if (val.str !== undefined) display = val.str;
       else display = JSON.stringify(val);
     } else if (meta.type === "f32") {
       display = meta.init.toFixed(4);
@@ -442,7 +442,7 @@ function collectVarOverrides(varMeta) {
       const n = parseFloat(raw);
       overrides[id] = { f32: isNaN(n) ? 0.0 : n };
     } else {
-      overrides[id] = { string: raw };
+      overrides[id] = { str: raw };
     }
   });
   return overrides;
@@ -532,7 +532,7 @@ function doTick() {
         const v = currentVars[id];
         if (!v) return "";
         if (v.f32 !== undefined) return `${m.name}=${v.f32.toFixed(4)}`;
-        if (v.string !== undefined) return `${m.name}="${v.string}"`;
+        if (v.str !== undefined) return `${m.name}="${v.str}"`;
         return "";
       })
       .filter(Boolean).join(", ");

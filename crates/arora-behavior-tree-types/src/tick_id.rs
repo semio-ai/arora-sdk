@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use semio_record::{
   acl::Acl,
   structure::v0::unfrozen::{Structure, StructureField},
@@ -12,7 +10,7 @@ pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
   Structure {
     name: "TickId".to_string(),
     parent,
-    fields: HashMap::from([(
+    fields: [(
       TICK_ID_CALLABLE_ID_FIELD_RAW_ID,
       StructureField {
         name: "callable_id".to_string(),
@@ -20,7 +18,7 @@ pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
           kind: PrimitiveKind::U64,
         }),
       },
-    )]),
+    )].into_iter().collect(),
     acl: <Acl as Default>::default(),
   }
 }

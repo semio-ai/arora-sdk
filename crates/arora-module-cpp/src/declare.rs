@@ -966,7 +966,7 @@ pub fn structure_deserializer(
 
   let mut i = 0;
   for field_id in sorted_field_ids.iter() {
-    let field = ty.fields.get(field_id).unwrap();
+    let field = ty.fields.get(*field_id).unwrap();
 
     let mut field_declarations: Vec<Declaration> = Vec::new();
 
@@ -1262,7 +1262,7 @@ pub fn structure_serializer(
 
   // Count fields that are available
   for field_id in sorted_field_ids.iter() {
-    let field = ty.fields.get(field_id).unwrap();
+    let field = ty.fields.get(*field_id).unwrap();
     function_statements.push(
       Statement::If(
         value_name

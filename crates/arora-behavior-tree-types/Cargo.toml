@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 lazy_static = "*"
 semver = "1.0.5"
 uuid = "1"

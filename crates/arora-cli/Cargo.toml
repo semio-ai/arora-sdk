@@ -10,8 +10,8 @@ arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "master" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "master" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
 clap = { version = "3", features = ["derive"] }
 futures = "0.3"
