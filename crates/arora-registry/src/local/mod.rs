@@ -153,11 +153,11 @@ mod tests {
     ty::{FrozenScalar, FrozenTy, Primitive, PrimitiveKind},
   };
   use semver::{Version, VersionReq};
-  use std::collections::BTreeMap;
+  use std::collections::{BTreeMap, HashMap};
   use uuid::Uuid;
 
   #[tokio::test]
-  async fn add_status_enumeration_and_use_it_in_a_module() {
+  async fn add_status_enumeration_and_use_it_in_a_module() {   
     let mut registry = LocalRegistry::new();
 
     let status = EnumerationFrozen {

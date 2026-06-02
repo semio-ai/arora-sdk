@@ -2187,7 +2187,6 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
- "serde",
 ]
 
 [[package]]
@@ -3275,14 +3274,14 @@ dependencies = [
 [[package]]
 name = "semio-client"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-client.git?branch=main#e5134a1879727b01b4c1351684f12d078daa346a"
+source = "git+https://github.com/semio-ai/semio-client.git?branch=main#5aeee38a6f30e7bc3481ed70fed647fe76ddfe95"
 dependencies = [
  "anyhow",
  "chrono",
  "clap 3.2.25",
  "futures",
  "graphql_client",
- "indexmap 1.9.3",
+ "indexmap 2.14.0",
  "lazy_static",
  "reqwest",
  "semio-record",
@@ -3299,14 +3298,14 @@ dependencies = [
 [[package]]
 name = "semio-record"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-record.git?branch=main#4d994e012b3fde1fde733cda41fa00abff69e421"
+source = "git+https://github.com/semio-ai/semio-record.git?branch=main#e82ba2b8f01834ef4e697ff6c8002b8b48c0da1a"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "derive_more 0.99.20",
  "futures",
- "indexmap 1.9.3",
+ "indexmap 2.14.0",
  "once_cell",
  "semver",
  "serde",
@@ -3317,7 +3316,7 @@ dependencies = [
 [[package]]
 name = "semio-store-rpc"
 version = "0.1.0"
-source = "git+https://github.com/semio-ai/semio-store-rpc.git?branch=update#78a4c603bfee6e88000fecc005ef737f976ce47f"
+source = "git+https://github.com/semio-ai/semio-store-rpc.git?branch=main#9570e40ce4642f69e0db7dd4a795c6ab2eb0c00f"
 dependencies = [
  "anyhow",
  "chrono",
