@@ -37,13 +37,13 @@ pub struct BehaviorTree {
   node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
 }
 
-struct BehaviorTreeRuntime<'a> {
+pub struct BehaviorTreeRuntime<'a> {
   caller: &'a mut dyn CallBridge,
   tick: TickId,
 }
 
 impl<'a> BehaviorTreeRuntime<'a> {
-  fn setup(
+  pub fn setup(
     tree: &'a BehaviorTree,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     caller: &'a mut dyn CallBridge,
@@ -59,13 +59,13 @@ impl<'a> BehaviorTreeRuntime<'a> {
       if trace {
         TraceTick::YesAll
       } else {
-        TraceTick::No
+        TraceTick::No 
       },
     )?;
     Ok(Self { caller, tick })
   }
 
-  fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
+  pub fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
     self.tick.tick(self.caller)
   }
 }
@@ -617,8 +617,8 @@ fn call_expression(
 }
 
 pub struct ModuleFunction {
-  module_id: Uuid,
-  function_id: Uuid,
-  function_name: String,
-  function: Function,
+  pub module_id: Uuid,
+  pub function_id: Uuid,
+  pub function_name: String,
+  pub function: Function,
 }
