@@ -19,5 +19,16 @@ fn main() {
     let host_bin_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
     let arora_cli = target_dir.join(&profile).join(format!("arora-cli{host_bin_ext}"));
     println!("cargo:rustc-env=ARORA_CLI_BIN={}", arora_cli.display());
+
+    // Forward artifact dependency paths for WASM modules
+    forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
+    forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
+
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn forward_env_var(name: &str) {
+    if let Ok(val) = std::env::var(name) {
+        println!("cargo::rustc-env={}={}", name, val);
+    }
 }
