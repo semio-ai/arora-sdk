@@ -52,6 +52,13 @@ use `arora-module-cli` to generate the adequate sources to implement it.
 This is called a "header", and it is used by the runtime to identify the symbols.
 Use `arora-cli --header <module.yaml> --exe <binary>` to try loading a module.
 
+**Important:** The `module.yaml` file is the source of truth. Each module's `build.rs`
+regenerates code in `src/arora_generated/` on every build. Manual edits to generated
+files will be lost. To add or modify functions, edit `module.yaml` and run
+`cargo clean -p <module-name>` to force regeneration. When importing functions from
+other modules, add them to both the `imports:` and `dependencies:` sections.
+See [`AGENTS.md`](AGENTS.md) for detailed guidance on code generation.
+
 When a function is called (for instance by using `arora-cli --call`),
 the call arguments are passed in via a structure which `id`
 corresponds to the function to call,

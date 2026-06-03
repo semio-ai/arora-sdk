@@ -110,6 +110,12 @@ language-specific scaffold (`arora-module-rust` for Rust, `arora-module-cpp`
 for C++) and a stripped "header" form for runtime use. The host-tool
 location is delivered to each module's `build.rs` via cargo bindeps.
 
+**Code generation:** Each module's `build.rs` automatically regenerates
+`src/arora_generated/` on every build from the `module.yaml` source. Manual
+edits to generated files are lost. To modify a module's interface, edit
+`module.yaml` (including `imports:` and `dependencies:` for cross-module
+calls) and rebuild. See [`../AGENTS.md`](../AGENTS.md) for detailed guidance.
+
 ## Build orchestration
 
 `cargo build --workspace` is the entry point. Cross-target artefacts are
