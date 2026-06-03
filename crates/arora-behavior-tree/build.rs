@@ -61,5 +61,17 @@ pub async fn main() -> Result<()> {
 
   // Apply rusfmt.
   apply_rustfmt(source_path).await?;
+
+  // Forward artifact dependency paths to the test code
+  // Cargo provides CARGO_CDYLIB_FILE_<normalized_dep_name> for artifact dependencies
+  // We need to forward this to tests using cargo::rustc-env
+  forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
+
   Ok(())
+}
+
+fn forward_env_var(name: &str) {
+  if let std::result::Result::Ok(val) = std::env::var(name) {
+    println!("cargo::rustc-env={}={}", name, val);
+  }
 }
