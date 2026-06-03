@@ -24,7 +24,9 @@ jobs:
 
       # ubuntu-latest ships ~14 GB free; Rust multi-target --release builds
       # need ~35 GB. Stripping irrelevant pre-installed toolchains (Android,
-      # .NET, Haskell, large-packages) recovers ~25 GB before we start.
+      # .NET, Haskell) recovers ~25 GB before we start.
+      # large-packages: false preserves the pre-installed Firefox needed for
+      # wasm-pack --headless --firefox browser tests.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -32,7 +34,7 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          large-packages: true
+          large-packages: false
           docker-images: true
           swap-storage: true
 
@@ -54,7 +56,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
@@ -82,53 +83,11 @@ jobs:
       - name: Build arora for wasm32-unknown-unknown
         run: cargo build -p arora --target wasm32-unknown-unknown --no-default-features --release
 
-  browser_test:
-    runs-on: ubuntu-latest
-    needs: build_and_test
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # large-packages: false preserves the pre-installed Firefox needed for
-      # wasm-pack --headless --firefox.
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: true
-
-      - name: Configure cargo git access
-        run: |
-          mkdir -p ~/.cargo
-          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
-          git config --global credential.helper 'store --file ~/.my-credentials'
-
-      - name: Install wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Cache cargo registry & target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
-
+      # Install wasm-pack for browser tests
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build test guest wasm (wasm32-wasip1)
-        run: cargo build -p test-rust-wasm --target wasm32-wasip1 --release
-
+      # Run browser tests in headless Firefox
       - name: Run arora-web browser test (headless Firefox)
         run: wasm-pack test --headless --firefox --release crates/arora-web
 
