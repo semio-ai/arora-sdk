@@ -508,7 +508,7 @@ fn collect_action_attributes(
     let attr = map_parsing_error(attr, "cannot get attribute", reader)?;
     let key = String::from_utf8(attr.key.as_ref().to_vec());
     let key = map_parsing_error(key, "invalid utf8 in attribute key", reader)?;
-    let value = attr.unescape_value();
+    let value = attr.normalized_value(quick_xml::XmlVersion::Explicit1_1);
     let value = map_parsing_error(
       value,
       format!("error unescaping value of attribute {}", key).as_str(),

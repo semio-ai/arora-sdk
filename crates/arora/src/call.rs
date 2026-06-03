@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc};
 
 use derive_more::Display;
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use uuid::Uuid;
 
 use arora_buffers::serde_uuid::serialize;
@@ -124,10 +124,10 @@ impl CallableRegistry {
   fn generate_unique_callable_id(&self) -> CallableId {
     let mut rng = rng();
     let mut tick_id = CallableId {
-      id: rng.random::<u64>(),
+      id: rng.next_u64(),
     };
     while self.callables_by_id.contains_key(&tick_id) {
-      tick_id.id = rng.random::<u64>();
+      tick_id.id = rng.next_u64();
     }
     tick_id
   }
