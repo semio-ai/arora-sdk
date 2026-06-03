@@ -532,35 +532,41 @@ pub mod tests {
       .await
       .expect(format!("failed to add module {} to registry", module_id).as_str());
 
-    // Find the executable in the right target directory (debug in priority)
-    let (module_target_dir, executable_prefix, executable_extension) =
-      match header.executor.name.as_str() {
-        "wasm" => (repo_root_path().join("target").join("wasm32-wasip1"), "", "wasm"),
-        "native" => {
-          let executable_extension = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
-            "dylib"
-          } else if cfg!(target_family = "unix") {
-            "so"
-          } else if cfg!(target_family = "windows") {
-            "dll"
-          } else {
-            panic!("unsupported platform")
-          };
-          (module_root.join("target"), "lib", executable_extension) // supposes it's the host
-        }
-        _ => panic!("unsupported executor"),
-      };
-    let target_subdir = if cfg!(debug_assertions) {
-      "debug"
+    // Find the executable
+    let module_path = if name == "behavior-tree-nodes" && header.executor.name.as_str() == "wasm" {
+      // For behavior-tree-nodes, use the artifact dependency path from build script
+      PathBuf::from(env!("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes"))
     } else {
-      "release"
+      // For other modules, use the legacy path construction
+      let (module_target_dir, executable_prefix, executable_extension) =
+        match header.executor.name.as_str() {
+          "wasm" => (repo_root_path().join("target").join("wasm32-wasip1"), "", "wasm"),
+          "native" => {
+            let executable_extension = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
+              "dylib"
+            } else if cfg!(target_family = "unix") {
+              "so"
+            } else if cfg!(target_family = "windows") {
+              "dll"
+            } else {
+              panic!("unsupported platform")
+            };
+            (module_root.join("target"), "lib", executable_extension) // supposes it's the host
+          }
+          _ => panic!("unsupported executor"),
+        };
+      let target_subdir = if cfg!(debug_assertions) {
+        "debug"
+      } else {
+        "release"
+      };
+      module_target_dir.join(target_subdir).join(format!(
+        "{}{}.{}",
+        executable_prefix,
+        name.to_case(Case::Snake),
+        executable_extension
+      ))
     };
-    let module_path = module_target_dir.join(target_subdir).join(format!(
-      "{}{}.{}",
-      executable_prefix,
-      name.to_case(Case::Snake),
-      executable_extension
-    ));
     println!("reading executable {:#?}", module_path);
     let mut executable_file = File::open(&module_path)
       .await
