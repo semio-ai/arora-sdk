@@ -23,6 +23,8 @@ fn main() {
     // Forward artifact dependency paths for WASM modules
     forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
     forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
+    forward_env_var("CARGO_STATICLIB_FILE_ARORA_BUFFERS");
+    forward_env_var("CARGO_STATICLIB_FILE_ARORA_UTIL");
 
     println!("cargo:rerun-if-changed=build.rs");
 }
