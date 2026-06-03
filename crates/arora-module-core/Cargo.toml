@@ -12,9 +12,9 @@ arora-registry = { path = "../arora-registry" }
 arora-types = "1"
 arora-vfs = { path = "../arora-vfs" }
 bytes = "1"
-convert_case = "0.5"
+convert_case = "0.11"
 derive_more = { version = "2", features = ["display"] }
-semver = "1.0.5"
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.8"

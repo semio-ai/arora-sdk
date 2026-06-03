@@ -14,15 +14,15 @@ semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = 
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
 async-recursion = "1"
-clap = { version = "3.0.10", features = ["derive"] }
-convert_case = "0.5"
+clap = { version = "3", features = ["derive"] }
+convert_case = "0.11"
 derive_more = "2"
-itertools = "0.10"
+itertools = "0.14"
 lazy_static = "*"
 proc-macro2 = "1"
-quote = "1.0"
-semver = "1.0.5"
-serde = { version = "1.0", features = ["derive"] }
+quote = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "*"
 tokio = { version = "1", features = ["full"] }

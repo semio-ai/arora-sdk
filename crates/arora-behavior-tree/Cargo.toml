@@ -16,8 +16,8 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 lazy_static = "*"
-quick-xml = "0.37"
-serde = { version = "1.0", features = ["derive"] }
+quick-xml = "0.40"
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "2"
@@ -28,10 +28,10 @@ arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
-assert_float_eq = "1.1.3"
-convert_case = "0.5"
-rand = "0.9"
-semver = "1.0.5"
+assert_float_eq = "1"
+convert_case = "0.11"
+rand = "0.10"
+semver = "1"
 tokio = { version = "1", features = ["full"] }
 url = "2"
 # Artifact dependency: automatically build WASM module for tests
@@ -42,5 +42,5 @@ anyhow = "*"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
 arora-module-rust = { path = "../arora-module-rust" }
-semver = "1.0.5"
+semver = "1"
 tokio = { version = "1", features = ["full"] }

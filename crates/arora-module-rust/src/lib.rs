@@ -364,7 +364,7 @@ pub fn generate_enumeration_source(
   // Enum IDs.
   let enum_id = id.to_string();
   let enum_id_bytes = RawUuidValue(id);
-  let enum_upper_name = format_ident!("{}", enum_name.to_case(Case::ScreamingSnake));
+  let enum_upper_name = format_ident!("{}", enum_name.to_case(Case::UpperSnake));
   let enum_const_id_ident = format_ident!("{}_ENUM_RAW_ID", enum_upper_name);
   let enum_const_id_doc = format!("{}: {}", enum_name, enum_id);
   let enum_id_declaration = quote! {
@@ -557,7 +557,7 @@ pub async fn generate_structure_source(
   // Struct IDs.
   let id_str = id.to_string();
   let id_bytes = RawUuidValue(id);
-  let upper_name = format_ident!("{}", name.to_case(Case::ScreamingSnake));
+  let upper_name = format_ident!("{}", name.to_case(Case::UpperSnake));
   let const_id_ident = format_ident!("{}_STRUCT_RAW_ID", upper_name);
   let const_id_doc = format!("{}: {}", name, id_str);
   let id_declaration = quote! {
@@ -739,7 +739,7 @@ async fn generate_imports_from_module_source(
 
   // Declare the ID of the module to use it locally.
   let module_const_id_ident =
-    format_ident!("{}_MODULE_ID", module_name.to_case(Case::ScreamingSnake),);
+    format_ident!("{}_MODULE_ID", module_name.to_case(Case::UpperSnake),);
   let module_id_declaration = generate_const_id_declaration(
     &module_name.to_string(),
     &module_const_id_ident,
@@ -1535,8 +1535,8 @@ pub fn type_ident(type_name: &String) -> Ident {
 pub fn struct_field_const_id_ident(struct_name: &String, field_name: &String) -> Ident {
   format_ident!(
     "{}_{}_FIELD_RAW_ID",
-    struct_name.to_case(Case::ScreamingSnake),
-    field_name.to_case(Case::ScreamingSnake)
+    struct_name.to_case(Case::UpperSnake),
+    field_name.to_case(Case::UpperSnake)
   )
 }
 
@@ -1574,8 +1574,8 @@ pub fn enum_variant_ident(enum_name: &String, variant_name: &String) -> TokenStr
 pub fn enum_variant_const_id_ident(enum_name: &String, variant_name: &String) -> Ident {
   format_ident!(
     "{}_{}_VARIANT_RAW_ID",
-    enum_name.to_case(Case::ScreamingSnake),
-    variant_name.to_case(Case::ScreamingSnake),
+    enum_name.to_case(Case::UpperSnake),
+    variant_name.to_case(Case::UpperSnake),
   )
 }
 
@@ -1602,15 +1602,15 @@ pub fn generate_const_id_declaration(
 pub fn function_const_id_ident(function_name: &String) -> Ident {
   format_ident!(
     "{}_FUNCTION_RAW_ID",
-    function_name.to_case(Case::ScreamingSnake),
+    function_name.to_case(Case::UpperSnake),
   )
 }
 
 pub fn function_param_const_id_ident(function_name: &String, param_name: &String) -> Ident {
   format_ident!(
     "{}_{}_PARAMETER_RAW_ID",
-    function_name.to_case(Case::ScreamingSnake),
-    param_name.to_case(Case::ScreamingSnake),
+    function_name.to_case(Case::UpperSnake),
+    param_name.to_case(Case::UpperSnake),
   )
 }
 

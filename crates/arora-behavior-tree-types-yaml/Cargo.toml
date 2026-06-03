@@ -15,6 +15,6 @@ uuid = { version = "1", features = ["v4"] }
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
 tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = "1"

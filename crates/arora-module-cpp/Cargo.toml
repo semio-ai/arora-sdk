@@ -13,12 +13,12 @@ arora-vfs = { path = "../arora-vfs" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
-clap = { version = "3.0.10", features = ["derive"] }
-convert_case = "0.5"
+clap = { version = "3", features = ["derive"] }
+convert_case = "0.11"
 derive_more = { version = "2", features = ["from"] }
 lazy_static = "*"
-semver = "1.0.5"
-serde = { version = "1.0", features = ["derive"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["serde", "v4"] }

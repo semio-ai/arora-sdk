@@ -26,8 +26,8 @@ arora-behavior-tree = { path = "../../crates/arora-behavior-tree" }
 arora-module-core = { path = "../../crates/arora-module-core" }
 arora-registry = { path = "../../crates/arora-registry" }
 arora-types = "1"
-convert_case = "0.5"
-rand = "0.9"
+convert_case = "0.11"
+rand = "0.10"
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
