@@ -3,6 +3,7 @@ use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{events::Event, Reader};
 use semio_record::module::v0::frozen::Parameter;
+use semio_record::ty::FrozenTy;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::{
@@ -19,7 +20,7 @@ use crate::nodes::{
   PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_FUNCTION_ID,
   STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
 };
-use crate::schema::Expression;
+use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
 use crate::ModuleFunction;
 
@@ -187,6 +188,19 @@ const IS_STR_SET_GROOT_ID: &'static str = "IsStringSet";
 const WAIT_STR_SET_GROOT_ID: &'static str = "WaitStringSet";
 const REGEX_MATCH_GROOT_ID: &'static str = "RegexMatch";
 
+/// UUID for behavior_tree.Status type
+const STATUS_TYPE_ID: Uuid = Uuid::from_bytes([
+  0x32, 0x5a, 0x57, 0x67, 0xe3, 0x44, 0x45, 0x32, 0x86, 0x0e, 0x07, 0x49, 0xbc, 0xf2, 0xe4, 0x28,
+]);
+
+/// Check if a function returns Status (vs some other type that needs _ret binding)
+fn returns_status(return_ty: &FrozenTy) -> bool {
+  match return_ty {
+    FrozenTy::FrozenScalar(scalar) => scalar.reference.id == STATUS_TYPE_ID,
+    _ => false,
+  }
+}
+
 /// Converts a Groot parameter into an Arora one.
 /// Requires some context to do so:
 /// - the function to which the parameter belongs,
@@ -212,12 +226,34 @@ fn groot_param_arg_to_arora(
     })
     .collect();
   match param_matches.len() {
-    0 => Err(BehaviorTreeError::InternalError {
-      message: format!(
-        "no such parameter \"{}\" in function \"{}\"",
-        param_arg.0, module_function.function_name
-      ),
-    }),
+    0 => {
+      // Behavior tree layer: if parameter not found but function has a return value,
+      // treat this as the return value binding (_RET_PARAM_ID)
+      if !returns_status(&module_function.function.return_ty) {
+        let expression = if param_arg.1.starts_with("{") && param_arg.1.ends_with("}") {
+          let variable_name = &param_arg.1[1..param_arg.1.len() - 1];
+          let maybe_id = variables.get(variable_name);
+          let id = if let Some(id) = maybe_id {
+            id.to_owned()
+          } else {
+            let id = Uuid::new_v4();
+            variables.insert(variable_name.to_owned(), id.to_owned());
+            id
+          };
+          Expression::Uuid(id)
+        } else {
+          Expression::Value(Value::String(param_arg.1.to_owned()))
+        };
+        Ok((_RET_PARAM_ID, expression))
+      } else {
+        Err(BehaviorTreeError::InternalError {
+          message: format!(
+            "no such parameter \"{}\" in function \"{}\"",
+            param_arg.0, module_function.function_name
+          ),
+        })
+      }
+    }
     1 => {
       let expression = if param_arg.1.starts_with("{") && param_arg.1.ends_with("}") {
         let variable_name = &param_arg.1[1..param_arg.1.len() - 1];
@@ -250,6 +286,30 @@ fn arora_param_to_groot(
   module_function: &ModuleFunction,
   variables: &mut HashMap<Uuid, String>,
 ) -> Result<(String, String), BehaviorTreeError> {
+  // Behavior tree layer: handle _RET_PARAM_ID specially
+  if *param_arg.0 == _RET_PARAM_ID {
+    let value = match param_arg.1 {
+      Expression::Uuid(id) => {
+        let maybe_name = variables.get(id);
+        let name = if let Some(name) = maybe_name {
+          name.to_owned()
+        } else {
+          let id = Uuid::new_v4();
+          variables.insert(id.to_owned(), id.to_string());
+          id.to_string()
+        };
+        format!("{{{}}}", name)
+      }
+      Expression::Value(value) => value.to_string(),
+      _ => {
+        return Err(BehaviorTreeError::InconsistentTreeError {
+          message: "unsupported expression type for Groot conversion".to_string(),
+        })
+      }
+    };
+    return Ok(("_ret".to_string(), value));
+  }
+  
   let function = &module_function.function;
   let param_matches: Vec<&Parameter> = function
     .parameter_ordering

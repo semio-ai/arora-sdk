@@ -172,6 +172,26 @@ fn parallel(children: Option<Vec<TickId>>) -> Status {
   }
 }
 
+// Math functions
+//==============================================================
+fn cos(angle: Option<f32>, res: &mut Option<f32>) -> Status {
+  if let Some(a) = angle {
+    *res = Some(a.cos());
+    Status::Success
+  } else {
+    Status::Failure
+  }
+}
+
+fn add(a: Option<f32>, b: Option<f32>, res: &mut Option<f32>) -> Status {
+  if let (Some(a_val), Some(b_val)) = (a, b) {
+    *res = Some(a_val + b_val);
+    Status::Success
+  } else {
+    Status::Failure
+  }
+}
+
 // Calling tick functions through arora_call_indirect.
 //========================================================================
 fn call_tick_function(tick_id: &TickId) -> Status {

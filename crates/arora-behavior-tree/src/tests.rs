@@ -218,7 +218,6 @@ pub mod tests {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-      "test-rust-wasm".to_string(),
       "behavior-tree-nodes".to_string(),
     ])
     .await;
@@ -833,7 +832,7 @@ pub mod tests {
   }
 
   lazy_static::lazy_static! {
-    pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["test-rust-wasm".to_string(), "behavior-tree-nodes".to_string()];
+    pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
   }
 
   /// A tree with a single node calling test-wasm.succeed()
