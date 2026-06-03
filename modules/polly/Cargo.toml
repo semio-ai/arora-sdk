@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 anyhow = "*"
 arora-buffers = { path = "../../crates/arora-buffers" }
 arora-types = "1"
-aws-config = "0.11.0"
-aws-sdk-polly = "0.11.0"
+aws-config = "1"
+aws-sdk-polly = "1"
 bytes = "1"
 derive_more = "2"
 lazy_static = "*"

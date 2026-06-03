@@ -1,9 +1,9 @@
 mod arora_generated;
 
 use arora_generated::behavior_tree::status::Status;
-use aws_config::meta::region::RegionProviderChain;
+use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
 use aws_sdk_polly::{
-  model::{OutputFormat, VoiceId},
+  types::{OutputFormat, VoiceId},
   Client, Error,
 };
 use bytes::Buf;
@@ -40,7 +40,10 @@ fn say(text: Option<String>) -> Status {
       // the task was finished and status was reset to running, let's respawn it
       *locked_task = Some(TOKIO_RUNTIME.spawn(async move {
         let region_provider = RegionProviderChain::default_provider().or_else("eu-west-3");
-        let config = aws_config::from_env().region(region_provider).load().await;
+        let config = aws_config::defaults(BehaviorVersion::latest())
+          .region(region_provider)
+          .load()
+          .await;
         let client = Client::new(&config);
         let result = synthesize(&client, text).await;
         let mut locked_status = TTS_STATUS.lock().expect("failed to lock status");
