@@ -3,8 +3,9 @@
 # crates that cross-compile for wasm32-wasip1.
 # See docs/cargo-migration/PLAN.md.
 [toolchain]
-channel = "nightly-2026-05-27"
+channel = "nightly-2026-06-03"
 components = ["rustfmt", "clippy", "rust-src"]
 targets = [
   "wasm32-wasip1",
 ]
+
