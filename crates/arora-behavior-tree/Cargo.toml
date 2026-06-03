@@ -24,7 +24,6 @@ derive_more = "2"
 
 [dev-dependencies]
 anyhow = "*"
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
@@ -35,6 +34,8 @@ rand = "0.9"
 semver = "1.0.5"
 tokio = { version = "1", features = ["full"] }
 url = "2"
+# Artifact dependency: automatically build WASM module for tests
+behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 
 [build-dependencies]
 anyhow = "*"
