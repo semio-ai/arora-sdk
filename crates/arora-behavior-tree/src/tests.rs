@@ -18,11 +18,8 @@ pub mod tests {
   };
   use assert_float_eq::*;
   use convert_case::{Case, Casing};
-  use rand::prelude::IndexedRandom;
-  use rand::rng;
   use semio_record::{module::v0::frozen::ExportKind, record::Freezer};
   use semver::Version;
-  use std::str::FromStr;
   use std::{
     cell::RefCell,
     collections::HashMap,
@@ -53,7 +50,7 @@ pub mod tests {
   pub async fn run_trivial_tree() {
     assert_eq!(
       Status::Success,
-      run_yaml_with_modules(TRIVIAL_TREE, &vec!["test-rust-wasm".to_string()]).await
+      run_yaml_base(TRIVIAL_TREE).await
     );
   }
 
@@ -246,11 +243,19 @@ pub mod tests {
   #[tokio::test]
   pub async fn non_status_cos() -> Result<()> {
     let angle: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(std::f32::consts::PI)));
-    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
-    let behavior = cos_raw(Expression::Variable(angle.clone()), result.clone()).try_into()?;
+    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
+    let behavior = TreeNode {
+      function: COS_FUNCTION_ID,
+      children: None,
+      parameters: HashMap::from([
+        (COS_ANGLE_PARAM_ID, Expression::Variable(angle.clone())),
+        (COS_RES_PARAM_ID, Expression::Variable(result.clone())),
+      ]),
+    }
+    .try_into()?;
 
     let (mut engine, index) =
-      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
     let mut runtime =
       BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
@@ -265,16 +270,20 @@ pub mod tests {
 
   #[tokio::test]
   pub async fn non_status_add() -> Result<()> {
-    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
-    let behavior = add_raw(
-      Expression::Value(Value::F32(3.0)),
-      Expression::Value(Value::F32(4.0)),
-      result.clone(),
-    )
+    let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
+    let behavior = TreeNode {
+      function: ADD_FUNCTION_ID,
+      children: None,
+      parameters: HashMap::from([
+        (ADD_A_PARAM_ID, Expression::Value(Value::F32(3.0))),
+        (ADD_B_PARAM_ID, Expression::Value(Value::F32(4.0))),
+        (ADD_RES_PARAM_ID, Expression::Variable(result.clone())),
+      ]),
+    }
     .try_into()?;
 
     let (mut engine, index) =
-      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
     let mut runtime =
       BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
@@ -290,14 +299,16 @@ pub mod tests {
   #[tokio::test]
   pub async fn add_then_cos() -> Result<()> {
     let x: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
-    let cos_result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Unit));
+    let cos_result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
     let behavior = seq(vec![
-      add_raw(
+      increase(
         Expression::Variable(x.clone()),
         Expression::Value(Value::F32(0.1)),
-        x.clone(),
       ),
-      cos_raw(Expression::Variable(x.clone()), cos_result.clone()),
+      cos(
+        Expression::Variable(x.clone()),
+        Expression::Variable(cos_result.clone()),
+      ),
     ])
     .try_into()?;
 
@@ -320,72 +331,6 @@ pub mod tests {
         panic!("cos_result does not hold an f32");
       }
     }
-    Ok(())
-  }
-
-  #[ignore]
-  #[tokio::test]
-  pub async fn hello_polly() -> Result<()> {
-    let behavior =
-      TreeNode::action_node(Uuid::from_str("e5a41333-4848-411f-878c-f1d662ebb4a0").unwrap())
-        .try_into()?;
-
-    let (mut engine, index) = setup_engine_with_modules(&vec![
-      "test-rust-wasm".to_string(),
-      "behavior-tree-nodes".to_string(),
-      "polly".to_string(),
-    ])
-    .await;
-
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
-    while runtime.tick().unwrap() == Status::Running {}
-    Ok(())
-  }
-
-  fn polly_say(text: Expression) -> TreeNode {
-    TreeNode {
-      function: Uuid::from_str("e1b4bda7-1c7b-4322-b9a0-552201b8a011").unwrap(),
-      children: None,
-      parameters: HashMap::from([(
-        Uuid::from_str("fb3787f2-2151-49ce-8b61-6274984558ea").unwrap(),
-        text,
-      )]),
-    }
-  }
-
-  #[ignore]
-  #[tokio::test]
-  pub async fn polly_sequence_of_speech() -> Result<()> {
-    const NAMES: [&'static str; 3] = ["Ross", "Braden", "Victor"];
-    let name = NAMES.choose(&mut rng()).unwrap();
-    let behavior = seq_star(vec![
-      polly_say(Expression::Value(Value::String("Hello!".to_string()))),
-      polly_say(Expression::Value(Value::String(format!(
-        "Oh, it's you, {}",
-        name
-      )))),
-      polly_say(Expression::Value(Value::String(
-        "How have you been?".to_string(),
-      ))),
-    ])
-    .try_into()?;
-
-    let (mut engine, index) = setup_engine_with_modules(&vec![
-      "test-rust-wasm".to_string(),
-      "behavior-tree-nodes".to_string(),
-      "polly".to_string(),
-    ])
-    .await;
-
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
-    let mut status = Status::Running;
-    while status == Status::Running {
-      status = runtime.tick().unwrap();
-      std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert_eq!(status, Status::Success);
     Ok(())
   }
 
@@ -425,7 +370,6 @@ pub mod tests {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-      "test-rust-wasm".to_string(),
       "behavior-tree-nodes".to_string(),
     ])
     .await;
@@ -509,68 +453,6 @@ pub mod tests {
     };
 
     println!("{}", String::from_utf8(behavior.to_groot_xml()).unwrap());
-    Ok(())
-  }
-
-  #[ignore]
-  #[tokio::test]
-  pub async fn fake_listen_polly_dialogue() -> Result<()> {
-    let name: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let name_expr = Expression::Variable(name.to_owned());
-    let feeling: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let feeling_expr = Expression::Variable(feeling.to_owned());
-    let input: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let input_expr = Expression::Variable(input.to_owned());
-
-    let behavior = fallback(vec![
-      seq(vec![
-        is_str_set(name_expr.to_owned()),
-        is_str_set(feeling_expr.to_owned()),
-      ]),
-      seq(vec![
-        wait_str_set(input_expr.to_owned()),
-        fallback(vec![
-          regex_match(
-            input_expr.to_owned(),
-            Expression::Value(Value::String("(Ross|Brad|Victor)".to_string())),
-            name_expr.to_owned(),
-          ),
-          regex_match(
-            input_expr.to_owned(),
-            Expression::Value(Value::String(
-              "(fine|good|well|great|bad|terrible|tired|awkward)".to_string(),
-            )),
-            feeling_expr.to_owned(),
-          ),
-        ]),
-        run(),
-      ]),
-    ])
-    .try_into()?;
-
-    let (mut engine, index) = setup_engine_with_modules(&vec![
-      "test-rust-wasm".to_string(),
-      "behavior-tree-nodes".to_string(),
-      "polly".to_string(),
-    ])
-    .await;
-
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
-    let mut status = Status::Running;
-    let mut tick_count = 0;
-    while status == Status::Running {
-      if tick_count == 5 {
-        *input.borrow_mut() = Value::String("Ross".to_string());
-      }
-      if tick_count == 10 {
-        *input.borrow_mut() = Value::String("great".to_string());
-      }
-      status = runtime.tick().unwrap();
-      tick_count += 1;
-      std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert_eq!(status, Status::Success);
     Ok(())
   }
 
@@ -819,7 +701,7 @@ pub mod tests {
     .expect("tree conversion failed");
 
     let (mut engine, index) =
-      setup_engine_with_modules(&vec!["test-rust-wasm".to_string()]).await;
+      setup_engine_with_modules(&vec![]).await;
     let mut runtime =
       BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 
@@ -835,10 +717,10 @@ pub mod tests {
     pub static ref BASE_MODULE_NAMES: Vec<String> = vec!["behavior-tree-nodes".to_string()];
   }
 
-  /// A tree with a single node calling test-wasm.succeed()
+  /// A tree with a single node calling behavior-tree-nodes.succeed()
   pub const TRIVIAL_TREE: &'static str = "\
 - id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
-  function: 00cd31a8-2cf4-48e6-a957-69a55de90424
+  function: 6696f0bd-e781-40cd-aeb5-8dc616f810d2
 ";
 
   pub const SEQ_OF_SUCCESS: &'static str = "\

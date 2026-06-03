@@ -19,6 +19,21 @@ soloud = "1"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
+[dev-dependencies]
+anyhow = "*"
+arora = { path = "../../crates/arora" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree" }
+arora-module-core = { path = "../../crates/arora-module-core" }
+arora-registry = { path = "../../crates/arora-registry" }
+arora-types = "1"
+convert_case = "0.5"
+rand = "0.9"
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
+serde_yaml = "0.8"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+behavior-tree-nodes = { path = "../behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
+
 [build-dependencies]
 anyhow = "*"
 arora-behavior-tree-types = { path = "../../crates/arora-behavior-tree-types" }
