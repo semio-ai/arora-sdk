@@ -3069,6 +3069,7 @@ dependencies = [
  "arora",
  "arora-behavior-tree",
  "arora-behavior-tree-types",
+ "arora-behavior-tree-types-yaml",
  "arora-buffers",
  "arora-module-core",
  "arora-module-rust",
