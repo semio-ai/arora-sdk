@@ -17,7 +17,13 @@ fn main() {
         .unwrap_or_else(|| workspace_root.join("target"));
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let host_bin_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    let arora_cli = target_dir.join(&profile).join(format!("arora-cli{host_bin_ext}"));
+
+    // Try to get arora-cli from bindeps first, fall back to target dir
+    let arora_cli = env::var("CARGO_BIN_FILE_ARORA_CLI")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| target_dir.join(&profile).join(format!("arora-cli{host_bin_ext}")));
+
     println!("cargo:rustc-env=ARORA_CLI_BIN={}", arora_cli.display());
 
     // Forward artifact dependency paths for WASM modules
