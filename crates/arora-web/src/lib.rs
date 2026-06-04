@@ -22,8 +22,8 @@ use arora::{
   engine::EngineBuilder,
   executor::browser::BrowserExecutor,
   load::load_module_from_parts,
-  schema::module::low::Header,
 };
+use arora_types::module::low::Header;
 use arora_types::{
   call::Call,
   value::{Enumeration, StructureField, StructureWithoutId, Value},
@@ -385,9 +385,9 @@ impl BehaviorTreeRunner {
     let header_json_str = header_json.to_string();
 
     for export in &header.exports {
-      let arora::schema::module::low::ExportSymbol::Function(f) = export;
+      let arora_types::module::low::ExportSymbol::Function(f) = export;
       let children_param_id = f.parameters.first().and_then(|p| {
-        if let arora::schema::module::low::TypeRef::Array { id } = &p.ty {
+        if let arora_types::module::low::TypeRef::Array { id } = &p.ty {
           if id == &Uuid::from_bytes(TICK_ID_STRUCT_BYTES) {
             Some(p.id)
           } else {

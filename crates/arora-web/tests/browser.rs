@@ -6,7 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use arora::schema::module::low::Header;
+use arora_types::module::low::Header;
 use arora_web::Engine;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;

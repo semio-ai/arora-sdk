@@ -267,6 +267,7 @@ name = "arora-integration-tests"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arora-cli",
  "behavior-tree-nodes",
  "polly",
  "test-rust-wasm",
