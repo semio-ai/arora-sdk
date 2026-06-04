@@ -45,11 +45,7 @@ default-members = [
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree-types-yaml",
   "crates/wasi-sdk",
-  "modules/polly",
-  "modules/test-rust-wasm",
   "modules/behavior-tree-nodes",
-  "modules/test-cpp",
-  "modules/test-cpp-2",
   "tests",
 ]
 

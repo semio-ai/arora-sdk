@@ -63,7 +63,6 @@ jobs:
       - name: Build workspace
         run: cargo build --release
 
-      # Force the wasm32-wasip1 guest module builds before `cargo test`.
       # The arora-behavior-tree tests load the .wasm artifacts from
       # <workspace>/target/wasm32-wasip1/release/ (cfg!(debug_assertions)
       # is off under --release, so the loader picks the release subdir).
