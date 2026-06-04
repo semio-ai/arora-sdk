@@ -8,9 +8,17 @@ use std::path::PathBuf;
 pub async fn main() -> Result<()> {
   // Use a local registry aware of behavior tree types.
   let mut registry = LocalRegistry::new();
-  let behavior_tree_records_path = "../../crates/arora-behavior-tree-types-yaml/records";
-  load_records_from_yaml_dir(behavior_tree_records_path, &mut registry).await?;
-  println!("cargo:rerun-if-changed={}", behavior_tree_records_path);
+
+  let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+    .expect("CARGO_MANIFEST_DIR not set");
+  let behavior_tree_records_path = PathBuf::from(manifest_dir)
+    .parent()
+    .and_then(|p| p.parent())
+    .map(|p| p.join("crates/arora-behavior-tree-types-yaml/records"))
+    .ok_or_else(|| anyhow::anyhow!("Failed to resolve behavior tree records path"))?;
+
+  load_records_from_yaml_dir(behavior_tree_records_path.clone(), &mut registry).await?;
+  println!("cargo:rerun-if-changed={}", behavior_tree_records_path.display());
 
   // Generate sources for the module
   let module_path = "module.yaml";
