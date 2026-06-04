@@ -28,3 +28,4 @@ anyhow = "1"
 [build-dependencies]
 behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+polly = { path = "../modules/polly", artifact = "cdylib" }
