@@ -233,7 +233,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
 
     let nof_iterations = args.repeat;
     for _i in 0..nof_iterations {
-      let result = engine.arora_call(&module_id, call.clone())?;
+      let result = tokio::task::block_in_place(|| engine.arora_call(&module_id, call.clone()))?;
       println!("{}", serde_yaml::to_string(&result)?);
     }
 

@@ -40,28 +40,8 @@ fn run(args: &[&str]) {
 #[test]
 fn call_polly_from_engine() {
     let polly_root = workspace_root().join("modules").join("polly");
-    let polly_lib_ext = if cfg!(target_os = "macos") {
-        "dylib"
-    } else if cfg!(target_os = "windows") {
-        "dll"
-    } else {
-        "so"
-    };
     let module_yaml = polly_root.join("src").join("arora_generated").join("module.yaml");
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    let module_exe = polly_root
-        .join("target")
-        .join(profile)
-        .join(format!("libpolly.{polly_lib_ext}"));
-    // Fall back to the workspace target dir (cargo puts host artifacts there).
-    let module_exe = if module_exe.exists() {
-        module_exe
-    } else {
-        workspace_root()
-            .join("target")
-            .join(profile)
-            .join(format!("libpolly.{polly_lib_ext}"))
-    };
+    let module_exe = PathBuf::from(env!("CARGO_CDYLIB_FILE_POLLY_polly"));
     run(&[
         "--include",
         behavior_tree_records().to_str().unwrap(),
@@ -93,11 +73,11 @@ fn call_test_rust_wasm_from_engine() {
 }
 
 #[test]
-#[ignore = "pre-existing: arora-cli panics with 'Cannot start a runtime from within a runtime' when handling multi-module --call; tracked separately from the build-system migration"]
 fn call_test_cpp_2_from_engine_with_struct() {
     let workspace = workspace_root();
     let test_cpp_2_root = workspace.join("modules").join("test-cpp-2");
-    let modules_dir = workspace.join("target").join("debug").join("modules");
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let modules_dir = workspace.join("target").join(profile).join("modules");
     let test_cpp_2_module_yaml = modules_dir.join("test-cpp-2").join("module.yaml");
     let test_cpp_module_yaml = modules_dir.join("test-cpp").join("module.yaml");
     let test_cpp_2_records = test_cpp_2_root.join("records");

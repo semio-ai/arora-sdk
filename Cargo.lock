@@ -271,6 +271,8 @@ dependencies = [
  "arora-cli",
  "behavior-tree-nodes",
  "polly",
+ "test-cpp",
+ "test-cpp-2",
  "test-rust-wasm",
 ]
 
