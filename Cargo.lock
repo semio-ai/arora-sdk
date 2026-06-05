@@ -250,6 +250,7 @@ dependencies = [
  "arora-buffers",
  "arora-module-core",
  "arora-registry",
+ "arora-types",
  "clap 3.2.25",
  "futures",
  "reqwest",

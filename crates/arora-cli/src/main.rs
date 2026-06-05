@@ -3,8 +3,8 @@ use arora::{
   call::{Call, CallBridge},
   engine::EngineBuilder,
   load::load_module_from_parts,
-  schema::module::low::Header,
 };
+use arora_types::module::low::Header;
 use arora_module_core::header::module_frozen_from_header_file;
 use arora_registry::{
   config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
