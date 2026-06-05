@@ -108,7 +108,10 @@ fn download_and_extract(cache: &Path, install: &Path) -> Result<()> {
 
     let gz = flate2::read::GzDecoder::new(io::Cursor::new(buf));
     let mut archive = tar::Archive::new(gz);
-    let tmp_extract = cache.join(format!(".wasi-sdk-{VERSION_FULL}-extract"));
+    // Use OUT_DIR (unique per build invocation) to avoid races when multiple
+    // build scripts download WASI SDK concurrently.
+    let tmp_base = env::var("OUT_DIR").map(PathBuf::from).unwrap_or_else(|_| cache.to_path_buf());
+    let tmp_extract = tmp_base.join(format!(".wasi-sdk-{VERSION_FULL}-extract"));
     if tmp_extract.exists() {
         fs::remove_dir_all(&tmp_extract).ok();
     }
@@ -124,11 +127,14 @@ fn download_and_extract(cache: &Path, install: &Path) -> Result<()> {
         .iter()
         .find(|e| e.path().is_dir())
         .ok_or_else(|| anyhow!("no top-level dir in extracted tarball"))?;
-    if install.exists() {
-        fs::remove_dir_all(install).ok();
+    // If a concurrent build script already installed it, skip the rename.
+    if !install.join("bin").join(clang_exe_name()).exists() {
+        if install.exists() {
+            fs::remove_dir_all(install).ok();
+        }
+        fs::rename(top.path(), install)
+            .with_context(|| format!("renaming {} to {}", top.path().display(), install.display()))?;
     }
-    fs::rename(top.path(), install)
-        .with_context(|| format!("renaming {} to {}", top.path().display(), install.display()))?;
     fs::remove_dir_all(&tmp_extract).ok();
     Ok(())
 }

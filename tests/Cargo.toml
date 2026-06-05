@@ -20,12 +20,12 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 anyhow = "1"
+test-cpp = { path = "../modules/test-cpp" }
+test-cpp-2 = { path = "../modules/test-cpp-2" }
 
 [build-dependencies]
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
 behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 polly = { path = "../modules/polly", artifact = "cdylib" }
-test-cpp = { path = "../modules/test-cpp" }
-test-cpp-2 = { path = "../modules/test-cpp-2" }
 
