@@ -12,7 +12,10 @@ use std::sync::Mutex;
 use tokio::task::JoinHandle;
 
 lazy_static::lazy_static! {
-  static ref TOKIO_RUNTIME: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
+  // Reuse the caller's runtime if one is active (e.g. arora-cli), otherwise
+  // create a dedicated one. Either way we only need a Handle for spawning.
+  static ref TOKIO_HANDLE: tokio::runtime::Handle = tokio::runtime::Handle::try_current()
+    .unwrap_or_else(|_| Box::leak(Box::new(tokio::runtime::Runtime::new().unwrap())).handle().clone());
   static ref TTS_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
   static ref TTS_STATUS: Mutex<Status> = Mutex::new(Status::Running);
 }
@@ -38,7 +41,7 @@ fn say(text: Option<String>) -> Status {
   if locked_task.is_none() || *locked_status == Status::Failure {
     if *locked_status == Status::Running {
       // the task was finished and status was reset to running, let's respawn it
-      *locked_task = Some(TOKIO_RUNTIME.spawn(async move {
+    *locked_task = Some(TOKIO_HANDLE.spawn(async move {
         let region_provider = RegionProviderChain::default_provider().or_else("eu-west-3");
         let config = aws_config::defaults(BehaviorVersion::latest())
           .region(region_provider)
