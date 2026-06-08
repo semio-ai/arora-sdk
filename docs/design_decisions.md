@@ -82,14 +82,12 @@ not actually use forced-target (see below).
 `crate-type = ["cdylib", "rlib"]` crates with **no** `forced-target` /
 `package.target`. A bare `cargo build` compiles them for the host (so
 `cargo test -p test-rust-wasm` runs natively). Their wasm32-wasip1 flavour is
-produced on demand by whoever needs it:
-
-- the integration-test crate declares them as
-  `artifact = "cdylib", target = "wasm32-wasip1"` build-dependencies, so
-  `cargo test` forces a wasm build and exposes each `.wasm` path; and
-- CI additionally runs `cargo build -p <module> --target wasm32-wasip1
-  --release` so the `arora-behavior-tree` unit tests can load the guests from
-  `target/wasm32-wasip1/release/`.
+produced on demand by whoever needs it: both `arora-behavior-tree`
+(dev-dependency) and the integration-test crate declare them as
+`artifact = "cdylib", target = "wasm32-wasip1"`, so `cargo test` builds the
+wasm guests and the tests locate them through the forwarded
+`CARGO_CDYLIB_FILE_*` env vars. No explicit `--target wasm32-wasip1` build is
+needed — `cargo test --release` is self-sufficient.
 
 (An earlier design used `forced-target` under `-Zper-package-target`; it was
 dropped. The `cargo-features = ["per-package-target"]` lines still present in
@@ -232,22 +230,22 @@ its own dir, so consumer build scripts copy both into a single
 
 ## Testing
 
-### Wasm guests for behavior-tree tests live at the workspace target dir
+### Behavior-tree tests load the wasm guest via its bindep env var
 
-`crates/arora-behavior-tree/src/tests.rs` loads each module's `.wasm` from
-`<workspace>/target/wasm32-wasip1/<profile>/<name>.wasm`. Profile is picked
-via `cfg!(debug_assertions)`, so the path tracks `cargo test --release` /
-`cargo test` automatically.
+`crates/arora-behavior-tree/src/tests.rs` loads `behavior-tree-nodes` from
+`env!("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes")` — the
+artifact-dependency path that `arora-behavior-tree/build.rs` forwards as a
+`rustc-env`. Because `behavior-tree-nodes` is declared as an
+`artifact = "cdylib", target = "wasm32-wasip1"` dev-dependency, `cargo test`
+builds the wasm guest itself and the test picks it up directly. **No prior
+`cargo build --target wasm32-wasip1` is required** — verified by wiping the
+guests and running `cargo test --release` with no pre-build.
 
-**Why:** the previous implementation looked in per-module `target/` dirs,
-which were stale leftovers from the retired CMake build. Cargo-first builds
-put all wasm artefacts in the workspace target dir.
-
-**Caveat:** the `arora-behavior-tree` unit tests do not force a wasm build
-themselves. An explicit `cargo build -p <module> --target wasm32-wasip1`
-(or running the integration tests, whose bindeps force the guests) must
-precede `cargo test`. CI does the explicit per-module wasm builds before
-`cargo test --release`.
+The loader also has a fallback branch that resolves other modules from
+`<workspace>/target/wasm32-wasip1/<profile>/<name>.wasm`, but no current test
+exercises it (every test loads only `behavior-tree-nodes`). If a future test
+loads a different wasm module by name, either bindep it the same way or build
+it for `wasm32-wasip1` first.
 
 ### Integration tests rely on a mix of bindeps and published artefacts
 

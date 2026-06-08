@@ -166,8 +166,8 @@ cargo build -vv -p <module-name>
 
 The workspace handles cross-compilation via artifact dependencies:
 - Rust wasm guests build for the **host** by default; their `wasm32-wasip1`
-  flavour is forced on demand (integration-test bindeps + an explicit
-  `cargo build -p <module> --target wasm32-wasip1`).
+  flavour is forced on demand by the behavior-tree and integration-test
+  crates' artifact dependencies, so `cargo test` builds them automatically.
 - Host tools (CLI, code generators) build for host.
 - Build scripts receive artifact paths via env vars. **Mind the names:**
   `CARGO_BIN_FILE_<DEP>` works for bins, but for dash-named staticlib/cdylib

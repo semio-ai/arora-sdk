@@ -237,22 +237,18 @@ Mirror what CI does (release shown; drop `--release` for a debug run):
 
 ```bash
 cargo build --release
-cargo build -p test-rust-wasm      --target wasm32-wasip1 --release
-cargo build -p behavior-tree-nodes --target wasm32-wasip1 --release
 cargo test --release
 ```
 
-The explicit per-module wasm builds populate
-`target/wasm32-wasip1/<profile>/`, where the `arora-behavior-tree` unit tests
-load the guests from — those tests do not force the wasm build themselves.
-
-`cargo test` then builds and runs the `arora-integration-tests` crate
-(`tests/`), which spawns `arora-cli` against module artifacts. It pins the
-Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`) and `polly` as
-artifact dependencies — running the tests forces those to build — and reads
-their paths from env vars forwarded by `tests/build.rs`. The `test-cpp` /
-`test-cpp-2` wasm (plus their `module.yaml` / `records/`) are published by
-those modules' `build.rs` under `target/<profile>/modules/` and read by path.
+`cargo test` is self-sufficient: the `arora-behavior-tree` and
+`arora-integration-tests` crates declare the wasm guests
+(`behavior-tree-nodes`, `test-rust-wasm`) and `polly` as artifact
+dependencies, so running the tests builds the `wasm32-wasip1` guests on its
+own and the tests find them through env vars forwarded by their `build.rs`
+(`CARGO_CDYLIB_FILE_*`). No separate `cargo build --target wasm32-wasip1` is
+needed. The `test-cpp` / `test-cpp-2` wasm (plus their `module.yaml` /
+`records/`) are published by those modules' `build.rs` under
+`target/<profile>/modules/` and read by path.
 
 All three integration tests run green from a clean build:
 `call_polly_from_engine`, `call_test_rust_wasm_from_engine`, and the

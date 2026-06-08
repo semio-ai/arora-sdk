@@ -146,9 +146,10 @@ paths as `-D` cache vars and forcing `cmake-rs`'s target via
 
 The Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`) are ordinary
 `cdylib`+`rlib` crates built for the host by default — no `forced-target` is
-used. Their wasm32-wasip1 build is forced on demand: the integration-test
-crate's artifact dependencies pin `target = "wasm32-wasip1"`, and CI runs an
-explicit `cargo build -p <module> --target wasm32-wasip1`.
+used. Their wasm32-wasip1 build is forced on demand by the `arora-behavior-tree`
+and integration-test crates' artifact dependencies (`target = "wasm32-wasip1"`),
+so `cargo test` builds the guests itself and the tests find them via forwarded
+`CARGO_CDYLIB_FILE_*` env vars (no explicit per-target build step needed).
 
 See [`design_decisions.md`](design_decisions.md#build-orchestration) for the
 rationale.
@@ -199,10 +200,9 @@ baseline collection of nodes as a wasm guest.
 `.github/workflows/continuous.yml`:
 
 - **`build_and_test`** (ubuntu-latest) runs, in order: `cargo build --release`
-  (default-members); explicit `cargo build -p test-rust-wasm` and
-  `-p behavior-tree-nodes` for `--target wasm32-wasip1 --release`;
-  `cargo test --release` (native + the wasm-via-wasmtime integration tests —
-  this is where `test-cpp`/`test-cpp-2` get built via the dev-dependency edge);
+  (default-members); `cargo test --release` (native + the wasm-via-wasmtime
+  integration tests — this builds the wasm32-wasip1 guests via bindeps and
+  builds `test-cpp`/`test-cpp-2` via the dev-dependency edge);
   `cargo build -p arora --target wasm32-unknown-unknown --no-default-features
   --release`; then it installs `wasm-pack` and runs the browser test inline
   (`wasm-pack test --headless --firefox --release crates/arora-web`). It also
