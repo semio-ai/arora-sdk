@@ -43,9 +43,11 @@ serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["console"] }
 # Browser RNG backend for `rand` (used in CallableId generation).
-# The matching `--cfg getrandom_backend="wasm_js"` rustflag is set in
-# .cargo/config.toml for the wasm32-unknown-unknown target.
-getrandom = { version = "0.3", features = ["wasm_js"] }
+# `rand 0.10` depends on getrandom 0.4, so this must track that major
+# version: enabling `wasm_js` on the 0.4 copy is what lets getrandom build
+# for wasm32-unknown-unknown. The matching `--cfg getrandom_backend="wasm_js"`
+# rustflag is set in .cargo/config.toml for that target.
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [build-dependencies]
 cbindgen = "0.20"
