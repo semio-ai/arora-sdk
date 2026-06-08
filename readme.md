@@ -6,6 +6,11 @@ For a top-down tour of the codebase see [`docs/architecture.md`](docs/architectu
 for the *why* behind the build setup and engine layout see
 [`docs/design_decisions.md`](docs/design_decisions.md).
 
+This branch also includes a local Vizij backend experiment. If you are checking
+out the related `engine`, `vizij-rs`, and `vizij-web` branches together, read
+[`docs/vizij-engine-backend-experiment.md`](docs/vizij-engine-backend-experiment.md)
+for the required sibling checkout layout and path replacement guidance.
+
 ## Arora Engine
 
 The engine is the core component, capable of putting together heterogenous modules
@@ -390,4 +395,3 @@ What the integration test crate actually drags in:
 The individual C++ modules' `CMakeLists.txt` files remain invokable
 standalone with `-D` overrides, mainly for IDE integration; the
 authoritative entry point is `cargo`.
-

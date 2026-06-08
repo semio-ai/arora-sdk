@@ -7,8 +7,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Polly Build Binary",
-            "program": "/Users/victor.paleologue/Code/Semio/engine/modules/polly/target/debug/build/polly-2059e7d1bb314a2f/build-script-build",
+            "name": "Polly Build Binary (local build output)",
+            // Replace <polly-build-dir> with the local directory under
+            // modules/polly/target/debug/build/ before using this config.
+            "program": "${workspaceFolder}/modules/polly/target/debug/build/<polly-build-dir>/build-script-build",
             "args": [],
             "cwd": "${workspaceFolder}"
         },

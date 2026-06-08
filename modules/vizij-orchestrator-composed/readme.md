@@ -77,3 +77,15 @@ module split matures.
 The compatibility module remains available for the all-in-one fallback path,
 while this module is the preferred target for proving animation and graph
 execution as independent first-class Arora modules.
+
+## Local Vizij Rust Dependency
+
+This module currently depends on the sibling Vizij Rust experiment worktree:
+
+```text
+../../../vizij-rs-vizij-engine-backend-experiment
+```
+
+See [`../../docs/vizij-engine-backend-experiment.md`](../../docs/vizij-engine-backend-experiment.md)
+for the full three-repo checkout layout and instructions for replacing this
+relative path if your checkout names differ.

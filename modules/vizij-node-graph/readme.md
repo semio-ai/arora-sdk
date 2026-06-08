@@ -37,6 +37,10 @@ This module currently depends on the sibling Vizij Rust experiment worktree:
 ../../../vizij-rs-vizij-engine-backend-experiment
 ```
 
+See [`../../docs/vizij-engine-backend-experiment.md`](../../docs/vizij-engine-backend-experiment.md)
+for the full three-repo checkout layout and instructions for replacing this
+relative path if your checkout names differ.
+
 ```bash
 cargo +nightly test -p vizij-node-graph
 cargo +nightly build -p vizij-node-graph --target wasm32-wasip1

@@ -66,6 +66,10 @@ This module currently depends on the sibling Vizij Rust experiment worktree:
 That keeps this branch as a local integration experiment without changing Arora
 engine core or copying Vizij runtime logic.
 
+See [`../../docs/vizij-engine-backend-experiment.md`](../../docs/vizij-engine-backend-experiment.md)
+for the full three-repo checkout layout and instructions for replacing this
+relative path if your checkout names differ.
+
 ```bash
 cargo +nightly test
 cargo +nightly build --target wasm32-wasip1
