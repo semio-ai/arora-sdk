@@ -211,6 +211,10 @@ pub fn generate_records(
     serde_json::json!({"id": F64_ID.to_string(), "name": "f64"}),
     serde_json::json!({"id": STRING_ID.to_string(), "name": "str"}),
   ];
+  // Count of the hand-ordered primitive entries above. Everything appended
+  // after them is derived from `assets`, whose iteration order is not stable,
+  // so we sort that tail below to keep `records.json` from churning.
+  let primitive_count = json_records.len();
 
   let mut seen_folders: HashSet<Uuid> = HashSet::new();
 
@@ -260,6 +264,11 @@ pub fn generate_records(
       }
     }
   }
+
+  // Sort the dynamically-collected records by id so `records.json` is stable
+  // across builds; the leading primitives keep their fixed, hand-authored order.
+  json_records[primitive_count..]
+    .sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
 
   let records_json = serde_json::to_string(&json_records)
     .map_err(|err| GenerationError::Generic(err.to_string()))?;

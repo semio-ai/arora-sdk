@@ -89,9 +89,9 @@ wasm guests and the tests locate them through the forwarded
 `CARGO_CDYLIB_FILE_*` env vars. No explicit `--target wasm32-wasip1` build is
 needed — `cargo test --release` is self-sufficient.
 
-(An earlier design used `forced-target` under `-Zper-package-target`; it was
-dropped. The `cargo-features = ["per-package-target"]` lines still present in
-`modules/test-cpp*/Cargo.toml` are vestigial and currently unused.)
+(An earlier design used `forced-target` under `-Zper-package-target`; both it
+and the leftover `cargo-features = ["per-package-target"]` opt-ins in the module
+manifests have since been removed.)
 
 ### `cmake-rs` invoked with explicit target overrides
 
