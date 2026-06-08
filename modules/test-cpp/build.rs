@@ -20,8 +20,8 @@ fn main() -> Result<()> {
     // Resolve the bindeps artifact paths.
     let arora_module_cli_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CLI")?;
     let arora_module_cpp_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CPP")?;
-    let arora_buffers_lib = env_path("CARGO_STATICLIB_FILE_ARORA_BUFFERS")?;
-    let arora_util_lib = env_path("CARGO_STATICLIB_FILE_ARORA_UTIL")?;
+    let arora_buffers_lib = staticlib_artifact("ARORA_BUFFERS")?;
+    let arora_util_lib = staticlib_artifact("ARORA_UTIL")?;
 
     // Stage host generators side-by-side under OUT_DIR. arora-module-cli
     // discovers the language generator by appending its --language argument
@@ -127,6 +127,32 @@ fn env_path(name: &str) -> Result<PathBuf> {
     env::var_os(name)
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("{name} not set; bindeps may not be enabled (-Z bindeps)"))
+}
+
+/// Resolve a cross-target `staticlib` artifact-dependency's library file.
+///
+/// `dep` is the dependency name upper-cased with `-` → `_` (e.g. `ARORA_BUFFERS`).
+/// Cargo only emits the convenience `CARGO_STATICLIB_FILE_<DEP>` variable when
+/// the staticlib *target* name equals the dependency name. Rust lib targets
+/// normalise `-` to `_` (`arora-buffers` → lib `arora_buffers`), so for
+/// dash-named crates that convenience var is never set — only the name-suffixed
+/// `CARGO_STATICLIB_FILE_<DEP>_<lib>` and the directory `CARGO_STATICLIB_DIR_<DEP>`
+/// are. (Host `bin` artifacts keep their dashes, so their convenience var works,
+/// which is why this only bites staticlibs.) Resolve via the DIR — always set
+/// when the artifact is built — so we stay correct regardless of the lib name.
+fn staticlib_artifact(dep: &str) -> Result<PathBuf> {
+    if let Some(p) = env::var_os(format!("CARGO_STATICLIB_FILE_{dep}")) {
+        return Ok(PathBuf::from(p));
+    }
+    let dir = env::var_os(format!("CARGO_STATICLIB_DIR_{dep}")).ok_or_else(|| {
+        anyhow!("CARGO_STATICLIB_DIR_{dep} not set; bindeps may not be enabled (-Z bindeps)")
+    })?;
+    let dir = PathBuf::from(dir);
+    std::fs::read_dir(&dir)
+        .with_context(|| format!("reading staticlib dir {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("a"))
+        .ok_or_else(|| anyhow!("no .a staticlib found in {}", dir.display()))
 }
 
 #[cfg(unix)]

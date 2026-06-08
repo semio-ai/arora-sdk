@@ -54,9 +54,14 @@ The build script will:
 
 ### Build Orchestration
 
-This workspace uses **unstable Cargo features**:
-- `-Z bindeps` for artifact dependencies (host tools, cross-target staticlibs)
-- `-Z per-package-target` for forced-target packages (wasm-only modules)
+This workspace uses one **unstable Cargo feature**:
+- `-Z bindeps` (artifact dependencies) — enabled in `.cargo/config.toml`
+  (`[unstable] bindeps = true`) for host tools and cross-target
+  staticlibs/cdylibs.
+
+`per-package-target` is **not** used (no module sets `forced-target`); the
+`cargo-features = ["per-package-target"]` lines in `modules/test-cpp*/Cargo.toml`
+are vestigial. See `docs/design_decisions.md`.
 
 **Consequence:** Requires nightly Rust (pinned in `rust-toolchain.toml`).
 
@@ -160,9 +165,15 @@ cargo build -vv -p <module-name>
 ### Cross-Compilation
 
 The workspace handles cross-compilation via artifact dependencies:
-- Wasm modules automatically build for `wasm32-wasip1`
-- Host tools (CLI, code generators) build for host
-- Build scripts receive paths via `CARGO_BIN_FILE_*`, `CARGO_STATICLIB_FILE_*`
+- Rust wasm guests build for the **host** by default; their `wasm32-wasip1`
+  flavour is forced on demand (integration-test bindeps + an explicit
+  `cargo build -p <module> --target wasm32-wasip1`).
+- Host tools (CLI, code generators) build for host.
+- Build scripts receive artifact paths via env vars. **Mind the names:**
+  `CARGO_BIN_FILE_<DEP>` works for bins, but for dash-named staticlib/cdylib
+  crates cargo only sets `CARGO_<KIND>_FILE_<DEP>_<lib>` (dashes→underscores)
+  and `CARGO_<KIND>_DIR_<DEP>` — not the bare `CARGO_<KIND>_FILE_<DEP>`.
+  See `docs/design_decisions.md`.
 
 ## Module Development
 

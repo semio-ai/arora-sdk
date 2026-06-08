@@ -26,12 +26,14 @@ fn main() {
 
     println!("cargo:rustc-env=ARORA_CLI_BIN={}", arora_cli.display());
 
-    // Forward artifact dependency paths for WASM modules
+    // Forward artifact-dependency paths for the WASM/cdylib guests the
+    // integration tests load. Cargo names these vars
+    // CARGO_CDYLIB_FILE_<DEP>_<lib> (the lib target name, dashes → underscores),
+    // not the convenience CARGO_CDYLIB_FILE_<DEP>. arora-buffers/arora-util are
+    // NOT artifact dependencies of this crate, so they are intentionally absent.
     forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
     forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
     forward_env_var("CARGO_CDYLIB_FILE_POLLY_polly");
-    forward_env_var("CARGO_STATICLIB_FILE_ARORA_BUFFERS");
-    forward_env_var("CARGO_STATICLIB_FILE_ARORA_UTIL");
 
     println!("cargo:rerun-if-changed=build.rs");
 }

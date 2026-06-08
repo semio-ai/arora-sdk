@@ -118,26 +118,37 @@ calls) and rebuild. See [`../AGENTS.md`](../AGENTS.md) for detailed guidance.
 
 ## Build orchestration
 
-`cargo build --workspace` is the entry point. Cross-target artefacts are
-expressed as artifact dependencies (`-Z bindeps`):
+`cargo` drives the build. A bare `cargo build` covers the workspace
+`default-members` (engine, host tools, host builds of the Rust modules, the
+integration-test crate); `cargo build --workspace` additionally builds the
+heavier `test-cpp` / `test-cpp-2` / `nao` members, which `default-members`
+excludes. Cross-target artefacts are expressed as artifact dependencies
+(`-Z bindeps`):
 
 - **Host bins** (e.g. `arora-module-cli`) — `build-dependencies` with
-  `artifact = "bin"`. Cargo exports `CARGO_BIN_FILE_<DEP>`.
+  `artifact = "bin"`. Cargo exports `CARGO_BIN_FILE_<DEP>` (bin target names
+  keep their dashes, so this short convenience name is set).
 - **Cross-target staticlibs** (`arora-buffers`, `arora-util` for
   `wasm32-wasip1` or `i686-unknown-linux-musl`) — `build-dependencies`
   with `artifact = "staticlib", target = "..."`. Cargo exports
-  `CARGO_STATICLIB_FILE_<DEP>` and `CARGO_STATICLIB_DIR_<DEP>`.
+  `CARGO_STATICLIB_DIR_<DEP>` and `CARGO_STATICLIB_FILE_<DEP>_<lib>` (lib
+  name, dashes→underscores). The bare `CARGO_STATICLIB_FILE_<DEP>` is **not**
+  set for dash-named crates — read the suffixed or `DIR` form. See
+  [`design_decisions.md`](design_decisions.md).
 - **Cross-target cdylibs** (the Rust wasm guests in
-  `arora-integration-tests`) — `artifact = "cdylib", target = "wasm32-wasip1"`.
+  `arora-integration-tests`) — `artifact = "cdylib", target = "wasm32-wasip1"`;
+  exported the same way as `CARGO_CDYLIB_FILE_<DEP>_<lib>`.
 
 For C++ modules, each `build.rs` calls into the module's
 self-contained `CMakeLists.txt` via `cmake::Config`, passing the bindep'd
 paths as `-D` cache vars and forcing `cmake-rs`'s target via
 `.target(...).host(...).no_default_flags(true)`.
 
-For wasm-only Rust modules, `forced-target = "wasm32-wasip1"` in
-`Cargo.toml` (under `-Zper-package-target`) keeps `cargo build --workspace`
-from trying to build them for the host.
+The Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`) are ordinary
+`cdylib`+`rlib` crates built for the host by default — no `forced-target` is
+used. Their wasm32-wasip1 build is forced on demand: the integration-test
+crate's artifact dependencies pin `target = "wasm32-wasip1"`, and CI runs an
+explicit `cargo build -p <module> --target wasm32-wasip1`.
 
 See [`design_decisions.md`](design_decisions.md#build-orchestration) for the
 rationale.
@@ -187,13 +198,15 @@ baseline collection of nodes as a wasm guest.
 
 `.github/workflows/continuous.yml`:
 
-- **`build_and_test`** (ubuntu-latest): builds the workspace `--release`,
-  forces the wasm32-wasip1 guests, runs `cargo test --all --release`, and
-  builds `arora` for `wasm32-unknown-unknown` `--no-default-features`.
-- **`browser_test`** (ubuntu-latest, depends on the above): installs
-  geckodriver from its GitHub release (Firefox is preinstalled on
-  ubuntu-latest), runs `wasm-pack test --headless --firefox --release
-  crates/arora-web`.
+- **`build_and_test`** (ubuntu-latest) runs, in order: `cargo build --release`
+  (default-members); explicit `cargo build -p test-rust-wasm` and
+  `-p behavior-tree-nodes` for `--target wasm32-wasip1 --release`;
+  `cargo test --release` (native + the wasm-via-wasmtime integration tests —
+  this is where `test-cpp`/`test-cpp-2` get built via the dev-dependency edge);
+  `cargo build -p arora --target wasm32-unknown-unknown --no-default-features
+  --release`; then it installs `wasm-pack` and runs the browser test inline
+  (`wasm-pack test --headless --firefox --release crates/arora-web`). It also
+  frees disk space first (the multi-target builds need ~35 GB).
 - **`markdown-link-check`**: link-checks the markdown.
 
 The NAO cross-build is not exercised in CI; it is excluded from

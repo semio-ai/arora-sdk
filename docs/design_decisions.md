@@ -35,8 +35,25 @@ arora-module-cli = { path = "...", artifact = "bin" }
 arora-buffers    = { path = "...", artifact = "staticlib", target = "wasm32-wasip1" }
 ```
 
-Cargo exports `CARGO_BIN_FILE_<DEP>`, `CARGO_STATICLIB_FILE_<DEP>`, and
-`CARGO_CDYLIB_FILE_<DEP>` to the consumer's `build.rs`.
+Cargo exports the artifact paths to the consumer's `build.rs` as environment
+variables. **Mind the exact names** — this has bitten us:
+
+- The fully-qualified form is `CARGO_<KIND>_FILE_<DEP>_<ARTIFACT-NAME>`, e.g.
+  `CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes` or
+  `CARGO_STATICLIB_FILE_ARORA_BUFFERS_arora_buffers`.
+- Cargo *also* emits the short convenience form `CARGO_<KIND>_FILE_<DEP>`
+  **only when the artifact's target name equals the dependency name.** A
+  `bin` target keeps its dashes (`arora-module-cli`), so the convenience
+  `CARGO_BIN_FILE_ARORA_MODULE_CLI` is emitted. A Rust **lib** target
+  normalises dashes to underscores (`arora-buffers` → lib `arora_buffers`),
+  so the names differ and the convenience `CARGO_STATICLIB_FILE_ARORA_BUFFERS`
+  is **never set** for dash-named staticlib/cdylib crates — only the
+  `_arora_buffers`-suffixed form and `CARGO_STATICLIB_DIR_ARORA_BUFFERS` are.
+
+Consumer `build.rs` scripts must read the suffixed form (or resolve via the
+always-present `CARGO_<KIND>_DIR_<DEP>`); reading the bare convenience name for
+a staticlib/cdylib silently yields "not set". See `modules/test-cpp/build.rs`
+(`staticlib_artifact`) and `tests/build.rs` for the working pattern.
 
 **Why:** the stable alternative is a `build.rs` that shells out to a second
 `cargo build` with environment variables scrubbed (`CARGO_BUILD_TARGET`,
@@ -48,21 +65,35 @@ own caching properly.
 
 ### Cross-target settings live in `.cargo/config.toml`
 
-- `[unstable] bindeps = true` and `per-package-target = true` enable the
-  unstable features used by the workspace.
+- `[unstable] bindeps = true` enables artifact dependencies for the whole
+  workspace. This is the canonical spelling; `cargo-features = ["bindeps"]`
+  inside an individual `Cargo.toml` is **not** sufficient for bindeps.
 - `[target.i686-unknown-linux-musl]` pins the Homebrew cross-compiler
   binaries on macOS (`brew install messense/macos-cross-toolchains/...`).
+- `[target.wasm32-unknown-unknown]` sets `getrandom_backend="wasm_js"` so the
+  browser engine build (`arora-web`) selects getrandom's WebCrypto backend.
 
-`cargo-features = ["bindeps"]` inside individual `Cargo.toml` files is **not**
-sufficient: the canonical cargo spelling for these flags is in
-`.cargo/config.toml`'s `[unstable]` block.
+There is **no** `per-package-target = true` in the config: the workspace does
+not actually use forced-target (see below).
 
-### `forced-target` for wasm-only modules
+### Wasm guests build for the host by default; wasm32-wasip1 on demand
 
-`behavior-tree-nodes` and `test-rust-wasm` are wasm-only by nature. They set
-`forced-target = "wasm32-wasip1"` (under the `-Zper-package-target` unstable
-flag), so `cargo build --workspace` builds them only for wasm32-wasip1 and
-the host build never tries to link them as native cdylibs.
+`behavior-tree-nodes` and `test-rust-wasm` are plain
+`crate-type = ["cdylib", "rlib"]` crates with **no** `forced-target` /
+`package.target`. A bare `cargo build` compiles them for the host (so
+`cargo test -p test-rust-wasm` runs natively). Their wasm32-wasip1 flavour is
+produced on demand by whoever needs it:
+
+- the integration-test crate declares them as
+  `artifact = "cdylib", target = "wasm32-wasip1"` build-dependencies, so
+  `cargo test` forces a wasm build and exposes each `.wasm` path; and
+- CI additionally runs `cargo build -p <module> --target wasm32-wasip1
+  --release` so the `arora-behavior-tree` unit tests can load the guests from
+  `target/wasm32-wasip1/release/`.
+
+(An earlier design used `forced-target` under `-Zper-package-target`; it was
+dropped. The `cargo-features = ["per-package-target"]` lines still present in
+`modules/test-cpp*/Cargo.toml` are vestigial and currently unused.)
 
 ### `cmake-rs` invoked with explicit target overrides
 
@@ -212,19 +243,35 @@ via `cfg!(debug_assertions)`, so the path tracks `cargo test --release` /
 which were stale leftovers from the retired CMake build. Cargo-first builds
 put all wasm artefacts in the workspace target dir.
 
-**Caveat:** the tests do not force a wasm build themselves. `cargo build
---workspace` followed by an explicit `cargo build -p <module> --target
-wasm32-wasip1` (or running the integration tests, whose bindeps force the
-guests) must precede `cargo test --all`. CI does this explicitly.
+**Caveat:** the `arora-behavior-tree` unit tests do not force a wasm build
+themselves. An explicit `cargo build -p <module> --target wasm32-wasip1`
+(or running the integration tests, whose bindeps force the guests) must
+precede `cargo test`. CI does the explicit per-module wasm builds before
+`cargo test --release`.
 
-### Integration tests rely on workspace artefacts at known paths
+### Integration tests rely on a mix of bindeps and published artefacts
 
-`tests/Cargo.toml` (`arora-integration-tests`) bindeps the Rust wasm guests
-(`behavior-tree-nodes`, `test-rust-wasm`) so they get built before the tests
-run. Host-targeted modules (`polly`, `test-cpp`, `test-cpp-2`) are **not**
-declared as bindeps — that triggers cargo's cdylib output-filename collision
-warnings (cargo#6313). Those modules' `build.rs` scripts publish artefacts
-to `target/<profile>/modules/`, which the integration tests read directly.
+`tests/Cargo.toml` (`arora-integration-tests`) pulls in artefacts two ways:
+
+- **Bindeps** (`[build-dependencies]`): `arora-cli` (`artifact = "bin"`),
+  `behavior-tree-nodes` and `test-rust-wasm`
+  (`artifact = "cdylib", target = "wasm32-wasip1"`), and `polly`
+  (`artifact = "cdylib"`, host). `tests/build.rs` forwards their paths to the
+  test binary via `cargo::rustc-env` (`ARORA_CLI_BIN`,
+  `CARGO_CDYLIB_FILE_POLLY_polly`, `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`),
+  and `integration.rs` reads them with `env!`.
+- **Dev-dependencies** (plain path): `test-cpp` and `test-cpp-2`. They are not
+  bindep'd — declaring an empty-lib C++ module as a `cdylib` artifact adds
+  nothing and their `build.rs` is what matters. Listing them as
+  dev-dependencies makes `cargo test` run those build scripts, which compile
+  the wasm via cmake and publish `*.wasm`, `module.yaml`, and `records/` to
+  `target/<profile>/modules/`. The C++ integration test reads those published
+  files directly.
+
+A bare `cargo build` (default-members) does **not** build `test-cpp`/`test-cpp-2`
+(they are excluded from `default-members`); `cargo test` does, through the
+dev-dependency edge. This is the asymmetry that makes the test step do work the
+build step skips.
 
 ### CI builds release
 

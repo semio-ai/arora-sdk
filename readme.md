@@ -233,24 +233,32 @@ It cross-compiles to `i686-unknown-linux-musl`, producing
 
 ### Testing
 
+Mirror what CI does (release shown; drop `--release` for a debug run):
+
 ```bash
-cargo build --workspace
-cargo test --all
+cargo build --release
+cargo build -p test-rust-wasm      --target wasm32-wasip1 --release
+cargo build -p behavior-tree-nodes --target wasm32-wasip1 --release
+cargo test --release
 ```
 
-The `arora-integration-tests` crate (`tests/`) spawns `arora-cli` against
-the freshly built module artifacts. It pulls in the wasm builds of the
-Rust modules through artifact dependencies pinned to `wasm32-wasip1`, so
-running the tests is enough to force those wasm guests to compile.
-Artifacts produced by `build.rs` of `polly`, `test-cpp`, `test-cpp-2`
-(host-side cdylibs and wasm executables) are picked up from
-`target/<profile>/modules/`, which is why a workspace build must precede
-the test invocation.
+The explicit per-module wasm builds populate
+`target/wasm32-wasip1/<profile>/`, where the `arora-behavior-tree` unit tests
+load the guests from — those tests do not force the wasm build themselves.
 
-The C++-into-wasm integration test
-`call_test_cpp_2_from_engine_with_struct` is marked `#[ignore]` due to a
-pre-existing arora-cli tokio runtime issue when handling multi-module
-`--call`; everything else runs green.
+`cargo test` then builds and runs the `arora-integration-tests` crate
+(`tests/`), which spawns `arora-cli` against module artifacts. It pins the
+Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`) and `polly` as
+artifact dependencies — running the tests forces those to build — and reads
+their paths from env vars forwarded by `tests/build.rs`. The `test-cpp` /
+`test-cpp-2` wasm (plus their `module.yaml` / `records/`) are published by
+those modules' `build.rs` under `target/<profile>/modules/` and read by path.
+
+All three integration tests run green from a clean build:
+`call_polly_from_engine`, `call_test_rust_wasm_from_engine`, and the
+C++-into-wasm `call_test_cpp_2_from_engine_with_struct` (multi-module
+`--call`). None is `#[ignore]`d — the earlier arora-cli tokio-runtime issue
+on multi-module calls was fixed by reusing the caller's runtime.
 
 ### Browser target
 
@@ -360,31 +368,41 @@ flowchart TD
   nao -->|bindep staticlib i686-musl| util
   nao --> qistub
 
+  itest -->|bindep bin| cli
   itest -->|bindep cdylib wasm| btn
   itest -->|bindep cdylib wasm| trw
-  itest -.->|runtime lookup| cli
-  itest -.->|runtime lookup| polly
-  itest -.->|runtime lookup| tcpp
-  itest -.->|runtime lookup| tcpp2
+  itest -->|bindep cdylib host| polly
+  itest -->|dev-dep, build.rs publishes| tcpp
+  itest -->|dev-dep, build.rs publishes| tcpp2
+  itest -.->|runtime lookup target/modules| tcpp
+  itest -.->|runtime lookup target/modules| tcpp2
 ```
 
 Solid arrows are `cargo` dependency edges (regular, build-, or
 artifact-dependencies); dotted arrows are runtime lookups that rely on a
-prior `cargo build --workspace`. Bindeps surface paths to the consumer's
-`build.rs` via `CARGO_BIN_FILE_<DEP>` (host bins) and
-`CARGO_STATICLIB_FILE_<DEP>` / `CARGO_CDYLIB_FILE_<DEP>` (per-target
-libraries), so each consumer can splice the cross-built artefact into
-its own cmake / linker invocation without a recursive cargo call.
+prior build. Bindeps surface paths to the consumer's `build.rs` as
+environment variables, so each consumer can splice the cross-built artefact
+into its own cmake / linker invocation without a recursive cargo call. **The
+names have a sharp edge:** for host **bins** the short `CARGO_BIN_FILE_<DEP>`
+works (bin names keep dashes), but for **staticlib/cdylib** crates with a
+dashed name cargo only sets `CARGO_<KIND>_FILE_<DEP>_<lib>` (lib name,
+dashes→underscores, e.g. `CARGO_STATICLIB_FILE_ARORA_BUFFERS_arora_buffers`)
+and `CARGO_<KIND>_DIR_<DEP>` — *not* the bare `CARGO_<KIND>_FILE_<DEP>`. Read
+the suffixed or `DIR` form (see `modules/test-cpp/build.rs`).
 
 What the integration test crate actually drags in:
 
 - **`behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip1"` — forces a wasm32-wasip1 build of the Rust behavior-tree-nodes module and exposes the path to its `.wasm`.
 - **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip1"` — same, for the Rust test module.
-- `arora-cli`, `polly`, `test-cpp`, `test-cpp-2` are **not** declared as
-  dependencies of the test crate (declaring them as bindeps causes
-  cdylib output filename collisions, cargo#6313). They are picked up
-  from their canonical workspace paths under `target/<profile>/`, which
-  is why a workspace build is a prerequisite.
+- **`arora-cli`** as `artifact = "bin"` and **`polly`** as
+  `artifact = "cdylib"` (host) — `tests/build.rs` forwards their paths to the
+  test binary, which reads `ARORA_CLI_BIN` and `CARGO_CDYLIB_FILE_POLLY_polly`.
+- **`test-cpp`** and **`test-cpp-2`** are plain **dev-dependencies** (not
+  bindeps): listing them makes `cargo test` run their `build.rs`, which builds
+  the wasm via cmake and publishes `*.wasm` / `module.yaml` / `records/` under
+  `target/<profile>/modules/`. The C++ integration test reads those published
+  files by path. (They are excluded from `default-members`, so a bare
+  `cargo build` does not build them — `cargo test` does.)
 
 ### Build flags & options
 
