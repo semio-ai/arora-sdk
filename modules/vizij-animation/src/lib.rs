@@ -5,7 +5,8 @@ use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use vizij_animation_core::{
-  parse_stored_animation_json, AnimId, Config, Engine, Inputs, InstanceCfg, PlayerId,
+  parse_stored_animation_json, AnimId, Config, Engine, Inputs, InstanceCfg, LoopMode,
+  PlayerCommand, PlayerId,
 };
 use vizij_api_core::WriteBatch;
 
@@ -72,10 +73,29 @@ struct CreatePlayerRequest {
   controller_id: Option<String>,
   #[serde(default = "default_player_name")]
   name: String,
+  #[serde(default)]
+  speed: Option<f32>,
+  #[serde(default, rename = "loopMode", alias = "loop_mode", alias = "loop")]
+  loop_mode: Option<JsonValue>,
 }
 
 fn default_player_name() -> String {
   "arora-vizij-player".to_string()
+}
+
+fn parse_loop_mode(value: Option<&JsonValue>) -> Result<Option<LoopMode>, String> {
+  let Some(value) = value else {
+    return Ok(None);
+  };
+  let Some(raw) = value.as_str() else {
+    return Err("player loopMode must be a string".to_string());
+  };
+  match raw.trim().to_ascii_lowercase().as_str() {
+    "once" => Ok(Some(LoopMode::Once)),
+    "loop" => Ok(Some(LoopMode::Loop)),
+    "pingpong" | "ping_pong" | "ping-pong" => Ok(Some(LoopMode::PingPong)),
+    other => Err(format!("unsupported player loopMode '{other}'")),
+  }
 }
 
 #[derive(Deserialize)]
@@ -206,6 +226,35 @@ impl AnimationModuleFacade {
     self.engine.create_player(name)
   }
 
+  fn apply_player_setup(
+    &mut self,
+    player: PlayerId,
+    setup: Option<&CreatePlayerRequest>,
+  ) -> Result<(), String> {
+    let Some(setup) = setup else {
+      return Ok(());
+    };
+    let mut inputs = Inputs::default();
+    if let Some(speed) = setup.speed {
+      if !speed.is_finite() {
+        return Err("player speed must be finite".to_string());
+      }
+      inputs
+        .player_cmds
+        .push(PlayerCommand::SetSpeed { player, speed });
+    }
+    if let Some(mode) = parse_loop_mode(setup.loop_mode.as_ref())? {
+      inputs
+        .player_cmds
+        .push(PlayerCommand::SetLoopMode { player, mode });
+    }
+    if inputs.player_cmds.is_empty() {
+      return Ok(());
+    }
+    let _ = self.engine.update_values(0.0, inputs);
+    Ok(())
+  }
+
   pub fn add_instance(
     &mut self,
     player: PlayerId,
@@ -233,6 +282,7 @@ impl AnimationModuleFacade {
     let player_id = self.create_player(player_name);
     let config = setup.instance.map(InstanceCfg::from).unwrap_or_default();
     self.add_instance(player_id, animation_id, config);
+    self.apply_player_setup(player_id, setup.player.as_ref())?;
     Ok(())
   }
 
@@ -591,6 +641,50 @@ mod tests {
     assert_eq!(writes[0]["path"], "face/smile.amount");
     assert_eq!(writes[0]["value"]["type"], "float");
     assert!(writes[0]["value"]["data"].as_f64().unwrap() > 0.0);
+  }
+
+  #[test]
+  fn configure_controller_applies_player_speed_setup() {
+    unwrap_value(&reset_engine());
+    unwrap_value(&configure_controller(Some(
+      json!({
+        "controllerId": "anim:paused",
+        "setup": {
+          "animation": fixture_animation(),
+          "player": { "speed": 0.0, "loopMode": "loop" },
+          "instance": { "weight": 1.0 }
+        }
+      })
+      .to_string(),
+    )));
+
+    let first = unwrap_value(&update_nodes_writes(Some(
+      json!({ "controllerId": "anim:paused", "dt": 0.5 }).to_string(),
+    )));
+    let first_value = first["writes"][0]["value"]["data"].as_f64().unwrap();
+    assert!(
+      first_value.abs() < 0.0001,
+      "configured speed 0 should keep the player paused: {first}"
+    );
+
+    let play_inputs = Inputs {
+      player_cmds: vec![PlayerCommand::Play {
+        player: PlayerId(0),
+      }],
+      instance_updates: Vec::new(),
+    };
+    let after_play = unwrap_value(&update_nodes_writes(Some(
+      json!({
+        "controllerId": "anim:paused",
+        "dt": 0.5,
+        "inputs": play_inputs
+      })
+      .to_string(),
+    )));
+    assert!(
+      after_play["writes"][0]["value"]["data"].as_f64().unwrap() > 0.0,
+      "play command should resume a speed-0 player: {after_play}"
+    );
   }
 
   #[test]

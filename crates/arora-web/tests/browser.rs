@@ -217,7 +217,7 @@ fn load_and_call_composed_vizij_orchestrator_wasm() {
   assert_eq!(create_response["ok"], true, "{create_response}");
   assert_eq!(
     create_response["result"]["composition"],
-    "independent-modules"
+    "arora-module-imports"
   );
 
   let graph_request = serde_json::json!({
