@@ -59,9 +59,9 @@ This workspace uses one **unstable Cargo feature**:
   (`[unstable] bindeps = true`) for host tools and cross-target
   staticlibs/cdylibs.
 
-`per-package-target` is **not** used (no module sets `forced-target`); the
-`cargo-features = ["per-package-target"]` lines in `modules/test-cpp*/Cargo.toml`
-are vestigial. See `docs/design_decisions.md`.
+`per-package-target` is **not** used — no module sets `forced-target`, and the
+leftover `cargo-features = ["per-package-target"]` opt-ins were removed from the
+module manifests. See `docs/design_decisions.md`.
 
 **Consequence:** Requires nightly Rust (pinned in `rust-toolchain.toml`).
 
