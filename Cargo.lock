@@ -444,6 +444,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
+ "test-rust-wasm",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",

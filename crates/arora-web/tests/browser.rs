@@ -14,7 +14,11 @@ use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
 
 const HEADER_YAML: &str = include_str!(env!("TEST_RUST_WASM_HEADER_YAML"));
-const WASM_BYTES: &[u8] = include_bytes!(env!("TEST_RUST_WASM_BYTES"));
+// test-rust-wasm is a dev-dependency artifact (Cargo.toml); cargo exposes its
+// built wasm path to this test crate as CARGO_CDYLIB_FILE_<DEP>_<lib>, the same
+// way arora-behavior-tree's tests consume behavior-tree-nodes. No explicit
+// `cargo build --target wasm32-wasip1` and no build.rs forwarding needed.
+const WASM_BYTES: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
 // `ping` from modules/test-rust-wasm/src/arora_generated/module.yaml.
 const PING_FN_ID: &str = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6";
