@@ -97,7 +97,7 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &FrozenTy) -> String {
       let ty = context
         .types
         .get(&scalar.reference.id)
-        .expect(format!("encountered unknown type {}", scalar.reference.id).as_str());
+        .unwrap_or_else(|| panic!("encountered unknown type {}", scalar.reference.id));
       ty.name().clone()
     }
     FrozenTy::FrozenArray(array) => {

@@ -44,7 +44,7 @@ pub async fn main() -> Result<()> {
 
   // Generate sources for the module
   let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
-  println!("cargo:rerun-if-changed={}", "module.yaml");
+  println!("cargo:rerun-if-changed=module.yaml");
   let records =
     generate_records(&assets, &registry).map_err(|e| anyhow::anyhow!("records: {e}"))?;
   let records_path = PathBuf::from("records/");

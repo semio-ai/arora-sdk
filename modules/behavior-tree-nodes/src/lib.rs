@@ -113,7 +113,7 @@ fn seq_star(children_arg: Option<Vec<TickId>>, current_index_arg: &mut Option<u1
   let mut status = Status::Success;
   for i in (current_index as usize)..children.len() {
     let child = &children[i];
-    match call_tick_function(&child) {
+    match call_tick_function(child) {
       Status::Success => current_index += 1,
       Status::Failure => {
         status = Status::Failure;
@@ -135,7 +135,7 @@ fn seq_star(children_arg: Option<Vec<TickId>>, current_index_arg: &mut Option<u1
 
 fn fallback(children: Option<Vec<TickId>>) -> Status {
   let children = children.unwrap();
-  if children.len() == 0 {
+  if children.is_empty() {
     return Status::Success;
   }
   for child in children {
@@ -205,7 +205,7 @@ fn call_tick_function(tick_id: &TickId) -> Status {
   let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
   let input =
     unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
-  let mut reader = BufferReader::new(&input);
+  let mut reader = BufferReader::new(input);
   status::deserialize_from_reader(&mut reader, true).unwrap()
 }
 

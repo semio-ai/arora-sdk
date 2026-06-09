@@ -68,18 +68,18 @@ impl Node {
       REGEX_MATCH_GROOT_ID => Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
-          message: format!("unexpected node id: {}", id.to_string()),
+          message: format!("unexpected node id: {}", id),
         })
       }
     };
     let function = index
       .get(&arora_id)
       .ok_or(BehaviorTreeError::InternalError {
-        message: format!("function {} is missing from index", arora_id.to_string()),
+        message: format!("function {} is missing from index", arora_id),
       })?;
     let mut parameters = HashMap::new();
     for param_arg in &self.param_args {
-      let (param, arg) = groot_param_arg_to_arora(param_arg, &function, variables)?;
+      let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
       parameters.insert(param, arg);
     }
     Ok(TreeNode {
@@ -116,7 +116,7 @@ impl Node {
       // Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap() => SET_STR_GROOT_ID,
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
-          message: format!("unexpected node id: {}", id.to_string()),
+          message: format!("unexpected node id: {}", id),
         })
       }
     }
@@ -127,12 +127,12 @@ impl Node {
         .ok_or(BehaviorTreeError::InconsistentTreeError {
           message: format!(
             "node refers to function {} that could not be resolved",
-            tree_node.function.to_string()
+            tree_node.function
           ),
         })?;
     let mut param_args = HashMap::new();
     for (param, arg) in &tree_node.parameters {
-      let param_arg = arora_param_to_groot((param, arg), &function, variables)?;
+      let param_arg = arora_param_to_groot((param, arg), function, variables)?;
       param_args.insert(param_arg.0, param_arg.1);
     }
     Ok(Node {
@@ -171,22 +171,22 @@ macro_rules! param_args {
   }}
 }
 
-const SUCCEED_GROOT_ID: &'static str = "Succeed";
-const FAIL_GROOT_ID: &'static str = "Fail";
-const RUN_GROOT_ID: &'static str = "Run";
-const STATUS_IDENTITY_GROOT_ID: &'static str = "Status";
-const STORE_GROOT_ID: &'static str = "Store";
-const INCREASE_GROOT_ID: &'static str = "Increase";
-const SEQ_GROOT_ID: &'static str = "Sequence";
-const SEQ_STAR_GROOT_ID: &'static str = "SequenceStar";
-const FALLBACK_GROOT_ID: &'static str = "Fallback";
-const PARALLEL_GROOT_ID: &'static str = "Parallel";
-const COS_GROOT_ID: &'static str = "Cos";
-const SET_STR_GROOT_ID: &'static str = "SetString";
-const UNSET_STR_GROOT_ID: &'static str = "UnsetString";
-const IS_STR_SET_GROOT_ID: &'static str = "IsStringSet";
-const WAIT_STR_SET_GROOT_ID: &'static str = "WaitStringSet";
-const REGEX_MATCH_GROOT_ID: &'static str = "RegexMatch";
+const SUCCEED_GROOT_ID: &str = "Succeed";
+const FAIL_GROOT_ID: &str = "Fail";
+const RUN_GROOT_ID: &str = "Run";
+const STATUS_IDENTITY_GROOT_ID: &str = "Status";
+const STORE_GROOT_ID: &str = "Store";
+const INCREASE_GROOT_ID: &str = "Increase";
+const SEQ_GROOT_ID: &str = "Sequence";
+const SEQ_STAR_GROOT_ID: &str = "SequenceStar";
+const FALLBACK_GROOT_ID: &str = "Fallback";
+const PARALLEL_GROOT_ID: &str = "Parallel";
+const COS_GROOT_ID: &str = "Cos";
+const SET_STR_GROOT_ID: &str = "SetString";
+const UNSET_STR_GROOT_ID: &str = "UnsetString";
+const IS_STR_SET_GROOT_ID: &str = "IsStringSet";
+const WAIT_STR_SET_GROOT_ID: &str = "WaitStringSet";
+const REGEX_MATCH_GROOT_ID: &str = "RegexMatch";
 
 /// UUID for behavior_tree.Status type
 const STATUS_TYPE_ID: Uuid = Uuid::from_bytes([
@@ -371,7 +371,7 @@ impl BehaviorTree {
   }
 
   pub fn to_groot_xml(&self) -> Vec<u8> {
-    serialize_behavior_to_groot_xml(&self)
+    serialize_behavior_to_groot_xml(self)
   }
 }
 
@@ -400,8 +400,8 @@ fn parse_groot_root(
       }
       parse_groot_behavior_tree_node(reader, buf)?
     }
-    Err(e) => forward_parsing_error("Error parsing XML", &reader, e)?,
-    _ => new_parsing_error_result("XML does not start with a valid root tag", &reader)?,
+    Err(e) => forward_parsing_error("Error parsing XML", reader, e)?,
+    _ => new_parsing_error_result("XML does not start with a valid root tag", reader)?,
   };
   Ok(root)
 }
@@ -418,11 +418,11 @@ fn parse_groot_behavior_tree_node(
         });
       }
       parse_groot_node(reader, buf)?
-        .ok_or(new_parsing_error("behavior tree has no root node", &reader))
+        .ok_or(new_parsing_error("behavior tree has no root node", reader))
     }
-    Err(e) => forward_parsing_error("Error parsing XML", &reader, e)?,
+    Err(e) => forward_parsing_error("Error parsing XML", reader, e)?,
     Ok(Event::Comment(_)) => parse_groot_behavior_tree_node(reader, buf),
-    _ => new_parsing_error_result("XML does not contain a \"BehaviorTree\" node", &reader)?,
+    _ => new_parsing_error_result("XML does not contain a \"BehaviorTree\" node", reader)?,
   }
 }
 
@@ -488,13 +488,13 @@ fn parse_groot_node(
     },
     Ok(Event::End(_)) => Ok(None),
     Ok(Event::Eof) => {
-      new_parsing_error_result("XML file ends before the root node is closed", &reader)?
+      new_parsing_error_result("XML file ends before the root node is closed", reader)?
     }
     Ok(event) => new_parsing_error_result(
       format!("unexpected XML element: {:?}", event).as_str(),
-      &reader,
+      reader,
     )?,
-    Err(e) => forward_parsing_error("Error", &reader, e)?,
+    Err(e) => forward_parsing_error("Error", reader, e)?,
   }
 }
 
@@ -515,13 +515,10 @@ fn collect_action_attributes(
       reader,
     )?;
     let value = value.to_string();
-    match attributes.insert(key.clone(), value) {
-      Some(_) => new_parsing_error_result(
-        format!("error unescaping value of attribute {}", key).as_str(),
-        reader,
-      )?,
-      None => (),
-    };
+    if attributes.insert(key.clone(), value).is_some() { new_parsing_error_result(
+      format!("error unescaping value of attribute {}", key).as_str(),
+      reader,
+    )? };
   }
   Ok(attributes)
 }
@@ -530,7 +527,7 @@ fn new_parsing_error(preamble: &str, reader: &Reader<&[u8]>) -> BehaviorTreeErro
   BehaviorTreeError::ParsingError {
     message: format!(
       "{} at position {}",
-      preamble.to_string(),
+      preamble,
       reader.buffer_position()
     ),
   }
@@ -543,7 +540,7 @@ fn new_parsing_error_result<T>(
   Err(BehaviorTreeError::ParsingError {
     message: format!(
       "{} at position {}",
-      preamble.to_string(),
+      preamble,
       reader.buffer_position()
     ),
   })
@@ -557,7 +554,7 @@ fn forward_parsing_error<T>(
   Err(BehaviorTreeError::ParsingError {
     message: format!(
       "{} at position {}: {:?}",
-      preamble.to_string(),
+      preamble,
       reader.buffer_position(),
       error
     )
@@ -573,7 +570,7 @@ fn map_parsing_error<T, E: Error>(
   result.map_err(|error| BehaviorTreeError::ParsingError {
     message: format!(
       "{} at position {}: {:?}",
-      preamble.to_string(),
+      preamble,
       reader.buffer_position(),
       error
     )
@@ -620,7 +617,7 @@ fn serialize_node_to_groot_xml(node: &Node, writer: &mut Writer<Cursor<Vec<u8>>>
   } else {
     writer.write_event(Event::Start(elem)).unwrap();
     for child in &node.children {
-      serialize_node_to_groot_xml(&child, writer);
+      serialize_node_to_groot_xml(child, writer);
     }
     writer
       .write_event(Event::End(BytesEnd::new(node.id.as_str())))
@@ -786,7 +783,7 @@ pub mod tests {
       .join("cosine_tree_groot_edited.xml");
     let xml_str = read_to_string(xml_path.to_owned())
       .await
-      .expect(format!("failed to read XML file {:?}", xml_path).as_str());
+      .unwrap_or_else(|_| panic!("failed to read XML file {:?}", xml_path));
     let behavior = parse_groot_xml(xml_str.as_str())?;
     println!("{}", String::from_utf8(behavior.to_groot_xml()).unwrap());
 

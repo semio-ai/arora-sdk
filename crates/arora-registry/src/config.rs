@@ -22,7 +22,7 @@ pub async fn check_and_update_config(
 ) -> Result<String, RegistryError> {
   // Read the configuration file if specified.
   let mut config: Option<Config> = if let Some(config_path) = &config_path {
-    let config_str = read_to_string(&config_path).map_err(|err| RegistryError::Generic {
+    let config_str = read_to_string(config_path).map_err(|err| RegistryError::Generic {
       message: format!("failed to read configuration file {}: {}", config_path, err),
     })?;
     Some(

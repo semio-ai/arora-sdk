@@ -165,7 +165,7 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
       }
       Value::Structure(Structure {
         id: Uuid::from_slice(id).unwrap(),
-        fields: fields,
+        fields,
       })
     }
     Some(TYPE_ENUMERATION) => {
@@ -213,7 +213,7 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
                   value: deserialize_from_reader(reader).into(),
                 });
               }
-              structures.push(StructureWithoutId { fields: fields });
+              structures.push(StructureWithoutId { fields });
             }
             Value::ArrayStructure {
               id: Uuid::from_slice(structure_id).unwrap(),

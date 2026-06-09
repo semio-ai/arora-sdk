@@ -14,6 +14,7 @@ pub enum ArrayKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub struct TypeRef {
   pub reference: bool,
   pub rvalue_reference: bool,
@@ -24,18 +25,6 @@ pub struct TypeRef {
   pub arguments: Option<Vec<TypeRef>>,
 }
 
-impl Default for TypeRef {
-  fn default() -> Self {
-    Self {
-      reference: false,
-      constant: false,
-      rvalue_reference: false,
-      pointer: false,
-      arguments: None,
-      ty: String::new(),
-    }
-  }
-}
 
 impl ToPrettyString for TypeRef {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -46,14 +35,14 @@ impl ToPrettyString for TypeRef {
     }
     s.push_str(&self.ty);
     if let Some(arguments) = &self.arguments {
-      s.push_str("<");
+      s.push('<');
       for (i, argument) in arguments.iter().enumerate() {
         if i > 0 {
           s.push_str(", ");
         }
         s.push_str(&argument.to_pretty_string(0));
       }
-      s.push_str(">");
+      s.push('>');
     }
     if self.reference {
       s.push_str(" &");
@@ -87,13 +76,14 @@ impl ToPrettyString for Parameter {
     format!(
       "{}{} {}",
       indent_string(indent),
-      &self.type_ref.to_pretty_string(0),
+      self.type_ref.to_pretty_string(0),
       self.name
     )
   }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub struct FunctionPrototype {
   pub name: String,
   pub parameters: Vec<Parameter>,
@@ -107,22 +97,6 @@ pub struct FunctionPrototype {
   pub attributes: Option<Vec<String>>,
 }
 
-impl Default for FunctionPrototype {
-  fn default() -> Self {
-    Self {
-      name: String::new(),
-      parameters: Vec::new(),
-      ret: None,
-      template_arguments: None,
-      specialization: None,
-      operator: false,
-      static_: false,
-      constant: false,
-      noexcept: false,
-      attributes: None,
-    }
-  }
-}
 
 impl ToPrettyString for FunctionPrototype {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -141,7 +115,7 @@ impl ToPrettyString for FunctionPrototype {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&template_argument);
+        s.push_str(template_argument);
       }
       s.push_str("> ");
     }
@@ -152,22 +126,22 @@ impl ToPrettyString for FunctionPrototype {
 
     if let Some(ret) = &self.ret {
       s.push_str(&ret.to_pretty_string(0));
-      s.push_str(" ");
+      s.push(' ');
     }
     s.push_str(&self.name);
 
     if let Some(specialization) = &self.specialization {
-      s.push_str("<");
+      s.push('<');
       for (i, specialization) in specialization.iter().enumerate() {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&specialization);
+        s.push_str(specialization);
       }
-      s.push_str(">");
+      s.push('>');
     }
 
-    s.push_str("(");
+    s.push('(');
     for (i, parameter) in self.parameters.iter().enumerate() {
       if i > 0 {
         s.push_str(", ");
@@ -178,7 +152,7 @@ impl ToPrettyString for FunctionPrototype {
         parameter.name
       ));
     }
-    s.push_str(")");
+    s.push(')');
     if self.constant {
       s.push_str(" const");
     }
@@ -191,6 +165,7 @@ impl ToPrettyString for FunctionPrototype {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub struct FunctionImplementation {
   pub name: String,
   pub parameters: Vec<Parameter>,
@@ -207,25 +182,6 @@ pub struct FunctionImplementation {
   pub assignment: Option<Expression>,
 }
 
-impl Default for FunctionImplementation {
-  fn default() -> Self {
-    Self {
-      name: String::new(),
-      parameters: Vec::new(),
-      ret: None,
-      body: Block::default(),
-      attributes: None,
-      template_arguments: None,
-      specialization: None,
-      operator: false,
-      static_: false,
-      constant: false,
-      noexcept: false,
-      inline: false,
-      assignment: None,
-    }
-  }
-}
 
 impl ToPrettyString for FunctionImplementation {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -244,7 +200,7 @@ impl ToPrettyString for FunctionImplementation {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&template_argument);
+        s.push_str(template_argument);
       }
       s.push_str(">\n");
     }
@@ -259,7 +215,7 @@ impl ToPrettyString for FunctionImplementation {
 
     if let Some(ret) = &self.ret {
       s.push_str(&ret.to_pretty_string(0));
-      s.push_str(" ");
+      s.push(' ');
     } else {
       s.push_str("void ");
     }
@@ -270,17 +226,17 @@ impl ToPrettyString for FunctionImplementation {
     s.push_str(&self.name);
 
     if let Some(specialization) = &self.specialization {
-      s.push_str("<");
+      s.push('<');
       for (i, specialization) in specialization.iter().enumerate() {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&specialization);
+        s.push_str(specialization);
       }
-      s.push_str(">");
+      s.push('>');
     }
 
-    s.push_str("(");
+    s.push('(');
     for (i, parameter) in self.parameters.iter().enumerate() {
       if i > 0 {
         s.push_str(", ");
@@ -291,7 +247,7 @@ impl ToPrettyString for FunctionImplementation {
         parameter.name
       ));
     }
-    s.push_str(")");
+    s.push(')');
     if self.constant {
       s.push_str(" const");
     }
@@ -302,7 +258,7 @@ impl ToPrettyString for FunctionImplementation {
     if let Some(assignment) = &self.assignment {
       s.push_str(&format!(" = {};\n", assignment.to_pretty_string(0)));
     } else {
-      s.push_str("\n");
+      s.push('\n');
       s.push_str(&self.body.to_pretty_string(indent));
     }
     s
@@ -311,19 +267,12 @@ impl ToPrettyString for FunctionImplementation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 
+#[derive(Default)]
 pub struct Block {
   pub statements: Vec<Declaration>,
   pub semicolon: bool,
 }
 
-impl Default for Block {
-  fn default() -> Self {
-    Self {
-      statements: Vec::new(),
-      semicolon: false,
-    }
-  }
-}
 
 impl ToPrettyString for Block {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -387,7 +336,7 @@ impl ToExpression for i32 {
 
 impl ToExpression for i64 {
   fn to_expression(&self) -> Expression {
-    Expression::IntegerLiteral(*self as i64)
+    Expression::IntegerLiteral(*self)
   }
 }
 
@@ -483,22 +432,22 @@ impl ToPrettyString for Struct {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&template_argument);
+        s.push_str(template_argument);
       }
       s.push_str(">\n");
     }
     s.push_str(&format!("struct {}", self.name));
     if let Some(specialization) = &self.specialization {
-      s.push_str("<");
+      s.push('<');
       for (i, specialization) in specialization.iter().enumerate() {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&specialization);
+        s.push_str(specialization);
       }
-      s.push_str(">");
+      s.push('>');
     }
-    s.push_str("\n");
+    s.push('\n');
     s.push_str(&self.block.to_pretty_string(indent));
     s
   }
@@ -522,20 +471,20 @@ impl ToPrettyString for Class {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&template_argument);
+        s.push_str(template_argument);
       }
       s.push_str("> ");
     }
     s.push_str(&format!("class {} ", self.name));
     if let Some(specialization) = &self.specialization {
-      s.push_str("<");
+      s.push('<');
       for (i, specialization) in specialization.iter().enumerate() {
         if i > 0 {
           s.push_str(", ");
         }
-        s.push_str(&specialization);
+        s.push_str(specialization);
       }
-      s.push_str(">");
+      s.push('>');
     }
     s.push_str(&self.block.to_pretty_string(indent));
     s
@@ -633,15 +582,15 @@ impl Declaration {
   }
 
   pub fn public() -> Declaration {
-    Declaration::Public.into()
+    Declaration::Public
   }
 
   pub fn private() -> Declaration {
-    Declaration::Private.into()
+    Declaration::Private
   }
 
   pub fn protected() -> Declaration {
-    Declaration::Protected.into()
+    Declaration::Protected
   }
 }
 
@@ -677,7 +626,7 @@ impl ToPrettyString for NewLine {
   fn to_pretty_string(&self, _indent: usize) -> String {
     let mut s = String::new();
     for _ in 0..self.count {
-      s.push_str("\n");
+      s.push('\n');
     }
     s
   }
@@ -704,11 +653,11 @@ impl ToPrettyString for Statement {
       Statement::Expression(expression) => format!("{};\n", expression.to_pretty_string(indent)),
       Statement::Return(expression) => format!(
         "{}return {};\n",
-        &indent_string(indent),
+        indent_string(indent),
         expression.to_pretty_string(0)
       ),
-      Statement::Break => format!("{}break;\n", &indent_string(indent)),
-      Statement::Continue => format!("{}continue;\n", &indent_string(indent)),
+      Statement::Break => format!("{}break;\n", indent_string(indent)),
+      Statement::Continue => format!("{}continue;\n", indent_string(indent)),
       Statement::If(expression, block, else_block) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
@@ -769,14 +718,14 @@ impl ToPrettyString for Statement {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
         s.push_str("goto ");
-        s.push_str(&label);
+        s.push_str(label);
         s.push_str(";\n");
         s
       }
       Statement::Label(label) => {
         let mut s = String::new();
         s.push_str(&indent_string(indent));
-        s.push_str(&label);
+        s.push_str(label);
         s.push_str(":\n");
         s
       }
@@ -1040,7 +989,7 @@ impl ToPrettyString for Variable {
       s.push_str("extern ");
     }
     s.push_str(&self.ty.to_pretty_string(indent));
-    s.push_str(" ");
+    s.push(' ');
     s.push_str(&self.name);
     match &self.array {
       ArrayKind::None => (),

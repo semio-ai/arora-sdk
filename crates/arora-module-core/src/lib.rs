@@ -39,7 +39,7 @@ pub async fn analyze_module<R: ReadableRegistry + Freezer>(
   module_definition: ModuleDefinition,
   registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
-  let module_id = module_definition.id.clone();
+  let module_id = module_definition.id;
   let module_version = module_definition.version.clone();
 
   // Resolve the module contents into a description compatible with the registry.

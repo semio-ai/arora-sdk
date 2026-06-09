@@ -10,6 +10,12 @@ pub struct BufferWriter {
   backing: Vec<u8>,
 }
 
+impl Default for BufferWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufferWriter {
   pub fn new() -> Self {
     let mut backing = Vec::with_capacity(128);
@@ -32,25 +38,25 @@ impl BufferWriter {
   pub fn begin_structure(&mut self, id: &[u8], field_count: u32) {
     assert_eq!(id.len(), 16);
     self.backing.put_u8(TYPE_STRUCTURE);
-    self.backing.put_slice(&id);
+    self.backing.put_slice(id);
     self.begin_structure_raw(field_count);
   }
 
   pub fn add_enumeration_value_raw(&mut self, value_id: &[u8]) {
     assert_eq!(value_id.len(), 16);
-    self.backing.put_slice(&value_id);
+    self.backing.put_slice(value_id);
   }
 
   pub fn add_enumeration_value(&mut self, id: &[u8], value_id: &[u8]) {
     assert_eq!(id.len(), 16);
     self.backing.put_u8(TYPE_ENUMERATION);
-    self.backing.put_slice(&id);
+    self.backing.put_slice(id);
     self.add_enumeration_value_raw(value_id);
   }
 
   pub fn add_structure_field(&mut self, id: &[u8]) {
     assert_eq!(id.len(), 16);
-    self.backing.put_slice(&id);
+    self.backing.put_slice(id);
   }
 
   pub fn add_unit(&mut self) {

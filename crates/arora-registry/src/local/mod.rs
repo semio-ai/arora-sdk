@@ -30,6 +30,12 @@ pub struct LocalRegistry {
 unsafe impl Send for LocalRegistry {}
 unsafe impl Sync for LocalRegistry {}
 
+impl Default for LocalRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalRegistry {
   pub fn new() -> Self {
     Self {
@@ -48,7 +54,7 @@ impl LocalRegistry {
   pub fn find_frozen_by_id(&self, id: &Uuid) -> Option<&FrozenRegistryReference> {
     self
       .indexed
-      .get(&Selector::Id(id.clone()))
+      .get(&Selector::Id(*id))
       .and_then(|version_index| get_latest_frozen(version_index))
   }
 
@@ -126,7 +132,7 @@ impl Freezer for LocalRegistry {
       .0
       .to_owned();
     Ok(FrozenReference {
-      id: reference.id.clone(),
+      id: reference.id,
       version: semio_record::record::Version(version),
     })
   }
@@ -254,7 +260,7 @@ mod tests {
     let (matched_version, matched_enumeration) = enumerations_by_version
       .iter()
       .rev()
-      .find(|(v, _)| version_req.matches(*v))
+      .find(|(v, _)| version_req.matches(v))
       .unwrap();
     assert_eq!(*matched_version, version);
     assert_eq!(*matched_enumeration, enumeration);

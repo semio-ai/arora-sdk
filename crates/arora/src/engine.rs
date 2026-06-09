@@ -20,6 +20,12 @@ pub struct EngineBuilder {
   executors: HashMap<&'static str, Box<dyn Executor>>,
 }
 
+impl Default for EngineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineBuilder {
   pub fn new() -> Self {
     Self {
@@ -91,7 +97,7 @@ impl Engine {
 
     {
       let engine = &mut *ret.as_mut() as *mut Engine;
-      for (_, executor) in ret.executors.iter_mut() {
+      for executor in ret.executors.values_mut() {
         executor.set_engine(engine as *mut Engine);
       }
     }
@@ -117,7 +123,7 @@ impl Engine {
     let executor = self
       .executors
       .get_mut(executor_name)
-      .ok_or_else(|| LoadModuleError::ExecutorNotFound)?;
+      .ok_or(LoadModuleError::ExecutorNotFound)?;
 
     self
       .modules
@@ -135,12 +141,12 @@ impl Engine {
   ) -> Result<Box<[u8]>, DispatchError> {
     let module = self
       .modules
-      .get_mut(&module_id)
-      .ok_or_else(|| DispatchError::ModuleNotFound {
-        id: module_id.clone(),
+      .get_mut(module_id)
+      .ok_or(DispatchError::ModuleNotFound {
+        id: *module_id,
       })?;
 
-    module.dispatch(&function_id, &arg)
+    module.dispatch(function_id, arg)
   }
 }
 
@@ -148,9 +154,9 @@ pub type EngineRef = *mut Engine;
 
 impl CallBridge for Engine {
   fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
-    let call_id = call.id.clone();
+    let call_id = call.id;
     let result_data = self
-      .dispatch(&module, &call_id, serialize_to_arg(call).as_ref())
+      .dispatch(module, &call_id, serialize_to_arg(call).as_ref())
       .map_err(Into::<CallError>::into)?;
     if let Value::Structure(structure) = deserialize(result_data.as_ref()) {
       if call_id != structure.id {

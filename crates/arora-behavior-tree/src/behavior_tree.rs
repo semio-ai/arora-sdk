@@ -80,7 +80,7 @@ pub fn run_behavior_tree(
   while status == Status::Running {
     status = runtime.tick()?;
   }
-  return Ok(status);
+  Ok(status)
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -109,13 +109,13 @@ fn setup_tick_function(
       let child_node = node_index
         .get(child_id)
         .ok_or(BehaviorTreeError::ChildNodeNotFound {
-          node: node.id.clone(),
-          child: child_id.clone(),
+          node: node.id,
+          child: *child_id,
         })?
         .clone();
       let tick_function_with_id = setup_tick_function(
         child_node.clone(),
-        &node_index,
+        node_index,
         function_index.clone(),
         variables.clone(),
         node_arg_variables.clone(),
@@ -151,13 +151,13 @@ fn tick(
   let module_function = function_index
     .get(&node.function)
     .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-      id: node.function.clone(),
+      id: node.function,
     }))?;
   let function = &module_function.function;
 
   let mut call = Call {
     module_id: None,
-    id: node.function.clone(),
+    id: node.function,
     args: Vec::with_capacity(node.arguments.len() + if node.children.is_some() { 1 } else { 0 }),
   };
 
@@ -178,15 +178,15 @@ fn tick(
           node: node.id.to_owned(),
           function: node.function.to_owned(),
         })?;
-    let first_parameter = function.parameters.get(&first_parameter_id).ok_or(
+    let first_parameter = function.parameters.get(first_parameter_id).ok_or(
       BehaviorTreeError::MissingChildrenParameter {
-        node: node.id.clone(),
+        node: node.id,
         function: node.function.to_owned(),
       },
     )?;
     if first_parameter.name != "children" {
       Err(BehaviorTreeError::MissingChildrenParameter {
-        node: node.id.clone(),
+        node: node.id,
         function: node.function.to_owned(),
       })?;
     }
@@ -194,14 +194,14 @@ fn tick(
       .ty
       .as_array()
       .ok_or(BehaviorTreeError::MissingChildrenParameter {
-        node: node.id.clone(),
+        node: node.id,
         function: node.function.to_owned(),
       })?
       .reference
       .id;
     if first_parameter_type_id != Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID) {
       Err(BehaviorTreeError::MissingChildrenParameter {
-        node: node.id.clone(),
+        node: node.id,
         function: node.function.to_owned(),
       })?;
     }
@@ -217,7 +217,7 @@ fn tick(
       });
     }
     call.args.push(StructureField {
-      id: first_parameter_id.clone(),
+      id: *first_parameter_id,
       value: Box::new(Value::ArrayStructure {
         id: Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID),
         elements: children_arg,
@@ -240,29 +240,26 @@ fn tick(
       let variable = get_node_parameter_variable(&node_parameter, &node_parameters_variables)?;
 
       // If the parameter expression is a call, perform the call to update the value.
-      match value_expression {
-        Expression::Call(parameter_call_expression) => {
-          let value = call_expression(
-            &variables,
-            &node_parameters_variables,
-            &parameter_call_expression,
-            caller,
-            &NodeParameterId {
-              node: node.id,
-              parameter: param_id.to_owned(),
-            },
-          )?;
-          *variable.borrow_mut() = value;
-        }
-        _ => {}
+      if let Expression::Call(parameter_call_expression) = value_expression {
+        let value = call_expression(
+          &variables,
+          &node_parameters_variables,
+          parameter_call_expression,
+          caller,
+          &NodeParameterId {
+            node: node.id,
+            parameter: param_id.to_owned(),
+          },
+        )?;
+        *variable.borrow_mut() = value;
       };
 
-      locals.insert(param_id.clone(), variable.clone());
+      locals.insert(*param_id, variable.clone());
       if param_id == &_RET_PARAM_ID {
         continue;
       }
       call.args.push(StructureField {
-        id: param_id.clone(),
+        id: *param_id,
         value: Box::new(variable.borrow().clone()),
       });
     }
@@ -270,7 +267,7 @@ fn tick(
 
   let result = caller
     .arora_call(&module_function.module_id, call)
-    .map_err(|e| BehaviorTreeError::CallError(e))?;
+    .map_err(BehaviorTreeError::CallError)?;
 
   for mutated in result.mutated {
     let variable = locals
@@ -278,7 +275,7 @@ fn tick(
       .ok_or(BehaviorTreeError::InternalError {
         message: format!(
           "mutated parameter {} does not correspond to any local variable",
-          &mutated.id
+          mutated.id
         ),
       })?;
     *variable.borrow_mut() = *mutated.value;
@@ -316,7 +313,7 @@ impl Tickable for CallableId {
   fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
     let value = self
       .call(caller)
-      .map_err(|e| BehaviorTreeError::CallError(e))?;
+      .map_err(BehaviorTreeError::CallError)?;
     value.try_into().map_err(|_| {
       BehaviorTreeError::ConversionError(ConversionError {
         message: "return value cannot be interpreted as a Status".to_string(),
@@ -373,7 +370,7 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
     }
 
     // Index the node and check for duplicates.
-    let existing_node = node_index.insert(shared_node.id.clone(), shared_node.clone());
+    let existing_node = node_index.insert(shared_node.id, shared_node.clone());
     if let Some(existing_node) = existing_node {
       return Err(BehaviorTreeError::InconsistentTreeError {
         message: format!("duplicate node {}", existing_node.id),
@@ -388,7 +385,7 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
       };
       setup_node_parameter_variable(
         &node_param,
-        &arg_expr,
+        arg_expr,
         &mut variables,
         &mut node_parameters_variables,
       )?;
@@ -404,7 +401,7 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 }
 
 pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
-  return load_behavior_tree_nodes(serde_yaml::from_str(yaml)?);
+  load_behavior_tree_nodes(serde_yaml::from_str(yaml)?)
 }
 
 // Other helpers
@@ -427,7 +424,7 @@ fn get_node_parameter_variable<'a>(
   node_parameters_variables: &'a HashMap<NodeParameterId, Rc<RefCell<Value>>>,
 ) -> Result<&'a Rc<RefCell<Value>>, BehaviorTreeError> {
   node_parameters_variables
-    .get(&node_parameter)
+    .get(node_parameter)
     .ok_or(BehaviorTreeError::InconsistentTreeError {
       message: format!("node parameter {} was not found", node_parameter),
     })
@@ -453,7 +450,7 @@ fn setup_node_parameter_variable(
     }
     Expression::Variable(variable) => variable.clone(),
     Expression::VariableId(variable_id) => {
-      if let Some(variable) = variables.get(&variable_id) {
+      if let Some(variable) = variables.get(variable_id) {
         variable.clone()
       } else {
         let variable = Rc::new(RefCell::new(Value::Unit));
@@ -462,7 +459,7 @@ fn setup_node_parameter_variable(
       }
     }
     Expression::NodeArgument(other_node_parameter) => node_parameters_variables
-      .get(&other_node_parameter)
+      .get(other_node_parameter)
       .ok_or(BehaviorTreeError::InconsistentTreeError {
         message: format!(
           "node argument {} used by node argument {} was not found",
@@ -489,19 +486,19 @@ fn compute_expression(
     Expression::Uuid(uuid) => Value::ArrayU8(uuid.as_bytes().to_vec()),
     Expression::Variable(variable) => variable.borrow().to_owned(),
     Expression::VariableId(variable_id) => {
-      let variable = get_variable(&variables, &variable_id, &node_parameter.node)?;
+      let variable = get_variable(variables, variable_id, &node_parameter.node)?;
       variable.borrow().to_owned()
     }
     Expression::Call(call) => call_expression(
-      &variables,
-      &node_parameters_variables,
+      variables,
+      node_parameters_variables,
       call,
       caller,
-      &node_parameter,
+      node_parameter,
     )?,
     Expression::NodeArgument(other_node_parameter) => {
       let variable =
-        get_node_parameter_variable(&other_node_parameter, &node_parameters_variables)?;
+        get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
       variable.borrow().to_owned()
     }
   };
@@ -516,27 +513,27 @@ fn compute_uuid(
   node_parameter: &NodeParameterId,
 ) -> Result<Uuid, BehaviorTreeError> {
   match expression {
-    Expression::Value(value) => try_into_uuid(&value, &None),
+    Expression::Value(value) => try_into_uuid(value, &None),
     Expression::Uuid(uuid) => Ok(uuid.to_owned()),
-    Expression::Variable(variable) => try_into_uuid(&*variable.borrow(), &None),
+    Expression::Variable(variable) => try_into_uuid(&variable.borrow(), &None),
     Expression::VariableId(variable_id) => {
-      let variable = get_variable(&variables, &variable_id, &node_parameter.node)?;
-      try_into_uuid(&*variable.borrow(), &Some(&variable_id))
+      let variable = get_variable(variables, variable_id, &node_parameter.node)?;
+      try_into_uuid(&variable.borrow(), &Some(variable_id))
     }
     Expression::Call(call) => {
       let value = call_expression(
-        &variables,
-        &node_parameters_variables,
+        variables,
+        node_parameters_variables,
         call,
         caller,
-        &node_parameter,
+        node_parameter,
       )?;
       try_into_uuid(&value, &None)
     }
     Expression::NodeArgument(other_node_parameter) => {
       let variable =
-        get_node_parameter_variable(&other_node_parameter, &node_parameters_variables)?;
-      try_into_uuid(&*variable.borrow(), &None)
+        get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
+      try_into_uuid(&variable.borrow(), &None)
     }
   }
 }
@@ -567,15 +564,15 @@ fn call_expression(
   node_parameter: &NodeParameterId,
 ) -> Result<Value, BehaviorTreeError> {
   let module_id = compute_uuid(
-    &variables,
-    &node_arg_variables,
+    variables,
+    node_arg_variables,
     &call.module,
     caller,
     node_parameter,
   )?;
   let function_id = compute_uuid(
-    &variables,
-    &node_arg_variables,
+    variables,
+    node_arg_variables,
     &call.function,
     caller,
     node_parameter,
@@ -583,18 +580,18 @@ fn call_expression(
   let mut args = Vec::with_capacity(call.arguments.len());
   for (arg_id_expression, value_expression) in &call.arguments {
     let arg_id = compute_uuid(
-      &variables,
-      &node_arg_variables,
-      &arg_id_expression,
+      variables,
+      node_arg_variables,
+      arg_id_expression,
       caller,
-      &node_parameter,
+      node_parameter,
     )?;
     let value = compute_expression(
-      &variables,
-      &node_arg_variables,
-      &value_expression,
+      variables,
+      node_arg_variables,
+      value_expression,
       caller,
-      &node_parameter,
+      node_parameter,
     )?;
     args.push(StructureField {
       id: arg_id,
@@ -610,7 +607,7 @@ fn call_expression(
         args,
       },
     )
-    .map_err(|e| BehaviorTreeError::CallError(e))?;
+    .map_err(BehaviorTreeError::CallError)?;
   Ok(result.ret)
 }
 

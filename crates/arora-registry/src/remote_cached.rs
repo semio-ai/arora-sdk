@@ -28,7 +28,7 @@ impl RemoteCachedRegistry {
 
   pub async fn resolve_selector(&mut self, selector: &Selector) -> Result<Uuid, RegistryError> {
     match selector {
-      Selector::Id(id) => Ok(id.clone()),
+      Selector::Id(id) => Ok(*id),
       Selector::Path(path) => self.resolve_path(path).await,
     }
   }

@@ -90,9 +90,8 @@ impl<'a> ReadWasmMemory for AroraBuffer<'a> {
   fn read_wasm_memory<T, C: AsContext<Data = T>>(context: &C, memory: Memory, offset: u32) -> Self {
     let size = u32::read_wasm_memory(context, memory, offset);
 
-    let mut buffer = Vec::with_capacity(size as usize + 4);
-    buffer.resize(size as usize + 4, 0u8);
-    memory.read(&context, offset as usize, &mut buffer).unwrap();
+    let mut buffer = vec![0; size as usize + 4];
+    memory.read(context, offset as usize, &mut buffer).unwrap();
 
     AroraBuffer(Cow::Owned(buffer))
   }

@@ -57,13 +57,13 @@ pub async fn generate<R: ReadableRegistry + Freezer>(
   ));
 
   let mut command = tokio::process::Command::new(&generator_path)
-    .args(&["--self-id", &module_id.to_string()])
-    .args(&["--self-version", &tag.to_string()])
+    .args(["--self-id", &module_id.to_string()])
+    .args(["--self-version", &tag.to_string()])
     .args(cmd.var_args)
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .spawn()
-    .map_err(|_| anyhow::anyhow!("Failed to start generator {:?}", &generator_path))?;
+    .map_err(|_| anyhow::anyhow!("Failed to start generator {:?}", generator_path))?;
 
   let mut stdin = command.stdin.as_mut().unwrap();
   let mut stdout = command.stdout.as_mut().unwrap();
@@ -73,10 +73,7 @@ pub async fn generate<R: ReadableRegistry + Freezer>(
 
   let mut imports = Vec::new();
   for asset in assets {
-    match asset {
-      ModuleAsset::Import(ref import) => imports.push(import.to_owned()),
-      _ => {}
-    };
+    if let ModuleAsset::Import(ref import) = asset { imports.push(import.to_owned()) };
     writer.write(asset).await?;
   }
   writer.end().await?;

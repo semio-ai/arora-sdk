@@ -323,11 +323,11 @@ fn add_frozen_index_entries(
 ) -> Result<(), RegistryError> {
   // Check that transaction is valid.
   for (selector, version_index) in &entries {
-    for (version, _) in version_index {
+    for version in version_index.keys() {
       check_frozen_index_entry_vacant(index, selector, version)?;
     }
   }
-  for (path, _) in &mappings {
+  for path in mappings.keys() {
     if path_to_ids.contains_key(path) {
       Err(RegistryError::DuplicateSelector {
         selector: Selector::Path(path.to_owned()),
@@ -337,13 +337,8 @@ fn add_frozen_index_entries(
   // Apply the transaction.
   for (selector, version_index) in entries {
     for (version, reg_ref) in version_index {
-      add_frozen_index_entry(index, selector.to_owned(), version.to_owned(), reg_ref).expect(
-        format!(
-          "failed to add frozen entry at {}@{} despite integrity was checked",
-          selector, version
-        )
-        .as_str(),
-      );
+      add_frozen_index_entry(index, selector.to_owned(), version.to_owned(), reg_ref).unwrap_or_else(|_| panic!("failed to add frozen entry at {}@{} despite integrity was checked",
+          selector, version));
     }
   }
   for (path, id) in mappings {

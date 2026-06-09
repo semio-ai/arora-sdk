@@ -58,13 +58,12 @@ impl ReadableRegistry for LocalRegistry {
 
   async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
     Ok(
-      self
+      *self
         .path_to_ids
         .get(path)
         .ok_or(RegistryError::NoSuchRecord {
           selector: Selector::Path(path.to_owned()),
-        })?
-        .clone(),
+        })?,
     )
   }
 

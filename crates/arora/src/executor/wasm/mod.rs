@@ -135,8 +135,7 @@ impl WebAssemblyModule {
 
     let memory = caller
       .get_export("memory")
-      .map(Extern::into_memory)
-      .flatten()
+      .and_then(Extern::into_memory)
       .unwrap();
 
     // yuck yuck yuck
@@ -195,8 +194,7 @@ impl WebAssemblyModule {
 
     let memory = caller
       .get_export("memory")
-      .map(Extern::into_memory)
-      .flatten()
+      .and_then(Extern::into_memory)
       .unwrap();
 
     let mut context = caller.as_context_mut();
@@ -272,7 +270,7 @@ impl WebAssemblyModule {
           export.id().to_string().replace('-', "_")
         ),
       )?;
-      arora_functions.insert(export.id().clone(), arora_function);
+      arora_functions.insert(*export.id(), arora_function);
     }
 
     let memory = instance.get_memory(&mut store, "memory").unwrap();
@@ -314,7 +312,7 @@ impl WebAssemblyModule {
 
   fn allocate_arg_memory(&mut self, size: u32) -> Result<u32, DispatchError> {
     let ptr = self.malloc(size)?;
-    self.current_arg_memory = Some((ptr.clone(), size));
+    self.current_arg_memory = Some((ptr, size));
     Ok(ptr)
   }
 
@@ -347,12 +345,12 @@ impl Module for WebAssemblyModule {
     // Calling the function. It returns the address of the buffer of the result.
     let func = self.arora_functions.get(method_id).unwrap();
     let result = func
-      .call(&mut self.store, (arg_addr as u32,))
+      .call(&mut self.store, (arg_addr,))
       .map_err(|e| DispatchError::Trap {
         message: format!(
           "error calling {}.{}: {:#?}",
           self.name(),
-          method_id.to_string(),
+          method_id,
           e
         ),
       })?;

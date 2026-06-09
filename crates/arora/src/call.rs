@@ -11,10 +11,10 @@ use arora_types::value::{Structure, Value};
 use crate::module::DispatchError;
 
 pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
-  return serialize(&Value::Structure(Structure {
+  serialize(&Value::Structure(Structure {
     id: call.id,
     fields: call.args,
-  }));
+  }))
 }
 
 pub trait Callable {
@@ -99,6 +99,12 @@ impl Callable for CallableId {
 
 pub struct CallableRegistry {
   callables_by_id: HashMap<CallableId, Rc<dyn Callable>>,
+}
+
+impl Default for CallableRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CallableRegistry {
