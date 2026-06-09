@@ -150,7 +150,7 @@ impl Directory {
   /// including all of its parent directories.
   /// Fails if the path is empty, invalid,
   /// or if any non-file entry exists with the same name.
-  pub fn ensure_directories(&mut self, path: &PathBuf) -> Result<&mut Directory, VfsError> {
+  pub fn ensure_directories(&mut self, path: &Path) -> Result<&mut Directory, VfsError> {
     let mut path_iter = path.iter();
     let next_name = Self::os_str_to_string(path_iter.next().ok_or(VfsError::EmptyPath)?)?;
     let mut current_entry: &mut Entry = self.get_mut_or_insert(next_name, Entry::new_directory);

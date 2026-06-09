@@ -1,3 +1,6 @@
+// Generated code: lint hygiene is the generator's responsibility, not this
+// repo's. Allow clippy/dead_code over the whole generated subtree.
+#[allow(clippy::all, dead_code)]
 pub mod arora_generated;
 pub mod error;
 pub mod nodes;

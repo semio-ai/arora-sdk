@@ -34,6 +34,9 @@ pub struct Node {
   id: String,
   name: String,
   param_args: HashMap<String, String>,
+  // Children are boxed consistently with the node-builder API (`to_boxed_vec`,
+  // `seq`/`fallback`/...); keep the boxing rather than churn every constructor.
+  #[allow(clippy::vec_box)]
   children: Vec<Box<Node>>,
 }
 
@@ -207,6 +210,7 @@ fn returns_status(return_ty: &FrozenTy) -> bool {
 /// - a local mapping of names and variable IDs.
 /// If the argument is surrounded by {}, the result will be a variable expression.
 /// Otherwise, the result will be a value expression.
+#[allow(clippy::doc_lazy_continuation)]
 fn groot_param_arg_to_arora(
   param_arg: (&String, &String),
   module_function: &ModuleFunction,
@@ -426,6 +430,8 @@ fn parse_groot_behavior_tree_node(
   }
 }
 
+// `buf` is threaded through the recursive descent to satisfy the reader API.
+#[allow(clippy::only_used_in_recursion)]
 fn parse_groot_node(
   reader: &mut Reader<&[u8]>,
   buf: &mut Vec<u8>,
@@ -436,10 +442,10 @@ fn parse_groot_node(
       let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
 
       let mut attributes = collect_action_attributes(node_start, reader)?;
-      if !attributes.remove(&ID_ATTRIBUTE_KEY.to_string()).is_none() {
+      if !attributes.remove(ID_ATTRIBUTE_KEY).is_none() {
         new_parsing_error_result("redundant ID attribute for action", reader)?
       }
-      let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
+      let name = attributes.remove(NAME_ATTRIBUTE_KEY);
 
       let mut children = Vec::new();
       loop {
@@ -460,9 +466,9 @@ fn parse_groot_node(
       b"Action" => {
         let mut attributes = collect_action_attributes(node_empty, reader)?;
         let id = attributes
-          .remove(&ID_ATTRIBUTE_KEY.to_string())
+          .remove(ID_ATTRIBUTE_KEY)
           .ok_or(new_parsing_error("missing ID attribute of action", reader))?;
-        let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
+        let name = attributes.remove(NAME_ATTRIBUTE_KEY);
         Ok(Some(Node {
           id,
           name: name.unwrap_or(Uuid::new_v4().to_string()),
@@ -474,10 +480,10 @@ fn parse_groot_node(
         let id = String::from_utf8(tag.to_vec());
         let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
         let mut attributes = collect_action_attributes(node_empty, reader)?;
-        if !attributes.remove(&ID_ATTRIBUTE_KEY.to_string()).is_none() {
+        if !attributes.remove(ID_ATTRIBUTE_KEY).is_none() {
           new_parsing_error_result("redundant ID attribute for action", reader)?
         }
-        let name = attributes.remove(&NAME_ATTRIBUTE_KEY.to_string());
+        let name = attributes.remove(NAME_ATTRIBUTE_KEY);
         Ok(Some(Node {
           id,
           name: name.unwrap_or(Uuid::new_v4().to_string()),
@@ -649,7 +655,7 @@ impl Display for Node {
 
 fn display_children(
   f: &mut std::fmt::Formatter<'_>,
-  children: &Vec<Box<Node>>,
+  children: &[Box<Node>],
 ) -> std::fmt::Result {
   for child in children {
     f.write_fmt(format_args!("\n- {}", child.as_ref()))?

@@ -1,3 +1,9 @@
+// This crate builds C++ source trees imperatively: vectors are seeded and then
+// pushed onto, and a few loops keep an explicit index for readability of the
+// emitted code. Those step-by-step forms are clearer here than the iterator
+// rewrites clippy suggests.
+#![allow(clippy::vec_init_then_push, clippy::explicit_counter_loop)]
+
 pub mod ast;
 pub mod constant;
 pub mod declare;

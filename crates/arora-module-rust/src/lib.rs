@@ -357,7 +357,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 pub fn generate_enumeration_source(
   id: &Uuid,
   enumeration: &EnumerationFrozen,
-  parent_path: &String,
+  parent_path: &str,
 ) -> Result<Directory, VfsError> {
   let uses = quote! {
     use crate::arora_generated::error::DeserializationError;
@@ -558,7 +558,7 @@ pub async fn generate_structure_source(
   id: &Uuid,
   structure: &StructureFrozen,
   registry: &mut dyn ReadableRegistry,
-  parent_path: &String,
+  parent_path: &str,
 ) -> Result<Directory, GenerationError> {
   // Struct declaration.
   let name = &structure.name;
@@ -723,7 +723,7 @@ pub async fn generate_structure_source(
 /// under the path of the module, as `path::to::module::import`.
 async fn generate_imports_from_module_source(
   module_id: &Uuid,
-  module_path: &String,
+  module_path: &str,
   imports: &Vec<ImportAsset>,
   registry: &mut dyn ReadableRegistry,
 ) -> Result<Directory, GenerationError> {
@@ -1537,7 +1537,7 @@ pub fn token_stream_to_file<P: AsRef<path::Path>>(
   let file_name = file_path.file_name().unwrap().to_str().unwrap();
   let parent_path = file_path.parent().unwrap();
   let mut output = Directory::new();
-  let parent_dir = match output.ensure_directories(&parent_path.to_path_buf()) {
+  let parent_dir = match output.ensure_directories(parent_path) {
     Ok(dir) => dir,
     Err(VfsError::EmptyPath) => &mut output,
     Err(err) => return Err(err),
@@ -1801,7 +1801,7 @@ async fn generated_mod_ident_from_id(
   Ok(quote! { arora_generated::#mod_ident })
 }
 
-fn mod_ident_from_path(path: &String) -> TokenStream {
+fn mod_ident_from_path(path: &str) -> TokenStream {
   let path_parts = path.split(".").collect::<Vec<&str>>();
   let path_parts = path_parts
     .iter()
