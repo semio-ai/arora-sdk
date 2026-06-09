@@ -98,10 +98,7 @@ impl LocalRegistryReference for FrozenRegistryReference {
   }
 
   fn is_root(&self) -> bool {
-    match self {
-      FrozenRegistryReference::Root => true,
-      _ => false,
-    }
+    matches!(self, FrozenRegistryReference::Root)
   }
 
   fn parent(&self) -> Option<&Uuid> {

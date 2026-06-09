@@ -1,3 +1,6 @@
+// Generated code: lint hygiene is the generator's responsibility, not this
+// repo's. Allow clippy/dead_code over the whole generated subtree.
+#[allow(clippy::all, dead_code)]
 mod arora_generated;
 
 use crate::arora_generated::{
@@ -111,8 +114,7 @@ fn seq_star(children_arg: Option<Vec<TickId>>, current_index_arg: &mut Option<u1
   let mut current_index = current_index_arg.unwrap();
   let children = children_arg.unwrap();
   let mut status = Status::Success;
-  for i in (current_index as usize)..children.len() {
-    let child = &children[i];
+  for child in &children[current_index as usize..] {
     match call_tick_function(child) {
       Status::Success => current_index += 1,
       Status::Failure => {

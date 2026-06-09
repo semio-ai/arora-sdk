@@ -31,7 +31,7 @@ pub async fn main() -> Result<()> {
   generated_sources = generate_enumeration_source(
     &STATUS_ENUMERATION_ID,
     &status,
-    &"behavior_tree".to_string(),
+    "behavior_tree",
   )?
   .merge_with(&generated_sources);
 
@@ -47,7 +47,7 @@ pub async fn main() -> Result<()> {
     &TICK_ID_STRUCTURE_ID,
     &tick_id,
     &mut registry,
-    &"behavior_tree".to_string(),
+    "behavior_tree",
   )
   .await?
   .merge_with(&generated_sources);

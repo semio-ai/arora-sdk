@@ -41,6 +41,9 @@ pub trait ReadableRegistry {
   ) -> Result<ModuleFrozen, RegistryError>;
 
   /// Resolves the given selector into an identifier.
+  // `&String` is kept to match every implementor's signature; narrowing to
+  // `&str` here would force a churn across all registry implementations.
+  #[allow(clippy::ptr_arg)]
   async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError>;
 
   /// Resolves the given identifier into a path.

@@ -29,7 +29,7 @@ use uuid::Uuid;
 pub fn generate_header_file(
   id: &Uuid,
   module: &ModuleFrozen,
-  imports: &Vec<ImportAsset>,
+  imports: &[ImportAsset],
   executor: &String,
 ) -> Result<Directory, ModuleDeclarationError> {
   let header = Header {

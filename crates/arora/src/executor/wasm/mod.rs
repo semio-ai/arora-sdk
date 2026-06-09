@@ -34,6 +34,9 @@ pub enum InitializationError {
   Internal(#[error(not(source))] anyhow::Error),
 }
 
+/// Shared handle to the guest's `malloc` export, resolved lazily on first use.
+type MallocResourceRc = Arc<RwLock<Option<Resource<TypedFunc<(u32,), u32>>>>>;
+
 pub struct WebAssemblyExecutor {
   engine: WasmEngine,
   arora_engine: Option<EngineRef>,
@@ -122,7 +125,7 @@ struct WebAssemblyModule {
 impl WebAssemblyModule {
   fn arora_dispatch(
     engine: usize,
-    malloc_resource_rc: &Arc<RwLock<Option<Resource<TypedFunc<(u32,), u32>>>>>,
+    malloc_resource_rc: &MallocResourceRc,
     mut caller: Caller<'_, WasiP1Ctx>,
     module_id: u32,
     method_id: u32,
@@ -172,7 +175,7 @@ impl WebAssemblyModule {
 
   fn arora_dispatch_indirect(
     engine: usize,
-    malloc_resource_rc: &Arc<RwLock<Option<Resource<TypedFunc<(u32,), u32>>>>>,
+    malloc_resource_rc: &MallocResourceRc,
     mut caller: Caller<'_, WasiP1Ctx>,
     callable_id: u64,
   ) -> u32 {

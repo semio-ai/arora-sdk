@@ -98,7 +98,7 @@ impl Engine {
     {
       let engine = &mut *ret.as_mut() as *mut Engine;
       for executor in ret.executors.values_mut() {
-        executor.set_engine(engine as *mut Engine);
+        executor.set_engine(engine);
       }
     }
 
