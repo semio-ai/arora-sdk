@@ -1,9 +1,8 @@
 use crate::local::LocalRegistry;
 use crate::remote::RemoteRegistry;
 use crate::{
-  EditableRegistry, Enumeration, EnumerationFrozen, FolderPublic, Module,
-  ModuleFrozen, ReadableRegistry, RegistryError, Structure, StructureFrozen,
-  TypeDefinitionFrozen,
+  EditableRegistry, Enumeration, EnumerationFrozen, FolderPublic, Module, ModuleFrozen,
+  ReadableRegistry, RegistryError, Structure, StructureFrozen, TypeDefinitionFrozen,
 };
 use async_trait::async_trait;
 use semio_client::common::{RecordType, Selector};
@@ -139,10 +138,7 @@ impl EditableRegistry for RemoteCachedRegistry {
     tag: Version,
     enumeration: EnumerationFrozen,
   ) -> Result<(), RegistryError> {
-    self
-      .cache
-      .add_enumeration(id, tag, enumeration)
-      .await
+    self.cache.add_enumeration(id, tag, enumeration).await
   }
 
   async fn tag_enumeration(

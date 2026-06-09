@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc};
 
 use derive_more::Display;
-use rand::{Rng, rng};
+use rand::{rng, Rng};
 use uuid::Uuid;
 
 use arora_buffers::serde_uuid::serialize;
@@ -40,13 +40,25 @@ pub trait CallBridge {
 
 #[derive(Display, Debug)]
 pub enum CallError {
-  Generic { message: String },
-  ModuleNotFound { id: Uuid },
-  FunctionNotFound { id: Uuid },
-  Trap { message: String },
-  Internal { message: String },
+  Generic {
+    message: String,
+  },
+  ModuleNotFound {
+    id: Uuid,
+  },
+  FunctionNotFound {
+    id: Uuid,
+  },
+  Trap {
+    message: String,
+  },
+  Internal {
+    message: String,
+  },
   /// The guest returned a structured error via TYPE_ERROR instead of trapping.
-  Guest { message: String },
+  Guest {
+    message: String,
+  },
 }
 
 impl From<DispatchError> for CallError {
@@ -123,9 +135,7 @@ impl CallableRegistry {
 
   fn generate_unique_callable_id(&self) -> CallableId {
     let mut rng = rng();
-    let mut tick_id = CallableId {
-      id: rng.next_u64(),
-    };
+    let mut tick_id = CallableId { id: rng.next_u64() };
     while self.callables_by_id.contains_key(&tick_id) {
       tick_id.id = rng.next_u64();
     }

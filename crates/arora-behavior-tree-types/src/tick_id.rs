@@ -18,7 +18,9 @@ pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
           kind: PrimitiveKind::U64,
         }),
       },
-    )].into_iter().collect(),
+    )]
+    .into_iter()
+    .collect(),
     acl: <Acl as Default>::default(),
   }
 }

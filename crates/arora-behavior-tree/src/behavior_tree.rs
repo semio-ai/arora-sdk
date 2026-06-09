@@ -17,10 +17,8 @@ use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
-use crate::{
-  arora_generated::behavior_tree::tick_id::{
-    TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
-  },
+use crate::arora_generated::behavior_tree::tick_id::{
+  TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
 
 // Runtime.
@@ -59,7 +57,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
       if trace {
         TraceTick::YesAll
       } else {
-        TraceTick::No 
+        TraceTick::No
       },
     )?;
     Ok(Self { caller, tick })

@@ -41,7 +41,9 @@ pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
           }),
         },
       ),
-    ].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect(),
     acl: <Acl as Default>::default(),
   }
 }

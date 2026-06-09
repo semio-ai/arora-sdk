@@ -1,8 +1,8 @@
 use anyhow::Result;
 use arora::engine::{EngineBuilder, PinnedEngine};
 use arora_behavior_tree::{
-  arora_generated::behavior_tree::status::Status, nodes::*, schema::Expression, tree_node::TreeNode,
-  BehaviorTreeRuntime, ModuleFunction,
+  arora_generated::behavior_tree::status::Status, nodes::*, schema::Expression,
+  tree_node::TreeNode, BehaviorTreeRuntime, ModuleFunction,
 };
 use arora_module_core::resolve::resolve_low_module;
 use arora_registry::{local::LocalRegistry, EditableRegistry, ModuleFrozen, ReadableRegistry};
@@ -192,7 +192,11 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Freezer>(
 
   let (module_target_dir, executable_prefix, executable_extension) =
     match header.executor.name.as_str() {
-      "wasm" => (repo_root_path().join("target").join("wasm32-wasip1"), "", "wasm"),
+      "wasm" => (
+        repo_root_path().join("target").join("wasm32-wasip1"),
+        "",
+        "wasm",
+      ),
       "native" => {
         let executable_extension = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
           "dylib"
