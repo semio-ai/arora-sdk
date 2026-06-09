@@ -522,12 +522,18 @@ pub mod tests {
     // Find the executable
     let module_path = if name == "behavior-tree-nodes" && header.executor.name.as_str() == "wasm" {
       // For behavior-tree-nodes, use the artifact dependency path from build script
-      PathBuf::from(env!("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes"))
+      PathBuf::from(env!(
+        "CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes"
+      ))
     } else {
       // For other modules, use the legacy path construction
       let (module_target_dir, executable_prefix, executable_extension) =
         match header.executor.name.as_str() {
-          "wasm" => (repo_root_path().join("target").join("wasm32-wasip1"), "", "wasm"),
+          "wasm" => (
+            repo_root_path().join("target").join("wasm32-wasip1"),
+            "",
+            "wasm",
+          ),
           "native" => {
             let executable_extension = if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
               "dylib"
@@ -693,8 +699,7 @@ pub mod tests {
     .try_into()
     .expect("tree conversion failed");
 
-    let (mut engine, index) =
-      setup_engine_with_modules(&vec![]).await;
+    let (mut engine, index) = setup_engine_with_modules(&vec![]).await;
     let mut runtime =
       BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
 

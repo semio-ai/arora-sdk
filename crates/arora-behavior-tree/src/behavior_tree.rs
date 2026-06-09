@@ -314,9 +314,7 @@ impl Tickable for TickId {
 
 impl Tickable for CallableId {
   fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-    let value = self
-      .call(caller)
-      .map_err(BehaviorTreeError::CallError)?;
+    let value = self.call(caller).map_err(BehaviorTreeError::CallError)?;
     value.try_into().map_err(|_| {
       BehaviorTreeError::ConversionError(ConversionError {
         message: "return value cannot be interpreted as a Status".to_string(),
@@ -500,8 +498,7 @@ fn compute_expression(
       node_parameter,
     )?,
     Expression::NodeArgument(other_node_parameter) => {
-      let variable =
-        get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
+      let variable = get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
       variable.borrow().to_owned()
     }
   };
@@ -534,8 +531,7 @@ fn compute_uuid(
       try_into_uuid(&value, &None)
     }
     Expression::NodeArgument(other_node_parameter) => {
-      let variable =
-        get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
+      let variable = get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
       try_into_uuid(&variable.borrow(), &None)
     }
   }

@@ -54,9 +54,9 @@ pub struct Directory {
 }
 
 impl Default for Directory {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl Directory {

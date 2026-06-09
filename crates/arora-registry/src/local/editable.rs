@@ -337,8 +337,13 @@ fn add_frozen_index_entries(
   // Apply the transaction.
   for (selector, version_index) in entries {
     for (version, reg_ref) in version_index {
-      add_frozen_index_entry(index, selector.to_owned(), version.to_owned(), reg_ref).unwrap_or_else(|_| panic!("failed to add frozen entry at {}@{} despite integrity was checked",
-          selector, version));
+      add_frozen_index_entry(index, selector.to_owned(), version.to_owned(), reg_ref)
+        .unwrap_or_else(|_| {
+          panic!(
+            "failed to add frozen entry at {}@{} despite integrity was checked",
+            selector, version
+          )
+        });
     }
   }
   for (path, id) in mappings {

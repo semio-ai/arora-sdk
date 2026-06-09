@@ -11,9 +11,9 @@ pub struct BufferWriter {
 }
 
 impl Default for BufferWriter {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl BufferWriter {

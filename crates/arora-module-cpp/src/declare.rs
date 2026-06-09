@@ -576,10 +576,9 @@ pub fn ty(context: &Context, ty: &TypeDefinitionFrozen) -> Struct {
   match ty {
     TypeDefinitionFrozen::Enumeration(value) => enumeration(context, &ty.name(), value),
     TypeDefinitionFrozen::Structure(value) => structure(context, &ty.name(), value),
-    TypeDefinitionFrozen::Primitive(_) => panic!(
-      "forbidden to define primitive type {}",
-      ty.name()
-    ),
+    TypeDefinitionFrozen::Primitive(_) => {
+      panic!("forbidden to define primitive type {}", ty.name())
+    }
   }
 }
 
@@ -786,9 +785,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
           ..Default::default()
         })),
         body: Block {
-          statements: vec![
-            Statement::Return(structure_private_field_variable(id, field)).into(),
-          ],
+          statements: vec![Statement::Return(structure_private_field_variable(id, field)).into()],
           semicolon: false,
         },
         constant: true,

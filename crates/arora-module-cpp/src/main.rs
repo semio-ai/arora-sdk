@@ -672,7 +672,8 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
       name: "C".to_string(),
       block: Block {
         statements: vec![
-          PreprocessorDirective::Include("arora/buffers.h".to_string(), IncludeStyle::System).into(),
+          PreprocessorDirective::Include("arora/buffers.h".to_string(), IncludeStyle::System)
+            .into(),
           PreprocessorDirective::Include("arora/util.h".to_string(), IncludeStyle::System).into(),
         ],
         ..Default::default()
@@ -688,8 +689,11 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
     .into(),
   );
   declarations.push(
-    PreprocessorDirective::Include("arora/buffer/serialize.hpp".to_string(), IncludeStyle::System)
-      .into(),
+    PreprocessorDirective::Include(
+      "arora/buffer/serialize.hpp".to_string(),
+      IncludeStyle::System,
+    )
+    .into(),
   );
 
   declarations.push(NewLine { count: 1 }.into());

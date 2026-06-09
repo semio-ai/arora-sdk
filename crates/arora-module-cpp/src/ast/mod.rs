@@ -13,8 +13,7 @@ pub enum ArrayKind {
   Dynamic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TypeRef {
   pub reference: bool,
   pub rvalue_reference: bool,
@@ -24,7 +23,6 @@ pub struct TypeRef {
   pub ty: String,
   pub arguments: Option<Vec<TypeRef>>,
 }
-
 
 impl ToPrettyString for TypeRef {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -82,8 +80,7 @@ impl ToPrettyString for Parameter {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct FunctionPrototype {
   pub name: String,
   pub parameters: Vec<Parameter>,
@@ -96,7 +93,6 @@ pub struct FunctionPrototype {
   pub noexcept: bool,
   pub attributes: Option<Vec<String>>,
 }
-
 
 impl ToPrettyString for FunctionPrototype {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -164,8 +160,7 @@ impl ToPrettyString for FunctionPrototype {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct FunctionImplementation {
   pub name: String,
   pub parameters: Vec<Parameter>,
@@ -181,7 +176,6 @@ pub struct FunctionImplementation {
   pub inline: bool,
   pub assignment: Option<Expression>,
 }
-
 
 impl ToPrettyString for FunctionImplementation {
   fn to_pretty_string(&self, indent: usize) -> String {
@@ -265,14 +259,11 @@ impl ToPrettyString for FunctionImplementation {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Block {
   pub statements: Vec<Declaration>,
   pub semicolon: bool,
 }
-
 
 impl ToPrettyString for Block {
   fn to_pretty_string(&self, indent: usize) -> String {

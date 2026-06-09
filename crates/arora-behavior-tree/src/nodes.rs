@@ -170,10 +170,7 @@ pub fn cos(angle: Expression, res: Expression) -> TreeNode {
   TreeNode {
     function: COS_FUNCTION_ID,
     children: None,
-    parameters: HashMap::from([
-      (COS_ANGLE_PARAM_ID, angle),
-      (COS_RES_PARAM_ID, res),
-    ]),
+    parameters: HashMap::from([(COS_ANGLE_PARAM_ID, angle), (COS_RES_PARAM_ID, res)]),
   }
 }
 

@@ -31,9 +31,9 @@ unsafe impl Send for LocalRegistry {}
 unsafe impl Sync for LocalRegistry {}
 
 impl Default for LocalRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl LocalRegistry {

@@ -28,12 +28,9 @@ pub async fn main() -> Result<()> {
       declare_status_enumeration(ROOT_ID),
     )
     .await?;
-  generated_sources = generate_enumeration_source(
-    &STATUS_ENUMERATION_ID,
-    &status,
-    "behavior_tree",
-  )?
-  .merge_with(&generated_sources);
+  generated_sources =
+    generate_enumeration_source(&STATUS_ENUMERATION_ID, &status, "behavior_tree")?
+      .merge_with(&generated_sources);
 
   // Generate sources for [`behavior_tree.TickId`]
   let tick_id = registry

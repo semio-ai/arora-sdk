@@ -102,9 +102,9 @@ pub struct CallableRegistry {
 }
 
 impl Default for CallableRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl CallableRegistry {

@@ -521,21 +521,19 @@ fn collect_action_attributes(
       reader,
     )?;
     let value = value.to_string();
-    if attributes.insert(key.clone(), value).is_some() { new_parsing_error_result(
-      format!("error unescaping value of attribute {}", key).as_str(),
-      reader,
-    )? };
+    if attributes.insert(key.clone(), value).is_some() {
+      new_parsing_error_result(
+        format!("error unescaping value of attribute {}", key).as_str(),
+        reader,
+      )?
+    };
   }
   Ok(attributes)
 }
 
 fn new_parsing_error(preamble: &str, reader: &Reader<&[u8]>) -> BehaviorTreeError {
   BehaviorTreeError::ParsingError {
-    message: format!(
-      "{} at position {}",
-      preamble,
-      reader.buffer_position()
-    ),
+    message: format!("{} at position {}", preamble, reader.buffer_position()),
   }
 }
 
@@ -544,11 +542,7 @@ fn new_parsing_error_result<T>(
   reader: &Reader<&[u8]>,
 ) -> Result<T, BehaviorTreeError> {
   Err(BehaviorTreeError::ParsingError {
-    message: format!(
-      "{} at position {}",
-      preamble,
-      reader.buffer_position()
-    ),
+    message: format!("{} at position {}", preamble, reader.buffer_position()),
   })
 }
 
@@ -653,10 +647,7 @@ impl Display for Node {
   }
 }
 
-fn display_children(
-  f: &mut std::fmt::Formatter<'_>,
-  children: &[Box<Node>],
-) -> std::fmt::Result {
+fn display_children(f: &mut std::fmt::Formatter<'_>, children: &[Box<Node>]) -> std::fmt::Result {
   for child in children {
     f.write_fmt(format_args!("\n- {}", child.as_ref()))?
   }
