@@ -157,7 +157,7 @@ mod tests {
   use uuid::Uuid;
 
   #[tokio::test]
-  async fn add_status_enumeration_and_use_it_in_a_module() {   
+  async fn add_status_enumeration_and_use_it_in_a_module() {
     let mut registry = LocalRegistry::new();
 
     let status = EnumerationFrozen {
@@ -171,7 +171,9 @@ mod tests {
             kind: semio_record::ty::PrimitiveKind::Unit,
           }),
         },
-      )].into_iter().collect(),
+      )]
+      .into_iter()
+      .collect(),
     };
     let status_version = Version::new(1, 0, 0);
     let enum_id = Uuid::new_v4();
@@ -241,7 +243,9 @@ mod tests {
             }),
           },
         ),
-      ].into_iter().collect(),
+      ]
+      .into_iter()
+      .collect(),
     };
     let version = Version::parse("1.0.0").unwrap();
     let mut enumerations_by_version = BTreeMap::new();

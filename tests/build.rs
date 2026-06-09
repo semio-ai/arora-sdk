@@ -9,37 +9,48 @@ use std::path::PathBuf;
 // paths under <workspace>/target. The integration tests panic with a clear
 // message if an artifact is missing.
 fn main() {
-    let manifest_dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
-    let workspace_root = manifest_dir.parent().expect("tests/ has a parent").to_path_buf();
-    let target_dir = env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("target"));
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-    let host_bin_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+  let manifest_dir =
+    PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
+  let workspace_root = manifest_dir
+    .parent()
+    .expect("tests/ has a parent")
+    .to_path_buf();
+  let target_dir = env::var_os("CARGO_TARGET_DIR")
+    .map(PathBuf::from)
+    .unwrap_or_else(|| workspace_root.join("target"));
+  let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+  let host_bin_ext = if cfg!(target_os = "windows") {
+    ".exe"
+  } else {
+    ""
+  };
 
-    // Try to get arora-cli from bindeps first, fall back to target dir
-    let arora_cli = env::var("CARGO_BIN_FILE_ARORA_CLI")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| target_dir.join(&profile).join(format!("arora-cli{host_bin_ext}")));
+  // Try to get arora-cli from bindeps first, fall back to target dir
+  let arora_cli = env::var("CARGO_BIN_FILE_ARORA_CLI")
+    .ok()
+    .map(PathBuf::from)
+    .unwrap_or_else(|| {
+      target_dir
+        .join(&profile)
+        .join(format!("arora-cli{host_bin_ext}"))
+    });
 
-    println!("cargo:rustc-env=ARORA_CLI_BIN={}", arora_cli.display());
+  println!("cargo:rustc-env=ARORA_CLI_BIN={}", arora_cli.display());
 
-    // Forward artifact-dependency paths for the WASM/cdylib guests the
-    // integration tests load. Cargo names these vars
-    // CARGO_CDYLIB_FILE_<DEP>_<lib> (the lib target name, dashes → underscores),
-    // not the convenience CARGO_CDYLIB_FILE_<DEP>. arora-buffers/arora-util are
-    // NOT artifact dependencies of this crate, so they are intentionally absent.
-    forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
-    forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
-    forward_env_var("CARGO_CDYLIB_FILE_POLLY_polly");
+  // Forward artifact-dependency paths for the WASM/cdylib guests the
+  // integration tests load. Cargo names these vars
+  // CARGO_CDYLIB_FILE_<DEP>_<lib> (the lib target name, dashes → underscores),
+  // not the convenience CARGO_CDYLIB_FILE_<DEP>. arora-buffers/arora-util are
+  // NOT artifact dependencies of this crate, so they are intentionally absent.
+  forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
+  forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
+  forward_env_var("CARGO_CDYLIB_FILE_POLLY_polly");
 
-    println!("cargo:rerun-if-changed=build.rs");
+  println!("cargo:rerun-if-changed=build.rs");
 }
 
 fn forward_env_var(name: &str) {
-    if let Ok(val) = std::env::var(name) {
-        println!("cargo::rustc-env={}={}", name, val);
-    }
+  if let Ok(val) = std::env::var(name) {
+    println!("cargo::rustc-env={}={}", name, val);
+  }
 }

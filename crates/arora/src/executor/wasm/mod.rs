@@ -403,7 +403,8 @@ impl Module for WebAssemblyModule {
     if result_buffer.get(BUFFER_SIZE_SIZE) == Some(&TYPE_ERROR) {
       let msg_start = BUFFER_SIZE_SIZE + 1;
       let message = if result_buffer.len() >= msg_start + 4 {
-        let len = u32::from_le_bytes(result_buffer[msg_start..msg_start + 4].try_into().unwrap()) as usize;
+        let len =
+          u32::from_le_bytes(result_buffer[msg_start..msg_start + 4].try_into().unwrap()) as usize;
         let str_start = msg_start + 4;
         std::str::from_utf8(&result_buffer[str_start..str_start + len])
           .unwrap_or("<invalid utf-8>")

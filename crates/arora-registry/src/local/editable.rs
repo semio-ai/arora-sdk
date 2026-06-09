@@ -151,9 +151,7 @@ impl EditableRegistry for LocalRegistry {
     structure: Structure,
   ) -> Result<StructureFrozen, RegistryError> {
     let structure = structure.freeze(self).await?;
-    self
-      .add_structure(id, tag, structure.to_owned())
-      .await?;
+    self.add_structure(id, tag, structure.to_owned()).await?;
     Ok(structure)
   }
 
@@ -262,7 +260,6 @@ impl EditableRegistry for LocalRegistry {
     Ok(())
   }
 }
-
 
 fn check_frozen_index_entry_vacant(
   index: &mut HashMap<Selector, BTreeMap<Version, FrozenRegistryReference>>,

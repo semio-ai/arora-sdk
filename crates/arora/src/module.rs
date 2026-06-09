@@ -3,12 +3,22 @@ use uuid::Uuid;
 
 #[derive(Display, Debug, Error)]
 pub enum DispatchError {
-  ModuleNotFound { id: Uuid },
-  FunctionNotFound { id: Uuid },
-  Trap { message: String },
-  Internal { message: String },
+  ModuleNotFound {
+    id: Uuid,
+  },
+  FunctionNotFound {
+    id: Uuid,
+  },
+  Trap {
+    message: String,
+  },
+  Internal {
+    message: String,
+  },
   /// The guest returned a TYPE_ERROR buffer instead of a result.
-  Guest { message: String },
+  Guest {
+    message: String,
+  },
 }
 
 pub trait Module {

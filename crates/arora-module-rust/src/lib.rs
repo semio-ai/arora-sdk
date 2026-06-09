@@ -45,7 +45,8 @@ pub async fn generate_sources(
   for asset in assets {
     match asset {
       ModuleAsset::Type(id, _, ty) => match ty {
-        TypeDefinitionFrozen::Primitive(_kind) => {}        TypeDefinitionFrozen::Enumeration(enumeration) => {
+        TypeDefinitionFrozen::Primitive(_kind) => {}
+        TypeDefinitionFrozen::Enumeration(enumeration) => {
           let parent_path = registry
             .resolve_id(&enumeration.parent)
             .await
@@ -227,8 +228,8 @@ pub fn generate_records(
     match ty {
       TypeDefinitionFrozen::Primitive(_) => {}
       TypeDefinitionFrozen::Enumeration(e) => {
-        let yaml = serde_yaml::to_string(e)
-          .map_err(|err| GenerationError::Generic(err.to_string()))?;
+        let yaml =
+          serde_yaml::to_string(e).map_err(|err| GenerationError::Generic(err.to_string()))?;
         let file_name = format!("{}@{}.yaml", id, version);
         vfs
           .insert_at_path(
@@ -242,11 +243,17 @@ pub fn generate_records(
           entry["parent"] = serde_json::json!(e.parent.to_string());
         }
         json_records.push(entry);
-        add_folder_chain(&e.parent, registry, &mut vfs, &mut json_records, &mut seen_folders)?;
+        add_folder_chain(
+          &e.parent,
+          registry,
+          &mut vfs,
+          &mut json_records,
+          &mut seen_folders,
+        )?;
       }
       TypeDefinitionFrozen::Structure(s) => {
-        let yaml = serde_yaml::to_string(s)
-          .map_err(|err| GenerationError::Generic(err.to_string()))?;
+        let yaml =
+          serde_yaml::to_string(s).map_err(|err| GenerationError::Generic(err.to_string()))?;
         let file_name = format!("{}@{}.yaml", id, version);
         vfs
           .insert_at_path(
@@ -260,7 +267,13 @@ pub fn generate_records(
           entry["parent"] = serde_json::json!(s.parent.to_string());
         }
         json_records.push(entry);
-        add_folder_chain(&s.parent, registry, &mut vfs, &mut json_records, &mut seen_folders)?;
+        add_folder_chain(
+          &s.parent,
+          registry,
+          &mut vfs,
+          &mut json_records,
+          &mut seen_folders,
+        )?;
       }
     }
   }
@@ -321,7 +334,6 @@ fn add_folder_chain(
 
   Ok(())
 }
-
 
 pub fn generate_common_sources() -> Result<Directory, GenerationError> {
   let source = quote! {
@@ -747,8 +759,7 @@ async fn generate_imports_from_module_source(
   let module_name = splitted_module_path.last().unwrap();
 
   // Declare the ID of the module to use it locally.
-  let module_const_id_ident =
-    format_ident!("{}_MODULE_ID", module_name.to_case(Case::UpperSnake),);
+  let module_const_id_ident = format_ident!("{}_MODULE_ID", module_name.to_case(Case::UpperSnake),);
   let module_id_declaration = generate_const_id_declaration(
     &module_name.to_string(),
     &module_const_id_ident,

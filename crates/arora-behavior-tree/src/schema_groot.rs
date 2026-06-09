@@ -309,7 +309,7 @@ fn arora_param_to_groot(
     };
     return Ok(("_ret".to_string(), value));
   }
-  
+
   let function = &module_function.function;
   let param_matches: Vec<&Parameter> = function
     .parameter_ordering

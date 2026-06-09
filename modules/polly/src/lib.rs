@@ -41,7 +41,7 @@ fn say(text: Option<String>) -> Status {
   if locked_task.is_none() || *locked_status == Status::Failure {
     if *locked_status == Status::Running {
       // the task was finished and status was reset to running, let's respawn it
-    *locked_task = Some(TOKIO_HANDLE.spawn(async move {
+      *locked_task = Some(TOKIO_HANDLE.spawn(async move {
         let region_provider = RegionProviderChain::default_provider().or_else("eu-west-3");
         let config = aws_config::defaults(BehaviorVersion::latest())
           .region(region_provider)

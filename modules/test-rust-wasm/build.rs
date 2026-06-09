@@ -28,8 +28,8 @@ pub async fn main() -> Result<()> {
     )
     .await?;
   let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
-  let records = generate_records(&assets, &registry)
-    .map_err(|e| anyhow::anyhow!("records: {e}"))?;
+  let records =
+    generate_records(&assets, &registry).map_err(|e| anyhow::anyhow!("records: {e}"))?;
   let records_path = PathBuf::from("records/");
   records
     .sync(records_path.clone())

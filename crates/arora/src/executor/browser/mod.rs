@@ -73,8 +73,8 @@ impl Executor for BrowserExecutor {
 
     // env.arora_dispatch
     let late_d = late.clone();
-    let dispatch_cb =
-      Closure::<dyn FnMut(u32, u32, u32) -> u32>::new(move |module_id_ptr, method_id_ptr, arg_ptr| {
+    let dispatch_cb = Closure::<dyn FnMut(u32, u32, u32) -> u32>::new(
+      move |module_id_ptr, method_id_ptr, arg_ptr| {
         let late = late_d.borrow();
         let late = late.as_ref().expect("late-bound state not set");
         // SAFETY: matches the wasmtime executor's engine-pointer trick.
@@ -85,34 +85,40 @@ impl Executor for BrowserExecutor {
         let result = engine
           .dispatch(&module_id, &method_id, arg.as_ref())
           .expect("arora_dispatch: engine.dispatch failed");
-        let result_addr = call_u32_u32(&late.malloc, result.len() as u32)
-          .expect("arora_dispatch: malloc failed");
+        let result_addr =
+          call_u32_u32(&late.malloc, result.len() as u32).expect("arora_dispatch: malloc failed");
         write_bytes(&late.memory, result_addr, &result);
         result_addr
-      });
+      },
+    );
 
     // env.arora_dispatch_indirect
     let late_di = late.clone();
-    let dispatch_indirect_cb =
-      Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
-        let late = late_di.borrow();
-        let late = late.as_ref().expect("late-bound state not set");
-        let engine = unsafe { &mut *(engine_ptr as *mut Engine) };
-        let value = engine
-          .arora_call_indirect(&CallableId { id: callable_id as u64 })
-          .expect("arora_dispatch_indirect: engine call failed");
-        let buf = serialize_value(&value);
-        let addr = call_u32_u32(&late.malloc, buf.len() as u32)
-          .expect("arora_dispatch_indirect: malloc failed");
-        write_bytes(&late.memory, addr, &buf);
-        addr
-      });
+    let dispatch_indirect_cb = Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
+      let late = late_di.borrow();
+      let late = late.as_ref().expect("late-bound state not set");
+      let engine = unsafe { &mut *(engine_ptr as *mut Engine) };
+      let value = engine
+        .arora_call_indirect(&CallableId {
+          id: callable_id as u64,
+        })
+        .expect("arora_dispatch_indirect: engine call failed");
+      let buf = serialize_value(&value);
+      let addr = call_u32_u32(&late.malloc, buf.len() as u32)
+        .expect("arora_dispatch_indirect: malloc failed");
+      write_bytes(&late.memory, addr, &buf);
+      addr
+    });
 
     // Build the import object.
     let imports = Object::new();
     let env = Object::new();
-    Reflect::set(&env, &"arora_dispatch".into(), dispatch_cb.as_ref().unchecked_ref())
-      .map_err(js_to_load_err)?;
+    Reflect::set(
+      &env,
+      &"arora_dispatch".into(),
+      dispatch_cb.as_ref().unchecked_ref(),
+    )
+    .map_err(js_to_load_err)?;
     Reflect::set(
       &env,
       &"arora_dispatch_indirect".into(),
@@ -122,8 +128,7 @@ impl Executor for BrowserExecutor {
     Reflect::set(&imports, &"env".into(), &env).map_err(js_to_load_err)?;
 
     let (wasi_obj, wasi_keepalive) = build_wasi_stubs();
-    Reflect::set(&imports, &"wasi_snapshot_preview1".into(), &wasi_obj)
-      .map_err(js_to_load_err)?;
+    Reflect::set(&imports, &"wasi_snapshot_preview1".into(), &wasi_obj).map_err(js_to_load_err)?;
 
     // Instantiate.
     let instance = WebAssembly::Instance::new(&module, &imports)
@@ -138,7 +143,9 @@ impl Executor for BrowserExecutor {
     let malloc: Function = Reflect::get(&exports, &"arora_buffer_alloc".into())
       .map_err(js_to_load_err)?
       .dyn_into()
-      .map_err(|_| LoadModuleError::Internal("guest does not export 'arora_buffer_alloc'".into()))?;
+      .map_err(|_| {
+        LoadModuleError::Internal("guest does not export 'arora_buffer_alloc'".into())
+      })?;
     let free: Function = Reflect::get(&exports, &"arora_buffer_free".into())
       .map_err(js_to_load_err)?
       .dyn_into()
@@ -259,7 +266,11 @@ fn js_to_load_err(e: JsValue) -> LoadModuleError {
 
 fn call_u32_u32(f: &Function, arg: u32) -> Result<u32, JsValue> {
   let res = f.call1(&JsValue::NULL, &JsValue::from(arg))?;
-  Ok(res.as_f64().ok_or_else(|| JsValue::from_str("non-numeric return"))? as u32)
+  Ok(
+    res
+      .as_f64()
+      .ok_or_else(|| JsValue::from_str("non-numeric return"))? as u32,
+  )
 }
 
 fn write_bytes(memory: &WebAssembly::Memory, offset: u32, bytes: &[u8]) {
@@ -305,7 +316,12 @@ fn build_wasi_stubs() -> (Object, Vec<JsValue>) {
   let proc_exit = Closure::<dyn FnMut(i32)>::new(|code: i32| {
     panic!("guest called proc_exit({code})");
   });
-  Reflect::set(&obj, &"proc_exit".into(), proc_exit.as_ref().unchecked_ref()).unwrap();
+  Reflect::set(
+    &obj,
+    &"proc_exit".into(),
+    proc_exit.as_ref().unchecked_ref(),
+  )
+  .unwrap();
   keepalive.push(proc_exit.into_js_value());
 
   // fd_write(fd, iovs, iovs_len, nwritten) -> errno. Stub returns 0
@@ -326,12 +342,22 @@ fn build_wasi_stubs() -> (Object, Vec<JsValue>) {
   keepalive.push(fd_seek.into_js_value());
 
   let fd_fdstat_get = Closure::<dyn FnMut(i32, i32) -> i32>::new(|_, _| 0);
-  Reflect::set(&obj, &"fd_fdstat_get".into(), fd_fdstat_get.as_ref().unchecked_ref()).unwrap();
+  Reflect::set(
+    &obj,
+    &"fd_fdstat_get".into(),
+    fd_fdstat_get.as_ref().unchecked_ref(),
+  )
+  .unwrap();
   keepalive.push(fd_fdstat_get.into_js_value());
 
   // 8 = WASI errno BADF — pretend no preopened dirs.
   let fd_prestat_get = Closure::<dyn FnMut(i32, i32) -> i32>::new(|_, _| 8);
-  Reflect::set(&obj, &"fd_prestat_get".into(), fd_prestat_get.as_ref().unchecked_ref()).unwrap();
+  Reflect::set(
+    &obj,
+    &"fd_prestat_get".into(),
+    fd_prestat_get.as_ref().unchecked_ref(),
+  )
+  .unwrap();
   keepalive.push(fd_prestat_get.into_js_value());
 
   let fd_prestat_dir_name = Closure::<dyn FnMut(i32, i32, i32) -> i32>::new(|_, _, _| 0);
@@ -344,7 +370,12 @@ fn build_wasi_stubs() -> (Object, Vec<JsValue>) {
   keepalive.push(fd_prestat_dir_name.into_js_value());
 
   let environ_get = Closure::<dyn FnMut(i32, i32) -> i32>::new(|_, _| 0);
-  Reflect::set(&obj, &"environ_get".into(), environ_get.as_ref().unchecked_ref()).unwrap();
+  Reflect::set(
+    &obj,
+    &"environ_get".into(),
+    environ_get.as_ref().unchecked_ref(),
+  )
+  .unwrap();
   keepalive.push(environ_get.into_js_value());
 
   let environ_sizes_get = Closure::<dyn FnMut(i32, i32) -> i32>::new(|_, _| 0);
@@ -379,7 +410,12 @@ fn build_wasi_stubs() -> (Object, Vec<JsValue>) {
   keepalive.push(clock_time_get.into_js_value());
 
   let random_get = Closure::<dyn FnMut(i32, i32) -> i32>::new(|_, _| 0);
-  Reflect::set(&obj, &"random_get".into(), random_get.as_ref().unchecked_ref()).unwrap();
+  Reflect::set(
+    &obj,
+    &"random_get".into(),
+    random_get.as_ref().unchecked_ref(),
+  )
+  .unwrap();
   keepalive.push(random_get.into_js_value());
 
   (obj, keepalive)

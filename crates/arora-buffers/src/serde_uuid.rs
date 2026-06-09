@@ -1,6 +1,8 @@
 use arora_types::{
   keyvalue::{KeyValue, KeyValueField},
-  value::{Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value},
+  value::{
+    Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value,
+  },
 };
 use uuid::Uuid;
 
@@ -268,7 +270,11 @@ fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
           Value::Unit => None,
           other => Some(other),
         };
-        kv.set_field(KeyValueField::new_with_id_and_option(key, field_id, field_value));
+        kv.set_field(KeyValueField::new_with_id_and_option(
+          key,
+          field_id,
+          field_value,
+        ));
       }
       Value::KeyValue(kv)
     }
