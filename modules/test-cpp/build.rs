@@ -129,17 +129,10 @@ fn env_path(name: &str) -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("{name} not set; bindeps may not be enabled (-Z bindeps)"))
 }
 
-/// Resolve a cross-target `staticlib` artifact-dependency's library file.
-///
-/// `dep` is the dependency name upper-cased with `-` → `_` (e.g. `ARORA_BUFFERS`).
-/// Cargo only emits the convenience `CARGO_STATICLIB_FILE_<DEP>` variable when
-/// the staticlib *target* name equals the dependency name. Rust lib targets
-/// normalise `-` to `_` (`arora-buffers` → lib `arora_buffers`), so for
-/// dash-named crates that convenience var is never set — only the name-suffixed
-/// `CARGO_STATICLIB_FILE_<DEP>_<lib>` and the directory `CARGO_STATICLIB_DIR_<DEP>`
-/// are. (Host `bin` artifacts keep their dashes, so their convenience var works,
-/// which is why this only bites staticlibs.) Resolve via the DIR — always set
-/// when the artifact is built — so we stay correct regardless of the lib name.
+/// Resolve a cross-target `staticlib` artifact dependency's `.a` file via
+/// `CARGO_STATICLIB_DIR_<DEP>`. For dash-named lib crates cargo does not set the
+/// bare `CARGO_STATICLIB_FILE_<DEP>` (lib `arora_buffers` ≠ dep `arora-buffers`),
+/// so the directory is the reliable source. `dep` is the upper-cased dep name.
 fn staticlib_artifact(dep: &str) -> Result<PathBuf> {
     if let Some(p) = env::var_os(format!("CARGO_STATICLIB_FILE_{dep}")) {
         return Ok(PathBuf::from(p));
