@@ -280,8 +280,7 @@ pub fn generate_records(
 
   // Sort the dynamically-collected records by id so `records.json` is stable
   // across builds; the leading primitives keep their fixed, hand-authored order.
-  json_records[primitive_count..]
-    .sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+  json_records[primitive_count..].sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
 
   let records_json = serde_json::to_string(&json_records)
     .map_err(|err| GenerationError::Generic(err.to_string()))?;
@@ -589,11 +588,7 @@ pub async fn generate_structure_source(
   let field_id_declarations = structure.fields.iter().map(|(field_id, field)| {
     let field_id_bytes = RawUuidValue(field_id);
     let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-    let field_doc = format!(
-      "{}: {}",
-      struct_field_ident(name, &field.name),
-      field_id,
-    );
+    let field_doc = format!("{}: {}", struct_field_ident(name, &field.name), field_id,);
     quote! {
       #[doc = #field_doc]
       pub const #field_const_id_ident: [u8; 16] = #field_id_bytes;
@@ -982,7 +977,9 @@ async fn generate_module_source(
 ) -> Result<Directory, GenerationError> {
   // Function Uses.
   let exports = &module.exports;
-  let use_functions = exports.values().map(|export| format_ident!("{}", export.name));
+  let use_functions = exports
+    .values()
+    .map(|export| format_ident!("{}", export.name));
 
   // Function and param IDs.
   let function_ids = exports.iter().flat_map(|(function_id, export)| {

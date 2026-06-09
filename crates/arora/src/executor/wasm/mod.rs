@@ -350,12 +350,7 @@ impl Module for WebAssemblyModule {
     let result = func
       .call(&mut self.store, (arg_addr,))
       .map_err(|e| DispatchError::Trap {
-        message: format!(
-          "error calling {}.{}: {:#?}",
-          self.name(),
-          method_id,
-          e
-        ),
+        message: format!("error calling {}.{}: {:#?}", self.name(), method_id, e),
       })?;
 
     // Free the buffer allocated for the argument.

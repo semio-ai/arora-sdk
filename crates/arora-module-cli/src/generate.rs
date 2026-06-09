@@ -73,7 +73,9 @@ pub async fn generate<R: ReadableRegistry + Freezer>(
 
   let mut imports = Vec::new();
   for asset in assets {
-    if let ModuleAsset::Import(ref import) = asset { imports.push(import.to_owned()) };
+    if let ModuleAsset::Import(ref import) = asset {
+      imports.push(import.to_owned())
+    };
     writer.write(asset).await?;
   }
   writer.end().await?;

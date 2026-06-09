@@ -21,9 +21,9 @@ pub struct EngineBuilder {
 }
 
 impl Default for EngineBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl EngineBuilder {
@@ -142,9 +142,7 @@ impl Engine {
     let module = self
       .modules
       .get_mut(module_id)
-      .ok_or(DispatchError::ModuleNotFound {
-        id: *module_id,
-      })?;
+      .ok_or(DispatchError::ModuleNotFound { id: *module_id })?;
 
     module.dispatch(function_id, arg)
   }

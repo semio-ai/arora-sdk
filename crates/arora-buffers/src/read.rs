@@ -142,7 +142,6 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_structure_raw(&mut self) -> u32 {
-    
     self.backing.get_u32_le()
   }
 
@@ -249,7 +248,7 @@ pub extern "C" fn arora_buffer_reader_get_structure(
 pub extern "C" fn arora_buffer_reader_get_structure_raw(reader: *mut BufferReader) -> u32 {
   unsafe {
     let reader = &mut *reader;
-    
+
     reader.get_structure_raw()
   }
 }

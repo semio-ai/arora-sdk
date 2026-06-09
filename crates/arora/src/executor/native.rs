@@ -14,9 +14,9 @@ pub struct NativeExecutor {
 }
 
 impl Default for NativeExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl NativeExecutor {
