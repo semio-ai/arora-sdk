@@ -80,11 +80,8 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      # Run browser tests in headless Firefox. The browser test
-      # include_bytes!()s the wasm32-wasip1 test-rust-wasm guest, which
-      # arora-web declares as a dev-dependency artifact (see its Cargo.toml /
-      # build.rs), so wasm-pack builds the guest itself — no explicit
-      # `cargo build --target wasm32-wasip1` step is needed.
+      # Browser tests in headless Firefox; wasm-pack builds arora-web's
+      # bindep'd wasm guest.
       - name: Run arora-web browser test (headless Firefox)
         run: wasm-pack test --headless --firefox --release crates/arora-web
 
