@@ -35,7 +35,8 @@ engine/
 ├── tests/                arora-integration-tests crate; end-to-end smoke tests
 ├── docs/
 │   ├── architecture.md        this file
-│   └── design_decisions.md    why things are the way they are
+│   ├── design_decisions.md    why things are the way they are
+│   └── dispatch.md            direct vs indirect dispatch; how BTs use it
 ├── examples/
 ├── .cargo/config.toml    unstable flags + i686-musl cross settings
 ├── rust-toolchain.toml   pins nightly + wasm32-wasip1 + i686-musl
@@ -194,6 +195,10 @@ Arora module functions. Node primitives live in
 
 The behavior-tree-nodes module (`modules/behavior-tree-nodes`) bundles a
 baseline collection of nodes as a wasm guest.
+
+The runtime registers each node as a host callable and ticks children through
+the engine's **indirect dispatch** path. See [`dispatch.md`](dispatch.md) for
+how direct and indirect dispatch work and how behavior trees use them.
 
 ## CI
 
