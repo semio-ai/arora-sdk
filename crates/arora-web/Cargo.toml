@@ -22,10 +22,6 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 serde_yaml = "0.9"
-# Artifact dependency: build the test-rust-wasm guest for wasm32-wasip1 so the
-# browser test can `include_bytes!` it. Declaring it here (rather than relying
-# on another crate's bindep having populated target/wasm32-wasip1/) makes this
-# crate's test self-sufficient — `wasm-pack test` builds the guest on its own.
-# cargo exposes the built path to the test crate as
-# CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm (see tests/browser.rs).
+# test-rust-wasm guest (wasm32-wasip1) the browser test include_bytes!s; cargo
+# exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
