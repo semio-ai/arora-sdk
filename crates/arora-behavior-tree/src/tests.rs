@@ -6,7 +6,7 @@ pub mod tests {
     arora_generated::behavior_tree::status::Status, load_behavior_tree_yaml, nodes::*,
     run_behavior_tree, schema::Expression, BehaviorTree, BehaviorTreeRuntime, ModuleFunction,
   };
-  use anyhow::Result;
+  use anyhow::{Context, Result};
   use arora::engine::{EngineBuilder, PinnedEngine};
   use arora_module_core::resolve::resolve_low_module;
   use arora_registry::local_yaml::load_records_from_yaml_dir;
@@ -32,6 +32,10 @@ pub mod tests {
   };
   use uuid::Uuid;
 
+  /// Shared function index, cheap to clone (`Rc`) across many runtimes that
+  /// reuse the same engine.
+  type Index = Rc<HashMap<Uuid, ModuleFunction>>;
+
   #[test]
   pub fn load_parse_error() -> Result<()> {
     let tree_yaml = "I'm singing in the rain...";
@@ -46,22 +50,63 @@ pub mod tests {
     return Ok(());
   }
 
+  /// All scenarios that only need the `behavior-tree-nodes` module share a
+  /// single engine. Loading WASM modules into an engine is by far the slowest
+  /// part of these tests, and `Engine` is not `Send` so it cannot be cached
+  /// across cargo's parallel test threads. Grouping the scenarios into one test
+  /// loads the module exactly once and reuses the engine across every runtime.
+  /// The trade-off is that these are no longer independent test cases, but each
+  /// scenario lives in its own named helper so a panic still points at the
+  /// offending scenario.
   #[tokio::test]
-  pub async fn run_trivial_tree() {
-    assert_eq!(
-      Status::Success,
-      run_yaml_base(TRIVIAL_TREE).await
-    );
+  pub async fn behavior_tree_nodes_scenarios() -> Result<()> {
+    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
+    let index: Index = Rc::new(index);
+
+    run_trivial_tree(&mut engine, &index).context("run_trivial_tree")?;
+    seq_of_success(&mut engine, &index).context("seq_of_success")?;
+    seq_fail_middle(&mut engine, &index).context("seq_fail_middle")?;
+    status_identity_update(&mut engine, &index).context("status_identity_update")?;
+    seq_run_last(&mut engine, &index).context("seq_run_last")?;
+    seq_run_middle_fail_last(&mut engine, &index).context("seq_run_middle_fail_last")?;
+    seq_star_succeed(&mut engine, &index).context("seq_star_succeed")?;
+    seq_star_resumes(&mut engine, &index).context("seq_star_resumes")?;
+    fallback_succeeds(&mut engine, &index).context("fallback_succeeds")?;
+    fallback_falls_back(&mut engine, &index).context("fallback_falls_back")?;
+    parallel_succeeds(&mut engine, &index).context("parallel_succeeds")?;
+    parallel_fails(&mut engine, &index).context("parallel_fails")?;
+    parallel_runs(&mut engine, &index).context("parallel_runs")?;
+    store_float(&mut engine, &index).context("store_float")?;
+    increasing_float(&mut engine, &index).context("increasing_float")?;
+    cosine_signal(&mut engine, &index).context("cosine_signal")?;
+    non_status_cos(&mut engine, &index).context("non_status_cos")?;
+    non_status_add(&mut engine, &index).context("non_status_add")?;
+    add_then_cos(&mut engine, &index).context("add_then_cos")?;
+    fake_listen_regex_dispatch(&mut engine, &index).context("fake_listen_regex_dispatch")?;
+
+    Ok(())
   }
 
-  #[tokio::test]
-  pub async fn status_identity_update() -> Result<()> {
+  fn run_trivial_tree(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
+    assert_eq!(Status::Success, run_yaml(TRIVIAL_TREE, engine, index));
+    Ok(())
+  }
+
+  fn seq_of_success(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
+    assert_eq!(Status::Success, run_yaml(SEQ_OF_SUCCESS, engine, index));
+    Ok(())
+  }
+
+  fn seq_fail_middle(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
+    assert_eq!(Status::Failure, run_yaml(SEQ_FAIL_MIDDLE, engine, index));
+    Ok(())
+  }
+
+  fn status_identity_update(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let mut status_value: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
     let behavior = status_identity(status_value.clone()).try_into()?;
 
-    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
 
     assert_eq!(Status::Success, runtime.tick().unwrap());
     set_value(&mut status_value, Status::Running);
@@ -72,39 +117,25 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn seq_of_success() {
-    assert_eq!(Status::Success, run_yaml_base(SEQ_OF_SUCCESS).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_fail_middle() {
-    assert_eq!(Status::Failure, run_yaml_base(SEQ_FAIL_MIDDLE).await);
-  }
-
-  #[tokio::test]
-  pub async fn seq_run_last() -> Result<()> {
+  fn seq_run_last(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = seq(vec![succeed(), succeed(), run()]).try_into()?;
-    assert_eq!(Status::Running, tick_base(&behavior).await);
+    assert_eq!(Status::Running, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn seq_run_middle_fail_last() -> Result<()> {
+  fn seq_run_middle_fail_last(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = seq(vec![succeed(), run(), fail()]).try_into()?;
-    assert_eq!(Status::Running, tick_base(&behavior).await);
+    assert_eq!(Status::Running, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn seq_star_succeed() -> Result<()> {
+  fn seq_star_succeed(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = seq_star(vec![succeed(), succeed(), succeed()]).try_into()?;
-    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(Status::Success, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn seq_star_resumes() -> Result<()> {
+  fn seq_star_resumes(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let mut first_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Success.into()));
     let mut second_status: Rc<RefCell<Value>> = Rc::new(RefCell::new(Status::Running.into()));
     let behavior = seq_star(vec![
@@ -113,9 +144,7 @@ pub mod tests {
     ])
     .try_into()?;
 
-    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
     // First tick moves the sequence to the second node.
     assert_eq!(Status::Running, runtime.tick().unwrap());
 
@@ -127,43 +156,37 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn fallback_succeeds() -> Result<()> {
+  fn fallback_succeeds(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = fallback(vec![succeed(), fail()]).try_into()?;
-    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(Status::Success, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn fallback_falls_back() -> Result<()> {
+  fn fallback_falls_back(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = fallback(vec![fail(), succeed()]).try_into()?;
-    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(Status::Success, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn parallel_succeeds() -> Result<()> {
+  fn parallel_succeeds(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = parallel(vec![succeed(), succeed(), succeed()]).try_into()?;
-    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(Status::Success, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn parallel_fails() -> Result<()> {
+  fn parallel_fails(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = parallel(vec![run(), succeed(), fail()]).try_into()?;
-    assert_eq!(Status::Failure, tick_base(&behavior).await);
+    assert_eq!(Status::Failure, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn parallel_runs() -> Result<()> {
+  fn parallel_runs(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let behavior = parallel(vec![run(), succeed(), succeed()]).try_into()?;
-    assert_eq!(Status::Running, tick_base(&behavior).await);
+    assert_eq!(Status::Running, tick(&behavior, engine, index));
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn store_float() -> Result<()> {
+  fn store_float(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let storage: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
     let expected_value = Value::F32(42f32);
     let behavior = store(
@@ -171,13 +194,12 @@ pub mod tests {
       Expression::Value(expected_value.to_owned()),
     )
     .try_into()?;
-    assert_eq!(Status::Success, tick_base(&behavior).await);
+    assert_eq!(Status::Success, tick(&behavior, engine, index));
     assert_eq!(expected_value, *storage.borrow());
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn increasing_float() -> Result<()> {
+  fn increasing_float(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let storage: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
     let delta = 42f32;
     let delta_value = Value::F32(delta);
@@ -187,9 +209,7 @@ pub mod tests {
     )
     .try_into()?;
 
-    let (mut engine, index) = setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
     for i in 1..10 {
       println!("storage = {}", storage.borrow());
       assert_eq!(Status::Success, runtime.tick().unwrap());
@@ -198,8 +218,7 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn cosine_signal() -> Result<()> {
+  fn cosine_signal(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let angle: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0f32)));
     let cosine: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(1f32)));
     let behavior = seq(vec![
@@ -214,12 +233,7 @@ pub mod tests {
     ])
     .try_into()?;
 
-    let (mut engine, index) = setup_engine_with_modules(&vec![
-      "behavior-tree-nodes".to_string(),
-    ])
-    .await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
 
     for i in 1..11 {
       assert_eq!(Status::Success, runtime.tick().unwrap());
@@ -240,8 +254,7 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn non_status_cos() -> Result<()> {
+  fn non_status_cos(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let angle: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(std::f32::consts::PI)));
     let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
     let behavior = TreeNode {
@@ -254,10 +267,7 @@ pub mod tests {
     }
     .try_into()?;
 
-    let (mut engine, index) =
-      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
 
     assert_eq!(Status::Success, runtime.tick().unwrap());
     if let Value::F32(cos_value) = *result.borrow() {
@@ -268,8 +278,7 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn non_status_add() -> Result<()> {
+  fn non_status_add(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
     let behavior = TreeNode {
       function: ADD_FUNCTION_ID,
@@ -282,10 +291,7 @@ pub mod tests {
     }
     .try_into()?;
 
-    let (mut engine, index) =
-      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
 
     assert_eq!(Status::Success, runtime.tick().unwrap());
     if let Value::F32(sum) = *result.borrow() {
@@ -296,8 +302,7 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn add_then_cos() -> Result<()> {
+  fn add_then_cos(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let x: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
     let cos_result: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::F32(0.0)));
     let behavior = seq(vec![
@@ -312,10 +317,7 @@ pub mod tests {
     ])
     .try_into()?;
 
-    let (mut engine, index) =
-      setup_engine_with_modules(&BASE_MODULE_NAMES).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
 
     for i in 1..=5 {
       assert_eq!(Status::Success, runtime.tick().unwrap());
@@ -334,8 +336,7 @@ pub mod tests {
     Ok(())
   }
 
-  #[tokio::test]
-  pub async fn fake_listen_regex_dispatch() -> Result<()> {
+  fn fake_listen_regex_dispatch(engine: &mut PinnedEngine, index: &Index) -> Result<()> {
     let name: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
     let name_expr = Expression::Variable(name.to_owned());
     let feeling: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
@@ -369,13 +370,7 @@ pub mod tests {
     ])
     .try_into()?;
 
-    let (mut engine, index) = setup_engine_with_modules(&vec![
-      "behavior-tree-nodes".to_string(),
-    ])
-    .await;
-
-    let mut runtime =
-      BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+    let mut runtime = BehaviorTreeRuntime::setup(&behavior, index.clone(), engine, true).unwrap();
     let mut status = Status::Running;
     let mut tick_count = 0;
     let expected_name = "Ross".to_string();
@@ -462,29 +457,21 @@ pub mod tests {
     *rc.borrow_mut() = v.into()
   }
 
-  async fn tick_base(behavior: &BehaviorTree) -> Status {
-    tick_with_modules(&behavior, &BASE_MODULE_NAMES).await
-  }
-
-  async fn run_yaml_base(tree_yaml: &str) -> Status {
-    run_yaml_with_modules(tree_yaml, &BASE_MODULE_NAMES).await
-  }
-
-  async fn tick_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let (mut engine, index) = setup_engine_with_modules(modules).await;
-    let mut runtime =
-      BehaviorTreeRuntime::setup(behavior, Rc::new(index), &mut engine, true).unwrap();
+  /// Set up a runtime on an already-built engine and tick it once.
+  fn tick(behavior: &BehaviorTree, engine: &mut PinnedEngine, index: &Index) -> Status {
+    let mut runtime = BehaviorTreeRuntime::setup(behavior, index.clone(), engine, true).unwrap();
     runtime.tick().unwrap()
   }
 
-  async fn run_with_modules(behavior: &BehaviorTree, modules: &Vec<String>) -> Status {
-    let (mut engine, index) = setup_engine_with_modules(&modules).await;
-    run_behavior_tree(&behavior, Rc::new(index), &mut engine, true).unwrap()
+  /// Run a behavior tree to completion on an already-built engine.
+  fn run_tree(behavior: &BehaviorTree, engine: &mut PinnedEngine, index: &Index) -> Status {
+    run_behavior_tree(behavior, index.clone(), engine, true).unwrap()
   }
 
-  async fn run_yaml_with_modules(tree_yaml: &str, modules: &Vec<String>) -> Status {
+  /// Parse a YAML tree and run it to completion on an already-built engine.
+  fn run_yaml(tree_yaml: &str, engine: &mut PinnedEngine, index: &Index) -> Status {
     let behavior = load_behavior_tree_yaml(tree_yaml).unwrap();
-    run_with_modules(&behavior, &modules).await
+    run_tree(&behavior, engine, index)
   }
 
   async fn setup_engine_with_modules<'a>(
