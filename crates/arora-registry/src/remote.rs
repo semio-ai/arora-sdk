@@ -51,7 +51,7 @@ impl RemoteRegistry {
     )
     .await
     .map_err(|e| {
-      RegistryError::remote_error(format!("error getting enumeration {}: {}", &selector, e))
+      RegistryError::remote_error(format!("error getting enumeration {}: {}", selector, e))
     })
   }
 
@@ -69,7 +69,7 @@ impl RemoteRegistry {
     )
     .await
     .map_err(|e| {
-      RegistryError::remote_error(format!("error getting enumeration {}: {}", &selector, e))
+      RegistryError::remote_error(format!("error getting enumeration {}: {}", selector, e))
     })
   }
 
@@ -179,7 +179,7 @@ impl ReadableRegistry for RemoteRegistry {
   }
 
   async fn resolve_id(&self, id: &Uuid) -> Result<String, RegistryError> {
-    let selector = Selector::Id(id.clone());
+    let selector = Selector::Id(*id);
     if let Some(primitive_kind) = get_primitive(&selector) {
       return Ok(primitive_kind.to_string());
     }
@@ -197,11 +197,11 @@ impl ReadableRegistry for RemoteRegistry {
       }
       RecordType::User => {
         let user = self.get_user(&selector).await?;
-        Ok(format!("{}", user.user_name))
+        Ok(user.user_name.to_string())
       }
       RecordType::Organization => {
         let organization = self.get_organization(&selector).await?;
-        Ok(format!("{}", organization.name))
+        Ok(organization.name.to_string())
       }
       RecordType::Folder => {
         let folder = self.get_folder(&selector).await?;
@@ -212,7 +212,7 @@ impl ReadableRegistry for RemoteRegistry {
         let module = self
           .get_module_not_mut(&selector, &VersionReq::STAR)
           .await?;
-        Ok(format!("{}", module.name))
+        Ok(module.name.to_string())
       }
       _ => Err(RegistryError::RemoteError {
         message: format!("{} is of an unknown type", selector.clone()),
@@ -285,7 +285,7 @@ impl Freezer for RemoteRegistry {
       .last()
       .ok_or(RegistryError::NoSuchRecord { selector })?;
     Ok(FrozenReference {
-      id: id.id.clone(),
+      id: id.id,
       version: latest_tag.to_owned(),
     })
   }

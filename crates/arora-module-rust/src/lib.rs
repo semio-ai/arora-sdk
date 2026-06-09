@@ -72,7 +72,7 @@ pub async fn generate_sources(
         }
       },
       ModuleAsset::Module(ref module_id, _, ref module, ref executor) => {
-        let module_sources = generate_module_source(&module, registry).await?;
+        let module_sources = generate_module_source(module, registry).await?;
         result = result.merge_with(&module_sources);
         assert!(current_module.is_none()); // Only one module to generate at a time.
         current_module = Some((module_id.to_owned(), module.to_owned(), executor.to_owned()));
@@ -347,7 +347,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 
     impl std::error::Error for DeserializationError {}
   };
-  token_stream_to_file("error.rs".to_string(), &source).map_err(GenerationError::VfsError)
+  token_stream_to_file("error.rs", &source).map_err(GenerationError::VfsError)
 }
 
 /// Generates a Rust source file for the given enumeration.
@@ -399,7 +399,7 @@ pub fn generate_enumeration_source(
     let variant_const_id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
     let variant_doc = format!(
       "{}: {}",
-      enum_variant_ident(&enum_name, &variant.name).to_string(),
+      enum_variant_ident(&enum_name, &variant.name),
       id_string
     );
     quote! {
@@ -588,11 +588,11 @@ pub async fn generate_structure_source(
 
   let field_id_declarations = structure.fields.iter().map(|(field_id, field)| {
     let field_id_bytes = RawUuidValue(field_id);
-    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
+    let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
     let field_doc = format!(
       "{}: {}",
-      struct_field_ident(&name, &field.name).to_string(),
-      field_id.to_string(),
+      struct_field_ident(name, &field.name),
+      field_id,
     );
     quote! {
       #[doc = #field_doc]
@@ -603,7 +603,7 @@ pub async fn generate_structure_source(
   // Struct Serialization.
   let mut fields_serialization = Vec::new();
   for (_, field) in &structure.fields {
-    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
+    let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
     let field_ident = variable_ident(&field.name);
     let value_expression = quote! { value.#field_ident };
     let serialize = generate_serialize_from_frozen(&field.ty, value_expression, registry).await?;
@@ -630,7 +630,7 @@ pub async fn generate_structure_source(
   // then we move all of them into the result structure.
   let mut field_variable_declarations = Vec::new();
   for (_, field) in &structure.fields {
-    let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    let variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
     let type_ident = type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
     field_variable_declarations
       .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
@@ -638,8 +638,8 @@ pub async fn generate_structure_source(
 
   let mut deserialization_cases = Vec::new();
   for (_, field) in &structure.fields {
-    let field_const_id_ident = struct_field_const_id_ident(&name, &field.name);
-    let field_variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
+    let field_variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
     let deserialize = generate_deserialize_from_frozen(&field.ty, registry, CheckType::Yes).await?;
     deserialization_cases.push(quote! {
       if field_raw_id == #field_const_id_ident {
@@ -650,7 +650,7 @@ pub async fn generate_structure_source(
 
   let struct_field_assignment = structure.fields.iter().map(|(_, field)| {
     let field_ident = variable_ident(&field.name);
-    let variable_ident = struct_field_intermediate_variable_ident(&name, &field.name);
+    let variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
     quote! { #field_ident: #variable_ident.unwrap() }
   });
 
@@ -763,7 +763,7 @@ async fn generate_imports_from_module_source(
   let module_id_declaration = generate_const_id_declaration(
     &module_name.to_string(),
     &module_const_id_ident,
-    &module_id,
+    module_id,
     Public::No,
   );
 
@@ -774,7 +774,7 @@ async fn generate_imports_from_module_source(
     let function_name = &import.import.name;
     let function_ident = format_ident!("{}", function_name);
     let mut parameters_declarations = Vec::new();
-    for (_, param) in &function_symbol.parameters {
+    for param in function_symbol.parameters.values() {
       let maybe_mut = if param.mutable {
         quote! { mut }
       } else {
@@ -792,9 +792,9 @@ async fn generate_imports_from_module_source(
 
     // And implement the call.
     // First declare the const ids.
-    let function_const_id_ident = function_const_id_ident(&function_name);
+    let function_const_id_ident = function_const_id_ident(function_name);
     let function_id_declaration = generate_const_id_declaration(
-      &function_name,
+      function_name,
       &function_const_id_ident,
       &import.id,
       Public::No,
@@ -803,9 +803,9 @@ async fn generate_imports_from_module_source(
       let mut param_ids_declarations = Vec::new();
       for (id, param) in &function_symbol.parameters {
         param_ids_declarations.push(generate_const_id_declaration(
-          &format!("{}.{}", &function_name, &param.name),
-          &function_param_const_id_ident(&function_name, &param.name),
-          &id,
+          &format!("{}.{}", function_name, param.name),
+          &function_param_const_id_ident(function_name, &param.name),
+          id,
           Public::No,
         ));
       }
@@ -822,9 +822,9 @@ async fn generate_imports_from_module_source(
     // and with one field for each param.
     let add_args = {
       let mut add_args = Vec::new();
-      for (_, param) in &function_symbol.parameters {
+      for param in function_symbol.parameters.values() {
         let function_param_const_id_ident =
-          function_param_const_id_ident(&function_name, &param.name);
+          function_param_const_id_ident(function_name, &param.name);
         let param_name_ident = format_ident!("{}", param.name);
         let serialize_arg =
           generate_serialize_from_frozen(&param.ty, param_name_ident.into_token_stream(), registry)
@@ -888,7 +888,7 @@ async fn generate_imports_from_module_source(
     let process_params = if nof_args > 1 {
       let declare_mutable_params = {
         let mut declare_mutable_params = Vec::new();
-        for (_, param) in &function_symbol.parameters {
+        for param in function_symbol.parameters.values() {
           if param.mutable {
             let param_name_ident = format_ident!("{}", param.name);
             declare_mutable_params.push(quote! {
@@ -901,11 +901,11 @@ async fn generate_imports_from_module_source(
 
       let deserialize_params = {
         let mut deserialize_params = Vec::new();
-        for (_, param) in &function_symbol.parameters {
+        for param in function_symbol.parameters.values() {
           if param.mutable {
             let param_name_ident = format_ident!("{}", param.name);
             let function_param_const_id_ident =
-              function_param_const_id_ident(&function_name, &param.name);
+              function_param_const_id_ident(function_name, &param.name);
             let deserialize_param =
               generate_deserialize_from_frozen(&param.ty, registry, CheckType::Yes).await?;
             deserialize_params.push(quote! {
@@ -982,9 +982,7 @@ async fn generate_module_source(
 ) -> Result<Directory, GenerationError> {
   // Function Uses.
   let exports = &module.exports;
-  let use_functions = exports
-    .iter()
-    .map(|(_, export)| format_ident!("{}", export.name));
+  let use_functions = exports.values().map(|export| format_ident!("{}", export.name));
 
   // Function and param IDs.
   let function_ids = exports.iter().flat_map(|(function_id, export)| {
@@ -993,14 +991,14 @@ async fn generate_module_source(
     id_declarations.push(generate_const_id_declaration(
       &export.name,
       &function_const_id_ident(&export.name),
-      &function_id,
+      function_id,
       Public::Yes,
     ));
     for (param_id, param) in &function_symbol.parameters {
       id_declarations.push(generate_const_id_declaration(
-        &format!("{}.{}", &export.name, &param.name),
+        &format!("{}.{}", export.name, param.name),
         &function_param_const_id_ident(&export.name, &param.name),
-        &param_id,
+        param_id,
         Public::Yes,
       ));
     }
@@ -1127,7 +1125,7 @@ async fn generate_module_source(
 
       let uuid_suffix = export_id.to_string().replace("-", "_");
       let arora_function_ident = format_ident!("arora_function_{}", uuid_suffix);
-      let doc = format!("{}", export.name);
+      let doc = export.name.to_string();
       function_declarations.push(quote! {
         #[doc = #doc]
         #[no_mangle]
@@ -1172,7 +1170,7 @@ async fn generate_module_source(
     #(#function_declarations)*
     #(#function_ids)*
   };
-  token_stream_to_file("export.rs".to_string(), &source).map_err(GenerationError::VfsError)
+  token_stream_to_file("export.rs", &source).map_err(GenerationError::VfsError)
 }
 
 pub fn generate_into_impl(type_ident: &Ident) -> TokenStream {
@@ -1653,32 +1651,32 @@ async fn type_ident_from_frozen(
   with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
   Ok(match ty {
-    FrozenTy::Primitive(primitive) => match primitive {
-      &Primitive::UNIT => quote! { () },
-      &Primitive::BOOLEAN => quote!(bool),
-      &Primitive::U8 => quote!(u8),
-      &Primitive::U16 => quote!(u16),
-      &Primitive::U32 => quote!(u32),
-      &Primitive::U64 => quote!(u64),
-      &Primitive::I8 => quote!(i8),
-      &Primitive::I16 => quote!(i16),
-      &Primitive::I32 => quote!(i32),
-      &Primitive::I64 => quote!(i64),
-      &Primitive::F32 => quote!(f32),
-      &Primitive::F64 => quote!(f64),
-      &Primitive::STRING => quote!(String),
-      &Primitive::ARRAY_BOOLEAN => quote!(Vec<bool>),
-      &Primitive::ARRAY_U8 => quote!(Vec<u8>),
-      &Primitive::ARRAY_U16 => quote!(Vec<u16>),
-      &Primitive::ARRAY_U32 => quote!(Vec<u32>),
-      &Primitive::ARRAY_U64 => quote!(Vec<u64>),
-      &Primitive::ARRAY_I8 => quote!(Vec<i8>),
-      &Primitive::ARRAY_I16 => quote!(Vec<i16>),
-      &Primitive::ARRAY_I32 => quote!(Vec<i32>),
-      &Primitive::ARRAY_I64 => quote!(Vec<i64>),
-      &Primitive::ARRAY_F32 => quote!(Vec<f32>),
-      &Primitive::ARRAY_F64 => quote!(Vec<f64>),
-      &Primitive::ARRAY_STRING => quote!(Vec<String>),
+    FrozenTy::Primitive(primitive) => match *primitive {
+      Primitive::UNIT => quote! { () },
+      Primitive::BOOLEAN => quote!(bool),
+      Primitive::U8 => quote!(u8),
+      Primitive::U16 => quote!(u16),
+      Primitive::U32 => quote!(u32),
+      Primitive::U64 => quote!(u64),
+      Primitive::I8 => quote!(i8),
+      Primitive::I16 => quote!(i16),
+      Primitive::I32 => quote!(i32),
+      Primitive::I64 => quote!(i64),
+      Primitive::F32 => quote!(f32),
+      Primitive::F64 => quote!(f64),
+      Primitive::STRING => quote!(String),
+      Primitive::ARRAY_BOOLEAN => quote!(Vec<bool>),
+      Primitive::ARRAY_U8 => quote!(Vec<u8>),
+      Primitive::ARRAY_U16 => quote!(Vec<u16>),
+      Primitive::ARRAY_U32 => quote!(Vec<u32>),
+      Primitive::ARRAY_U64 => quote!(Vec<u64>),
+      Primitive::ARRAY_I8 => quote!(Vec<i8>),
+      Primitive::ARRAY_I16 => quote!(Vec<i16>),
+      Primitive::ARRAY_I32 => quote!(Vec<i32>),
+      Primitive::ARRAY_I64 => quote!(Vec<i64>),
+      Primitive::ARRAY_F32 => quote!(Vec<f32>),
+      Primitive::ARRAY_F64 => quote!(Vec<f64>),
+      Primitive::ARRAY_STRING => quote!(Vec<String>),
     },
     FrozenTy::FrozenScalar(scalar) => {
       type_ident_from_id(&scalar.reference.id, registry, with_mod).await?

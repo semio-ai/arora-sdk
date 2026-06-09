@@ -1,3 +1,11 @@
+// arora-buffers exposes the `#[no_mangle] extern "C"` buffer ABI consumed by
+// WASM guests and host bindings. These entry points take raw pointers by
+// contract; marking each one `unsafe` (or documenting a `# Safety` section per
+// function) would churn the ABI surface for every caller without making the
+// FFI boundary any safer. Suppress the two pointer-hygiene lints crate-wide.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::missing_safety_doc)]
+
 pub mod alloc;
 pub mod read;
 pub mod serde_raw_id;

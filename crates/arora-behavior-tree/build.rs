@@ -25,7 +25,7 @@ pub async fn main() -> Result<()> {
     .tag_enumeration(
       STATUS_ENUMERATION_ID.to_owned(),
       STATUS_ENUMERATION_VERSION.to_owned(),
-      declare_status_enumeration(ROOT_ID.clone()),
+      declare_status_enumeration(ROOT_ID),
     )
     .await?;
   generated_sources = generate_enumeration_source(
@@ -40,7 +40,7 @@ pub async fn main() -> Result<()> {
     .tag_structure(
       TICK_ID_STRUCTURE_ID.to_owned(),
       TICK_ID_STRUCTURE_VERSION.to_owned(),
-      declare_tick_id_structure(ROOT_ID.clone()),
+      declare_tick_id_structure(ROOT_ID),
     )
     .await?;
   generated_sources = generate_structure_source(

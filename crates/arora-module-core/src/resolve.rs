@@ -260,7 +260,7 @@ pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
   for import in module_definition.imports {
     let HighImportSymbol::Function(import_function) = import.clone();
     let import_module_id = resolve_module_id(import_function.module.as_str(), registry).await?;
-    let import_module_selector = Selector::Id(import_module_id.clone());
+    let import_module_selector = Selector::Id(import_module_id);
     let import_module_version = registry
       .resolve_tag(&import_module_selector, &semver::VersionReq::STAR)
       .await
@@ -329,14 +329,14 @@ pub async fn resolve_low_module<R: ReadableRegistry + Freezer>(
   for import in module_header.imports {
     let LowImportSymbol::Function(import_function) = import.clone();
     let import_module_id = import_function.module;
-    let import_module_selector = Selector::Id(import_module_id.clone());
+    let import_module_selector = Selector::Id(import_module_id);
     let import_module_version = registry
       .resolve_tag(&import_module_selector, &semver::VersionReq::STAR)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?;
     let import_module = registry
       .get_module(
-        &Selector::Id(import_module_id.clone()),
+        &Selector::Id(import_module_id),
         &semver::VersionReq::STAR,
       )
       .await

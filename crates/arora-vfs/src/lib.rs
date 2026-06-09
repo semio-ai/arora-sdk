@@ -53,6 +53,12 @@ pub struct Directory {
   pub entries: HashMap<String, Entry>,
 }
 
+impl Default for Directory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Directory {
   pub fn new() -> Self {
     Self {
@@ -80,7 +86,7 @@ impl Directory {
         Entry::File(_) => return None,
       };
     }
-    return Some(current_entry);
+    Some(current_entry)
   }
 
   pub fn insert<N: AsRef<str>, E: Into<Entry>>(
@@ -91,7 +97,7 @@ impl Directory {
     let name = name.as_ref().to_string();
     match self.entries.entry(name.clone()) {
       HashMapEntry::Occupied(_) => Err(VfsError::AlreadyExists(name)),
-      HashMapEntry::Vacant(map_entry) => Ok(map_entry.insert(entry.into().into())),
+      HashMapEntry::Vacant(map_entry) => Ok(map_entry.insert(entry.into())),
     }
   }
 
@@ -113,12 +119,12 @@ impl Directory {
         .get_mut_at_path(parent)
         .ok_or(VfsError::NotFound(path.display().to_string()))?
       {
-        return parent_dir.insert(file_name, entry);
+        parent_dir.insert(file_name, entry)
       } else {
-        return Err(VfsError::Generic(format!(
+        Err(VfsError::Generic(format!(
           "parent of path {} is not a directory",
           path.display()
-        )));
+        )))
       }
     } else {
       self.insert(file_name, entry)
@@ -155,11 +161,11 @@ impl Directory {
         Entry::File(_) => return Err(VfsError::AlreadyExists(next_name.clone())),
       };
     }
-    return Ok(
+    Ok(
       current_entry
         .as_directory()
         .expect("inserted directory is not a directory after insertion!"),
-    );
+    )
   }
 
   /// Lists entries in the directory.
@@ -236,7 +242,7 @@ impl Directory {
               let other_directory = other_directory.clone();
               entries.insert(
                 name.clone(),
-                Entry::Directory(directory.merge_with(&other_directory)).into(),
+                Entry::Directory(directory.merge_with(&other_directory)),
               );
             } else {
               panic!("Tried to merge a directory with a file");

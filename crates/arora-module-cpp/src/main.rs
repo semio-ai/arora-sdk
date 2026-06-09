@@ -37,7 +37,7 @@ pub enum NameStyle {
 
 impl NameStyle {
   pub fn convert(&self, name: &str) -> String {
-    let name = name.replace('-', " ").replace('_', " ");
+    let name = name.replace(['-', '_'], " ");
     match self {
       Self::UpperCamelCase => name.to_case(Case::UpperCamel),
       Self::LowerCamelCase => name.to_case(Case::Camel),
@@ -81,7 +81,7 @@ pub struct Context<'a> {
 fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directory> {
   let ty = context
     .types
-    .get(&id)
+    .get(id)
     .ok_or_else(|| anyhow::anyhow!("Type not found: {}", id))?;
 
   let mut source = Directory::new();
@@ -89,12 +89,12 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
 
   let mut source_declarations = Vec::new();
   source_declarations.extend_from_slice(&[
-    Declaration::include_local(format!("types/{}.hpp", &ty.name())),
+    Declaration::include_local(format!("types/{}.hpp", ty.name())),
     Declaration::new_line(1),
   ]);
 
-  source_declarations.extend_from_slice(&declare::type_constants_impl(id, &ty));
-  source_declarations.extend_from_slice(&declare::ty_impl(context, id, &ty));
+  source_declarations.extend_from_slice(&declare::type_constants_impl(id, ty));
+  source_declarations.extend_from_slice(&declare::ty_impl(context, id, ty));
 
   let source_content = TranslationUnit {
     declarations: source_declarations,
@@ -138,7 +138,7 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
     let dep_header = context
       .types
       .get(dep)
-      .expect(format!("unknown type {}", dep).as_str());
+      .unwrap_or_else(|| panic!("unknown type {}", dep));
     include_declarations.push(
       PreprocessorDirective::Include(
         format!("types/{}.hpp", dep_header.name()),
@@ -174,7 +174,7 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
   root.insert("include", include)?;
 
   // Write out a C++ header
-  Ok(root.into())
+  Ok(root)
 }
 
 fn generate_module_imports<'a>(
@@ -190,7 +190,7 @@ fn generate_module_imports<'a>(
   let mut source_declarations = Vec::new();
 
   source_declarations.extend_from_slice(&[
-    Declaration::include_local(format!("{}.hpp", &module_name)),
+    Declaration::include_local(format!("{}.hpp", module_name)),
     Declaration::include_system("arora/arora.hpp"),
     Declaration::new_line(1),
   ]);
@@ -212,7 +212,7 @@ fn generate_module_imports<'a>(
           source_declarations.push(
             declare::uuid_variable(
               id::parameter_uuid(&import_asset.import.name, &parameter.name),
-              &parameter_id,
+              parameter_id,
             )
             .into(),
           );
@@ -256,7 +256,7 @@ fn generate_module_imports<'a>(
         ];
 
         for parameter_id in &func.parameter_ordering {
-          let parameter = func.parameters.get(&parameter_id).ok_or(anyhow::anyhow!(
+          let parameter = func.parameters.get(parameter_id).ok_or(anyhow::anyhow!(
             "parameter ordering does not match parameters {}",
             parameter_id
           ))?;
@@ -413,7 +413,7 @@ fn generate_module_imports<'a>(
           FunctionImplementation {
             name: format!(
               "{}::{}",
-              &id_name,
+              id_name,
               identifier_name(&import_asset.import.name)
             ),
             parameters,
@@ -530,7 +530,7 @@ fn generate_module_imports<'a>(
   root.insert("include", include)?;
 
   // Write out a C++ header
-  Ok(root.into())
+  Ok(root)
 }
 
 fn include_guard_name(name: &str) -> String {
@@ -615,7 +615,7 @@ fn generate_self_header<'a>(context: &Context<'a>) -> anyhow::Result<Translation
 
         namespace_declarations.push(
           FunctionPrototype {
-            name: name,
+            name,
             ret: Some(TypeRef {
               ty: ty::type_name(context, &f.return_ty).to_string(),
               ..Default::default()
@@ -647,7 +647,7 @@ fn parameter_variable_name(parameter_id: &Uuid, parameter: &Parameter) -> String
   format!(
     "{}_{}",
     identifier_name(parameter.name.as_str()),
-    identifier_uuid(&parameter_id)
+    identifier_uuid(parameter_id)
   )
 }
 
@@ -657,17 +657,17 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
 
   let mut declarations = Vec::new();
   declarations.push(
-    PreprocessorDirective::Include(format!("{}.hpp", &module.name), IncludeStyle::Local).into(),
+    PreprocessorDirective::Include(format!("{}.hpp", module.name), IncludeStyle::Local).into(),
   );
   declarations
-    .push(PreprocessorDirective::Include(format!("cassert"), IncludeStyle::System).into());
+    .push(PreprocessorDirective::Include("cassert".to_string(), IncludeStyle::System).into());
   declarations.push(
     Extern {
       name: "C".to_string(),
       block: Block {
         statements: vec![
-          PreprocessorDirective::Include(format!("arora/buffers.h"), IncludeStyle::System).into(),
-          PreprocessorDirective::Include(format!("arora/util.h"), IncludeStyle::System).into(),
+          PreprocessorDirective::Include("arora/buffers.h".to_string(), IncludeStyle::System).into(),
+          PreprocessorDirective::Include("arora/util.h".to_string(), IncludeStyle::System).into(),
         ],
         ..Default::default()
       },
@@ -676,25 +676,25 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
   );
   declarations.push(
     PreprocessorDirective::Include(
-      format!("arora/buffer/deserialize.hpp"),
+      "arora/buffer/deserialize.hpp".to_string(),
       IncludeStyle::System,
     )
     .into(),
   );
   declarations.push(
-    PreprocessorDirective::Include(format!("arora/buffer/serialize.hpp"), IncludeStyle::System)
+    PreprocessorDirective::Include("arora/buffer/serialize.hpp".to_string(), IncludeStyle::System)
       .into(),
   );
 
   declarations.push(NewLine { count: 1 }.into());
 
-  declarations.push(declare::uuid_variable(id::module_uuid(&module.name), &module_id).into());
+  declarations.push(declare::uuid_variable(id::module_uuid(&module.name), module_id).into());
 
   for (export_id, export) in &context.module.as_ref().unwrap().exports {
     match &export.kind {
       ExportKind::Function(f) => {
         declarations
-          .push(declare::uuid_variable(id::function_uuid(&export.name), &export_id).into());
+          .push(declare::uuid_variable(id::function_uuid(&export.name), export_id).into());
 
         let mut function_declarations: Vec<Declaration> = Vec::new();
 
@@ -862,8 +862,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                     id::function_uuid(&export.name).to_expression(),
                   ])
                   .equal("0".to_expression()),
-              )
-              .into(),
+              ),
             Block {
               statements: read_declarations,
               ..Default::default()
@@ -980,20 +979,20 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
           declarations.push(
             declare::uuid_variable(
               id::parameter_uuid(&export.name, &parameter.name),
-              &parameter_id,
+              parameter_id,
             )
             .into(),
           );
         }
 
-        let function_name = format!("arora_function_{}", identifier_uuid(&export_id));
+        let function_name = format!("arora_function_{}", identifier_uuid(export_id));
 
         declarations.push(
           Extern {
             name: "C".to_string(),
             block: Block {
               statements: vec![FunctionImplementation {
-                attributes: Some(vec![format!("export_name(\"{}\")", function_name).into()]),
+                attributes: Some(vec![format!("export_name(\"{}\")", function_name)]),
                 name: function_name,
                 ret: Some(ty::U8_CONST_PTR.clone()),
                 parameters: vec![ast::Parameter {
@@ -1041,7 +1040,7 @@ fn generate_self<'a>(context: &Context<'a>) -> anyhow::Result<Directory> {
   root.insert("include", include)?;
 
   // Write out a C++ header
-  Ok(root.into())
+  Ok(root)
 }
 
 /// Generates a directory describing the module in a layout compatible with `arora-module-cli --include`.
@@ -1111,7 +1110,7 @@ async fn main() -> anyhow::Result<()> {
   for id in context.types.keys() {
     root = root.merge_with(&generate_type(&context, id)?);
   }
-  for (_, imports) in context.grouped_import_symbols.iter() {
+  for imports in context.grouped_import_symbols.values() {
     root = root.merge_with(&generate_module_imports(&context, imports)?);
   }
   root = root.merge_with(&generate_self(&context)?);

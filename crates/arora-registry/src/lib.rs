@@ -349,9 +349,6 @@ pub fn get_primitive(selector: &Selector) -> Option<PrimitiveKind> {
       id if *id == *STRING_ID => Some(PrimitiveKind::String),
       _ => None,
     },
-    Selector::Path(path) => match path.parse() {
-      Ok(primitive_kind) => Some(primitive_kind),
-      Err(_) => None,
-    },
+    Selector::Path(path) => path.parse().ok(),
   }
 }

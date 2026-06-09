@@ -19,7 +19,7 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn next_type(&mut self) -> Option<u8> {
-    if self.backing.len() == 0 {
+    if self.backing.is_empty() {
       return None;
     }
 
@@ -142,8 +142,8 @@ impl<'a> BufferReader<'a> {
   }
 
   pub fn get_structure_raw(&mut self) -> u32 {
-    let field_count = self.backing.get_u32_le();
-    field_count
+    
+    self.backing.get_u32_le()
   }
 
   pub fn get_structure_field(&mut self) -> &'a [u8] {
@@ -249,8 +249,8 @@ pub extern "C" fn arora_buffer_reader_get_structure(
 pub extern "C" fn arora_buffer_reader_get_structure_raw(reader: *mut BufferReader) -> u32 {
   unsafe {
     let reader = &mut *reader;
-    let field_count = reader.get_structure_raw();
-    field_count
+    
+    reader.get_structure_raw()
   }
 }
 

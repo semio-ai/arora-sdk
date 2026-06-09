@@ -163,7 +163,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
 
     declarations.push(
       FunctionPrototype {
-        name: format!("set_{}", &field.name),
+        name: format!("set_{}", field.name),
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_const_ref(&TypeRef {
@@ -179,7 +179,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
 
     declarations.push(
       FunctionPrototype {
-        name: format!("set_{}", &field.name),
+        name: format!("set_{}", field.name),
         parameters: vec![Parameter {
           name: "value".to_string(),
           type_ref: ty::optional_move(&TypeRef {
@@ -226,7 +226,7 @@ pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationFrozen) -> Ve
 
   ret.push(
     Variable {
-      name: id::type_uuid(&name),
+      name: id::type_uuid(name),
       ty: ty::U8_CONST.clone(),
       extern_: true,
       array: ArrayKind::Fixed(16u64.to_expression()),
@@ -238,7 +238,7 @@ pub fn enumeration_constants(_: &Uuid, name: &str, ty: &EnumerationFrozen) -> Ve
   for (_, variant) in ty.variants.iter() {
     ret.push(
       Variable {
-        name: id::value_uuid(&name, &variant.name),
+        name: id::value_uuid(name, &variant.name),
         ty: ty::U8_CONST.clone(),
         extern_: true,
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -256,7 +256,7 @@ pub fn structure_constants(_: &Uuid, name: &str, ty: &StructureFrozen) -> Vec<De
 
   ret.push(
     Variable {
-      name: id::type_uuid(&name),
+      name: id::type_uuid(name),
       ty: ty::U8_CONST.clone(),
       extern_: true,
       array: ArrayKind::Fixed(16u64.to_expression()),
@@ -268,7 +268,7 @@ pub fn structure_constants(_: &Uuid, name: &str, ty: &StructureFrozen) -> Vec<De
   for (_, value) in ty.fields.iter() {
     ret.push(
       Variable {
-        name: id::field_uuid(&name, &value.name),
+        name: id::field_uuid(name, &value.name),
         ty: ty::U8_CONST.clone(),
         extern_: true,
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -286,7 +286,7 @@ pub fn type_constants(id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declaration> 
     TypeDefinitionFrozen::Structure(v) => structure_constants(id, &ty.name(), v),
     TypeDefinitionFrozen::Enumeration(v) => enumeration_constants(id, &ty.name(), v),
     TypeDefinitionFrozen::Primitive(_) => {
-      panic!("forbidden to define primitive type {}", id.to_string())
+      panic!("forbidden to define primitive type {}", id)
     }
   }
 }
@@ -300,7 +300,7 @@ pub fn enumeration_constants_impl(
 
   ret.push(
     Variable {
-      name: id::type_uuid(&name),
+      name: id::type_uuid(name),
       ty: ty::U8_CONST.clone(),
       value: Some(uuid_initializer_list(id)),
       array: ArrayKind::Fixed(16u64.to_expression()),
@@ -312,7 +312,7 @@ pub fn enumeration_constants_impl(
   for (id, variant) in ty.variants.iter() {
     ret.push(
       Variable {
-        name: id::value_uuid(&name, &variant.name),
+        name: id::value_uuid(name, &variant.name),
         ty: ty::U8_CONST.clone(),
         value: Some(uuid_initializer_list(id)),
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -330,7 +330,7 @@ pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructureFrozen) -> 
 
   ret.push(
     Variable {
-      name: id::type_uuid(&name),
+      name: id::type_uuid(name),
       ty: ty::U8_CONST.clone(),
       value: Some(uuid_initializer_list(id)),
       array: ArrayKind::Fixed(16u64.to_expression()),
@@ -342,7 +342,7 @@ pub fn structure_constants_impl(id: &Uuid, name: &str, ty: &StructureFrozen) -> 
   for (id, value) in ty.fields.iter() {
     ret.push(
       Variable {
-        name: id::field_uuid(&name, &value.name),
+        name: id::field_uuid(name, &value.name),
         ty: ty::U8_CONST.clone(),
         value: Some(uuid_initializer_list(id)),
         array: ArrayKind::Fixed(16u64.to_expression()),
@@ -422,7 +422,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Str
       // Static method to create an instance of the variant.
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", variant.name.to_lowercase()),
+          name: variant.name.to_lowercase().to_string(),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -445,7 +445,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Str
 
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", variant.name.to_lowercase()),
+          name: variant.name.to_lowercase().to_string(),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -467,7 +467,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Str
     } else {
       struct_statements.push(
         FunctionPrototype {
-          name: format!("{}", variant.name.to_lowercase()),
+          name: variant.name.to_lowercase().to_string(),
           ret: Some(TypeRef {
             ty: name.to_string(),
             ..Default::default()
@@ -549,7 +549,7 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Str
     .into(),
   );
 
-  if data_size_args.len() > 0 {
+  if !data_size_args.is_empty() {
     struct_statements.push(
       Variable {
         name: "data_".to_string(),
@@ -574,11 +574,11 @@ pub fn enumeration(context: &Context, name: &str, ty: &EnumerationFrozen) -> Str
 
 pub fn ty(context: &Context, ty: &TypeDefinitionFrozen) -> Struct {
   match ty {
-    TypeDefinitionFrozen::Enumeration(value) => enumeration(context, &ty.name(), &value),
-    TypeDefinitionFrozen::Structure(value) => structure(context, &ty.name(), &value),
+    TypeDefinitionFrozen::Enumeration(value) => enumeration(context, &ty.name(), value),
+    TypeDefinitionFrozen::Structure(value) => structure(context, &ty.name(), value),
     TypeDefinitionFrozen::Primitive(_) => panic!(
       "forbidden to define primitive type {}",
-      ty.name().to_string()
+      ty.name()
     ),
   }
 }
@@ -766,7 +766,7 @@ fn structure_private_field_variable_name(id: &Uuid, field: &StructureField) -> S
   format!(
     "{}_{}",
     identifier_name(field.name.as_str()),
-    identifier_uuid(&id)
+    identifier_uuid(id)
   )
 }
 
@@ -787,7 +787,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
         })),
         body: Block {
           statements: vec![
-            Statement::Return(structure_private_field_variable(&id, &field).into()).into(),
+            Statement::Return(structure_private_field_variable(id, field)).into(),
           ],
           semicolon: false,
         },
@@ -810,7 +810,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
         }],
         ret: Some(ty::VOID.clone()),
         body: Block {
-          statements: vec![structure_private_field_variable(&id, &field)
+          statements: vec![structure_private_field_variable(id, field)
             .assign("value")
             .into_statement()
             .into()],
@@ -832,7 +832,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
         }],
         ret: Some(ty::VOID.clone()),
         body: Block {
-          statements: vec![structure_private_field_variable(&id, &field)
+          statements: vec![structure_private_field_variable(id, field)
             .assign("value")
             .into_statement()
             .into()],
@@ -849,10 +849,10 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
 
 pub fn ty_impl(context: &Context, id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declaration> {
   match ty {
-    TypeDefinitionFrozen::Enumeration(value) => enumeration_impl(context, id, &value.name, &value),
-    TypeDefinitionFrozen::Structure(value) => structure_impl(context, &value.name, &value),
+    TypeDefinitionFrozen::Enumeration(value) => enumeration_impl(context, id, &value.name, value),
+    TypeDefinitionFrozen::Structure(value) => structure_impl(context, &value.name, value),
     TypeDefinitionFrozen::Primitive(_) => {
-      panic!("forbidden to define primitive type {}", id.to_string())
+      panic!("forbidden to define primitive type {}", id)
     }
   }
 }
@@ -901,11 +901,10 @@ pub fn structure_deserializer(
                 "structure_metadata".to_expression().into(),
                 "id".to_expression().into(),
               ),
-              id::type_uuid(&name).to_expression(),
+              id::type_uuid(name).to_expression(),
             ])
             .not_equal("0".to_expression()),
-        )
-        .into(),
+        ),
       Block {
         statements: vec![Statement::Return(constant::NULL_OPTION.clone()).into()],
         ..Default::default()
@@ -928,7 +927,7 @@ pub fn structure_deserializer(
   );
 
   let mut sorted_field_ids = ty.fields.keys().collect::<Vec<_>>();
-  sorted_field_ids.sort_by(|a, b| a.cmp(b));
+  sorted_field_ids.sort();
 
   function_statements.push(
     Variable {
@@ -1112,7 +1111,7 @@ pub fn enumeration_deserializer(
       func::ARORA_UUID_COMPARE
         .call([
           "res".to_expression().dot("id"),
-          id::type_uuid(&name).to_expression(),
+          id::type_uuid(name).to_expression(),
         ])
         .not_equal(0u8.to_expression()),
       Block {
@@ -1155,7 +1154,7 @@ pub fn enumeration_deserializer(
         func::ARORA_UUID_COMPARE
           .call([
             "res".to_expression().dot("value_id"),
-            id::value_uuid(&name, &variant.name).to_expression(),
+            id::value_uuid(name, &variant.name).to_expression(),
           ])
           .equal(0u8.to_expression()),
         Block {
@@ -1231,7 +1230,7 @@ pub fn deserializer(
       structure_deserializer(context, &ty.name(), structure)
     }
     TypeDefinitionFrozen::Enumeration(ref enumeration) => {
-      enumeration_deserializer(&context, type_id, &ty.name(), enumeration)
+      enumeration_deserializer(context, type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),
   }
@@ -1248,7 +1247,7 @@ pub fn structure_serializer(
   let mut function_statements = Vec::<Declaration>::new();
 
   let mut sorted_field_ids = ty.fields.keys().collect::<Vec<_>>();
-  sorted_field_ids.sort_by(|a, b| a.cmp(b));
+  sorted_field_ids.sort();
 
   function_statements.push(
     Variable {
@@ -1286,7 +1285,7 @@ pub fn structure_serializer(
   }
 
   function_statements.push(
-    arora_buffer_writer_begin_structure(&id::type_uuid(&name), field_count.to_expression()).into(),
+    arora_buffer_writer_begin_structure(&id::type_uuid(name), field_count.to_expression()).into(),
   );
 
   for field_id in sorted_field_ids {
@@ -1437,7 +1436,7 @@ pub fn serializer(
       structure_serializer(context, &ty.name(), structure)
     }
     TypeDefinitionFrozen::Enumeration(ref enumeration) => {
-      enumeration_serializer(&context, &type_id, &ty.name(), enumeration)
+      enumeration_serializer(context, type_id, &ty.name(), enumeration)
     }
     _ => panic!("deserializer: not implemented for {:?}", ty),
   }

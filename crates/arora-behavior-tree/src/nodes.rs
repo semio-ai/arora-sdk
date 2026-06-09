@@ -10,25 +10,25 @@ use uuid::Uuid;
 //===============================================================
 #[allow(unused)]
 pub fn succeed() -> TreeNode {
-  TreeNode::action_node(SUCCEED_FUNCTION_ID.clone())
+  TreeNode::action_node(SUCCEED_FUNCTION_ID)
 }
 
 #[allow(unused)]
 pub fn fail() -> TreeNode {
-  TreeNode::action_node(FAIL_FUNCTION_ID.clone())
+  TreeNode::action_node(FAIL_FUNCTION_ID)
 }
 
 #[allow(unused)]
 pub fn run() -> TreeNode {
-  TreeNode::action_node(RUN_FUNCTION_ID.clone())
+  TreeNode::action_node(RUN_FUNCTION_ID)
 }
 
 #[allow(unused)]
 pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
   TreeNode {
-    function: STATUS_IDENTITY_FUNCTION_ID.clone(),
+    function: STATUS_IDENTITY_FUNCTION_ID,
     children: None,
-    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID.clone(), Expression::Variable(value))]),
+    parameters: HashMap::from([(STATUS_VALUE_PARAM_ID, Expression::Variable(value))]),
   }
 }
 
@@ -113,11 +113,11 @@ pub fn regex_match(value: Expression, matcher: Expression, first_match: Expressi
 #[allow(unused)]
 pub fn store(storage: Expression, value: Expression) -> TreeNode {
   TreeNode {
-    function: STORE_FUNCTION_ID.clone(),
+    function: STORE_FUNCTION_ID,
     children: None,
     parameters: HashMap::from([
-      (STORE_STORAGE_PARAM_ID.clone(), storage),
-      (STORE_VALUE_PARAM_ID.clone(), value),
+      (STORE_STORAGE_PARAM_ID, storage),
+      (STORE_VALUE_PARAM_ID, value),
     ]),
   }
 }
@@ -125,11 +125,11 @@ pub fn store(storage: Expression, value: Expression) -> TreeNode {
 #[allow(unused)]
 pub fn increase(storage: Expression, delta: Expression) -> TreeNode {
   TreeNode {
-    function: INCREASE_FUNCTION_ID.clone(),
+    function: INCREASE_FUNCTION_ID,
     children: None,
     parameters: HashMap::from([
-      (INCREASE_STORAGE_PARAM_ID.clone(), storage),
-      (INCREASE_DELTA_PARAM_ID.clone(), delta),
+      (INCREASE_STORAGE_PARAM_ID, storage),
+      (INCREASE_DELTA_PARAM_ID, delta),
     ]),
   }
 }
@@ -138,16 +138,16 @@ pub fn increase(storage: Expression, delta: Expression) -> TreeNode {
 //==============================================================
 #[allow(unused)]
 pub fn seq(children: Vec<TreeNode>) -> TreeNode {
-  TreeNode::control_node(SEQ_FUNCTION_ID.clone(), children)
+  TreeNode::control_node(SEQ_FUNCTION_ID, children)
 }
 
 #[allow(unused)]
 pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
   TreeNode {
-    function: SEQ_STAR_FUNCTION_ID.clone(),
+    function: SEQ_STAR_FUNCTION_ID,
     children: Some(children),
     parameters: HashMap::from([(
-      SEQ_STAR_CURRENT_INDEX_PARAM_ID.clone(),
+      SEQ_STAR_CURRENT_INDEX_PARAM_ID,
       Expression::Value(Value::U16(0)),
     )]),
   }
@@ -155,12 +155,12 @@ pub fn seq_star(children: Vec<TreeNode>) -> TreeNode {
 
 #[allow(unused)]
 pub fn fallback(children: Vec<TreeNode>) -> TreeNode {
-  TreeNode::control_node(FALLBACK_FUNCTION_ID.clone(), children)
+  TreeNode::control_node(FALLBACK_FUNCTION_ID, children)
 }
 
 #[allow(unused)]
 pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
-  TreeNode::control_node(PARALLEL_FUNCTION_ID.clone(), children)
+  TreeNode::control_node(PARALLEL_FUNCTION_ID, children)
 }
 
 // Other functions from other modules
@@ -168,11 +168,11 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
 #[allow(unused)]
 pub fn cos(angle: Expression, res: Expression) -> TreeNode {
   TreeNode {
-    function: COS_FUNCTION_ID.clone(),
+    function: COS_FUNCTION_ID,
     children: None,
     parameters: HashMap::from([
-      (COS_ANGLE_PARAM_ID.clone(), angle),
-      (COS_RES_PARAM_ID.clone(), res),
+      (COS_ANGLE_PARAM_ID, angle),
+      (COS_RES_PARAM_ID, res),
     ]),
   }
 }

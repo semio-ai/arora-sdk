@@ -180,16 +180,16 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
     let header_path = &args.header[i];
     let header: Header = serde_yaml::from_str(
       &read_to_string(header_path)
-        .expect(format!("header file {} could not be read", header_path).as_str()),
+        .unwrap_or_else(|_| panic!("header file {} could not be read", header_path)),
     )
-    .expect(format!("header file {} contains invalid yaml", header_path).as_str());
+    .unwrap_or_else(|_| panic!("header file {} contains invalid yaml", header_path));
     let (module_id, module_version, module_and_imports) =
       module_frozen_from_header_file(header_path, registry.borrow_mut()).await?;
 
     // Remember the module ID for each function ID.
     for (export_id, export) in &module_and_imports.module.exports {
       match export.kind {
-        ExportKind::Function(_) => functions_modules.insert(export_id.clone(), module_id.clone()),
+        ExportKind::Function(_) => functions_modules.insert(*export_id, module_id),
       };
     }
 
@@ -210,19 +210,19 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
     let executable = executable.into_boxed_slice();
 
     let module_name = header.name.clone();
-    load_module_from_parts(&mut *engine, header, executable)
-      .expect(format!("failed to load module {}", module_name).as_str());
+    load_module_from_parts(&mut engine, header, executable)
+      .unwrap_or_else(|_| panic!("failed to load module {}", module_name));
   }
 
   if let Some(call_yaml) = &args.call {
-    let call: Call = serde_yaml::from_str(&call_yaml)?;
-    let function_id = call.id.clone();
+    let call: Call = serde_yaml::from_str(call_yaml)?;
+    let function_id = call.id;
     let module_id = if let Some(module_id) = &call.module_id {
       module_id
     } else {
       functions_modules
         .get(&function_id)
-        .expect(format!("no such function {}", function_id).as_str())
+        .unwrap_or_else(|| panic!("no such function {}", function_id))
     };
 
     let start_time = if args.benchmark {
@@ -233,7 +233,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
 
     let nof_iterations = args.repeat;
     for _i in 0..nof_iterations {
-      let result = tokio::task::block_in_place(|| engine.arora_call(&module_id, call.clone()))?;
+      let result = tokio::task::block_in_place(|| engine.arora_call(module_id, call.clone()))?;
       println!("{}", serde_yaml::to_string(&result)?);
     }
 

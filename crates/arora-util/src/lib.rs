@@ -1,3 +1,8 @@
+// `arora_uuid_compare` is part of the `#[no_mangle] extern "C"` ABI consumed by
+// WASM guests; it takes raw pointers by contract. Marking it `unsafe` would
+// change the ABI surface for callers without making the FFI boundary safer.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use uuid::Uuid;
 
 #[no_mangle]

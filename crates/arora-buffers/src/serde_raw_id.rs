@@ -125,7 +125,7 @@ impl<'a> Value<'a> {
         }
         Value::Structure(Structure {
           id: id.into(),
-          fields: fields,
+          fields,
         })
       }
       Some(TYPE_ENUMERATION) => Value::Enumeration(Enumeration {
@@ -167,7 +167,7 @@ impl<'a> Value<'a> {
                   value: Value::deserialize_reader(reader),
                 });
               }
-              structures.push(StructureRaw { fields: fields });
+              structures.push(StructureRaw { fields });
             }
             Value::ArrayStructure(structure_id.into(), structures)
           }
@@ -316,6 +316,9 @@ mod tests {
   }
 
   #[test]
+  // The literals are arbitrary sample values for round-tripping an f32 array,
+  // not intended to be std::f32::consts::PI / E.
+  #[allow(clippy::approx_constant)]
   pub fn array_f32_yaml() -> Result<()> {
     if let Value::ArrayF32(values) = serde_yaml::from_str(ARRAY_F32_YAML)? {
       assert_eq!(vec![3.14159, 2.718, 1.618], values.to_vec());
@@ -325,11 +328,11 @@ mod tests {
     Ok(())
   }
 
-  pub const U8_YAML: &'static str = "\
+  pub const U8_YAML: &str = "\
 u8: 42
 ";
 
-  pub const ARRAY_F32_YAML: &'static str = "\
+  pub const ARRAY_F32_YAML: &str = "\
 f32[]: [3.14159, 2.718, 1.618]
 ";
 }

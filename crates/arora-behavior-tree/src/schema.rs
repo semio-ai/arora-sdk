@@ -97,7 +97,7 @@ pub mod tests {
   use anyhow::Result;
   use std::str::FromStr;
 
-  pub const TRIVIAL_NODE_YAML: &'static str = "\
+  pub const TRIVIAL_NODE_YAML: &str = "\
 id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
 function: af2bd9fa-14f6-4388-b68b-e50c8443960e
 ";
@@ -112,10 +112,10 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
     };
     let actual: Node = serde_yaml::from_str(node_yaml)?;
     assert!(actual == expected);
-    return Ok(());
+    Ok(())
   }
 
-  pub const SIMPLE_TREE_YAML: &'static str = "\
+  pub const SIMPLE_TREE_YAML: &str = "\
 - id: fc8e2c43-8f0a-461f-9b44-30cc45c4357f
   function: af2bd9fa-14f6-4388-b68b-e50c8443960e
   children:
@@ -162,6 +162,6 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
 
     let actual: Vec<Node> = serde_yaml::from_str(node_yaml)?;
     assert!(actual == expected);
-    return Ok(());
+    Ok(())
   }
 }

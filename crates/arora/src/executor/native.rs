@@ -13,6 +13,12 @@ pub struct NativeExecutor {
   modules: HashMap<Uuid, Box<NativeModule>>,
 }
 
+impl Default for NativeExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeExecutor {
   pub fn new() -> Self {
     Self {
@@ -95,7 +101,7 @@ impl Module for NativeModule {
       let res_ptr = res_address as *mut u8;
       let size_buf = std::slice::from_raw_parts(res_ptr, 4);
       let size = u32::from_be_bytes(size_buf.try_into().unwrap());
-      let res_buf: *const [u8] = std::slice::from_raw_parts(res_ptr, size as usize);
+      let res_buf: *const [u8] = std::ptr::slice_from_raw_parts(res_ptr, size as usize);
       Ok(Box::from_raw(res_buf as *mut [u8]))
     }
   }

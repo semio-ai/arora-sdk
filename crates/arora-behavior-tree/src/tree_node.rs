@@ -49,10 +49,10 @@ impl TreeNode {
       let mut ids = Vec::with_capacity(children.len());
       for child in children {
         let child_node =
-          child.collect(&mut node_index, &mut variables, node_parameters_variables)?;
-        let child_node_id = child_node.id.clone();
+          child.collect(node_index, variables, node_parameters_variables)?;
+        let child_node_id = child_node.id;
         // This could only happen with an UUID collision, i.e. never.
-        assert_eq!(node_index.insert(child_node.id.clone(), child_node), None);
+        assert_eq!(node_index.insert(child_node.id, child_node), None);
         ids.push(child_node_id);
       }
       Some(ids)
