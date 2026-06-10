@@ -92,7 +92,7 @@ impl ReadableRegistry for RemoteCachedRegistry {
     }
   }
 
-  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &str) -> Result<Uuid, RegistryError> {
     let res = self.cache.resolve_path(path).await;
     if res.is_ok() {
       return res;

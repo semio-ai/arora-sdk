@@ -30,7 +30,7 @@ pub async fn resolve_type_id(
   Ok(match Uuid::parse_str(name) {
     Ok(id) => id,
     Err(_) => registry
-      .resolve_path(&name.to_string())
+      .resolve_path(name)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?,
   })
@@ -43,7 +43,7 @@ pub async fn resolve_module_id(
   Ok(match Uuid::parse_str(name) {
     Ok(id) => id,
     Err(_) => registry
-      .resolve_path(&name.to_string())
+      .resolve_path(name)
       .await
       .map_err(ModuleDeclarationError::RegistryError)?,
   })
