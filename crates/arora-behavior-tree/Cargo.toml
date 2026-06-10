@@ -18,6 +18,8 @@ semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = 
 lazy_static = "*"
 quick-xml = "0.40"
 serde = { version = "1", features = ["derive"] }
+# 0.9 switches the YAML enum representation from single-key maps to `!Tag`,
+# which existing tree/module YAML files don't use. Stay on 0.8.
 serde_yaml = "0.8"
 uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "2"
