@@ -114,14 +114,24 @@ musl cross-toolchain's).
 
 ## Target choices
 
-### `wasm32-wasip1` for guest modules
+### `wasm32-wasip1` for guest modules; `wasm32-wasip2` components incoming
 
-Module guests target `wasm32-wasip1`, not `wasm32-unknown-unknown` or
-`wasm32-wasip2`.
+Legacy module guests target `wasm32-wasip1`. New-style guests are
+WebAssembly Components targeting `wasm32-wasip2` against the
+`arora:module` WIT world (`wit/arora-module.wit`).
 
 - `wasip1` is Tier 2 in rustc, fully supported by WASI SDK 33, and matches
-  what wasi-sdk's clang emits by default.
-- `wasip2` (component model) is a bigger ecosystem move; deferred.
+  what wasi-sdk's clang emits by default. The custom malloc/dispatch ABI
+  and `arora-buffers` exchange over raw linear memory live on this path.
+- `wasip2` is Tier 2 in rustc and emits components directly (via
+  `wasm-component-ld`). Components exchange data through the canonical
+  ABI (`list<u8>`), eliminating the guest allocator protocol. See
+  `modules/test-rust-component` and `executor::component`.
+- `wasip3` (WASI 0.3, native async) is the destination: the WIT world is
+  shaped so its functions become `async` without structural changes. Not
+  adopted yet because wasmtime's `p3` module is explicitly experimental,
+  `wasm32-wasip3` is Tier 3 in rustc, and browsers lack a transpilation
+  path (jco async needs JSPI, absent from Firefox).
 - `wasm32-unknown-unknown` is still used for pure-Rust wasm without a system
   interface (`arora-buffers`, `arora-util` as staticlibs, and the
   `arora-web` engine itself — see below).
@@ -165,21 +175,25 @@ This pulls Boost and OpenSSL transitively — expect ~10 min on a cold build.
 
 ## Engine architecture
 
-### Three executors, one engine
+### Four executors, one engine
 
-The engine (`crates/arora`) exposes three `Executor` implementations and
-selects between them at registration time:
+The engine (`crates/arora`) exposes four `Executor` implementations and
+selects between them by the `executor.name` in a module's header:
 
-| Executor                   | Module location               | Cfg                                  | Default feature |
-| -------------------------- | ----------------------------- | ------------------------------------ | --------------- |
-| `executor::native`         | `native.rs`                   | `cfg(not(target_arch = "wasm32"))`   | `native-host`   |
-| `executor::wasm` (wasmtime)| `wasm/mod.rs`                 | `cfg(not(target_arch = "wasm32"))`   | `wasmtime-host` |
-| `executor::browser`        | `browser/mod.rs`              | `cfg(target_arch = "wasm32")`        | always-on on wasm32 |
+| Executor                   | Name             | Module location  | Cfg                                | Default feature |
+| -------------------------- | ---------------- | ---------------- | ---------------------------------- | --------------- |
+| `executor::native`         | `native`         | `native.rs`      | `cfg(not(target_arch = "wasm32"))` | `native-host`   |
+| `executor::wasm` (wasmtime)| `wasm`           | `wasm/mod.rs`    | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
+| `executor::component`      | `wasm-component` | `component/mod.rs` | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
+| `executor::browser`        | `wasm`           | `browser/mod.rs` | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
 
-`native` uses `libloading` to dlopen host cdylibs. `wasm` uses `wasmtime`.
-`browser` uses `js_sys::WebAssembly::{Module, Instance, Memory}` and
-implements its own WASI stubs (`proc_exit`, `fd_write` → console,
-`random_get` via `crypto.getRandomValues`, …).
+`native` uses `libloading` to dlopen host cdylibs. `wasm` uses `wasmtime`
+core modules with the legacy malloc/dispatch ABI. `component` uses
+`wasmtime::component` against the `arora:module` WIT world plus
+`wasmtime-wasi` p2. `browser` uses
+`js_sys::WebAssembly::{Module, Instance, Memory}` and implements its own
+WASI stubs (`proc_exit`, `fd_write` → console, `random_get` via
+`crypto.getRandomValues`, …).
 
 `wasmtime`, `wasmtime-wasi`, `libloading`, and `tempfile` are gated behind
 the `wasmtime-host` and `native-host` features (both default-on for native
@@ -196,16 +210,21 @@ crate is just the JS binding surface.
 **Why:** keeps `wasm-bindgen` out of the dependency graph of native consumers
 of `arora`, and lets `arora-web` be built/published independently.
 
-### `engine as usize` for executor callbacks (deliberately unsafe)
+### Raw engine pointer in executor host state (deliberately unsafe)
 
-Both the wasmtime and browser executors register `arora_dispatch` and
-`arora_dispatch_indirect` host callbacks that capture an `*mut Engine`
-re-encoded as `usize`, because `wasm-bindgen` `Closure`s and wasmtime's
-`Linker` callbacks cannot capture borrowed lifetimes that span the engine's
-lifetime cleanly. The engine is pinned (`Pin<Box<Engine>>`) so the address is
-stable.
+All wasm executors give their dispatch callbacks access to a raw
+`*mut Engine` (`EngineRef`): the wasmtime executors carry it in their
+`Store` host state (behind an `EnginePtr` wrapper whose
+`unsafe impl Send` satisfies wasmtime's store-data bound), the browser
+executor captures it in its import closures. The engine is pinned
+(`Pin<Box<Engine>>`) so the address is stable.
 
-This is a known unsafe pattern; cleanup is tracked separately.
+The pointer stays raw because dispatch is re-entrant: a guest call to
+`arora_dispatch` re-enters `Engine::dispatch` while the engine is already
+mutably borrowed further up the same stack, which no safe wrapper
+(`RefCell`, `RwLock`) tolerates. Removing it means reworking module
+ownership so modules are callable without borrowing the engine — planned
+together with the component-model migration.
 
 ## Module surface
 

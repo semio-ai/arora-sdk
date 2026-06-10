@@ -69,7 +69,8 @@ Key build concepts:
 - `cargo build --workspace` is the entry point
 - Cross-compilation happens automatically via artifact dependencies
 - C++ modules use CMake, but invoked from Rust `build.rs`
-- Wasm modules target `wasm32-wasip1`
+- Legacy wasm modules target `wasm32-wasip1`; component-model modules
+  target `wasm32-wasip2` against `wit/arora-module.wit`
 - Browser engine uses `wasm32-unknown-unknown`
 
 ## Common Pitfalls and Solutions
