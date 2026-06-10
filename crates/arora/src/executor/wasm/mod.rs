@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use bytes::Buf;
@@ -20,7 +19,7 @@ use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
 use crate::{
-    engine::{Engine, EngineRef},
+    engine::EngineRef,
     executor::wasm::guest::AroraBuffer,
     module::{DispatchError, Module},
 };
@@ -33,8 +32,29 @@ pub enum InitializationError {
     Internal(#[error(not(source))] anyhow::Error),
 }
 
-/// Shared handle to the guest's `malloc` export, resolved lazily on first use.
-type MallocRc = Arc<RwLock<Option<TypedFunc<(u32,), u32>>>>;
+/// [`EngineRef`] wrapper satisfying the `Send` bound that
+/// [`wasmtime_wasi::p1::add_to_linker_sync`] puts on store data.
+///
+/// SAFETY: the engine and the modules holding this pointer live and run on a
+/// single thread; `Send` is only claimed to satisfy the linker bound, the
+/// pointer never actually crosses threads.
+struct EnginePtr(EngineRef);
+unsafe impl Send for EnginePtr {}
+
+/// Host-side state held by each module's [`Store`].
+struct HostState {
+    wasi: WasiP1Ctx,
+
+    /// The [`crate::engine::Engine`] this module belongs to. Guest calls to
+    /// `arora_dispatch` re-enter the engine while it is already mutably
+    /// borrowed further up the stack, which is why this is a raw pointer
+    /// rather than a safe reference (see [`EngineRef`]).
+    engine: EnginePtr,
+
+    /// The guest's `arora_buffer_alloc` export, used by dispatch handlers to
+    /// allocate result buffers in guest memory. Set right after instantiation.
+    malloc: Option<TypedFunc<(u32,), u32>>,
+}
 
 pub struct WebAssemblyExecutor {
     engine: WasmEngine,
@@ -72,24 +92,23 @@ impl Executor for WebAssemblyExecutor {
     ) -> Result<Box<dyn Module>, LoadModuleError> {
         let module = WasmModule::new(&self.engine, &module_definition.executable)
             .map_err(|_| LoadModuleError::MalformedExecutable)?;
-        let ctx = WasiCtxBuilder::new().inherit_stdio().build_p1();
+        let state = HostState {
+            wasi: WasiCtxBuilder::new().inherit_stdio().build_p1(),
+            engine: EnginePtr(self.arora_engine.unwrap()),
+            malloc: None,
+        };
 
-        let store = Store::new(&self.engine, ctx);
+        let store = Store::new(&self.engine, state);
 
         let mut linker = Linker::new(&self.engine);
-        wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s| s).map_err(|err| {
-            LoadModuleError::Internal(format!("failed to map to wasm linker: {}", err))
-        })?;
+        wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s: &mut HostState| &mut s.wasi)
+            .map_err(|err| {
+                LoadModuleError::Internal(format!("failed to map to wasm linker: {}", err))
+            })?;
 
         Ok(Box::new(
-            WebAssemblyModule::new(
-                self.arora_engine.unwrap(),
-                module_definition.header.exports,
-                module,
-                store,
-                linker,
-            )
-            .unwrap(),
+            WebAssemblyModule::new(module_definition.header.exports, module, store, linker)
+                .unwrap(),
         ))
     }
 
@@ -119,14 +138,12 @@ struct WebAssemblyModule {
     /// The memory pool taken by the WASM module.
     memory: Memory,
 
-    store: Store<WasiP1Ctx>,
+    store: Store<HostState>,
 }
 
 impl WebAssemblyModule {
     fn arora_dispatch(
-        engine: usize,
-        malloc_rc: &MallocRc,
-        mut caller: Caller<'_, WasiP1Ctx>,
+        mut caller: Caller<'_, HostState>,
         module_id: u32,
         method_id: u32,
         arg: u32,
@@ -141,11 +158,9 @@ impl WebAssemblyModule {
             .and_then(Extern::into_memory)
             .unwrap();
 
-        // yuck yuck yuck
-        // All of this shouldn't necessary. We should fix it.
-        let engine = unsafe { &mut *(engine as *mut Engine) };
-
-        let malloc = malloc_rc.try_read().unwrap().as_ref().unwrap().clone();
+        // SAFETY: re-entrant access to the engine; see `HostState::engine`.
+        let engine = unsafe { &mut *caller.data().engine.0 };
+        let malloc = caller.data().malloc.as_ref().unwrap().clone();
 
         let mut context = caller.as_context_mut();
 
@@ -166,20 +181,15 @@ impl WebAssemblyModule {
         result_addr
     }
 
-    fn arora_dispatch_indirect(
-        engine: usize,
-        malloc_rc: &MallocRc,
-        mut caller: Caller<'_, WasiP1Ctx>,
-        callable_id: u64,
-    ) -> u32 {
-        // more yucks
-        let arora_caller: &mut dyn CallBridge = unsafe { &mut *(engine as *mut Engine) };
+    fn arora_dispatch_indirect(mut caller: Caller<'_, HostState>, callable_id: u64) -> u32 {
+        // SAFETY: re-entrant access to the engine; see `HostState::engine`.
+        let arora_caller: &mut dyn CallBridge = unsafe { &mut *caller.data().engine.0 };
         let result_value = arora_caller
             .arora_call_indirect(&CallableId { id: callable_id })
             .unwrap();
         let result_buffer = serialize(&result_value);
 
-        let malloc = malloc_rc.try_read().unwrap().as_ref().unwrap().clone();
+        let malloc = caller.data().malloc.as_ref().unwrap().clone();
 
         let memory = caller
             .get_export("memory")
@@ -200,47 +210,13 @@ impl WebAssemblyModule {
     }
 
     pub fn new(
-        engine: EngineRef,
         exports: Vec<ExportSymbol>,
         module: WasmModule,
-        mut store: Store<WasiP1Ctx>,
-        mut linker: Linker<WasiP1Ctx>,
+        mut store: Store<HostState>,
+        mut linker: Linker<HostState>,
     ) -> Result<Self> {
-        // Convert the pointer into a usize to ensure it passes through the WASM ABI.
-        // TODO: do we really need to do this?
-        let arora_engine_addr = engine as usize;
-
-        let malloc_rc = Arc::new(RwLock::new(None));
-
-        let malloc_rc_clone = malloc_rc.clone();
-        linker.func_wrap(
-            "env",
-            "arora_dispatch",
-            move |caller: Caller<'_, WasiP1Ctx>, module_id, method_id, arg| {
-                WebAssemblyModule::arora_dispatch(
-                    arora_engine_addr,
-                    &malloc_rc_clone,
-                    caller,
-                    module_id,
-                    method_id,
-                    arg,
-                )
-            },
-        )?;
-
-        let malloc_rc_clone = malloc_rc.clone();
-        linker.func_wrap(
-            "env",
-            "arora_dispatch_indirect",
-            move |caller: Caller<'_, WasiP1Ctx>, callable_id: u64| {
-                WebAssemblyModule::arora_dispatch_indirect(
-                    arora_engine_addr,
-                    &malloc_rc_clone,
-                    caller,
-                    callable_id,
-                )
-            },
-        )?;
+        linker.func_wrap("env", "arora_dispatch", Self::arora_dispatch)?;
+        linker.func_wrap("env", "arora_dispatch_indirect", Self::arora_dispatch_indirect)?;
 
         let instance = linker.instantiate(&mut store, &module)?;
 
@@ -263,7 +239,7 @@ impl WebAssemblyModule {
         }
 
         let memory = instance.get_memory(&mut store, "memory").unwrap();
-        *malloc_rc.try_write().unwrap() = Some(arora_buffer_alloc.clone());
+        store.data_mut().malloc = Some(arora_buffer_alloc.clone());
 
         Ok(Self {
             module,
