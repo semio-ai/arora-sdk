@@ -9,4 +9,4 @@ license = "Proprietary"
 anyhow = "1"
 flate2 = "1"
 tar = "0.4"
-ureq = { version = "2", default-features = false, features = ["tls"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }

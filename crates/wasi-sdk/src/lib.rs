@@ -106,13 +106,13 @@ fn download_and_extract(cache: &Path, install: &Path) -> Result<()> {
         "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-{VERSION_MAJOR}/wasi-sdk-{VERSION_FULL}-{arch}-{os}.tar.gz"
     );
     eprintln!("wasi-sdk: downloading {url}");
-    let resp = ureq::get(&url)
+    let mut resp = ureq::get(&url)
         .call()
         .with_context(|| format!("GET {url}"))?;
     if resp.status() != 200 {
         bail!("download failed: HTTP {} for {}", resp.status(), url);
     }
-    let mut reader = resp.into_reader();
+    let mut reader = resp.body_mut().as_reader();
     let mut buf = Vec::new();
     reader
         .read_to_end(&mut buf)
