@@ -46,6 +46,18 @@ jobs:
       - name: Test (native + wasm modules via wasmtime)
         run: cargo test --release
 
+      # Lint in this job rather than a parallel one: the test build above has
+      # already fetched every dependency and run the build scripts that emit
+      # each crate's src/arora_generated.rs. clippy has to compile regardless,
+      # and `cargo fmt --check` errors on the unresolved `mod arora_generated;`
+      # when those files are absent — so folding both in reuses that work
+      # instead of paying for a second runner to redo the bindep/codegen build.
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check
+
       # Install wasm-pack for browser tests
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
@@ -54,47 +66,6 @@ jobs:
       # bindep'd wasm guest, and wasm-compatible engine.
       - name: Run arora-web browser test (headless Firefox)
         run: wasm-pack test --headless --firefox --release crates/arora-web
-
-  lint:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure cargo git access
-        run: |
-          mkdir -p ~/.cargo
-          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
-          git config --global credential.helper 'store --file ~/.my-credentials'
-
-      - name: Install rustfmt and clippy
-        run: rustup component add rustfmt clippy
-
-      # rust-toolchain.toml pins nightly + wasm32-wasip1; the wasm guest
-      # bindeps are built while checking, so the extra target must be present.
-      - name: Install wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Cache cargo registry & target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
-
-      # Clippy runs first because compiling executes the build scripts that
-      # generate each crate's `src/arora_generated.rs`. `cargo fmt` follows the
-      # `mod arora_generated;` declarations, so without those files present it
-      # fails to resolve the module before checking anything.
-      - name: Clippy
-        run: cargo clippy -- -D warnings
-
-      - name: Check formatting
-        run: cargo fmt --check
 
   markdown-link-check:
     runs-on: ubuntu-latest
