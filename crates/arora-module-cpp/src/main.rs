@@ -1,9 +1,3 @@
-// This crate builds C++ source trees imperatively: vectors are seeded and then
-// pushed onto, and a few loops keep an explicit index for readability of the
-// emitted code. Those step-by-step forms are clearer here than the iterator
-// rewrites clippy suggests.
-#![allow(clippy::vec_init_then_push, clippy::explicit_counter_loop)]
-
 pub mod ast;
 pub mod constant;
 pub mod declare;
@@ -566,19 +560,15 @@ fn generate_self_header<'a>(context: &Context<'a>) -> anyhow::Result<Translation
   let guard_name = include_guard_name(&module.name);
   let id_name = identifier_name(&module.name);
 
-  let mut declarations = Vec::new();
-  declarations.push(PreprocessorDirective::Ifndef(guard_name.clone()).into());
-  declarations.push(PreprocessorDirective::Define(guard_name).into());
-  declarations.push(NewLine { count: 1 }.into());
-
-  declarations
-    .push(PreprocessorDirective::Include("cstdint".to_string(), IncludeStyle::System).into());
-  declarations
-    .push(PreprocessorDirective::Include("optional".to_string(), IncludeStyle::System).into());
-  declarations
-    .push(PreprocessorDirective::Include("string".to_string(), IncludeStyle::System).into());
-  declarations
-    .push(PreprocessorDirective::Include("vector".to_string(), IncludeStyle::System).into());
+  let mut declarations: Vec<Declaration> = vec![
+    PreprocessorDirective::Ifndef(guard_name.clone()).into(),
+    PreprocessorDirective::Define(guard_name).into(),
+    NewLine { count: 1 }.into(),
+    PreprocessorDirective::Include("cstdint".to_string(), IncludeStyle::System).into(),
+    PreprocessorDirective::Include("optional".to_string(), IncludeStyle::System).into(),
+    PreprocessorDirective::Include("string".to_string(), IncludeStyle::System).into(),
+    PreprocessorDirective::Include("vector".to_string(), IncludeStyle::System).into(),
+  ];
 
   for export in context.module.as_ref().unwrap().exports.values() {
     let mut dependencies = HashSet::new();
@@ -785,8 +775,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
         let field_count = "field_count".to_expression();
         let current_res = "current_res".to_expression();
 
-        let mut i = 0;
-        for parameter_id in f.parameter_ordering.iter() {
+        for (i, parameter_id) in f.parameter_ordering.iter().enumerate() {
           let parameter = f.parameters.get(parameter_id).unwrap();
           let mut field_declarations: Vec<Declaration> = Vec::new();
 
@@ -853,8 +842,6 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
             )
             .into(),
           );
-
-          i += 1;
         }
 
         function_declarations.push(
