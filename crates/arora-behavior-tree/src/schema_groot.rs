@@ -686,7 +686,7 @@ pub mod tests {
     use super::{action, parse_groot_xml, seq, BehaviorTree, Node};
     use crate::{
         schema::Expression,
-        tests::tests::{crate_root_path, read_header_to_index, BASE_MODULE_NAMES},
+        tests::{crate_root_path, read_header_to_index, BASE_MODULE_NAMES},
         ModuleFunction,
     };
     use anyhow::Result;
