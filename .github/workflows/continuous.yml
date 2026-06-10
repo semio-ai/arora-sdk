@@ -116,11 +116,15 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Check formatting
-        run: cargo fmt --check
-
+      # Clippy runs first because compiling executes the build scripts that
+      # generate each crate's `src/arora_generated.rs`. `cargo fmt` follows the
+      # `mod arora_generated;` declarations, so without those files present it
+      # fails to resolve the module before checking anything.
       - name: Clippy
         run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check
 
   markdown-link-check:
     runs-on: ubuntu-latest
