@@ -960,8 +960,7 @@ pub fn structure_deserializer(
   let field_index = "field_index".to_expression();
   let current_res = "current_res".to_expression();
 
-  let mut i = 0;
-  for field_id in sorted_field_ids.iter() {
+  for (i, field_id) in sorted_field_ids.iter().enumerate() {
     let field = ty.fields.get(*field_id).unwrap();
 
     let mut field_declarations: Vec<Declaration> = Vec::new();
@@ -1030,8 +1029,6 @@ pub fn structure_deserializer(
       )
       .into(),
     );
-
-    i += 1;
   }
 
   function_statements.push(Statement::Return("__arora_result__".to_expression()).into());
@@ -1064,9 +1061,7 @@ pub fn enumeration_deserializer(
   name: &str,
   ty: &EnumerationFrozen,
 ) -> FunctionImplementation {
-  let mut function_statements = Vec::<Declaration>::new();
-
-  function_statements.push(
+  let mut function_statements: Vec<Declaration> = vec![
     Variable {
       name: "variant".to_string(),
       ty: ty::U8_CONST.clone(),
@@ -1074,9 +1069,6 @@ pub fn enumeration_deserializer(
       ..Default::default()
     }
     .into(),
-  );
-
-  function_statements.push(
     Statement::If(
       "variant"
         .to_expression()
@@ -1091,9 +1083,6 @@ pub fn enumeration_deserializer(
       None,
     )
     .into(),
-  );
-
-  function_statements.push(
     Variable {
       name: "res".to_string(),
       ty: ty::ARORA_GET_ENUMERATION_VALUE_RESULT.clone(),
@@ -1101,9 +1090,6 @@ pub fn enumeration_deserializer(
       ..Default::default()
     }
     .into(),
-  );
-
-  function_statements.push(
     Statement::If(
       func::ARORA_UUID_COMPARE
         .call([
@@ -1124,7 +1110,7 @@ pub fn enumeration_deserializer(
       None,
     )
     .into(),
-  );
+  ];
 
   for (_, variant) in ty.variants.iter() {
     let ret = if variant.ty.is_scalar()
@@ -1363,18 +1349,19 @@ pub fn enumeration_serializer(
   let enum_type_enum = enum_type_name.to_expression().colon_colon("Variant");
   let mut switch_cases = Vec::<(Expression, Block)>::new();
   for (_, variant) in &enum_type.variants {
-    let mut case_statements: Vec<Declaration> = Vec::new();
-    case_statements.push(Declaration::Statement(Statement::Expression(
-      func::ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE.call([
-        writer.clone(),
-        id::type_uuid(enum_type_name).to_expression(),
-        id::value_uuid(enum_type_name, &variant.name).to_expression(),
-      ]),
-    )));
-    case_statements.push(Declaration::Statement(Statement::Expression(
-      func::ARORA_BUFFER_WRITER_ADD_UNIT.call([writer.clone()]),
-    )));
-    case_statements.push(Declaration::Statement(Statement::Break));
+    let case_statements: Vec<Declaration> = vec![
+      Declaration::Statement(Statement::Expression(
+        func::ARORA_BUFFER_WRITER_ADD_ENUMERATION_VALUE.call([
+          writer.clone(),
+          id::type_uuid(enum_type_name).to_expression(),
+          id::value_uuid(enum_type_name, &variant.name).to_expression(),
+        ]),
+      )),
+      Declaration::Statement(Statement::Expression(
+        func::ARORA_BUFFER_WRITER_ADD_UNIT.call([writer.clone()]),
+      )),
+      Declaration::Statement(Statement::Break),
+    ];
     switch_cases.push((
       enum_type_enum.colon_colon(variant.name.to_expression()),
       Block {
@@ -1384,14 +1371,11 @@ pub fn enumeration_serializer(
     ));
   }
 
-  let mut function_statements = Vec::<Declaration>::new();
-  function_statements.push(
-    Statement::Switch(
-      value.dot("get_variant").call::<String, _>(vec![]),
-      switch_cases,
-    )
-    .into(),
-  );
+  let function_statements: Vec<Declaration> = vec![Statement::Switch(
+    value.dot("get_variant").call::<String, _>(vec![]),
+    switch_cases,
+  )
+  .into()];
 
   FunctionImplementation {
     name: "arora::buffer::serialize".to_string(),
