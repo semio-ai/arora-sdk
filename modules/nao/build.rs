@@ -4,78 +4,78 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 
 fn main() -> Result<()> {
-  let manifest_dir =
-    PathBuf::from(env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?);
-  println!("cargo:rerun-if-changed=CMakeLists.txt");
-  println!("cargo:rerun-if-changed=src");
-  println!("cargo:rerun-if-changed=module.yaml");
-  println!("cargo:rerun-if-changed=mac-homebrew-i686.toolchain.cmake");
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?);
+    println!("cargo:rerun-if-changed=CMakeLists.txt");
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=module.yaml");
+    println!("cargo:rerun-if-changed=mac-homebrew-i686.toolchain.cmake");
 
-  let arora_module_cli_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CLI")?;
-  let arora_module_cpp_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CPP")?;
-  let arora_buffers_lib = staticlib_artifact("ARORA_BUFFERS")?;
-  let arora_util_lib = staticlib_artifact("ARORA_UTIL")?;
+    let arora_module_cli_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CLI")?;
+    let arora_module_cpp_src = env_path("CARGO_BIN_FILE_ARORA_MODULE_CPP")?;
+    let arora_buffers_lib = staticlib_artifact("ARORA_BUFFERS")?;
+    let arora_util_lib = staticlib_artifact("ARORA_UTIL")?;
 
-  let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
-  let tools_dir = out_dir.join("arora-tools");
-  std::fs::create_dir_all(&tools_dir).ok();
-  let arora_module_cli = tools_dir.join("arora-module-cli");
-  let arora_module_cpp = tools_dir.join("arora-module-cpp");
-  copy_executable(&arora_module_cli_src, &arora_module_cli)?;
-  copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
+    let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
+    let tools_dir = out_dir.join("arora-tools");
+    std::fs::create_dir_all(&tools_dir).ok();
+    let arora_module_cli = tools_dir.join("arora-module-cli");
+    let arora_module_cpp = tools_dir.join("arora-module-cpp");
+    copy_executable(&arora_module_cli_src, &arora_module_cli)?;
+    copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
-  let workspace_root = workspace_root(&manifest_dir)?;
-  let behavior_tree_include = workspace_root
-    .join("crates")
-    .join("arora-behavior-tree-types-yaml")
-    .join("records");
-  let arora_cpp_source = workspace_root.join("libs").join("cpp");
-  let arora_include_dir = workspace_root.join("target").join("include");
-  let toolchain_file = manifest_dir.join("mac-homebrew-i686.toolchain.cmake");
+    let workspace_root = workspace_root(&manifest_dir)?;
+    let behavior_tree_include = workspace_root
+        .join("crates")
+        .join("arora-behavior-tree-types-yaml")
+        .join("records");
+    let arora_cpp_source = workspace_root.join("libs").join("cpp");
+    let arora_include_dir = workspace_root.join("target").join("include");
+    let toolchain_file = manifest_dir.join("mac-homebrew-i686.toolchain.cmake");
 
-  // We override cmake-rs's HOST target derivation: it defaults to the
-  // build script's TARGET (aarch64-apple-darwin) and injects OSX-specific
-  // flags, which collide with the i686-unknown-linux-musl cross toolchain.
-  let dst = cmake::Config::new(&manifest_dir)
-    .target("i686-unknown-linux-musl")
-    .host("i686-unknown-linux-musl")
-    .no_default_flags(true)
-    .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
-    .define("ARORA_MODULE_CLI", &arora_module_cli)
-    .define("ARORA_BEHAVIOR_TREE_INCLUDE", &behavior_tree_include)
-    .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)
-    .define("ARORA_INCLUDE_DIR", &arora_include_dir)
-    .define("ARORA_BUFFERS_LIB", &arora_buffers_lib)
-    .define("ARORA_UTIL_LIB", &arora_util_lib)
-    .build_target("nao")
-    .very_verbose(false)
-    .build();
+    // We override cmake-rs's HOST target derivation: it defaults to the
+    // build script's TARGET (aarch64-apple-darwin) and injects OSX-specific
+    // flags, which collide with the i686-unknown-linux-musl cross toolchain.
+    let dst = cmake::Config::new(&manifest_dir)
+        .target("i686-unknown-linux-musl")
+        .host("i686-unknown-linux-musl")
+        .no_default_flags(true)
+        .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
+        .define("ARORA_MODULE_CLI", &arora_module_cli)
+        .define("ARORA_BEHAVIOR_TREE_INCLUDE", &behavior_tree_include)
+        .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)
+        .define("ARORA_INCLUDE_DIR", &arora_include_dir)
+        .define("ARORA_BUFFERS_LIB", &arora_buffers_lib)
+        .define("ARORA_UTIL_LIB", &arora_util_lib)
+        .build_target("nao")
+        .very_verbose(false)
+        .build();
 
-  let so = dst.join("build").join("libnao.so");
-  if !so.exists() {
-    return Err(anyhow!(
-      "expected libnao.so at {} but not found",
-      so.display()
-    ));
-  }
-  println!("cargo:libnao={}", so.display());
+    let so = dst.join("build").join("libnao.so");
+    if !so.exists() {
+        return Err(anyhow!(
+            "expected libnao.so at {} but not found",
+            so.display()
+        ));
+    }
+    println!("cargo:libnao={}", so.display());
 
-  let stable = workspace_root
-    .join("target")
-    .join(env::var("PROFILE").unwrap_or_else(|_| "debug".to_string()))
-    .join("modules");
-  std::fs::create_dir_all(&stable).ok();
-  let stable_so = stable.join("libnao.so");
-  std::fs::copy(&so, &stable_so)
-    .with_context(|| format!("copying {} to {}", so.display(), stable_so.display()))?;
-  println!("cargo:libnao-stable={}", stable_so.display());
-  Ok(())
+    let stable = workspace_root
+        .join("target")
+        .join(env::var("PROFILE").unwrap_or_else(|_| "debug".to_string()))
+        .join("modules");
+    std::fs::create_dir_all(&stable).ok();
+    let stable_so = stable.join("libnao.so");
+    std::fs::copy(&so, &stable_so)
+        .with_context(|| format!("copying {} to {}", so.display(), stable_so.display()))?;
+    println!("cargo:libnao-stable={}", stable_so.display());
+    Ok(())
 }
 
 fn env_path(name: &str) -> Result<PathBuf> {
-  env::var_os(name)
-    .map(PathBuf::from)
-    .ok_or_else(|| anyhow!("{name} not set; bindeps may not be enabled (-Z bindeps)"))
+    env::var_os(name)
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("{name} not set; bindeps may not be enabled (-Z bindeps)"))
 }
 
 /// Resolve a cross-target `staticlib` artifact dependency's `.a` file via
@@ -83,52 +83,52 @@ fn env_path(name: &str) -> Result<PathBuf> {
 /// bare `CARGO_STATICLIB_FILE_<DEP>` (lib `arora_buffers` ≠ dep `arora-buffers`),
 /// so the directory is the reliable source. `dep` is the upper-cased dep name.
 fn staticlib_artifact(dep: &str) -> Result<PathBuf> {
-  if let Some(p) = env::var_os(format!("CARGO_STATICLIB_FILE_{dep}")) {
-    return Ok(PathBuf::from(p));
-  }
-  let dir = env::var_os(format!("CARGO_STATICLIB_DIR_{dep}")).ok_or_else(|| {
-    anyhow!("CARGO_STATICLIB_DIR_{dep} not set; bindeps may not be enabled (-Z bindeps)")
-  })?;
-  let dir = PathBuf::from(dir);
-  std::fs::read_dir(&dir)
-    .with_context(|| format!("reading staticlib dir {}", dir.display()))?
-    .filter_map(|e| e.ok().map(|e| e.path()))
-    .find(|p| p.extension().and_then(|e| e.to_str()) == Some("a"))
-    .ok_or_else(|| anyhow!("no .a staticlib found in {}", dir.display()))
+    if let Some(p) = env::var_os(format!("CARGO_STATICLIB_FILE_{dep}")) {
+        return Ok(PathBuf::from(p));
+    }
+    let dir = env::var_os(format!("CARGO_STATICLIB_DIR_{dep}")).ok_or_else(|| {
+        anyhow!("CARGO_STATICLIB_DIR_{dep} not set; bindeps may not be enabled (-Z bindeps)")
+    })?;
+    let dir = PathBuf::from(dir);
+    std::fs::read_dir(&dir)
+        .with_context(|| format!("reading staticlib dir {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("a"))
+        .ok_or_else(|| anyhow!("no .a staticlib found in {}", dir.display()))
 }
 
 #[cfg(unix)]
 fn copy_executable(src: &Path, dst: &Path) -> Result<()> {
-  use std::os::unix::fs::PermissionsExt;
-  std::fs::copy(src, dst)
-    .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
-  let mut perms = std::fs::metadata(dst)?.permissions();
-  perms.set_mode(0o755);
-  std::fs::set_permissions(dst, perms)?;
-  Ok(())
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::copy(src, dst)
+        .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+    let mut perms = std::fs::metadata(dst)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(dst, perms)?;
+    Ok(())
 }
 
 #[cfg(not(unix))]
 fn copy_executable(src: &Path, dst: &Path) -> Result<()> {
-  std::fs::copy(src, dst)
-    .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
-  Ok(())
+    std::fs::copy(src, dst)
+        .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+    Ok(())
 }
 
 fn workspace_root(manifest_dir: &Path) -> Result<PathBuf> {
-  let mut dir = manifest_dir.to_path_buf();
-  while dir.pop() {
-    let candidate = dir.join("Cargo.toml");
-    if candidate.is_file() {
-      if let Ok(s) = std::fs::read_to_string(&candidate) {
-        if s.contains("[workspace]") {
-          return Ok(dir);
+    let mut dir = manifest_dir.to_path_buf();
+    while dir.pop() {
+        let candidate = dir.join("Cargo.toml");
+        if candidate.is_file() {
+            if let Ok(s) = std::fs::read_to_string(&candidate) {
+                if s.contains("[workspace]") {
+                    return Ok(dir);
+                }
+            }
         }
-      }
     }
-  }
-  Err(anyhow!(
-    "could not find workspace root above {}",
-    manifest_dir.display()
-  ))
+    Err(anyhow!(
+        "could not find workspace root above {}",
+        manifest_dir.display()
+    ))
 }
