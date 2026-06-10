@@ -403,7 +403,6 @@ pub mod tests {
     Ok(())
   }
 
-  #[ignore]
   #[tokio::test]
   pub async fn fake_listen_regex_dispatch_to_groot() -> Result<()> {
     let name = Uuid::new_v4();
