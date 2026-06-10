@@ -197,7 +197,7 @@ impl<'a> BufferReader<'a> {
 #[no_mangle]
 pub extern "C" fn arora_buffer_reader_new<'a>(buffer: *const u8) -> *mut BufferReader<'a> {
   let size_buf: &[u8] = unsafe { std::slice::from_raw_parts(buffer, 4) };
-  let size = u32::from_be_bytes(size_buf.try_into().unwrap());
+  let size = u32::from_le_bytes(size_buf.try_into().unwrap());
   unsafe {
     Box::into_raw(Box::new(BufferReader::new(std::slice::from_raw_parts(
       buffer,
