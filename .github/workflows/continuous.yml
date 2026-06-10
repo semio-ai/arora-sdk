@@ -85,6 +85,43 @@ jobs:
       - name: Run arora-web browser test (headless Firefox)
         run: wasm-pack test --headless --firefox --release crates/arora-web
 
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - name: Install rustfmt and clippy
+        run: rustup component add rustfmt clippy
+
+      # rust-toolchain.toml pins nightly + wasm32-wasip1; the wasm guest
+      # bindeps are built while checking, so the extra target must be present.
+      - name: Install wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy
+
   markdown-link-check:
     runs-on: ubuntu-latest
     steps:
