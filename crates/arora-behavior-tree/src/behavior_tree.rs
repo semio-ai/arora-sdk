@@ -6,6 +6,7 @@ pub mod error;
 pub mod nodes;
 pub mod schema;
 pub mod schema_groot;
+#[cfg(test)]
 mod tests;
 pub mod tree_node;
 use arora::call::{CallBridge, CallError, Callable, CallableId};
