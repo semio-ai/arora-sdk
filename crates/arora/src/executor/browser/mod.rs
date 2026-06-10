@@ -25,7 +25,7 @@ use arora_types::module::low::ModuleDefinition;
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
-use crate::engine::{Engine, EngineRef};
+use crate::engine::EngineRef;
 use crate::module::{DispatchError, Module};
 
 pub struct BrowserExecutor {
@@ -77,8 +77,9 @@ impl Executor for BrowserExecutor {
             move |module_id_ptr, method_id_ptr, arg_ptr| {
                 let late = late_d.borrow();
                 let late = late.as_ref().expect("late-bound state not set");
-                // SAFETY: matches the wasmtime executor's engine-pointer trick.
-                let engine = unsafe { &mut *(engine_ptr as *mut Engine) };
+                // SAFETY: re-entrant single-threaded access, like the
+                // wasmtime executor's `HostState::engine`.
+                let engine = unsafe { &mut *engine_ptr };
                 let module_id = read_uuid(&late.memory, module_id_ptr);
                 let method_id = read_uuid(&late.memory, method_id_ptr);
                 let arg = read_arora_buffer(&late.memory, arg_ptr);
@@ -97,7 +98,9 @@ impl Executor for BrowserExecutor {
         let dispatch_indirect_cb = Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
             let late = late_di.borrow();
             let late = late.as_ref().expect("late-bound state not set");
-            let engine = unsafe { &mut *(engine_ptr as *mut Engine) };
+            // SAFETY: re-entrant single-threaded access, like the
+            // wasmtime executor's `HostState::engine`.
+            let engine = unsafe { &mut *engine_ptr };
             let value = engine
                 .arora_call_indirect(&CallableId {
                     id: callable_id as u64,
