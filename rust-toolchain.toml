@@ -7,5 +7,6 @@ channel = "nightly-2026-06-03"
 components = ["rustfmt", "clippy", "rust-src"]
 targets = [
   "wasm32-wasip1",
+  "wasm32-wasip2",
 ]
 

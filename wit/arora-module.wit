@@ -1,0 +1,42 @@
+/// The Arora module contract as a WebAssembly Component Model world.
+///
+/// Component guests implement `dispatch` (routing by function id) and may
+/// call back into the engine through the imported `host` interface. Data
+/// still crosses the boundary as Arora Buffers (`list<u8>`); the canonical
+/// ABI replaces the legacy malloc/free + raw-linear-memory exchange used by
+/// core-module guests.
+///
+/// Designed for WASIp2 today; under WASIp3 the same functions become
+/// `async` (and buffers can graduate to `stream<u8>`) without changing
+/// their shape.
+package arora:module@0.1.0;
+
+interface types {
+    /// A 128-bit identifier — a UUID split into big-endian halves.
+    record id {
+        hi: u64,
+        lo: u64,
+    }
+}
+
+/// Engine services available to every Arora guest module.
+interface host {
+    use types.{id};
+
+    /// Call a function of another module. `arg` and the returned value are
+    /// Arora Buffers.
+    dispatch: func(module: id, method: id, arg: list<u8>) -> result<list<u8>, string>;
+
+    /// Invoke an anonymous callable registered with the engine.
+    dispatch-indirect: func(callable: u64) -> result<list<u8>, string>;
+}
+
+world module {
+    use types.{id};
+
+    import host;
+
+    /// Single dispatch entry point: routes `method` to the matching
+    /// exported function. `arg` and the result are Arora Buffers.
+    export dispatch: func(method: id, arg: list<u8>) -> result<list<u8>, string>;
+}

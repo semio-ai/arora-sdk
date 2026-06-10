@@ -44,6 +44,7 @@ fn main() {
     // NOT artifact dependencies of this crate, so they are intentionally absent.
     forward_env_var("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes");
     forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
+    forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component");
     forward_env_var("CARGO_CDYLIB_FILE_POLLY_polly");
 
     println!("cargo:rerun-if-changed=build.rs");

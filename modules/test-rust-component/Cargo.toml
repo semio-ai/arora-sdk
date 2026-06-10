@@ -1,0 +1,12 @@
+[package]
+name = "test-rust-component"
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+description = "Test module built as a WebAssembly Component (wasm32-wasip2) against the arora:module WIT world"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.58"
