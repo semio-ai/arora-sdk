@@ -216,7 +216,11 @@ impl WebAssemblyModule {
         mut linker: Linker<HostState>,
     ) -> Result<Self> {
         linker.func_wrap("env", "arora_dispatch", Self::arora_dispatch)?;
-        linker.func_wrap("env", "arora_dispatch_indirect", Self::arora_dispatch_indirect)?;
+        linker.func_wrap(
+            "env",
+            "arora_dispatch_indirect",
+            Self::arora_dispatch_indirect,
+        )?;
 
         let instance = linker.instantiate(&mut store, &module)?;
 

@@ -64,9 +64,8 @@ impl SharedLoader {
             .get()
             .ok_or_else(|| JsValue::from_str("BrowserExecutor: set_engine not called"))?;
 
-        let (imports, parts) = build_imports(engine_ptr).map_err(|e| {
-            JsValue::from_str(&format!("building imports failed: {e}"))
-        })?;
+        let (imports, parts) = build_imports(engine_ptr)
+            .map_err(|e| JsValue::from_str(&format!("building imports failed: {e}")))?;
         let result = JsFuture::from(WebAssembly::instantiate_buffer(&executable, &imports)).await?;
         let instance: WebAssembly::Instance = Reflect::get(&result, &"instance".into())?
             .dyn_into()
@@ -345,8 +344,8 @@ fn build_imports(engine_ptr: EngineRef) -> Result<(Object, ImportParts), LoadMod
             })
             .expect("arora_dispatch_indirect: engine call failed");
         let buf = serialize_value(&value);
-        let addr =
-            call_u32_u32(&late.malloc, buf.len() as u32).expect("arora_dispatch_indirect: malloc failed");
+        let addr = call_u32_u32(&late.malloc, buf.len() as u32)
+            .expect("arora_dispatch_indirect: malloc failed");
         write_bytes(&late.memory, addr, &buf);
         addr
     });

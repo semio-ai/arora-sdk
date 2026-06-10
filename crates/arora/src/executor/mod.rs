@@ -1,5 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
+#[cfg(feature = "wasmtime-host")]
+pub mod component;
 #[cfg(feature = "native-host")]
 pub mod native;
 #[cfg(feature = "wasmtime-host")]

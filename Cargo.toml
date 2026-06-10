@@ -20,6 +20,7 @@ members = [
   "modules/nao",
   "modules/polly",
   "modules/test-rust-wasm",
+  "modules/test-rust-component",
   "modules/behavior-tree-nodes",
   "modules/test-cpp",
   "modules/test-cpp-2",
