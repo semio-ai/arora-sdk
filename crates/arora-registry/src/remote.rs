@@ -168,7 +168,7 @@ impl ReadableRegistry for RemoteRegistry {
     self.get_module_not_mut(selector, tag).await
   }
 
-  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &str) -> Result<Uuid, RegistryError> {
     let selector = Selector::Path(path.to_owned());
     selector
       .resolve(&self.context)

@@ -56,7 +56,7 @@ impl ReadableRegistry for LocalRegistry {
     }
   }
 
-  async fn resolve_path(&self, path: &String) -> Result<Uuid, RegistryError> {
+  async fn resolve_path(&self, path: &str) -> Result<Uuid, RegistryError> {
     Ok(
       *self
         .path_to_ids
