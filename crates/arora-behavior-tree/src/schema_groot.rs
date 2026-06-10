@@ -65,7 +65,7 @@ impl Node {
       UNSET_STR_GROOT_ID => Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap(),
       IS_STR_SET_GROOT_ID => Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap(),
       WAIT_STR_SET_GROOT_ID => Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap(),
-      REGEX_MATCH_GROOT_ID => Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
+      REGEX_MATCH_GROOT_ID => Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap(),
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
           message: format!("unexpected node id: {}", id),
@@ -113,7 +113,23 @@ impl Node {
       FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
       PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
       COS_FUNCTION_ID => COS_GROOT_ID,
-      // Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap() => SET_STR_GROOT_ID,
+      // The string/regex helper nodes use ad-hoc function ids (see `nodes.rs`)
+      // instead of named constants, so they are matched via guards here.
+      id if id == Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap() => {
+        SET_STR_GROOT_ID
+      }
+      id if id == Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap() => {
+        UNSET_STR_GROOT_ID
+      }
+      id if id == Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap() => {
+        IS_STR_SET_GROOT_ID
+      }
+      id if id == Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap() => {
+        WAIT_STR_SET_GROOT_ID
+      }
+      id if id == Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap() => {
+        REGEX_MATCH_GROOT_ID
+      }
       id => {
         return Err(BehaviorTreeError::InconsistentTreeError {
           message: format!("unexpected node id: {}", id),
@@ -290,7 +306,7 @@ fn arora_param_to_groot(
   // Behavior tree layer: handle _RET_PARAM_ID specially
   if *param_arg.0 == _RET_PARAM_ID {
     let value = match param_arg.1 {
-      Expression::Uuid(id) => {
+      Expression::Uuid(id) | Expression::VariableId(id) => {
         let maybe_name = variables.get(id);
         let name = if let Some(name) = maybe_name {
           name.to_owned()
@@ -334,7 +350,7 @@ fn arora_param_to_groot(
     1 => {
       let function_parameter = param_matches.first().unwrap();
       let value = match param_arg.1 {
-        Expression::Uuid(id) => {
+        Expression::Uuid(id) | Expression::VariableId(id) => {
           let maybe_name = variables.get(id);
           let name = if let Some(name) = maybe_name {
             name.to_owned()
