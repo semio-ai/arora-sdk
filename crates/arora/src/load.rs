@@ -18,29 +18,29 @@ use crate::schema::module::low::{Header, ModuleDefinition};
 /// function-id → module-id index.
 #[derive(Debug, Clone)]
 pub struct LoadedModule {
-  pub id: Uuid,
-  pub function_ids: Vec<Uuid>,
+    pub id: Uuid,
+    pub function_ids: Vec<Uuid>,
 }
 
 /// Build a [`ModuleDefinition`] from its constituent parts.
 pub fn module_definition_from_parts(header: Header, executable: Box<[u8]>) -> ModuleDefinition {
-  ModuleDefinition {
-    schema_version: 0,
-    header,
-    executable,
-  }
+    ModuleDefinition {
+        schema_version: 0,
+        header,
+        executable,
+    }
 }
 
 /// Load a module into `engine` from its `header` and `executable` bytes,
 /// returning a `LoadedModule` summary the caller can use to map function
 /// ids back to the module id.
 pub fn load_module_from_parts(
-  engine: &mut Engine,
-  header: Header,
-  executable: Box<[u8]>,
+    engine: &mut Engine,
+    header: Header,
+    executable: Box<[u8]>,
 ) -> Result<LoadedModule, LoadModuleError> {
-  let id = header.id;
-  let function_ids = header.exports.iter().map(|e| *e.id()).collect();
-  engine.load_module(module_definition_from_parts(header, executable))?;
-  Ok(LoadedModule { id, function_ids })
+    let id = header.id;
+    let function_ids = header.exports.iter().map(|e| *e.id()).collect();
+    engine.load_module(module_definition_from_parts(header, executable))?;
+    Ok(LoadedModule { id, function_ids })
 }

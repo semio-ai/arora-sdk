@@ -11,27 +11,27 @@ use arora_generated::behavior_tree::status::Status;
 
 fn ping() {}
 fn succeed() -> Status {
-  Status::Success
+    Status::Success
 }
 
 fn cos(angle: Option<f32>) -> f32 {
-  angle.unwrap().cos()
+    angle.unwrap().cos()
 }
 
 fn add(a: Option<f32>, b: Option<f32>) -> f32 {
-  a.unwrap() + b.unwrap()
+    a.unwrap() + b.unwrap()
 }
 
 // Tests
 //====================================================================================
 #[cfg(test)]
 pub mod tests {
-  use super::*;
-  use anyhow::Result;
+    use super::*;
+    use anyhow::Result;
 
-  #[test]
-  pub fn test_ping() -> Result<()> {
-    ping();
-    Ok(())
-  }
+    #[test]
+    pub fn test_ping() -> Result<()> {
+        ping();
+        Ok(())
+    }
 }
