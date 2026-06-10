@@ -34,10 +34,7 @@ pub struct Node {
   id: String,
   name: String,
   param_args: HashMap<String, String>,
-  // Children are boxed consistently with the node-builder API (`to_boxed_vec`,
-  // `seq`/`fallback`/...); keep the boxing rather than churn every constructor.
-  #[allow(clippy::vec_box)]
-  children: Vec<Box<Node>>,
+  children: Vec<Node>,
 }
 
 impl Node {
@@ -49,7 +46,7 @@ impl Node {
   ) -> Result<TreeNode, BehaviorTreeError> {
     let mut tree_node_children = Vec::new();
     for child in &self.children {
-      tree_node_children.push(child.as_ref().try_into_tree_node(index, variables)?)
+      tree_node_children.push(child.try_into_tree_node(index, variables)?)
     }
 
     let arora_id = match self.id.as_str() {
@@ -101,7 +98,7 @@ impl Node {
     let mut groot_children = Vec::new();
     if let Some(tree_node_children) = &tree_node.children {
       for child in tree_node_children {
-        groot_children.push(Box::new(Self::try_from_tree_node(child, index, variables)?))
+        groot_children.push(Self::try_from_tree_node(child, index, variables)?)
       }
     }
     let groot_id = match tree_node.function {
@@ -151,7 +148,7 @@ pub fn seq(children: Vec<Node>) -> Node {
   Node {
     id: SEQ_GROOT_ID.to_string(),
     name: Uuid::new_v4().to_string(),
-    children: to_boxed_vec(children),
+    children,
     param_args: HashMap::new(),
   }
 }
@@ -451,7 +448,7 @@ fn parse_groot_node(
       loop {
         let child = parse_groot_node(reader, buf)?;
         match child {
-          Some(child) => children.push(Box::new(child)),
+          Some(child) => children.push(child),
           None => break,
         }
       }
@@ -647,9 +644,9 @@ impl Display for Node {
   }
 }
 
-fn display_children(f: &mut std::fmt::Formatter<'_>, children: &[Box<Node>]) -> std::fmt::Result {
+fn display_children(f: &mut std::fmt::Formatter<'_>, children: &[Node]) -> std::fmt::Result {
   for child in children {
-    f.write_fmt(format_args!("\n- {}", child.as_ref()))?
+    f.write_fmt(format_args!("\n- {}", child))?
   }
   Ok(())
 }
@@ -660,10 +657,6 @@ fn display_param_args(param_args: &HashMap<String, String>) -> String {
     .map(|(key, value)| format!("{}=\"{}\"", key, value))
     .collect::<Vec<String>>()
     .join(", ")
-}
-
-fn to_boxed_vec<T>(v: Vec<T>) -> Vec<Box<T>> {
-  v.into_iter().map(|child| Box::new(child)).collect()
 }
 
 fn to_string_map(m: HashMap<&str, &str>) -> HashMap<String, String> {
