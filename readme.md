@@ -197,7 +197,8 @@ C++ modules each carry their own `CMakeLists.txt` invoked from a
 ### Prerequisites
 
 - Rust nightly with the standard toolchain. The pinned `rust-toolchain.toml`
-  also requests the `wasm32-wasip1` and `i686-unknown-linux-musl` targets.
+  also requests the `wasm32-wasip1`, `wasm32-wasip2`, and
+  `i686-unknown-linux-musl` targets.
 - A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
   Linux).
 - For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`.

@@ -27,6 +27,7 @@ engine/
 ├── modules/              Arora modules (guest code loaded by the engine)
 │   ├── behavior-tree-nodes    Rust → wasm32-wasip1; BT primitives
 │   ├── test-rust-wasm         Rust → wasm32-wasip1; reference module
+│   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
 │   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
 │   └── nao                    cross-built i686-musl cdylib (opt-in)
@@ -38,8 +39,9 @@ engine/
 │   ├── design_decisions.md    why things are the way they are
 │   └── dispatch.md            direct vs indirect dispatch; how BTs use it
 ├── examples/
+├── wit/                  arora:module WIT world for component guests
 ├── .cargo/config.toml    unstable flags + i686-musl cross settings
-├── rust-toolchain.toml   pins nightly + wasm32-wasip1 + i686-musl
+├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2 + i686-musl
 ├── Cargo.toml            workspace root
 └── .github/workflows/    CI
 ```
@@ -62,12 +64,14 @@ graph TB
         subgraph executors["Executor trait"]
             native_exec["NativeExecutor\nlibloading · host only\nfeature: native-host"]
             wasm_exec["WebAssemblyExecutor\nwasmtime + WASI · host only\nfeature: wasmtime-host"]
+            component_exec["ComponentExecutor\nwasmtime component + WASI p2 · host only\nfeature: wasmtime-host"]
             browser_exec["BrowserExecutor\njs-sys WebAssembly + WASI stubs\ncfg(target_arch = wasm32)"]
         end
     end
 
     subgraph mods["Modules"]
         rust_wasm["Rust → wasm32-wasip1\nbehavior-tree-nodes, test-rust-wasm"]
+        rust_component["Rust → wasm32-wasip2 component\ntest-rust-component"]
         cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2"]
         native_cdylib["Native cdylib\npolly"]
         cross_cdylib["Cross-compiled cdylib\nnao · i686-musl · opt-in"]
@@ -82,8 +86,10 @@ graph TB
 The engine library (`crates/arora`) is dual-target:
 
 - On native (`cfg(not(target_arch = "wasm32"))`), it compiles `executor::native`
-  (libloading) and `executor::wasm` (wasmtime). Both are gated by Cargo
-  features (`native-host`, `wasmtime-host`), both default-on.
+  (libloading), `executor::wasm` (wasmtime core modules), and
+  `executor::component` (wasmtime component model against
+  `wit/arora-module.wit`). All are gated by Cargo features
+  (`native-host`, `wasmtime-host`), both default-on.
 - On `wasm32-*`, it compiles `executor::browser` instead and accepts
   `--no-default-features` to drop the host-only deps.
 

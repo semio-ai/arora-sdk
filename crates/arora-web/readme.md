@@ -11,7 +11,9 @@ JS surface (see [src/lib.rs](src/lib.rs)):
 ```ts
 class Engine {
   constructor();
-  loadModule(headerJson: string, executable: Uint8Array): string; // returns module id
+  loadModule(headerJson: string, executable: Uint8Array): string; // returns module id; sync compile (< 8 MB in Chrome)
+  prepareModule(headerJson: string, executable: Uint8Array): Promise<void>; // async compile + instantiate, any size
+  loadPreparedModule(headerJson: string): string;                   // completes a prepareModule load; returns module id
   call(callJson: string): string;                                   // returns result JSON
   listModules(): string;                                            // returns JSON array of loaded module headers
 }
@@ -19,12 +21,19 @@ class Engine {
 class BehaviorTreeRunner {
   constructor();
   loadModule(headerJson: string, executable: Uint8Array): string;
+  prepareModule(headerJson: string, executable: Uint8Array): Promise<void>;
+  loadPreparedModule(headerJson: string): string;
   listModules(): string;                                            // returns JSON array of loaded module headers
   setVariable(varId: string, valueJson: string): void;
   tick(nodesJson: string): string;  // returns {status, trace, variables}
   run(nodesJson: string): string;   // runs until not Running
 }
 ```
+
+`loadModule` compiles and instantiates synchronously, which Chrome rejects
+above 8 MB on the main thread. The `prepareModule` + `loadPreparedModule`
+pair routes through the async `WebAssembly.instantiate` and works for any
+size in every browser.
 
 `callJson` matches `arora::call::Call`:
 `{"id":"<function-uuid>","args":[...]}`. If the call doesn't carry a
