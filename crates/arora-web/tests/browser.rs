@@ -51,6 +51,33 @@ fn load_and_ping_test_rust_wasm() {
     assert!(!result.is_empty(), "result was empty");
 }
 
+/// Same flow through the prepared-module path used for executables larger
+/// than Chrome's 8 MB main-thread compile/instantiate limit.
+#[wasm_bindgen_test]
+async fn prepare_load_and_ping_test_rust_wasm() {
+    let header_json = yaml_header_to_json(HEADER_YAML);
+    let mut engine = Engine::new();
+
+    wasm_bindgen_futures::JsFuture::from(engine.prepare_module(&header_json, WASM_BYTES.to_vec()))
+        .await
+        .expect("prepareModule succeeded");
+
+    let module_id: String = engine
+        .load_prepared_module(&header_json)
+        .map_err(jsval_to_string)
+        .expect("loadPreparedModule succeeded");
+
+    let header: Header = serde_yaml::from_str(HEADER_YAML).unwrap();
+    assert_eq!(module_id, header.id.to_string());
+
+    let call_json = format!(r#"{{"id":"{PING_FN_ID}","args":[]}}"#);
+    let result = engine
+        .call(&call_json)
+        .map_err(jsval_to_string)
+        .expect("call(ping) succeeded");
+    assert!(!result.is_empty(), "result was empty");
+}
+
 fn jsval_to_string(v: JsValue) -> String {
     v.as_string().unwrap_or_else(|| format!("{v:?}"))
 }

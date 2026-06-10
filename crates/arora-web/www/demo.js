@@ -472,14 +472,21 @@ let nodeStatuses = new Map();
 let tickCount = 0;
 let currentVars = {};
 
-function loadModules(r) {
-  r.loadModule(JSON.stringify(jsyaml.load(modules.btHeaderYaml)), new Uint8Array(modules.btWasm));
-  r.loadModule(JSON.stringify(jsyaml.load(modules.testHeaderYaml)), new Uint8Array(modules.testWasm));
+async function loadModules(r) {
+  // Two-step load: prepareModule compiles + instantiates asynchronously
+  // (Chrome rejects both above 8 MB on the main thread), then
+  // loadPreparedModule completes the load synchronously.
+  const btHeader = JSON.stringify(jsyaml.load(modules.btHeaderYaml));
+  const testHeader = JSON.stringify(jsyaml.load(modules.testHeaderYaml));
+  await r.prepareModule(btHeader, new Uint8Array(modules.btWasm));
+  r.loadPreparedModule(btHeader);
+  await r.prepareModule(testHeader, new Uint8Array(modules.testWasm));
+  r.loadPreparedModule(testHeader);
 }
 
-function switchTree(treeKey) {
+async function switchTree(treeKey) {
   runner = new BehaviorTreeRunner();
-  loadModules(runner);
+  await loadModules(runner);
 
   currentTree = TREES[treeKey];
   nodeMap = buildNodeMap(currentTree.nodes);
@@ -545,9 +552,9 @@ function doTick() {
   }
 }
 
-function doReset() {
+async function doReset() {
   runner = new BehaviorTreeRunner();
-  loadModules(runner);
+  await loadModules(runner);
 
   for (const [id, val] of Object.entries(currentTree.initial)) {
     runner.setVariable(id, JSON.stringify(val));
@@ -601,7 +608,7 @@ async function main() {
   document.getElementById("tick-btn").addEventListener("click", doTick);
   document.getElementById("reset-btn").addEventListener("click", doReset);
 
-  switchTree("classic");
+  await switchTree("classic");
 }
 
 main();

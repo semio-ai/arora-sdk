@@ -71,7 +71,11 @@ async function loadModule(yamlText, wasmBuffer, statusEl) {
   try {
     const header = jsyaml.load(yamlText);
     const headerJson = JSON.stringify(header);
-    const id = engine.loadModule(headerJson, new Uint8Array(wasmBuffer));
+    // Two-step load: prepareModule compiles + instantiates asynchronously
+    // (Chrome rejects both above 8 MB on the main thread), then
+    // loadPreparedModule completes the load synchronously.
+    await engine.prepareModule(headerJson, new Uint8Array(wasmBuffer));
+    const id = engine.loadPreparedModule(headerJson);
     statusEl.className = "load-status";
     statusEl.textContent = `✓ loaded ${header.name ?? id}`;
     renderModules();

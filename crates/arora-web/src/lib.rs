@@ -20,7 +20,7 @@ use std::rc::Rc;
 use arora::{
     call::{CallBridge, Callable, CallableId},
     engine::EngineBuilder,
-    executor::browser::BrowserExecutor,
+    executor::browser::{BrowserExecutor, SharedLoaderRc},
     load::load_module_from_parts,
 };
 use arora_types::module::low::Header;
@@ -40,6 +40,7 @@ pub fn _start() {
 #[wasm_bindgen]
 pub struct Engine {
     inner: std::pin::Pin<Box<arora::engine::Engine>>,
+    loader: SharedLoaderRc,
     function_module: HashMap<Uuid, Uuid>,
     module_headers: HashMap<Uuid, String>,
 }
@@ -48,11 +49,12 @@ pub struct Engine {
 impl Engine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Engine {
-        let inner = EngineBuilder::new()
-            .add_executor(BrowserExecutor::new())
-            .build();
+        let executor = BrowserExecutor::new();
+        let loader = executor.shared();
+        let inner = EngineBuilder::new().add_executor(executor).build();
         Engine {
             inner,
+            loader,
             function_module: HashMap::new(),
             module_headers: HashMap::new(),
         }
@@ -60,17 +62,40 @@ impl Engine {
 
     /// Load a module given its header (as JSON) and executable bytes.
     /// Returns the module's UUID as a string.
+    ///
+    /// Compiles and instantiates synchronously: Chrome rejects both above
+    /// 8 MB on the main thread — use `prepareModule` + `loadPreparedModule`
+    /// for large executables.
     #[wasm_bindgen(js_name = loadModule)]
     pub fn load_module(&mut self, header_json: &str, executable: &[u8]) -> Result<String, JsValue> {
+        self.load_module_inner(header_json, executable.to_vec().into_boxed_slice())
+    }
+
+    /// Asynchronously compile and instantiate a module's executable
+    /// (via `WebAssembly.instantiate`, no main-thread size limit).
+    /// Follow up with `loadPreparedModule` to complete the load.
+    #[wasm_bindgen(js_name = prepareModule)]
+    pub fn prepare_module(&self, header_json: &str, executable: Vec<u8>) -> js_sys::Promise {
+        prepare_module_impl(self.loader.clone(), header_json, executable)
+    }
+
+    /// Load a module whose executable was staged by `prepareModule`.
+    /// Returns the module's UUID as a string.
+    #[wasm_bindgen(js_name = loadPreparedModule)]
+    pub fn load_prepared_module(&mut self, header_json: &str) -> Result<String, JsValue> {
+        self.load_module_inner(header_json, Box::new([]))
+    }
+
+    fn load_module_inner(
+        &mut self,
+        header_json: &str,
+        executable: Box<[u8]>,
+    ) -> Result<String, JsValue> {
         let header: Header = serde_json::from_str(header_json)
             .map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
         let header_json_str = header_json.to_string();
-        let loaded = load_module_from_parts(
-            &mut *self.inner,
-            header,
-            executable.to_vec().into_boxed_slice(),
-        )
-        .map_err(|e| JsValue::from_str(&format!("load_module failed: {e}")))?;
+        let loaded = load_module_from_parts(&mut *self.inner, header, executable)
+            .map_err(|e| JsValue::from_str(&format!("load_module failed: {e}")))?;
         for fn_id in &loaded.function_ids {
             self.function_module.insert(*fn_id, loaded.id);
         }
@@ -116,6 +141,23 @@ impl Default for Engine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Shared implementation of `prepareModule`: parses the header for the
+/// module id, then stages an asynchronously-instantiated module in the
+/// loader. Returns a `Promise<void>`.
+fn prepare_module_impl(
+    loader: SharedLoaderRc,
+    header_json: &str,
+    executable: Vec<u8>,
+) -> js_sys::Promise {
+    let header: Result<Header, _> = serde_json::from_str(header_json);
+    wasm_bindgen_futures::future_to_promise(async move {
+        let header =
+            header.map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+        loader.prepare(header.id, executable).await?;
+        Ok(JsValue::UNDEFINED)
+    })
 }
 
 // =============================================================================
@@ -366,6 +408,7 @@ fn register_node(
 #[wasm_bindgen]
 pub struct BehaviorTreeRunner {
     inner: Pin<Box<arora::engine::Engine>>,
+    loader: SharedLoaderRc,
     fn_meta: HashMap<Uuid, FnMeta>,
     variables: Rc<RefCell<HashMap<Uuid, Value>>>,
     module_headers: HashMap<Uuid, String>,
@@ -375,11 +418,12 @@ pub struct BehaviorTreeRunner {
 impl BehaviorTreeRunner {
     #[wasm_bindgen(constructor)]
     pub fn new() -> BehaviorTreeRunner {
-        let inner = EngineBuilder::new()
-            .add_executor(BrowserExecutor::new())
-            .build();
+        let executor = BrowserExecutor::new();
+        let loader = executor.shared();
+        let inner = EngineBuilder::new().add_executor(executor).build();
         BehaviorTreeRunner {
             inner,
+            loader,
             fn_meta: HashMap::new(),
             variables: Rc::new(RefCell::new(HashMap::new())),
             module_headers: HashMap::new(),
@@ -389,8 +433,35 @@ impl BehaviorTreeRunner {
     /// Load a WASM module. `header_json` must be the module's YAML header
     /// converted to JSON (the JS side can use js-yaml for that).
     /// Returns the module UUID string.
+    ///
+    /// Compiles and instantiates synchronously: Chrome rejects both above
+    /// 8 MB on the main thread — use `prepareModule` + `loadPreparedModule`
+    /// for large executables.
     #[wasm_bindgen(js_name = loadModule)]
     pub fn load_module(&mut self, header_json: &str, executable: &[u8]) -> Result<String, JsValue> {
+        self.load_module_inner(header_json, executable.to_vec().into_boxed_slice())
+    }
+
+    /// Asynchronously compile and instantiate a module's executable
+    /// (via `WebAssembly.instantiate`, no main-thread size limit).
+    /// Follow up with `loadPreparedModule` to complete the load.
+    #[wasm_bindgen(js_name = prepareModule)]
+    pub fn prepare_module(&self, header_json: &str, executable: Vec<u8>) -> js_sys::Promise {
+        prepare_module_impl(self.loader.clone(), header_json, executable)
+    }
+
+    /// Load a module whose executable was staged by `prepareModule`.
+    /// Returns the module UUID string.
+    #[wasm_bindgen(js_name = loadPreparedModule)]
+    pub fn load_prepared_module(&mut self, header_json: &str) -> Result<String, JsValue> {
+        self.load_module_inner(header_json, Box::new([]))
+    }
+
+    fn load_module_inner(
+        &mut self,
+        header_json: &str,
+        executable: Box<[u8]>,
+    ) -> Result<String, JsValue> {
         let header: Header = serde_json::from_str(header_json)
             .map_err(|e| JsValue::from_str(&format!("invalid header: {e}")))?;
         let module_id = header.id;
@@ -419,12 +490,8 @@ impl BehaviorTreeRunner {
             );
         }
 
-        let result = load_module_from_parts(
-            &mut *self.inner,
-            header,
-            executable.to_vec().into_boxed_slice(),
-        )
-        .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))?;
+        let result = load_module_from_parts(&mut *self.inner, header, executable)
+            .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))?;
         self.module_headers.insert(result.id, header_json_str);
         Ok(result.id.to_string())
     }

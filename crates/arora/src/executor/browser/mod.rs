@@ -11,7 +11,7 @@
 //! `wasi_snapshot_preview1`; we provide minimal stubs sufficient to
 //! get past instantiation and Rust's startup.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -19,6 +19,7 @@ use js_sys::{Function, Object, Reflect, Uint8Array, WebAssembly};
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 
 use arora_buffers::serde_uuid::serialize as serialize_value;
 use arora_types::module::low::ModuleDefinition;
@@ -28,13 +29,93 @@ use crate::call::{CallBridge, CallableId};
 use crate::engine::EngineRef;
 use crate::module::{DispatchError, Module};
 
+/// State shared between a [`BrowserExecutor`] and asynchronous module
+/// loaders (e.g. arora-web's `prepareModule`).
+///
+/// Chrome disallows both synchronous compilation and synchronous
+/// instantiation above 8 MB on the main thread, so large modules must be
+/// compiled *and* instantiated through the async `WebAssembly.instantiate`.
+/// [`SharedLoader::prepare`] does that and stages the ready instance here;
+/// the next `Executor::load_module` for the same module id picks it up
+/// instead of compiling synchronously.
+pub struct SharedLoader {
+    engine: Cell<Option<EngineRef>>,
+    prepared: RefCell<HashMap<Uuid, PreparedInstance>>,
+}
+
+pub type SharedLoaderRc = Rc<SharedLoader>;
+
+/// An instantiated guest plus the import closures keeping it alive,
+/// staged for the synchronous tail of module loading.
+struct PreparedInstance {
+    instance: WebAssembly::Instance,
+    dispatch_cb: Closure<dyn FnMut(u32, u32, u32) -> u32>,
+    dispatch_indirect_cb: Closure<dyn Fn(i64) -> u32>,
+    wasi_keepalive: Vec<JsValue>,
+    late: Rc<RefCell<Option<LateBound>>>,
+}
+
+impl SharedLoader {
+    /// Asynchronously compile and instantiate `executable` for the module
+    /// `id`, staging the instance for the next `load_module(id)`.
+    pub async fn prepare(self: Rc<Self>, id: Uuid, executable: Vec<u8>) -> Result<(), JsValue> {
+        let engine_ptr = self
+            .engine
+            .get()
+            .ok_or_else(|| JsValue::from_str("BrowserExecutor: set_engine not called"))?;
+
+        let (imports, parts) = build_imports(engine_ptr).map_err(|e| {
+            JsValue::from_str(&format!("building imports failed: {e}"))
+        })?;
+        let result = JsFuture::from(WebAssembly::instantiate_buffer(&executable, &imports)).await?;
+        let instance: WebAssembly::Instance = Reflect::get(&result, &"instance".into())?
+            .dyn_into()
+            .map_err(|_| JsValue::from_str("WebAssembly.instantiate: no instance in result"))?;
+
+        self.prepared
+            .borrow_mut()
+            .insert(id, parts.with_instance(instance));
+        Ok(())
+    }
+}
+
+/// Import closures and late-bound state created before instantiation.
+struct ImportParts {
+    dispatch_cb: Closure<dyn FnMut(u32, u32, u32) -> u32>,
+    dispatch_indirect_cb: Closure<dyn Fn(i64) -> u32>,
+    wasi_keepalive: Vec<JsValue>,
+    late: Rc<RefCell<Option<LateBound>>>,
+}
+
+impl ImportParts {
+    fn with_instance(self, instance: WebAssembly::Instance) -> PreparedInstance {
+        PreparedInstance {
+            instance,
+            dispatch_cb: self.dispatch_cb,
+            dispatch_indirect_cb: self.dispatch_indirect_cb,
+            wasi_keepalive: self.wasi_keepalive,
+            late: self.late,
+        }
+    }
+}
+
 pub struct BrowserExecutor {
-    engine: Option<EngineRef>,
+    shared: SharedLoaderRc,
 }
 
 impl BrowserExecutor {
     pub fn new() -> Self {
-        Self { engine: None }
+        Self {
+            shared: Rc::new(SharedLoader {
+                engine: Cell::new(None),
+                prepared: RefCell::new(HashMap::new()),
+            }),
+        }
+    }
+
+    /// Shared handle for staging asynchronously-instantiated modules.
+    pub fn shared(&self) -> SharedLoaderRc {
+        self.shared.clone()
     }
 }
 
@@ -46,7 +127,7 @@ impl Default for BrowserExecutor {
 
 impl Executor for BrowserExecutor {
     fn set_engine(&mut self, engine: EngineRef) {
-        self.engine = Some(engine);
+        self.shared.engine.set(Some(engine));
     }
 
     fn name(&self) -> &'static str {
@@ -57,86 +138,39 @@ impl Executor for BrowserExecutor {
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn Module>, LoadModuleError> {
-        let engine_ptr = self.engine.ok_or_else(|| {
-            LoadModuleError::Internal("BrowserExecutor: set_engine not called".into())
-        })?;
-
-        // Compile the module from bytes.
-        let bytes_view = Uint8Array::from(module_definition.executable.as_ref());
-        let module = WebAssembly::Module::new(&bytes_view.into())
-            .map_err(|e| LoadModuleError::Internal(format!("WebAssembly.Module: {:?}", e)))?;
-
-        // Late-bound view of the instance's memory + malloc, shared with
-        // the dispatch closures (the instance does not exist yet at the
-        // moment we have to declare them as imports).
-        let late: Rc<RefCell<Option<LateBound>>> = Rc::new(RefCell::new(None));
-
-        // env.arora_dispatch
-        let late_d = late.clone();
-        let dispatch_cb = Closure::<dyn FnMut(u32, u32, u32) -> u32>::new(
-            move |module_id_ptr, method_id_ptr, arg_ptr| {
-                let late = late_d.borrow();
-                let late = late.as_ref().expect("late-bound state not set");
-                // SAFETY: re-entrant single-threaded access, like the
-                // wasmtime executor's `HostState::engine`.
-                let engine = unsafe { &mut *engine_ptr };
-                let module_id = read_uuid(&late.memory, module_id_ptr);
-                let method_id = read_uuid(&late.memory, method_id_ptr);
-                let arg = read_arora_buffer(&late.memory, arg_ptr);
-                let result = engine
-                    .dispatch(&module_id, &method_id, arg.as_ref())
-                    .expect("arora_dispatch: engine.dispatch failed");
-                let result_addr = call_u32_u32(&late.malloc, result.len() as u32)
-                    .expect("arora_dispatch: malloc failed");
-                write_bytes(&late.memory, result_addr, &result);
-                result_addr
-            },
-        );
-
-        // env.arora_dispatch_indirect
-        let late_di = late.clone();
-        let dispatch_indirect_cb = Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
-            let late = late_di.borrow();
-            let late = late.as_ref().expect("late-bound state not set");
-            // SAFETY: re-entrant single-threaded access, like the
-            // wasmtime executor's `HostState::engine`.
-            let engine = unsafe { &mut *engine_ptr };
-            let value = engine
-                .arora_call_indirect(&CallableId {
-                    id: callable_id as u64,
-                })
-                .expect("arora_dispatch_indirect: engine call failed");
-            let buf = serialize_value(&value);
-            let addr = call_u32_u32(&late.malloc, buf.len() as u32)
-                .expect("arora_dispatch_indirect: malloc failed");
-            write_bytes(&late.memory, addr, &buf);
-            addr
-        });
-
-        // Build the import object.
-        let imports = Object::new();
-        let env = Object::new();
-        Reflect::set(
-            &env,
-            &"arora_dispatch".into(),
-            dispatch_cb.as_ref().unchecked_ref(),
-        )
-        .map_err(js_to_load_err)?;
-        Reflect::set(
-            &env,
-            &"arora_dispatch_indirect".into(),
-            dispatch_indirect_cb.as_ref().unchecked_ref(),
-        )
-        .map_err(js_to_load_err)?;
-        Reflect::set(&imports, &"env".into(), &env).map_err(js_to_load_err)?;
-
-        let (wasi_obj, wasi_keepalive) = build_wasi_stubs();
-        Reflect::set(&imports, &"wasi_snapshot_preview1".into(), &wasi_obj)
-            .map_err(js_to_load_err)?;
-
-        // Instantiate.
-        let instance = WebAssembly::Instance::new(&module, &imports)
-            .map_err(|e| LoadModuleError::Internal(format!("WebAssembly.Instance: {:?}", e)))?;
+        // Use an instance prepared asynchronously for this id when there is
+        // one; otherwise compile + instantiate synchronously from bytes
+        // (subject to Chrome's 8 MB main-thread limit — large modules must
+        // go through `SharedLoader::prepare`).
+        let prepared = self
+            .shared
+            .prepared
+            .borrow_mut()
+            .remove(&module_definition.header.id);
+        let prepared = match prepared {
+            Some(p) => p,
+            None => {
+                let engine_ptr = self.shared.engine.get().ok_or_else(|| {
+                    LoadModuleError::Internal("BrowserExecutor: set_engine not called".into())
+                })?;
+                let bytes_view = Uint8Array::from(module_definition.executable.as_ref());
+                let module = WebAssembly::Module::new(&bytes_view.into()).map_err(|e| {
+                    LoadModuleError::Internal(format!("WebAssembly.Module: {:?}", e))
+                })?;
+                let (imports, parts) = build_imports(engine_ptr)?;
+                let instance = WebAssembly::Instance::new(&module, &imports).map_err(|e| {
+                    LoadModuleError::Internal(format!("WebAssembly.Instance: {:?}", e))
+                })?;
+                parts.with_instance(instance)
+            }
+        };
+        let PreparedInstance {
+            instance,
+            dispatch_cb,
+            dispatch_indirect_cb,
+            wasi_keepalive,
+            late,
+        } = prepared;
 
         // Pull exports.
         let exports = instance.exports();
@@ -265,6 +299,88 @@ impl Module for BrowserModule {
 }
 
 // --- helpers -------------------------------------------------------------
+
+/// Builds the guest import object: `env.arora_dispatch{,_indirect}` plus the
+/// `wasi_snapshot_preview1` stubs. The returned [`ImportParts`] keep the
+/// closures and late-bound state alive until the module is built.
+fn build_imports(engine_ptr: EngineRef) -> Result<(Object, ImportParts), LoadModuleError> {
+    // Late-bound view of the instance's memory + malloc, shared with
+    // the dispatch closures (the instance does not exist yet at the
+    // moment we have to declare them as imports).
+    let late: Rc<RefCell<Option<LateBound>>> = Rc::new(RefCell::new(None));
+
+    // env.arora_dispatch
+    let late_d = late.clone();
+    let dispatch_cb = Closure::<dyn FnMut(u32, u32, u32) -> u32>::new(
+        move |module_id_ptr, method_id_ptr, arg_ptr| {
+            let late = late_d.borrow();
+            let late = late.as_ref().expect("late-bound state not set");
+            // SAFETY: re-entrant single-threaded access, like the
+            // wasmtime executor's `HostState::engine`.
+            let engine = unsafe { &mut *engine_ptr };
+            let module_id = read_uuid(&late.memory, module_id_ptr);
+            let method_id = read_uuid(&late.memory, method_id_ptr);
+            let arg = read_arora_buffer(&late.memory, arg_ptr);
+            let result = engine
+                .dispatch(&module_id, &method_id, arg.as_ref())
+                .expect("arora_dispatch: engine.dispatch failed");
+            let result_addr = call_u32_u32(&late.malloc, result.len() as u32)
+                .expect("arora_dispatch: malloc failed");
+            write_bytes(&late.memory, result_addr, &result);
+            result_addr
+        },
+    );
+
+    // env.arora_dispatch_indirect
+    let late_di = late.clone();
+    let dispatch_indirect_cb = Closure::<dyn Fn(i64) -> u32>::new(move |callable_id: i64| {
+        let late = late_di.borrow();
+        let late = late.as_ref().expect("late-bound state not set");
+        // SAFETY: re-entrant single-threaded access, like the
+        // wasmtime executor's `HostState::engine`.
+        let engine = unsafe { &mut *engine_ptr };
+        let value = engine
+            .arora_call_indirect(&CallableId {
+                id: callable_id as u64,
+            })
+            .expect("arora_dispatch_indirect: engine call failed");
+        let buf = serialize_value(&value);
+        let addr =
+            call_u32_u32(&late.malloc, buf.len() as u32).expect("arora_dispatch_indirect: malloc failed");
+        write_bytes(&late.memory, addr, &buf);
+        addr
+    });
+
+    // Build the import object.
+    let imports = Object::new();
+    let env = Object::new();
+    Reflect::set(
+        &env,
+        &"arora_dispatch".into(),
+        dispatch_cb.as_ref().unchecked_ref(),
+    )
+    .map_err(js_to_load_err)?;
+    Reflect::set(
+        &env,
+        &"arora_dispatch_indirect".into(),
+        dispatch_indirect_cb.as_ref().unchecked_ref(),
+    )
+    .map_err(js_to_load_err)?;
+    Reflect::set(&imports, &"env".into(), &env).map_err(js_to_load_err)?;
+
+    let (wasi_obj, wasi_keepalive) = build_wasi_stubs();
+    Reflect::set(&imports, &"wasi_snapshot_preview1".into(), &wasi_obj).map_err(js_to_load_err)?;
+
+    Ok((
+        imports,
+        ImportParts {
+            dispatch_cb,
+            dispatch_indirect_cb,
+            wasi_keepalive,
+            late,
+        },
+    ))
+}
 
 fn js_to_load_err(e: JsValue) -> LoadModuleError {
     LoadModuleError::Internal(format!("js error: {e:?}"))
