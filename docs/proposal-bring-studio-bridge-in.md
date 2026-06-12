@@ -218,7 +218,7 @@ Adding to the five repos from proposal 1:
 |------|------|------|
 | `arora-types` | + `data::{Key, StateChange, DataStore, DataError}` | unchanged |
 | `arora-ecbs` | Canonical `DataStore` impl | `arora-types` |
-| `arora-module` | unchanged | unchanged |
+| `arora-module-authoring` | unchanged | unchanged |
 | `arora-engine` | unchanged | unchanged |
 | `arora-behavior-tree` | Can now consume a `DataStore` for blackboard reads/writes | + `arora-types` (already) |
 | `arora-sdk` | Owns the `Hal` trait; `Instance::builder()` accepts a `DataStore` and an optional `Hal` | + `arora-ecbs` (as default impl) |
@@ -231,7 +231,7 @@ Adding to the five repos from proposal 1:
 graph TD
     types["arora-types<br/>(crates.io)<br/>+ data::DataStore + Key + StateChange"]
     ecbs["arora-ecbs<br/>DataStore impl"]
-    module["arora-module"]
+    module["arora-module-authoring"]
     engine["arora-engine"]
     bt["arora-behavior-tree"]
     sdk["arora-sdk<br/>+ Hal trait + Instance"]
@@ -276,7 +276,7 @@ graph LR
         ecbs["arora-ecbs<br/>(Store impl of DataStore)"]
     end
 
-    subgraph module_repo["arora-module"]
+    subgraph module_repo["arora-module-authoring"]
         m_core["arora-module-core"]
         m_cli["arora-module-cli"]
         m_rust["arora-module-rust"]
@@ -327,7 +327,7 @@ graph LR
         a_hal_rest["hal/arora-hal-restful<br/>(hackerbot feature)"]
     end
 
-    %% arora-module internal (from proposal 1)
+    %% arora-module-authoring internal (from proposal 1)
     m_core --> types
     m_core --> m_reg
     m_core --> m_vfs

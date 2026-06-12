@@ -8,7 +8,7 @@ Revision note (2026-06-10): some groundwork already landed and is
 reflected below — the repo rename `engine` → `arora-engine`, the
 `semio-client`/`semio-record` move onto `main`, and clippy + fmt in the
 engine's CI. The substantive work (move `CallBridge` into `arora-types`,
-extract BT, `arora-module`, `arora-sdk`) is still pending.
+extract BT, `arora-module-authoring`, `arora-sdk`) is still pending.
 
 This document proposes a way to extract Arora modules (and module-shaped
 libraries like the behavior-tree runtime) into standalone repositories,
@@ -26,17 +26,27 @@ The four trees in scope:
 - `arora-types/` — already extracted, on crates.io
 - `arora-behavior-tree/` — a placeholder snapshot of the engine's BT crates
   pushed earlier as a "quick first move". Not a true extraction yet
-- (new) repos created as part of the recipe: `arora-module`, `arora-sdk`
+- (new) repos created as part of the recipe: `arora-module-authoring`, `arora-sdk`
+
+> **`arora-web`** (named here for the first time) is the engine's
+> tentative stand-alone web binding — a `wasm-bindgen` surface that
+> could ship as an NPM package to run Aroras anywhere on the web. A Rust
+> consumer such as Studio RS will likely depend on `arora-engine`
+> directly rather than on this web binding, whereas a web-side consumer
+> such as the Vizij Workspace could depend on `arora-web` directly. This
+> proposal is the next step of evolution, not the final target — whether
+> `arora-web` ultimately survives is left open. Its shape today and
+> after the split is detailed in §2.4.
 
 Discussions and Agreements:
 
 - Tiago: buffers should go into arora-types if it becomes the shared ser/de solution for them.
-  Otherwise it's fine in the arora-module repo. Until further notice it's actually ok.
+  Otherwise it's fine in the arora-module-authoring repo. Until further notice it's actually ok.
   Shouldn't we use a fixed data storage between modules, with a shared pointer
   between them, to avoid writing buffers all the time?
 - Chris: worried that we'd need to pass animation data at every tick, but that is not the case. It raises many questions about data interface, but indeed it's not needed yet to answer them.
 - Andy: worried we can't trace what's being called between modules. Tracing solutions are possible, but that won't provide a fixed channel to track. Victor says it's actually not meant to be interesting because Studio will either call the methods directly (ins and outs will be at hand), or through the behavior tree (variables are used in between nodes, no call stack).
-- Victor: buffers are fine in arora-module. But if it becomes the shared ser/de solution,
+- Victor: buffers are fine in arora-module-authoring. But if it becomes the shared ser/de solution,
   it should go into arora-core. But this decision is pretty easy to change in the future, so let's go?
   Discussions about data storage shared between modules is interesting,
   but not decisive for the current transition. It's more an implementation detail, since behavior trees do not care nor module interfaces.
@@ -146,17 +156,17 @@ should expose the module tooling as a thing of its own.
 | Repo | Role | Depends on |
 |------|------|------------|
 | `arora-types` | Interface layer: types, `Call`, `CallResult`, `Value`, **`CallBridge`/`Callable`/`CallableId`/`CallError`**, buffer ABI. Published to crates.io. | nothing (serde, semver, uuid) |
-| `arora-module` (new) | Module-author toolbox: `arora-module-core`, `-cli`, `-rust`, `-cpp`, `arora-registry`, `arora-vfs`, `arora-util`, `arora-buffers`, `wasi-sdk`. | `arora-types` |
-| `arora-engine` (this repo) | The engine library (crate `arora`), the launcher binary, the NAO experiment, the engine's own test suite. | `arora-types`, `arora-module` (test/build only) |
-| `arora-behavior-tree` (existing, refilled) | BT runtime + types + YAML records + `behavior-tree-nodes` wasm module. | `arora-types`, `arora-module` (build + tests) |
-| `arora-sdk` (new) | Integration layer. Owns `arora-web` and the convenience launcher. Re-exports the engine + golden modules preconfigured. | `arora-engine`, `arora-behavior-tree`, `arora-module` |
+| `arora-module-authoring` (new) | Module-author toolbox: `arora-module-core`, `-cli`, `-rust`, `-cpp`, `arora-registry`, `arora-vfs`, `arora-util`, `arora-buffers`, `wasi-sdk`. | `arora-types` |
+| `arora-engine` (this repo) | The engine library (crate `arora`), the launcher binary, the NAO experiment, the engine's own test suite. | `arora-types`, `arora-module-authoring` (test/build only) |
+| `arora-behavior-tree` (existing, refilled) | BT runtime + types + YAML records + `behavior-tree-nodes` wasm module. | `arora-types`, `arora-module-authoring` (build + tests) |
+| `arora-sdk` (new) | Integration layer. Owns `arora-web` and the convenience launcher. Re-exports the engine + golden modules preconfigured. | `arora-engine`, `arora-behavior-tree`, `arora-module-authoring` |
 
 ### 2.2 Dependency graph (target state)
 
 ```mermaid
 graph TD
     types["arora-types<br/>(crates.io)"]
-    module["arora-module<br/>module-core/-cli/-rust/-cpp,<br/>registry, vfs, util, buffers, wasi-sdk"]
+    module["arora-module-authoring<br/>module-core/-cli/-rust/-cpp,<br/>registry, vfs, util, buffers, wasi-sdk"]
     engine["arora-engine<br/>arora + launcher + NAO"]
     bt["arora-behavior-tree<br/>BT runtime + types + nodes"]
     sdk["arora-sdk<br/>arora-web + integration CLI<br/>+ re-exports of engine and BT"]
@@ -174,7 +184,7 @@ graph TD
 Solid arrows are runtime dependencies. Dashed arrows are build/test-only.
 
 The crucial property: no cycle. `arora-engine` and `arora-behavior-tree`
-are siblings on top of `arora-types` + `arora-module`. `arora-sdk` is
+are siblings on top of `arora-types` + `arora-module-authoring`. `arora-sdk` is
 the only place that sees both.
 
 #### Full crate-level view
@@ -190,7 +200,7 @@ graph LR
         types["arora-types"]
     end
 
-    subgraph module_repo["arora-module"]
+    subgraph module_repo["arora-module-authoring"]
         m_core["arora-module-core"]
         m_cli["arora-module-cli"]
         m_rust["arora-module-rust"]
@@ -222,7 +232,7 @@ graph LR
         sdk_web_bt["arora-web-behavior-tree"]
     end
 
-    %% arora-module internal
+    %% arora-module-authoring internal
     m_core --> types
     m_core --> m_reg
     m_core --> m_vfs
@@ -288,7 +298,7 @@ polly, or a new third-party module repo), the same shape applies:
 ```mermaid
 graph TD
     t["arora-types"]
-    m["arora-module"]
+    m["arora-module-authoring"]
     mod["some-module<br/>(runtime crate + wasm guest)"]
     sdk["arora-sdk (optional)"]
     consumer["consumer (Arora user,<br/>or non-Arora project)"]
@@ -425,7 +435,7 @@ commands, file paths, and DoD live in
    the missing commits from the engine-side copy. This is the
    truth-test for the recipe — if it cannot be done cleanly, stop
    and revise §2.3 before going further.
-3. **Extract `arora-module`.** Move the module tooling crates into
+3. **Extract `arora-module-authoring`.** Move the module tooling crates into
    their own repo. Engine and BT consume them via git tag.
 4. **Extract `arora-sdk`.** Move `arora-web` and the
    "engine + golden modules" convenience layer into a new repo.
@@ -469,7 +479,7 @@ afterward. These are the acceptance criteria.
 ```
 
 The user touches one package: `@semio-ai/arora-sdk-web`. That
-`arora-engine`, `arora-behavior-tree`, `arora-module` are separate
+`arora-engine`, `arora-behavior-tree`, `arora-module-authoring` are separate
 repos is invisible.
 
 ### 5.2 Rust library
@@ -478,7 +488,7 @@ repos is invisible.
 # Cargo.toml
 [dependencies]
 arora-sdk = { git = "https://github.com/semio-ai/arora-sdk", branch = "main" }
-# Bundles arora-engine + arora-behavior-tree + arora-module + arora-types,
+# Bundles arora-engine + arora-behavior-tree + arora-module-authoring + arora-types,
 # re-exported so the consumer only has one version to track.
 ```
 
@@ -531,11 +541,11 @@ For the SDK web package — same as today's `arora-web`:
 `wasm-pack build crates/arora-web --target web --release`, then
 `npm pack` / `npm publish` if we go that route.
 
-For a module author — `arora-module` is the only build dep:
+For a module author — `arora-module-authoring` is the only build dep:
 
 ```toml
 [build-dependencies]
-arora-module-rust = { git = "https://github.com/semio-ai/arora-module" }
+arora-module-rust = { git = "https://github.com/semio-ai/arora-module-authoring" }
 [dependencies]
 arora-types = "1.2"
 ```
@@ -585,7 +595,7 @@ on now (and which the plan applies to each repo):
 | `cargo test --release` | all repos |
 | `cargo clippy --all-targets -- -D warnings` | all repos |
 | `cargo fmt --all -- --check` | all repos |
-| `wasm32-wasip1` guest build | `arora-module`, `arora-behavior-tree`, `arora-engine` |
+| `wasm32-wasip1` guest build | `arora-module-authoring`, `arora-behavior-tree`, `arora-engine` |
 | `wasm32-unknown-unknown` build | `arora-sdk`, `arora-engine` |
 | Headless Firefox browser test | `arora-sdk` |
 | Markdown link check | all repos |
@@ -621,7 +631,7 @@ Operational commands and exact ruleset payload are in the plan
    onto `main` during step 2.
 
 2. **`arora-buffers` placement.** Decide before step 3: ship it
-   with `arora-module` (current proposal), in `arora-types`, or
+   with `arora-module-authoring` (current proposal), in `arora-types`, or
    alone. Module authors want both `arora-types` and `arora-buffers`
    together, which argues for merging them — but `arora-buffers`
    currently carries C/C++ headers and that may bloat `arora-types`.
@@ -641,7 +651,7 @@ Operational commands and exact ruleset payload are in the plan
    coming — plan to spend real time on it.
 
 6. **Engine CI stability after step 3+.** Once the engine git-deps
-   `arora-module` and `arora-behavior-tree`, breaking changes there
+   `arora-module-authoring` and `arora-behavior-tree`, breaking changes there
    surface as red engine PRs. Pinning to tags (decided, §5.5)
    addresses this, but only if the discipline holds.
 
