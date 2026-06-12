@@ -202,23 +202,23 @@ achieved, STOP and escalate.**
 
 ---
 
-## PR 5 — Create `semio-ai/arora-module` repo, populate it
+## PR 5 — Create `semio-ai/arora-module-authoring` repo, populate it
 
-**Repos:** new `arora-module`, then `engine`, then
+**Repos:** new `arora-module-authoring`, then `engine`, then
 `arora-behavior-tree`.
 
 1. Create the repo:
    ```sh
-   /opt/homebrew/bin/gh repo create semio-ai/arora-module --private \
+   /opt/homebrew/bin/gh repo create semio-ai/arora-module-authoring --private \
      --description "Arora module tooling: codegen, registry, buffers"
    ```
 2. Clone locally:
    ```sh
-   git clone git@github.com:semio-ai/arora-module.git \
-     /Users/victor.paleologue/Code/Semio/arora-module
+   git clone git@github.com:semio-ai/arora-module-authoring.git \
+     /Users/victor.paleologue/Code/Semio/arora-module-authoring
    ```
 3. Move the following crates from `arora-engine/crates/` to
-   `arora-module/crates/` *with their git history* (`git filter-repo`
+   `arora-module-authoring/crates/` *with their git history* (`git filter-repo`
    or `git subtree split`):
    - `arora-module-core`, `arora-module-cli`, `arora-module-cpp`,
      `arora-module-rust`, `arora-registry`, `arora-vfs`,
@@ -226,14 +226,14 @@ achieved, STOP and escalate.**
 
    (See proposal §7 risk 2 about whether `arora-buffers` should
    instead merge into `arora-types`. Decide before this step.)
-4. Create `arora-module/Cargo.toml` workspace pointing at the moved
+4. Create `arora-module-authoring/Cargo.toml` workspace pointing at the moved
    crates. Copy `rust-toolchain.toml` and `.cargo/config.toml` from
    the engine.
 5. Convert any inter-crate `path = "..."` deps that crossed the
    boundary into git deps on `arora-types` (already on crates.io).
    They should be none.
 6. Copy `.github/workflows/continuous.yml` from `arora-engine`, trim to
-   what `arora-module` needs (no NAO, no browser test, but keep the
+   what `arora-module-authoring` needs (no NAO, no browser test, but keep the
    wasm32-wasip1 codegen smoke). It already carries clippy + fmt jobs
    (see "CI baseline" below).
 7. **Stop and ask Victor** to add `SEMIO_GIT_CREDENTIAL` as an
@@ -244,7 +244,7 @@ achieved, STOP and escalate.**
    ```
    If already org-level, no action needed — the new repo inherits it.
 8. Push to `main`, verify CI green, tag `v0.1.0`.
-9. In `arora-engine`: open branch `feat/use-arora-module-repo`. Delete the
+9. In `arora-engine`: open branch `feat/use-arora-module-authoring-repo`. Delete the
    moved crates from `arora-engine/crates/`. Update workspace `members`
    and `Cargo.toml` to git-dep them (`tag = "v0.1.0"`). Run
    `cargo build --workspace`. Update CI workflow's `branches:` allow
@@ -253,7 +253,7 @@ achieved, STOP and escalate.**
     `[dev-dependencies]` / `[build-dependencies]`. Drop the engine
     references.
 
-**DoD:** `arora-module` repo exists, CI green, tagged `v0.1.0`.
+**DoD:** `arora-module-authoring` repo exists, CI green, tagged `v0.1.0`.
 Engine and BT repos consume it via git tag, their CI is green.
 
 ---
@@ -267,7 +267,7 @@ Engine and BT repos consume it via git tag, their CI is green.
 2. Land it under `arora-behavior-tree/modules/behavior-tree-nodes`.
 3. Its `Cargo.toml` should depend on `arora-behavior-tree-types`
    (path), `arora-types` (crates.io), and `arora-module-rust` (git
-   dep on `arora-module v0.1.0`). No engine reference.
+   dep on `arora-module-authoring v0.1.0`). No engine reference.
 4. Build it:
    ```sh
    cargo build -p behavior-tree-nodes --target wasm32-wasip1 --release
@@ -327,7 +327,7 @@ produces a binary named `arora-cli`.
 1. Rename the `crates/arora-cli` binary target to `arora-engine` in its
    `Cargo.toml` (`[[bin]] name = "arora-engine"`). Keep the crate
    name `arora-cli` to minimize blast radius.
-2. Once `arora-module`, `arora-behavior-tree`, and `arora-sdk` exist,
+2. Once `arora-module-authoring`, `arora-behavior-tree`, and `arora-sdk` exist,
    point their git dep URLs at `arora-engine.git` directly rather than
    leaning on the redirect.
 
@@ -349,7 +349,7 @@ The CI bar we want on every repo:
 | `cargo test --release` | yes |
 | `cargo clippy --all-targets -- -D warnings` | yes |
 | `cargo fmt --all -- --check` | yes |
-| `wasm32-wasip1` guest build | yes for `arora-module`, `arora-behavior-tree`, `arora-engine` |
+| `wasm32-wasip1` guest build | yes for `arora-module-authoring`, `arora-behavior-tree`, `arora-engine` |
 | `wasm32-unknown-unknown` build | yes for `arora-sdk`, `arora-engine` |
 | Headless Firefox browser test | yes for `arora-sdk` |
 | Markdown link check | yes |
@@ -398,7 +398,7 @@ Pushing directly to `main`/`master` on any of them is blocked.
 ## After PR 9 — document the recipe
 
 Write `arora-behavior-tree/EXTRACTING-A-MODULE.md` (or in
-`arora-module`) documenting what PRs 3, 4, 6 actually required. This
+`arora-module-authoring`) documenting what PRs 3, 4, 6 actually required. This
 is the artefact future extractions copy from. Cover at minimum:
 - Cargo.toml dependency rules (proposal §2.3).
 - How to write a `MockCallBridge` for tests.
