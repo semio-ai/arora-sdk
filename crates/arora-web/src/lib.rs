@@ -153,8 +153,7 @@ fn prepare_module_impl(
 ) -> js_sys::Promise {
     let header: Result<Header, _> = serde_json::from_str(header_json);
     wasm_bindgen_futures::future_to_promise(async move {
-        let header =
-            header.map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+        let header = header.map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
         loader.prepare(header.id, executable).await?;
         Ok(JsValue::UNDEFINED)
     })
