@@ -31,3 +31,7 @@ path = "src/wasm_dispatch.rs"
 [[bin]]
 name = "bt_bonsai"
 path = "src/bt_bonsai.rs"
+
+[[bin]]
+name = "shared_data"
+path = "src/shared_data.rs"

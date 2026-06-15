@@ -40,6 +40,7 @@ redundant project?*
 | 2 | Can Copper help the **dynamic modules**, or is the "useless overhead" real? | **It cannot help; it is the opposite philosophy** (no dynamic loading — compile-time DAG, verified). The overhead is real but small: a dynamic wasm call ~**114 ns** vs ~**1.3 ns** static. Whether that is "useless" depends entirely on call rate. See [02](02-dynamic-modules.md). |
 | 3 | Are Copper's **behavior trees** competitive? | **Copper has no behavior tree.** You bolt on `bonsai-bt` (works, verified). It is competitive as *tree execution* but loses Arora's defining feature: leaves that are **dynamically loaded module calls**, and trees that are **records**. See [03](03-behavior-trees.md). |
 | 4 | Is the **communication plug-in system** worth reusing? | **Only if you adopt the Copper runtime.** `cu-zenoh-bridge` / `cu-ros2-bridge` exist (1.0.0-rc2) but are `CuBridge`s wired into a Copper task graph. Outside it, the raw `zenoh` crate is simpler. See [04](04-communication-plugins.md). |
+| 6 | **How do I get Copper-class performance in Arora** (static BT, shared data slice across the boundary)? | **Feasible, and the right plan.** Native modules can share a store slice by pointer (~free); wasm/browser modules can share **one imported linear memory** zero-copy across modules (verified); static-linking the BT node logic removes the per-node sandbox crossing. See [06](06-shared-data-zero-copy.md). |
 | 5 | All in all — switch, reuse, or avoid a redundant project? | **Do not adopt Copper as Arora's core.** The gut feeling ("at best I avoid a redundant project") does not hold: Copper would *be* the redundant project here, because its value (deterministic replay, zero-alloc DAG) does not target Arora's bottleneck (dynamic composition). Cherry-pick ideas, not the framework. See [05](05-verdict.md). |
 
 ## Sub-studies
@@ -49,6 +50,7 @@ redundant project?*
 3. [**Behavior trees: Arora vs Copper**](03-behavior-trees.md)
 4. [**Communication plug-ins: Zenoh / ROS 2 bridges**](04-communication-plugins.md)
 5. [**Verdict**](05-verdict.md)
+6. [**Closing the performance gap: static linking + zero-copy shared data**](06-shared-data-zero-copy.md)
 
 Plus the [**runnable sandbox**](sandbox/) and its [results](sandbox/README.md).
 
