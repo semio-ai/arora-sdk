@@ -1,0 +1,11 @@
+(
+    tasks: [
+        (id: "src",  type: "Counter"),
+        (id: "dbl",  type: "Doubler"),
+        (id: "sink", type: "Collector"),
+    ],
+    cnx: [
+        (src: "src", dst: "dbl",  msg: "i32"),
+        (src: "dbl", dst: "sink", msg: "i32"),
+    ],
+)

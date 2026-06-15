@@ -1,0 +1,33 @@
+[package]
+name = "copper-sandbox"
+version = "0.1.0"
+edition = "2021"
+
+# Detached from the arora workspace on purpose: this is a standalone
+# study crate that pulls in the real Copper runtime to verify claims.
+[workspace]
+
+[dependencies]
+cu29 = "1.0.0-rc2"
+wasmtime = "45"
+bonsai-bt = { version = "0.12", features = ["serde", "serde_json"] }
+bincode = "2"
+anyhow = "1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+
+[[bin]]
+name = "minimal_pipeline"
+path = "src/minimal_pipeline.rs"
+
+[[bin]]
+name = "throughput"
+path = "src/throughput.rs"
+
+[[bin]]
+name = "wasm_dispatch"
+path = "src/wasm_dispatch.rs"
+
+[[bin]]
+name = "bt_bonsai"
+path = "src/bt_bonsai.rs"
