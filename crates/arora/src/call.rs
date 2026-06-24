@@ -1,11 +1,10 @@
 use std::{collections::HashMap, rc::Rc};
 
-use derive_more::Display;
 use rand::{rng, Rng};
 use uuid::Uuid;
 
 use arora_buffers::serde_uuid::serialize;
-pub use arora_types::call::{Call, CallResult};
+pub use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::value::{Structure, Value};
 
 use crate::module::DispatchError;
@@ -17,50 +16,13 @@ pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
     }))
 }
 
-pub trait Callable {
-    fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError>;
-}
+// `Callable`, `CallBridge`, `CallError`, and `CallableId` now live in
+// `arora-types` (re-exported above) so module-shaped libraries can use the
+// call boundary without depending on the engine crate. The engine-internal
+// machinery below stays here.
 
-pub trait CallBridge {
-    /// Calls the given function, with the arguments provided via `call`.
-    fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError>;
-
-    /// Registers the given function in the executor and
-    /// associates it to an identified generated on the fly.
-    /// The function is made available to every module by calling
-    /// `arora_dispatch_indirect(id: u64) -> Value`.
-    fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId;
-
-    /// Unregisters the function associated to the given identifier.
-    fn arora_unregister_callable(&mut self, callable_id: &CallableId);
-
-    /// Calls a callable that was registered.
-    fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError>;
-}
-
-#[derive(Display, Debug)]
-pub enum CallError {
-    Generic {
-        message: String,
-    },
-    ModuleNotFound {
-        id: Uuid,
-    },
-    FunctionNotFound {
-        id: Uuid,
-    },
-    Trap {
-        message: String,
-    },
-    Internal {
-        message: String,
-    },
-    /// The guest returned a structured error via TYPE_ERROR instead of trapping.
-    Guest {
-        message: String,
-    },
-}
-
+/// Maps the engine's internal [`DispatchError`] onto the public
+/// [`CallError`].
 impl From<DispatchError> for CallError {
     fn from(e: DispatchError) -> Self {
         match e {
@@ -73,28 +35,9 @@ impl From<DispatchError> for CallError {
     }
 }
 
-impl std::error::Error for CallError {}
-
 lazy_static::lazy_static! {
   pub static ref CALLABLE_ID_TYPE_ID: Uuid = Uuid::parse_str("6dd7f535-8245-4bf2-b081-81fd4636fa90").unwrap();
   pub static ref CALLABLE_ID_ID_FIELD_ID: Uuid = Uuid::parse_str("d799be14-e12a-4539-ac56-f7dc4634161b").unwrap();
-}
-
-#[derive(Clone, Hash, Eq, PartialEq)]
-pub struct CallableId {
-    pub id: u64,
-}
-
-impl From<u64> for CallableId {
-    fn from(id: u64) -> Self {
-        Self { id }
-    }
-}
-
-impl Callable for CallableId {
-    fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
-        caller.arora_call_indirect(self)
-    }
 }
 
 pub struct CallableRegistry {

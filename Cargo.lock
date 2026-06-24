@@ -397,9 +397,9 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "1.1.5"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94902682a52824140ca7be81898c08cd73f67b3a3d27bcce37af5191df502f84"
+checksum = "7b1c3c0092ebb0580fe9a1d55db027c050fd0a3a899bd450e6b9ef7813b374e3"
 dependencies = [
  "derive_more 2.1.1",
  "js-sys",
@@ -4232,7 +4232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
