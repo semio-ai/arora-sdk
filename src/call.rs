@@ -1,3 +1,6 @@
+use std::rc::Rc;
+
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -22,6 +25,73 @@ pub struct CallResult {
   pub ret: Value,
   #[serde(default)]
   pub mutated: Vec<StructureField>,
+}
+
+/// Anything that can be invoked through a [`CallBridge`], e.g. a
+/// behavior-tree tick registered as an indirect callable.
+pub trait Callable {
+  fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError>;
+}
+
+/// The interface a module uses to call back into its host (the engine, or a
+/// mock in tests). It lives here, in the interface layer, so module-shaped
+/// libraries can make host calls without depending on the engine crate.
+pub trait CallBridge {
+  /// Calls the given function, with the arguments provided via `call`.
+  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError>;
+
+  /// Registers the given function in the executor and associates it to an
+  /// identifier generated on the fly. The function is made available to
+  /// every module by calling `arora_dispatch_indirect(id: u64) -> Value`.
+  fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId;
+
+  /// Unregisters the function associated to the given identifier.
+  fn arora_unregister_callable(&mut self, callable_id: &CallableId);
+
+  /// Calls a callable that was registered.
+  fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError>;
+}
+
+#[derive(Display, Debug)]
+pub enum CallError {
+  Generic {
+    message: String,
+  },
+  ModuleNotFound {
+    id: Uuid,
+  },
+  FunctionNotFound {
+    id: Uuid,
+  },
+  Trap {
+    message: String,
+  },
+  Internal {
+    message: String,
+  },
+  /// The guest returned a structured error via TYPE_ERROR instead of trapping.
+  Guest {
+    message: String,
+  },
+}
+
+impl std::error::Error for CallError {}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct CallableId {
+  pub id: u64,
+}
+
+impl From<u64> for CallableId {
+  fn from(id: u64) -> Self {
+    Self { id }
+  }
+}
+
+impl Callable for CallableId {
+  fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+    caller.arora_call_indirect(self)
+  }
 }
 
 #[cfg(test)]
@@ -62,6 +132,62 @@ mod tests {
       Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63").unwrap()
     );
     assert_eq!(call.args.len(), 2);
+  }
+
+  /// Proves the call-bridge interface stands on its own: a module-shaped
+  /// library can register and invoke callables with no engine present.
+  #[test]
+  fn callable_round_trips_through_a_mock_bridge() {
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct MockBridge {
+      registered: HashMap<CallableId, Rc<dyn Callable>>,
+      next_id: u64,
+    }
+
+    impl CallBridge for MockBridge {
+      fn arora_call(&mut self, _module: &Uuid, _call: Call) -> Result<CallResult, CallError> {
+        Err(CallError::Generic {
+          message: "the mock has no modules".to_string(),
+        })
+      }
+      fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
+        let id = CallableId::from(self.next_id);
+        self.next_id += 1;
+        self.registered.insert(id.clone(), callable);
+        id
+      }
+      fn arora_unregister_callable(&mut self, callable_id: &CallableId) {
+        self.registered.remove(callable_id);
+      }
+      fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError> {
+        let callable = self
+          .registered
+          .get(callable_id)
+          .cloned()
+          .ok_or(CallError::Generic {
+            message: "unknown callable".to_string(),
+          })?;
+        callable.call(self)
+      }
+    }
+
+    struct Answer;
+    impl Callable for Answer {
+      fn call(&self, _caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+        Ok(Value::I32(42))
+      }
+    }
+
+    let mut bridge = MockBridge::default();
+    let id = bridge.arora_register_callable(Rc::new(Answer));
+    let result = bridge.arora_call_indirect(&id).unwrap();
+    assert!(matches!(result, Value::I32(42)));
+
+    bridge.arora_unregister_callable(&id);
+    assert!(bridge.arora_call_indirect(&id).is_err());
   }
 
   pub const CALL_TEST: &str = "\
