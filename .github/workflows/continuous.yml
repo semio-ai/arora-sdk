@@ -20,7 +20,7 @@ jobs:
         run: |
           mkdir -p ~/.cargo
           echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
           git config --global credential.helper 'store --file ~/.my-credentials'
 
       # rust-toolchain.toml pins nightly + wasm32-wasip1;
@@ -53,7 +53,7 @@ jobs:
       # when those files are absent — so folding both in reuses that work
       # instead of paying for a second runner to redo the bindep/codegen build.
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --release -- -D warnings
 
       - name: Check formatting
         run: cargo fmt --check

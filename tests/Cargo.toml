@@ -4,27 +4,13 @@ version = "0.0.0"
 edition = "2021"
 license = "Proprietary"
 publish = false
-description = "End-to-end tests that exercise built modules via arora-cli"
+description = "End-to-end tests that exercise built modules"
 
 [lib]
 path = "src/lib.rs"
 
-# The integration tests spawn `arora-cli` against artifacts that the rest
-# of the workspace produces at known paths under <workspace>/target. We
-# use bindeps on arora-cli (a bin artifact) to ensure it's always built,
-# but intentionally do NOT declare bindeps on the cdylib modules (polly,
-# etc) as those produce duplicate compilation units and cargo "output
-# filename collision" warnings (cargo#6313). The build.rs detects arora-cli
-# via CARGO_BIN_FILE_ARORA_CLI from bindeps, with fallback to the target
-# directory in case it's pre-built.
-
 [dev-dependencies]
 anyhow = "1"
-test-cpp = { path = "../modules/test-cpp" }
-test-cpp-2 = { path = "../modules/test-cpp-2" }
-
-# Component-model executor tests (tests/component.rs) drive the engine
-# in-process rather than through arora-cli.
 arora = { path = "../crates/arora" }
 arora-buffers = { path = "../crates/arora-buffers" }
 arora-types = "1"
@@ -33,8 +19,4 @@ uuid = "1"
 
 [build-dependencies]
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
-behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
-test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
-polly = { path = "../modules/polly", artifact = "cdylib" }
-

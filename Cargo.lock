@@ -169,47 +169,41 @@ dependencies = [
 [[package]]
 name = "arora-behavior-tree"
 version = "0.0.1"
+source = "git+https://github.com/semio-ai/arora-behavior-tree.git?branch=extract#07c2f4ffe0b2497a163bc79b12d0f99151721870"
 dependencies = [
  "anyhow",
- "arora",
  "arora-behavior-tree-types",
  "arora-buffers",
- "arora-module-core",
  "arora-module-rust",
  "arora-registry",
  "arora-types",
- "assert_float_eq",
- "behavior-tree-nodes",
- "convert_case 0.11.0",
  "derive_more 2.1.1",
  "lazy_static",
  "quick-xml",
- "rand 0.10.1",
  "semio-client",
  "semio-record",
  "semver",
  "serde",
  "serde_yaml 0.8.26",
  "tokio",
- "url",
  "uuid",
 ]
 
 [[package]]
 name = "arora-behavior-tree-types"
 version = "0.1.0"
+source = "git+https://github.com/semio-ai/arora-behavior-tree.git?branch=extract#07c2f4ffe0b2497a163bc79b12d0f99151721870"
 dependencies = [
  "lazy_static",
  "semio-record",
  "semver",
- "serde",
- "serde_yaml 0.8.26",
  "uuid",
 ]
 
 [[package]]
 name = "arora-behavior-tree-types-yaml"
 version = "0.1.0"
+source = "git+https://github.com/semio-ai/arora-behavior-tree.git?branch=extract#07c2f4ffe0b2497a163bc79b12d0f99151721870"
 dependencies = [
  "arora-behavior-tree-types",
  "arora-registry",
@@ -263,13 +257,8 @@ dependencies = [
  "arora-buffers",
  "arora-cli",
  "arora-types",
- "behavior-tree-nodes",
- "polly",
  "serde_yaml 0.8.26",
- "test-cpp",
- "test-cpp-2",
  "test-rust-component",
- "test-rust-wasm",
  "uuid",
 ]
 
@@ -453,12 +442,6 @@ name = "ascii"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eab1c04a571841102f5345a8fc0f6bb3d31c315dec879b5c6e42e40ce7ffa34e"
-
-[[package]]
-name = "assert_float_eq"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd9777fd8234cccd34019d9e26d70c8247f9baf24c8fdc0b56c548cf943af2ed"
 
 [[package]]
 name = "async-recursion"
@@ -985,6 +968,7 @@ dependencies = [
 [[package]]
 name = "behavior-tree-nodes"
 version = "0.1.0"
+source = "git+https://github.com/semio-ai/arora-behavior-tree.git?branch=extract#07c2f4ffe0b2497a163bc79b12d0f99151721870"
 dependencies = [
  "anyhow",
  "arora-behavior-tree-types",

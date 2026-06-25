@@ -13,15 +13,11 @@ members = [
   "crates/arora-util",
   "crates/arora-vfs",
   "crates/arora-web",
-  "crates/arora-behavior-tree",
-  "crates/arora-behavior-tree-types",
-  "crates/arora-behavior-tree-types-yaml",
   "crates/wasi-sdk",
   "modules/nao",
   "modules/polly",
   "modules/test-rust-wasm",
   "modules/test-rust-component",
-  "modules/behavior-tree-nodes",
   "modules/test-cpp",
   "modules/test-cpp-2",
   "tests",
@@ -42,11 +38,7 @@ default-members = [
   "crates/arora-util",
   "crates/arora-vfs",
   "crates/arora-web",
-  "crates/arora-behavior-tree",
-  "crates/arora-behavior-tree-types",
-  "crates/arora-behavior-tree-types-yaml",
   "crates/wasi-sdk",
-  "modules/behavior-tree-nodes",
   "tests",
 ]
 
@@ -54,3 +46,13 @@ default-members = [
 lto = "thin"
 debug = 1
 
+# arora-behavior-tree (git-dep at @extract) references engine crates via
+# arora-engine.git; redirect those to the local workspace so they unify with
+# the path crates instead of compiling a second copy.
+[patch."https://github.com/semio-ai/arora-engine.git"]
+arora-buffers = { path = "crates/arora-buffers" }
+arora-util = { path = "crates/arora-util" }
+arora-vfs = { path = "crates/arora-vfs" }
+arora-registry = { path = "crates/arora-registry" }
+arora-module-core = { path = "crates/arora-module-core" }
+arora-module-rust = { path = "crates/arora-module-rust" }
