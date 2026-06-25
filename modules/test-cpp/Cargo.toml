@@ -30,4 +30,3 @@ arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target 
 # The build.rs reads the records/ directory populated by this crate's
 # build script — declared here purely to force build-order so a cold
 # `cargo build --workspace` works without prior builds.
-arora-behavior-tree-types-yaml = { git = "https://github.com/semio-ai/arora-behavior-tree.git", branch = "extract" }

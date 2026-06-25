@@ -19,7 +19,7 @@ exports:
     name: succeed
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: bool
 
   - type: function
     id: c13757cb-2311-4c93-abcc-cb12d6cbb859

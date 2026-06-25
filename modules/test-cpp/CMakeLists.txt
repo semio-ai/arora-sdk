@@ -3,12 +3,12 @@ project(test-cpp CXX)
 
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin that codegens C++ from module.yaml
-#   ARORA_BEHAVIOR_TREE_INCLUDE records dir for arora-behavior-tree-types-yaml
+#   records dir for arora-behavior-tree-types-yaml
 #   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp (built inline below)
 # CMAKE_TOOLCHAIN_FILE must be the WASI SDK toolchain file.
-foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
+foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
             ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set. "
@@ -43,7 +43,6 @@ set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_IN
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
 add_custom_target(generate-test-cpp-wrapper ALL
   COMMAND ${ARORA_MODULE_CLI}
-    --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
     generate
     -l cpp
     -m ${CMAKE_CURRENT_SOURCE_DIR}/module.yaml
@@ -51,8 +50,6 @@ add_custom_target(generate-test-cpp-wrapper ALL
   BYPRODUCTS
     ${GENERATED_DIR}/include/test-cpp.hpp
     ${GENERATED_DIR}/source/test-cpp.cpp
-    ${GENERATED_DIR}/include/types/Status.hpp
-    ${GENERATED_DIR}/source/types/Status.cpp
     ${GENERATED_DIR}/module.yaml
 )
 
@@ -62,7 +59,6 @@ add_custom_target(generate-test-cpp-wrapper ALL
 add_executable(test-cpp
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp.cpp
-  ${GENERATED_DIR}/source/types/Status.cpp
 )
 add_dependencies(test-cpp generate-test-cpp-wrapper)
 target_include_directories(test-cpp PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)

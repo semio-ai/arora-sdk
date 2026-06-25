@@ -4280,7 +4280,6 @@ name = "test-rust-wasm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arora-behavior-tree-types",
  "arora-buffers",
  "arora-module-core",
  "arora-module-rust",

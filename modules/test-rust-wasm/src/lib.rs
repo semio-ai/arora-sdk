@@ -1,17 +1,11 @@
-// Let us pretend this is an auto-generated header.
-//====================================================================================
-// Provides the interface of the module, and forwards calls to specialized functions.
-// Generated code: allow clippy/dead_code over the whole generated subtree.
-#[allow(clippy::all, dead_code)]
+// Engine-local, behavior-tree-free copy. The Status-returning version lives in
+// arora-sdk as test-rust-wasm-with-nodes.
+#[allow(clippy::all, dead_code, unused)]
 mod arora_generated;
-// Provides symbols imported from other modules.
-use arora_generated::behavior_tree::status::Status;
-//====================================================================================
-// Put the implementation below.
 
 fn ping() {}
-fn succeed() -> Status {
-    Status::Success
+fn succeed() -> bool {
+    true
 }
 
 fn cos(angle: Option<f32>) -> f32 {
@@ -22,8 +16,6 @@ fn add(a: Option<f32>, b: Option<f32>) -> f32 {
     a.unwrap() + b.unwrap()
 }
 
-// Tests
-//====================================================================================
 #[cfg(test)]
 pub mod tests {
     use super::*;
