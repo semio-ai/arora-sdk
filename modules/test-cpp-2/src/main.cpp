@@ -3,8 +3,8 @@
 #include <iostream>
 
 std::int32_t test_cpp_2::test_structured(
-  const std::experimental::optional<Status> &a,
-  const std::experimental::optional<TestStructure1> &b
+  const std::optional<Status> &a,
+  const std::optional<TestStructure1> &b
 )
 {
   printf("Is success? %d\n", a->is_success());

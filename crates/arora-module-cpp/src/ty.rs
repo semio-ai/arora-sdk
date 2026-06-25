@@ -107,7 +107,7 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &FrozenTy) -> String {
     }
 }
 
-pub const OPTIONAL_TYPENAME: &str = "std::experimental::optional";
+pub const OPTIONAL_TYPENAME: &str = "std::optional";
 
 pub fn optional(ty: &TypeRef) -> TypeRef {
     TypeRef {

@@ -4,7 +4,7 @@
 extern "C" {
   #include <arora/buffers.h>
 }
-#include <arora/optional.hpp>
+#include <optional>
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -16,7 +16,7 @@ namespace arora
   namespace buffer
   {
     template<typename T>
-    std::enable_if_t<!detail::is_container<T>::value, std::experimental::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept;
+    std::enable_if_t<!detail::is_container<T>::value, std::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept;
 
     template<typename T>
     T arora_buffer_reader_get(arora_buffer_reader *const reader) noexcept;
@@ -87,7 +87,7 @@ namespace arora
     void skip_array(arora_buffer_reader *const reader, const std::uint8_t array_type, const std::uint32_t element_count);
 
     template<typename T>
-    std::enable_if_t<!detail::is_container<T>::value, std::experimental::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept {
+    std::enable_if_t<!detail::is_container<T>::value, std::optional<T>> deserialize(arora_buffer_reader *const reader) noexcept {
         const std::uint8_t type = arora_buffer_reader_next_type(reader);
         if (type == arora_buffer_type_of<T>())
         {
@@ -96,7 +96,7 @@ namespace arora
         else
         {
           skip(reader, type);
-          return std::experimental::nullopt;
+          return std::nullopt;
         }
     }
 
@@ -160,12 +160,12 @@ namespace arora
     }
 
     template<typename T>
-    std::experimental::optional<std::vector<T>> deserialize_elements(arora_buffer_reader *const reader) noexcept {
+    std::optional<std::vector<T>> deserialize_elements(arora_buffer_reader *const reader) noexcept {
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
       if (res.ty != arora_buffer_type_of<T>())
       {
         skip_array(reader, res.ty, res.element_count);
-        return std::experimental::nullopt;
+        return std::nullopt;
       }
 
       const auto * const data = arora_buffer_reader_get_bulk<T>(reader, res.element_count);
@@ -173,13 +173,13 @@ namespace arora
     }
 
     template<>
-    inline std::experimental::optional<std::vector<std::string>> deserialize_elements<std::string>(arora_buffer_reader *const reader) noexcept
+    inline std::optional<std::vector<std::string>> deserialize_elements<std::string>(arora_buffer_reader *const reader) noexcept
     {
       const arora_get_array_result res = arora_buffer_reader_get_array(reader);
       if (res.ty != ARORA_BUFFER_TYPE_STRING)
       {
         skip_array(reader, res.ty, res.element_count);
-        return std::experimental::nullopt;
+        return std::nullopt;
       }
 
       std::vector<std::string> result;
@@ -195,12 +195,12 @@ namespace arora
     }
 
     template<typename R>
-    std::enable_if_t<detail::is_container<R>::value, std::experimental::optional<R>> deserialize(arora_buffer_reader *const reader) noexcept {
+    std::enable_if_t<detail::is_container<R>::value, std::optional<R>> deserialize(arora_buffer_reader *const reader) noexcept {
       const std::uint8_t type = arora_buffer_reader_next_type(reader);
       if (type != arora_buffer_type_of<R>())
       {
         skip(reader, type);
-        return std::experimental::nullopt;
+        return std::nullopt;
       }
       using T = typename R::value_type;
       return deserialize_elements<T>(reader);

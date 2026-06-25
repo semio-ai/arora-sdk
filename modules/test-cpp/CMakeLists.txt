@@ -16,7 +16,7 @@ foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
   endif()
 endforeach()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # The arora include headers are written by the arora-buffers / arora-util

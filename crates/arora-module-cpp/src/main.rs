@@ -132,6 +132,7 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
         Declaration::new_line(1),
         Declaration::include_system("cmath"),
         Declaration::include_system("cstdint"),
+        Declaration::include_system("optional"),
         Declaration::new_line(1),
     ];
 
@@ -378,7 +379,7 @@ fn generate_module_imports<'a>(
                             .equal("0".to_expression())])
                         .into_statement()
                         .into(),
-                    // const std::experimental::optional<RETURN_TYPE> __arora_return__ = arora::buffer::deserialize<RETURN_TYPE>(reader);
+                    // const std::optional<RETURN_TYPE> __arora_return__ = arora::buffer::deserialize<RETURN_TYPE>(reader);
                     Variable {
                         name: "__arora_return__".to_string(),
                         ty: ty::optional_const(&TypeRef {
@@ -457,6 +458,7 @@ fn generate_module_imports<'a>(
         Declaration::new_line(1),
         Declaration::include_system("cmath"),
         Declaration::include_system("cstdint"),
+        Declaration::include_system("optional"),
         Declaration::new_line(1),
     ];
 
