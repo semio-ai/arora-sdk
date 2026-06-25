@@ -99,15 +99,15 @@ dispatch (both are runtime hash-map lookups). The real differences:
 
 ## How behavior trees use indirect dispatch
 
-The [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md) runtime is
+The [`arora-behavior-tree`](https://github.com/semio-ai/arora-behavior-tree) runtime is
 a host-side orchestrator: the control-flow logic (sequence, fallback, …) lives
-in the [`behavior-tree-nodes`](../modules/behavior-tree-nodes/readme.md) **guest
+in the [`behavior-tree-nodes`](https://github.com/semio-ai/arora-behavior-tree) **guest
 module**, while the tree structure and blackboard variables live host-side. The
 two recurse into each other, and indirect dispatch is the bridge.
 
 ### Setup: one callable per node
 
-[`setup_tick_function`](../crates/arora-behavior-tree/src/behavior_tree.rs) walks
+[`setup_tick_function`](https://github.com/semio-ai/arora-behavior-tree) walks
 the tree bottom-up. For every node it constructs a `TickFunction` capturing that
 node, its already-registered children, and `Rc`-shared clones of the tree-wide
 `function_index`, `locals`, and `node_arg_variables` maps. Each `TickFunction`
@@ -145,10 +145,10 @@ sequenceDiagram
    `arora_call(module, fn, …)`, **passing the children as an array of
    `TickId`s** — the children are required to be the node's first parameter,
    named `children` (UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`), typed
-   `Vec<TickId>` (see [`crates/arora-behavior-tree/readme.md`](../crates/arora-behavior-tree/readme.md)).
+   `Vec<TickId>` (see [`crates/arora-behavior-tree/readme.md`](https://github.com/semio-ai/arora-behavior-tree)).
 3. The guest control logic decides when to tick a child and calls back
    `arora_dispatch_indirect(child.callable_id)`
-   ([`modules/behavior-tree-nodes/src/lib.rs`](../modules/behavior-tree-nodes/src/lib.rs)).
+   ([`modules/behavior-tree-nodes/src/lib.rs`](https://github.com/semio-ai/arora-behavior-tree)).
 4. That re-enters the host, which ticks the child `TickFunction` — a leaf calls
    its module function via `arora_call`; a composite recurses from step 2.
 

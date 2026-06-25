@@ -187,7 +187,7 @@ The workspace handles cross-compilation via artifact dependencies:
 5. Implement functions in `src/lib.rs`
 6. Build and test
 
-See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) or [`modules/behavior-tree-nodes/`](modules/behavior-tree-nodes/) for working examples.
+See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) or [`modules/behavior-tree-nodes/`](https://github.com/semio-ai/arora-behavior-tree) for working examples.
 
 ### Module Interface Contract
 

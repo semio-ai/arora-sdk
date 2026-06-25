@@ -98,17 +98,17 @@ They can be saved into files that can be included by command-line tools.
 ## Behavior Trees
 
 This project includes
-[a library to run behavior trees](crates/arora-behavior-tree/readme.md),
+[a library to run behavior trees](https://github.com/semio-ai/arora-behavior-tree),
 described with references to functions provided by Arora
 [modules](#modules).
 
 Such functions rely on basic types provided as a library by
-[`arora-behavior-tree-types`](crates/arora-behavior-tree-types/readme.md),
+[`arora-behavior-tree-types`](https://github.com/semio-ai/arora-behavior-tree),
 so that Rust bindings can be generated for them using
 [`arora-module-rust`](crates/arora-module-rust/readme.md).
 
 They are also available in the YAML format in
-[`arora-behavior-tree-types-yaml`](crates/arora-behavior-tree-types/readme.md),
+[`arora-behavior-tree-types-yaml`](https://github.com/semio-ai/arora-behavior-tree),
 so that Rust or C++ bindings can be generated using
 [`arora-module-cpp`](crates/arora-module-cpp/readme.md).
 See [`arora-registry`](crates/arora-registry/readme.md) to load them
@@ -138,7 +138,7 @@ for other uses.
 - [Arora CLI](crates/arora-cli/readme.md),
   the CLI tool to load modules and run functions.
 
-- [Arora Web](crates/arora-web/readme.md),
+- [Arora Web](https://github.com/semio-ai/arora-sdk),
   a `wasm-bindgen` entry point that hosts the engine inside a browser
   (browser-native `WebAssembly` instead of wasmtime).
 
@@ -166,21 +166,21 @@ for other uses.
   - [`test-cpp-2`](modules/test-cpp-2/readme.md):
     a module to test the C++ that depends on
     [`test-cpp`](modules/test-cpp/readme.md)
-    and [`behavior-tree-types-yaml`](crates/arora-behavior-tree-types-yaml/readme.md).
+    and [`behavior-tree-types-yaml`](https://github.com/semio-ai/arora-behavior-tree).
   - [Rust WASM test module](modules/test-rust-wasm/readme.md):
     a module to test the Rust bindings, that depends on
-    [`behavior-tree-types`](crates/arora-behavior-tree-types/readme.md).
-  - [Behavior Tree Nodes](modules/behavior-tree-nodes/readme.md):
+    [`behavior-tree-types`](https://github.com/semio-ai/arora-behavior-tree).
+  - [Behavior Tree Nodes](https://github.com/semio-ai/arora-behavior-tree):
     an initial collection of behavior tree nodes as module functions.
-  - [NAO](modules/nao/readme.md): a tentative module for NAO support.
-  - [Polly](modules/polly/readme.md): a module providing nodes for AWS Polly TTS.
+  - [NAO](https://github.com/semio-ai/arora-sdk): a tentative module for NAO support.
+  - [Polly](https://github.com/semio-ai/arora-sdk): a module providing nodes for AWS Polly TTS.
 
 - Behavior Tree:
-  - [Types](crates/arora-behavior-tree-types/readme.md):
+  - [Types](https://github.com/semio-ai/arora-behavior-tree):
     basic types used in behavior trees.
-  - [Types YAML](crates/arora-behavior-tree-types-yaml/readme.md):
+  - [Types YAML](https://github.com/semio-ai/arora-behavior-tree):
     the same types serialized as YAML.
-  - [Behavior Tree](crates/arora-behavior-tree/readme.md):
+  - [Behavior Tree](https://github.com/semio-ai/arora-behavior-tree):
     the Arora-specific library to run behavior trees.
 
 ## Building
@@ -277,7 +277,7 @@ crates/arora-web/www/serve.sh    # demo page on :8080
 > `GECKODRIVER` env var. The same applies to `--chrome` /
 > `chromedriver`.
 
-See [`crates/arora-web/readme.md`](crates/arora-web/readme.md) for
+See [`crates/arora-web/readme.md`](https://github.com/semio-ai/arora-sdk) for
 details.
 
 ### Dependency overview

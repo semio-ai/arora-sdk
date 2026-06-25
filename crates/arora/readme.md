@@ -15,7 +15,7 @@ Two are shipped today:
 - [`browser::BrowserExecutor`](src/executor/browser/mod.rs) hosts modules
   via the browser's native `WebAssembly` runtime when `arora` itself is
   compiled to `wasm32-unknown-unknown`. The JS-facing wrapper lives in
-  [`arora-web`](../arora-web/readme.md).
+  [`arora-web`](https://github.com/semio-ai/arora-sdk).
 
 Both expose the same ABI to guests (`arora_buffer_alloc`/`free`,
 `arora_function_<uuid>` exports, `arora_dispatch` / `arora_dispatch_indirect`
@@ -52,7 +52,7 @@ An `u64` identifier is attributed to each registered function,
 so that they can be called later using `arora_call_indirect` from the host side,
 or from any module via `arora_dispatch_indirect`.
 
-> [Behavior Trees](../arora-behavior-tree/readme.md) typically use this mechanism
+> [Behavior Trees](https://github.com/semio-ai/arora-behavior-tree) typically use this mechanism
 > to wrap the various node functions into uniform tick functions.
 
 ### Call Mechanism
