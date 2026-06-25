@@ -7,10 +7,10 @@ fields:
     type:
       type: primitive
       value:
-        kind: arrayI32
+        kind: boolean
   5ffa9104-1e5c-4026-943f-8db38bd34563:
     name: integer_array
     type:
       type: primitive
       value:
-        kind: arrayI32
+        kind: i32

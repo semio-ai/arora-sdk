@@ -205,8 +205,11 @@ fn generate_module_imports<'a>(
                         IncludeStyle::System,
                     )
                     .into(),
-                    PreprocessorDirective::Include("arora/util.h".to_string(), IncludeStyle::System)
-                        .into(),
+                    PreprocessorDirective::Include(
+                        "arora/util.h".to_string(),
+                        IncludeStyle::System,
+                    )
+                    .into(),
                 ],
                 ..Default::default()
             },
@@ -221,8 +224,11 @@ fn generate_module_imports<'a>(
         .into(),
     );
     source_declarations.push(
-        PreprocessorDirective::Include("arora/buffer/serialize.hpp".to_string(), IncludeStyle::System)
-            .into(),
+        PreprocessorDirective::Include(
+            "arora/buffer/serialize.hpp".to_string(),
+            IncludeStyle::System,
+        )
+        .into(),
     );
     source_declarations.push(Declaration::new_line(1));
     source_declarations

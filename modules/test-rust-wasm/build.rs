@@ -18,9 +18,16 @@ pub async fn main() -> Result<()> {
     println!("cargo:rerun-if-changed={}", records_path.display());
     let generated_sources = generate_sources(assets, &mut registry).await?;
     let source_path = PathBuf::from("src/arora_generated/");
-    generated_sources.sync(source_path.clone()).await.map_err(|err| {
-        anyhow::anyhow!("failed to write generated sources to {}: {}", source_path.display(), err)
-    })?;
+    generated_sources
+        .sync(source_path.clone())
+        .await
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "failed to write generated sources to {}: {}",
+                source_path.display(),
+                err
+            )
+        })?;
     apply_rustfmt(source_path).await?;
     Ok(())
 }

@@ -23,11 +23,6 @@ jobs:
           echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
           git config --global credential.helper 'store --file ~/.my-credentials'
 
-      # rust-toolchain.toml pins nightly + wasm32-wasip1;
-      # add wasm32-unknown-unknown for the browser executor build.
-      - name: Install wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
-
       - name: Cache cargo registry & target
         uses: actions/cache@v5
         with:
@@ -39,10 +34,9 @@ jobs:
             cargo-${{ runner.os }}-
 
       # `cargo test --release` builds the wasm32-wasip1 guests automatically
-      # via the behavior-tree and integration-test crates' artifact
+      # via the integration-test crate's artifact
       # dependencies (bindeps); the tests locate them through the forwarded
-      # CARGO_CDYLIB_FILE_* env vars (see arora-behavior-tree/build.rs and
-      # tests/build.rs). No separate guest build step is needed.
+      # CARGO_CDYLIB_FILE_* env vars (see tests/build.rs). No separate guest build step is needed.
       - name: Test (native + wasm modules via wasmtime)
         run: cargo test --release
 
@@ -57,15 +51,6 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
-
-      # Install wasm-pack for browser tests
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      # Browser tests in headless Firefox; wasm-pack builds arora-web's
-      # bindep'd wasm guest, and wasm-compatible engine.
-      - name: Run arora-web browser test (headless Firefox)
-        run: wasm-pack test --headless --firefox --release crates/arora-web
 
   markdown-link-check:
     runs-on: ubuntu-latest
