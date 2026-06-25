@@ -12,24 +12,14 @@ members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
-  "crates/arora-web",
-  "crates/arora-behavior-tree",
-  "crates/arora-behavior-tree-types",
-  "crates/arora-behavior-tree-types-yaml",
   "crates/wasi-sdk",
-  "modules/nao",
-  "modules/polly",
   "modules/test-rust-wasm",
   "modules/test-rust-component",
-  "modules/behavior-tree-nodes",
   "modules/test-cpp",
   "modules/test-cpp-2",
   "tests",
 ]
 
-# NAO module is opt-in: it requires i686-unknown-linux-musl cross-toolchain
-# (Mac: brew install messense/macos-cross-toolchains/i686-unknown-linux-musl)
-# Build explicitly with: cargo build -p arora-nao
 default-members = [
   "crates/arora",
   "crates/arora-buffers",
@@ -41,12 +31,7 @@ default-members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
-  "crates/arora-web",
-  "crates/arora-behavior-tree",
-  "crates/arora-behavior-tree-types",
-  "crates/arora-behavior-tree-types-yaml",
   "crates/wasi-sdk",
-  "modules/behavior-tree-nodes",
   "tests",
 ]
 

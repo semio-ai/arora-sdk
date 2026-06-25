@@ -20,13 +20,8 @@ jobs:
         run: |
           mkdir -p ~/.cargo
           echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
-          echo "${{ secrets.SEMIO_GIT_CREDENTIAL }}" > ~/.my-credentials
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
           git config --global credential.helper 'store --file ~/.my-credentials'
-
-      # rust-toolchain.toml pins nightly + wasm32-wasip1;
-      # add wasm32-unknown-unknown for the browser executor build.
-      - name: Install wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
 
       - name: Cache cargo registry & target
         uses: actions/cache@v5
@@ -39,10 +34,9 @@ jobs:
             cargo-${{ runner.os }}-
 
       # `cargo test --release` builds the wasm32-wasip1 guests automatically
-      # via the behavior-tree and integration-test crates' artifact
+      # via the integration-test crate's artifact
       # dependencies (bindeps); the tests locate them through the forwarded
-      # CARGO_CDYLIB_FILE_* env vars (see arora-behavior-tree/build.rs and
-      # tests/build.rs). No separate guest build step is needed.
+      # CARGO_CDYLIB_FILE_* env vars (see tests/build.rs). No separate guest build step is needed.
       - name: Test (native + wasm modules via wasmtime)
         run: cargo test --release
 
@@ -53,19 +47,27 @@ jobs:
       # when those files are absent — so folding both in reuses that work
       # instead of paying for a second runner to redo the bindep/codegen build.
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --release -- -D warnings
 
       - name: Check formatting
         run: cargo fmt --check
 
-      # Install wasm-pack for browser tests
+      # The engine's web host (executor::browser) only compiles for wasm32, so
+      # it never gets exercised by the native build above. Build and run it
+      # here, in a real headless browser, so regressions in the browser host
+      # are caught at the engine level rather than downstream.
+      - name: Install wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      # Browser tests in headless Firefox; wasm-pack builds arora-web's
-      # bindep'd wasm guest, and wasm-compatible engine.
-      - name: Run arora-web browser test (headless Firefox)
-        run: wasm-pack test --headless --firefox --release crates/arora-web
+      # geckodriver + firefox are preinstalled on ubuntu-latest.
+      # --no-default-features drops the wasmtime/native hosts so `arora` builds
+      # for wasm32; the test loads the test-rust-wasm guest through
+      # BrowserExecutor and dispatches it (see crates/arora/tests/browser.rs).
+      - name: Browser executor test (headless Firefox)
+        run: wasm-pack test --headless --firefox crates/arora --no-default-features --test browser
 
   markdown-link-check:
     runs-on: ubuntu-latest

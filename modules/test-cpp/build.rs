@@ -34,13 +34,7 @@ fn main() -> Result<()> {
     copy_executable(&arora_module_cli_src, &arora_module_cli)?;
     copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
-    // Records produced by arora-behavior-tree-types-yaml during its build.
-    // The path is stable: <workspace_root>/crates/arora-behavior-tree-types-yaml/records.
     let workspace_root = workspace_root(&manifest_dir)?;
-    let behavior_tree_include = workspace_root
-        .join("crates")
-        .join("arora-behavior-tree-types-yaml")
-        .join("records");
     let arora_cpp_source = workspace_root.join("libs").join("cpp");
     let arora_include_dir = workspace_root.join("target").join("include");
 
@@ -55,7 +49,6 @@ fn main() -> Result<()> {
         .no_default_flags(true)
         .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
         .define("ARORA_MODULE_CLI", &arora_module_cli)
-        .define("ARORA_BEHAVIOR_TREE_INCLUDE", &behavior_tree_include)
         .define("ARORA_BUFFERS_LIB", &arora_buffers_lib)
         .define("ARORA_UTIL_LIB", &arora_util_lib)
         .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)

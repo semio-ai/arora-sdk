@@ -8,5 +8,5 @@ lazy_static::lazy_static! {
   pub static ref ARORA_BUFFER_TYPE_UUID: Expression = "ARORA_BUFFER_TYPE_UUID".to_expression();
   pub static ref ARORA_BUFFER_TYPE_VALUE: Expression = "ARORA_BUFFER_TYPE_VALUE".to_expression();
 
-  pub static ref NULL_OPTION: Expression = "std::experimental::nullopt".to_expression();
+  pub static ref NULL_OPTION: Expression = "std::nullopt".to_expression();
 }

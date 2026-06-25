@@ -1,11 +1,11 @@
 #include "test-cpp.hpp"
 
-Status test_cpp::test_2_args(
-  const std::experimental::optional<std::uint32_t> &a,
-  const std::experimental::optional<std::uint32_t> &b
+bool test_cpp::test_2_args(
+  const std::optional<std::uint32_t> &a,
+  const std::optional<std::uint32_t> &b
 )
 {
-  return Status::success();
+  return true;
 }
 
 int main(int argc, char *argv[])

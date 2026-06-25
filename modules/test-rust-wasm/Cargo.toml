@@ -25,7 +25,6 @@ anyhow = "*"
 
 [build-dependencies]
 anyhow = "*"
-arora-behavior-tree-types = { path = "../../crates/arora-behavior-tree-types" }
 arora-module-core = { path = "../../crates/arora-module-core" }
 arora-module-rust = { path = "../../crates/arora-module-rust" }
 arora-registry = { path = "../../crates/arora-registry" }

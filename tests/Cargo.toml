@@ -33,8 +33,6 @@ uuid = "1"
 
 [build-dependencies]
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
-behavior-tree-nodes = { path = "../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
-polly = { path = "../modules/polly", artifact = "cdylib" }
 

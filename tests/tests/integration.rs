@@ -13,13 +13,6 @@ fn workspace_root() -> PathBuf {
     dir
 }
 
-fn behavior_tree_records() -> PathBuf {
-    workspace_root()
-        .join("crates")
-        .join("arora-behavior-tree-types-yaml")
-        .join("records")
-}
-
 fn run(args: &[&str]) {
     let output = Command::new(ARORA_CLI)
         .args(args)
@@ -35,26 +28,6 @@ fn run(args: &[&str]) {
 }
 
 #[test]
-fn call_polly_from_engine() {
-    let polly_root = workspace_root().join("modules").join("polly");
-    let module_yaml = polly_root
-        .join("src")
-        .join("arora_generated")
-        .join("module.yaml");
-    let module_exe = PathBuf::from(env!("CARGO_CDYLIB_FILE_POLLY_polly"));
-    run(&[
-        "--include",
-        behavior_tree_records().to_str().unwrap(),
-        "--header",
-        module_yaml.to_str().unwrap(),
-        "--exe",
-        module_exe.to_str().unwrap(),
-        "--call",
-        "id: e5a41333-4848-411f-878c-f1d662ebb4a0",
-    ]);
-}
-
-#[test]
 fn call_test_rust_wasm_from_engine() {
     let module_root = workspace_root().join("modules").join("test-rust-wasm");
     let module_yaml = module_root
@@ -64,8 +37,6 @@ fn call_test_rust_wasm_from_engine() {
     // Use the artifact dependency path from build script
     let wasm = PathBuf::from(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
     run(&[
-        "--include",
-        behavior_tree_records().to_str().unwrap(),
         "--header",
         module_yaml.to_str().unwrap(),
         "--exe",
@@ -92,8 +63,6 @@ fn call_test_cpp_2_from_engine_with_struct() {
 
     run(&[
         "--include",
-        behavior_tree_records().to_str().unwrap(),
-        "--include",
         test_cpp_2_records.to_str().unwrap(),
         "--include",
         test_cpp_records_published.to_str().unwrap(),
@@ -111,10 +80,7 @@ fn call_test_cpp_2_from_engine_with_struct() {
             "args:\n",
             "- id: b41899c3-66dc-40d4-ab61-d1ccf5231c88\n",
             "  value:\n",
-            "    enum:\n",
-            "      id: 325a5767-e344-4532-860e-0749bcf2e428\n",
-            "      variant_id: 766e9e9a-446d-4e46-83e6-14b7ca101169\n",
-            "      value: unit\n",
+            "    bool: true\n",
             "- id: 63086e48-804f-403a-8862-3358ddedc08d\n",
             "  value:\n",
             "    struct:\n",
@@ -122,11 +88,7 @@ fn call_test_cpp_2_from_engine_with_struct() {
             "      fields:\n",
             "      - id: 7d94a956-e50d-4cc4-9714-f62e1f9b134e\n",
             "        value:\n",
-            "          enums:\n",
-            "            id: 325a5767-e344-4532-860e-0749bcf2e428\n",
-            "            elements:\n",
-            "              - variant_id: 2468f46c-bb60-425c-9a4d-9ad326ccc7e2\n",
-            "                value: unit\n",
+            "          bool: true\n",
             "      - id: 5ffa9104-1e5c-4026-943f-8db38bd34563\n",
             "        value:\n",
             "          i32: 113\n",

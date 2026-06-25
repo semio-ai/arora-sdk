@@ -109,6 +109,15 @@ impl Freezer for LocalRegistry {
     type Error = RegistryError;
     async fn freeze(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
         let selector = Selector::Id(reference.id.to_owned());
+        // Primitives are intrinsic (fixed ids, no stored record or version);
+        // resolve them directly, mirroring `get_type`, so modules don't need an
+        // external primitive-records dump in the registry to be frozen.
+        if crate::get_primitive(&selector).is_some() {
+            return Ok(FrozenReference {
+                id: reference.id,
+                version: semio_record::record::Version(Version::new(0, 0, 0)),
+            });
+        }
         let version = self
             .indexed
             .get(&selector)

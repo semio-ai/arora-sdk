@@ -132,6 +132,7 @@ fn generate_type<'a>(context: &Context<'a>, id: &Uuid) -> anyhow::Result<Directo
         Declaration::new_line(1),
         Declaration::include_system("cmath"),
         Declaration::include_system("cstdint"),
+        Declaration::include_system("optional"),
         Declaration::new_line(1),
     ];
 
@@ -190,11 +191,46 @@ fn generate_module_imports<'a>(
 
     let mut source_declarations = Vec::new();
 
-    source_declarations.extend_from_slice(&[
-        Declaration::include_local(format!("{}.hpp", module_name)),
-        Declaration::include_system("arora/arora.hpp"),
-        Declaration::new_line(1),
-    ]);
+    source_declarations.push(Declaration::include_local(format!("{}.hpp", module_name)));
+    source_declarations.push(Declaration::include_system("arora/arora.hpp"));
+    source_declarations
+        .push(PreprocessorDirective::Include("cassert".to_string(), IncludeStyle::System).into());
+    source_declarations.push(
+        Extern {
+            name: "C".to_string(),
+            block: Block {
+                statements: vec![
+                    PreprocessorDirective::Include(
+                        "arora/buffers.h".to_string(),
+                        IncludeStyle::System,
+                    )
+                    .into(),
+                    PreprocessorDirective::Include(
+                        "arora/util.h".to_string(),
+                        IncludeStyle::System,
+                    )
+                    .into(),
+                ],
+                ..Default::default()
+            },
+        }
+        .into(),
+    );
+    source_declarations.push(
+        PreprocessorDirective::Include(
+            "arora/buffer/deserialize.hpp".to_string(),
+            IncludeStyle::System,
+        )
+        .into(),
+    );
+    source_declarations.push(
+        PreprocessorDirective::Include(
+            "arora/buffer/serialize.hpp".to_string(),
+            IncludeStyle::System,
+        )
+        .into(),
+    );
+    source_declarations.push(Declaration::new_line(1));
     source_declarations
         .push(declare::uuid_variable(id::module_uuid(&module_name), &module_id).into());
 
@@ -378,7 +414,7 @@ fn generate_module_imports<'a>(
                             .equal("0".to_expression())])
                         .into_statement()
                         .into(),
-                    // const std::experimental::optional<RETURN_TYPE> __arora_return__ = arora::buffer::deserialize<RETURN_TYPE>(reader);
+                    // const std::optional<RETURN_TYPE> __arora_return__ = arora::buffer::deserialize<RETURN_TYPE>(reader);
                     Variable {
                         name: "__arora_return__".to_string(),
                         ty: ty::optional_const(&TypeRef {
@@ -457,6 +493,7 @@ fn generate_module_imports<'a>(
         Declaration::new_line(1),
         Declaration::include_system("cmath"),
         Declaration::include_system("cstdint"),
+        Declaration::include_system("optional"),
         Declaration::new_line(1),
     ];
 

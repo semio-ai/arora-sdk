@@ -4,8 +4,8 @@ pub mod local_yaml;
 pub mod remote;
 pub mod remote_cached;
 use arora_types::ty::{
-    F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID, U8_ID,
-    UNIT_ID,
+    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
+    U8_ID, UNIT_ID,
 };
 use async_trait::async_trait;
 use derive_more::Display;
@@ -337,6 +337,7 @@ pub fn get_primitive(selector: &Selector) -> Option<PrimitiveKind> {
     match selector {
         Selector::Id(id) => match id {
             id if *id == *UNIT_ID => Some(PrimitiveKind::Unit),
+            id if *id == *BOOLEAN_ID => Some(PrimitiveKind::Boolean),
             id if *id == *U8_ID => Some(PrimitiveKind::U8),
             id if *id == *U16_ID => Some(PrimitiveKind::U16),
             id if *id == *U32_ID => Some(PrimitiveKind::U32),

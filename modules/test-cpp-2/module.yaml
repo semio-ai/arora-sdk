@@ -27,7 +27,7 @@ imports:
           id: u32
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: bool
 exports:
   - type: function
     id: 07f5740c-ba4a-45af-8ec5-bedde5737e99
@@ -37,7 +37,7 @@ exports:
         name: a
         type:
           kind: scalar
-          id: behavior_tree.Status
+          id: bool
       - id: 63086e48-804f-403a-8862-3358ddedc08d
         name: b
         type:

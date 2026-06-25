@@ -3,7 +3,7 @@ project(test-cpp-2 CXX)
 
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin (with arora-module-cpp sibling)
-#   ARORA_BEHAVIOR_TREE_INCLUDE records dir for arora-behavior-tree-types-yaml
+#   records dir for arora-behavior-tree-types-yaml
 #   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp
@@ -11,7 +11,7 @@ project(test-cpp-2 CXX)
 #   TEST_CPP_RECORDS            test-cpp's published records dir
 #   LOCAL_RECORDS               this module's records/ dir
 # CMAKE_TOOLCHAIN_FILE must be the WASI SDK toolchain file.
-foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
+foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
             ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
             TEST_CPP_RECORDS LOCAL_RECORDS)
   if(NOT DEFINED ${VAR})
@@ -20,7 +20,7 @@ foreach(VAR ARORA_MODULE_CLI ARORA_BEHAVIOR_TREE_INCLUDE ARORA_BUFFERS_LIB
   endif()
 endforeach()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(${ARORA_CPP_SOURCE_DIR} arora-cpp-build)
@@ -36,7 +36,6 @@ set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_IN
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
 add_custom_target(generate-test-cpp-2-wrapper ALL
   COMMAND ${ARORA_MODULE_CLI}
-    --include ${ARORA_BEHAVIOR_TREE_INCLUDE}
     --include ${TEST_CPP_RECORDS}
     --include ${LOCAL_RECORDS}
     generate
@@ -48,8 +47,6 @@ add_custom_target(generate-test-cpp-2-wrapper ALL
     ${GENERATED_DIR}/include/test-cpp.hpp
     ${GENERATED_DIR}/source/test-cpp-2.cpp
     ${GENERATED_DIR}/source/test-cpp.cpp
-    ${GENERATED_DIR}/include/types/Status.hpp
-    ${GENERATED_DIR}/source/types/Status.cpp
     ${GENERATED_DIR}/include/types/TestStructure1.hpp
     ${GENERATED_DIR}/source/types/TestStructure1.cpp
 )
@@ -58,7 +55,6 @@ add_executable(test-cpp-2
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp-2.cpp
   ${GENERATED_DIR}/source/test-cpp.cpp
-  ${GENERATED_DIR}/source/types/Status.cpp
   ${GENERATED_DIR}/source/types/TestStructure1.cpp
 )
 add_dependencies(test-cpp-2 generate-test-cpp-2-wrapper)
