@@ -52,6 +52,23 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      # The engine's web host (executor::browser) only compiles for wasm32, so
+      # it never gets exercised by the native build above. Build and run it
+      # here, in a real headless browser, so regressions in the browser host
+      # are caught at the engine level rather than downstream.
+      - name: Install wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # geckodriver + firefox are preinstalled on ubuntu-latest.
+      # --no-default-features drops the wasmtime/native hosts so `arora` builds
+      # for wasm32; the test loads the test-rust-wasm guest through
+      # BrowserExecutor and dispatches it (see crates/arora/tests/browser.rs).
+      - name: Browser executor test (headless Firefox)
+        run: wasm-pack test --headless --firefox crates/arora --no-default-features --test browser
+
   markdown-link-check:
     runs-on: ubuntu-latest
     steps:

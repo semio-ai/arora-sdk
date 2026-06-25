@@ -53,3 +53,14 @@ cbindgen = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 uuid = { version = "1", features = ["serde", "v4"] }
+
+# Browser-host integration test (tests/browser.rs), wasm32-only. serde_yaml +
+# uuid above supply the header/value types; these add the test harness, the
+# panic hook, and the guest module the test loads through the browser executor.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+arora-types = "1.2"
+wasm-bindgen-test = "0.3"
+console_error_panic_hook = "0.1"
+# test-rust-wasm guest (wasm32-wasip1) that the browser test include_bytes!s;
+# cargo exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
