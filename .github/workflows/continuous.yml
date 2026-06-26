@@ -67,7 +67,7 @@ jobs:
       # for wasm32; the test loads the test-rust-wasm guest through
       # BrowserExecutor and dispatches it (see crates/arora/tests/browser.rs).
       - name: Browser executor test (headless Firefox)
-        run: wasm-pack test --headless --firefox crates/arora --no-default-features --test browser
+        run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
 
   markdown-link-check:
     runs-on: ubuntu-latest

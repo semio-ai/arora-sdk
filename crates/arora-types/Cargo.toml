@@ -8,9 +8,15 @@ repository = "https://github.com/semio-ai/arora-types"
 homepage = "https://github.com/semio-ai/arora-types"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# rlib only. The wasm/JS bindings (src/wasm_value.rs, wasm32-gated) reach JS
+# through a dependent cdylib (e.g. arora-web) — wasm-bindgen pulls a dependency's
+# exports into the final cdylib — so arora-types itself need not be a cdylib. As
+# an in-workspace member its (host-empty) cdylib was built under two feature
+# contexts (normal + behavior-tree's build.rs host artifacts), colliding on the
+# unhashed libarora_types output and duplicating arora-types/uuid (E0308). A
+# standalone arora-types wasm package, if ever needed, can build the cdylib via
+# `cargo rustc --crate-type cdylib`.
+crate-type = ["rlib"]
 
 [dependencies]
 async-trait = "0.1"
