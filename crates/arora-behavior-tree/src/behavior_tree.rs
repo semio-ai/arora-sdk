@@ -9,8 +9,8 @@ pub mod schema_groot;
 #[cfg(test)]
 mod tests;
 pub mod tree_node;
-use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
+use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::{
     call::Call,
     value::{ConversionError, StructureField, Value},
