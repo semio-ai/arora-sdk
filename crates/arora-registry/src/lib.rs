@@ -1,7 +1,10 @@
+#[cfg(feature = "remote")]
 pub mod config;
 pub mod local;
 pub mod local_yaml;
+#[cfg(feature = "remote")]
 pub mod remote;
+#[cfg(feature = "remote")]
 pub mod remote_cached;
 use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{

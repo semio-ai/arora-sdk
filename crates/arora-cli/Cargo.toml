@@ -10,7 +10,7 @@ arora = { path = "../arora" }
 arora-buffers = { path = "../arora-buffers" }
 arora-types = "1"
 arora-module-core = { path = "../arora-module-core" }
-arora-registry = { path = "../arora-registry" }
+arora-registry = { path = "../arora-registry", features = ["remote"] }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"

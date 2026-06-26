@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// A [`LocalRegistry`] supports the addition of [`StructureFrozen`], [`EnumerationFrozen`] and [`ModuleFrozen`]
 /// on the fly. It provides a local index to look them up fast
 /// by [`Uuid'] or by path ([`String`]).
-/// It can be used as a local cache of a remote registry accessed using [`semio_client`].
+/// It can be used as a local cache of a remote registry accessed using the `remote` feature (semio-client).
 /// It provides an absolute root available for any record,
 /// with the identifier [`ROOT_ID`].
 pub struct LocalRegistry {
