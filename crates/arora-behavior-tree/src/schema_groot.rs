@@ -86,7 +86,11 @@ impl Node {
         }
         Ok(TreeNode {
             function: function.function_id,
-            children: None,
+            children: if tree_node_children.is_empty() {
+                None
+            } else {
+                Some(tree_node_children)
+            },
             parameters,
         })
     }
