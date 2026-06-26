@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+  "crates/arora",
   "modules/nao",
   "modules/polly",
   "crates/arora-web",
@@ -29,6 +30,7 @@ members = [
 ]
 
 default-members = [
+  "crates/arora",
   "crates/arora-behavior-tree-types-yaml",
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree",

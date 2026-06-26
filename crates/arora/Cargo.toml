@@ -1,0 +1,35 @@
+[package]
+name = "arora"
+version = "0.1.0"
+edition = "2021"
+description = "Opinionated Arora runtime: an engine pre-wired with the behavior-tree module and the Semio backend."
+license = "MIT"
+
+[lib]
+name = "arora"
+path = "src/lib.rs"
+
+[[bin]]
+name = "arora"
+path = "src/main.rs"
+
+[dependencies]
+arora-engine = { path = "../arora-engine" }
+arora-behavior-tree = { path = "../arora-behavior-tree" }
+arora-module-core = { path = "../arora-module-core" }
+arora-registry = { path = "../arora-registry" }
+arora-types = { path = "../arora-types", version = "1.4" }
+# The Semio backend (module freezing / records).
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
+anyhow = "*"
+serde_yaml = "0.8"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[build-dependencies]
+# The behavior-tree node implementations, built as a wasm artifact and embedded
+# into the binary at build time (build.rs re-exports the path, lib.rs
+# include_bytes! it). NOTE: build `arora` as a workspace member (it is in
+# default-members) — not as a standalone `-p arora` leaf — or arora-types/uuid
+# get duplicated across the normal/build feature contexts.
+behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
