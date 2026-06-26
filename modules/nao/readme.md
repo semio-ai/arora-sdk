@@ -1,7 +1,7 @@
 # NAO Support Module
 
 This module is meant to be compiled into a native binary,
-and be loaded with the [native executor](../../crates/arora/readme.md#native-executor).
+and be loaded with the [native executor](../../crates/arora-engine/readme.md#native-executor).
 It compiles and uses Semio's patched [libQi](https://github.com/semio-ai/libqi)
 to perform calls for the robot NAO.
 
