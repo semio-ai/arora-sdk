@@ -3,8 +3,8 @@ mod readable;
 mod reg_ref;
 use self::reg_ref::{FrozenRegistryReference, LocalRegistryReference};
 use crate::{EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen};
+use arora_types::record::Selector;
 use async_trait::async_trait;
-use semio_client::common::Selector;
 use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::Version;
 use std::{

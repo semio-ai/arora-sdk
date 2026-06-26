@@ -35,6 +35,9 @@ default-members = [
   "tests",
 ]
 
+[patch.crates-io]
+arora-types = { git = "https://github.com/semio-ai/arora-types.git", branch = "feat/record-traits" }
+
 [profile.release]
 lto = "thin"
 debug = 1

@@ -10,7 +10,6 @@ arora-module-core = { path = "../arora-module-core" }
 arora-registry = { path = "../arora-registry" }
 arora-types = "1"
 arora-vfs = { path = "../arora-vfs" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
 async-recursion = "1"

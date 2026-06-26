@@ -1,7 +1,7 @@
 use super::{reg_ref::FrozenRegistryReference, LocalRegistry};
 use crate::{get_primitive, ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
+use arora_types::record::{RecordType, Selector};
 use async_trait::async_trait;
-use semio_client::common::{RecordType, Selector};
 use semver::{Version, VersionReq};
 use uuid::Uuid;
 

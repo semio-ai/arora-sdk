@@ -3,8 +3,8 @@ use crate::{
     EditableRegistry, EnumerationFrozen, FolderPublic, Module, ModuleFrozen, RegistryError,
     Structure, StructureFrozen,
 };
+use arora_types::record::Selector;
 use async_trait::async_trait;
-use semio_client::common::Selector;
 use semio_record::{enumeration::v0::unfrozen::Enumeration, record::Freeze};
 use semver::Version;
 use std::{

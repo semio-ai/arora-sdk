@@ -2,14 +2,38 @@ use crate::{
     get_primitive, EnumerationFrozen, FolderPublic, ModuleFrozen, OrganizationPublic,
     ReadableRegistry, RegistryError, StructureFrozen, TypeDefinitionFrozen, UserPublic,
 };
+use arora_types::record::{RecordType, Selector};
 use async_trait::async_trait;
 use semio_client::{
-    common::{type_of, GetPublic, RecordType, Selector, TaggedReq, TypeOf},
+    common::{GetPublic, TaggedReq, TypeOf},
     context::Context,
 };
 use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::{Version, VersionReq};
 use uuid::Uuid;
+
+/// Converts a public [`arora_types::record::Selector`] into the equivalent
+/// `semio-client` selector accepted by the remote store API.
+fn to_client_selector(selector: &Selector) -> semio_client::common::Selector {
+    match selector {
+        Selector::Id(id) => semio_client::common::Selector::Id(*id),
+        Selector::Path(path) => semio_client::common::Selector::Path(path.clone()),
+    }
+}
+
+/// Converts a `semio-client` record type returned by the remote store API
+/// into the equivalent public [`arora_types::record::RecordType`].
+fn from_client_record_type(record_type: semio_client::common::RecordType) -> RecordType {
+    match record_type {
+        semio_client::common::RecordType::User => RecordType::User,
+        semio_client::common::RecordType::Folder => RecordType::Folder,
+        semio_client::common::RecordType::Organization => RecordType::Organization,
+        semio_client::common::RecordType::Module => RecordType::Module,
+        semio_client::common::RecordType::Structure => RecordType::Structure,
+        semio_client::common::RecordType::Enumeration => RecordType::Enumeration,
+        semio_client::common::RecordType::Unknown => RecordType::Unknown,
+    }
+}
 
 pub struct RemoteRegistry {
     context: Context,
@@ -28,10 +52,11 @@ impl RemoteRegistry {
         semio_client::common::type_of(
             &self.context,
             TypeOf {
-                selector: selector.clone(),
+                selector: to_client_selector(selector),
             },
         )
         .await
+        .map(from_client_record_type)
         .map_err(|e| RegistryError::RemoteError {
             message: format!("error getting type of {}: {}", selector.clone(), e),
         })
@@ -45,7 +70,7 @@ impl RemoteRegistry {
         semio_client::enumeration::tagged_req(
             &self.context,
             TaggedReq {
-                selector: selector.to_owned(),
+                selector: to_client_selector(selector),
                 version_req: tag.to_string(),
             },
         )
@@ -63,7 +88,7 @@ impl RemoteRegistry {
         semio_client::structure::tagged_req(
             &self.context,
             TaggedReq {
-                selector: selector.to_owned(),
+                selector: to_client_selector(selector),
                 version_req: tag.to_string(),
             },
         )
@@ -77,7 +102,7 @@ impl RemoteRegistry {
         semio_client::user::get_public(
             &self.context,
             semio_client::user::GetPublic {
-                selector: selector.clone(),
+                selector: to_client_selector(selector),
             },
         )
         .await
@@ -93,7 +118,7 @@ impl RemoteRegistry {
         semio_client::organization::get_public(
             &self.context,
             GetPublic {
-                id: selector.clone(),
+                id: to_client_selector(selector),
             },
         )
         .await
@@ -106,7 +131,7 @@ impl RemoteRegistry {
         semio_client::folder::get_public(
             &self.context,
             GetPublic {
-                id: selector.clone(),
+                id: to_client_selector(selector),
             },
         )
         .await
@@ -123,7 +148,7 @@ impl RemoteRegistry {
         let module = semio_client::module::tagged_req(
             &self.context,
             TaggedReq {
-                selector: selector.to_owned(),
+                selector: to_client_selector(selector),
                 version_req: tag.to_string(),
             },
         )
@@ -170,7 +195,7 @@ impl ReadableRegistry for RemoteRegistry {
 
     async fn resolve_path(&self, path: &str) -> Result<Uuid, RegistryError> {
         let selector = Selector::Path(path.to_owned());
-        selector
+        to_client_selector(&selector)
             .resolve(&self.context)
             .await
             .map_err(|e| RegistryError::RemoteError {
@@ -228,7 +253,7 @@ impl ReadableRegistry for RemoteRegistry {
         let tags = semio_client::common::tags(
             &self.context,
             semio_client::common::Tags {
-                selector: selector.to_owned(),
+                selector: to_client_selector(selector),
             },
         )
         .await
@@ -249,13 +274,14 @@ impl ReadableRegistry for RemoteRegistry {
     }
 
     async fn type_of(&mut self, selector: &Selector) -> Result<RecordType, RegistryError> {
-        type_of(
+        semio_client::common::type_of(
             &self.context,
             TypeOf {
-                selector: selector.clone(),
+                selector: to_client_selector(selector),
             },
         )
         .await
+        .map(from_client_record_type)
         .map_err(|err| RegistryError::Generic {
             message: format!("error getting type from remote: {}", err),
         })
@@ -273,7 +299,7 @@ impl Freezer for RemoteRegistry {
         let tags = semio_client::common::tags(
             &self.context,
             semio_client::common::Tags {
-                selector: selector.to_owned(),
+                selector: to_client_selector(&selector),
             },
         )
         .await

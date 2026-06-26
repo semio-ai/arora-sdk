@@ -3,13 +3,13 @@ pub mod local;
 pub mod local_yaml;
 pub mod remote;
 pub mod remote_cached;
+use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
     U8_ID, UNIT_ID,
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_client::common::{RecordType, Selector};
 use semio_record::{
     enumeration::v0::Enumeration as EnumerationDefn, folder::v0::Folder as FolderDefn,
     module::v0::Module as ModuleDefn, organization::v0::Organization as OrganizationDefn,
