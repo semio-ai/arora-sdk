@@ -8,6 +8,7 @@
 use super::{
   Compat, Freeze, FrozenReference, Resolver, UnfrozenReference, Version, VersionReq, Versioned,
 };
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -42,13 +43,14 @@ pub enum FrozenTy {
   Array(FrozenReference),
 }
 
+#[async_trait]
 impl<R: Resolver> Freeze<R> for UnfrozenTy {
   type Frozen = FrozenTy;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
     Ok(match self {
       UnfrozenTy::Primitive(p) => FrozenTy::Primitive(p.clone()),
-      UnfrozenTy::Scalar(r) => FrozenTy::Scalar(r.freeze(resolver)?),
-      UnfrozenTy::Array(r) => FrozenTy::Array(r.freeze(resolver)?),
+      UnfrozenTy::Scalar(r) => FrozenTy::Scalar(r.freeze(resolver).await?),
+      UnfrozenTy::Array(r) => FrozenTy::Array(r.freeze(resolver).await?),
     })
   }
 }
@@ -67,12 +69,13 @@ pub struct FrozenStructureField {
   pub ty: FrozenTy,
 }
 
+#[async_trait]
 impl<R: Resolver> Freeze<R> for StructureField {
   type Frozen = FrozenStructureField;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
     Ok(FrozenStructureField {
       name: self.name.clone(),
-      ty: self.ty.freeze(resolver)?,
+      ty: self.ty.freeze(resolver).await?,
     })
   }
 }
@@ -102,14 +105,15 @@ impl Versioned for Structure {
   }
 }
 
+#[async_trait]
 impl<R: Resolver> Freeze<R> for Structure {
   type Frozen = FrozenStructure;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
     Ok(FrozenStructure {
       id: self.id,
       version: self.version.clone(),
       name: self.name.clone(),
-      fields: self.fields.freeze(resolver)?, // blanket HashMap impl
+      fields: self.fields.freeze(resolver).await?, // blanket HashMap impl
     })
   }
 }
@@ -128,12 +132,13 @@ pub struct FrozenParameter {
   pub ty: FrozenTy,
 }
 
+#[async_trait]
 impl<R: Resolver> Freeze<R> for Parameter {
   type Frozen = FrozenParameter;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
     Ok(FrozenParameter {
       name: self.name.clone(),
-      ty: self.ty.freeze(resolver)?,
+      ty: self.ty.freeze(resolver).await?,
     })
   }
 }
@@ -165,15 +170,16 @@ impl Versioned for ModuleHeader {
   }
 }
 
+#[async_trait]
 impl<R: Resolver> Freeze<R> for ModuleHeader {
   type Frozen = FrozenModuleHeader;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
     Ok(FrozenModuleHeader {
       id: self.id,
       version: self.version.clone(),
       name: self.name.clone(),
-      parameters: self.parameters.freeze(resolver)?, // blanket Vec impl
-      dependencies: self.dependencies.freeze(resolver)?, // blanket Vec impl
+      parameters: self.parameters.freeze(resolver).await?, // blanket Vec impl
+      dependencies: self.dependencies.freeze(resolver).await?, // blanket Vec impl
     })
   }
 }
@@ -215,9 +221,10 @@ impl InMemoryRegistry {
   }
 }
 
+#[async_trait]
 impl Resolver for InMemoryRegistry {
   type Error = ResolveError;
-  fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+  async fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
     let versions = self
       .versions
       .get(&reference.id)
@@ -327,7 +334,7 @@ fn resolver_picks_newest_matching() {
     id,
     version_req: VersionReq::any(),
   });
-  match any.freeze(&reg).unwrap() {
+  match pollster::block_on(any.freeze(&reg)).unwrap() {
     FrozenTy::Scalar(r) => assert_eq!(r.version, v("2.0.0")),
     other => panic!("expected scalar, got {:?}", other),
   }
@@ -336,7 +343,7 @@ fn resolver_picks_newest_matching() {
     id,
     version_req: VersionReq::parse("<2.0.0").unwrap(),
   });
-  match capped.freeze(&reg).unwrap() {
+  match pollster::block_on(capped.freeze(&reg)).unwrap() {
     FrozenTy::Scalar(r) => assert_eq!(r.version, v("1.4.0")),
     other => panic!("expected scalar, got {:?}", other),
   }
@@ -353,7 +360,7 @@ fn resolver_errors_surface() {
     version_req: VersionReq::any(),
   };
   assert!(matches!(
-    reg.resolve(&missing).unwrap_err(),
+    pollster::block_on(reg.resolve(&missing)).unwrap_err(),
     ResolveError::NoSuchRecord(_)
   ));
 
@@ -362,7 +369,7 @@ fn resolver_errors_surface() {
     version_req: VersionReq::parse(">=2.0.0").unwrap(),
   };
   assert!(matches!(
-    reg.resolve(&bad_req).unwrap_err(),
+    pollster::block_on(reg.resolve(&bad_req)).unwrap_err(),
     ResolveError::NoSuchVersion(_, _)
   ));
 }
@@ -379,9 +386,9 @@ fn freeze_unfreeze_roundtrip_pins_exact_version() {
     version_req: VersionReq::parse("^1.0").unwrap(),
   });
 
-  let frozen = original.freeze(&reg).unwrap();
+  let frozen = pollster::block_on(original.freeze(&reg)).unwrap();
   let widened = frozen.unfreeze();
-  let refrozen = widened.freeze(&reg).unwrap();
+  let refrozen = pollster::block_on(widened.freeze(&reg)).unwrap();
   assert_eq!(frozen, refrozen);
 
   match widened {
@@ -425,7 +432,7 @@ fn freeze_structure_record() {
     fields,
   };
 
-  let frozen = s.freeze(&reg).unwrap();
+  let frozen = pollster::block_on(s.freeze(&reg)).unwrap();
   let child = frozen.fields.values().find(|f| f.name == "child").unwrap();
   match &child.ty {
     FrozenTy::Scalar(r) => assert_eq!(r.version, v("1.2.0")),
@@ -459,7 +466,7 @@ fn freeze_module_header_record() {
     }],
   };
 
-  let frozen = header.freeze(&reg).unwrap();
+  let frozen = pollster::block_on(header.freeze(&reg)).unwrap();
   assert_eq!(frozen.dependencies[0].version, v("0.1.0"));
   match &frozen.parameters[0].ty {
     FrozenTy::Scalar(r) => assert_eq!(r.version, v("2.3.0")),

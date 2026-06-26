@@ -3,16 +3,15 @@
 //! semio-record defines an async `Freeze<F: Freezer>` + `Freezer`. Generalized
 //! here, store-agnostic:
 //!   * `Resolver` plays the role of `Freezer`. The real, store-backed
-//!     implementation (arora-registry) implements this trait.
+//!     implementation (arora-registry) implements this trait — and because the
+//!     remote registry resolves over the network, this is **async**, matching
+//!     semio-record's `#[async_trait] Freezer`.
 //!   * `Freeze<R>` is identical in spirit but NOT tied to module records.
 //!   * Blanket impls give "freezing a container freezes its elements" for free,
 //!     so most leaf types are the only ones that need a hand-written impl.
-//!
-//! Synchronous for now — faithful to the validated prototype and this lean
-//! interface crate. When the async, store-backed registries implement
-//! `Resolver`, an async sibling can be added without changing this surface.
 
 use crate::record::reference::{FrozenReference, UnfrozenReference};
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -20,47 +19,77 @@ use std::hash::Hash;
 /// version. The ONLY abstraction that needs to touch a store/registry. Mirrors
 /// semio-record `record::Freezer` and arora-registry's `impl Freezer` (which
 /// picks the newest version matching the requirement).
-pub trait Resolver {
-  type Error: std::error::Error;
-  fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error>;
+#[async_trait]
+pub trait Resolver: Sync {
+  type Error: std::error::Error + Send;
+  async fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error>;
 }
 
 /// A value that can be frozen by resolver `R`. `Frozen` is the pinned form.
+#[async_trait]
 pub trait Freeze<R: Resolver> {
   type Frozen;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error>;
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error>;
 }
 
 // --- Blanket impls: structure-preserving freezing of common containers. ---
 
-impl<R: Resolver, T: Freeze<R>> Freeze<R> for Vec<T> {
+#[async_trait]
+impl<R, T> Freeze<R> for Vec<T>
+where
+  R: Resolver,
+  T: Freeze<R> + Sync,
+  T::Frozen: Send,
+{
   type Frozen = Vec<T::Frozen>;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
-    self.iter().map(|x| x.freeze(resolver)).collect()
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+    let mut out = Vec::with_capacity(self.len());
+    for item in self {
+      out.push(item.freeze(resolver).await?);
+    }
+    Ok(out)
   }
 }
 
-impl<R: Resolver, T: Freeze<R>> Freeze<R> for Option<T> {
+#[async_trait]
+impl<R, T> Freeze<R> for Option<T>
+where
+  R: Resolver,
+  T: Freeze<R> + Sync,
+  T::Frozen: Send,
+{
   type Frozen = Option<T::Frozen>;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
-    self.as_ref().map(|x| x.freeze(resolver)).transpose()
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+    Ok(match self {
+      Some(value) => Some(value.freeze(resolver).await?),
+      None => None,
+    })
   }
 }
 
-impl<R: Resolver, K: Clone + Eq + Hash, V: Freeze<R>> Freeze<R> for HashMap<K, V> {
+#[async_trait]
+impl<R, K, V> Freeze<R> for HashMap<K, V>
+where
+  R: Resolver,
+  K: Clone + Eq + Hash + Send + Sync,
+  V: Freeze<R> + Sync,
+  V::Frozen: Send,
+{
   type Frozen = HashMap<K, V::Frozen>;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
-    self
-      .iter()
-      .map(|(k, v)| Ok((k.clone(), v.freeze(resolver)?)))
-      .collect()
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+    let mut out = HashMap::with_capacity(self.len());
+    for (k, v) in self {
+      out.insert(k.clone(), v.freeze(resolver).await?);
+    }
+    Ok(out)
   }
 }
 
 /// The base case: freezing a bare unfrozen reference asks the resolver to pin it.
+#[async_trait]
 impl<R: Resolver> Freeze<R> for UnfrozenReference {
   type Frozen = FrozenReference;
-  fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
-    resolver.resolve(self)
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+    resolver.resolve(self).await
   }
 }
