@@ -19,7 +19,7 @@ native-host = ["dep:libloading", "dep:tempfile"]
 [dependencies]
 anyhow = "*"
 arora-buffers = { path = "../arora-buffers" }
-arora-types = "1.2"
+arora-types = { path = "../arora-types", version = "1.4" }
 async-trait = "0.1"
 bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
@@ -58,7 +58,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # uuid above supply the header/value types; these add the test harness, the
 # panic hook, and the guest module the test loads through the browser executor.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-arora-types = "1.2"
+arora-types = { path = "../arora-types", version = "1.4" }
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1"
 # test-rust-wasm guest (wasm32-wasip1) that the browser test include_bytes!s;

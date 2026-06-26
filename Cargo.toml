@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+  "crates/arora-types",
   "crates/arora",
   "crates/arora-buffers",
   "crates/arora-module-core",
@@ -21,6 +22,7 @@ members = [
 ]
 
 default-members = [
+  "crates/arora-types",
   "crates/arora",
   "crates/arora-buffers",
   "crates/arora-module-core",
