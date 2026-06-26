@@ -1,0 +1,13 @@
+<root>
+    <TreeNodesModel>
+        <Action ID="Cos">
+            <input_port name="angle"/>
+            <output_port name="cosine"/>
+        </Action>
+        <Action ID="Increase">
+            <input_port name="delta"/>
+            <inout_port name="storage"/>
+        </Action>
+    </TreeNodesModel>
+</root>
+

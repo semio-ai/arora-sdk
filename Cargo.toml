@@ -2,6 +2,10 @@
 resolver = "2"
 
 members = [
+  "modules/behavior-tree-nodes",
+  "crates/arora-behavior-tree-types-yaml",
+  "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree",
   "crates/arora-types",
   "crates/arora",
   "crates/arora-buffers",
@@ -22,6 +26,9 @@ members = [
 ]
 
 default-members = [
+  "crates/arora-behavior-tree-types-yaml",
+  "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree",
   "crates/arora-types",
   "crates/arora",
   "crates/arora-buffers",

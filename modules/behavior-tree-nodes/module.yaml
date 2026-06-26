@@ -1,0 +1,285 @@
+---
+name: behavior-tree-nodes
+id: 3f0aa0c0-6dd5-4cc5-a05e-97a21ec44455
+author: Semio
+description: Core Behavior Tree Nodes
+license: Proprietary
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: 6696f0bd-e781-40cd-aeb5-8dc616f810d2
+    name: succeed
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 3abbbfb6-d00d-41eb-88bb-97874267eaf6
+    name: fail
+    parameters: []
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 41ae5ed0-1d12-4b71-aab8-02e7efedf177
+    name: run
+    parameters: []
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee
+    name: status_identity
+    parameters:
+      - id: e1f174e6-ca9e-4344-84cb-7f3f22115239
+        name: value
+        type:
+          kind: scalar
+          id: behavior_tree.Status
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: c803889f-4757-4b56-908f-4b2b47041eff
+    name: set_str
+    parameters:
+      - id: 8fa2f965-1eb5-40d9-baca-8facef0d31a8
+        name: variable
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+
+      - id: 88438955-7872-44ad-8464-d636dc5fe26f
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 7dce01ed-9818-4b7d-b45a-2e7fdece3633
+    name: unset_str
+    parameters:
+      - id: 2c84bf0f-4ec2-41a4-83ee-3f92a53be79d
+        name: variable
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 20ba3f0f-309e-4cd2-adfc-aca6cc432526
+    name: is_str_set
+    parameters:
+      - id: c4f1e72d-30fe-400b-a584-f08e93944026
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 3180977c-25a1-458e-ab82-11f36c654518
+    name: wait_str_set
+    parameters:
+      - id: 8f190079-e519-44d3-ac36-3bfc322e87eb
+        name: value
+        type:
+          kind: scalar
+          id: str
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 8e3dbcc1-1a81-4cf6-a457-6e0c075456fd
+    name: regex_match
+    parameters:
+      - id: 3267f093-8a7f-4b77-b74c-3bd2e7ad40f9
+        name: value
+        type:
+          kind: scalar
+          id: str
+
+      - id: 6702e02d-f6ba-4c5d-acab-9ade0a690afa
+        name: matcher
+        type:
+          kind: scalar
+          id: str
+
+      - id: e8b71df7-2bb5-4498-8bc3-833c5bc8eadc
+        name: first_match
+        type:
+          kind: scalar
+          id: str
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: b8349b96-abc7-4a31-906c-da1ce6fa356e
+    name: store
+    parameters:
+      - id: 2345a3a5-a80d-4480-9927-3c65bd2b7543
+        name: storage
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+
+      - id: 0a0778cd-cb7a-41fc-96d4-512cc8538ce2
+        name: value
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 7f6fc4a9-567c-4f15-87cc-7ca34ae1456f
+    name: increase
+    parameters:
+      - id: e898fe88-cc61-46d2-aecc-b4fc0beb862f
+        name: storage
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+        
+      - id: 1018eb85-2d04-4995-a349-b6c83c27f287
+        name: delta
+        type:
+          kind: scalar
+          id: f32
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 32246df6-ab5d-4f18-9221-23e28731de93
+    name: seq
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: behavior_tree.TickId
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: c2d5ed72-798c-4174-94f7-13378bd9bf1f
+    name: seq_star
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: behavior_tree.TickId
+
+      - id: 4de502df-3f48-4541-94d8-dd68fe92bc8e
+        name: current_index
+        type:
+          kind: scalar
+          id: u16
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: bfa89a4e-c369-430e-be78-0dc07311391c
+    name: fallback
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: behavior_tree.TickId
+        mutable: false
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: a9340289-1f30-411f-9faa-0f07d54613e8
+    name: parallel
+    parameters:
+      - id: 5b6e9515-dbcc-411d-bee9-3d8cba5fedda
+        name: children
+        type:
+          kind: array
+          id: behavior_tree.TickId
+        mutable: false
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 104b9710-5d43-4a93-944c-d64bddb30ef8
+    name: cos
+    parameters:
+      - id: 272fbafd-c2a5-4ffe-a294-9cabe6e6c1e7
+        name: angle
+        type:
+          kind: scalar
+          id: f32
+
+      - id: 1d101686-05d8-47b4-9292-fdc9e5a0daeb
+        name: res
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+  - type: function
+    id: 65be1fe9-ac2a-4b6e-8870-68ac7bde6f0a
+    name: add
+    parameters:
+      - id: 0b8885b0-afca-4378-abe6-79e2ff0ee72b
+        name: a
+        type:
+          kind: scalar
+          id: f32
+
+      - id: cbb21d3d-69b1-488b-a3c8-236ca68263ae
+        name: b
+        type:
+          kind: scalar
+          id: f32
+
+      - id: 13d7a1c2-2d37-4d0e-b317-2924671d2210
+        name: res
+        type:
+          kind: scalar
+          id: f32
+        mutable: true
+    ret:
+      kind: scalar
+      id: behavior_tree.Status
+
+imports: []
+dependencies: []
+executable_mime: application/wasm
