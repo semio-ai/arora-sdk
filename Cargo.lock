@@ -10,7 +10,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arora-types"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "derive_more",
  "js-sys",
@@ -20,6 +20,7 @@ dependencies = [
  "ron",
  "semver",
  "serde",
+ "serde_json",
  "serde_yaml",
  "uuid",
  "wasm-bindgen",
@@ -530,6 +531,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
