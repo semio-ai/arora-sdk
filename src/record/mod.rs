@@ -8,10 +8,12 @@
 
 pub mod freeze;
 pub mod reference;
+pub mod selector;
 pub mod versioned;
 
 pub use freeze::{Freeze, Resolver};
 pub use reference::{FrozenReference, UnfrozenReference, Version, VersionReq};
+pub use selector::{RecordType, Selector};
 pub use versioned::{Compat, Versioned};
 
 use crate::module::low::Header;
