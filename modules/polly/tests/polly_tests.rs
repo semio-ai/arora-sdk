@@ -1,9 +1,9 @@
 use anyhow::Result;
-use arora::engine::{EngineBuilder, PinnedEngine};
 use arora_behavior_tree::{
     arora_generated::behavior_tree::status::Status, nodes::*, schema::Expression,
     tree_node::TreeNode, BehaviorTreeRuntime, ModuleFunction,
 };
+use arora_engine::engine::{EngineBuilder, PinnedEngine};
 use arora_module_core::resolve::resolve_low_module;
 use arora_registry::{local::LocalRegistry, EditableRegistry, ModuleFrozen, ReadableRegistry};
 use arora_types::{
@@ -156,8 +156,8 @@ async fn setup_engine_with_modules(
     modules: &Vec<String>,
 ) -> (PinnedEngine, HashMap<Uuid, ModuleFunction>) {
     let mut engine = EngineBuilder::new()
-        .add_executor(arora::executor::wasm::WebAssemblyExecutor::new().unwrap())
-        .add_executor(arora::executor::native::NativeExecutor::new())
+        .add_executor(arora_engine::executor::wasm::WebAssemblyExecutor::new().unwrap())
+        .add_executor(arora_engine::executor::native::NativeExecutor::new())
         .build();
 
     let mut registry = LocalRegistry::new();

@@ -3,7 +3,7 @@
 //! Provides a [`Engine`] type that JavaScript can construct, load
 //! modules into (header JSON + executable bytes), and call functions
 //! on. All module hosting is done via the browser's native
-//! `WebAssembly` runtime — see `arora::executor::browser`.
+//! `WebAssembly` runtime — see `arora_engine::executor::browser`.
 //!
 //! This crate only carries non-trivial content when built for
 //! `wasm32-*` targets. On the host it is an empty shim so it can sit
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use arora::{
+use arora_engine::{
     call::{CallBridge, Callable, CallableId},
     engine::EngineBuilder,
     executor::browser::{BrowserExecutor, SharedLoaderRc},
@@ -39,7 +39,7 @@ pub fn _start() {
 /// JS-callable handle to a configured Arora engine.
 #[wasm_bindgen]
 pub struct Engine {
-    inner: std::pin::Pin<Box<arora::engine::Engine>>,
+    inner: std::pin::Pin<Box<arora_engine::engine::Engine>>,
     loader: SharedLoaderRc,
     function_module: HashMap<Uuid, Uuid>,
     module_headers: HashMap<Uuid, String>,
@@ -115,7 +115,7 @@ impl Engine {
     }
 
     /// Call a function. `call_json` is a JSON document matching
-    /// `arora::call::Call`. Returns the result as a JSON string.
+    /// `arora_engine::call::Call`. Returns the result as a JSON string.
     #[wasm_bindgen]
     pub fn call(&mut self, call_json: &str) -> Result<String, JsValue> {
         let call: Call = serde_json::from_str(call_json)
@@ -248,7 +248,7 @@ struct NodeCallable {
 }
 
 impl Callable for NodeCallable {
-    fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, arora::call::CallError> {
+    fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, arora_engine::call::CallError> {
         let tick_id_type = Uuid::from_bytes(TICK_ID_STRUCT_BYTES);
         let callable_field = Uuid::from_bytes(TICK_ID_CALLABLE_FIELD_BYTES);
         let ret_param_id = Uuid::from_bytes(RET_PARAM_BYTES);
@@ -406,7 +406,7 @@ fn register_node(
 ///    stateful tick-by-tick execution with variable bindings.
 #[wasm_bindgen]
 pub struct BehaviorTreeRunner {
-    inner: Pin<Box<arora::engine::Engine>>,
+    inner: Pin<Box<arora_engine::engine::Engine>>,
     loader: SharedLoaderRc,
     fn_meta: HashMap<Uuid, FnMeta>,
     variables: Rc<RefCell<HashMap<Uuid, Value>>>,

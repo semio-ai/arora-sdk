@@ -5,10 +5,10 @@
 
 use std::rc::Rc;
 
-use arora::call::{CallBridge, Callable, CallableId};
-use arora::engine::EngineBuilder;
-use arora::executor::component::ComponentExecutor;
-use arora::load::load_module_from_parts;
+use arora_engine::call::{CallBridge, Callable, CallableId};
+use arora_engine::engine::EngineBuilder;
+use arora_engine::executor::component::ComponentExecutor;
+use arora_engine::load::load_module_from_parts;
 use arora_types::module::low::Header;
 use arora_types::value::Value;
 use uuid::Uuid;
@@ -101,7 +101,7 @@ fn component_bad_callable_arg_is_guest_error() {
 struct FortyTwo;
 
 impl Callable for FortyTwo {
-    fn call(&self, _caller: &mut dyn CallBridge) -> Result<Value, arora::call::CallError> {
+    fn call(&self, _caller: &mut dyn CallBridge) -> Result<Value, arora_engine::call::CallError> {
         Ok(Value::U64(42))
     }
 }

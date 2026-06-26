@@ -35,7 +35,7 @@ above 8 MB on the main thread. The `prepareModule` + `loadPreparedModule`
 pair routes through the async `WebAssembly.instantiate` and works for any
 size in every browser.
 
-`callJson` matches `arora::call::Call`:
+`callJson` matches `arora_engine::call::Call`:
 `{"id":"<function-uuid>","args":[...]}`. If the call doesn't carry a
 `module_id`, arora-web looks one up from the function ID it was loaded
 with.

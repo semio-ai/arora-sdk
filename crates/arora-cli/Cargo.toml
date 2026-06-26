@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora = { path = "../arora" }
+arora-engine = { path = "../arora-engine" }
 arora-buffers = { path = "../arora-buffers" }
 arora-types = { path = "../arora-types", version = "1.4" }
 arora-module-core = { path = "../arora-module-core" }

@@ -1,5 +1,5 @@
 [package]
-name = "arora"
+name = "arora-engine"
 version = "0.1.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"

@@ -1,7 +1,7 @@
 //! Browser-host integration tests for the engine's own web executor.
 //!
 //! These instantiate a guest module through the browser's native
-//! `WebAssembly` runtime ([`arora::executor::browser::BrowserExecutor`]),
+//! `WebAssembly` runtime ([`arora_engine::executor::browser::BrowserExecutor`]),
 //! dispatch its functions, and read the results back — so regressions in
 //! the web host are caught here, at the engine level, instead of being
 //! rediscovered by a downstream binding.
@@ -16,10 +16,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use arora::call::CallBridge;
-use arora::engine::EngineBuilder;
-use arora::executor::browser::BrowserExecutor;
-use arora::load::load_module_from_parts;
+use arora_engine::call::CallBridge;
+use arora_engine::engine::EngineBuilder;
+use arora_engine::executor::browser::BrowserExecutor;
+use arora_engine::load::load_module_from_parts;
 use arora_types::call::Call;
 use arora_types::module::low::Header;
 use arora_types::value::{StructureField, Value};

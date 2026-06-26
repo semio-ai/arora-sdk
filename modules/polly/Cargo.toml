@@ -21,7 +21,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 anyhow = "*"
-arora = { path = "../../crates/arora" }
+arora-engine = { path = "../../crates/arora-engine" }
 arora-behavior-tree = { path = "../../crates/arora-behavior-tree" }
 arora-module-core = { path = "../../crates/arora-module-core" }
 arora-registry = { path = "../../crates/arora-registry" }

@@ -137,38 +137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arora"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arora-buffers",
- "arora-types",
- "async-trait",
- "bytes",
- "cbindgen 0.29.4",
- "console_error_panic_hook",
- "derive_more 2.1.1",
- "getrandom 0.4.2",
- "js-sys",
- "lazy_static",
- "libloading",
- "rand 0.10.1",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "serde_yaml 0.8.26",
- "tempfile",
- "test-rust-wasm",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "wasmtime",
- "wasmtime-wasi",
- "web-sys",
-]
-
-[[package]]
 name = "arora-behavior-tree"
 version = "0.0.1"
 dependencies = [
@@ -231,8 +199,8 @@ name = "arora-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arora",
  "arora-buffers",
+ "arora-engine",
  "arora-module-core",
  "arora-registry",
  "arora-types",
@@ -249,13 +217,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-buffers",
+ "arora-types",
+ "async-trait",
+ "bytes",
+ "cbindgen 0.29.4",
+ "console_error_panic_hook",
+ "derive_more 2.1.1",
+ "getrandom 0.4.2",
+ "js-sys",
+ "lazy_static",
+ "libloading",
+ "rand 0.10.1",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "serde_yaml 0.8.26",
+ "tempfile",
+ "test-rust-wasm",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "wasmtime",
+ "wasmtime-wasi",
+ "web-sys",
+]
+
+[[package]]
 name = "arora-integration-tests"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "arora",
  "arora-buffers",
  "arora-cli",
+ "arora-engine",
  "arora-types",
  "serde_yaml 0.8.26",
  "test-cpp",
@@ -428,7 +428,7 @@ dependencies = [
 name = "arora-web"
 version = "0.1.0"
 dependencies = [
- "arora",
+ "arora-engine",
  "arora-types",
  "console_error_panic_hook",
  "getrandom 0.4.2",
@@ -3153,11 +3153,11 @@ name = "polly"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arora",
  "arora-behavior-tree",
  "arora-behavior-tree-types",
  "arora-behavior-tree-types-yaml",
  "arora-buffers",
+ "arora-engine",
  "arora-module-core",
  "arora-module-rust",
  "arora-registry",
