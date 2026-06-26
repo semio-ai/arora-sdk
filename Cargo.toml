@@ -2,6 +2,9 @@
 resolver = "2"
 
 members = [
+  "modules/nao",
+  "modules/polly",
+  "crates/arora-web",
   "modules/behavior-tree-nodes",
   "crates/arora-behavior-tree-types-yaml",
   "crates/arora-behavior-tree-types",

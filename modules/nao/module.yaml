@@ -1,0 +1,22 @@
+id: ed2a9b9b-a2b8-438e-a99c-29e0df09c1d4
+author: Semio
+description: NAO support module
+license: Proprietary
+name: nao
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
+exports:
+  - type: function
+    id: a84eecf0-90eb-42dd-86e9-0cedf6b8849a
+    name: hello_nao
+    parameters: []
+    ret:
+      kind: scalar
+      id: str
+imports: []
+dependencies: []
+executable_mime: application/wasm
