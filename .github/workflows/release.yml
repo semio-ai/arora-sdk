@@ -42,7 +42,10 @@ jobs:
             if [ -z "$ver" ] || [ "$ver" = "null" ]; then
               echo "::warning::$crate not found in workspace metadata"; continue
             fi
-            if curl -sf "https://crates.io/api/v1/crates/$crate/$ver" >/dev/null 2>&1; then
+            # crates.io requires a User-Agent; without it the API 403s, the
+            # check fails, and we fall through to a redundant publish attempt.
+            if curl -sf -H "User-Agent: arora-sdk-ci (github.com/semio-ai/arora-sdk)" \
+                 "https://crates.io/api/v1/crates/$crate/$ver" >/dev/null 2>&1; then
               echo "$crate $ver already on crates.io — skip"
             else
               echo "Publishing $crate $ver"
