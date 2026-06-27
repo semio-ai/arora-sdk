@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-module-core = { path = "../arora-module-core" }
-arora-registry = { path = "../arora-registry", features = ["remote"] }
-arora-types = { path = "../arora-types", version = "1.4" }
-arora-vfs = { path = "../arora-vfs" }
+arora-module-core = { path = "../core" }
+arora-registry = { path = "../../arora-registry", features = ["remote"] }
+arora-types = { path = "../../arora-types", version = "1.4" }
+arora-vfs = { path = "../../arora-vfs" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 anyhow = "*"

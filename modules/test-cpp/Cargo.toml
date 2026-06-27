@@ -22,8 +22,8 @@ cmake = "0.1"
 # locates the language-specific generator by appending the language name to
 # its own argv[0] directory, so the cpp generator must be co-located with
 # the cli. The build script stages both binaries into one directory.
-arora-module-cli = { path = "../../crates/arora-module-cli", artifact = "bin" }
-arora-module-cpp = { path = "../../crates/arora-module-cpp", artifact = "bin" }
+arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact = "bin" }
+arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
 # wasm32-wasip1 static libraries the C++ links against.
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip1" }
 arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip1" }

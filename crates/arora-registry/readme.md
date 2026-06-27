@@ -44,4 +44,4 @@ can load such a directory and
 feed an [`EditableRegistry`](src/lib.rs) with these records.
 This is useful for defining types locally in an exchangeable format
 to work with CLI tools like [`arora-cli`](../arora-cli/readme.md)
-or [`arora-module-cli`](../arora-module-cli/readme.md).
+or [`arora-module-cli`](../arora-module-authoring/cli/readme.md).

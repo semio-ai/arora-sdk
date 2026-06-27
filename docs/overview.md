@@ -109,12 +109,12 @@ described with references to functions provided by Arora
 Such functions rely on basic types provided as a library by
 [`arora-behavior-tree-types`](https://github.com/semio-ai/arora-behavior-tree),
 so that Rust bindings can be generated for them using
-[`arora-module-rust`](../crates/arora-module-rust/readme.md).
+[`arora-module-rust`](../crates/arora-module-authoring/rust/readme.md).
 
 They are also available in the YAML format in
 [`arora-behavior-tree-types-yaml`](https://github.com/semio-ai/arora-behavior-tree),
 so that Rust or C++ bindings can be generated using
-[`arora-module-cpp`](../crates/arora-module-cpp/readme.md).
+[`arora-module-cpp`](../crates/arora-module-authoring/cpp/readme.md).
 See [`arora-registry`](../crates/arora-registry/readme.md) to load them
 for other uses.
 
@@ -151,16 +151,16 @@ for other uses.
   It is potentially useful for WebAssembly modules.
 
 - Arora Module libraries:
-  - [`arora-module-core`](../crates/arora-module-core/readme.md):
+  - [`arora-module-core`](../crates/arora-module-authoring/core/readme.md):
     a library to analyze type and module declarations,
     and resolve them for code generation.
-  - [`arora-module-cli`](../crates/arora-module-cli/readme.md):
+  - [`arora-module-cli`](../crates/arora-module-authoring/cli/readme.md):
     a library to generate code from a module description.
     It finds the various code generators locally.
-  - [`arora-module-rust`](../crates/arora-module-rust/readme.md):
+  - [`arora-module-rust`](../crates/arora-module-authoring/rust/readme.md):
     the Rust code generator for modules.
     Also works as a library.
-  - [`arora-module-cpp`](../crates/arora-module-cpp/readme.md):
+  - [`arora-module-cpp`](../crates/arora-module-authoring/cpp/readme.md):
     the C++ code generator for modules.
     Only works as a executable.
 

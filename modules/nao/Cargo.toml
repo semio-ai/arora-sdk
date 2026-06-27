@@ -22,8 +22,8 @@ anyhow = "1"
 cmake = "0.1"
 # Host tools used by the C++ codegen step. arora-module-cli locates
 # arora-module-cpp as a sibling, so we stage both into one dir.
-arora-module-cli = { path = "../../crates/arora-module-cli", artifact = "bin" }
-arora-module-cpp = { path = "../../crates/arora-module-cpp", artifact = "bin" }
+arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact = "bin" }
+arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
 # Static libs linked into the NAO .so. The Mac Homebrew cross-gcc handles
 # linking, so cargo builds these for the NAO target.
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "i686-unknown-linux-musl" }

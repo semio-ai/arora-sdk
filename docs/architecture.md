@@ -16,10 +16,11 @@ engine/
 │   ├── arora-util             C-helper utilities written in Rust
 │   ├── arora-vfs              virtual filesystem used by code generation
 │   ├── arora-registry         local + remote record registry
-│   ├── arora-module-core      type/module analysis + resolution
-│   ├── arora-module-cli       host code-generator entry point
-│   ├── arora-module-rust      Rust code generator
-│   ├── arora-module-cpp       C++ code generator
+│   ├── arora-module-authoring/  module-author toolbox (grouped crates)
+│   │   ├── core               type/module analysis + resolution
+│   │   ├── cli                host code-generator entry point
+│   │   ├── rust               Rust code generator
+│   │   └── cpp                C++ code generator
 │   ├── arora-behavior-tree         behavior-tree runtime
 │   ├── arora-behavior-tree-types         BT primitive types
 │   ├── arora-behavior-tree-types-yaml    same types serialised as YAML records
