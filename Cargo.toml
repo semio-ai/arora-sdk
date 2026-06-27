@@ -3,6 +3,15 @@ resolver = "2"
 
 members = [
   "crates/arora",
+  "modules/nao",
+  "modules/polly",
+  "crates/arora-web",
+  "modules/behavior-tree-nodes",
+  "crates/arora-behavior-tree-types-yaml",
+  "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree",
+  "crates/arora-types",
+  "crates/arora-engine",
   "crates/arora-buffers",
   "crates/arora-module-core",
   "crates/arora-module-cli",
@@ -22,6 +31,11 @@ members = [
 
 default-members = [
   "crates/arora",
+  "crates/arora-behavior-tree-types-yaml",
+  "crates/arora-behavior-tree-types",
+  "crates/arora-behavior-tree",
+  "crates/arora-types",
+  "crates/arora-engine",
   "crates/arora-buffers",
   "crates/arora-module-core",
   "crates/arora-module-cli",
@@ -34,6 +48,7 @@ default-members = [
   "crates/wasi-sdk",
   "tests",
 ]
+
 
 [profile.release]
 lto = "thin"

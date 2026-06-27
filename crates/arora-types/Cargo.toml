@@ -1,0 +1,43 @@
+[package]
+name = "arora-types"
+version = "1.4.0"
+edition = "2021"
+description = "Shared type definitions for the Semio Arora framework"
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-types"
+homepage = "https://github.com/semio-ai/arora-types"
+
+[lib]
+# rlib only. The wasm/JS bindings (src/wasm_value.rs, wasm32-gated) reach JS
+# through a dependent cdylib (e.g. arora-web) — wasm-bindgen pulls a dependency's
+# exports into the final cdylib — so arora-types itself need not be a cdylib. As
+# an in-workspace member its (host-empty) cdylib was built under two feature
+# contexts (normal + behavior-tree's build.rs host artifacts), colliding on the
+# unhashed libarora_types output and duplicating arora-types/uuid (E0308). A
+# standalone arora-types wasm package, if ever needed, can build the cdylib via
+# `cargo rustc --crate-type cdylib`.
+crate-type = ["rlib"]
+
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+derive_more = { version = "2", features = ["display"] }
+semver = { version = "1", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+lazy_static = "1"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { version = "1", features = ["js", "serde", "v4"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[dev-dependencies]
+pollster = "0.4"
+serde_json = "1"
+json5 = "0.4"
+ron = "0.12"
+pretty_assertions = "1"
+serde_yaml = "0.8"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -1,8 +1,8 @@
 # `arora-cli`
 
-A CLI version of the [Arora Engine](../arora/readme.md).
+A CLI version of the [Arora Engine](../arora-engine/readme.md).
 Can be used to load and execute modules
-without integrating the [`arora` library](../arora/readme.md)
+without integrating the [`arora` library](../arora-engine/readme.md)
 into another codebase.
 
 ## In a Nutshell
@@ -18,7 +18,7 @@ for information about client configuration files.
 
 Then, a function can be called by providing a `--call` description in YAML.
 The description format corresponds to the YAML serialization
-of the [`Call` structure of the Arora Engine](../arora/src/call.rs),
+of the [`Call` structure of the Arora Engine](../arora-engine/src/call.rs),
 using the usual [generic `Value` YAML serialization](https://github.com/semio-ai/arora-types/blob/main/src/value.rs).
 
 For instance, a call to `arora-cli` may look like this:

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Behavior-tree demo — Arora engine</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: ui-monospace, monospace;
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 1rem 2rem 0.6rem;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: baseline;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; color: #f8fafc; }
+    select {
+      font: inherit;
+      font-size: 0.85rem;
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      border-radius: 0.35rem;
+      padding: 0.3rem 0.6rem;
+      cursor: pointer;
+    }
+    main { flex: 1; display: flex; gap: 0; overflow: hidden; }
+
+    #tree-panel {
+      flex: 1;
+      padding: 1rem 1.5rem;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    #tree-panel h2 { margin: 0; font-size: 0.8rem; letter-spacing: 0.05em; color: #64748b; text-transform: uppercase; }
+    #tree-svg { display: block; width: 100%; }
+
+    #side-panel {
+      width: 280px;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid #1e293b;
+      padding: 1rem;
+      gap: 0.75rem;
+      overflow-y: auto;
+    }
+    #side-panel h2 { margin: 0; font-size: 0.8rem; letter-spacing: 0.05em; color: #64748b; text-transform: uppercase; }
+
+    button {
+      padding: 0.5rem 1rem;
+      font: inherit;
+      font-weight: 600;
+      font-size: 0.85rem;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: #2563eb; }
+    button:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+    #reset-btn { background: #475569; }
+    #reset-btn:hover:not(:disabled) { background: #334155; }
+    .btn-row { display: flex; gap: 0.5rem; align-items: center; }
+    .tick-badge { font-size: 0.78rem; color: #64748b; }
+
+    #status-box {
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.65rem 0.75rem;
+    }
+    #status-box .label { font-size: 0.72rem; color: #64748b; margin-bottom: 0.2rem; }
+    #status-value { font-size: 1rem; font-weight: bold; color: #94a3b8; }
+    #status-value.success { color: #4ade80; }
+    #status-value.failure { color: #f87171; }
+    #status-value.running  { color: #fbbf24; }
+
+    #var-box {
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.65rem 0.75rem;
+    }
+    #var-box .label { font-size: 0.72rem; color: #64748b; margin-bottom: 0.5rem; }
+    #var-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    #var-table th {
+      text-align: left;
+      color: #64748b;
+      font-weight: normal;
+      font-size: 0.72rem;
+      padding: 0 0 0.3rem;
+      border-bottom: 1px solid #334155;
+    }
+    #var-table td { padding: 0.2rem 0; vertical-align: middle; }
+    .var-name-cell { color: #93c5fd; padding-right: 0.5rem; }
+    .var-input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.25rem;
+      color: #4ade80;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.15rem 0.35rem;
+      width: 100%;
+    }
+    .var-input:focus { outline: none; border-color: #3b82f6; }
+
+    #log-box {
+      flex: 1;
+      background: #1e293b;
+      border-radius: 0.4rem;
+      padding: 0.65rem 0.75rem;
+      overflow-y: auto;
+      min-height: 80px;
+    }
+    #log-box .label { font-size: 0.72rem; color: #64748b; margin-bottom: 0.2rem; }
+    #log { font-size: 0.72rem; color: #94a3b8; white-space: pre-wrap; }
+
+    /* Tree SVG */
+    .bt-node rect, .bt-node polygon { stroke-width: 2; transition: fill 0.3s, stroke 0.3s; }
+    .bt-node.unvisited rect, .bt-node.unvisited polygon { fill: #1e293b; stroke: #475569; }
+    .bt-node.success  rect, .bt-node.success  polygon { fill: #14532d; stroke: #4ade80; }
+    .bt-node.failure  rect, .bt-node.failure  polygon { fill: #7f1d1d; stroke: #f87171; }
+    .bt-node.running  rect, .bt-node.running  polygon { fill: #78350f; stroke: #fbbf24; }
+    .bt-node text { fill: #e2e8f0; font-family: ui-monospace, monospace; font-size: 11px; pointer-events: none; }
+    .bt-node .sub { fill: #94a3b8; font-size: 9px; }
+    .bt-edge { stroke: #334155; stroke-width: 1.5; fill: none; transition: stroke 0.3s; }
+    .bt-edge.active { stroke: #3b82f6; }
+
+    /* Variable reference lines */
+    .var-edge { stroke-width: 1.2; fill: none; stroke-dasharray: 5 3; opacity: 0.7; }
+    .var-edge.read  { stroke: #60a5fa; }
+    .var-edge.write { stroke: #4ade80; }
+
+    /* Variable ellipses */
+    .var-node ellipse { fill: #0f172a; stroke: #334155; stroke-width: 1.5; }
+    .var-node text { fill: #94a3b8; font-family: ui-monospace, monospace; font-size: 10px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Behavior-tree demo — Arora engine in the browser</h1>
+    <label for="tree-select" style="font-size:0.85rem;color:#94a3b8;">Tree:</label>
+    <select id="tree-select"></select>
+  </header>
+  <main>
+    <section id="tree-panel">
+      <h2>Tree</h2>
+      <svg id="tree-svg" viewBox="0 0 700 280" xmlns="http://www.w3.org/2000/svg"></svg>
+    </section>
+    <aside id="side-panel">
+      <h2>Controls</h2>
+      <div class="btn-row">
+        <button id="tick-btn" disabled>Tick</button>
+        <button id="reset-btn" disabled>Reset</button>
+        <span class="tick-badge">tick <span id="tick-count">0</span></span>
+      </div>
+
+      <div id="status-box">
+        <div class="label">Last status</div>
+        <div id="status-value">—</div>
+      </div>
+
+      <div id="var-box">
+        <div class="label">Variables</div>
+        <table id="var-table">
+          <thead><tr><th>Name</th><th>Value</th></tr></thead>
+          <tbody id="var-tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="log-box">
+        <div class="label">Log</div>
+        <pre id="log">Loading…</pre>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>

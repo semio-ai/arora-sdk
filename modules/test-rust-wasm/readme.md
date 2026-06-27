@@ -43,7 +43,7 @@ $ cargo build [...]
 > **Note:**
 > Building the module for the host works here because
 > this module does not depend on other modules,
-> and therefore not on [the Arora Engine](../../crates/arora/readme.md)
+> and therefore not on [the Arora Engine](../../crates/arora-engine/readme.md)
 > and its functions `arora_dispatch` and `arora_dispatch_indirect`.
 
 Build into WASM so that it can be loaded by `wasmtime`,

@@ -1,0 +1,52 @@
+name: Release (publish changed crates)
+
+# Publishes workspace crates to crates.io automatically on push to main.
+# "Only when actually changed" is enforced by version: a crate is published
+# only when its manifest version is not already on crates.io (so bump the
+# version to release; unchanged crates are skipped). This is more precise than
+# path filters for a workspace — a crate's version only moves when it changes.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Workspace resolution still pulls the private semio-* git deps (for the
+      # not-yet-publishable crates), so configure git auth even though the
+      # publishable crates themselves are semio-free.
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - name: Publish crates whose version is new
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          set -uo pipefail
+          # For now only arora-types is published (semio-free, already on crates.io). The
+          # module-authoring / registry / behavior-tree crates are intentionally
+          # absent: they carry private semio-record / semio-client git deps,
+          # which crates.io forbids. They join this list once the semio-record
+          # migration removes those deps.
+          publishable=(arora-types)
+          for crate in "${publishable[@]}"; do
+            ver=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')
+            if [ -z "$ver" ] || [ "$ver" = "null" ]; then
+              echo "::warning::$crate not found in workspace metadata"; continue
+            fi
+            if curl -sf "https://crates.io/api/v1/crates/$crate/$ver" >/dev/null 2>&1; then
+              echo "$crate $ver already on crates.io — skip"
+            else
+              echo "Publishing $crate $ver"
+              cargo publish -p "$crate" \
+                || echo "::warning::failed to publish $crate $ver (deps may need to index first; rerun)"
+            fi
+          done

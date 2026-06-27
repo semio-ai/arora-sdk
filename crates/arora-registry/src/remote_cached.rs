@@ -4,8 +4,8 @@ use crate::{
     EditableRegistry, Enumeration, EnumerationFrozen, FolderPublic, Module, ModuleFrozen,
     ReadableRegistry, RegistryError, Structure, StructureFrozen, TypeDefinitionFrozen,
 };
+use arora_types::record::{RecordType, Selector};
 use async_trait::async_trait;
-use semio_client::common::{RecordType, Selector};
 use semio_client::context::Context;
 use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::{Version, VersionReq};

@@ -3,8 +3,8 @@ mod readable;
 mod reg_ref;
 use self::reg_ref::{FrozenRegistryReference, LocalRegistryReference};
 use crate::{EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen};
+use arora_types::record::Selector;
 use async_trait::async_trait;
-use semio_client::common::Selector;
 use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::Version;
 use std::{
@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// A [`LocalRegistry`] supports the addition of [`StructureFrozen`], [`EnumerationFrozen`] and [`ModuleFrozen`]
 /// on the fly. It provides a local index to look them up fast
 /// by [`Uuid'] or by path ([`String`]).
-/// It can be used as a local cache of a remote registry accessed using [`semio_client`].
+/// It can be used as a local cache of a remote registry accessed using the `remote` feature (semio-client).
 /// It provides an absolute root available for any record,
 /// with the identifier [`ROOT_ID`].
 pub struct LocalRegistry {

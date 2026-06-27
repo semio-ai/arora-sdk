@@ -4,12 +4,12 @@ How the engine routes a call from a caller to the function that runs it, the
 two addressing schemes it supports today (direct and indirect), and how the
 behavior-tree runtime leans on the indirect one.
 
-For the buffer/ABI basics see [`crates/arora/readme.md`](../crates/arora/readme.md#call-mechanism);
+For the buffer/ABI basics see [`crates/arora/readme.md`](../crates/arora-engine/readme.md#call-mechanism);
 for the *why* behind broader choices see [`design_decisions.md`](design_decisions.md).
 
 ## Two ways to address a call
 
-The engine implements the [`CallBridge`](../crates/arora/src/call.rs) trait,
+The engine implements the [`CallBridge`](../crates/arora-engine/src/call.rs) trait,
 which exposes two distinct call paths. They differ in **what the target is
 addressed by** and **what is passed**:
 
@@ -27,28 +27,28 @@ Both are wired into each executor as host callbacks that capture the engine
 pointer (`engine as usize`, see
 [`design_decisions.md`](design_decisions.md#engine-as-usize-for-executor-callbacks-deliberately-unsafe)).
 The wasmtime wiring is in
-[`executor/wasm/mod.rs`](../crates/arora/src/executor/wasm/mod.rs) (`func_wrap`
+[`executor/wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs) (`func_wrap`
 for `arora_dispatch` / `arora_dispatch_indirect`); the browser wiring is the
 `env.arora_dispatch*` closures in
-[`executor/browser/mod.rs`](../crates/arora/src/executor/browser/mod.rs).
+[`executor/browser/mod.rs`](../crates/arora-engine/src/executor/browser/mod.rs).
 
 ### Direct dispatch
 
 `arora_dispatch(module_id, method_id, arg)`
-([`wasm/mod.rs`](../crates/arora/src/executor/wasm/mod.rs)) reads the two UUIDs
+([`wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs)) reads the two UUIDs
 and the argument buffer out of guest memory, then calls
 `Engine::dispatch(module_id, function_id, arg)`
-([`engine.rs`](../crates/arora/src/engine.rs)), which looks the module up in
+([`engine.rs`](../crates/arora-engine/src/engine.rs)), which looks the module up in
 `modules: HashMap<Uuid, Box<dyn Module>>` and forwards to `Module::dispatch`.
 The native executor resolves the function by exported symbol name
-(`arora_function_<uuid>`, [`executor/native.rs`](../crates/arora/src/executor/native.rs));
+(`arora_function_<uuid>`, [`executor/native.rs`](../crates/arora-engine/src/executor/native.rs));
 the wasm executor resolves it through the module's `arora_functions` table.
 
 The higher-level host wrapper `arora_call` adds the call **protocol** on top of
 raw dispatch: it serializes the `Call` into the argument structure, and parses
 the returned `Structure` into a `CallResult` whose first field is the return
 value and whose remaining fields are mutated (out) parameters
-([`engine.rs`](../crates/arora/src/engine.rs)).
+([`engine.rs`](../crates/arora-engine/src/engine.rs)).
 
 This is the "call a **named function** with these arguments" path. Both the
 caller and the callee can be separately-compiled artifacts that agree only on
@@ -58,13 +58,13 @@ generated stubs.
 ### Indirect dispatch
 
 `arora_dispatch_indirect(callable_id)`
-([`wasm/mod.rs`](../crates/arora/src/executor/wasm/mod.rs)) takes a single
+([`wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs)) takes a single
 `u64`, calls `Engine::arora_call_indirect(CallableId)`, which looks the callable
-up in the [`CallableRegistry`](../crates/arora/src/call.rs) and invokes it. The
+up in the [`CallableRegistry`](../crates/arora-engine/src/call.rs) and invokes it. The
 returned `Value` is serialized into a fresh buffer and handed back.
 
 Callables are registered host-side with `arora_register_callable`, which mints a
-**random** `u64` id (`rng.next_u64()`, [`call.rs`](../crates/arora/src/call.rs))
+**random** `u64` id (`rng.next_u64()`, [`call.rs`](../crates/arora-engine/src/call.rs))
 and stores an `Rc<dyn Callable>`. `arora_register_callable` is **not** a guest
 import — a guest cannot register a callable; only the process hosting the engine
 can. `arora_dispatch_indirect` only lets a guest *invoke* a callable it was

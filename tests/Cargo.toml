@@ -25,9 +25,9 @@ test-cpp-2 = { path = "../modules/test-cpp-2" }
 
 # Component-model executor tests (tests/component.rs) drive the engine
 # in-process rather than through arora-cli.
-arora = { path = "../crates/arora" }
+arora-engine = { path = "../crates/arora-engine" }
 arora-buffers = { path = "../crates/arora-buffers" }
-arora-types = "1"
+arora-types = { path = "../crates/arora-types", version = "1.4" }
 serde_yaml = "0.8"
 uuid = "1"
 

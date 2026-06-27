@@ -1,0 +1,6 @@
+# polly is not a default member and isn't built in CI (it needs AWS deps), so
+# its build-generated `src/arora_generated/` module is absent there and
+# `cargo fmt --check` cannot resolve `mod arora_generated;` in lib.rs. rustfmt
+# resolves modules before honoring `ignore`, so skip formatting this crate
+# entirely. (Format polly locally where it builds, if needed.)
+disable_all_formatting = true

@@ -7,6 +7,7 @@ use arora_registry::{
     local::LocalRegistry, EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError,
     StructureFrozen, TypeDefinitionFrozen,
 };
+use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
     U8_ID, UNIT_ID,
@@ -17,7 +18,6 @@ use convert_case::{Case, Casing};
 use derive_more::Display;
 use proc_macro2::Ident;
 use quote::{__private::TokenStream, format_ident, quote, ToTokens};
-use semio_client::common::{RecordType, Selector};
 use semio_record::ty::PrimitiveKind;
 use semio_record::{
     module::v0::frozen::{ExportKind, Parameter},

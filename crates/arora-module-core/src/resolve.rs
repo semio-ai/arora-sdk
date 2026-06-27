@@ -13,7 +13,7 @@ use arora_types::module::{
         Parameter as LowParameter, TypeRef as LowTypeRef,
     },
 };
-use semio_client::common::Selector;
+use arora_types::record::Selector;
 use semio_record::record::{Freeze, Freezer, UnfrozenReference, VersionReq};
 use semio_record::{
     acl::Acl,
