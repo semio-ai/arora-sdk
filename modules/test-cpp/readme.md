@@ -6,7 +6,7 @@ required for the automated tests of the project.
 It demonstrates the implementation of a module in C++,
 using CMake and the WASI SDK (managed at the root of the repository).
 
-It calls [`arora-module-cli`](../../crates/arora-module-cli/readme.md)
+It calls [`arora-module-cli`](../../crates/arora-module-authoring/cli/readme.md)
 to generate the C++ bindings used in the implementation.
 It calls [`arora-cli`](../../crates/arora-cli/readme.md)
 to perform a sanity check of the module.

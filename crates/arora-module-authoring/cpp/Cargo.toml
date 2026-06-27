@@ -1,28 +1,23 @@
 [package]
-name = "arora-module-rust"
+name = "arora-module-cpp"
 version = "0.1.0"
 edition = "2021"
-readme = "readme.md"
-include = ["/src"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-module-core = { path = "../arora-module-core" }
-arora-registry = { path = "../arora-registry" }
-arora-types = { path = "../arora-types", version = "1.4" }
-arora-vfs = { path = "../arora-vfs" }
+arora-module-core = { path = "../core" }
+arora-registry = { path = "../../arora-registry" }
+arora-types = { path = "../../arora-types", version = "1.4" }
+arora-vfs = { path = "../../arora-vfs" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
-async-recursion = "1"
 clap = { version = "3", features = ["derive"] }
 convert_case = "0.11"
-derive_more = "2"
-itertools = "0.14"
+derive_more = { version = "2", features = ["from"] }
 lazy_static = "*"
-proc-macro2 = "1"
-quote = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "*"
+serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["serde", "v4"] }

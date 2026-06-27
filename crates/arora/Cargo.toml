@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 arora-engine = { path = "../arora-engine" }
 arora-behavior-tree = { path = "../arora-behavior-tree" }
-arora-module-core = { path = "../arora-module-core" }
+arora-module-core = { path = "../arora-module-authoring/core" }
 arora-registry = { path = "../arora-registry" }
 arora-types = { path = "../arora-types", version = "1.4" }
 # The Semio backend (module freezing / records).

@@ -1,6 +1,6 @@
 # `arora-module-core`
 
-Core library underneath [`arora-module-cli`](../arora-module-cli/readme.md).
+Core library underneath [`arora-module-cli`](../cli/readme.md).
 
 It can be used separately: the functions
 [`analyze_module` and `analyze_module_from_path`](src/lib.rs)
@@ -12,11 +12,11 @@ and resolve all its dependencies in the context of the given
 They are translated into [`ModuleAsset`s](src/lib.rs),
 arranged specifically to help generators in their work.
 It can be used directly, like with
-the [`arora-module-rust` library](../arora-module-rust/readme.md),
+the [`arora-module-rust` library](../rust/readme.md),
 or in a serialized form, like
-[`arora-module-cli`](../arora-module-cli/readme.md#communication-with-the-code-generator)
+[`arora-module-cli`](../cli/readme.md#communication-with-the-code-generator)
 does.
 
 See [the Test Rust WASM module](../../modules/test-rust-wasm/readme.md)
 for a working example using `arora-module-core` with
-the [`arora-module-rust` library](../arora-module-rust/readme.md)
+the [`arora-module-rust` library](../rust/readme.md)

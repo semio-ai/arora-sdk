@@ -4,7 +4,7 @@ Command-line tool for generating language-specific build-files, exporting types,
 `arora-module-cli` interfaces with language-specific executables to generate code.
 It processes the [module headers](https://github.com/semio-ai/arora-types) for them and
 analyzes them against a [registry](../arora-registry/readme.md)
-or local includes using [`arora-module-core`](../arora-module-core/readme.md).
+or local includes using [`arora-module-core`](../core/readme.md).
 Then it sends the resolved type dependencies and
 human-readable exports and imports to consider to the generators
 
@@ -34,8 +34,8 @@ human-readable exports and imports to consider to the generators
   - `--output-directory` / `-o` - The location generated files will be placed
 
 Results depend on the generators.
-See [`arora-module-cpp`](../arora-module-cpp/readme.md)
-or [`arora-module-rust`](../arora-module-rust/readme.md)
+See [`arora-module-cpp`](../cpp/readme.md)
+or [`arora-module-rust`](../rust/readme.md)
 for more details.
 
 ### Communication with the Code Generator
@@ -49,7 +49,7 @@ corresponding respectively to the UUID of the module to generate,
 and to its version tag.
 
 Then, it is fed the list of resolved
-[`ModuleAsset`s](../arora-module-core/readme.md)
+[`ModuleAsset`s](../core/readme.md)
 in the standard input (serialized using [`serde`](https://serde.rs/)).
 It contains the description of all the dependent types and modules,
 and ends with the description of the module to generate.

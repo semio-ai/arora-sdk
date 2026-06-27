@@ -24,7 +24,7 @@ is used to describe completely a module to implement.
 It is usually saved as a `module.yaml` file
 (using [`serde-yaml`](https://docs.serde.rs/serde_yaml/index.html)).
 It can be used by the code generators of
-[`arora-module-cli`](../arora-module-cli/readme.md)
+[`arora-module-cli`](../arora-module-authoring/cli/readme.md)
 to produce the proper bindings for a module.
 
 The "low-level" format of a module is called a

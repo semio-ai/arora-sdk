@@ -2,7 +2,7 @@
 
 Produces C++ code to support the implementation of an Arora module in C++.
 It is meant to be run in the context of
-[`arora-module-cli`](../arora-module-cli/readme.md).
+[`arora-module-cli`](../cli/readme.md).
 
 The generated code depends on the C++ library `arora-cpp`.
 It will produce C++ headers in the `include` directory,

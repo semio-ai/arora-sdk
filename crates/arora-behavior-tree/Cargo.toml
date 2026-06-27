@@ -27,6 +27,6 @@ anyhow = "*"
 anyhow = "*"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
-arora-module-rust = { path = "../arora-module-rust" }
+arora-module-rust = { path = "../arora-module-authoring/rust" }
 semver = "1"
 tokio = { version = "1", features = ["full"] }

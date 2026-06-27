@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
-arora-registry = { path = "../arora-registry" }
-arora-types = { path = "../arora-types", version = "1.4" }
-arora-vfs = { path = "../arora-vfs" }
+arora-registry = { path = "../../arora-registry" }
+arora-types = { path = "../../arora-types", version = "1.4" }
+arora-vfs = { path = "../../arora-vfs" }
 bytes = "1"
 convert_case = "0.11"
 derive_more = { version = "2", features = ["display"] }
