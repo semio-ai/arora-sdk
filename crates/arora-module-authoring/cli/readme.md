@@ -3,7 +3,7 @@
 Command-line tool for generating language-specific build-files, exporting types, and exporting modules.
 `arora-module-cli` interfaces with language-specific executables to generate code.
 It processes the [module headers](https://github.com/semio-ai/arora-types) for them and
-analyzes them against a [registry](../arora-registry/readme.md)
+analyzes them against a [registry](../../arora-registry/readme.md)
 or local includes using [`arora-module-core`](../core/readme.md).
 Then it sends the resolved type dependencies and
 human-readable exports and imports to consider to the generators
@@ -55,6 +55,6 @@ It contains the description of all the dependent types and modules,
 and ends with the description of the module to generate.
 
 In return, the generator produces a serialized virtual directory
-using [`arora-vfs`](../arora-vfs/readme.md),
+using [`arora-vfs`](../../arora-vfs/readme.md),
 that `arora-module-cli` will write to the location specified
 with the option `--output-directory`.
