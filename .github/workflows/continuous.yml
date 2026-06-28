@@ -69,6 +69,13 @@ jobs:
       - name: Browser executor test (headless Firefox)
         run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
 
+      # The opinionated `arora` runtime must also compile for the browser:
+      # arora-web wraps it (AroraRuntime) with no default features, selecting the
+      # browser engine host and the Tokio-free runtime. Building it here guards
+      # the whole wasm runtime path against regressions.
+      - name: Build arora-web for wasm32 (opinionated runtime)
+        run: cargo build -p arora-web --target wasm32-unknown-unknown
+
   markdown-link-check:
     runs-on: ubuntu-latest
     steps:

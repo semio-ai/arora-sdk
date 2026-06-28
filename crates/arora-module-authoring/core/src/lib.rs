@@ -10,11 +10,9 @@ use resolve::resolve_high_module;
 use semio_record::{module::v0::frozen::Export, record::Freezer};
 use semver::{Version, VersionReq};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::fs::read_to_string;
 use std::path::Path;
-use tokio::{
-    fs::read_to_string,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 /// Analyzes a module from the path where it is written in the YAML format.
@@ -23,9 +21,7 @@ pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Free
     path: P,
     registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
-    let module_yaml = read_to_string(path)
-        .await
-        .map_err(ModuleDeclarationError::IoError)?;
+    let module_yaml = read_to_string(path).map_err(ModuleDeclarationError::IoError)?;
     let module_definition: ModuleDefinition =
         serde_yaml::from_str(&module_yaml).map_err(ModuleDeclarationError::YAMLError)?;
     analyze_module(module_definition, registry).await

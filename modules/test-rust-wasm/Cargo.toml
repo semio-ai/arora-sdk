@@ -28,4 +28,4 @@ anyhow = "*"
 arora-module-core = { path = "../../crates/arora-module-authoring/core" }
 arora-module-rust = { path = "../../crates/arora-module-authoring/rust" }
 arora-registry = { path = "../../crates/arora-registry" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

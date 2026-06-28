@@ -3,7 +3,6 @@ use crate::{
 };
 use semver::Version;
 use std::{ffi::OsStr, path::Path, str::FromStr};
-use tokio::fs::read_to_string;
 use uuid::Uuid;
 
 /// Reads a directory describing registry records in YAML format,
@@ -147,17 +146,14 @@ async fn for_each_yaml_record<F>(path: &Path, mut f: F) -> Result<(), RegistryEr
 where
     F: FnMut(Uuid, Option<Version>, String) -> Result<(), RegistryError>,
 {
-    let mut dir = match tokio::fs::read_dir(path).await {
+    let dir = match std::fs::read_dir(path) {
         Ok(dir) => dir,
         _ => return Ok(()),
     };
-    while let Some(entry) = dir
-        .next_entry()
-        .await
-        .map_err(|err| RegistryError::Generic {
+    for entry in dir {
+        let entry = entry.map_err(|err| RegistryError::Generic {
             message: format!("failed to read directory {}: {}", path.display(), err),
-        })?
-    {
+        })?;
         let path = entry.path();
         if path.extension() != Some(OsStr::new("yaml")) {
             continue;
@@ -184,16 +180,106 @@ where
             };
             (id, None)
         };
-        let yaml = read_to_string(&path)
-            .await
-            .map_err(|err| RegistryError::Generic {
-                message: format!(
-                    "failed to read record description in {}: {}",
-                    path.display(),
-                    err
-                ),
-            })?;
+        let yaml = std::fs::read_to_string(&path).map_err(|err| RegistryError::Generic {
+            message: format!(
+                "failed to read record description in {}: {}",
+                path.display(),
+                err
+            ),
+        })?;
         f(id, tag, yaml)?;
+    }
+    Ok(())
+}
+
+/// The kind of registry record, identifying how an entry passed to
+/// [`load_records`] should be parsed and added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordKind {
+    Folder,
+    Enumeration,
+    Structure,
+    Module,
+}
+
+/// Parse a record file stem `<uuid>[@<version>]` into its id and optional
+/// version tag. Returns `None` if the uuid (or, when present, the version) is
+/// not parseable.
+pub fn parse_record_stem(stem: &str) -> Option<(Uuid, Option<Version>)> {
+    if let Some(at) = stem.find('@') {
+        let (id_str, tag_str) = stem.split_at(at);
+        let id = Uuid::from_str(id_str).ok()?;
+        let tag = Version::parse(&tag_str[1..]).ok()?;
+        Some((id, Some(tag)))
+    } else {
+        Some((Uuid::from_str(stem).ok()?, None))
+    }
+}
+
+/// Load registry records from in-memory YAML — the portable, filesystem-free
+/// counterpart to [`load_records_from_yaml_dir`].
+///
+/// Each item is `(kind, file_stem, yaml)`, where `file_stem` is the record
+/// file's name without extension (`<uuid>[@<version>]`). This lets a caller
+/// embed the records (e.g. via `include_dir!`) and load them on targets without
+/// a filesystem, such as `wasm32`. Records are added in dependency order
+/// (folders, enumerations, structures, then modules) regardless of input order.
+pub async fn load_records<'a, I>(
+    records: I,
+    registry: &mut dyn EditableRegistry,
+) -> Result<(), RegistryError>
+where
+    I: IntoIterator<Item = (RecordKind, &'a str, String)>,
+{
+    let mut folders = Vec::new();
+    let mut enumerations = Vec::new();
+    let mut structures = Vec::new();
+    let mut modules = Vec::new();
+
+    for (kind, stem, yaml) in records {
+        let (id, tag) = parse_record_stem(stem).ok_or_else(|| RegistryError::ParsingError {
+            message: format!("record file name is not a uuid[@version]: {stem}"),
+        })?;
+        match kind {
+            RecordKind::Folder => folders.push((id, yaml)),
+            RecordKind::Enumeration => enumerations.push((id, tag, yaml)),
+            RecordKind::Structure => structures.push((id, tag, yaml)),
+            RecordKind::Module => modules.push((id, tag, yaml)),
+        }
+    }
+
+    let parse_err = |what: &str, err: serde_yaml::Error| RegistryError::ParsingError {
+        message: format!("YAML {what} description is invalid: {err}"),
+    };
+    let need_version = || RegistryError::ParsingError {
+        message: "record file name was missing version information".to_string(),
+    };
+
+    for (id, yaml) in folders {
+        let folder =
+            serde_yaml::from_str::<FolderPublic>(&yaml).map_err(|e| parse_err("folder", e))?;
+        registry.add_folder(id, folder).await?;
+    }
+    for (id, tag, yaml) in enumerations {
+        let enumeration = serde_yaml::from_str::<EnumerationFrozen>(&yaml)
+            .map_err(|e| parse_err("enumeration", e))?;
+        registry
+            .add_enumeration(id, tag.ok_or_else(need_version)?, enumeration)
+            .await?;
+    }
+    for (id, tag, yaml) in structures {
+        let structure = serde_yaml::from_str::<StructureFrozen>(&yaml)
+            .map_err(|e| parse_err("structure", e))?;
+        registry
+            .add_structure(id, tag.ok_or_else(need_version)?, structure)
+            .await?;
+    }
+    for (id, tag, yaml) in modules {
+        let module =
+            serde_yaml::from_str::<ModuleFrozen>(&yaml).map_err(|e| parse_err("module", e))?;
+        registry
+            .add_module(id, tag.ok_or_else(need_version)?, module)
+            .await?;
     }
     Ok(())
 }
