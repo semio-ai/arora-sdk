@@ -1,0 +1,14 @@
+[package]
+name = "arora-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "The Arora Bridge trait: the connection between an Arora runtime and a remote (e.g. Semio Studio), modelled on studio-bridge's device-client."
+license = "MIT"
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "1.5" }
+async-trait = "0.1"
+futures = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

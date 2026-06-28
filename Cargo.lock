@@ -199,6 +199,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-bridge"
+version = "0.1.0"
+dependencies = [
+ "arora-types",
+ "async-trait",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "arora-buffers"
 version = "0.1.0"
 dependencies = [
@@ -263,6 +273,15 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "web-sys",
+]
+
+[[package]]
+name = "arora-hal"
+version = "0.1.0"
+dependencies = [
+ "arora-types",
+ "async-trait",
+ "tokio",
 ]
 
 [[package]]
@@ -402,8 +421,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-simple-data-store"
+version = "0.1.0"
+dependencies = [
+ "arora-types",
+]
+
+[[package]]
 name = "arora-types"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "async-trait",
  "derive_more 2.1.1",
