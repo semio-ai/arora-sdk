@@ -25,6 +25,11 @@ anyhow = "*"
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+# The three Arora interfaces wired together by the runtime loop.
+arora-hal = { path = "../arora-hal" }
+arora-bridge = { path = "../arora-bridge" }
+arora-simple-data-store = { path = "../arora-simple-data-store" }
+futures = "0.3"
 
 [build-dependencies]
 # The behavior-tree node implementations, built as a wasm artifact and embedded
@@ -33,3 +38,6 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # default-members) — not as a standalone `-p arora` leaf — or arora-types/uuid
 # get duplicated across the normal/build feature contexts.
 behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
+
+[dev-dependencies]
+async-trait = "0.1"

@@ -7,6 +7,8 @@
 //! startup (as Groot XML) and otherwise idles, waiting for behavior trees that
 //! will soon arrive over the bridge.
 
+pub mod runtime;
+
 use anyhow::{anyhow, Context, Result};
 use arora_behavior_tree::{
     arora_generated::behavior_tree::status::Status, run_behavior_tree, schema_groot,
