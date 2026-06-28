@@ -1,4 +1,5 @@
 pub mod call;
+pub mod data;
 pub mod keyvalue;
 pub mod module;
 pub mod record;
