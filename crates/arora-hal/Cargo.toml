@@ -1,0 +1,13 @@
+[package]
+name = "arora-hal"
+version = "0.1.0"
+edition = "2021"
+description = "Arora Hardware Abstraction Layer (HAL) trait, with a fake implementation."
+license = "MIT"
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "1.5" }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
