@@ -1,68 +1,84 @@
 //! The Arora runtime loop — studio-bridge's `engine`, library side.
 //!
-//! # Concurrency model: one state owner, dedicated steps
+//! # Portable, step-dispatched, single state owner
 //!
 //! Several things want to change the blackboard: the **bridge** (commands and
 //! state from the remote), the **HAL** (sensor readings), and the **behavior
-//! tree** (intent it writes while ticking). Rather than let them race on the
-//! state behind a lock, the [`Runtime`] gives the state a single owner — the
-//! main thread — and dispatches the others as **serialized steps** of one loop:
+//! tree** (intent it writes while ticking). Rather than share the state behind a
+//! lock and race, [`Runtime`] gives it a single owner and dispatches the others
+//! as serialized **steps** of one loop ([`step`](Runtime::step)):
 //!
 //! 1. drain inbound bridge/HAL updates → apply to the state;
 //! 2. tick the behavior tree → it reads/writes the state;
-//! 3. flush the resulting state changes out to the remote.
+//! 3. flush the resulting state changes out to the remote / hardware.
 //!
 //! Only one step touches the state at a time, so there is never concurrent
-//! access — and no dedicated engine thread, just a dedicated *step*. The async
-//! bridge/HAL I/O runs on a separate Tokio "adapter" thread that only moves data
-//! through channels; it never touches the state. This also lets the (`!Send`,
-//! `block_on`-using) engine and behavior tree live naturally on the main thread.
+//! access — and no dedicated engine thread, just a dedicated *step*.
+//!
+//! ## Why it is built this way (web first)
+//!
+//! `step()` is **synchronous and non-blocking**, and the [`Runtime`] itself
+//! spawns no threads, owns no async runtime, and never sleeps. The asynchronous
+//! bridge/HAL I/O lives in a separate [`io`] pump (built from `futures` only)
+//! that talks to the loop through channels. The embedder drives both:
+//!
+//! - **native**: spawn [`io`] on Tokio and call [`run`](Runtime::run) (a thin
+//!   `step` loop) on a thread;
+//! - **web**: `spawn_local` the [`io`] pump and drive `step()` from
+//!   `requestAnimationFrame` — or run the whole thing inside a Web Worker.
+//!
+//! Because the loop only ever exchanges messages over channels, it moves into a
+//! Web Worker unchanged: the channels become the worker boundary.
 
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
 
 use arora_behavior_tree::{
     arora_generated::behavior_tree::status::Status, run_behavior_tree, schema_groot,
     tree_node::TreeNode, BehaviorTree, ModuleFunction,
 };
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, DeviceInfo};
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo};
 use arora_engine::engine::PinnedEngine;
 use arora_hal::Hal;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::CallResult;
-use arora_types::data::{DataStore, StateChange};
+use arora_types::data::{DataStore, StateChange, Subscription};
 use arora_types::value::Value;
-use futures::StreamExt;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::{Future, StreamExt};
 use uuid::Uuid;
 
 use crate::Arora;
 
-/// Inbound work from the async adapter to the main loop.
-enum Event {
+/// Inbound events the async [`io`] pump forwards to the sync [`Runtime`].
+enum Inbound {
     /// A command from the remote, with its reply channel.
     Command(BridgeCommand),
-    /// A device-info update (`None` = the device was unregistered).
-    DeviceInfo(Option<DeviceInfo>),
+    /// A device-info update (`Ok(None)` = the device was unregistered).
+    DeviceInfo(BridgeResult<Option<DeviceInfo>>),
     /// A client claimed/released interest in the data.
     DataRequested(bool),
-    /// A state change reported by the hardware (sensors, mirrored actuation).
-    HalUpdate(StateChange),
 }
 
-/// Outbound work from the main loop to the async adapter.
+/// Outbound work the [`Runtime`] hands to the async [`io`] pump.
 enum Outbound {
-    /// Forward a local state change to the remote.
-    SendData(StateChange),
+    /// A local state change to mirror to the remote and the hardware.
+    StateChanged(StateChange),
 }
 
-/// Something went wrong running the loop.
+/// What a [`step`](Runtime::step) concluded.
+#[derive(Debug, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// The runtime is live; keep stepping.
+    Live,
+    /// The device was unregistered from the remote; stop stepping.
+    Unregistered,
+}
+
+/// Something went wrong running a step.
 #[derive(Debug)]
 pub enum RuntimeError {
-    /// The device was unregistered from the remote — the runtime stopped.
-    Unregistered,
     /// A write to the data store failed.
     Store(String),
     /// A behavior tree failed to build or run.
@@ -72,7 +88,6 @@ pub enum RuntimeError {
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeError::Unregistered => write!(f, "device unregistered from the remote"),
             RuntimeError::Store(m) => write!(f, "data store error: {m}"),
             RuntimeError::BehaviorTree(m) => write!(f, "behavior tree error: {m}"),
         }
@@ -81,52 +96,59 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// The Arora runtime: the state's single owner, plus the engine and behavior
-/// trees, driven by one step-dispatched loop. Build it from an [`Arora`]
-/// (engine + behavior-tree module) and a HAL + bridge.
+/// The Arora runtime: the state's single owner plus the engine and behavior
+/// trees, advanced one [`step`](Runtime::step) at a time. Build it with
+/// [`with_io`](Runtime::with_io).
 pub struct Runtime {
-    // Owned and touched ONLY by the main loop (single-threaded state access):
+    // Owned and touched ONLY by the stepping thread (single-threaded state):
     store: SimpleDataStore,
     engine: PinnedEngine,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     trees: VecDeque<BehaviorTree>,
-    // Channels to/from the async adapter thread:
-    events: Receiver<Event>,
-    outbound: tokio::sync::mpsc::UnboundedSender<Outbound>,
-    store_changes: arora_types::data::Subscription,
-    tick: Duration,
-    // Keep the adapter thread alive for the runtime's lifetime.
-    _adapter: std::thread::JoinHandle<()>,
+    // Channels to/from the async io pump, plus the HAL's sensor feed:
+    hal_updates: Subscription,
+    inbound: UnboundedReceiver<Inbound>,
+    outbound: UnboundedSender<Outbound>,
+    store_changes: Subscription,
 }
 
 impl Runtime {
     /// Wire an [`Arora`] (engine + behavior-tree module) to a HAL and a bridge.
-    /// Spawns the async adapter thread; the returned `Runtime` is driven on the
-    /// calling (main) thread via [`run`](Runtime::run).
-    pub fn new(arora: Arora, hal: Box<dyn Hal>, bridge: Box<dyn Bridge>) -> Self {
+    ///
+    /// Returns the synchronous `Runtime` plus the asynchronous [`io`] future that
+    /// pumps the bridge/HAL. The embedder spawns the future on its executor
+    /// (`tokio::spawn` on native, `spawn_local` on the web) and drives
+    /// [`step`](Runtime::step) on its own cadence — the two communicate only over
+    /// channels.
+    pub fn with_io(
+        arora: Arora,
+        hal: Arc<dyn Hal>,
+        bridge: Arc<dyn Bridge>,
+    ) -> (Self, impl Future<Output = ()>) {
         let Arora {
             engine,
             function_index,
         } = arora;
         let store = SimpleDataStore::new();
         let store_changes = store.subscribe();
+        let hal_updates = hal.updates();
 
-        let (events_tx, events) = std::sync::mpsc::channel::<Event>();
-        let (outbound, outbound_rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        let (inbound_tx, inbound) = futures::channel::mpsc::unbounded::<Inbound>();
+        let (outbound, outbound_rx) = futures::channel::mpsc::unbounded::<Outbound>();
 
-        let adapter = spawn_adapter(Arc::from(hal), Arc::from(bridge), events_tx, outbound_rx);
+        let pump = io(bridge, hal, inbound_tx, outbound_rx);
 
-        Self {
+        let runtime = Self {
             store,
             engine,
             function_index,
             trees: VecDeque::new(),
-            events,
+            hal_updates,
+            inbound,
             outbound,
             store_changes,
-            tick: Duration::from_millis(10),
-            _adapter: adapter,
-        }
+        };
+        (runtime, pump)
     }
 
     /// Queue a behavior tree (as Groot XML) to be run on the next BT step.
@@ -145,38 +167,36 @@ impl Runtime {
         Ok(())
     }
 
-    /// Run the step-dispatched loop until the device is unregistered or a step
-    /// fails. Runs on the calling thread; the state is touched only here.
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
-        loop {
-            // STEP 1 — drain inbound bridge/HAL updates into the state.
-            loop {
-                match self.events.try_recv() {
-                    Ok(Event::HalUpdate(change)) => self.apply(change)?,
-                    Ok(Event::Command(cmd)) => self.handle_command(cmd)?,
-                    Ok(Event::DeviceInfo(None)) => return Err(RuntimeError::Unregistered),
-                    Ok(Event::DeviceInfo(Some(_info))) => { /* TODO: apply device info */ }
-                    Ok(Event::DataRequested(_requested)) => { /* TODO: claim handling */ }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return Ok(()),
-                }
-            }
-
-            // STEP 2 — tick the behavior tree(s); they read/write the same state.
-            if let Some(tree) = self.trees.pop_front() {
-                self.tick_tree(&tree)?;
-            }
-
-            // STEP 3 — flush local state changes out to the remote.
-            while let Some(change) = self.store_changes.try_recv() {
-                let _ = self.outbound.send(Outbound::SendData(change));
-            }
-
-            std::thread::sleep(self.tick);
+    /// Advance one step: drain inbound bridge/HAL updates into the state, tick the
+    /// behavior tree, then flush the resulting state changes out. Non-blocking;
+    /// touches the state from this (single) thread only.
+    pub fn step(&mut self) -> Result<StepOutcome, RuntimeError> {
+        // STEP 1a — HAL sensor updates (a synchronous subscription).
+        while let Some(change) = self.hal_updates.try_recv() {
+            self.apply(change)?;
         }
+        // STEP 1b — bridge events forwarded by the io pump.
+        while let Ok(event) = self.inbound.try_recv() {
+            match event {
+                Inbound::Command(cmd) => self.handle_command(cmd)?,
+                Inbound::DeviceInfo(Ok(None)) => return Ok(StepOutcome::Unregistered),
+                Inbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
+                Inbound::DeviceInfo(Err(_e)) => { /* TODO: surface bridge error */ }
+                Inbound::DataRequested(_requested) => { /* TODO: claim handling */ }
+            }
+        }
+        // STEP 2 — tick the behavior tree(s); they read/write the same state.
+        if let Some(tree) = self.trees.pop_front() {
+            self.tick_tree(&tree)?;
+        }
+        // STEP 3 — flush local state changes out to the remote / hardware.
+        while let Some(change) = self.store_changes.try_recv() {
+            let _ = self.outbound.unbounded_send(Outbound::StateChanged(change));
+        }
+        Ok(StepOutcome::Live)
     }
 
-    /// Apply a state change to the blackboard (main-thread only).
+    /// Apply a state change to the blackboard (stepping thread only).
     fn apply(&self, change: StateChange) -> Result<(), RuntimeError> {
         self.store
             .write(change)
@@ -214,108 +234,80 @@ impl Runtime {
     }
 
     /// Tick a behavior tree to a terminal status. The tree drives the engine,
-    /// which manages its own blocking runtime — fine here on the main thread.
+    /// which manages its own blocking runtime — fine on the stepping thread.
     fn tick_tree(&mut self, tree: &BehaviorTree) -> Result<Status, RuntimeError> {
         run_behavior_tree(tree, self.function_index.clone(), &mut self.engine, false)
             .map_err(|e| RuntimeError::BehaviorTree(format!("run: {e:?}")))
     }
 }
 
-/// Spawn the Tokio adapter thread: it bridges the async HAL/bridge I/O to the
-/// main loop's channels. It never touches the state.
-fn spawn_adapter(
-    hal: Arc<dyn Hal>,
+/// Native convenience: drive [`step`](Runtime::step) in a loop until the device
+/// is unregistered, pacing with a short sleep. On the web, drive `step` from
+/// `requestAnimationFrame` instead (this method would block the event loop).
+#[cfg(not(target_arch = "wasm32"))]
+impl Runtime {
+    pub fn run(&mut self) -> Result<(), RuntimeError> {
+        loop {
+            if self.step()? == StepOutcome::Unregistered {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+/// The async I/O pump: forwards the bridge's command/device-info/data-requested
+/// streams to the runtime, and drains the runtime's outbound changes to the
+/// remote and the hardware. Built from `futures` only — no Tokio, no threads —
+/// so it runs equally on a Tokio task or a browser `spawn_local`.
+async fn io(
     bridge: Arc<dyn Bridge>,
-    events: std::sync::mpsc::Sender<Event>,
-    mut outbound: tokio::sync::mpsc::UnboundedReceiver<Outbound>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(_) => return,
-        };
-        rt.block_on(async move {
-            // bridge commands -> events
-            let b = bridge.clone();
-            let e = events.clone();
-            let commands = tokio::spawn(async move {
-                let mut stream = b.commands().await;
-                while let Some(cmd) = stream.next().await {
-                    if e.send(Event::Command(cmd)).is_err() {
-                        break;
-                    }
+    hal: Arc<dyn Hal>,
+    inbound_tx: UnboundedSender<Inbound>,
+    mut outbound_rx: UnboundedReceiver<Outbound>,
+) {
+    let forward = async {
+        let commands = bridge.commands().await.map(Inbound::Command);
+        let device_info = bridge
+            .device_info_updated()
+            .await
+            .unwrap_or_else(|_| Box::pin(futures::stream::empty()))
+            .map(Inbound::DeviceInfo);
+        let data_requested = bridge.data_requested().await.map(Inbound::DataRequested);
+        let mut merged = futures::stream::select(
+            commands,
+            futures::stream::select(device_info, data_requested),
+        );
+        while let Some(event) = merged.next().await {
+            if inbound_tx.unbounded_send(event).is_err() {
+                break; // the runtime was dropped
+            }
+        }
+    };
+    let drain = async {
+        while let Some(out) = outbound_rx.next().await {
+            match out {
+                Outbound::StateChanged(change) => {
+                    // Mirror local changes to the remote and the hardware.
+                    let _ = bridge.send_data(change.clone()).await;
+                    let _ = hal.write(change).await;
                 }
-            });
-            // device-info updates -> events
-            let b = bridge.clone();
-            let e = events.clone();
-            let device_info = tokio::spawn(async move {
-                if let Ok(mut stream) = b.device_info_updated().await {
-                    while let Some(item) = stream.next().await {
-                        match item {
-                            Ok(info) => {
-                                if e.send(Event::DeviceInfo(info)).is_err() {
-                                    break;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                }
-            });
-            // data-requested (claim) -> events
-            let b = bridge.clone();
-            let e = events.clone();
-            let data_requested = tokio::spawn(async move {
-                let mut stream = b.data_requested().await;
-                while let Some(requested) = stream.next().await {
-                    if e.send(Event::DataRequested(requested)).is_err() {
-                        break;
-                    }
-                }
-            });
-            // HAL updates (sync channel) -> events
-            let hal_updates = hal.updates();
-            let e = events.clone();
-            let hal_forward = tokio::task::spawn_blocking(move || {
-                while let Some(change) = hal_updates.recv() {
-                    if e.send(Event::HalUpdate(change)).is_err() {
-                        break;
-                    }
-                }
-            });
-            // outbound -> the remote / hardware
-            let b = bridge.clone();
-            let hal_out = hal.clone();
-            let outbound_task = tokio::spawn(async move {
-                while let Some(out) = outbound.recv().await {
-                    match out {
-                        Outbound::SendData(change) => {
-                            let _ = b.send_data(change.clone()).await;
-                            let _ = hal_out.write(change).await;
-                        }
-                    }
-                }
-            });
-            let _ = tokio::join!(
-                commands,
-                device_info,
-                data_requested,
-                hal_forward,
-                outbound_task
-            );
-        });
-    })
+            }
+        }
+    };
+    futures::future::join(forward, drain).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arora_bridge::{BridgeResult, CommandStream, DataRequestedStream, DeviceInfoStream};
-    use arora_types::data::Key;
+    use arora_bridge::{CommandStream, DataRequestedStream, DeviceInfoStream};
+    use arora_types::data::{Key, StateChange};
     use async_trait::async_trait;
+    use futures::channel::oneshot;
 
-    /// A bridge that reports the device unregistered immediately.
+    /// A bridge that reports the device unregistered immediately and is otherwise
+    /// silent.
     struct UnregisterBridge;
 
     #[async_trait]
@@ -343,19 +335,28 @@ mod tests {
         }
     }
 
-    async fn build_runtime(bridge: Box<dyn Bridge>) -> Runtime {
+    async fn build(bridge: Arc<dyn Bridge>) -> (Runtime, impl Future<Output = ()>) {
         let arora = Arora::start().await.expect("arora starts");
-        Runtime::new(arora, Box::new(arora_hal::FakeHal::new()), bridge)
+        Runtime::with_io(arora, Arc::new(arora_hal::FakeHal::new()), bridge)
+    }
+
+    /// Drive `step` cooperatively (yielding to let the io pump run) until the
+    /// runtime reports unregistered, with a safety bound.
+    async fn drive_until_unregistered(mut runtime: Runtime) {
+        for _ in 0..1000 {
+            match runtime.step().expect("step ok") {
+                StepOutcome::Unregistered => return,
+                StepOutcome::Live => tokio::task::yield_now().await,
+            }
+        }
+        panic!("runtime never reported unregistered");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stops_when_unregistered() {
-        let mut runtime = build_runtime(Box::new(UnregisterBridge)).await;
-        // run() is synchronous (it drives the engine); the bridge/HAL adapter is
-        // already on its own thread, so call it directly. It returns promptly
-        // once the adapter forwards the device-unregistered event.
-        let err = runtime.run().unwrap_err();
-        assert!(matches!(err, RuntimeError::Unregistered));
+        let (runtime, pump) = build(Arc::new(UnregisterBridge)).await;
+        tokio::spawn(pump);
+        drive_until_unregistered(runtime).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -367,14 +368,41 @@ mod tests {
     </Sequence>
   </BehaviorTree>
 </root>"#;
-        let mut runtime = build_runtime(Box::new(UnregisterBridge)).await;
+        let (mut runtime, pump) = build(Arc::new(UnregisterBridge)).await;
         runtime.queue_groot_xml(xml).expect("tree queues");
-        let err = runtime.run().unwrap_err();
-        assert!(matches!(err, RuntimeError::Unregistered));
+        tokio::spawn(pump);
+        drive_until_unregistered(runtime).await;
     }
 
-    #[test]
-    fn key_is_in_scope() {
-        let _ = Key::from("x");
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_and_update_commands_round_trip() {
+        let (mut runtime, _pump) = build(Arc::new(UnregisterBridge)).await;
+        let key = Key::from("greeting");
+
+        // Update writes a value into the store.
+        let (tx, rx) = oneshot::channel();
+        let mut set = std::collections::HashMap::new();
+        set.insert(key.clone(), Some(Value::String("hi".into())));
+        let change = StateChange {
+            set,
+            unset: std::collections::HashSet::new(),
+        };
+        runtime
+            .handle_command(BridgeCommand::new(BridgeOp::Update(change), tx))
+            .unwrap();
+        assert!(rx.await.unwrap().is_ok(), "update should succeed");
+
+        // Get reads it back, wrapped as Option inside an ArrayValue.
+        let (tx, rx) = oneshot::channel();
+        runtime
+            .handle_command(BridgeCommand::new(BridgeOp::Get(vec![key]), tx))
+            .unwrap();
+        let result = rx.await.unwrap().expect("get should succeed");
+        assert_eq!(
+            result.ret,
+            Value::ArrayValue(vec![Value::Option(Some(Box::new(Value::String(
+                "hi".into()
+            ))))])
+        );
     }
 }
