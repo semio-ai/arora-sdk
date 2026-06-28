@@ -11,6 +11,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 arora-engine = { path = "../arora-engine", default-features = false }
 arora-types = { path = "../arora-types", version = "1.4" }
+# The opinionated runtime (no default features → the browser engine host, a
+# Tokio-free runtime + io pump) plus the in-process fakes it runs with.
+arora = { path = "../arora", default-features = false }
+arora-hal = { path = "../arora-hal" }
+arora-bridge = { path = "../arora-bridge" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

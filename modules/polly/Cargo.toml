@@ -16,7 +16,7 @@ bytes = "1"
 derive_more = "2"
 lazy_static = "*"
 soloud = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
@@ -30,7 +30,7 @@ convert_case = "0.11"
 rand = "0.10"
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 serde_yaml = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 
@@ -41,4 +41,4 @@ arora-behavior-tree-types-yaml = { path = "../../crates/arora-behavior-tree-type
 arora-module-core = { path = "../../crates/arora-module-authoring/core" }
 arora-module-rust = { path = "../../crates/arora-module-authoring/rust" }
 arora-registry = { path = "../../crates/arora-registry" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }

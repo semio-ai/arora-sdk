@@ -1,13 +1,13 @@
 use async_recursion::async_recursion;
 use derive_more::Display;
-use io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::{
     collections::{hash_map::Entry as HashMapEntry, HashMap},
+    fs, io,
     path::{Path, PathBuf},
 };
-use tokio::{fs, io};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct File {
@@ -28,10 +28,7 @@ impl File {
 
         let real_hash = if path.exists() {
             let mut current = Vec::new();
-            fs::File::open(&path)
-                .await?
-                .read_to_end(&mut current)
-                .await?;
+            fs::File::open(&path)?.read_to_end(&mut current)?;
             let mut hasher = Sha256::new();
             hasher.update(&current);
             Some(hasher.finalize())
@@ -43,7 +40,7 @@ impl File {
             return Ok(());
         }
 
-        fs::File::create(&path).await?.write_all(&self.data).await?;
+        fs::File::create(&path)?.write_all(&self.data)?;
         Ok(())
     }
 }
@@ -203,7 +200,7 @@ impl Directory {
     /// Writes the directory to the given path.
     pub async fn sync(&self, path: PathBuf) -> io::Result<()> {
         if !path.exists() {
-            fs::create_dir_all(&path).await?;
+            fs::create_dir_all(&path)?;
         } else if !path.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

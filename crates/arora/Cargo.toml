@@ -12,9 +12,24 @@ path = "src/lib.rs"
 [[bin]]
 name = "arora"
 path = "src/main.rs"
+# The binary is native-only (Tokio runtime + filesystem). On wasm, build the
+# library with --no-default-features.
+required-features = ["native"]
+
+[features]
+default = ["native"]
+# Native build: the wasmtime + dynamic-library engine hosts and the binary. Build
+# for wasm32 with --no-default-features (the browser host is selected by target
+# cfg).
+native = [
+    "dep:tokio",
+    "dep:behavior-tree-nodes",
+    "arora-engine/wasmtime-host",
+    "arora-engine/native-host",
+]
 
 [dependencies]
-arora-engine = { path = "../arora-engine" }
+arora-engine = { path = "../arora-engine", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree" }
 arora-module-core = { path = "../arora-module-authoring/core" }
 arora-registry = { path = "../arora-registry" }
@@ -23,21 +38,26 @@ arora-types = { path = "../arora-types", version = "1.4" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
 serde_yaml = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }
 # The three interfaces the runtime loop wires around the shared state.
 arora-hal = { path = "../arora-hal" }
 arora-bridge = { path = "../arora-bridge" }
 arora-simple-data-store = { path = "../arora-simple-data-store" }
 futures = "0.3"
+# Embeds the behavior-tree type records so they load without a filesystem (wasm).
+include_dir = "0.7"
 
 [build-dependencies]
 # The behavior-tree node implementations, built as a wasm artifact and embedded
-# into the binary at build time (build.rs re-exports the path, lib.rs
-# include_bytes! it). NOTE: build `arora` as a workspace member (it is in
-# default-members) — not as a standalone `-p arora` leaf — or arora-types/uuid
-# get duplicated across the normal/build feature contexts.
-behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
+# at build time (build.rs re-exports the path; lib.rs include_bytes! it). Build
+# `arora` as a workspace member (it is in default-members), not as a standalone
+# `-p arora` leaf, or arora-types/uuid get duplicated across the normal/build
+# feature contexts.
+#
+# Optional + behind `native` so the wasm build excludes it; on wasm the BT-nodes
+# bytes are supplied at runtime (`Arora::start_with_nodes`).
+behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
