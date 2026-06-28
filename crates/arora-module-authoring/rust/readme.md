@@ -9,5 +9,5 @@ The library can provides the function
 [`generate_sources`](src/lib.rs)
 to generate Rust code from
 [`ModuleAsset`s produced by `arora-module-core`](../core/readme.md#asset).
-See [the Test Rust WASM module](../../modules/test-rust-wasm/readme.md)
+See [the Test Rust WASM module](../../../modules/test-rust-wasm/readme.md)
 for a working example.

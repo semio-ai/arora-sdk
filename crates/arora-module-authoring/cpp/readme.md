@@ -8,5 +8,5 @@ The generated code depends on the C++ library `arora-cpp`.
 It will produce C++ headers in the `include` directory,
 and C++ source files in the `source` directory.
 
-See [the Test C++ module 1](../../modules/test-cpp/readme.md)
-and [2](../../modules/test-cpp-2/readme.md) for working examples.
+See [the Test C++ module 1](../../../modules/test-cpp/readme.md)
+and [2](../../../modules/test-cpp-2/readme.md) for working examples.
