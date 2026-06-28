@@ -1,489 +1,227 @@
-# Implementation plan: bringing studio-bridge into the Arora architecture
+# Implementation plan: bringing studio-bridge into Arora (consolidated-workspace revision)
 
-Companion to [`proposal-bring-studio-bridge-in.md`](proposal-bring-studio-bridge-in.md).
-Read the proposal first — this file assumes the target shape (§5),
-the HAL placement decision (§3), and the data interface (§4) are
-already understood.
+> **Revised 2026-06-27.** The original version of this plan assumed the
+> multi-repo split (separate `arora-types`, `arora-ecbs`, `arora-sdk`, and a
+> new `arora` binary repo). That split was **reversed**: everything now lives
+> in **one `arora-sdk` workspace** (the `arora-engine` repo). This revision
+> rewrites the plan for that reality and for Victor's three-interface framing.
+> The companion rationale is still [`proposal-bring-studio-bridge-in.md`](proposal-bring-studio-bridge-in.md)
+> (read §3–§4 for the HAL/data reasoning); ignore its repo-topology sections.
 
-This is the executable plan. Each task is sized to be one PR. Each
-PR has a definition of done (DoD); do not move on until it passes.
-
-If a step's DoD does not hold, **STOP and report back**. Do not
-paper over a red CI with `--no-verify` or by skipping tests.
-
----
-
-## Conventions
-
-- Branch naming: `feat/<short-name>` in each affected repo.
-- Commit style: follow each repo's existing convention
-  (`<type>(<scope>): <subject>` in the Arora repos).
-- Never force-push to `main`/`master`. Never delete branches the
-  user has not authorized.
-- Always run CI before merging by opening a draft PR; do not merge
-  if CI is red.
-- All cross-repo git deps pin to a tag or commit, never to a branch.
-
-## Sequencing relative to proposal 1
-
-| Plan-2 PR | Depends on |
-|---|---|
-| PR 1 (data interface in arora-types) | proposal 1 PR 1 merged + published (so arora-types is already in the "add new module" flow) |
-| PR 2 (arora-ecbs first slice) | PR 1 published |
-| PR 3 (Key/StateChange move) | PR 2 |
-| PR 4 (HAL trait in arora-sdk) | proposal 1 PR 7 (arora-sdk exists) + PR 3 |
-| PR 5 (BridgeConnector) | PR 4 |
-| PR 6 (Instance accepts HAL + bridge) | PR 4, PR 5 |
-| PR 7 (arora binary repo) | PR 6 |
-| PR 8 (move HAL impls) | PR 7 |
-| PR 9 (decommission studio-bridge engine + headless) | PR 8 |
-
-Do not start PR 4 until proposal 1's PR 7 is merged.
-
-## Checkpoints where the agent must stop and ask
-
-- After **PR 1** (before `cargo publish arora-types`): confirm the
-  version bump with Victor.
-- After **PR 2** (arora-ecbs first slice): the trait shape is
-  load-bearing for everything else. Review with Victor whether the
-  `DataStore` trait survived contact with a real impl. If not,
-  revise the trait before continuing (proposal §4, §8 risk 4).
-- Before **PR 7** (create `arora` binary repo): name collision
-  (proposal §8 risk 5). Confirm the binary/library naming with
-  Victor.
-- Before **PR 9** (deleting the studio-bridge engine + headless +
-  controller + robots subtrees): this is irreversible-ish. Confirm.
+If a step's DoD does not hold, **STOP and report back**. Do not paper over red
+CI. Never force-push `main`; open PRs.
 
 ---
 
-## Tooling and environment
+## 1. The target in one picture
 
-Same baseline as plan 1:
+`arora` (the crate already in this workspace, `crates/arora`) becomes the
+opinionated runtime that **bundles three pluggable interfaces**. You get all
+three by depending on `arora`; you choose an *implementation* of each.
 
-- `gh` at `/opt/homebrew/bin/gh` (v2.92.0).
-- `repo` scope is enough to create repos under `semio-ai`.
-- `admin:org` needed for org-level secrets/rulesets: refresh via
-  `gh auth refresh -s admin:org`.
-- Repos checked out side-by-side under
-  `/Users/victor.paleologue/Code/Semio/`.
+```
+                        ┌────────────────────────── crates/arora ──────────────────────────┐
+   pick a HAL impl ───► │  HAL (control)   ◄── trait, from studio-bridge `controller`        │
+   (fake | nao_ros2 |   │  Data (state)    ◄── trait, from studio-bridge `State`/StateChange │
+    ur5 | hackerbot…)   │  Bridge (conn.)  ◄── trait, modelled on device-client `DeviceClient`│
+   pick a bridge impl ─►│                                                                    │
+   (studio-bridge|none) │  + the engine loop (was studio-bridge `engine`) — library side      │
+                        │  + the launcher    (was studio-bridge `headless`) — binary side     │
+                        └────────────────────────────────────────────────────────────────────┘
+                                 │ Data trait              │ Bridge trait
+                                 ▼                          ▼
+                        arora-types::data          studio-bridge (stays a separate repo):
+                        (Key, State, StateChange,    device-client (impls the Bridge trait),
+                         DataStore + in-mem impl)    studio-client + Zenoh routing ("studio + router"),
+                                                     msgs (wire), firestore-stream, token-storage
+```
 
-Additional working directories this plan touches:
-- `studio-bridge/` (existing, will shrink).
-- `arora-ecbs/` (exists as empty repo; this plan fills it).
-- `arora/` (does not exist yet; PR 7 creates it).
+The three interfaces:
 
----
+| Interface | Source today (studio-bridge) | New name / home | Implementations | Selected by |
+|---|---|---|---|---|
+| **Control** | `controller::StudioBridgeController` | `Hal` trait — `crates/arora-hal` | fake, ros2 (quori/ur3/ur5/nao-ros2/pepper-ros2/unitree-g1), restful (hackerbot), nao | `arora` cargo feature |
+| **Data** | `msgs::State` / `Key` / `StateChange` + the subscribe/get/update APIs | `arora-types::data` (`DataStore` trait + `MemoryStore`) | in-memory default; `arora-ecbs` later | builder arg (default in-mem) |
+| **Bridge** | `device-client::DeviceClient` | `Bridge` trait — `crates/arora` (or `arora-sdk`) | `studio-bridge`'s connector (stays in that repo) | builder arg / `bridge` feature |
 
-## PR 1 — `arora-types::data` module (trait + HashMap impl)
-
-**Repo:** `arora-types`. **Branch:** `feat/data-interface`.
-
-Context: §4 of the proposal. We add a new `data::` module that
-defines `Key`, `StateChange`, `DataError`, and the `DataStore`
-trait. We include a `HashMap`-backed reference impl in the same
-crate so consumers can use it without taking on arora-ecbs as a
-dependency.
-
-Steps:
-
-1. Create `src/data/mod.rs` with submodules:
-   - `key.rs` — `Key` (a path-shaped identifier; mirror the
-     current `studio-bridge-msgs::Key` shape).
-   - `state.rs` — `StateChange`, constructor helpers
-     (`StateChange::set(key, value)`).
-   - `error.rs` — `DataError`.
-   - `store.rs` — the `DataStore` trait per proposal §4.
-   - `memory.rs` — `MemoryStore`, a `HashMap<Key, Value>`-backed
-     `DataStore` impl with a `tokio::sync::broadcast` for
-     `subscribe()`. Pull the backpressure pattern from
-     `studio-bridge-engine` (it already does this for mpsc
-     channels — proposal §4 smell 3).
-2. Re-export from `src/lib.rs`:
-   ```rust
-   pub mod data;
-   ```
-3. Add tests under `tests/data.rs`:
-   - Write then read returns the value.
-   - Subscribe + write delivers the change.
-   - Snapshot returns the full state.
-   - Two subscribers both receive every change; a slow subscriber
-     does not block a fast one.
-4. Bump `Cargo.toml` to `version = "1.3.0"` (after proposal 1's
-   `1.2.0`).
-5. Open PR, get CI green, merge, tag `v1.3.0`, **stop and ask
-   Victor** before `cargo publish`.
-
-**DoD:** `arora-types v1.3.0` is on crates.io.
-`arora_types::data::{Key, StateChange, DataStore, MemoryStore}` is
-usable in a scratch project.
+"Getting `arora` gets you these interfaces automatically; you specify which one
+you want (fake, nao_ros2, …)" = the `arora` crate wires Control + Data + Bridge
+into one run loop; you pick a HAL impl by feature and a bridge impl by builder.
 
 ---
 
-## PR 2 — `arora-ecbs` first slice: real `DataStore` impl
+## 2. What moves into the `arora-sdk` workspace, and what stays in `studio-bridge`
 
-**Repo:** `arora-ecbs`. **Branch:** `feat/datastore-impl`.
-Prerequisite: PR 1 published.
+### Moves IN (studio-bridge → this workspace)
 
-The repo is empty today. We do *not* try to design the full
-entity-component model in this PR. Goal: one concrete
-implementation that satisfies the `DataStore` trait, with whatever
-structure makes sense for ecbs — even if that just means a
-`HashMap` with a different concurrency story than the
-`arora-types::MemoryStore` reference.
+| From studio-bridge | To | Notes |
+|---|---|---|
+| `controller` (trait + `FakeController`) | `crates/arora-hal` (trait + `arora-hal-fake`) | Rename `StudioBridgeController` → `Hal`; depend only on `arora-types` (no bridge types). |
+| `robots/ros2-robots`, `robots/restful-api-robots`, `robots/nao` | `crates/arora-hal-{ros2,restful,nao}` (or grouped `crates/arora-hal/*`) | Port `impl StudioBridgeController` → `impl Hal`. Keep the per-robot cargo features. |
+| `engine` (the `run()` driver loop) | `crates/arora` **library** (`Arora::run`) | This is "engine → arora, the library side." The `tokio::select!` over device-info / commands / controller-data / animation becomes the arora run loop over Bridge + HAL + Data + BT. |
+| `headless` (the binary) | `crates/arora` **binary** (`src/main.rs`) | "headless → arora." Migrate **all** of it: clap args + env fallbacks, `bridge_config`, `app_data_files`, encrypted token storage, interactive device-info prompts, feature-gated HAL selection, Firebase build-env forwarding, device-info sync, then run. |
+| `msgs::{State, Key, StateChange, AroraOp, AroraCall…}` (shared vocabulary) | `arora-types::data` | Wire-only types (`DeviceInfo`, Zenoh key encoding) stay in `msgs`. `msgs` re-exports the moved types from `arora-types` for wire compat. |
+| animation-player integration (engine ticks `animation_engine`) | `crates/arora` (lib) | The animation tick is part of the engine loop; carry it. `animation-player` becomes an `arora` dep (or a feature). |
 
-Steps:
+### Stays in `studio-bridge` (per Victor)
 
-1. `cargo init --lib` at the repo root. Add `arora-types = "1.3"`.
-2. Create `src/store.rs` with `pub struct Store { ... }` implementing
-   `arora_types::data::DataStore`. Backing storage choice is open
-   — start with `Arc<RwLock<HashMap<Key, Value>>>` if no better
-   idea has emerged; the trait abstracts it.
-3. Add a `Store::handle()` method returning a cheaply-cloneable
-   handle (`Arc<Self>` or similar) so callers can hand the same
-   store to HAL, bridge, BT, and the engine.
-4. Tests: re-run the same suite as PR 1's `tests/data.rs` against
-   `arora_ecbs::Store`. If the trait needs a tweak to make this
-   ergonomic, **stop and revise PR 1's trait** rather than
-   working around it.
-5. CI: copy the `_rust.yml` reusable workflow from plan 1's PR 9
-   (if landed) or a minimal `cargo build && cargo test`.
-6. Tag `v0.1.0`.
+- **`device-client`** — the `DeviceClient` trait **and** its Firebase + Zenoh
+  implementations. ("device client interfaces and implementations stay.") It
+  will additionally implement `arora`'s `Bridge` trait (or be wrapped by a thin
+  `BridgeConnector` that does).
+- **`studio-client` + the Zenoh routing** = "studio + router." The browser/native
+  Studio side, device discovery (liveliness), claim/RPC routing over Zenoh.
+- **`msgs`** (wire format), **`firestore-stream`**, **`devices-firestore`**,
+  **`token-storage`**, **`get-robot-model`** — bridge/auth plumbing.
+- A **`BridgeConnector`** that adapts `device-client` to the `Bridge` trait, so
+  `arora` depends on `studio-bridge` only through that trait (+ an optional
+  `bridge` feature).
 
-**Checkpoint:** Stop. Report to Victor on whether the trait
-survived contact. If the entity-component shape demands a
-different surface (e.g. typed components, queries), revise PR 1
-before continuing.
-
-**DoD:** `arora-ecbs` v0.1.0 builds and tests green. The same
-test bodies that pass against `MemoryStore` pass against
-`arora_ecbs::Store`.
+> Note: there is **no `router` crate** in studio-bridge today — routing is the
+> Zenoh network + `studio-client` + the engine loop. "The router stays" is read
+> as "the Studio-facing Zenoh routing (studio-client side) stays in the bridge."
+> Confirm if a dedicated router crate is intended (open decision D1).
 
 ---
 
-## PR 3 — Move `Key` and `StateChange` from `studio-bridge-msgs` to `arora-types`
+## 3. Target crate layout
 
-**Repo:** `studio-bridge` (and `arora-types` if any fix-up needed).
-**Branch:** `feat/key-to-arora-types`.
-Prerequisite: PR 1 merged.
+```
+arora-sdk workspace (this repo) — added crates in *bold*:
+  crates/
+    arora-types        + data:: { Key, Value(already), State, StateChange, DataStore, MemoryStore, DataError }
+    arora-engine, arora-behavior-tree(+types,+yaml), arora-registry,
+    arora-module-authoring/{core,cli,cpp,rust}, arora-buffers, arora-util,
+    arora-vfs, wasi-sdk, arora-cli, arora-web
+    arora              ← absorbs engine loop (lib) + headless (bin); exposes Bridge trait;
+                         features select the HAL impl
+    *arora-hal*        ← the Hal trait (+ FakeHal); arora-types-only deps
+    *arora-hal-ros2*   ← quori/ur3/ur5/nao-ros2/pepper-ros2/unitree-g1 (features)
+    *arora-hal-restful*← hackerbot
+    *arora-hal-nao*    ← NAO C++ SDK binding (if kept)
+  modules/ … (unchanged)
 
-Context: proposal §3 and §7 first bullet. `Key` and `StateChange`
-currently live in `studio-bridge/msgs/src/state.rs` and are used
-by `device-client`, `controller`, and (after PR 1) by
-`arora-types::data`. Until they share a single definition, the
-HAL trait extraction in PR 4 cannot land.
+studio-bridge (separate repo, shrinks):
+  msgs (− moved vocab, re-exports it), studio-client, device-client (+ impl Bridge),
+  firestore-stream, devices-firestore, token-storage, get-robot-model, connector/
+```
 
-Steps:
-
-1. In `studio-bridge/msgs/src/state.rs`: delete the local `Key`
-   and `StateChange` types. Re-export from `arora-types`:
-   ```rust
-   pub use arora_types::data::{Key, StateChange};
-   ```
-   Keep anything else in `state.rs` that does not move (wire-only
-   wrappers, serde shims).
-2. In `studio-bridge/msgs/Cargo.toml`: bump `arora-types` to
-   `"1.3"`.
-3. Build the studio-bridge workspace; fix any path-of-import
-   breakage (`studio_bridge_msgs::Key` callers stay working via
-   the re-export, but qualified paths inside `msgs` may need
-   adjustment).
-4. Run the studio-bridge test suite. Particularly: any wire-format
-   round-trip tests that pinned to the old `Key` serde shape.
-
-**DoD:** `studio-bridge` workspace builds and tests green with
-`Key`/`StateChange` re-exported from `arora-types`. No behaviour
-change at the wire level (verify by running an existing
-device-client round-trip test, or by serializing a known message
-and diffing against a committed fixture).
+`arora` depends on `studio-bridge` only via the optional `bridge` feature, the
+way `arora-sdk` already depends on the behavior tree behind a seam. The engine,
+BT, module tooling, and types stay bridge-free.
 
 ---
 
-## PR 4 — `arora-sdk::Hal` trait
+## 4. Phased PRs (all in-workspace unless noted)
 
-**Repo:** `arora-sdk`. **Branch:** `feat/hal-trait`.
-Prerequisite: proposal 1's PR 7 merged (so arora-sdk exists), and
-plan-2 PR 3 merged.
+Each phase is one PR with a DoD. Phases 1–4 are additive (nothing breaks);
+5–7 do the cutover.
 
-Steps:
+**Phase 1 — `arora-types::data`.**
+Add `Key`, `State`, `StateChange`, `DataError`, the `DataStore` trait, and a
+`MemoryStore` (HashMap + `tokio::broadcast` for `subscribe`). Mirror the current
+`msgs::state` shapes so the later move is mechanical. Tests: write/read,
+subscribe-delivers, snapshot, slow-subscriber-doesn't-block-fast.
+*DoD:* `arora_types::data::*` usable; release.yml will publish the version bump.
+**Checkpoint:** confirm the version bump (and the `Key` serde shape, since it
+becomes the wire type) with Victor before publish.
 
-1. In `arora-sdk/crates/arora-sdk/Cargo.toml`: add
-   `arora-types = "1.3"`, `async-trait`, `futures-core` (for
-   `Stream`).
-2. Create `src/hal.rs` with the trait sketched in proposal §3:
-   `Hal::describe`, `read`, `write`, `updates`.
-3. Add `HalDescription`, `HalResult`, `HalError` next to it.
-   Mirror the surface of today's
-   `studio_bridge_controller::StudioBridgeController` so the port
-   in PR 8 is mechanical:
-   - `get_model` → `describe`.
-   - `get` / `get_all` → `read`.
-   - `update` / `update_single` → `write`.
-   - `get_model_glb` → optional method or a separate
-     `HalAssets` extension trait (decide; if unsure, separate
-     trait keeps `Hal` lean).
-4. Provide a `FakeHal` in a `#[cfg(any(test, feature = "fake"))]`
-   module — the port of today's
-   `studio_bridge_controller::fake::FakeController`. Strip
-   bridge-specific behaviour; it just echoes writes back into its
-   own store.
-5. Tests: `FakeHal` round-trip via a `MemoryStore`. Subscribing to
-   `updates()` while writing yields the writes in order.
-6. Tag `v0.x.0` (one minor bump in arora-sdk).
+**Phase 2 — `crates/arora-hal` (the Control interface).**
+Port `StudioBridgeController` → `Hal` (deps: `arora-types` only). Map
+`get_model→describe`, `get/get_all→read`, `update→write`, `subscribe→updates`,
+`get_model_glb→` a `HalAssets` extension trait (keep `Hal` lean). Include
+`FakeHal` (port of `FakeController`). Tests: FakeHal round-trip + ordered
+`updates()`. *DoD:* `arora-hal` builds, `FakeHal` passes, no studio-bridge dep.
 
-**DoD:** `arora-sdk::Hal` exists and is implemented by `FakeHal`.
-Tests pass. No reference to `studio-bridge` in `arora-sdk`'s
-`Cargo.toml`.
+**Phase 3 — the `Bridge` interface + studio-bridge `BridgeConnector`.**
+Define a `Bridge` trait in `arora` modelled on `DeviceClient`
+(`device_info_updated`, `update_device_info`, `data_requested`, `send_data`,
+`command_receiver`), in `arora-types` terms. In **studio-bridge**, add a
+`connector` crate implementing it over the existing `device-client`. Preserve
+the unregister→error lifecycle (regression test). *DoD:* `BridgeConnector`
+satisfies `Bridge`; unregister test passes. (studio-bridge PR; pin by tag.)
 
----
+**Phase 4 — `arora` library absorbs the engine loop.**
+Bring `engine::run`'s `tokio::select!` into `Arora` as the driver loop over:
+Bridge commands → HAL/Data; HAL `updates()` → Data; Data changes → Bridge
+`send_data`; device-info sync; animation tick; BT tick. Supervision: if any task
+errors, `Arora::run` returns `Err` and aborts the rest (matches today's
+"bridge dies → process exits"). Builder: `Arora::builder().with_data_store(..)
+.with_hal(..).with_bridge(..).build()`. Keep `run_groot_xml` for direct trees.
+*DoD:* `Arora` with FakeHal + MemoryStore + mock bridge passes supervision tests.
 
-## PR 5 — `studio-bridge::BridgeConnector`
+**Phase 5 — `arora` binary absorbs headless.**
+Migrate the whole `headless` binary into `crates/arora/src/main.rs` (+ helper
+modules): CLI/env, `bridge_config`, app-data dir, token encrypt/load, prompts,
+Firebase env forwarding, device-info sync, feature-gated HAL selection, then
+`Arora::run`. *DoD:* `cargo run -p arora --features fake` boots a fake instance
+and exits cleanly on SIGINT, matching today's `studio-bridge-headless`.
 
-**Repo:** `studio-bridge`. **Branch:** `feat/bridge-connector`.
-Prerequisite: PR 2 (arora-ecbs) tagged, PR 4 (HAL trait) tagged.
+**Phase 6 — robot HAL impls.**
+Subtree-split `robots/*` from studio-bridge **with history** into
+`crates/arora-hal-{ros2,restful,nao}`; port impls to `Hal`; wire `arora`
+features (`quori`, `ur5`, `hackerbot`, …) mirroring headless. *DoD:* `arora
+--features ur5` behaves like `studio-bridge-headless --features ur5` against a
+robot endpoint.
 
-Context: proposal §5.2 ("studio-bridge AFTER"). The bridge stops
-owning the loop. It becomes a connector built around a
-`DataStore` handle.
-
-Steps:
-
-1. New crate `studio-bridge/connector/` with library target
-   `studio-bridge-connector` (or merge into an existing
-   not-going-away crate; do not put it in `engine`, which is being
-   removed in PR 9).
-2. API per proposal §6.1:
-   ```rust
-   pub struct BridgeConnector { ... }
-   impl BridgeConnector {
-       pub fn builder() -> BridgeConnectorBuilder { ... }
-       pub async fn run(self) -> Result<(), BridgeError> { ... }
-   }
-   pub struct BridgeConnectorBuilder { ... }
-   impl BridgeConnectorBuilder {
-       pub fn with_data_store(self, ds: Arc<dyn DataStore>) -> Self;
-       pub fn with_studio_client(self, sc: ...) -> Self;
-       pub fn with_device_client(self, dc: ...) -> Self;
-       pub async fn build(self) -> Result<BridgeConnector, BridgeError>;
-   }
-   ```
-3. Internals: lift the bidirectional mirroring from
-   `studio-bridge/engine/src/engine.rs` (the "wait on studio
-   messages, apply to controller, send back" loop) but rewrite so
-   *both sides* are `DataStore` ↔ studio-client. The controller no
-   longer exists in this code path; HAL writes show up in the
-   store and the connector forwards them to Studio.
-4. Error/lifecycle parity (proposal §7 bullet 2): the connector
-   must fail in the same way today's `studio_bridge_engine::run`
-   fails on device unregistration. Define a `BridgeError` variant
-   for this and document that `Instance::run()` will propagate it.
-   Add a regression test (mock studio-client that emits an
-   unregister event; assert `connector.run()` returns the expected
-   error variant).
-5. Do **not** delete `studio-bridge/engine/` or `controller/` or
-   `headless/` yet — they stay in place until PR 9.
-
-**DoD:** `BridgeConnector` builds against a `DataStore` handle and
-a pair of studio/device clients. The unregister-regression test
-passes.
+**Phase 7 — shrink studio-bridge.** (studio-bridge PR; **confirm before merge.**)
+Remove `engine`, `controller`, `headless`, `robots`. Move the shared vocab to
+the `arora-types` re-export. Keep device-client, studio-client, msgs, firestore
+helpers, token-storage, connector. Decide where `animation-player` lands (arora).
+*DoD:* studio-bridge builds with runtime crates gone; `arora` reproduces the old
+headless behaviour to Studio.
 
 ---
 
-## PR 6 — `arora-sdk::Instance::builder()` accepts `Hal` and `BridgeConnector`
+## 5. Documentation migration (≈35 files, ~7.9k lines — a real workstream)
 
-**Repo:** `arora-sdk`. **Branch:** `feat/instance-hal-bridge`.
-Prerequisite: PR 5.
+Studio-bridge carries substantial docs. They split by *what the doc is about*,
+not where the code goes. Do this incrementally alongside the phase that moves
+the corresponding code; track with a checklist so none is dropped.
 
-Context: proposal §6.1 — the robot main wires `Instance::builder()
-.with_data_store(store).with_hal(hal).with_bridge(bridge).build()`.
+**Move INTO this repo (arora runtime / HAL / data / engine concerns):**
+- `headless/README.md` (183) → `crates/arora/` runtime/launcher docs.
+- `engine/README.md` (8) → folded into `crates/arora` lib docs.
+- `robots/ros2-robots/README.md` (341), `robots/nao/readme.md` (62) → the
+  `arora-hal-*` crate readmes; `restful-api-robots` rustdoc (46) → `arora-hal-restful`.
+- `fake_bot/README.md` (119), `fake_bot/EXECUTION_APPROACHES.md` (144) → arora HAL/testing docs.
+- Data/state-model design: `zenoh-study/key_typing_and_registry.md` (313),
+  `zenoh-study/local_echo_ecs_sync.md` (239) → `docs/` (informs `arora-types::data`).
+- Relevant architecture from `docs/index.md` (414) → merged into this repo's
+  `docs/architecture.md` (the runtime/loop/HAL parts).
 
-Steps:
+**Stay in studio-bridge (Studio / Zenoh / connectivity concerns):**
+- `README.md` (313, rewritten to the connector role), `docs/diagnosing-zenoh-sessions.md` (415),
+  most of `zenoh-study/*` (claim mechanism, ACL, REST-vs-WS, deployment, slides, feasibility…),
+  `studio-client/**` docs (808), `device-client/README.md` (25), `msgs/tests/README.md` (51).
 
-1. Extend `arora_sdk::InstanceBuilder` with:
-   ```rust
-   pub fn with_data_store(self, ds: impl DataStore + 'static) -> Self;
-   pub fn with_hal(self, hal: Box<dyn Hal>) -> Self;
-   pub fn with_bridge(self, bridge: studio_bridge_connector::BridgeConnector) -> Self;
-   ```
-   The `with_bridge` method is feature-gated behind
-   `feature = "bridge"` so an SDK consumer that does not want
-   studio-bridge does not pay for it.
-2. `Instance::run()` becomes a `tokio::select!` over:
-   - the engine's own dispatch loop,
-   - `bridge.run()` if set,
-   - HAL `updates()` → `data_store.write()`,
-   - data-store change subscription → HAL `write` for keys the HAL
-     owns (decide ownership: simplest is "HAL writes its own
-     `describe()`-listed keys back; everything else is bridge
-     territory").
-3. Document the supervision rule: if any of the three tasks
-   returns `Err`, `Instance::run()` returns `Err` and aborts the
-   others. This preserves today's "studio-bridge dies → process
-   dies" semantics required by PR 5's DoD.
-4. Tests:
-   - Instance with `FakeHal` + `MemoryStore` + no bridge: HAL
-     writes appear in the store.
-   - Instance with `FakeHal` + `MemoryStore` + a mock
-     `BridgeConnector` that fails after 100ms: instance returns
-     the bridge's error.
+**Split:** `docs/index.md` and `zenoh-study/zenoh_bridge_proposal_draft.md`
+straddle both — extract the arora-runtime parts here, leave the Zenoh-bridge
+parts there, and cross-link.
 
-**DoD:** `Instance::builder()` exposes all four `with_*` methods.
-The supervision tests pass.
+A precise per-file destination table is the first task of the doc workstream;
+the inventory (path + topic + size) is captured in the study that produced this
+revision.
 
 ---
 
-## PR 7 — Create the `arora` binary repo
+## 6. Open decisions (need Victor) before scaffolding
 
-**Repo:** new `semio-ai/arora`. **Branch (in arora):** initial
-commit `main`.
-Prerequisite: PR 6 tagged. **Stop and confirm naming with Victor
-before this PR** (proposal §8 risk 5).
+- **D1 — "router".** No `router` crate exists; "studio + router stay" is read as
+  "studio-client + Zenoh routing stay." Confirm, or name the intended router crate.
+- **D2 — `arora-ecbs`.** Bring the (empty) `arora-ecbs` repo into this workspace
+  as the canonical `DataStore`, or keep `arora-types::MemoryStore` as the default
+  and defer ecbs? (Plan above defers it.)
+- **D3 — HAL crate layout.** One `crates/arora-hal` + sibling impl crates, or a
+  grouped `crates/arora-hal/{fake,ros2,restful,nao}` like arora-module-authoring?
+- **D4 — `Bridge` trait location.** In `crates/arora`, or a lean `crates/arora-bridge`
+  so non-arora consumers can implement it without pulling arora?
+- **D5 — `animation-player`.** Bring it into the workspace, keep it a git dep of
+  `arora`, or feature-gate it?
+- **D6 — wire-format coupling.** Moving `Key`/`StateChange` to `arora-types`
+  couples the in-process and wire types; keep them additive-only (never restructure).
 
-Steps:
-
-1. ```sh
-   /opt/homebrew/bin/gh repo create semio-ai/arora --private \
-     --description "Arora robot launcher: HAL impls + SDK + bridge, feature-gated per robot"
-   git clone git@github.com:semio-ai/arora.git \
-     /Users/victor.paleologue/Code/Semio/arora
-   ```
-2. Workspace layout:
-   ```
-   arora/
-   ├── Cargo.toml          (workspace)
-   ├── crates/
-   │   └── arora-launcher  (library — workspace lib name to dodge
-   │                        the binary/crate name collision)
-   ├── hal/                (per-robot HAL impls, one crate each)
-   │   ├── arora-hal-fake
-   │   └── (PR 8 fills the rest)
-   ├── src/main.rs         (binary target `arora`, in the root
-   │                        package — `[[bin]] name = "arora"`)
-   └── .github/workflows/  (reuses _rust.yml)
-   ```
-3. Root `Cargo.toml` has `[[bin]] name = "arora"` so
-   `cargo install --path .` produces `arora`. The library crate
-   inside `crates/arora-launcher` exists for code reuse and to
-   avoid the package-name collision with the `arora` engine crate.
-4. `arora-launcher/src/lib.rs`: the `build_instance(args)`
-   function called from `main.rs`. It reads CLI args (use `clap`),
-   builds the data store (default `arora_ecbs::Store::new()`),
-   selects the HAL via feature, builds the bridge connector,
-   constructs `arora_sdk::Instance::builder()`, and returns the
-   `Instance`.
-5. `src/main.rs`: parse args; build instance; `instance.run().await`.
-6. Feature flags (initially): `fake` (always on for dev). PR 8
-   adds the rest.
-7. Push to `main`. CI green. Tag `v0.1.0`.
-
-**DoD:** `cargo run --features fake -- --robot fake` boots an
-arora instance using `FakeHal` + `MemoryStore` and exits cleanly
-on SIGINT.
-
----
-
-## PR 8 — Move per-robot HAL impls from `studio-bridge` to `arora`
-
-**Repos:** `arora` (new home), `studio-bridge` (source — do not
-delete yet). **Branch (arora):** `feat/hal-impls`. **Branch
-(studio-bridge):** none yet — deletion happens in PR 9.
-
-Today: `studio-bridge/robots/{ros2-robots,restful-api-robots,nao}/`
-implement `studio_bridge_controller::StudioBridgeController`.
-
-Steps:
-
-1. For each robot family, decide whether to land it as one crate
-   or split it (proposal §7 bullet 3). Default plan:
-   - `arora/hal/arora-hal-ros2` containing `quori`, `ur3`, `ur5`,
-     `nao-ros2`, `pepper-ros2` as Cargo features (mirrors today's
-     feature gating).
-   - `arora/hal/arora-hal-restful` containing `hackerbot`.
-   - `arora/hal/arora-hal-fake` already exists from PR 7.
-2. Subtree-split each robot crate from studio-bridge **with
-   history** into the new home (use `git filter-repo` or
-   `git subtree split`).
-3. In each moved crate, port the trait impl from
-   `StudioBridgeController` to `arora_sdk::Hal`. The method
-   mapping is the one from PR 4 step 3.
-4. Update `arora`'s `Cargo.toml` features:
-   ```toml
-   [features]
-   default = []
-   fake     = ["arora-hal-fake"]
-   quori    = ["arora-hal-ros2/quori"]
-   ur3      = ["arora-hal-ros2/ur3"]
-   # …mirror today's headless feature list…
-   ```
-5. The launcher's `build_hal()` selects between them using
-   `#[cfg(feature = "...")]`.
-6. CI: build with each feature; tests with `fake`.
-
-**DoD:** Building `arora --features ur5` (or any other
-robot-flagged feature) produces a binary that, when run against a
-reachable robot endpoint, behaves like today's
-`studio-bridge-headless --features ur5`. Compare on a checkout
-that still has both.
-
----
-
-## PR 9 — Decommission `studio-bridge/{engine,controller,headless,robots}`
-
-**Repo:** `studio-bridge`. **Branch:** `feat/decommission-runtime`.
-Prerequisite: PR 8 in `arora` is verified working against at least
-one real robot (or against the same fixture the old
-`studio-bridge-headless` test harness used). **Stop and confirm
-with Victor before merging this PR.**
-
-Steps:
-
-1. Delete from the workspace:
-   - `studio-bridge/engine/`
-   - `studio-bridge/controller/`
-   - `studio-bridge/headless/`
-   - `studio-bridge/robots/`
-2. Remove them from the root `Cargo.toml` `members`.
-3. Drop `animation-player` dep (it moved with the engine/launcher
-   per proposal §8 risk 3 — confirm where it ended up: most
-   likely `arora-sdk` or `arora-launcher`).
-4. Remaining workspace members:
-   - `msgs`, `studio-client`, `device-client`,
-     `firestore-stream`, `devices-firestore`, `connector` (from
-     PR 5), `get-robot-model`, `token-storage`.
-5. Update the studio-bridge README to describe the connector role
-   (no more "headless binary" section).
-6. Tag a major version bump (`v0.x` → `v1.0`?) since the
-   workspace surface area drops sharply.
-
-**DoD:** `cargo build --workspace` in studio-bridge succeeds with
-the runtime crates gone. `cargo install --path crates/arora` in
-the arora repo still works. Production deploys swap from the old
-`studio-bridge-headless` binary to the new `arora` binary with no
-behaviour change observable to Studio.
-
----
-
-## After PR 9 — documentation and cleanup
-
-- Write `arora/README.md`: how to add a new robot family (new
-  crate under `hal/`, new feature flag, new launcher arm).
-- Write `studio-bridge/CONNECTOR.md`: how to embed the bridge
-  connector standalone (proposal §6.2 is the starting point).
-- Land a one-page entry in `arora-ecbs` explaining the
-  `DataStore` contract and which methods are hot-path vs cold.
-- Promote the `Hal` trait from `arora-sdk` to `arora-engine` if a
-  use case has emerged that justifies it (proposal §8 risk 1).
-  Otherwise leave it.
-
----
-
-## What is *not* in this plan
-
-- The full entity-component shape of `arora-ecbs`. PR 2 ships a
-  thin `DataStore` impl; the structural work is its own proposal.
-- ROS 2 / Zenoh transport changes. The connector reuses today's
-  `studio-client` and `device-client` as-is.
-- Removing `Firestore` from the bridge. That is a separate concern
-  (proposal 3, if it happens).
-- Browser / wasm support for the HAL trait. The trait is
-  `Send + Sync + async_trait` — fine for native, undefined for
-  wasm. Defer until a real wasm-HAL consumer appears.
+## 7. What is NOT in this plan
+- The full entity-component shape of `arora-ecbs` (its own design).
+- ROS2/Zenoh transport changes — the bridge reuses studio-client/device-client as-is.
+- Browser/wasm HAL (the trait is native-async; defer until a wasm-HAL consumer exists).
