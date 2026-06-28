@@ -409,7 +409,9 @@ mod test {
     let mut map: HashMap<Key, i32> = HashMap::new();
     map.insert(Key::from("test_key".to_string()), 42);
     assert_eq!(map.get("test_key"), Some(&42));
-    assert_eq!(map.get(&"test_key".to_string()), Some(&42));
+    // Look up by an owned `String` as well, exercising the `Borrow` impl.
+    let owned_key = String::from("test_key");
+    assert_eq!(map.get(&owned_key), Some(&42));
   }
 
   #[test]
