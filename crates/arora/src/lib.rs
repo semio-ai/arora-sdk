@@ -15,20 +15,33 @@ use arora_behavior_tree::{
     tree_node::TreeNode, BehaviorTree, ModuleFunction,
 };
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
+#[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
 use arora_module_core::resolve::resolve_low_module;
 use arora_registry::{
-    local::LocalRegistry, local_yaml::load_records_from_yaml_dir, EditableRegistry, ModuleFrozen,
+    local::LocalRegistry,
+    local_yaml::{load_records, RecordKind},
+    EditableRegistry, ModuleFrozen,
 };
 use arora_types::module::low::{Header, ModuleDefinition};
+use include_dir::{include_dir, Dir};
 use semio_record::module::v0::frozen::ExportKind;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 use uuid::Uuid;
 
+/// The behavior-tree type records (Status, TickId, …) that the behavior-tree
+/// node module imports, embedded at build time so they load without a
+/// filesystem (e.g. in the browser). They live in the
+/// `arora-behavior-tree-types-yaml` crate.
+static TYPE_RECORDS: Dir<'static> =
+    include_dir!("$CARGO_MANIFEST_DIR/../arora-behavior-tree-types-yaml/records");
+
 /// The behavior-tree node implementations, compiled to wasm and embedded at
-/// build time via the `behavior-tree-nodes` artifact dependency.
+/// build time via the `behavior-tree-nodes` artifact dependency. Only with the
+/// `native` feature — without it (e.g. the wasm build) the bytes are supplied at
+/// runtime (see [`Arora::start_with_nodes`]).
+#[cfg(feature = "native")]
 const BEHAVIOR_TREE_NODES_WASM: &[u8] = include_bytes!(env!("BT_NODES_WASM"));
 
 /// The behavior-tree-nodes module header, embedded at build time (a committed
@@ -47,27 +60,31 @@ pub struct Arora {
 }
 
 impl Arora {
-    /// Start the runtime: build the engine (WebAssembly + native executors) and
-    /// load the embedded behavior-tree node module.
+    /// Start the runtime with the behavior-tree node module embedded at build
+    /// time. Requires the `native` feature; without it (e.g. the wasm build) the
+    /// artifact isn't embedded, so use [`start_with_nodes`](Arora::start_with_nodes)
+    /// with bytes supplied by the host.
+    #[cfg(feature = "native")]
     pub async fn start() -> Result<Self> {
-        let mut engine = EngineBuilder::new()
-            .add_executor(WebAssemblyExecutor::new().context("failed to create wasm executor")?)
-            .add_executor(NativeExecutor::new())
-            .build();
+        Self::start_with_nodes(BEHAVIOR_TREE_NODES_WASM).await
+    }
+
+    /// Start the runtime with the given behavior-tree node module wasm: build the
+    /// engine (the browser host on wasm, the wasmtime + native hosts otherwise)
+    /// and load the node module from `nodes_wasm`.
+    pub async fn start_with_nodes(nodes_wasm: &[u8]) -> Result<Self> {
+        let mut engine = build_engine()?;
 
         let mut registry = LocalRegistry::new();
         let mut function_index = HashMap::new();
 
         // The behavior-tree node module imports the behavior-tree type records
-        // (Status, TickId, …), so seed those into the registry first. They live
-        // in the arora-behavior-tree-types-yaml crate's `records/` directory.
-        load_records_from_yaml_dir(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../arora-behavior-tree-types-yaml/records"),
-            &mut registry,
-        )
-        .await
-        .map_err(|e| anyhow!("failed to load behavior-tree type records: {e:?}"))?;
+        // (Status, TickId, …), so seed those into the registry first. They are
+        // embedded from the arora-behavior-tree-types-yaml crate (see
+        // `TYPE_RECORDS`), so this works without a filesystem.
+        load_embedded_records(&mut registry)
+            .await
+            .map_err(|e| anyhow!("failed to load behavior-tree type records: {e:?}"))?;
 
         let header: Header = serde_yaml::from_str(BEHAVIOR_TREE_NODES_HEADER)
             .context("invalid behavior-tree-nodes module header")?;
@@ -90,7 +107,7 @@ impl Arora {
             .load_module(ModuleDefinition {
                 schema_version: 0,
                 header,
-                executable: BEHAVIOR_TREE_NODES_WASM.to_vec().into_boxed_slice(),
+                executable: nodes_wasm.to_vec().into_boxed_slice(),
             })
             .map_err(|e| anyhow!("failed to load behavior-tree-nodes module: {e:?}"))?;
 
@@ -134,6 +151,61 @@ impl Arora {
             // TODO: receive behavior trees over the bridge and run them.
         }
     }
+}
+
+/// Build the engine with the right executor host for the target: the browser's
+/// native `WebAssembly` runtime on wasm, or the wasmtime + native (dynamic
+/// library) hosts otherwise.
+#[cfg(feature = "native")]
+fn build_engine() -> Result<PinnedEngine> {
+    Ok(EngineBuilder::new()
+        .add_executor(WebAssemblyExecutor::new().context("failed to create wasm executor")?)
+        .add_executor(NativeExecutor::new())
+        .build())
+}
+
+#[cfg(not(feature = "native"))]
+fn build_engine() -> Result<PinnedEngine> {
+    use arora_engine::executor::browser::BrowserExecutor;
+    Ok(EngineBuilder::new()
+        .add_executor(BrowserExecutor::new())
+        .build())
+}
+
+/// Load the embedded behavior-tree type records ([`TYPE_RECORDS`]) into the
+/// registry, in dependency order, without touching a filesystem. The records are
+/// grouped into `folder` / `enumeration` / `structure` / `module` subdirectories
+/// (mirroring [`arora_registry::local_yaml::load_records_from_yaml_dir`]).
+async fn load_embedded_records(registry: &mut dyn EditableRegistry) -> Result<()> {
+    let mut entries: Vec<(RecordKind, String, String)> = Vec::new();
+    for subdir in TYPE_RECORDS.dirs() {
+        let kind = match subdir.path().file_name().and_then(|n| n.to_str()) {
+            Some("folder") => RecordKind::Folder,
+            Some("enumeration") => RecordKind::Enumeration,
+            Some("structure") => RecordKind::Structure,
+            Some("module") => RecordKind::Module,
+            _ => continue,
+        };
+        for file in subdir.files() {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let (Some(stem), Some(content)) = (
+                path.file_stem().and_then(|s| s.to_str()),
+                file.contents_utf8(),
+            ) else {
+                continue;
+            };
+            entries.push((kind, stem.to_string(), content.to_string()));
+        }
+    }
+    let records = entries
+        .iter()
+        .map(|(kind, stem, content)| (*kind, stem.as_str(), content.clone()));
+    load_records(records, registry)
+        .await
+        .map_err(|e| anyhow!("failed to load embedded records: {e:?}"))
 }
 
 /// Index a frozen module's exported functions by their UUID, so the

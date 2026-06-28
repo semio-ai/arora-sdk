@@ -21,8 +21,8 @@ use semio_record::{
     ty::{FrozenTy, PrimitiveKind},
 };
 use semver::Version;
+use std::fs::read_to_string;
 use std::path::Path;
-use tokio::fs::read_to_string;
 use uuid::Uuid;
 
 /// Creates a YAML header file named `module.yaml` describing the module.
@@ -117,9 +117,7 @@ pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry 
     registry: &mut R,
 ) -> Result<(Uuid, Version, ModuleAndImports), ModuleDeclarationError> {
     let header: Header = serde_yaml::from_str(
-        &read_to_string(header_path.as_ref())
-            .await
-            .map_err(ModuleDeclarationError::IoError)?,
+        &read_to_string(header_path.as_ref()).map_err(ModuleDeclarationError::IoError)?,
     )
     .map_err(|e| {
         ModuleDeclarationError::Generic(format!(

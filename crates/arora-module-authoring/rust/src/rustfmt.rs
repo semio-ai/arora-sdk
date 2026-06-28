@@ -11,12 +11,13 @@ pub async fn apply_rustfmt<P: AsRef<Path>>(path: P) -> Result<(), GenerationErro
         sub_path.extension() == Some(OsStr::new("rs"))
     })
     .map_err(GenerationError::IoError)?;
-    let rustfmt_status = tokio::process::Command::new("rustfmt")
+    // A one-shot subprocess: use std::process (synchronous) rather than
+    // tokio::process, which would pull tokio's `process`/`signal` features (and
+    // thus mio) — breaking wasm cross-compilation of crates that depend on this
+    // codegen crate.
+    let rustfmt_status = std::process::Command::new("rustfmt")
         .args(&rust_files)
-        .spawn()
-        .map_err(GenerationError::IoError)?
-        .wait()
-        .await
+        .status()
         .map_err(GenerationError::IoError)?;
     if rustfmt_status.success() {
         Ok(())

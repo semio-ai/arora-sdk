@@ -36,6 +36,62 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 }
 
+// =============================================================================
+// Opinionated Arora runtime
+//
+// Runs the full `arora` runtime (engine + behavior-tree module) in the browser
+// with an in-process fake HAL and bridge. The asynchronous io pump is spawned on
+// the event loop; JavaScript drives the synchronous `step()` — e.g. from
+// `requestAnimationFrame`, or from a Web Worker's loop.
+// =============================================================================
+
+use arora::runtime::{Runtime, StepOutcome};
+use arora_bridge::FakeBridge;
+use arora_hal::FakeHal;
+use std::sync::Arc;
+
+/// JS-callable handle to a running opinionated Arora runtime.
+#[wasm_bindgen]
+pub struct AroraRuntime {
+    runtime: Runtime,
+}
+
+#[wasm_bindgen]
+impl AroraRuntime {
+    /// Start the runtime with an in-process fake HAL and bridge. `nodes_wasm` is
+    /// the behavior-tree node module's wasm bytes — the JS host fetches
+    /// `behavior-tree-nodes.wasm` and passes them here (on wasm they are not
+    /// embedded at build time). Spawns the async io pump on the browser event
+    /// loop; drive the runtime by calling `step()`.
+    pub async fn start(nodes_wasm: &[u8]) -> Result<AroraRuntime, JsValue> {
+        let arora = arora::Arora::start_with_nodes(nodes_wasm)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
+        let (runtime, io) =
+            Runtime::with_io(arora, Arc::new(FakeHal::new()), Arc::new(FakeBridge::new()));
+        wasm_bindgen_futures::spawn_local(io);
+        Ok(AroraRuntime { runtime })
+    }
+
+    /// Advance the runtime one step. Returns `true` while live, `false` once the
+    /// device has been unregistered (stop calling then).
+    pub fn step(&mut self) -> Result<bool, JsValue> {
+        match self.runtime.step() {
+            Ok(StepOutcome::Live) => Ok(true),
+            Ok(StepOutcome::Unregistered) => Ok(false),
+            Err(e) => Err(JsValue::from_str(&format!("step failed: {e}"))),
+        }
+    }
+
+    /// Queue a behavior tree (Groot XML) to run on the next step.
+    #[wasm_bindgen(js_name = queueGrootXml)]
+    pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
+        self.runtime
+            .queue_groot_xml(xml)
+            .map_err(|e| JsValue::from_str(&format!("queue failed: {e}")))
+    }
+}
+
 /// JS-callable handle to a configured Arora engine.
 #[wasm_bindgen]
 pub struct Engine {
