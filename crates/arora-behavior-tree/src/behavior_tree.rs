@@ -10,6 +10,7 @@ pub mod schema_groot;
 mod tests;
 pub mod tree_node;
 pub mod variable;
+use crate::variable::{VariableCell, VariableResolver};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::{
@@ -17,7 +18,6 @@ use arora_types::{
     value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
-use crate::variable::VariableCell;
 use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -518,11 +518,15 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
                 node: shared_node.id.to_owned(),
                 parameter: param_id.to_owned(),
             };
+            // The schema (YAML) path has no variable names to resolve against a
+            // store, so every cell stays tree-local.
             setup_node_parameter_variable(
                 &node_param,
                 arg_expr,
                 &mut variables,
                 &mut node_parameters_variables,
+                &|_| None,
+                &HashMap::new(),
             )?;
         }
     }
@@ -571,11 +575,13 @@ fn get_node_parameter_variable<'a>(
 /// it will be created with the default value `Value::Unit`.
 /// If a parameter has to be computed with a function call,
 /// the variable will hold the default value `Value::Unit`.
-fn setup_node_parameter_variable(
+pub(crate) fn setup_node_parameter_variable(
     node_parameter: &NodeParameterId,
     argument_expression: &Expression,
     variables: &mut HashMap<Uuid, VariableCell>,
     node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+    resolver: &VariableResolver,
+    names: &HashMap<Uuid, String>,
 ) -> Result<VariableCell, BehaviorTreeError> {
     let variable = match argument_expression {
         Expression::Value(value) => VariableCell::local_with(value.to_owned()),
@@ -588,13 +594,20 @@ fn setup_node_parameter_variable(
             if let Some(variable) = variables.get(variable_id) {
                 variable.clone()
             } else {
-                let variable = VariableCell::local();
+                // First reference to this `{var}`: bind it to the host data store
+                // if the resolver knows its name (the Direct convention — variable
+                // name == store key), otherwise fall back to a tree-local cell.
+                let cell = names
+                    .get(variable_id)
+                    .and_then(|n| resolver(n))
+                    .map(VariableCell::stored)
+                    .unwrap_or_else(VariableCell::local);
                 // Key the new cell by its own `variable_id` so the next reference
                 // to the same `{var}` finds and shares it. (A `Uuid::new_v4()` here
                 // made every reference create its own cell — see the
                 // `shared_variable_id_resolves_to_one_cell` regression test.)
-                variables.insert(*variable_id, variable.clone());
-                variable
+                variables.insert(*variable_id, cell.clone());
+                cell
             }
         }
         Expression::NodeArgument(other_node_parameter) => node_parameters_variables

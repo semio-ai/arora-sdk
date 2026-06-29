@@ -63,6 +63,8 @@ fn shared_variable_id_resolves_to_one_cell() {
         &Expression::VariableId(var_id),
         &mut variables,
         &mut node_parameters,
+        &|_| None,
+        &HashMap::new(),
     )
     .unwrap();
     let cell_b = crate::setup_node_parameter_variable(
@@ -70,6 +72,8 @@ fn shared_variable_id_resolves_to_one_cell() {
         &Expression::VariableId(var_id),
         &mut variables,
         &mut node_parameters,
+        &|_| None,
+        &HashMap::new(),
     )
     .unwrap();
 
@@ -78,6 +82,64 @@ fn shared_variable_id_resolves_to_one_cell() {
         cell_b.get_or_unit(),
         Value::Boolean(true),
         "two parameters bound to the same variable id must share one cell"
+    );
+}
+
+/// A `{var}` whose name the resolver knows binds to the data store: the cell and
+/// the store key are the same storage, both ways. This is the Direct convention
+/// (variable name == store key) the runtime supplies — exercised here against a
+/// real [`SimpleDataStore`] so the behavior-tree crate's `Slot` plumbing is
+/// covered without an engine.
+#[test]
+fn resolved_variable_is_store_backed() {
+    use crate::schema::{Expression, NodeParameterId};
+    use crate::variable::VariableCell;
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::data::{DataStore, Key, StateChange};
+
+    let store = SimpleDataStore::new();
+    let resolver = {
+        let store = store.clone();
+        // `DataStore::slot` already hands back a `Box<dyn Slot>`.
+        move |name: &str| Some(store.slot(&Key::from(name)))
+    };
+
+    let var_id = Uuid::new_v4();
+    let names = HashMap::from([(var_id, "battery.level".to_string())]);
+
+    let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
+    let mut node_parameters: HashMap<NodeParameterId, VariableCell> = HashMap::new();
+    let param = NodeParameterId {
+        node: Uuid::new_v4(),
+        parameter: Uuid::new_v4(),
+    };
+
+    let cell = crate::setup_node_parameter_variable(
+        &param,
+        &Expression::VariableId(var_id),
+        &mut variables,
+        &mut node_parameters,
+        &resolver,
+        &names,
+    )
+    .unwrap();
+
+    // Write through the cell, read through the store.
+    cell.set(Value::from(1.0_f64));
+    assert_eq!(
+        store.read(&[Key::from("battery.level")]),
+        vec![Some(Value::from(1.0_f64))],
+        "a write through the resolved cell must reach the store key"
+    );
+
+    // Write through the store, read through the cell.
+    store
+        .write(StateChange::set("battery.level", Value::from(2.0_f64)))
+        .unwrap();
+    assert_eq!(
+        cell.get(),
+        Some(Value::from(2.0_f64)),
+        "a write through the store key must be visible through the resolved cell"
     );
 }
 

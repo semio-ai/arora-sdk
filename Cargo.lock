@@ -162,6 +162,7 @@ dependencies = [
  "arora-buffers",
  "arora-module-rust",
  "arora-registry",
+ "arora-simple-data-store",
  "arora-types",
  "derive_more 2.1.1",
  "lazy_static",

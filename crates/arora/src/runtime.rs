@@ -43,7 +43,7 @@ use arora_engine::engine::PinnedEngine;
 use arora_hal::Hal;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::CallResult;
-use arora_types::data::{DataStore, StateChange, Subscription};
+use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{Future, StreamExt};
@@ -173,16 +173,28 @@ impl Runtime {
     }
 
     /// Queue a behavior tree (as Groot XML) to be run on the next BT step.
+    ///
+    /// Each Groot `{var}` is bound to the data store under its own name — the
+    /// Direct convention (variable name == store key) — so a behavior reading or
+    /// writing `{var}` reads/writes the store directly during the tick. STEP 2's
+    /// single-writer guarantee makes that race-free (no copy/sync needed).
     pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), RuntimeError> {
         let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)
             .map_err(|e| RuntimeError::BehaviorTree(format!("parse: {e:?}")))?;
+        // `try_into_tree_node` fills `variables` as name → variable id.
         let mut variables = HashMap::new();
         let tree_node: TreeNode = groot
             .root
             .try_into_tree_node(self.function_index.as_ref(), &mut variables)
             .map_err(|e| RuntimeError::BehaviorTree(format!("build: {e:?}")))?;
+        // Invert to variable id → name for the BT builder.
+        let id_to_name: HashMap<Uuid, String> =
+            variables.into_iter().map(|(name, id)| (id, name)).collect();
+        // Direct convention: a variable resolves to the store slot under its name.
+        let store = self.store.clone();
+        let resolver = move |name: &str| Some(store.slot(&Key::from(name)));
         let behavior: BehaviorTree = tree_node
-            .try_into()
+            .into_behavior_tree(&resolver, &id_to_name)
             .map_err(|e| RuntimeError::BehaviorTree(format!("instantiate: {e:?}")))?;
         self.trees.push_back(behavior);
         Ok(())
@@ -211,8 +223,23 @@ impl Runtime {
             self.tick_tree(&tree)?;
         }
         // STEP 3 — flush local state changes out to the remote / hardware.
+        // Coalesce everything drained this step into ONE StateChange so the
+        // remote/hardware see a single, consistent update per step. Changes are
+        // drained in order, so later ones win: a set overrides an earlier unset of
+        // the same key (and vice versa).
+        let mut merged = StateChange::new();
         while let Some(change) = self.store_changes.try_recv() {
-            let _ = self.outbound.unbounded_send(Outbound::StateChanged(change));
+            for (key, value) in change.set {
+                merged.unset.remove(&key);
+                merged.set.insert(key, value);
+            }
+            for key in change.unset {
+                merged.set.remove(&key);
+                merged.unset.insert(key);
+            }
+        }
+        if !merged.is_empty() {
+            let _ = self.outbound.unbounded_send(Outbound::StateChanged(merged));
         }
         Ok(StepOutcome::Live)
     }

@@ -22,6 +22,9 @@ derive_more = "2"
 
 [dev-dependencies]
 anyhow = "*"
+# Only for tests: exercise a `{var}` cell resolved to a real store Slot. The
+# library itself stays storage-agnostic (it depends only on the `Slot` trait).
+arora-simple-data-store = { path = "../arora-simple-data-store" }
 
 [build-dependencies]
 anyhow = "*"
