@@ -100,8 +100,11 @@ impl std::error::Error for RuntimeError {}
 /// trees, advanced one [`step`](Runtime::step) at a time. Build it with
 /// [`with_io`](Runtime::with_io).
 pub struct Runtime {
-    // Owned and touched ONLY by the stepping thread (single-threaded state):
-    store: SimpleDataStore,
+    // Owned and touched ONLY by the stepping thread (single-threaded state).
+    // Held behind `dyn DataStore` so a wrapping store (e.g. a
+    // `NamespacedStore` over one mutualized backend) can be injected via
+    // [`with_io_in`](Runtime::with_io_in).
+    store: Arc<dyn DataStore>,
     engine: PinnedEngine,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     behaviors: VecDeque<Box<dyn Behavior>>,
@@ -129,23 +132,24 @@ impl Runtime {
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
     ) -> (Self, impl Future<Output = ()>) {
-        Self::with_io_in(arora, hal, bridge, SimpleDataStore::new())
+        Self::with_io_in(arora, hal, bridge, Arc::new(SimpleDataStore::new()))
     }
 
     /// Like [`with_io`](Runtime::with_io), but runs against the caller-provided
-    /// `store` rather than a private one.
+    /// `store` (any [`DataStore`]) rather than a private one.
     ///
-    /// Because [`SimpleDataStore`] is cheaply cloneable and clones share the same
-    /// storage, one instance handed to several runtimes is a single shared
-    /// blackboard — and the embedder keeps its own clone for direct,
-    /// high-performance access and subscription. This is how Studio mutualizes one
-    /// store across every spawned device (namespaced by device key), reading and
-    /// writing it directly.
+    /// The store is a trait object, so the caller chooses the backend: a plain
+    /// shared [`SimpleDataStore`] (cheaply cloneable, clones share storage), or a
+    /// wrapping store such as a `NamespacedStore` that prefixes every key with a
+    /// device namespace before delegating to one mutualized backend. This is how
+    /// Studio mutualizes one store across every spawned device (namespaced by
+    /// device key) while keeping its own handle for direct access and
+    /// subscription.
     pub fn with_io_in(
         arora: Arora,
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
-        store: SimpleDataStore,
+        store: Arc<dyn DataStore>,
     ) -> (Self, impl Future<Output = ()>) {
         let Arora {
             engine,
@@ -233,7 +237,7 @@ impl Runtime {
         // shared store; keep it queued while it is still running.
         if let Some(mut behavior) = self.behaviors.pop_front() {
             let mut ctx = BehaviorContext {
-                store: &self.store,
+                store: &*self.store,
                 caller: &mut self.engine,
                 dt: 0.0,
             };
@@ -398,6 +402,7 @@ async fn io(
 mod tests {
     use super::*;
     use arora_bridge::{CommandStream, DataRequestedStream, DeviceInfoStream};
+    use arora_simple_data_store::NamespacedStore;
     use arora_types::data::{Key, StateChange};
     use async_trait::async_trait;
     use futures::channel::oneshot;
@@ -434,6 +439,15 @@ mod tests {
     async fn build(bridge: Arc<dyn Bridge>) -> (Runtime, impl Future<Output = ()>) {
         let arora = Arora::start().await.expect("arora starts");
         Runtime::with_io(arora, Arc::new(arora_hal::FakeHal::new()), bridge)
+    }
+
+    /// Like [`build`], but runs the runtime against a caller-provided store.
+    async fn build_in(
+        bridge: Arc<dyn Bridge>,
+        store: Arc<dyn DataStore>,
+    ) -> (Runtime, impl Future<Output = ()>) {
+        let arora = Arora::start().await.expect("arora starts");
+        Runtime::with_io_in(arora, Arc::new(arora_hal::FakeHal::new()), bridge, store)
     }
 
     /// Drive `step` until the runtime reports unregistered, with a safety bound.
@@ -633,6 +647,57 @@ mod tests {
         assert!(
             matches!(methods.ret, Value::ArrayValue(_)),
             "list_methods returns an array"
+        );
+    }
+
+    /// A `Runtime` built over a `NamespacedStore` writes through `step()` under
+    /// the device namespace: a write driven through the runtime's own store
+    /// pipeline (here the bridge `Update` path, which `step()` dispatches) lands
+    /// as `robotA/<key>` in the shared backend.
+    ///
+    /// This exercises the `Arc<dyn DataStore>` injection end-to-end: the runtime
+    /// holds the namespaced view and never sees the prefix, while the mutualized
+    /// `SimpleDataStore` ends up holding only the namespaced key. (A *behavior*
+    /// writing a real leaf node under the namespace is covered by the
+    /// `behavior_writes_store` integration test, which loads the
+    /// test-behavior-tree-nodes module; `Arora` exposes no module-load API to run
+    /// such a leaf through `step()` here.)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn runtime_over_namespaced_store_writes_under_namespace() {
+        let shared = SimpleDataStore::new();
+        let store: Arc<dyn DataStore> =
+            Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
+        let (mut runtime, _pump) = build_in(Arc::new(UnregisterBridge), store.clone()).await;
+
+        // Drive a write through the runtime's store pipeline.
+        let (tx, rx) = oneshot::channel();
+        let mut set = std::collections::HashMap::new();
+        set.insert(Key::from("greeting"), Some(Value::String("hi".into())));
+        runtime
+            .handle_command(BridgeCommand::new(
+                BridgeOp::Update(StateChange {
+                    set,
+                    unset: std::collections::HashSet::new(),
+                }),
+                tx,
+            ))
+            .unwrap();
+        assert!(rx.await.unwrap().is_ok(), "update should succeed");
+        // Let the change flow out through a step (the flush stage drains the
+        // store's change feed).
+        assert_eq!(runtime.step().expect("step ok"), StepOutcome::Live);
+
+        // In the shared backend the key lives under the device namespace…
+        assert_eq!(
+            shared.read(&[Key::from("robotA/greeting")]),
+            vec![Some(Value::String("hi".into()))],
+            "the runtime's write landed under the device namespace"
+        );
+        // …and NOT under the bare key.
+        assert_eq!(
+            shared.read(&[Key::from("greeting")]),
+            vec![None],
+            "the bare key must not be set in the shared store"
         );
     }
 }

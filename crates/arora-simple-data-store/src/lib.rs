@@ -7,6 +7,9 @@
 //! behavior tree, and the engine at once. Richer backends (e.g. arora-ecbs) can
 //! implement the same trait.
 
+mod namespaced;
+pub use namespaced::NamespacedStore;
+
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, RwLock};
