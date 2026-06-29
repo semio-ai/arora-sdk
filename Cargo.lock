@@ -141,6 +141,7 @@ name = "arora"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arora-behavior",
  "arora-behavior-tree",
  "arora-bridge",
  "arora-engine",
@@ -154,10 +155,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-behavior"
+version = "0.1.0"
+dependencies = [
+ "arora-types",
+]
+
+[[package]]
 name = "arora-behavior-tree"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "arora-behavior",
  "arora-behavior-tree-types",
  "arora-buffers",
  "arora-module-rust",
