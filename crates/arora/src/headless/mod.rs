@@ -38,8 +38,9 @@ use app_data_files::ensure_app_data_dir;
 /// Run the headless device runner to completion (until the device is
 /// unregistered or the process is interrupted).
 ///
-/// TODO: device-info registration + CLI args (grow launch). For now this is
-/// env-only and does not register device info, load a bridge config, or prompt.
+/// Configuration is environment-only for now (a CLI / bridge-config file is a
+/// follow-up); it registers the device with Studio from the configured device
+/// info (`DEVICE_NAME`, `MODEL_FAMILY`, `HARDWARE_VERSION`, …) when any is set.
 pub fn launch() -> Result<()> {
     env_logger::init();
 
@@ -87,6 +88,10 @@ pub fn launch() -> Result<()> {
         })
     };
 
+    // Device info to register with Studio, from the environment. `None` when
+    // nothing is configured, so we don't clear an already-registered device.
+    let device_info = device_info_from_env();
+
     info!("Connecting via Zenoh (endpoints: {:?})", endpoints);
 
     let hal = Arc::new(FakeHal::new());
@@ -102,6 +107,46 @@ pub fn launch() -> Result<()> {
         // `studio_bridge_device_client::error::Error` has no `Display` impl,
         // so format it with `{e:?}`.
         .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
-        Ok(Arc::new(client) as Arc<dyn Bridge>)
+        let client: Arc<dyn Bridge> = Arc::new(client);
+
+        // Register this device with Studio from the configured device info.
+        if let Some(info) = device_info {
+            client
+                .update_device_info(Some(info))
+                .await
+                .context("failed to register device info with Studio")?;
+            info!("Registered device info with Studio");
+        }
+        Ok(client)
     })
+}
+
+/// Build the device info to register from the environment, or `None` if nothing
+/// is configured (so registration is skipped and an existing registration is
+/// left untouched). `DEVICE_OWNERS` is a comma-separated list.
+fn device_info_from_env() -> Option<arora_bridge::DeviceInfo> {
+    let owners: Vec<String> = std::env::var("DEVICE_OWNERS")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let info = arora_bridge::DeviceInfo {
+        name: std::env::var("DEVICE_NAME").ok(),
+        description: std::env::var("DEVICE_DESCRIPTION").ok(),
+        model_family: std::env::var("MODEL_FAMILY").ok(),
+        hardware_version: std::env::var("HARDWARE_VERSION").ok(),
+        software_version: std::env::var("SOFTWARE_VERSION").ok(),
+        owners,
+    };
+    let configured = info.name.is_some()
+        || info.description.is_some()
+        || info.model_family.is_some()
+        || info.hardware_version.is_some()
+        || info.software_version.is_some()
+        || !info.owners.is_empty();
+    configured.then_some(info)
 }
