@@ -298,6 +298,39 @@ impl Runtime {
                 // TODO(next slice): dispatch the call through the engine.
                 Err("call handling is not yet wired".to_string())
             }
+            BridgeOp::ListKeys { prefix } => {
+                // Introspection: enumerate the live (set) key paths, optionally
+                // filtered by prefix, sorted for a deterministic reply.
+                let snapshot = self.store.snapshot();
+                let mut paths: Vec<String> = snapshot
+                    .storage
+                    .iter()
+                    .filter(|(_, value)| value.is_some())
+                    .map(|(key, _)| key.path.clone())
+                    .filter(|path| prefix.as_ref().is_none_or(|p| path.starts_with(p.as_str())))
+                    .collect();
+                paths.sort();
+                Ok(CallResult {
+                    ret: Value::ArrayValue(paths.into_iter().map(Value::String).collect()),
+                    mutated: Vec::new(),
+                })
+            }
+            BridgeOp::ListMethods { prefix } => {
+                // Introspection: enumerate registered module method names,
+                // optionally filtered by prefix, sorted and deduped.
+                let mut names: Vec<String> = self
+                    .function_index
+                    .values()
+                    .map(|f| f.function_name.clone())
+                    .filter(|name| prefix.as_ref().is_none_or(|p| name.starts_with(p.as_str())))
+                    .collect();
+                names.sort();
+                names.dedup();
+                Ok(CallResult {
+                    ret: Value::ArrayValue(names.into_iter().map(Value::String).collect()),
+                    mutated: Vec::new(),
+                })
+            }
         };
         cmd.reply(result);
         Ok(())
@@ -546,6 +579,60 @@ mod tests {
             Value::ArrayValue(vec![Value::Option(Some(Box::new(Value::String(
                 "hi".into()
             ))))])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_keys_enumerates_the_store_by_prefix() {
+        let (mut runtime, _pump) = build(Arc::new(UnregisterBridge)).await;
+
+        // Seed three keys across two prefixes.
+        let mut set = std::collections::HashMap::new();
+        set.insert(Key::from("face/mouth"), Some(Value::F32(0.5)));
+        set.insert(Key::from("face/eyes"), Some(Value::F32(0.1)));
+        set.insert(Key::from("body/hand"), Some(Value::F32(0.9)));
+        let (tx, _rx) = oneshot::channel();
+        runtime
+            .handle_command(BridgeCommand::new(
+                BridgeOp::Update(StateChange {
+                    set,
+                    unset: std::collections::HashSet::new(),
+                }),
+                tx,
+            ))
+            .unwrap();
+
+        // ListKeys with a prefix returns only that subtree, sorted.
+        let (tx, rx) = oneshot::channel();
+        runtime
+            .handle_command(BridgeCommand::new(
+                BridgeOp::ListKeys {
+                    prefix: Some("face".into()),
+                },
+                tx,
+            ))
+            .unwrap();
+        let result = rx.await.unwrap().expect("list_keys ok");
+        assert_eq!(
+            result.ret,
+            Value::ArrayValue(vec![
+                Value::String("face/eyes".into()),
+                Value::String("face/mouth".into()),
+            ])
+        );
+
+        // ListMethods returns the registered method names as an array.
+        let (tx, rx) = oneshot::channel();
+        runtime
+            .handle_command(BridgeCommand::new(
+                BridgeOp::ListMethods { prefix: None },
+                tx,
+            ))
+            .unwrap();
+        let methods = rx.await.unwrap().expect("list_methods ok");
+        assert!(
+            matches!(methods.ret, Value::ArrayValue(_)),
+            "list_methods returns an array"
         );
     }
 }
