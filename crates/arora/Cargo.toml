@@ -29,6 +29,8 @@ default = ["native"]
 # cfg).
 native = [
     "dep:tokio",
+    "dep:studio-bridge-device-client",
+    "dep:firestore-stream",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -46,6 +48,12 @@ arora-hal = { path = "../arora-hal" }
 arora-bridge = { path = "../arora-bridge" }
 arora-simple-data-store = { path = "../arora-simple-data-store" }
 futures = "0.3"
+# The default Bridge implementation (the studio-bridge Zenoh connector) and the
+# Firebase config it needs. Native-only (zenoh/firestore) and optional, so the
+# wasm build of the library stays lean. arora bundles these so a device-specific
+# binary only has to provide its own HAL.
+studio-bridge-device-client = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "chore/reqwest-0.13", optional = true }
+firestore-stream = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "chore/reqwest-0.13", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
