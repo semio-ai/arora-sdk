@@ -1,8 +1,8 @@
 [package]
-name = "behavior-tree-nodes"
+name = "test-behavior-tree-nodes"
 version = "0.1.0"
 authors = ["Victor Paleologue <victor.paleologue@palaio.eu>"]
-description = "Core behavior tree nodes"
+description = "Test/demo behavior-tree leaf and utility nodes (the basic control nodes are wired natively into arora-behavior-tree)"
 license = "Proprietary"
 edition = "2021"
 readme = "readme.md"

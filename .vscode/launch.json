@@ -22,9 +22,9 @@
                 "-l",
                 "rust",
                 "-m",
-                "${workspaceFolder}/modules/behavior-tree-nodes/module.yaml",
+                "${workspaceFolder}/modules/test-behavior-tree-nodes/module.yaml",
                 "-o",
-                "${workspaceFolder}/modules/behavior-tree-nodes/src/arora_generated",
+                "${workspaceFolder}/modules/test-behavior-tree-nodes/src/arora_generated",
             ],
             "env": {
                 "RUST_BACKTRACE": "1",

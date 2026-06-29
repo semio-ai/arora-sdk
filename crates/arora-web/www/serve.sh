@@ -18,27 +18,27 @@ guest_wasm="$workspace_root/target/wasm32-wasip1/debug/test_rust_wasm.wasm"
 guest_yaml="$workspace_root/modules/test-rust-wasm/src/arora_generated/module.yaml"
 guest_records="$workspace_root/modules/test-rust-wasm/records/records.json"
 
-bt_nodes_wasm="$workspace_root/target/wasm32-wasip1/debug/behavior_tree_nodes.wasm"
-bt_nodes_yaml="$workspace_root/modules/behavior-tree-nodes/src/arora_generated/module.yaml"
-bt_nodes_records="$workspace_root/modules/behavior-tree-nodes/records/records.json"
+bt_nodes_wasm="$workspace_root/target/wasm32-wasip1/debug/test_behavior_tree_nodes.wasm"
+bt_nodes_yaml="$workspace_root/modules/test-behavior-tree-nodes/src/arora_generated/module.yaml"
+bt_nodes_records="$workspace_root/modules/test-behavior-tree-nodes/records/records.json"
 
 echo "==> cargo build guest modules (wasm32-wasip1)"
-(cd "$workspace_root" && cargo build -p test-rust-wasm -p behavior-tree-nodes --target wasm32-wasip1)
+(cd "$workspace_root" && cargo build -p test-rust-wasm -p test-behavior-tree-nodes --target wasm32-wasip1)
 
 echo "==> wasm-pack build $crate_dir"
 (cd "$crate_dir" && wasm-pack build --target web --dev)
 
 echo "==> staging artifacts under www/"
 rm -rf "$here/pkg" "$here/modules"
-mkdir -p "$here/pkg" "$here/modules/test-rust-wasm" "$here/modules/behavior-tree-nodes"
+mkdir -p "$here/pkg" "$here/modules/test-rust-wasm" "$here/modules/test-behavior-tree-nodes"
 cp "$crate_dir/pkg/arora_web.js" "$here/pkg/"
 cp "$crate_dir/pkg/arora_web_bg.wasm" "$here/pkg/"
 cp "$guest_yaml" "$here/modules/test-rust-wasm/module.yaml"
 cp "$guest_wasm" "$here/modules/test-rust-wasm/test_rust_wasm.wasm"
 cp "$guest_records" "$here/modules/test-rust-wasm/records.json"
-cp "$bt_nodes_yaml" "$here/modules/behavior-tree-nodes/module.yaml"
-cp "$bt_nodes_wasm" "$here/modules/behavior-tree-nodes/behavior_tree_nodes.wasm"
-cp "$bt_nodes_records" "$here/modules/behavior-tree-nodes/records.json"
+cp "$bt_nodes_yaml" "$here/modules/test-behavior-tree-nodes/module.yaml"
+cp "$bt_nodes_wasm" "$here/modules/test-behavior-tree-nodes/test_behavior_tree_nodes.wasm"
+cp "$bt_nodes_records" "$here/modules/test-behavior-tree-nodes/records.json"
 
 port="${PORT:-8080}"
 echo "==> serving on http://localhost:$port"

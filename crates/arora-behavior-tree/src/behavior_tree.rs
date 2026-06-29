@@ -24,6 +24,10 @@ use uuid::Uuid;
 use crate::arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
+use crate::nodes::{
+    FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+};
 
 // Runtime.
 //====================================================================
@@ -143,6 +147,123 @@ fn setup_tick_function(
     })
 }
 
+/// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
+/// fail, run) natively, without consulting the function index or the wasm
+/// engine. Children are ticked through their registered tick functions
+/// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
+/// `None` for any other function (which the caller dispatches via the engine).
+fn tick_builtin(
+    caller: &mut dyn CallBridge,
+    node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+    child_tick_ids: &[TickId],
+    node: &Node,
+) -> Result<Option<Status>, BehaviorTreeError> {
+    let status = match node.function {
+        SUCCEED_FUNCTION_ID => Status::Success,
+        FAIL_FUNCTION_ID => Status::Failure,
+        RUN_FUNCTION_ID => Status::Running,
+        SEQ_FUNCTION_ID => {
+            let mut status = Status::Success;
+            for child in child_tick_ids {
+                match child.tick(caller)? {
+                    Status::Success => continue,
+                    Status::Failure => {
+                        status = Status::Failure;
+                        break;
+                    }
+                    Status::Running => {
+                        status = Status::Running;
+                        break;
+                    }
+                }
+            }
+            status
+        }
+        FALLBACK_FUNCTION_ID => {
+            if child_tick_ids.is_empty() {
+                Status::Success
+            } else {
+                let mut status = Status::Failure;
+                for child in child_tick_ids {
+                    match child.tick(caller)? {
+                        Status::Success => {
+                            status = Status::Success;
+                            break;
+                        }
+                        Status::Failure => continue,
+                        Status::Running => {
+                            status = Status::Running;
+                            break;
+                        }
+                    }
+                }
+                status
+            }
+        }
+        PARALLEL_FUNCTION_ID => {
+            // Ticks every child every time, then aggregates: Success only if
+            // all children succeeded, Failure if any failed, else Running.
+            let mut success = true;
+            let mut failure = false;
+            for child in child_tick_ids {
+                match child.tick(caller)? {
+                    Status::Success => continue,
+                    Status::Failure => {
+                        success = false;
+                        failure = true;
+                    }
+                    Status::Running => {
+                        success = false;
+                    }
+                }
+            }
+            if success {
+                Status::Success
+            } else if failure {
+                Status::Failure
+            } else {
+                Status::Running
+            }
+        }
+        SEQ_STAR_FUNCTION_ID => {
+            // The current index persists in the node's parameter variable, so
+            // a Running tree resumes past the children that already succeeded.
+            let index_variable = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?;
+            let mut current_index = match *index_variable.borrow() {
+                Value::U16(index) => index,
+                _ => 0,
+            };
+            let mut status = Status::Success;
+            for child in child_tick_ids.iter().skip(current_index as usize) {
+                match child.tick(caller)? {
+                    Status::Success => current_index += 1,
+                    Status::Failure => {
+                        status = Status::Failure;
+                        break;
+                    }
+                    Status::Running => {
+                        status = Status::Running;
+                        break;
+                    }
+                }
+            }
+            if status != Status::Running {
+                current_index = 0;
+            }
+            *index_variable.borrow_mut() = Value::U16(current_index);
+            status
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(status))
+}
+
 fn tick(
     caller: &mut dyn CallBridge,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
@@ -152,6 +273,15 @@ fn tick(
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
+    // The basic control nodes are wired in natively; everything else is
+    // dispatched into a module through the engine.
+    if let Some(status) = tick_builtin(caller, &node_parameters_variables, child_tick_ids, &node)? {
+        if trace != TraceTick::No {
+            println!("tick {} -> {:?}", node.id, status);
+        }
+        return Ok(status);
+    }
+
     let module_function =
         function_index
             .get(&node.function)

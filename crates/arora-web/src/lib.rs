@@ -58,13 +58,12 @@ pub struct AroraRuntime {
 
 #[wasm_bindgen]
 impl AroraRuntime {
-    /// Start the runtime with an in-process fake HAL and bridge. `nodes_wasm` is
-    /// the behavior-tree node module's wasm bytes — the JS host fetches
-    /// `behavior-tree-nodes.wasm` and passes them here (on wasm they are not
-    /// embedded at build time). Spawns the async io pump on the browser event
-    /// loop; drive the runtime by calling `step()`.
-    pub async fn start(nodes_wasm: &[u8]) -> Result<AroraRuntime, JsValue> {
-        let arora = arora::Arora::start_with_nodes(nodes_wasm)
+    /// Start the runtime with an in-process fake HAL and bridge. The basic
+    /// behavior-tree control nodes are wired natively into the engine, so no
+    /// node module needs to be fetched or loaded. Spawns the async io pump on the
+    /// browser event loop; drive the runtime by calling `step()`.
+    pub async fn start() -> Result<AroraRuntime, JsValue> {
+        let arora = arora::Arora::start()
             .await
             .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
         let (runtime, io) =

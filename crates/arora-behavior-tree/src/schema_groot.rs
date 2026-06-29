@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
     COS_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_FUNCTION_ID,
-    STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+    SEQ_STAR_FUNCTION_ID, STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
 };
 use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
@@ -74,6 +74,32 @@ impl Node {
                 })
             }
         };
+
+        let children = if tree_node_children.is_empty() {
+            None
+        } else {
+            Some(tree_node_children)
+        };
+
+        // The basic control nodes are dispatched natively, so they are not in
+        // the function index: build their TreeNode directly. seq_star also needs
+        // its persistent current-index variable seeded.
+        if is_builtin_function(arora_id) {
+            let parameters = if arora_id == SEQ_STAR_FUNCTION_ID {
+                HashMap::from([(
+                    SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+                    Expression::Value(Value::U16(0)),
+                )])
+            } else {
+                HashMap::new()
+            };
+            return Ok(TreeNode {
+                function: arora_id,
+                children,
+                parameters,
+            });
+        }
+
         let function = index
             .get(&arora_id)
             .ok_or(BehaviorTreeError::InternalError {
@@ -86,11 +112,7 @@ impl Node {
         }
         Ok(TreeNode {
             function: function.function_id,
-            children: if tree_node_children.is_empty() {
-                None
-            } else {
-                Some(tree_node_children)
-            },
+            children,
             parameters,
         })
     }
@@ -143,6 +165,19 @@ impl Node {
             }
         }
         .to_string();
+
+        // The basic control nodes are dispatched natively and not in the
+        // function index. They carry no Groot attributes — seq_star's persistent
+        // current-index is internal state, not a Groot param.
+        if is_builtin_function(tree_node.function) {
+            return Ok(Node {
+                id: groot_id,
+                name: Uuid::new_v4().to_string(),
+                param_args: HashMap::new(),
+                children: groot_children,
+            });
+        }
+
         let function =
             index
                 .get(&tree_node.function)
@@ -164,6 +199,21 @@ impl Node {
             children: groot_children,
         })
     }
+}
+
+/// Whether the given arora function id is a basic control node dispatched
+/// natively (and therefore absent from the module function index).
+fn is_builtin_function(function: Uuid) -> bool {
+    matches!(
+        function,
+        SUCCEED_FUNCTION_ID
+            | FAIL_FUNCTION_ID
+            | RUN_FUNCTION_ID
+            | SEQ_FUNCTION_ID
+            | SEQ_STAR_FUNCTION_ID
+            | FALLBACK_FUNCTION_ID
+            | PARALLEL_FUNCTION_ID
+    )
 }
 
 pub fn seq(children: Vec<Node>) -> Node {
