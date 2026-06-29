@@ -14,7 +14,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use arora_bridge::FakeBridge;
 use arora_hal::FakeHal;
+use arora_simple_data_store::SimpleDataStore;
 
 fn main() -> Result<()> {
-    arora::launch(Arc::new(FakeHal::new()), Arc::new(FakeBridge::new()))
+    arora::launch(
+        Arc::new(FakeHal::new()),
+        Arc::new(FakeBridge::new()),
+        SimpleDataStore::new(),
+    )
 }
