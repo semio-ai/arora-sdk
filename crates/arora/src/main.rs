@@ -1,25 +1,15 @@
-//! The default `arora` binary: run an arora instance with the in-process fake
-//! HAL and bridge.
+//! The default `arora` binary: the headless device runner.
 //!
-//! Usage:
-//!   arora [path/to/tree.groot.xml]
+//! It reads its configuration from the environment (Firebase options, Zenoh
+//! endpoints, identity file), loads/saves an encrypted refresh token locally,
+//! connects to Semio Studio over Zenoh, and runs the arora runtime. See
+//! [`arora::headless`] for the configuration env vars and the full run.
 //!
-//! This is the generic launcher. A device-specific build is a thin downstream
-//! binary that depends on `arora` plus its own HAL/bridge crates and calls
-//! [`arora::launch`] with those implementations — customization from the
+//! A device-specific build is a thin downstream binary that depends on `arora`
+//! plus its own HAL/bridge crates and calls [`arora::launch`] /
+//! [`arora::launch_with`] with those implementations — customization from the
 //! outside, no feature flags inside `arora`.
 
-use std::sync::Arc;
-
-use anyhow::Result;
-use arora_bridge::FakeBridge;
-use arora_hal::FakeHal;
-use arora_simple_data_store::SimpleDataStore;
-
-fn main() -> Result<()> {
-    arora::launch(
-        Arc::new(FakeHal::new()),
-        Arc::new(FakeBridge::new()),
-        SimpleDataStore::new(),
-    )
+fn main() -> anyhow::Result<()> {
+    arora::headless::launch()
 }
