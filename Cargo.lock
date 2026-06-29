@@ -294,6 +294,7 @@ dependencies = [
  "arora-engine",
  "arora-types",
  "serde_yaml 0.8.26",
+ "test-behavior-tree-nodes",
  "test-cpp",
  "test-cpp-2",
  "test-rust-component",
