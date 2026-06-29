@@ -113,23 +113,44 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Wire an [`Arora`] (engine + behavior-tree module) to a HAL and a bridge.
+    /// Wire an [`Arora`] (engine + behavior-tree module) to a HAL and a bridge,
+    /// with a fresh, private [`SimpleDataStore`].
     ///
     /// Returns the synchronous `Runtime` plus the asynchronous [`io`] future that
     /// pumps the bridge/HAL. The embedder spawns the future on its executor
     /// (`tokio::spawn` on native, `spawn_local` on the web) and drives
     /// [`step`](Runtime::step) on its own cadence — the two communicate only over
     /// channels.
+    ///
+    /// To share one store across several runtimes (and keep a handle to it for
+    /// direct access), use [`with_io_in`](Runtime::with_io_in).
     pub fn with_io(
         arora: Arora,
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
     ) -> (Self, impl Future<Output = ()>) {
+        Self::with_io_in(arora, hal, bridge, SimpleDataStore::new())
+    }
+
+    /// Like [`with_io`](Runtime::with_io), but runs against the caller-provided
+    /// `store` rather than a private one.
+    ///
+    /// Because [`SimpleDataStore`] is cheaply cloneable and clones share the same
+    /// storage, one instance handed to several runtimes is a single shared
+    /// blackboard — and the embedder keeps its own clone for direct,
+    /// high-performance access and subscription. This is how Studio mutualizes one
+    /// store across every spawned device (namespaced by device key), reading and
+    /// writing it directly.
+    pub fn with_io_in(
+        arora: Arora,
+        hal: Arc<dyn Hal>,
+        bridge: Arc<dyn Bridge>,
+        store: SimpleDataStore,
+    ) -> (Self, impl Future<Output = ()>) {
         let Arora {
             engine,
             function_index,
         } = arora;
-        let store = SimpleDataStore::new();
         let store_changes = store.subscribe();
         let hal_updates = hal.updates();
 
@@ -340,13 +361,18 @@ mod tests {
         Runtime::with_io(arora, Arc::new(arora_hal::FakeHal::new()), bridge)
     }
 
-    /// Drive `step` cooperatively (yielding to let the io pump run) until the
-    /// runtime reports unregistered, with a safety bound.
+    /// Drive `step` until the runtime reports unregistered, with a safety bound.
     async fn drive_until_unregistered(mut runtime: Runtime) {
         for _ in 0..1000 {
             match runtime.step().expect("step ok") {
                 StepOutcome::Unregistered => return,
-                StepOutcome::Live => tokio::task::yield_now().await,
+                // Sleep, not just yield: the io pump runs as a separate spawned
+                // task, and `yield_now` is cooperative (CPU-time, not wall-clock)
+                // — this tight loop can burn all 1000 iterations in microseconds,
+                // before the pump is scheduled to deliver the unregister event on
+                // a loaded runner. A small sleep gives the pump real time; the
+                // loop still returns as soon as the event arrives (typically ms).
+                StepOutcome::Live => tokio::time::sleep(std::time::Duration::from_millis(1)).await,
             }
         }
         panic!("runtime never reported unregistered");
