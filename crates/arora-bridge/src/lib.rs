@@ -42,6 +42,20 @@ pub enum BridgeOp {
     Update(StateChange),
     /// Call a function.
     Call(Call),
+    /// Enumerate store keys under an optional path prefix — introspection for
+    /// the live-edit surface. Replies with a [`CallResult`] whose `ret` is an
+    /// `ArrayValue` of the matching key paths as `String`s.
+    ListKeys {
+        /// Only keys whose path starts with this prefix; `None` lists all.
+        prefix: Option<String>,
+    },
+    /// Enumerate callable module methods under an optional name prefix. Replies
+    /// with a [`CallResult`] whose `ret` is an `ArrayValue` of method names as
+    /// `String`s.
+    ListMethods {
+        /// Only methods whose name starts with this prefix; `None` lists all.
+        prefix: Option<String>,
+    },
 }
 
 /// Something went wrong on the bridge.
