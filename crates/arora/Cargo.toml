@@ -59,8 +59,8 @@ futures = "0.3"
 # Firebase config it needs. Native-only (zenoh/firestore) and optional, so the
 # wasm build of the library stays lean. arora bundles these so a device-specific
 # binary only has to provide its own HAL.
-studio-bridge-device-client = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "chore/reqwest-0.13", optional = true }
-firestore-stream = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "chore/reqwest-0.13", optional = true }
+studio-bridge-device-client = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "main", optional = true }
+firestore-stream = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "main", optional = true }
 # Headless device-runner deps (native-only, optional). Versions track
 # studio-bridge/headless, the runner this is ported from.
 crypto_secretbox = { version = "0.1.1", optional = true }
