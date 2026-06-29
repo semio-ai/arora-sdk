@@ -1,9 +1,10 @@
 use crate::{
     error::BehaviorTreeError,
     schema::{Expression, Node, NodeParameterId},
-    setup_node_parameter_variable, BehaviorTree,
+    setup_node_parameter_variable,
+    variable::VariableCell,
+    BehaviorTree,
 };
-use arora_types::value::Value;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
@@ -41,8 +42,8 @@ impl TreeNode {
     pub fn collect(
         self,
         mut node_index: &mut HashMap<Uuid, Rc<Node>>,
-        mut variables: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
-        mut node_parameters_variables: &mut HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+        mut variables: &mut HashMap<Uuid, VariableCell>,
+        mut node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
     ) -> Result<Rc<Node>, BehaviorTreeError> {
         let node_id = Uuid::new_v4();
         let children: Option<Vec<Uuid>> = if let Some(children) = self.children {
