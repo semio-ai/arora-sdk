@@ -50,12 +50,31 @@ use crate::Arora;
 /// `arora-web`'s `AroraRuntime` instead.
 #[cfg(feature = "native")]
 pub fn launch(hal: Arc<dyn Hal>, bridge: Arc<dyn Bridge>) -> Result<()> {
+    launch_with(hal, move || async move { Ok(bridge) })
+}
+
+/// Like [`launch`], but constructs the bridge inside arora's Tokio runtime via
+/// an asynchronous builder.
+///
+/// A bridge whose construction is `async` and whose background tasks must live
+/// on the runtime that drives it — such as the studio-bridge connector's
+/// `ZenohDeviceClient` — can't be built before `launch` creates its runtime, and
+/// must not be built on a throwaway one it would outlive. This variant runs the
+/// builder on arora's runtime, so the bridge and its tasks share that runtime's
+/// lifetime.
+#[cfg(feature = "native")]
+pub fn launch_with<F, Fut>(hal: Arc<dyn Hal>, make_bridge: F) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Arc<dyn Bridge>>>,
+{
     // The async setup runs inside a Tokio runtime; the step loop that drives the
     // engine is synchronous and runs on this (main) thread afterwards — the wasm
     // executor manages its own blocking runtime and must not be ticked inside
     // Tokio.
     let tokio = tokio::runtime::Runtime::new().context("failed to start Tokio runtime")?;
     let (mut runtime, io) = tokio.block_on(async {
+        let bridge = make_bridge().await.context("failed to build the bridge")?;
         let arora = Arora::start().await.context("failed to start Arora")?;
         Ok::<_, anyhow::Error>(Runtime::with_io(arora, hal, bridge))
     })?;
