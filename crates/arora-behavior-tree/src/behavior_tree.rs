@@ -9,6 +9,7 @@ pub mod schema_groot;
 #[cfg(test)]
 mod tests;
 pub mod tree_node;
+pub mod variable;
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::{
@@ -16,6 +17,7 @@ use arora_types::{
     value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
+use crate::variable::VariableCell;
 use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -38,9 +40,9 @@ pub struct BehaviorTree {
     /// All the nodes, indexed by their ID.
     node_index: HashMap<Uuid, Rc<Node>>,
     /// The local variables.
-    variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
+    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
-    node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
+    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
 }
 
 pub struct BehaviorTreeRuntime<'a> {
@@ -101,8 +103,8 @@ fn setup_tick_function(
     node: Rc<Node>,
     node_index: &HashMap<Uuid, Rc<Node>>,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
+    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
 ) -> Result<TickId, BehaviorTreeError> {
@@ -154,7 +156,7 @@ fn setup_tick_function(
 /// `None` for any other function (which the caller dispatches via the engine).
 fn tick_builtin(
     caller: &mut dyn CallBridge,
-    node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
@@ -235,7 +237,7 @@ fn tick_builtin(
                 },
                 node_parameters_variables,
             )?;
-            let mut current_index = match *index_variable.borrow() {
+            let mut current_index = match index_variable.get_or_unit() {
                 Value::U16(index) => index,
                 _ => 0,
             };
@@ -256,7 +258,7 @@ fn tick_builtin(
             if status != Status::Running {
                 current_index = 0;
             }
-            *index_variable.borrow_mut() = Value::U16(current_index);
+            index_variable.set(Value::U16(current_index));
             status
         }
         _ => return Ok(None),
@@ -267,8 +269,8 @@ fn tick_builtin(
 fn tick(
     caller: &mut dyn CallBridge,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    variables: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
-    node_parameters_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
+    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     child_tick_ids: &Vec<TickId>,
     node: Rc<Node>,
     trace: TraceTick,
@@ -364,7 +366,7 @@ fn tick(
     // A local map of variables is maintained to update them when if mutated.
     // Some of them were setup to be shared, but it is transparent here.
     // They are indexed by parameter id.
-    let mut locals = HashMap::<Uuid, Rc<RefCell<Value>>>::new();
+    let mut locals = HashMap::<Uuid, VariableCell>::new();
     {
         let variables = variables.borrow();
         for (param_id, value_expression) in &node.arguments {
@@ -387,7 +389,7 @@ fn tick(
                         parameter: param_id.to_owned(),
                     },
                 )?;
-                *variable.borrow_mut() = value;
+                variable.set(value);
             };
 
             locals.insert(*param_id, variable.clone());
@@ -396,7 +398,7 @@ fn tick(
             }
             call.args.push(StructureField {
                 id: *param_id,
-                value: Box::new(variable.borrow().clone()),
+                value: Box::new(variable.get_or_unit()),
             });
         }
     }
@@ -407,20 +409,20 @@ fn tick(
 
     for mutated in result.mutated {
         let variable = locals
-            .get_mut(&mutated.id)
+            .get(&mutated.id)
             .ok_or(BehaviorTreeError::InternalError {
                 message: format!(
                     "mutated parameter {} does not correspond to any local variable",
                     mutated.id
                 ),
             })?;
-        *variable.borrow_mut() = *mutated.value;
+        variable.set(*mutated.value);
     }
 
     // If the node has a _ret argument (function does not return a status),
     // write the return value to the bound variable.
     let status = if let Some(var) = locals.get(&_RET_PARAM_ID) {
-        *var.borrow_mut() = result.ret.clone();
+        var.set(result.ret.clone());
         Status::Success
     } else {
         result.ret.try_into().unwrap_or(Status::Success)
@@ -460,8 +462,8 @@ impl Tickable for CallableId {
 struct TickFunction {
     node: Rc<Node>,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    locals: Rc<RefCell<HashMap<Uuid, Rc<RefCell<Value>>>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, Rc<RefCell<Value>>>>,
+    locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     children: Vec<TickId>,
     trace: TraceTick,
 }
@@ -540,10 +542,10 @@ pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeE
 // Other helpers
 //=======================================================
 fn get_variable<'a>(
-    variables: &'a HashMap<Uuid, Rc<RefCell<Value>>>,
+    variables: &'a HashMap<Uuid, VariableCell>,
     variable_id: &Uuid,
     node_id: &Uuid,
-) -> Result<&'a Rc<RefCell<Value>>, BehaviorTreeError> {
+) -> Result<&'a VariableCell, BehaviorTreeError> {
     variables
         .get(variable_id)
         .ok_or(BehaviorTreeError::VariableNotFound {
@@ -554,8 +556,8 @@ fn get_variable<'a>(
 
 fn get_node_parameter_variable<'a>(
     node_parameter: &NodeParameterId,
-    node_parameters_variables: &'a HashMap<NodeParameterId, Rc<RefCell<Value>>>,
-) -> Result<&'a Rc<RefCell<Value>>, BehaviorTreeError> {
+    node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+) -> Result<&'a VariableCell, BehaviorTreeError> {
     node_parameters_variables
         .get(node_parameter)
         .ok_or(BehaviorTreeError::InconsistentTreeError {
@@ -572,21 +574,21 @@ fn get_node_parameter_variable<'a>(
 fn setup_node_parameter_variable(
     node_parameter: &NodeParameterId,
     argument_expression: &Expression,
-    variables: &mut HashMap<Uuid, Rc<RefCell<Value>>>,
-    node_parameters_variables: &mut HashMap<NodeParameterId, Rc<RefCell<Value>>>,
-) -> Result<Rc<RefCell<Value>>, BehaviorTreeError> {
+    variables: &mut HashMap<Uuid, VariableCell>,
+    node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+) -> Result<VariableCell, BehaviorTreeError> {
     let variable = match argument_expression {
-        Expression::Value(value) => Rc::new(RefCell::new(value.to_owned())),
+        Expression::Value(value) => VariableCell::local_with(value.to_owned()),
         Expression::Uuid(uuid) => {
             let value = Value::ArrayU8(uuid.as_bytes().to_vec());
-            Rc::new(RefCell::new(value))
+            VariableCell::local_with(value)
         }
         Expression::Variable(variable) => variable.clone(),
         Expression::VariableId(variable_id) => {
             if let Some(variable) = variables.get(variable_id) {
                 variable.clone()
             } else {
-                let variable = Rc::new(RefCell::new(Value::Unit));
+                let variable = VariableCell::local();
                 // Key the new cell by its own `variable_id` so the next reference
                 // to the same `{var}` finds and shares it. (A `Uuid::new_v4()` here
                 // made every reference create its own cell — see the
@@ -605,15 +607,15 @@ fn setup_node_parameter_variable(
                 ),
             })?
             .to_owned(),
-        Expression::Call(_) => Rc::new(RefCell::new(Value::Unit)),
+        Expression::Call(_) => VariableCell::local(),
     };
     node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
     Ok(variable)
 }
 
 fn compute_expression(
-    variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
-    node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+    variables: &HashMap<Uuid, VariableCell>,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
     expression: &Expression,
     caller: &mut dyn CallBridge,
     node_parameter: &NodeParameterId,
@@ -621,10 +623,10 @@ fn compute_expression(
     let value = match expression {
         Expression::Value(value) => value.to_owned(),
         Expression::Uuid(uuid) => Value::ArrayU8(uuid.as_bytes().to_vec()),
-        Expression::Variable(variable) => variable.borrow().to_owned(),
+        Expression::Variable(variable) => variable.get_or_unit(),
         Expression::VariableId(variable_id) => {
             let variable = get_variable(variables, variable_id, &node_parameter.node)?;
-            variable.borrow().to_owned()
+            variable.get_or_unit()
         }
         Expression::Call(call) => call_expression(
             variables,
@@ -636,15 +638,15 @@ fn compute_expression(
         Expression::NodeArgument(other_node_parameter) => {
             let variable =
                 get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
-            variable.borrow().to_owned()
+            variable.get_or_unit()
         }
     };
     Ok(value)
 }
 
 fn compute_uuid(
-    variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
-    node_parameters_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+    variables: &HashMap<Uuid, VariableCell>,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
     expression: &Expression,
     caller: &mut dyn CallBridge,
     node_parameter: &NodeParameterId,
@@ -652,10 +654,10 @@ fn compute_uuid(
     match expression {
         Expression::Value(value) => try_into_uuid(value, &None),
         Expression::Uuid(uuid) => Ok(uuid.to_owned()),
-        Expression::Variable(variable) => try_into_uuid(&variable.borrow(), &None),
+        Expression::Variable(variable) => try_into_uuid(&variable.get_or_unit(), &None),
         Expression::VariableId(variable_id) => {
             let variable = get_variable(variables, variable_id, &node_parameter.node)?;
-            try_into_uuid(&variable.borrow(), &Some(variable_id))
+            try_into_uuid(&variable.get_or_unit(), &Some(variable_id))
         }
         Expression::Call(call) => {
             let value = call_expression(
@@ -670,7 +672,7 @@ fn compute_uuid(
         Expression::NodeArgument(other_node_parameter) => {
             let variable =
                 get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
-            try_into_uuid(&variable.borrow(), &None)
+            try_into_uuid(&variable.get_or_unit(), &None)
         }
     }
 }
@@ -694,8 +696,8 @@ fn try_into_uuid(value: &Value, variable_id: &Option<&Uuid>) -> Result<Uuid, Beh
 }
 
 fn call_expression(
-    variables: &HashMap<Uuid, Rc<RefCell<Value>>>,
-    node_arg_variables: &HashMap<NodeParameterId, Rc<RefCell<Value>>>,
+    variables: &HashMap<Uuid, VariableCell>,
+    node_arg_variables: &HashMap<NodeParameterId, VariableCell>,
     call: &CallExpression,
     caller: &mut dyn CallBridge,
     node_parameter: &NodeParameterId,

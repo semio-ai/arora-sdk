@@ -1,6 +1,7 @@
+use crate::variable::VariableCell;
 use arora_types::{module::high::TypeRef, value::Value};
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
+use std::{collections::HashMap, fmt::Display};
 use uuid::Uuid;
 
 /// Special parameter UUID used to capture a node's return value into a variable.
@@ -50,7 +51,7 @@ pub enum Expression {
     Uuid(Uuid),
     /// Reference to an anonymous variable.
     #[serde(skip)]
-    Variable(Rc<RefCell<Value>>),
+    Variable(VariableCell),
     /// Reference to a variable by ID.
     VariableId(Uuid),
     /// Reference to another parameter.

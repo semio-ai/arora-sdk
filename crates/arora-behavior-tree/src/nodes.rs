@@ -1,9 +1,10 @@
 use crate::{
     schema::{Expression, _RET_PARAM_ID},
     tree_node::TreeNode,
+    variable::VariableCell,
 };
 use arora_types::value::Value;
-use std::{cell::RefCell, collections::HashMap, rc::Rc, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
 // To simulate statuses
@@ -24,7 +25,7 @@ pub fn run() -> TreeNode {
 }
 
 #[allow(unused)]
-pub fn status_identity(value: Rc<RefCell<Value>>) -> TreeNode {
+pub fn status_identity(value: VariableCell) -> TreeNode {
     TreeNode {
         function: STATUS_IDENTITY_FUNCTION_ID,
         children: None,
@@ -229,7 +230,7 @@ pub const PARALLEL_FUNCTION_ID: Uuid = Uuid::from_bytes([
 // Direct action nodes from test-rust-wasm (non-Status returns via _ret out-parameter)
 //==============================================================
 #[allow(unused)]
-pub fn cos_raw(angle: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
+pub fn cos_raw(angle: Expression, result: VariableCell) -> TreeNode {
     TreeNode {
         function: TEST_RUST_WASM_COS_FUNCTION_ID,
         children: None,
@@ -241,7 +242,7 @@ pub fn cos_raw(angle: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
 }
 
 #[allow(unused)]
-pub fn add_raw(a: Expression, b: Expression, result: Rc<RefCell<Value>>) -> TreeNode {
+pub fn add_raw(a: Expression, b: Expression, result: VariableCell) -> TreeNode {
     TreeNode {
         function: TEST_RUST_WASM_ADD_FUNCTION_ID,
         children: None,

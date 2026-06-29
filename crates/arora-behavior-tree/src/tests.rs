@@ -43,10 +43,11 @@ pub fn load_simple_tree() -> Result<()> {
 #[test]
 fn shared_variable_id_resolves_to_one_cell() {
     use crate::schema::{Expression, NodeParameterId};
+    use crate::variable::VariableCell;
 
     let var_id = Uuid::new_v4();
-    let mut variables: HashMap<Uuid, Rc<RefCell<Value>>> = HashMap::new();
-    let mut node_parameters: HashMap<NodeParameterId, Rc<RefCell<Value>>> = HashMap::new();
+    let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
+    let mut node_parameters: HashMap<NodeParameterId, VariableCell> = HashMap::new();
 
     let param_a = NodeParameterId {
         node: Uuid::new_v4(),
@@ -72,15 +73,11 @@ fn shared_variable_id_resolves_to_one_cell() {
     )
     .unwrap();
 
-    *cell_a.borrow_mut() = Value::Boolean(true);
+    cell_a.set(Value::Boolean(true));
     assert_eq!(
-        *cell_b.borrow(),
+        cell_b.get_or_unit(),
         Value::Boolean(true),
         "two parameters bound to the same variable id must share one cell"
-    );
-    assert!(
-        Rc::ptr_eq(&cell_a, &cell_b),
-        "the same variable id must yield the same cell"
     );
 }
 
