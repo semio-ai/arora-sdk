@@ -16,6 +16,12 @@ path = "src/main.rs"
 # library with --no-default-features.
 required-features = ["native"]
 
+# A worked example of a device-specific arora (custom HAL injected into
+# arora::launch). Native-only, like the binary.
+[[example]]
+name = "device"
+required-features = ["native"]
+
 [features]
 default = ["native"]
 # Native build: the wasmtime + dynamic-library engine hosts and the binary. Build
