@@ -11,7 +11,7 @@ pub mod launcher;
 pub mod runtime;
 
 #[cfg(feature = "native")]
-pub use launcher::launch;
+pub use launcher::{launch, launch_with};
 
 use anyhow::{anyhow, Context, Result};
 use arora_behavior_tree::{
