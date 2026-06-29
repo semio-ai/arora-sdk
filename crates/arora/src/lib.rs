@@ -8,6 +8,8 @@
 //! otherwise idles, waiting for behavior trees that will soon arrive over the
 //! bridge.
 
+#[cfg(feature = "native")]
+pub mod headless;
 pub mod launcher;
 pub mod runtime;
 
