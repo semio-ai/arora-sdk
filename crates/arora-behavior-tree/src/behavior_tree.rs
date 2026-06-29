@@ -2,6 +2,7 @@
 // repo's. Allow clippy/dead_code over the whole generated subtree.
 #[allow(clippy::all, dead_code)]
 pub mod arora_generated;
+pub mod behavior;
 pub mod error;
 pub mod nodes;
 pub mod schema;

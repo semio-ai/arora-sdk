@@ -36,6 +36,7 @@ native = [
 [dependencies]
 arora-engine = { path = "../arora-engine", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree" }
+arora-behavior = { path = "../arora-behavior" }
 arora-types = { path = "../arora-types", version = "1.4" }
 anyhow = "*"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }

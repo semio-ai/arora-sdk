@@ -34,9 +34,9 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use arora_behavior::{Behavior, BehaviorContext, BehaviorStatus};
 use arora_behavior_tree::{
-    arora_generated::behavior_tree::status::Status, run_behavior_tree, schema_groot,
-    tree_node::TreeNode, BehaviorTree, ModuleFunction,
+    behavior::TreeBehavior, schema_groot, tree_node::TreeNode, BehaviorTree, ModuleFunction,
 };
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo};
 use arora_engine::engine::PinnedEngine;
@@ -104,7 +104,7 @@ pub struct Runtime {
     store: SimpleDataStore,
     engine: PinnedEngine,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    trees: VecDeque<BehaviorTree>,
+    behaviors: VecDeque<Box<dyn Behavior>>,
     // Channels to/from the async io pump, plus the HAL's sensor feed:
     hal_updates: Subscription,
     inbound: UnboundedReceiver<Inbound>,
@@ -163,7 +163,7 @@ impl Runtime {
             store,
             engine,
             function_index,
-            trees: VecDeque::new(),
+            behaviors: VecDeque::new(),
             hal_updates,
             inbound,
             outbound,
@@ -196,8 +196,19 @@ impl Runtime {
         let behavior: BehaviorTree = tree_node
             .into_behavior_tree(&resolver, &id_to_name)
             .map_err(|e| RuntimeError::BehaviorTree(format!("instantiate: {e:?}")))?;
-        self.trees.push_back(behavior);
+        self.queue_behavior(Box::new(TreeBehavior::new(
+            behavior,
+            self.function_index.clone(),
+        )));
         Ok(())
+    }
+
+    /// Queue any [`Behavior`] — a behavior tree, a node graph, or another
+    /// interpreter — to be ticked on the next step. The runtime ticks it each
+    /// step while it reports [`BehaviorStatus::Running`] and drops it once it
+    /// reports [`BehaviorStatus::Done`].
+    pub fn queue_behavior(&mut self, behavior: Box<dyn Behavior>) {
+        self.behaviors.push_back(behavior);
     }
 
     /// Advance one step: drain inbound bridge/HAL updates into the state, tick the
@@ -218,9 +229,20 @@ impl Runtime {
                 Inbound::DataRequested(_requested) => { /* TODO: claim handling */ }
             }
         }
-        // STEP 2 — tick the behavior tree(s); they read/write the same state.
-        if let Some(tree) = self.trees.pop_front() {
-            self.tick_tree(&tree)?;
+        // STEP 2 — tick the active behavior (tree, node graph, …) against the
+        // shared store; keep it queued while it is still running.
+        if let Some(mut behavior) = self.behaviors.pop_front() {
+            let mut ctx = BehaviorContext {
+                store: &self.store,
+                caller: &mut self.engine,
+                dt: 0.0,
+            };
+            let status = behavior
+                .tick(&mut ctx)
+                .map_err(|e| RuntimeError::BehaviorTree(e.to_string()))?;
+            if status == BehaviorStatus::Running {
+                self.behaviors.push_back(behavior);
+            }
         }
         // STEP 3 — flush local state changes out to the remote / hardware.
         // Coalesce everything drained this step into ONE StateChange so the
@@ -279,13 +301,6 @@ impl Runtime {
         };
         cmd.reply(result);
         Ok(())
-    }
-
-    /// Tick a behavior tree to a terminal status. The tree drives the engine,
-    /// which manages its own blocking runtime — fine on the stepping thread.
-    fn tick_tree(&mut self, tree: &BehaviorTree) -> Result<Status, RuntimeError> {
-        run_behavior_tree(tree, self.function_index.clone(), &mut self.engine, false)
-            .map_err(|e| RuntimeError::BehaviorTree(format!("run: {e:?}")))
     }
 }
 
@@ -451,6 +466,81 @@ mod tests {
             .handle_command(BridgeCommand::new(BridgeOp::Get(vec![key]), tx))
             .unwrap();
         let result = rx.await.unwrap().expect("get should succeed");
+        assert_eq!(
+            result.ret,
+            Value::ArrayValue(vec![Value::Option(Some(Box::new(Value::String(
+                "hi".into()
+            ))))])
+        );
+    }
+
+    /// A bridge that stays silent and never unregisters, so `step` keeps
+    /// returning `Live` and a queued behavior ticks deterministically.
+    struct SilentBridge;
+
+    #[async_trait]
+    impl Bridge for SilentBridge {
+        async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(None)
+        }
+        async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+        async fn update_device_info(
+            &self,
+            info: Option<DeviceInfo>,
+        ) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(info)
+        }
+        async fn data_requested(&self) -> DataRequestedStream {
+            Box::pin(futures::stream::empty())
+        }
+        async fn send_data(&self, _data: StateChange) -> BridgeResult<()> {
+            Ok(())
+        }
+        async fn commands(&self) -> CommandStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    /// A non-tree [`Behavior`]: writes one key through the shared store, done.
+    struct WriteOnce;
+
+    impl Behavior for WriteOnce {
+        fn tick(
+            &mut self,
+            ctx: &mut BehaviorContext,
+        ) -> Result<BehaviorStatus, arora_behavior::BehaviorError> {
+            ctx.store
+                .write(StateChange::set(
+                    "from_behavior",
+                    Value::String("hi".into()),
+                ))
+                .map_err(|e| arora_behavior::BehaviorError {
+                    message: e.to_string(),
+                })?;
+            Ok(BehaviorStatus::Done)
+        }
+    }
+
+    /// The runtime ticks a non-tree behavior just like a tree: swapping the
+    /// interpreter is all it takes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn runs_a_queued_non_tree_behavior() {
+        let (mut runtime, pump) = build(Arc::new(SilentBridge)).await;
+        tokio::spawn(pump);
+        runtime.queue_behavior(Box::new(WriteOnce));
+
+        // One step ticks the behavior, which writes through the shared store.
+        runtime.step().expect("step");
+        let (tx, rx) = oneshot::channel();
+        runtime
+            .handle_command(BridgeCommand::new(
+                BridgeOp::Get(vec![Key::from("from_behavior")]),
+                tx,
+            ))
+            .unwrap();
+        let result = rx.await.unwrap().expect("get ok");
         assert_eq!(
             result.ret,
             Value::ArrayValue(vec![Value::Option(Some(Box::new(Value::String(
