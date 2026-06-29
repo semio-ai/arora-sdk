@@ -692,13 +692,91 @@ pub async fn generate_structure_source(
       }
     };
 
+    // Conversion to/from the generic `Value` vocabulary (mirrors the enum path).
+    // Without this, generated structs only round-trip through the binary buffer
+    // format; with it they flow through the Arora data store as `Value::Structure`.
+    let mut to_value_fields = Vec::new();
+    for (_, field) in &structure.fields {
+        let field_ident = variable_ident(&field.name);
+        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
+        let field_value = generate_value_from_frozen(&field.ty, quote! { self.#field_ident });
+        to_value_fields.push(quote! {
+          StructureField {
+            id: Uuid::from_bytes(#field_const_id_ident),
+            value: Box::new(#field_value),
+          }
+        });
+    }
+    let to_value = quote! {
+      impl Into<Value> for #struct_ident {
+        fn into(self) -> Value {
+          Value::Structure(Structure {
+            id: Uuid::from_bytes(#const_id_ident),
+            fields: vec![#(#to_value_fields),*],
+          })
+        }
+      }
+    };
+
+    let mut from_value_field_vars = Vec::new();
+    let mut from_value_cases = Vec::new();
+    let mut from_value_assignments = Vec::new();
+    for (_, field) in &structure.fields {
+        let field_ident = variable_ident(&field.name);
+        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
+        let field_var = struct_field_intermediate_variable_ident(name, &field.name);
+        let field_type_ident =
+            type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+        let extract = generate_field_from_value_frozen(
+            &field.ty,
+            quote! { *field.value },
+            &field.name,
+            registry,
+        )
+        .await?;
+        from_value_field_vars
+            .push(quote! { let mut #field_var: Option<#field_type_ident> = None; });
+        from_value_cases.push(quote! { #field_const_id_ident => { #field_var = Some(#extract); } });
+        let missing_message = format!("missing field {}", field.name);
+        from_value_assignments.push(quote! {
+          #field_ident: #field_var.ok_or_else(|| ConversionError { message: #missing_message.to_string() })?
+        });
+    }
+    let from_value = quote! {
+      impl TryFrom<Value> for #struct_ident {
+        type Error = ConversionError;
+        fn try_from(value: Value) -> Result<Self, Self::Error> {
+          if let Value::Structure(as_struct) = value {
+            if *as_struct.id.as_bytes() != #const_id_ident {
+              return Err(ConversionError { message: "unexpected structure type ID".to_string() });
+            }
+            #(#from_value_field_vars)*
+            for field in as_struct.fields {
+              match *field.id.as_bytes() {
+                #(#from_value_cases)*
+                _ => return Err(ConversionError { message: "unexpected struct field".to_string() }),
+              }
+            }
+            Ok(#struct_ident {
+              #(#from_value_assignments,)*
+            })
+          } else {
+            Err(ConversionError { message: "unexpected kind".to_string() })
+          }
+        }
+      }
+    };
+
     let type_source = quote! {
       use arora_buffers::*;
       use uuid::Uuid;
+      use arora_types::value::{ConversionError, Structure, StructureField, Value};
       use crate::arora_generated::error::DeserializationError;
       #struct_declaration
       #serialization
       #deserialization
+      #to_value
+      #from_value
       #id_declaration
       #(#field_id_declarations)*
     };
@@ -1204,6 +1282,128 @@ pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
           return deserialize_from_reader(&mut reader, true)
         }
       }
+    }
+}
+
+/// Generate an expression building a generic `Value` from a Rust field value.
+/// Counterpart of [`generate_serialize_from_frozen`] for the in-memory `Value`
+/// vocabulary instead of the binary buffer format.
+fn generate_value_from_frozen(ty: &FrozenTy, value_expression: TokenStream) -> TokenStream {
+    match ty {
+        FrozenTy::Primitive(primitive) => match primitive.kind {
+            PrimitiveKind::Unit => quote! { Value::Unit },
+            PrimitiveKind::Boolean => quote! { Value::Boolean(#value_expression) },
+            PrimitiveKind::U8 => quote! { Value::U8(#value_expression) },
+            PrimitiveKind::U16 => quote! { Value::U16(#value_expression) },
+            PrimitiveKind::U32 => quote! { Value::U32(#value_expression) },
+            PrimitiveKind::U64 => quote! { Value::U64(#value_expression) },
+            PrimitiveKind::I8 => quote! { Value::I8(#value_expression) },
+            PrimitiveKind::I16 => quote! { Value::I16(#value_expression) },
+            PrimitiveKind::I32 => quote! { Value::I32(#value_expression) },
+            PrimitiveKind::I64 => quote! { Value::I64(#value_expression) },
+            PrimitiveKind::F32 => quote! { Value::F32(#value_expression) },
+            PrimitiveKind::F64 => quote! { Value::F64(#value_expression) },
+            PrimitiveKind::String => quote! { Value::String(#value_expression) },
+            PrimitiveKind::ArrayBoolean => quote! { Value::ArrayBoolean(#value_expression) },
+            PrimitiveKind::ArrayU8 => quote! { Value::ArrayU8(#value_expression) },
+            PrimitiveKind::ArrayU16 => quote! { Value::ArrayU16(#value_expression) },
+            PrimitiveKind::ArrayU32 => quote! { Value::ArrayU32(#value_expression) },
+            PrimitiveKind::ArrayU64 => quote! { Value::ArrayU64(#value_expression) },
+            PrimitiveKind::ArrayI8 => quote! { Value::ArrayI8(#value_expression) },
+            PrimitiveKind::ArrayI16 => quote! { Value::ArrayI16(#value_expression) },
+            PrimitiveKind::ArrayI32 => quote! { Value::ArrayI32(#value_expression) },
+            PrimitiveKind::ArrayI64 => quote! { Value::ArrayI64(#value_expression) },
+            PrimitiveKind::ArrayF32 => quote! { Value::ArrayF32(#value_expression) },
+            PrimitiveKind::ArrayF64 => quote! { Value::ArrayF64(#value_expression) },
+            PrimitiveKind::ArrayString => quote! { Value::ArrayString(#value_expression) },
+        },
+        // Nested struct/enum types implement `Into<Value>`.
+        FrozenTy::FrozenScalar(_) => quote! { Into::<Value>::into(#value_expression) },
+        // Arrays of struct/enum types collapse to `Value::ArrayValue`.
+        FrozenTy::FrozenArray(_) => quote! {
+            Value::ArrayValue(
+                #value_expression.into_iter().map(|__element| Into::<Value>::into(__element)).collect()
+            )
+        },
+    }
+}
+
+/// Generate an expression extracting a Rust field value out of a generic `Value`.
+/// Counterpart of [`generate_deserialize_from_frozen`]. The produced expression
+/// may `return Err(ConversionError { .. })` from the enclosing `try_from`.
+#[async_recursion(?Send)]
+async fn generate_field_from_value_frozen(
+    ty: &FrozenTy,
+    value_expression: TokenStream,
+    field_name: &str,
+    registry: &mut dyn ReadableRegistry,
+) -> Result<TokenStream, GenerationError> {
+    match ty {
+        FrozenTy::Primitive(primitive) => {
+            let mismatch = format!("field {}: unexpected value kind", field_name);
+            let arm = match primitive.kind {
+                PrimitiveKind::Unit => quote! { Value::Unit => () },
+                PrimitiveKind::Boolean => quote! { Value::Boolean(__v) => __v },
+                PrimitiveKind::U8 => quote! { Value::U8(__v) => __v },
+                PrimitiveKind::U16 => quote! { Value::U16(__v) => __v },
+                PrimitiveKind::U32 => quote! { Value::U32(__v) => __v },
+                PrimitiveKind::U64 => quote! { Value::U64(__v) => __v },
+                PrimitiveKind::I8 => quote! { Value::I8(__v) => __v },
+                PrimitiveKind::I16 => quote! { Value::I16(__v) => __v },
+                PrimitiveKind::I32 => quote! { Value::I32(__v) => __v },
+                PrimitiveKind::I64 => quote! { Value::I64(__v) => __v },
+                PrimitiveKind::F32 => quote! { Value::F32(__v) => __v },
+                PrimitiveKind::F64 => quote! { Value::F64(__v) => __v },
+                PrimitiveKind::String => quote! { Value::String(__v) => __v },
+                PrimitiveKind::ArrayBoolean => quote! { Value::ArrayBoolean(__v) => __v },
+                PrimitiveKind::ArrayU8 => quote! { Value::ArrayU8(__v) => __v },
+                PrimitiveKind::ArrayU16 => quote! { Value::ArrayU16(__v) => __v },
+                PrimitiveKind::ArrayU32 => quote! { Value::ArrayU32(__v) => __v },
+                PrimitiveKind::ArrayU64 => quote! { Value::ArrayU64(__v) => __v },
+                PrimitiveKind::ArrayI8 => quote! { Value::ArrayI8(__v) => __v },
+                PrimitiveKind::ArrayI16 => quote! { Value::ArrayI16(__v) => __v },
+                PrimitiveKind::ArrayI32 => quote! { Value::ArrayI32(__v) => __v },
+                PrimitiveKind::ArrayI64 => quote! { Value::ArrayI64(__v) => __v },
+                PrimitiveKind::ArrayF32 => quote! { Value::ArrayF32(__v) => __v },
+                PrimitiveKind::ArrayF64 => quote! { Value::ArrayF64(__v) => __v },
+                PrimitiveKind::ArrayString => quote! { Value::ArrayString(__v) => __v },
+            };
+            Ok(quote! {
+                match #value_expression {
+                    #arm,
+                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                }
+            })
+        }
+        FrozenTy::FrozenScalar(_) => {
+            let type_ident = type_ident_from_frozen(ty, registry, PrefixWithMod::Yes).await?;
+            Ok(quote! { <#type_ident as TryFrom<Value>>::try_from(#value_expression)? })
+        }
+        FrozenTy::FrozenArray(array) => {
+            let element_ty = FrozenTy::FrozenScalar(FrozenScalar {
+                reference: array.reference.to_owned(),
+            });
+            let element_conversion = generate_field_from_value_frozen(
+                &element_ty,
+                quote! { __element },
+                field_name,
+                registry,
+            )
+            .await?;
+            let mismatch = format!("field {}: expected array value", field_name);
+            Ok(quote! {
+                match #value_expression {
+                    Value::ArrayValue(__items) => {
+                        let mut __out = Vec::with_capacity(__items.len());
+                        for __element in __items {
+                            __out.push(#element_conversion);
+                        }
+                        __out
+                    }
+                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                }
+            })
+        }
     }
 }
 
