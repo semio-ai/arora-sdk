@@ -35,4 +35,9 @@ uuid = "1"
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
+# The test-only behavior-tree node module. Nothing in the default build depends
+# on it now that the basic control nodes are native in arora-behavior-tree, so
+# building it here (its build.rs emits the crate's `arora_generated` bindings)
+# keeps `cargo fmt --check`/clippy happy and the artifact available to tests.
+test-behavior-tree-nodes = { path = "../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
 
