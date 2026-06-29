@@ -7,7 +7,11 @@
 //! startup (as Groot XML) and otherwise idles, waiting for behavior trees that
 //! will soon arrive over the bridge.
 
+pub mod launcher;
 pub mod runtime;
+
+#[cfg(feature = "native")]
+pub use launcher::launch;
 
 use anyhow::{anyhow, Context, Result};
 use arora_behavior_tree::{
