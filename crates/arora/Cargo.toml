@@ -61,3 +61,7 @@ behavior-tree-nodes = { path = "../../modules/behavior-tree-nodes", artifact = "
 
 [dev-dependencies]
 async-trait = "0.1"
+# `time` (tests only): the runtime-loop tests sleep between `step`s to give the
+# spawned io pump wall-clock time to deliver events. The runtime itself needs no
+# timers (the pump is futures-only).
+tokio = { version = "1", features = ["time"] }
