@@ -62,3 +62,13 @@ default-members = [
 lto = "thin"
 debug = 1
 
+# `arora` git-depends the studio-bridge crates for the Zenoh bridge. Those crates
+# pull `arora-types` from crates.io and `arora-bridge` from the arora-engine git
+# repo; redirect both to this workspace's own crates so the graph shares a single
+# copy instead of duplicating them (which would fail to type-check).
+[patch.crates-io]
+arora-types = { path = "crates/arora-types" }
+
+[patch."https://github.com/semio-ai/arora-engine.git"]
+arora-bridge = { path = "crates/arora-bridge" }
+

@@ -29,6 +29,15 @@ default = ["native"]
 # cfg).
 native = [
     "dep:tokio",
+    "dep:studio-bridge-device-client",
+    "dep:firestore-stream",
+    # The headless device runner (token storage + crypto, app-data dir, logging).
+    # Kept optional + native-only so the wasm build of the library stays lean.
+    "dep:crypto_secretbox",
+    "dep:dirs",
+    "dep:rustls",
+    "dep:env_logger",
+    "dep:log",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -46,6 +55,19 @@ arora-hal = { path = "../arora-hal" }
 arora-bridge = { path = "../arora-bridge" }
 arora-simple-data-store = { path = "../arora-simple-data-store" }
 futures = "0.3"
+# The default Bridge implementation (the studio-bridge Zenoh connector) and the
+# Firebase config it needs. Native-only (zenoh/firestore) and optional, so the
+# wasm build of the library stays lean. arora bundles these so a device-specific
+# binary only has to provide its own HAL.
+studio-bridge-device-client = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "main", optional = true }
+firestore-stream = { git = "https://github.com/semio-ai/studio-bridge.git", branch = "main", optional = true }
+# Headless device-runner deps (native-only, optional). Versions track
+# studio-bridge/headless, the runner this is ported from.
+crypto_secretbox = { version = "0.1.1", optional = true }
+dirs = { version = "6", optional = true }
+env_logger = { version = "0.11", optional = true }
+log = { version = "0.4", optional = true }
+rustls = { version = "0.23.27", default-features = false, features = ["ring"], optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
