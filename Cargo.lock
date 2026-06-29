@@ -145,16 +145,10 @@ dependencies = [
  "arora-bridge",
  "arora-engine",
  "arora-hal",
- "arora-module-core",
- "arora-registry",
  "arora-simple-data-store",
  "arora-types",
  "async-trait",
- "behavior-tree-nodes",
  "futures",
- "include_dir",
- "semio-record",
- "serde_yaml 0.8.26",
  "tokio",
  "uuid",
 ]
@@ -1020,25 +1014,6 @@ checksum = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195"
 dependencies = [
  "outref",
  "vsimd",
-]
-
-[[package]]
-name = "behavior-tree-nodes"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arora-behavior-tree-types",
- "arora-buffers",
- "arora-module-core",
- "arora-module-rust",
- "arora-registry",
- "arora-types",
- "bytes",
- "derive_more 2.1.1",
- "regex",
- "serde",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -2656,25 +2631,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "include_dir"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
-dependencies = [
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3250,7 +3206,6 @@ dependencies = [
  "arora-types",
  "aws-config",
  "aws-sdk-polly",
- "behavior-tree-nodes",
  "bytes",
  "convert_case 0.11.0",
  "derive_more 2.1.1",
@@ -3259,6 +3214,7 @@ dependencies = [
  "semio-record",
  "serde_yaml 0.8.26",
  "soloud",
+ "test-behavior-tree-nodes",
  "tokio",
  "uuid",
 ]
@@ -4441,6 +4397,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "test-behavior-tree-nodes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-behavior-tree-types",
+ "arora-buffers",
+ "arora-module-core",
+ "arora-module-rust",
+ "arora-registry",
+ "arora-types",
+ "bytes",
+ "derive_more 2.1.1",
+ "regex",
+ "serde",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

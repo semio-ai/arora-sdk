@@ -48,11 +48,11 @@ use crate::Arora;
 /// Run an arora instance with the given HAL, bridge, and data store until the
 /// device is unregistered (or the process is interrupted).
 ///
-/// Starts the engine (with the embedded behavior-tree module), wires the
-/// portable [`Runtime`] around the injected HAL + bridge over `store`, queues an
-/// optional Groot tree given as the first CLI argument, spawns the asynchronous
-/// io pump on a Tokio runtime, then drives the synchronous step loop on this
-/// thread.
+/// Starts the engine (with the basic behavior-tree control nodes wired
+/// natively), wires the portable [`Runtime`] around the injected HAL + bridge
+/// over `store`, queues an optional Groot tree given as the first CLI argument,
+/// spawns the asynchronous io pump on a Tokio runtime, then drives the
+/// synchronous step loop on this thread.
 ///
 /// Pass a freshly created [`SimpleDataStore`] for a self-contained device, or a
 /// clone of a shared one to mutualize the blackboard across runtimes (e.g.
@@ -90,7 +90,7 @@ where
         let arora = Arora::start().await.context("failed to start Arora")?;
         Ok::<_, anyhow::Error>(Runtime::with_io_in(arora, hal, bridge, store))
     })?;
-    println!("arora: engine started; behavior-tree module loaded.");
+    println!("arora: engine started; native behavior-tree control nodes ready.");
 
     if let Some(path) = std::env::args().nth(1) {
         let xml = std::fs::read_to_string(&path)

@@ -33,7 +33,7 @@ async fn hello_polly() -> Result<()> {
             .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-        "behavior-tree-nodes".to_string(),
+        "test-behavior-tree-nodes".to_string(),
         "polly".to_string(),
     ])
     .await;
@@ -73,7 +73,7 @@ async fn polly_sequence_of_speech() -> Result<()> {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-        "behavior-tree-nodes".to_string(),
+        "test-behavior-tree-nodes".to_string(),
         "polly".to_string(),
     ])
     .await;
@@ -126,7 +126,7 @@ async fn fake_listen_polly_dialogue() -> Result<()> {
     .try_into()?;
 
     let (mut engine, index) = setup_engine_with_modules(&vec![
-        "behavior-tree-nodes".to_string(),
+        "test-behavior-tree-nodes".to_string(),
         "polly".to_string(),
     ])
     .await;

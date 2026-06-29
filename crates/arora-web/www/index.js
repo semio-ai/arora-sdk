@@ -150,9 +150,9 @@ document.getElementById("load-test-wasm-btn").addEventListener("click", async ()
 document.getElementById("load-bt-nodes-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("load-builtin-status");
   await fetchLoadAndRegister(
-    "./modules/behavior-tree-nodes/module.yaml",
-    "./modules/behavior-tree-nodes/behavior_tree_nodes.wasm",
-    "./modules/behavior-tree-nodes/records.json",
+    "./modules/test-behavior-tree-nodes/module.yaml",
+    "./modules/test-behavior-tree-nodes/test_behavior_tree_nodes.wasm",
+    "./modules/test-behavior-tree-nodes/records.json",
     statusEl,
   );
 });

@@ -19,14 +19,14 @@ const FN = {
 };
 
 const PARAM = {
-  // behavior-tree-nodes children parameter (seq/fallback/parallel)
+  // test-behavior-tree-nodes children parameter (seq/fallback/parallel)
   CHILDREN:         "5b6e9515-dbcc-411d-bee9-3d8cba5fedda",
   // _ret special out-parameter (captures function return value into a variable)
   RET:              "5f726574-0000-4000-8000-000000000000",
   // test-rust-wasm add
   ADD_A:            "a1b2c3d4-e5f6-4a8b-9c0d-e1f2a3b4c5d6",
   ADD_B:            "b2c3d4e5-f6a7-4b9c-8d1e-f2a3b4c5d6e7",
-  // cos (imported from test-rust-wasm, re-exported via behavior-tree-nodes)
+  // cos (imported from test-rust-wasm, re-exported via test-behavior-tree-nodes)
   COS_ANGLE:        "6c2a157c-4235-47b0-bff3-1eeef3e5747d",
   // is_str_set / wait_str_set value param
   IS_STR_SET_VALUE: "c4f1e72d-30fe-400b-a584-f08e93944026",
@@ -587,8 +587,8 @@ async function main() {
 
   log("fetching modules…");
   const [btHeaderYaml, btWasm, testHeaderYaml, testWasm] = await Promise.all([
-    fetch("./modules/behavior-tree-nodes/module.yaml").then((r) => r.text()),
-    fetch("./modules/behavior-tree-nodes/behavior_tree_nodes.wasm").then((r) => r.arrayBuffer()),
+    fetch("./modules/test-behavior-tree-nodes/module.yaml").then((r) => r.text()),
+    fetch("./modules/test-behavior-tree-nodes/test_behavior_tree_nodes.wasm").then((r) => r.arrayBuffer()),
     fetch("./modules/test-rust-wasm/module.yaml").then((r) => r.text()),
     fetch("./modules/test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
   ]);
