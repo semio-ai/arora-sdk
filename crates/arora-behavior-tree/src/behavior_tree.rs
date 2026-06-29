@@ -587,7 +587,11 @@ fn setup_node_parameter_variable(
                 variable.clone()
             } else {
                 let variable = Rc::new(RefCell::new(Value::Unit));
-                variables.insert(Uuid::new_v4(), variable.clone());
+                // Key the new cell by its own `variable_id` so the next reference
+                // to the same `{var}` finds and shares it. (A `Uuid::new_v4()` here
+                // made every reference create its own cell — see the
+                // `shared_variable_id_resolves_to_one_cell` regression test.)
+                variables.insert(*variable_id, variable.clone());
                 variable
             }
         }

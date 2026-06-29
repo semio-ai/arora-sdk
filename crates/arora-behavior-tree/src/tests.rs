@@ -32,6 +32,58 @@ pub fn load_simple_tree() -> Result<()> {
     Ok(())
 }
 
+/// Two node parameters that reference the **same** variable id must resolve to a
+/// single shared cell, so a write through one is visible through the other —
+/// that is what makes `{var}` a shared blackboard entry across nodes.
+///
+/// Regression test for the variable-sharing bug: a freshly-referenced variable
+/// was inserted into the variables map under a fresh `Uuid::new_v4()` instead of
+/// its own `variable_id`, so the next lookup by `variable_id` missed and a second,
+/// independent cell was created.
+#[test]
+fn shared_variable_id_resolves_to_one_cell() {
+    use crate::schema::{Expression, NodeParameterId};
+
+    let var_id = Uuid::new_v4();
+    let mut variables: HashMap<Uuid, Rc<RefCell<Value>>> = HashMap::new();
+    let mut node_parameters: HashMap<NodeParameterId, Rc<RefCell<Value>>> = HashMap::new();
+
+    let param_a = NodeParameterId {
+        node: Uuid::new_v4(),
+        parameter: Uuid::new_v4(),
+    };
+    let param_b = NodeParameterId {
+        node: Uuid::new_v4(),
+        parameter: Uuid::new_v4(),
+    };
+
+    let cell_a = crate::setup_node_parameter_variable(
+        &param_a,
+        &Expression::VariableId(var_id),
+        &mut variables,
+        &mut node_parameters,
+    )
+    .unwrap();
+    let cell_b = crate::setup_node_parameter_variable(
+        &param_b,
+        &Expression::VariableId(var_id),
+        &mut variables,
+        &mut node_parameters,
+    )
+    .unwrap();
+
+    *cell_a.borrow_mut() = Value::Boolean(true);
+    assert_eq!(
+        *cell_b.borrow(),
+        Value::Boolean(true),
+        "two parameters bound to the same variable id must share one cell"
+    );
+    assert!(
+        Rc::ptr_eq(&cell_a, &cell_b),
+        "the same variable id must yield the same cell"
+    );
+}
+
 // Native execution harness
 //================================================================
 /// A leaf whose status is supplied by a shared, mutable cell, so a test can
