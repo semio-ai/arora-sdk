@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use arora_bridge::FakeBridge;
 use arora_hal::{Hal, HalDescription, HalResult};
+use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{Key, State, StateChange, Subscription};
 use arora_types::value::Value;
 use async_trait::async_trait;
@@ -78,7 +79,12 @@ impl Hal for ExampleHal {
 
 fn main() -> Result<()> {
     // The whole device-specific build: run the standard arora runtime with our
-    // HAL and a bridge, injected from here. (Use the studio-bridge connector's
-    // `ZenohDeviceClient` in place of `FakeBridge` to reach Semio Studio.)
-    arora::launch(Arc::new(ExampleHal::default()), Arc::new(FakeBridge::new()))
+    // HAL and a bridge, injected from here, over a fresh private data store.
+    // (Use the studio-bridge connector's `ZenohDeviceClient` in place of
+    // `FakeBridge` to reach Semio Studio.)
+    arora::launch(
+        Arc::new(ExampleHal::default()),
+        Arc::new(FakeBridge::new()),
+        SimpleDataStore::new(),
+    )
 }
