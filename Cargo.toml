@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["docs/semio-record-study/arora-record-proto"]
 
 members = [
   "crates/arora",
