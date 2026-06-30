@@ -88,6 +88,9 @@ where
     let (mut runtime, io) = tokio.block_on(async {
         let bridge = make_bridge().await.context("failed to build the bridge")?;
         let arora = Arora::start().await.context("failed to start Arora")?;
+        // The public launcher API still takes a concrete `SimpleDataStore`; the
+        // runtime holds `Arc<dyn DataStore>`, so wrap it here.
+        let store: Arc<dyn arora_types::data::DataStore> = Arc::new(store);
         Ok::<_, anyhow::Error>(Runtime::with_io_in(arora, hal, bridge, store))
     })?;
     println!("arora: engine started; native behavior-tree control nodes ready.");
