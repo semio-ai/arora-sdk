@@ -700,4 +700,63 @@ mod tests {
             "the bare key must not be set in the shared store"
         );
     }
+
+    /// A behavior that writes one key/value and is then `Done` — the minimal
+    /// store-writing behavior, value-parameterized so two of them differ.
+    struct WriteKey {
+        key: &'static str,
+        value: Value,
+    }
+
+    impl Behavior for WriteKey {
+        fn tick(
+            &mut self,
+            ctx: &mut BehaviorContext,
+        ) -> Result<BehaviorStatus, arora_behavior::BehaviorError> {
+            ctx.store
+                .write(StateChange::set(self.key, self.value.clone()))
+                .map_err(|e| arora_behavior::BehaviorError {
+                    message: e.to_string(),
+                })?;
+            Ok(BehaviorStatus::Done)
+        }
+    }
+
+    /// ARORA-39 acceptance, end to end through `step()`: a queued behavior writes
+    /// a key into the device-namespaced store, and *switching* to a different
+    /// behavior changes what gets written. Driven by a real `Behavior` (not a
+    /// Groot literal), so it sidesteps the typed-literal coercion of ARORA-43.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn behavior_writes_then_switching_changes_the_namespaced_store() {
+        let shared = SimpleDataStore::new();
+        let store: Arc<dyn DataStore> =
+            Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
+        // Pump intentionally not spawned: with no inbound events the device never
+        // unregisters, so `step()` stays `Live` and ticks the queued behavior.
+        let (mut runtime, _pump) = build_in(Arc::new(UnregisterBridge), store).await;
+
+        // A behavior writes greeting = "hi"; one step lands it under the namespace.
+        runtime.queue_behavior(Box::new(WriteKey {
+            key: "greeting",
+            value: Value::String("hi".into()),
+        }));
+        assert_eq!(runtime.step().expect("step"), StepOutcome::Live);
+        assert_eq!(
+            shared.read(&[Key::from("robotA/greeting")]),
+            vec![Some(Value::String("hi".into()))],
+            "the behavior's write landed under the device namespace"
+        );
+
+        // Switch to a different behavior; the next step changes the stored value.
+        runtime.queue_behavior(Box::new(WriteKey {
+            key: "greeting",
+            value: Value::String("bye".into()),
+        }));
+        assert_eq!(runtime.step().expect("step"), StepOutcome::Live);
+        assert_eq!(
+            shared.read(&[Key::from("robotA/greeting")]),
+            vec![Some(Value::String("bye".into()))],
+            "switching the queued behavior changed what was written"
+        );
+    }
 }
