@@ -1,9 +1,14 @@
 [package]
 name = "arora-bridge"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "The Arora Bridge trait: the connection between an Arora runtime and a remote (e.g. Semio Studio), modelled on studio-bridge's device-client."
 license = "MIT"
+repository = "https://github.com/semio-ai/arora-engine"
+homepage = "https://github.com/semio-ai/arora-engine"
+documentation = "https://docs.rs/arora-bridge"
+keywords = ["arora", "robotics", "bridge"]
+categories = ["api-bindings"]
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.5" }

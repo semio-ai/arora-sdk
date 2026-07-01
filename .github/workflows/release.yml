@@ -12,6 +12,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # crates.io trusted publishing (OIDC) — no stored token
     steps:
       - uses: actions/checkout@v6
 
@@ -25,17 +28,25 @@ jobs:
           echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
           git config --global credential.helper 'store --file ~/.my-credentials'
 
+      # Trusted publishing: exchange the workflow's GitHub OIDC identity for a
+      # short-lived crates.io token. Each published crate must have a Trusted
+      # Publisher configured on crates.io (GitHub: semio-ai/arora-engine,
+      # workflow: release.yml).
+      - name: Authenticate to crates.io (trusted publishing)
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish crates whose version is new
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -uo pipefail
-          # For now only arora-types is published (semio-free, already on crates.io). The
-          # module-authoring / registry / behavior-tree crates are intentionally
-          # absent: they carry private semio-record / semio-client git deps,
-          # which crates.io forbids. They join this list once the semio-record
-          # migration removes those deps.
-          publishable=(arora-types)
+          # Publishable crates (semio-free deps, already resolvable on crates.io),
+          # in dependency order. The module-authoring / registry / behavior-tree
+          # crates are intentionally absent: they carry private semio-record /
+          # semio-client git deps, which crates.io forbids. They join this list
+          # once the semio-record migration removes those deps.
+          publishable=(arora-types arora-bridge)
           for crate in "${publishable[@]}"; do
             ver=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')
