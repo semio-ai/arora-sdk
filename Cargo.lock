@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arora-types",
  "async-trait",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "async-trait",
  "derive_more 2.1.1",

@@ -1,11 +1,19 @@
 [package]
 name = "arora-types"
-version = "1.5.0"
+version = "1.5.1"
 edition = "2021"
 description = "Shared type definitions for the Semio Arora framework"
 license = "MIT"
-repository = "https://github.com/semio-ai/arora-types"
-homepage = "https://github.com/semio-ai/arora-types"
+# arora-types lives in the arora-engine workspace since the multi-repo
+# consolidation; the old standalone arora-types repo is gone.
+repository = "https://github.com/semio-ai/arora-engine"
+homepage = "https://github.com/semio-ai/arora-engine"
+documentation = "https://docs.rs/arora-types"
+keywords = ["arora", "robotics", "types"]
+categories = ["data-structures"]
+# The README file is lowercase; name it explicitly so cargo bundles it into the
+# published crate on case-sensitive filesystems (CI) where it isn't auto-detected.
+readme = "readme.md"
 
 [lib]
 # rlib only. The wasm/JS bindings (src/wasm_value.rs, wasm32-gated) reach JS
