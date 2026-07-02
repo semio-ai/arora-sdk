@@ -2,6 +2,8 @@
 name = "arora-util"
 version = "0.1.0"
 edition = "2021"
+description = "Internal utility helpers for the Arora runtime."
+license = "MIT"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
