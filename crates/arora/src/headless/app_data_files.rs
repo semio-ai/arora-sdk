@@ -6,11 +6,11 @@
 //! data (encryption key + refresh token) under `.semio/arora` there.
 
 use std::fs::{self, File};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dirs::home_dir;
 
-fn is_dir_is_writable(dir: &PathBuf) -> bool {
+fn is_dir_is_writable(dir: &Path) -> bool {
     let test_file = dir.join("test_file");
     match File::create(&test_file) {
         Ok(_) => {
@@ -24,7 +24,7 @@ fn is_dir_is_writable(dir: &PathBuf) -> bool {
 fn find_writable_dir() -> Result<PathBuf, std::io::Error> {
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(dir) = current_exe.parent() {
-            if is_dir_is_writable(&dir.to_path_buf()) {
+            if is_dir_is_writable(dir) {
                 return Ok(dir.into());
             }
         }
