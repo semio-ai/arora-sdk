@@ -29,9 +29,11 @@ use anyhow::{Context, Result};
 use arora_bridge::Bridge;
 use arora_hal::FakeHal;
 use arora_simple_data_store::SimpleDataStore;
-use firestore_stream::options::{FirebaseEmulatorOptions, FirebaseOptions};
+use arora_studio_bridge_client::firestore_support::options::{
+    FirebaseEmulatorOptions, FirebaseOptions,
+};
+use arora_studio_bridge_client::zenoh::ZenohDeviceClient;
 use log::{info, warn};
-use studio_bridge_device_client::zenoh::ZenohDeviceClient;
 
 use app_data_files::ensure_app_data_dir;
 
@@ -104,7 +106,7 @@ pub fn launch() -> Result<()> {
             endpoints,
         )
         .await
-        // `studio_bridge_device_client::error::Error` has no `Display` impl,
+        // `arora_studio_bridge_client::error::Error` has no `Display` impl,
         // so format it with `{e:?}`.
         .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
         let client: Arc<dyn Bridge> = Arc::new(client);

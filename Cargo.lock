@@ -181,16 +181,15 @@ dependencies = [
  "arora-engine",
  "arora-hal",
  "arora-simple-data-store",
+ "arora-studio-bridge-client",
  "arora-types",
  "async-trait",
  "crypto_secretbox",
  "dirs",
  "env_logger",
- "firestore-stream",
  "futures",
  "log",
  "rustls 0.23.41",
- "studio-bridge-device-client",
  "tokio",
  "uuid",
 ]
@@ -477,6 +476,35 @@ name = "arora-simple-data-store"
 version = "0.1.0"
 dependencies = [
  "arora-types",
+]
+
+[[package]]
+name = "arora-studio-bridge-client"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a243e897edfe82fdd6428ddb6a0b32d7311139055e02bb891e22b46ea1a50fd3"
+dependencies = [
+ "arora-bridge",
+ "arora-types",
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "firestore",
+ "futures",
+ "futures-util",
+ "gcloud-sdk",
+ "log",
+ "rand 0.9.4",
+ "reqwest",
+ "rustls 0.23.41",
+ "serde",
+ "serde_json",
+ "strfmt",
+ "studio-bridge-msgs",
+ "tokio",
+ "tokio-stream",
+ "webpki-roots",
+ "zenoh",
 ]
 
 [[package]]
@@ -2433,7 +2461,8 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "firestore"
 version = "0.49.0"
-source = "git+https://github.com/semio-ai/firestore-rs.git?branch=master#712c06e299045b6d1e00b83a2d8ae5aee5bace83"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0694fd7f29eff94f1e398b5985dc35482fd18289245abd29db48a13fba162a81"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2450,26 +2479,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
-]
-
-[[package]]
-name = "firestore-stream"
-version = "0.1.0"
-source = "git+https://github.com/semio-ai/studio-bridge.git?branch=main#6c7be3ff7d26f037161a6a6d8b1caa58615675ed"
-dependencies = [
- "chrono",
- "firestore",
- "futures",
- "gcloud-sdk",
- "log",
- "rand 0.9.4",
- "reqwest",
- "rustls 0.23.41",
- "serde",
- "serde_json",
- "strfmt",
- "studio-bridge-msgs",
- "webpki-roots",
 ]
 
 [[package]]
@@ -5884,33 +5893,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "studio-bridge-device-client"
-version = "1.0.0"
-source = "git+https://github.com/semio-ai/studio-bridge.git?branch=main#6c7be3ff7d26f037161a6a6d8b1caa58615675ed"
-dependencies = [
- "arora-bridge",
- "arora-types",
- "async-stream",
- "async-trait",
- "chrono",
- "firestore",
- "firestore-stream",
- "futures",
- "futures-util",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "strfmt",
- "studio-bridge-msgs",
- "tokio",
- "zenoh",
-]
-
-[[package]]
 name = "studio-bridge-msgs"
 version = "1.0.0"
-source = "git+https://github.com/semio-ai/studio-bridge.git?branch=main#6c7be3ff7d26f037161a6a6d8b1caa58615675ed"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cc8447b3d63944f1c1ba6a5e7a46bca5a5000aacb35ece6363145606d70c5f2"
 dependencies = [
  "arora-types",
  "chrono",
