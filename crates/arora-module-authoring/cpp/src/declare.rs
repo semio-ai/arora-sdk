@@ -360,7 +360,7 @@ pub fn type_constants_impl(id: &Uuid, ty: &TypeDefinitionFrozen) -> Vec<Declarat
         TypeDefinitionFrozen::Structure(v) => structure_constants_impl(id, &v.name, v),
         TypeDefinitionFrozen::Enumeration(v) => enumeration_constants_impl(id, &v.name, v),
         TypeDefinitionFrozen::Primitive(v) => {
-            panic!("forbidden to define primitive type {}", v.to_string())
+            panic!("forbidden to define primitive type {}", v)
         }
     }
 }

@@ -3,19 +3,16 @@
 A package manager for Arora.
 The registry is meant to be a server provided
 by [the project `semio-db`](https://github.com/semio-ai/semio-db).
-A [`RemoteRegistry`](src/remote.rs) is a local handle to access the remote server,
-using [`semio-client`](https://github.com/semio-ai/semio-client)
-and [`semio-record`](https://github.com/semio-ai/semio-record).
-It is read-only, *i.e.* it implements only
-the trait [`ReadableRegistry`](src/lib.rs).
+This crate is the local, publishable core: a [`LocalRegistry`](src/local/mod.rs)
+implements both the [`ReadableRegistry` and `EditableRegistry`](src/lib.rs)
+traits, supports the addition of `Structure`, `Enumeration` and `Module`
+on the fly, and provides a local index to look them up fast.
 
-A [`LocalRegistry`](src/local/mod.rs) behaves similarly, but locally.
-It is editable, *i.e.* it implements the trait [`EditableRegistry`](src/lib.rs).
-It supports the addition of `Structure`, `Enumeration` and `Module`
-on the fly and provides a local index to look them up fast.
-
-A [`RemoteCachedRegistry`](src/remote_cached.rs) couples a [`RemoteRegistry`](src/remote.rs)
-with a [`LocalRegistry`](src/local/mod.rs) used for caching every record queried remotely.
+The registries backed by the remote server — `RemoteRegistry` (read-only,
+using [`semio-client`](https://github.com/semio-ai/semio-client)) and
+`RemoteCachedRegistry` (a remote coupled with a `LocalRegistry` cache) — live
+in the private sibling crate `arora-registry-remote`, so this crate carries
+no private git dependencies.
 
 ## Record versions
 
