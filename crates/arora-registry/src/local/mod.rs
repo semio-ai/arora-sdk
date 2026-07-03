@@ -4,8 +4,8 @@ mod reg_ref;
 use self::reg_ref::{FrozenRegistryReference, LocalRegistryReference};
 use crate::{EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen};
 use arora_types::record::Selector;
+use arora_types::record::{FrozenReference, Resolver, UnfrozenReference};
 use async_trait::async_trait;
-use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::Version;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -105,9 +105,9 @@ impl LocalRegistry {
 }
 
 #[async_trait]
-impl Freezer for LocalRegistry {
+impl Resolver for LocalRegistry {
     type Error = RegistryError;
-    async fn freeze(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+    async fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
         let selector = Selector::Id(reference.id.to_owned());
         // Primitives are intrinsic (fixed ids, no stored record or version);
         // resolve them directly, mirroring `get_type`, so modules don't need an
@@ -115,7 +115,7 @@ impl Freezer for LocalRegistry {
         if crate::get_primitive(&selector).is_some() {
             return Ok(FrozenReference {
                 id: reference.id,
-                version: semio_record::record::Version(Version::new(0, 0, 0)),
+                version: arora_types::record::Version(Version::new(0, 0, 0)),
             });
         }
         let version = self
@@ -139,7 +139,7 @@ impl Freezer for LocalRegistry {
             .to_owned();
         Ok(FrozenReference {
             id: reference.id,
-            version: semio_record::record::Version(version),
+            version: arora_types::record::Version(version),
         })
     }
 }
@@ -158,11 +158,11 @@ pub const ROOT_ID: Uuid = Uuid::from_bytes([
 mod tests {
     use super::{LocalRegistry, ROOT_ID};
     use crate::{EditableRegistry, EnumerationFrozen, ModuleFrozen};
-    use semio_record::{
-        enumeration::v0::frozen::EnumerationVariant,
-        module::v0::frozen::{Export, ExportKind, Function},
-        record::FrozenReference,
+    use arora_types::record::{
+        enumeration::frozen::EnumerationVariant,
+        module::frozen::{Export, ExportKind, Function},
         ty::{FrozenScalar, FrozenTy, Primitive, PrimitiveKind},
+        FrozenReference,
     };
     use semver::{Version, VersionReq};
     use std::collections::{BTreeMap, HashMap};
@@ -180,7 +180,7 @@ mod tests {
                 EnumerationVariant {
                     name: "Ok".to_owned(),
                     ty: FrozenTy::Primitive(Primitive {
-                        kind: semio_record::ty::PrimitiveKind::Unit,
+                        kind: arora_types::record::ty::PrimitiveKind::Unit,
                     }),
                 },
             )]

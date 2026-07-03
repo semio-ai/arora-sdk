@@ -1,9 +1,9 @@
+use arora_types::record::module::frozen::Parameter;
+use arora_types::record::ty::FrozenTy;
 use arora_types::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{events::Event, Reader};
-use semio_record::module::v0::frozen::Parameter;
-use semio_record::ty::FrozenTy;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::{

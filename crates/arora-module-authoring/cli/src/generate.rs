@@ -2,9 +2,9 @@ use arora_module_core::{
     analyze_module_from_path, header::generate_header_file, ModuleAsset, Reader, Writer,
 };
 use arora_registry::ReadableRegistry;
+use arora_types::record::Resolver;
 use arora_vfs::Entry;
 use clap::Parser;
-use semio_record::record::Freezer;
 
 #[derive(Debug, Parser)]
 pub struct Generate {
@@ -33,7 +33,7 @@ fn print_entry(entry: &Entry, i: usize) {
     }
 }
 
-pub async fn generate<R: ReadableRegistry + Freezer>(
+pub async fn generate<R: ReadableRegistry + Resolver>(
     cmd: Generate,
     registry: &mut R,
 ) -> anyhow::Result<()> {

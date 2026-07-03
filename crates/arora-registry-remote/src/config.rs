@@ -8,7 +8,7 @@ use semio_client::{
     user::{self, Login},
 };
 
-use crate::RegistryError;
+use arora_registry::RegistryError;
 
 /// Manages options to connect to a registry as follows:
 /// if a configuration is specified it will be used and updated

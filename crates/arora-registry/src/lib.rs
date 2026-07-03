@@ -1,11 +1,6 @@
-#[cfg(feature = "remote")]
-pub mod config;
 pub mod local;
 pub mod local_yaml;
-#[cfg(feature = "remote")]
-pub mod remote;
-#[cfg(feature = "remote")]
-pub mod remote_cached;
+use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
@@ -13,12 +8,6 @@ use arora_types::ty::{
 };
 use async_trait::async_trait;
 use derive_more::Display;
-use semio_record::{
-    enumeration::v0::Enumeration as EnumerationDefn, folder::v0::Folder as FolderDefn,
-    module::v0::Module as ModuleDefn, organization::v0::Organization as OrganizationDefn,
-    record::RecordDefn, structure::v0::Structure as StructureDefn, ty::FrozenTy, ty::PrimitiveKind,
-    user::v0::User as UserDefn,
-};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -141,20 +130,15 @@ pub trait EditableRegistry {
     async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError>;
 }
 
-pub type Enumeration = <EnumerationDefn as RecordDefn>::Unfrozen;
-pub type Structure = <StructureDefn as RecordDefn>::Unfrozen;
-pub type Module = <ModuleDefn as RecordDefn>::Unfrozen;
-pub type User = <UserDefn as RecordDefn>::Unfrozen;
-pub type Organization = <OrganizationDefn as RecordDefn>::Unfrozen;
-pub type Folder = <FolderDefn as RecordDefn>::Unfrozen;
+pub type Enumeration = arora_types::record::enumeration::unfrozen::Enumeration;
+pub type Structure = arora_types::record::structure::unfrozen::Structure;
+pub type Module = arora_types::record::module::unfrozen::Module;
 
-pub type UserPublic = <UserDefn as RecordDefn>::Public;
-pub type OrganizationPublic = <OrganizationDefn as RecordDefn>::Public;
-pub type FolderPublic = <FolderDefn as RecordDefn>::Public;
+pub type FolderPublic = arora_types::record::folder::public::Public;
 
-pub type EnumerationFrozen = <EnumerationDefn as RecordDefn>::Frozen;
-pub type StructureFrozen = <StructureDefn as RecordDefn>::Frozen;
-pub type ModuleFrozen = <ModuleDefn as RecordDefn>::Frozen;
+pub type EnumerationFrozen = arora_types::record::enumeration::frozen::Enumeration;
+pub type StructureFrozen = arora_types::record::structure::frozen::Structure;
+pub type ModuleFrozen = arora_types::record::module::frozen::Module;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDefinitionFrozen {

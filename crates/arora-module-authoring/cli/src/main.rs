@@ -1,8 +1,10 @@
 mod generate;
 use arora_registry::{
-    config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
-    remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry,
+    local::LocalRegistry, local_yaml::load_records_from_yaml_dir, EditableRegistry,
+    ReadableRegistry,
 };
+use arora_registry_remote::{config::check_and_update_config, remote_cached::RemoteCachedRegistry};
+use arora_types::record::Resolver;
 use clap::{Parser, Subcommand};
 use generate::generate;
 use reqwest::{
@@ -10,7 +12,6 @@ use reqwest::{
     Client, Url,
 };
 use semio_client::{authentication::Config, context::Context};
-use semio_record::record::Freezer;
 use std::{fs::read_to_string, path::PathBuf, str::FromStr};
 
 #[derive(Debug, Parser)]
@@ -133,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     args: Args,
     registry: &mut R,
 ) -> anyhow::Result<()> {

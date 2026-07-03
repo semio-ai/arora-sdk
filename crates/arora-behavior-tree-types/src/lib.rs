@@ -1,6 +1,6 @@
 mod status;
 mod tick_id;
-use semio_record::folder::v0::public::Public as FolderPublic;
+use arora_types::record::folder::public::Public as FolderPublic;
 pub use status::*;
 pub use tick_id::*;
 use uuid::Uuid;

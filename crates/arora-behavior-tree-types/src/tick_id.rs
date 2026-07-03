@@ -1,6 +1,5 @@
-use semio_record::{
-    acl::Acl,
-    structure::v0::unfrozen::{Structure, StructureField},
+use arora_types::record::{
+    structure::unfrozen::{Structure, StructureField},
     ty::{Primitive, PrimitiveKind, UnfrozenTy},
 };
 use semver::Version;
@@ -21,7 +20,6 @@ pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
         )]
         .into_iter()
         .collect(),
-        acl: <Acl as Default>::default(),
     }
 }
 

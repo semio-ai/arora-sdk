@@ -28,7 +28,6 @@ arora-registry = { path = "../../crates/arora-registry" }
 arora-types = { path = "../../crates/arora-types", version = "1.4" }
 convert_case = "0.11"
 rand = "0.10"
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 serde_yaml = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }

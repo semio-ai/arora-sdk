@@ -42,17 +42,17 @@ native = [
 ]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree" }
-arora-behavior = { path = "../arora-behavior" }
+arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "0.1" }
+arora-behavior = { path = "../arora-behavior", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.4" }
 anyhow = "*"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }
 # The three interfaces the runtime loop wires around the shared state.
-arora-hal = { path = "../arora-hal" }
-arora-bridge = { path = "../arora-bridge" }
-arora-simple-data-store = { path = "../arora-simple-data-store" }
+arora-hal = { path = "../arora-hal", version = "0.1" }
+arora-bridge = { path = "../arora-bridge", version = "1" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "0.1" }
 futures = "0.3"
 # The default Bridge implementation: the studio-bridge Zenoh connector, published
 # as `arora-studio-bridge-client` (it also provides the Firebase config types the

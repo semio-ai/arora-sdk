@@ -1,13 +1,13 @@
-use crate::local::LocalRegistry;
 use crate::remote::RemoteRegistry;
-use crate::{
+use arora_registry::local::LocalRegistry;
+use arora_registry::{
     EditableRegistry, Enumeration, EnumerationFrozen, FolderPublic, Module, ModuleFrozen,
     ReadableRegistry, RegistryError, Structure, StructureFrozen, TypeDefinitionFrozen,
 };
+use arora_types::record::{FrozenReference, Resolver, UnfrozenReference};
 use arora_types::record::{RecordType, Selector};
 use async_trait::async_trait;
 use semio_client::context::Context;
-use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
 use semver::{Version, VersionReq};
 use uuid::Uuid;
 
@@ -188,13 +188,13 @@ impl EditableRegistry for RemoteCachedRegistry {
 }
 
 #[async_trait]
-impl Freezer for RemoteCachedRegistry {
+impl Resolver for RemoteCachedRegistry {
     type Error = RegistryError;
-    async fn freeze(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
-        match self.cache.freeze(reference).await {
+    async fn resolve(&self, reference: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+        match self.cache.resolve(reference).await {
             Ok(frozen) => Ok(frozen),
             Err(RegistryError::NoSuchRecord { .. }) | Err(RegistryError::NoSuchVersion { .. }) => {
-                Ok(self.remote.freeze(reference).await?)
+                Ok(self.remote.resolve(reference).await?)
             }
             Err(err) => Err(err),
         }

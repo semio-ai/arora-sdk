@@ -1,5 +1,5 @@
 use crate::{ast::TypeRef, Context};
-use semio_record::ty::{FrozenTy, PrimitiveKind};
+use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 
 lazy_static::lazy_static! {
   pub static ref VOID: TypeRef = TypeRef {

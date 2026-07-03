@@ -14,12 +14,11 @@ use arora_types::module::{
     },
 };
 use arora_types::record::Selector;
-use semio_record::record::{Freeze, Freezer, UnfrozenReference, VersionReq};
-use semio_record::{
-    acl::Acl,
-    module::v0::unfrozen::{Export, Function, Parameter},
+use arora_types::record::{
+    module::unfrozen::{Export, Function, Parameter},
     ty::{UnfrozenArray, UnfrozenScalar, UnfrozenTy},
 };
+use arora_types::record::{Freeze, Resolver, UnfrozenReference, VersionReq};
 use std::collections::HashSet;
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
@@ -169,7 +168,7 @@ pub async fn resolve_high_import(
             }
             Export {
                 name: function.name,
-                kind: semio_record::module::v0::unfrozen::ExportKind::Function(Function {
+                kind: arora_types::record::module::unfrozen::ExportKind::Function(Function {
                     parameters,
                     return_ty: resolve_high_type_ref(&function.ret, registry).await?,
                     parameter_ordering,
@@ -192,7 +191,7 @@ pub async fn resolve_low_import(symbol: LowImportSymbol) -> Result<Export, Modul
             }
             Export {
                 name: function.name,
-                kind: semio_record::module::v0::unfrozen::ExportKind::Function(Function {
+                kind: arora_types::record::module::unfrozen::ExportKind::Function(Function {
                     parameters,
                     return_ty: resolve_low_type_ref(&function.ret).await?,
                     parameter_ordering,
@@ -218,7 +217,7 @@ pub async fn resolve_high_export(
             }
             Export {
                 name: function.name,
-                kind: semio_record::module::v0::unfrozen::ExportKind::Function(Function {
+                kind: arora_types::record::module::unfrozen::ExportKind::Function(Function {
                     parameters,
                     return_ty: resolve_high_type_ref(&function.ret, registry).await?,
                     parameter_ordering,
@@ -241,7 +240,7 @@ pub async fn resolve_low_export(symbol: LowExportSymbol) -> Result<Export, Modul
             }
             Export {
                 name: function.name,
-                kind: semio_record::module::v0::unfrozen::ExportKind::Function(Function {
+                kind: arora_types::record::module::unfrozen::ExportKind::Function(Function {
                     parameters,
                     return_ty: resolve_low_type_ref(&function.ret).await?,
                     parameter_ordering,
@@ -251,7 +250,7 @@ pub async fn resolve_low_export(symbol: LowExportSymbol) -> Result<Export, Modul
     })
 }
 
-pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
+pub async fn resolve_high_module<R: ReadableRegistry + Resolver>(
     module_definition: HighModuleDefinition,
     registry: &mut R,
 ) -> Result<ModuleAndImports, ModuleDeclarationError> {
@@ -308,7 +307,6 @@ pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
         executable: None,
         exports,
         dependencies: dependencies.into_iter().collect(),
-        acl: <Acl as Default>::default(),
     };
     Ok(ModuleAndImports {
         module: module.freeze(registry).await.map_err(|e| {
@@ -320,7 +318,7 @@ pub async fn resolve_high_module<R: ReadableRegistry + Freezer>(
     })
 }
 
-pub async fn resolve_low_module<R: ReadableRegistry + Freezer>(
+pub async fn resolve_low_module<R: ReadableRegistry + Resolver>(
     module_header: Header,
     registry: &mut R,
 ) -> Result<ModuleAndImports, ModuleDeclarationError> {
@@ -376,7 +374,6 @@ pub async fn resolve_low_module<R: ReadableRegistry + Freezer>(
         executable: None,
         exports,
         dependencies: dependencies.into_iter().collect(),
-        acl: <Acl as Default>::default(),
     };
     Ok(ModuleAndImports {
         module: module.freeze(registry).await.map_err(|e| {

@@ -1,16 +1,35 @@
-use crate::{
-    get_primitive, EnumerationFrozen, FolderPublic, ModuleFrozen, OrganizationPublic,
-    ReadableRegistry, RegistryError, StructureFrozen, TypeDefinitionFrozen, UserPublic,
+use arora_registry::{
+    get_primitive, EnumerationFrozen, FolderPublic, ModuleFrozen, ReadableRegistry, RegistryError,
+    StructureFrozen, TypeDefinitionFrozen,
 };
+use arora_types::record::{FrozenReference, Resolver, UnfrozenReference};
 use arora_types::record::{RecordType, Selector};
 use async_trait::async_trait;
 use semio_client::{
     common::{GetPublic, TaggedReq, TypeOf},
     context::Context,
 };
-use semio_record::record::{Freezer, FrozenReference, UnfrozenReference};
+
+/// Public user/organization records keep the Semio store's own vocabulary
+/// (semio-record): they are store concepts, not arora ones.
+pub type UserPublic = semio_record::user::v0::public::Public;
+pub type OrganizationPublic = semio_record::organization::v0::public::Public;
 use semver::{Version, VersionReq};
 use uuid::Uuid;
+
+/// The semio-client API speaks semio-record's types; arora speaks
+/// `arora_types::record`. Their wire formats are identical by design (pinned
+/// by arora-types' golden wire tests), so the conversion is a serde
+/// round-trip through the shared format.
+fn from_store<S, T>(record: S, what: &str) -> Result<T, RegistryError>
+where
+    S: serde::Serialize,
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::to_value(record)
+        .and_then(serde_json::from_value)
+        .map_err(|e| RegistryError::remote_error(format!("converting {what} record: {e}")))
+}
 
 /// Converts a public [`arora_types::record::Selector`] into the equivalent
 /// `semio-client` selector accepted by the remote store API.
@@ -78,6 +97,7 @@ impl RemoteRegistry {
         .map_err(|e| {
             RegistryError::remote_error(format!("error getting enumeration {}: {}", selector, e))
         })
+        .and_then(|record| from_store(record, "enumeration"))
     }
 
     async fn get_structure(
@@ -96,6 +116,7 @@ impl RemoteRegistry {
         .map_err(|e| {
             RegistryError::remote_error(format!("error getting enumeration {}: {}", selector, e))
         })
+        .and_then(|record| from_store(record, "structure"))
     }
 
     async fn get_user(&self, selector: &Selector) -> Result<UserPublic, RegistryError> {
@@ -138,6 +159,7 @@ impl RemoteRegistry {
         .map_err(|e| RegistryError::RemoteError {
             message: format!("error getting folder {}: {}", selector.clone(), e),
         })
+        .and_then(|record| from_store(record, "folder"))
     }
 
     async fn get_module_not_mut(
@@ -156,7 +178,7 @@ impl RemoteRegistry {
         .map_err(|e| RegistryError::RemoteError {
             message: format!("error getting module {}: {}", selector.clone(), e),
         })?;
-        Ok(module)
+        from_store(module, "module")
     }
 }
 
@@ -289,10 +311,10 @@ impl ReadableRegistry for RemoteRegistry {
 }
 
 #[async_trait]
-impl Freezer for RemoteRegistry {
+impl Resolver for RemoteRegistry {
     type Error = RegistryError;
 
-    async fn freeze(&self, id: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
+    async fn resolve(&self, id: &UnfrozenReference) -> Result<FrozenReference, Self::Error> {
         let path = self.resolve_id(&id.id).await?;
         let selector = Selector::Path(format!("{}@{}", path, id.version_req));
 
@@ -311,7 +333,7 @@ impl Freezer for RemoteRegistry {
             .ok_or(RegistryError::NoSuchRecord { selector })?;
         Ok(FrozenReference {
             id: id.id,
-            version: latest_tag.to_owned(),
+            version: arora_types::record::Version(latest_tag.0.to_owned()),
         })
     }
 }
