@@ -2,12 +2,12 @@ pub mod header;
 pub mod resolve;
 use arora_registry::{ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
 use arora_types::module::high::ModuleDefinition;
+use arora_types::record::{module::frozen::Export, Resolver};
 use arora_types::record::{RecordType, Selector};
 use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
 use derive_more::Display;
 use resolve::resolve_high_module;
-use semio_record::{module::v0::frozen::Export, record::Freezer};
 use semver::{Version, VersionReq};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::read_to_string;
@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 /// Analyzes a module from the path where it is written in the YAML format.
 /// See [`analyze_module`].
-pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Freezer>(
+pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Resolver>(
     path: P,
     registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
@@ -31,7 +31,7 @@ pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Free
 /// resolves its dependencies with the help of the provided registry.
 /// Produces a list of assets that can be used for code generation.
 /// First, the types, then the modules, then the imports.
-pub async fn analyze_module<R: ReadableRegistry + Freezer>(
+pub async fn analyze_module<R: ReadableRegistry + Resolver>(
     module_definition: ModuleDefinition,
     registry: &mut R,
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {

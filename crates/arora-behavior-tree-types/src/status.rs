@@ -1,6 +1,5 @@
-use semio_record::{
-    acl::Acl,
-    enumeration::v0::unfrozen::{Enumeration, EnumerationVariant},
+use arora_types::record::{
+    enumeration::unfrozen::{Enumeration, EnumerationVariant},
     ty::{Primitive, PrimitiveKind, UnfrozenTy},
 };
 use semver::Version;
@@ -44,7 +43,6 @@ pub fn declare_status_enumeration(parent: Uuid) -> Enumeration {
         ]
         .into_iter()
         .collect(),
-        acl: <Acl as Default>::default(),
     }
 }
 
@@ -66,7 +64,7 @@ pub const STATUS_ENUMERATION_VERSION: Version = Version::new(1, 0, 0);
 #[cfg(test)]
 pub mod tests {
 
-    use semio_record::enumeration::v0::unfrozen::Enumeration;
+    use arora_types::record::enumeration::unfrozen::Enumeration;
 
     use crate::{declare_status_enumeration, BEHAVIOR_TREE_FOLDER_ID};
 

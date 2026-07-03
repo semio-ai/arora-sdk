@@ -6,18 +6,19 @@ use arora_engine::{
 };
 use arora_module_core::header::module_frozen_from_header_file;
 use arora_registry::{
-    config::check_and_update_config, local::LocalRegistry, local_yaml::load_records_from_yaml_dir,
-    remote_cached::RemoteCachedRegistry, EditableRegistry, ReadableRegistry, RegistryError,
+    local::LocalRegistry, local_yaml::load_records_from_yaml_dir, EditableRegistry,
+    ReadableRegistry, RegistryError,
 };
+use arora_registry_remote::{config::check_and_update_config, remote_cached::RemoteCachedRegistry};
 use arora_types::module::low::Header;
+use arora_types::record::module::frozen::ExportKind;
+use arora_types::record::Resolver;
 use clap::{Error, ErrorKind, Parser};
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
     Client,
 };
 use semio_client::{authentication::Config, context::Context};
-use semio_record::module::v0::frozen::ExportKind;
-use semio_record::record::Freezer;
 use std::{
     borrow::BorrowMut, collections::HashMap, fs::read_to_string, path::PathBuf, str::FromStr,
 };
@@ -154,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Freezer>(
+async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     args: Args,
     registry: &mut R,
 ) -> anyhow::Result<()> {

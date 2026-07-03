@@ -2,15 +2,16 @@
 name = "arora-module-rust"
 version = "0.1.0"
 edition = "2021"
+description = "Rust source generation for Arora modules (types and bindings from type records)."
+license = "MIT"
 readme = "readme.md"
 include = ["/src"]
 
 [dependencies]
-arora-module-core = { path = "../core" }
-arora-registry = { path = "../../arora-registry" }
-arora-types = { path = "../../arora-types", version = "1.4" }
-arora-vfs = { path = "../../arora-vfs" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
+arora-module-core = { path = "../core", version = "0.1" }
+arora-registry = { path = "../../arora-registry", version = "0.1" }
+arora-types = { path = "../../arora-types", version = "1.6" }
+arora-vfs = { path = "../../arora-vfs", version = "0.1" }
 anyhow = "*"
 async-recursion = "1"
 clap = { version = "3", features = ["derive"] }
@@ -24,5 +25,5 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "*"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std"] }
 uuid = { version = "1", features = ["serde", "v4"] }

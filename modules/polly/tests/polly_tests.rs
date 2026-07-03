@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arora_behavior_tree::{
+use arora_behavior_tree::{variable::VariableCell, 
     arora_generated::behavior_tree::status::Status, nodes::*, schema::Expression,
     tree_node::TreeNode, BehaviorTreeRuntime, ModuleFunction,
 };
@@ -13,7 +13,7 @@ use arora_types::{
 use convert_case::{Case, Casing};
 use rand::prelude::IndexedRandom;
 use rand::rng;
-use semio_record::{module::v0::frozen::ExportKind, record::Freezer};
+use arora_types::record::{module::frozen::ExportKind, Resolver};
 use std::str::FromStr;
 use std::{
     cell::RefCell,
@@ -92,12 +92,12 @@ async fn polly_sequence_of_speech() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn fake_listen_polly_dialogue() -> Result<()> {
-    let name: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let name_expr = Expression::Variable(name.to_owned());
-    let feeling: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let feeling_expr = Expression::Variable(feeling.to_owned());
-    let input: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::String(String::new())));
-    let input_expr = Expression::Variable(input.to_owned());
+    let name = Rc::new(RefCell::new(Some(Value::String(String::new()))));
+    let name_expr = Expression::Variable(VariableCell::Local(name.to_owned()));
+    let feeling = Rc::new(RefCell::new(Some(Value::String(String::new()))));
+    let feeling_expr = Expression::Variable(VariableCell::Local(feeling.to_owned()));
+    let input = Rc::new(RefCell::new(Some(Value::String(String::new()))));
+    let input_expr = Expression::Variable(VariableCell::Local(input.to_owned()));
 
     let behavior = fallback(vec![
         seq(vec![
@@ -137,10 +137,10 @@ async fn fake_listen_polly_dialogue() -> Result<()> {
     let mut tick_count = 0;
     while status == Status::Running {
         if tick_count == 5 {
-            *input.borrow_mut() = Value::String("Ross".to_string());
+            *input.borrow_mut() = Some(Value::String("Ross".to_string()));
         }
         if tick_count == 10 {
-            *input.borrow_mut() = Value::String("great".to_string());
+            *input.borrow_mut() = Some(Value::String("great".to_string()));
         }
         status = runtime.tick().unwrap();
         tick_count += 1;
@@ -170,7 +170,7 @@ async fn setup_engine_with_modules(
     (engine, index)
 }
 
-async fn load_module<R: ReadableRegistry + EditableRegistry + Freezer>(
+async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
     name: &String,
     registry: &mut R,
     index: &mut HashMap<Uuid, ModuleFunction>,

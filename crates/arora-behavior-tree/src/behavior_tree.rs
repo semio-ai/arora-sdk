@@ -14,13 +14,13 @@ pub mod variable;
 use crate::variable::{VariableCell, VariableResolver};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
+use arora_types::record::module::frozen::Function;
 use arora_types::{
     call::Call,
     value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
 use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
-use semio_record::module::v0::frozen::Function;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 

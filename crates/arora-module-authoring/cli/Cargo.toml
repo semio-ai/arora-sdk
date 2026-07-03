@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 arora-module-core = { path = "../core" }
-arora-registry = { path = "../../arora-registry", features = ["remote"] }
+arora-registry = { path = "../../arora-registry" }
+arora-registry-remote = { path = "../../arora-registry-remote" }
 arora-types = { path = "../../arora-types", version = "1.4" }
 arora-vfs = { path = "../../arora-vfs" }
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 anyhow = "*"
 clap = { version = "3", features = ["derive"] }

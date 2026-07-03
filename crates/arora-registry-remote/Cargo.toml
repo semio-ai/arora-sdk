@@ -1,0 +1,23 @@
+[package]
+name = "arora-registry-remote"
+version = "0.1.0"
+edition = "2021"
+description = "Semio-store-backed remote registries for Arora (private; keeps the semio-client seam out of the publishable crates)."
+publish = false
+
+[dependencies]
+arora-registry = { path = "../arora-registry" }
+arora-types = { path = "../arora-types", version = "1.6" }
+semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
+semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
+anyhow = "*"
+async-trait = "0.1"
+derive_more = "2"
+reqwest = "0.13"
+semver = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.8"
+tokio = { version = "1", features = ["rt", "macros"] }
+url = "2"
+uuid = { version = "1", features = ["serde", "v4"] }

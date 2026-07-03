@@ -25,6 +25,12 @@ impl std::fmt::Display for Version {
   }
 }
 
+impl From<semver::Version> for Version {
+  fn from(v: semver::Version) -> Self {
+    Version(v)
+  }
+}
+
 impl From<crate::SemanticVersion> for Version {
   fn from(v: crate::SemanticVersion) -> Self {
     Version(v.into())

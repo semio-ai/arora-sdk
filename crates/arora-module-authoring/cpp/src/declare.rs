@@ -6,8 +6,8 @@ use crate::{
     constant, func, id, identifier_name, identifier_uuid, ty, Context,
 };
 use arora_registry::{EnumerationFrozen, StructureFrozen, TypeDefinitionFrozen};
-use semio_record::{
-    structure::v0::frozen::StructureField,
+use arora_types::record::{
+    structure::frozen::StructureField,
     ty::{FrozenTy, PrimitiveKind},
 };
 use uuid::Uuid;

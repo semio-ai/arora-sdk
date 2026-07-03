@@ -2,23 +2,16 @@
 name = "arora-registry"
 version = "0.1.0"
 edition = "2021"
+description = "Local type-record registry for Arora: stores, tags and freezes type records."
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-# The remote (Semio store) registry is opt-in; without it arora-registry
-# is a lean, local-only core with no semio-client / reqwest dependency.
-default = []
-remote = ["dep:semio-client", "dep:reqwest"]
-
 [dependencies]
-semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
-semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main", optional = true }
 anyhow = "*"
-arora-types = { path = "../arora-types", version = "1.4" }
+arora-types = { path = "../arora-types", version = "1.6" }
 async-trait = "0.1"
 derive_more = "2"
-reqwest = { version = "0.13", optional = true }
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"

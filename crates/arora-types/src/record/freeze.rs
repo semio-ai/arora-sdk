@@ -1,11 +1,11 @@
 //! `Freeze` + `Resolver` — the generalized freezing mechanism.
 //!
-//! semio-record defines an async `Freeze<F: Freezer>` + `Freezer`. Generalized
+//! semio-record defines an async `Freeze<F: Resolver>` + `Resolver`. Generalized
 //! here, store-agnostic:
-//!   * `Resolver` plays the role of `Freezer`. The real, store-backed
+//!   * `Resolver` plays the role of `Resolver`. The real, store-backed
 //!     implementation (arora-registry) implements this trait — and because the
 //!     remote registry resolves over the network, this is **async**, matching
-//!     semio-record's `#[async_trait] Freezer`.
+//!     semio-record's `#[async_trait] Resolver`.
 //!   * `Freeze<R>` is identical in spirit but NOT tied to module records.
 //!   * Blanket impls give "freezing a container freezes its elements" for free,
 //!     so most leaf types are the only ones that need a hand-written impl.
@@ -17,7 +17,7 @@ use std::hash::Hash;
 
 /// Resolves an unpinned reference into a pinned one by choosing a concrete
 /// version. The ONLY abstraction that needs to touch a store/registry. Mirrors
-/// semio-record `record::Freezer` and arora-registry's `impl Freezer` (which
+/// semio-record `record::Resolver` and arora-registry's `impl Resolver` (which
 /// picks the newest version matching the requirement).
 #[async_trait]
 pub trait Resolver: Sync {

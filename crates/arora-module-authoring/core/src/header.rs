@@ -3,6 +3,11 @@ use crate::{
     ImportAsset, ModuleDeclarationError,
 };
 use arora_registry::{ModuleFrozen, ReadableRegistry};
+use arora_types::record::{
+    module::frozen::ExportKind,
+    ty::{FrozenTy, PrimitiveKind},
+    Resolver,
+};
 use arora_types::{
     module::low::{
         Executor, ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter,
@@ -15,11 +20,6 @@ use arora_types::{
     SemanticVersion,
 };
 use arora_vfs::{Directory, Entry, File};
-use semio_record::{
-    module::v0::frozen::ExportKind,
-    record::Freezer,
-    ty::{FrozenTy, PrimitiveKind},
-};
 use semver::Version;
 use std::fs::read_to_string;
 use std::path::Path;
@@ -112,7 +112,7 @@ pub fn generate_header_file(
 
 /// Reads the YAML header file at the given path
 /// and returns a description compatible with the registry.
-pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry + Freezer>(
+pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry + Resolver>(
     header_path: P,
     registry: &mut R,
 ) -> Result<(Uuid, Version, ModuleAndImports), ModuleDeclarationError> {

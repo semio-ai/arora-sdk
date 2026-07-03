@@ -4,8 +4,8 @@ use crate::{
     Structure, StructureFrozen,
 };
 use arora_types::record::Selector;
+use arora_types::record::{enumeration::unfrozen::Enumeration, Freeze};
 use async_trait::async_trait;
-use semio_record::{enumeration::v0::unfrozen::Enumeration, record::Freeze};
 use semver::Version;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, HashMap},
@@ -183,7 +183,7 @@ impl EditableRegistry for LocalRegistry {
         add_mapping(&mut new_mappings, path.to_owned(), id.to_owned())?;
         for (sub_id, export) in &module.exports {
             match export.kind {
-                semio_record::module::v0::frozen::ExportKind::Function(_) => {
+                arora_types::record::module::frozen::ExportKind::Function(_) => {
                     let sub_ref = FrozenRegistryReference::Function {
                         id: sub_id.to_owned(),
                         parent_id: id.to_owned(),

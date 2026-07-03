@@ -6,6 +6,7 @@ pub mod id;
 pub mod ty;
 use arora_module_core::{ImportAsset, ModuleAsset, Reader, Writer};
 use arora_registry::{ModuleFrozen, TypeDefinitionFrozen};
+use arora_types::record::module::frozen::{ExportKind, Parameter};
 use arora_vfs::{Directory, Entry, File};
 use ast::{
     Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
@@ -15,7 +16,6 @@ use ast::{
 use ast::{ToExpression, ToPrettyString};
 use clap::Parser;
 use convert_case::{Case, Casing};
-use semio_record::module::v0::frozen::{ExportKind, Parameter};
 use semver::Version;
 use std::path::PathBuf;
 use std::{
