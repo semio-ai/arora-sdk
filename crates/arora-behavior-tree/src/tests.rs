@@ -374,7 +374,7 @@ fn seq_star_resumes_and_resets() {
     let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
         .expect("setup");
     assert_eq!(runtime.tick().expect("tick"), Status::Running);
-    drop(runtime);
+    let _ = runtime;
     assert_eq!(*ticks.borrow().get(&first).unwrap_or(&0), 1);
     assert_eq!(*ticks.borrow().get(&second).unwrap_or(&0), 1);
     assert_eq!(*ticks.borrow().get(&third).unwrap_or(&0), 0);
@@ -387,7 +387,7 @@ fn seq_star_resumes_and_resets() {
     let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
         .expect("setup");
     assert_eq!(runtime.tick().expect("tick"), Status::Success);
-    drop(runtime);
+    let _ = runtime;
     assert_eq!(
         *ticks.borrow().get(&first).unwrap_or(&0),
         1,
@@ -400,7 +400,7 @@ fn seq_star_resumes_and_resets() {
     let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
         .expect("setup");
     assert_eq!(runtime.tick().expect("tick"), Status::Success);
-    drop(runtime);
+    let _ = runtime;
     assert_eq!(
         *ticks.borrow().get(&first).unwrap_or(&0),
         2,
