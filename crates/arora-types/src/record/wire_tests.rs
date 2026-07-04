@@ -99,3 +99,25 @@ fn frozen_ty_serializes_with_adjacent_type_value_tags() {
   assert!(yaml.contains("type: primitive"), "got: {yaml}");
   assert!(yaml.contains("kind: u64"), "got: {yaml}");
 }
+
+#[test]
+fn function_return_type_wire_name_matches_in_both_forms() {
+  use super::module::{frozen, unfrozen};
+  use super::ty::{PrimitiveKind, UnfrozenTy};
+  use std::collections::HashMap;
+
+  let unfrozen = unfrozen::Function {
+    parameters: HashMap::new(),
+    parameter_ordering: Vec::new(),
+    return_ty: UnfrozenTy::from(PrimitiveKind::Unit),
+  };
+  let frozen = frozen::Function {
+    parameters: HashMap::new(),
+    parameter_ordering: Vec::new(),
+    return_ty: FrozenTy::from(PrimitiveKind::Unit),
+  };
+  let unfrozen_yaml = serde_yaml::to_string(&unfrozen).unwrap();
+  let frozen_yaml = serde_yaml::to_string(&frozen).unwrap();
+  assert!(unfrozen_yaml.contains("returnType:"), "got: {unfrozen_yaml}");
+  assert!(frozen_yaml.contains("returnType:"), "got: {frozen_yaml}");
+}

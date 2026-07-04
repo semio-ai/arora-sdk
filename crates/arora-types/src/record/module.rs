@@ -147,6 +147,7 @@ pub mod frozen {
   pub struct Function {
     pub parameters: HashMap<Uuid, Parameter>,
     pub parameter_ordering: Vec<Uuid>,
+    #[serde(rename = "returnType")]
     pub return_ty: FrozenTy,
   }
 
