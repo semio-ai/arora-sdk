@@ -46,7 +46,7 @@ arora-engine = { path = "../arora-engine", version = "0.1", default-features = f
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "0.1" }
 arora-behavior = { path = "../arora-behavior", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.4" }
-anyhow = "*"
+anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }
 # The three interfaces the runtime loop wires around the shared state.
