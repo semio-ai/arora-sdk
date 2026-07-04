@@ -147,8 +147,6 @@ pub enum TypeDefinitionFrozen {
     Structure(StructureFrozen),
 }
 
-unsafe impl Send for TypeDefinitionFrozen {}
-
 impl TypeDefinitionFrozen {
     pub fn name(&self) -> String {
         match self {
@@ -247,8 +245,6 @@ pub enum RegistryError {
 }
 
 impl std::error::Error for RegistryError {}
-
-unsafe impl Send for RegistryError {}
 
 impl RegistryError {
     pub fn no_such_record(selector: &Selector) -> Self {
