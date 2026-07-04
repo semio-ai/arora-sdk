@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arora-module-core",
@@ -431,7 +431,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
 ]
