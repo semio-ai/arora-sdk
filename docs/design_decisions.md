@@ -310,3 +310,62 @@ with `--release`.
   module.
 - **Reworking the module loader / VFS / runtime semantics** — the
   cargo-first work was a build-system change only.
+
+## Records
+
+### Type records live in arora-types
+
+Type records (versioned declarations of structures, enumerations, modules and
+folders — see [`docs/records.md`](records.md)) live in `arora_types::record`
+rather than in a dedicated crate. The alternative — a separate `arora-record`
+crate holding the record data types and the freeze machinery — would keep
+`arora-types` smaller, and could still be extracted later without an API
+change. We keep them together because declaring a type and pinning which
+version of it you mean are one workflow: `arora-types` owns the factories that
+produce structures from type specifications that can be versioned, and
+splitting the specs from the versioning machinery would cut the factories off
+from their inputs. Every consumer of records (registry, module authoring, the
+behavior tree) already depends on `arora-types` anyway.
+
+### Two type vocabularies, two axes
+
+`arora-types` carries two encodings of "a type": `ty::{low,high}` and
+`record::ty`. They overlap in shape but encode different axes. `ty::{low,high}`
+is the **module-header** vocabulary — `high` uses string type ids as written in
+`module.yaml`, `low` uses resolved UUIDs; the split is *parse/resolve*, and
+these references carry no versions. `record::ty` is the **record** vocabulary —
+`UnfrozenTy` carries version requirements, `FrozenTy` carries pinned versions;
+the split is *version-pinning*, and the frozen form is a wire format. Collapsing
+them into one parameterized vocabulary is tempting and remains an open
+question; today the duplication is the price of keeping the module-header
+format and the record wire format independently stable.
+
+### The frozen serde shape is a wire contract
+
+The Semio store consumes and serves the frozen record forms, so their serde
+layout (adjacently tagged type expressions — `type`/`value` — camel-case
+primitive kinds, `IndexMap` field order) is an external contract, not an
+implementation detail. `arora-types` pins it with golden tests that
+deserialize and round-trip verbatim copies of store-accepted YAML records
+(`crates/arora-types/src/record/wire_tests.rs`). Change the serde attributes
+only with a store-side migration plan.
+
+### The remote registry is a separate, private crate
+
+`arora-registry` is local-only and publishable. The registries that talk to
+Semio's hosted store (`RemoteRegistry`, `RemoteCachedRegistry`) live in
+`arora-registry-remote`, a private crate, because they depend on
+`semio-client` — a private git dependency, and crates.io rejects git
+dependencies even behind an off-by-default feature. A feature flag inside
+`arora-registry` was the considered alternative; it reads nicer but is simply
+not publishable. Both crates implement the same registry traits, so consumers
+swap registries without code changes.
+
+### Generated sources are committed
+
+`arora-behavior-tree` ships its generated `src/arora_generated/` sources in
+git and in the published crate. Its build script still regenerates them, but
+the vfs `sync` is content-hash-guarded: an unchanged regeneration writes
+nothing. Committed generated code keeps `cargo publish`'s tarball
+verification happy (build scripts must not modify the source directory) and
+means builds from the crates.io checkout never write into it either.
