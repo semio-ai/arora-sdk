@@ -118,6 +118,9 @@ fn function_return_type_wire_name_matches_in_both_forms() {
   };
   let unfrozen_yaml = serde_yaml::to_string(&unfrozen).unwrap();
   let frozen_yaml = serde_yaml::to_string(&frozen).unwrap();
-  assert!(unfrozen_yaml.contains("returnType:"), "got: {unfrozen_yaml}");
+  assert!(
+    unfrozen_yaml.contains("returnType:"),
+    "got: {unfrozen_yaml}"
+  );
   assert!(frozen_yaml.contains("returnType:"), "got: {frozen_yaml}");
 }
