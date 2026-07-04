@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "The Behavior abstraction the Arora runtime ticks: a behavior tree, a node graph, or any interpreter, against the shared data store."
 license = "MIT"
+readme = "readme.md"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.5" }
