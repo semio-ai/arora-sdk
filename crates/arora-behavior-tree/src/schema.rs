@@ -27,7 +27,10 @@ pub struct Node {
     pub function: Uuid,
 
     /// Args to apply to the function call parameters.
-    #[serde(default)]
+    ///
+    /// Expressions keep their singleton-map YAML form (`value: ...`), the
+    /// stable on-disk representation of tree files.
+    #[serde(default, with = "serde_yaml::with::singleton_map_recursive")]
     pub arguments: HashMap<Uuid, Expression>,
 
     /// Child nodes, if any.

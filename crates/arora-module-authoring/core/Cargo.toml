@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Module analysis and resolution for Arora module authoring."
 license = "MIT"
@@ -17,10 +17,10 @@ derive_more = { version = "2", features = ["display"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt", "macros", "io-util"] }
 uuid = "1"
 
 [dev-dependencies]
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }

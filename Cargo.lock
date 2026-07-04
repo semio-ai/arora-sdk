@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -218,7 +218,7 @@ dependencies = [
  "quick-xml",
  "semver",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -231,7 +231,7 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -242,7 +242,7 @@ dependencies = [
  "arora-behavior-tree-types",
  "arora-registry",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -259,14 +259,14 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arora-types",
  "bytes",
  "cbindgen 0.20.0",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -286,7 +286,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -312,7 +312,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tempfile",
  "test-rust-wasm",
  "uuid",
@@ -342,7 +342,7 @@ dependencies = [
  "arora-cli",
  "arora-engine",
  "arora-types",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "test-behavior-tree-nodes",
  "test-cpp",
  "test-cpp-2",
@@ -367,7 +367,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arora-registry",
  "arora-types",
@@ -386,7 +386,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -406,14 +406,14 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arora-module-rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arora-module-core",
@@ -431,7 +431,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "arora-registry"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -458,7 +458,7 @@ dependencies = [
  "derive_more 2.1.1",
  "semver",
  "serde",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -479,7 +479,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -537,7 +537,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -575,7 +575,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "test-rust-wasm",
  "uuid",
  "wasm-bindgen",
@@ -3699,12 +3699,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "linked-hash-map"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4367,7 +4361,7 @@ dependencies = [
  "derive_more 2.1.1",
  "lazy_static",
  "rand 0.10.1",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "soloud",
  "test-behavior-tree-nodes",
  "tokio",
@@ -5570,18 +5564,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.8.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
-dependencies = [
- "indexmap 1.9.3",
- "ryu",
- "serde",
- "yaml-rust",
 ]
 
 [[package]]
@@ -8055,15 +8037,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
-name = "yaml-rust"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
-dependencies = [
- "linked-hash-map",
-]
-
-[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8196,7 +8169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tracing",
  "uhlc",
  "validated_struct",

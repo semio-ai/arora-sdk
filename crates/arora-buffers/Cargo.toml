@@ -1,6 +1,6 @@
 [package]
 name = "arora-buffers"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Binary read/write buffers and type tags for the Arora module value ABI."
 license = "MIT"
@@ -15,11 +15,11 @@ arora-types = { path = "../arora-types", version = "1.4" }
 bytes = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 
 [build-dependencies]
 cbindgen = "0.20"
 
 [dev-dependencies]
 anyhow = "1"
-serde_yaml = "0.8"
+serde_yaml = "0.9"
