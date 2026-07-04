@@ -53,7 +53,7 @@ cbindgen = "0.29"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # Browser-host integration test (tests/browser.rs), wasm32-only. serde_yaml +

@@ -216,7 +216,11 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     }
 
     if let Some(call_yaml) = &args.call {
-        let call: Call = serde_yaml::from_str(call_yaml)?;
+        // Values keep their singleton-map YAML form (`bool: true`, `i32: 113`)
+        // — the stable shape of the --call format.
+        let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
+            serde_yaml::Deserializer::from_str(call_yaml),
+        )?;
         let function_id = call.id;
         let module_id = if let Some(module_id) = &call.module_id {
             module_id
@@ -236,7 +240,11 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
         for _i in 0..nof_iterations {
             let result =
                 tokio::task::block_in_place(|| engine.arora_call(module_id, call.clone()))?;
-            println!("{}", serde_yaml::to_string(&result)?);
+            let mut out = Vec::new();
+            let mut serializer = serde_yaml::Serializer::new(&mut out);
+            serde_yaml::with::singleton_map_recursive::serialize(&result, &mut serializer)?;
+            drop(serializer);
+            println!("{}", String::from_utf8(out)?);
         }
 
         if args.benchmark {

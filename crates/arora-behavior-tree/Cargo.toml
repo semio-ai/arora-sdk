@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "MIT"
@@ -18,7 +18,7 @@ quick-xml = "0.40"
 serde = { version = "1", features = ["derive"] }
 # 0.9 switches the YAML enum representation from single-key maps to `!Tag`,
 # which existing tree/module YAML files don't use. Stay on 0.8.
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "2"
 

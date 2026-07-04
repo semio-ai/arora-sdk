@@ -309,7 +309,8 @@ mod tests {
 
     #[test]
     pub fn u8_yaml() -> Result<()> {
-        if let Value::U8(value) = serde_yaml::from_str(U8_YAML)? {
+        let de = serde_yaml::Deserializer::from_str(U8_YAML);
+        if let Value::U8(value) = serde_yaml::with::singleton_map_recursive::deserialize(de)? {
             assert_eq!(42, value);
         } else {
             bail!("parsed value was not an u8");
@@ -322,7 +323,9 @@ mod tests {
     // not intended to be std::f32::consts::PI / E.
     #[allow(clippy::approx_constant)]
     pub fn array_f32_yaml() -> Result<()> {
-        if let Value::ArrayF32(values) = serde_yaml::from_str(ARRAY_F32_YAML)? {
+        let de = serde_yaml::Deserializer::from_str(ARRAY_F32_YAML);
+        if let Value::ArrayF32(values) = serde_yaml::with::singleton_map_recursive::deserialize(de)?
+        {
             assert_eq!(vec![3.14159, 2.718, 1.618], values.to_vec());
         } else {
             bail!("parsed value was not an array of f32");

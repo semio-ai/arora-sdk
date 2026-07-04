@@ -14,5 +14,5 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 uuid = "1"

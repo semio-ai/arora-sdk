@@ -104,7 +104,11 @@ mod tests {
 
   #[test]
   pub fn parse_call_test() {
-    let call: Call = serde_yaml::from_str(CALL_TEST).unwrap();
+    // The call format keeps values in their singleton-map YAML form.
+    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
+      serde_yaml::Deserializer::from_str(CALL_TEST),
+    )
+    .unwrap();
     assert_eq!(
       call.id,
       Uuid::from_str("07f5740c-ba4a-45af-8ec5-bedde5737e99").unwrap()
@@ -126,7 +130,10 @@ mod tests {
 
   #[test]
   pub fn parse_call_test_2() {
-    let call: Call = serde_yaml::from_str(CALL_TEST_2).unwrap();
+    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
+      serde_yaml::Deserializer::from_str(CALL_TEST_2),
+    )
+    .unwrap();
     assert_eq!(
       call.id,
       Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63").unwrap()
