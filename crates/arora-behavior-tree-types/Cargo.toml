@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.6" }
-lazy_static = "*"
+lazy_static = "1"
 semver = "1"
 uuid = "1"
 

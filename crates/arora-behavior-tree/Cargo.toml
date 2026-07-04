@@ -13,7 +13,7 @@ arora-buffers = { path = "../arora-buffers", version = "0.1" }
 arora-behavior = { path = "../arora-behavior", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.6" }
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "0.1" }
-lazy_static = "*"
+lazy_static = "1"
 quick-xml = "0.40"
 serde = { version = "1", features = ["derive"] }
 # 0.9 switches the YAML enum representation from single-key maps to `!Tag`,
@@ -23,13 +23,13 @@ uuid = { version = "1", features = ["serde", "v4"] }
 derive_more = "2"
 
 [dev-dependencies]
-anyhow = "*"
+anyhow = "1"
 # Only for tests: exercise a `{var}` cell resolved to a real store Slot. The
 # library itself stays storage-agnostic (it depends only on the `Slot` trait).
 arora-simple-data-store = { path = "../arora-simple-data-store" }
 
 [build-dependencies]
-anyhow = "*"
+anyhow = "1"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "0.1" }
 arora-registry = { path = "../arora-registry", version = "0.1" }
 arora-module-rust = { path = "../arora-module-authoring/rust", version = "0.1" }

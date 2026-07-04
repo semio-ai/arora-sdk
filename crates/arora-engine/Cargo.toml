@@ -19,13 +19,13 @@ wasmtime-host = ["dep:wasmtime", "dep:wasmtime-wasi"]
 native-host = ["dep:libloading", "dep:tempfile"]
 
 [dependencies]
-anyhow = "*"
+anyhow = "1"
 arora-buffers = { path = "../arora-buffers", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.4" }
 async-trait = "0.1"
 bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
-lazy_static = "*"
+lazy_static = "1"
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
