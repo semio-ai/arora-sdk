@@ -15,5 +15,5 @@ for offline runs; Semio Studio's Zenoh connector and Vizij's WebSocket server
 are real ones.
 
 Part of the device runtime interfaces, with
-[`arora-hal`](https://crates.io/crates/arora-hal) and
-[`arora-behavior`](https://crates.io/crates/arora-behavior).
+[`arora-hal`](https://docs.rs/arora-hal) and
+[`arora-behavior`](https://docs.rs/arora-behavior).

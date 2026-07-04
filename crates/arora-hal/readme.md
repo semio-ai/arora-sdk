@@ -13,5 +13,5 @@ state changes back — behaviors never talk to hardware directly. `FakeHal` is a
 in-memory implementation for tests and hardware-less runs.
 
 Part of the device runtime interfaces, with
-[`arora-bridge`](https://crates.io/crates/arora-bridge) and
-[`arora-behavior`](https://crates.io/crates/arora-behavior).
+[`arora-bridge`](https://docs.rs/arora-bridge) and
+[`arora-behavior`](https://docs.rs/arora-behavior).
