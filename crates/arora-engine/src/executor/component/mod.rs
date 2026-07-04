@@ -2,7 +2,7 @@
 //!
 //! Hosts guest modules built as WebAssembly Components (e.g. Rust's
 //! `wasm32-wasip2` target) against the `arora:module` WIT world defined in
-//! `wit/arora-module.wit`. Unlike the core-module executor in
+//! `crates/arora-engine/wit/arora-module.wit`. Unlike the core-module executor in
 //! [`super::wasm`], data crosses the boundary through the canonical ABI
 //! (`list<u8>`), so there is no guest allocator to drive and no raw linear
 //! memory to read.
@@ -25,7 +25,7 @@ use crate::module::{DispatchError, Module as AroraModule};
 
 bindgen!({
     world: "module",
-    path: "../../wit",
+    path: "wit",
 });
 
 #[derive(Debug, Error, Display, From)]

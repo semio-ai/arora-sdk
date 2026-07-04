@@ -1,12 +1,12 @@
 //! Component-model test guest.
 //!
-//! Implements the `arora:module/module` world from `wit/arora-module.wit`:
+//! Implements the `arora:module/module` world from `crates/arora-engine/wit/arora-module.wit`:
 //! a single `dispatch` export routing by function id. Used by the
 //! integration tests to exercise the `ComponentExecutor`.
 
 wit_bindgen::generate!({
     world: "module",
-    path: "../../wit",
+    path: "../../crates/arora-engine/wit",
     additional_derives: [PartialEq],
 });
 
