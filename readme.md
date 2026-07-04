@@ -1,10 +1,27 @@
 # Arora
 
-**Arora is a runtime and toolkit for defining typed functions as portable modules and calling them across languages and contexts** — natively, in WebAssembly, or in the browser.
+**Arora is a runtime for robotic devices — live control, data processing and behavior execution on one deterministic loop** — built on a toolkit for defining typed functions as portable modules and calling them across languages and contexts: natively, in WebAssembly, or in the browser.
 
-Write a module in Rust or C++, declare its typed interface once, and any Arora host can load it and call its functions. Orchestrate those calls however you like: by hand, from a CLI, from the web, or as a behavior tree.
+Write a module in Rust or C++, declare its typed interface once, and any Arora host can load it and call its functions. Orchestrate those calls however you like: by hand, from a CLI, from the web, or as a behavior tree ticking on a robot.
 
-> **In one breath:** [`arora-types`](#the-map) is the shared type system, [`arora-engine`](#the-map) loads and runs modules, [`arora-behavior-tree`](#the-map) orchestrates calls as trees, and [`arora`](#the-map) is the batteries-included wrapper. → [Getting started](#getting-started).
+> **In one breath:** [`arora-types`](#the-map) is the shared type system, [`arora-engine`](#the-map) loads and runs modules, [`arora-behavior-tree`](#the-map) orchestrates calls as trees, and [`arora`](#the-map) runs it all as a live device. → [Arora on your device](#arora-on-your-device) · [Getting started](#getting-started).
+
+## Arora on your device
+
+A device running Arora is a few parts around one shared state:
+
+- a **HAL** ([`arora-hal`](crates/arora-hal/readme.md)) exposes your hardware — sensors in, actuators out — as typed values on a shared blackboard;
+- **behaviors** ([`arora-behavior`](crates/arora-behavior/readme.md)) execute against that state on every step: behavior trees out of the box, or any interpreter implementing the trait (a node graph, a script host);
+- a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (the opt-in `studio-bridge` feature registers the device) or to any editor speaking the protocol;
+- **modules** give behaviors typed functions to call, in wasm or native code, with their types declared as [records](docs/records.md).
+
+The runtime steps these as one deterministic loop — drain the bridge and the HAL into the state, tick the behaviors, flush the changes back out — so there is a single owner of the state and no locking in your control path. Bringing a new device to Arora means writing a HAL for its hardware and picking a bridge:
+
+```rust
+arora::launch(my_hal, my_bridge, SimpleDataStore::new())?;
+```
+
+A device can boot with no behavior at all and be driven entirely live: behaviors arrive over the bridge, tick against the blackboard, and the device answers with its state.
 
 ## The map
 
@@ -15,6 +32,9 @@ Arora is a single Cargo workspace of focused crates, layered from a neutral core
 | **`arora-types`** | The basic typing system shared by everything in Arora: module headers, type/record references, values, and the `CallBridge` calling interface. Depend on this alone if you only need the vocabulary. |
 | **`arora-module-authoring`** | Produce and import modules — the codegen core, the per-language supports (Rust, C++, …), and the authoring CLI. (Several crates today; they belong together.) |
 | **`arora-registry`** | Resolve modules, their versions and dependencies — locally, or, optionally, against a remote store. |
+| **`arora-hal`** | The hardware abstraction: a device's sensors and actuators as typed state (+ its model for rendering). |
+| **`arora-bridge`** | The live-control link: state reads/writes, function calls and update streams over a remote connection. |
+| **`arora-behavior`** | The `Behavior` trait — what the runtime ticks each step: a behavior tree, a node graph, any interpreter. |
 | **`arora-engine`** | The generic runtime: load modules and call arbitrary typed functions in multiple execution contexts (native via `wasmtime`, in-browser via the platform `WebAssembly`). Implements the `CallBridge`. |
 | **`arora-behavior-tree`** | A standalone crate that uses the `CallBridge` (typically implemented by the engine) to call any function from any module — orchestrated as a behavior tree. Usable **without** the authoring crates; the module-backed node support is feature-gated (opt-out). |
 | **`arora`** | The opinionated wrapper: the engine pre-wired with behavior trees as the entry point, backed by Semio's services. Start here if you want "Arora, batteries included". |
@@ -27,6 +47,7 @@ Arora is a single Cargo workspace of focused crates, layered from a neutral core
 arora-types ───────────────────── the vocabulary everything shares
    ├─ arora-module-authoring ───── build & import modules
    ├─ arora-registry ──────────── resolve modules + dependencies
+   ├─ arora-hal / arora-bridge / arora-behavior ── the device runtime interfaces
    └─ arora-engine ────────────── load & run modules  (provides the CallBridge)
          ├─ arora-behavior-tree ── orchestrate calls as trees (consumes the CallBridge)
          └─ arora ──────────────── opinionated: engine + behavior tree + Semio backend
