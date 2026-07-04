@@ -57,6 +57,7 @@ Each crate carries its own `readme.md`. Going deeper:
 
 - [`docs/overview.md`](docs/overview.md) — engine, modules, records, behavior trees, full layout
 - [`docs/building.md`](docs/building.md) — prerequisites, build, testing, browser target, flags
+- [`docs/records.md`](docs/records.md) — type records: versioned type declarations, freezing, record files
 - [`docs/architecture.md`](docs/architecture.md) — top-down architecture tour
 - [`docs/design_decisions.md`](docs/design_decisions.md) — the *why* behind the build setup
 - [`docs/dispatch.md`](docs/dispatch.md) — how cross-module calls (the `CallBridge` / `arora_dispatch`) work

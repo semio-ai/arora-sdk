@@ -180,17 +180,17 @@ Demo + headless-Firefox test under `crates/arora-web/www/` and
 
 ## Records and the registry
 
-The engine identifies types and functions by UUID. Records of those types
-come from Semio's broader ecosystem:
+The engine identifies types and functions by UUID. Those UUIDs name **type
+records** — versioned declarations of structures, enumerations and modules,
+defined in [`arora_types::record`](https://docs.rs/arora-types/latest/arora_types/record/)
+and explained in [`docs/records.md`](records.md).
 
-- [`semio-record`](https://github.com/semio-ai/semio-record) — data structures.
-- [`semio-store-rpc`](https://github.com/semio-ai/semio-store-rpc),
-  [`semio-client`](https://github.com/semio-ai/semio-client) — RPC to a
-  [`semio-db`](https://github.com/semio-ai/semio-db) instance.
-
-`arora-registry` resolves records locally (from files) or remotely (via
-semio-client). The registry is host-only; the browser engine accepts
-already-resolved headers from the JS layer.
+`arora-registry` stores, freezes and resolves records locally (in-process or
+from YAML record files). The registries backed by Semio's hosted store live in
+the private `arora-registry-remote` crate
+([why](design_decisions.md#the-remote-registry-is-a-separate-private-crate)).
+The registry is host-only; the browser engine accepts already-resolved headers
+from the JS layer.
 
 ## Behavior trees
 

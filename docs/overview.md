@@ -1,9 +1,5 @@
 # Arora — Detailed Overview
 
-> Preserved from the original root readme before the repo was consolidated into
-> the single `arora-sdk` workspace. Some crate names/paths predate the
-> consolidation and will be refreshed as the reorg lands; the concepts hold.
-
 Semio Arora is a runtime dedicated to Semio's robotics software.
 
 For a top-down tour of the codebase see [`docs/architecture.md`](architecture.md);
@@ -28,11 +24,9 @@ from the other modules (named `arora_dispatch`),
 or anonymous functions registered on-the-fly
 (named `arora_dispatch_indirect`).
 
-Note that the module description are described locally using the
-[Arora Types crate](https://github.com/semio-ai/arora-types),
-differing slightly from the `Module`, `Enumeration` or `Structure` data structures
-provided in [Semio Record](https://github.com/semio-ai/semio-record).
-See [modules](#modules) and [records](#semio-records)
+Module descriptions and the record forms they resolve to are both defined in
+[`arora-types`](https://docs.rs/arora-types/latest/arora_types/).
+See [modules](#modules) and [records](#type-records).
 
 The main command-line tool is [`arora-cli`](../crates/arora-cli/readme.md).
 It is used to start an engine, load modules and run functions.
@@ -74,29 +68,19 @@ The first field must be of the same `id` as the function
 and contains the return value.
 The remaining fields correspond to parameters that the call has mutated.
 
-## Semio Records
+## Type records
 
-This project relies on a notion of records of type
-`Enumeration`, `Structure` or `Module`.
-They are provided by the following Semio projects:
+Types and modules are declared as **type records** — versioned records of
+`Enumeration`, `Structure` or `Module` defined in
+[`arora_types::record`](https://docs.rs/arora-types/latest/arora_types/record/)
+and served through a [registry](../crates/arora-registry/readme.md).
+See [`docs/records.md`](records.md) for the model (unfrozen/frozen, freezing,
+record files).
 
-- [Semio Record](https://github.com/semio-ai/semio-record)
-- [Semio Store RPC](https://github.com/semio-ai/semio-store-rpc)
-- [Semio Client](https://github.com/semio-ai/semio-client)
-
-They provide the interface to connect to a
-[Semio Database](https://github.com/semio-ai/semio-db),
-which collects the records of the assets produced by Semio users.
-
-The database does not need to be specified and running at build time.
-At runtime, you can specify it by providing a
-[Semio Client Configuration](https://github.com/semio-ai/semio-client/blob/master/src/authentication.rs),
-with the command-line option `--config`.
-A config file is typically produced by [Semio Client (`semio-cli`)](https://github.com/semio-ai/semio-client),
-and can be reused in this context.
-
-The types provided by [Semio Records](https://github.com/semio-ai/semio-record),
-are usually made available through a [registry](../crates/arora-registry/readme.md).
+Records of the assets produced by Semio users are collected by Semio's hosted
+store; connecting to it is the job of the private `arora-registry-remote`
+crate and the opinionated `arora`/`arora-cli` layer (runtime `--config`,
+produced by Semio Client). No store is needed at build time.
 They can be saved into files that can be included by command-line tools.
 
 ## Behavior Trees
@@ -136,8 +120,7 @@ for other uses.
   the library of the engine.
 
 - [Arora Registry](../crates/arora-registry/readme.md),
-  to handle local and remote registry of
-  [Semio Records](https://github.com/semio-ai/semio-record).
+  the local registry of [type records](records.md).
 
 - [Arora CLI](../crates/arora-cli/readme.md),
   the CLI tool to load modules and run functions.
