@@ -1,32 +1,42 @@
-//! Arora WebSocket Protocol
+//! The open local bridge for Arora: a WebSocket server that bridges the Arora
+//! API, implementing [`arora_bridge::Bridge`] (see [`bridge::WsBridge`]), with
+//! type-safe message definitions, a method registry, and a ready-to-use server.
 //!
-//! The open local bridge for Arora: a WebSocket server implementing
-//! [`arora_bridge::Bridge`] (see [`bridge::WsBridge`]), with type-safe message
-//! definitions, a method registry, and a ready-to-use server.
+//! Messages speak the Arora data-layer vocabulary: the store is a shared,
+//! path-keyed blackboard, so clients **write** and **read** [`Value`]s at
+//! **keys** (hierarchical paths, e.g. `face/mouth`), list the available keys,
+//! and invoke registered RPC methods. The server binds the loopback interface
+//! by default: the link is unauthenticated and meant for editors and apps on
+//! trusted local links.
 //!
 //! # Features
 //!
 //! - **Message Types**: Type-safe [`Incoming`] and [`Outgoing`] message enums
-//! - **Registry**: Store slots and methods with [`Registry`]
-//! - **Server**: Full WebSocket server with [`AroraWSServer`] (requires `server` feature)
-//! - **Connection Trait**: Implements [`AroraConnection`] for protocol-agnostic usage
+//! - **Registry**: Advertise keys and methods with [`Registry`]
+//! - **Server**: Full WebSocket server with [`AroraWSServer`]
+//! - **Bridge**: [`bridge::WsBridge`] drives the server as an Arora [`Bridge`](arora_bridge::Bridge)
 //!
-//! # Protocol Overview
+//! # Wire Format
 //!
 //! Messages are JSON-encoded with a `type` field discriminator:
 //!
 //! ```json
 //! // Client -> Server
-//! {"type": "set_slot_values", "values": {"face/mouth": {"f64": 0.5}}}
-//! {"type": "list_slots", "path": "face"}
+//! {"type": "write_values", "values": {"face/mouth": {"f64": 0.5}}}
+//! {"type": "read_values", "keys": ["face/mouth"]}
+//! {"type": "list_keys", "path": "face"}
 //! {"type": "list_methods"}
 //! {"type": "invoke", "method": "reset", "request_id": "req-1"}
 //!
 //! // Server -> Client
-//! {"type": "set_slot_values_resp", "success": true}
-//! {"type": "list_slots_resp", "slots": [...]}
+//! {"type": "write_values_resp", "success": true}
+//! {"type": "read_values_resp", "values": {"face/mouth": {"f64": 0.5}}}
+//! {"type": "list_keys_resp", "keys": [...]}
 //! {"type": "list_methods_resp", "methods": [...]}
 //! {"type": "invoke_resp", "success": true, "request_id": "req-1"}
+//!
+//! // Server -> Client, unsolicited: the live state feed
+//! {"type": "values_changed", "values": {"face/mouth": {"f64": 0.5}}}
 //! ```
 //!
 //! # Server Example
@@ -50,9 +60,9 @@
 //!         |_args| InvokeResult::ok(),
 //!     ).await;
 //!
-//!     // Set update handler
-//!     server.set_set_slot_values_handler(|values| {
-//!         println!("Received {} updates", values.len());
+//!     // Handle writes from clients
+//!     server.set_write_values_handler(|values| {
+//!         println!("Received {} writes", values.len());
 //!         Ok(())
 //!     }).await;
 //!
@@ -65,20 +75,21 @@
 /// The WS server as an Arora `Bridge`.
 pub mod bridge;
 pub mod handlers;
+mod key;
 mod messages;
 mod method;
 mod registry;
 mod server;
-mod slot;
 
 pub use handlers::{
-    GetSlotValuesHandler, MethodHandler, OnClientConnectedHandler, SetSlotValuesResult,
+    MethodHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
+    WriteValuesResult,
 };
+pub use key::KeyInfo;
 pub use messages::{Incoming, Outgoing};
 pub use method::{InvokeResult, MethodInfo, MethodParam};
 pub use registry::Registry;
-pub use server::{process_message, AroraWSServer, ServerConfig, SetSlotValuesHandler};
-pub use slot::SlotInfo;
+pub use server::{process_message, AroraWSServer, ServerConfig};
 pub use tokio_util::sync::CancellationToken;
 
 pub use arora_types::keyvalue::{KeyValue, KeyValueField};

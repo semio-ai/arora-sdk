@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width,initial-scale=1.0,user-scalable=no"
     />
-    <title>Vizij Control</title>
+    <title>Arora Control</title>
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237c4dff'/></svg>"
@@ -286,7 +286,7 @@
   <body>
     <header>
       <div class="status-row">
-        <div class="brand">Vizij Control</div>
+        <div class="brand">Arora Control</div>
         <span class="dot off" id="dot"></span>
         <span id="stxt">Disconnected</span>
       </div>
@@ -378,18 +378,18 @@
         return Number.isFinite(extractNumeric(obj, Number.NaN));
       }
 
-      function metadataScore(slot) {
+      function metadataScore(key) {
         let score = 0;
-        if (hasMeaningfulNumber(slot?.min)) {
+        if (hasMeaningfulNumber(key?.min)) {
           score += 4;
         }
-        if (hasMeaningfulNumber(slot?.max)) {
+        if (hasMeaningfulNumber(key?.max)) {
           score += 4;
         }
-        if (slot?.default_value !== undefined) {
+        if (key?.default_value !== undefined) {
           score += 3;
         }
-        if (typeof slot?.path === "string" && slot.path.trim().length) {
+        if (typeof key?.path === "string" && key.path.trim().length) {
           score += 1;
         }
         return score;
@@ -440,16 +440,16 @@
         return clamped;
       }
 
-      function shouldReplaceCanonical(existingSlot, newSlot) {
-        const existingScore = metadataScore(existingSlot);
-        const newScore = metadataScore(newSlot);
+      function shouldReplaceCanonical(existingKey, newKey) {
+        const existingScore = metadataScore(existingKey);
+        const newScore = metadataScore(newKey);
         if (newScore !== existingScore) {
           return newScore > existingScore;
         }
-        if (newSlot?.path && existingSlot?.path) {
+        if (newKey?.path && existingKey?.path) {
           return (
-            normalizePath(newSlot.path).length <
-            normalizePath(existingSlot.path).length
+            normalizePath(newKey.path).length <
+            normalizePath(existingKey.path).length
           );
         }
         return false;
@@ -471,8 +471,8 @@
         return span / 2000;
       }
 
-      function deriveControls(slots) {
-        const normalized = (slots || []).filter((s) => {
+      function deriveControls(keys) {
+        const normalized = (keys || []).filter((s) => {
           const kind = s && s.kind ? String(s.kind).toLowerCase() : "";
           return kind === "input" && typeof s.path === "string";
         });
@@ -503,10 +503,10 @@
             max,
             defaultValue: fallback,
             currentValue: fallback,
-            slot: s,
+            key: s,
           };
           const existing = byCanonicalPath.get(path);
-          if (!existing || shouldReplaceCanonical(existing.slot, s)) {
+          if (!existing || shouldReplaceCanonical(existing.key, s)) {
             byCanonicalPath.set(path, control);
           }
         }
@@ -744,7 +744,7 @@
           if (!keys.length) {
             return;
           }
-          ws.send(JSON.stringify({ type: "set_slot_values", values: payload }));
+          ws.send(JSON.stringify({ type: "write_values", values: payload }));
           pending = {};
         }, 25);
       }
@@ -805,8 +805,8 @@
         });
         ws.send(
           JSON.stringify({
-            type: "get_slot_values",
-            slots: controls.map((c) => c.path),
+            type: "read_values",
+            keys: controls.map((c) => c.path),
           }),
         );
       }
@@ -816,7 +816,7 @@
           return;
         }
         const paths = controls.map((c) => c.path);
-        ws.send(JSON.stringify({ type: "get_slot_values", slots: paths }));
+        ws.send(JSON.stringify({ type: "read_values", keys: paths }));
       }
 
       function toggleConnection() {
@@ -850,7 +850,7 @@
           cbtn.disabled = false;
           rbtn.disabled = false;
           searchInput.value = "";
-          ws.send(JSON.stringify({ type: "list_slots" }));
+          ws.send(JSON.stringify({ type: "list_keys" }));
           requestValuesForCurrentControls();
         };
         ws.onmessage = (event) => {
@@ -858,14 +858,17 @@
           try {
             message = JSON.parse(event.data);
           } catch (error) {
-            console.error("[vizij] Failed to parse websocket message:", error);
+            console.error("[arora] Failed to parse websocket message:", error);
             return;
           }
-          if (message.type === "list_slots_resp") {
-            setControls(deriveControls(message.slots || []));
+          if (message.type === "list_keys_resp") {
+            setControls(deriveControls(message.keys || []));
             rebuildUI();
             requestValuesForCurrentControls();
-          } else if (message.type === "get_slot_values_resp") {
+          } else if (
+            message.type === "read_values_resp" ||
+            message.type === "values_changed"
+          ) {
             const values = message.values || {};
             Object.entries(values).forEach(([path, value]) => {
               const numeric = extractNumeric(value);
@@ -891,7 +894,7 @@
           rebuildUI();
         };
         ws.onerror = (err) => {
-          console.error("[vizij] WebSocket error:", err);
+          console.error("[arora] WebSocket error:", err);
           status("off", "Connection error");
         };
       }
