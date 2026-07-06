@@ -82,6 +82,55 @@ graph TB
     mods -->|"runtime contract: arora-types Module + Call"| eng
 ```
 
+## Runtime: store, HAL, bridge, behavior
+
+The `arora` crate wraps the engine in a device runtime built around one
+blackboard with four seams. The store is the single shared state; everything
+else either feeds it or reads it, serialized as the steps of one loop
+(`arora::runtime::Runtime::step`): drain HAL and bridge updates into the
+store, tick the behavior against it, flush the merged changes back out to the
+remote and the hardware. `step()` is synchronous and non-blocking; the async
+bridge/HAL I/O lives in a separate futures-only pump, which is what lets the
+same loop run on a native thread or in a browser Web Worker.
+
+```mermaid
+graph LR
+    hw["Device hardware\n(sensors / actuators)"]
+    studio["Remote\n(Semio Studio)"]
+
+    subgraph runtime["arora::runtime::Runtime — one device"]
+        hal["HAL\n(arora-hal)"]
+        store[("DataStore\n(arora-types · arora-simple-data-store)")]
+        bridge["Bridge\n(arora-bridge)"]
+        behavior["Behavior\n(arora-behavior: behavior tree,\nnode graph, …) + engine calls"]
+    end
+
+    hw <--> hal
+    hal -->|"1 · sensor updates"| store
+    bridge -->|"1 · commands / device info"| store
+    behavior <-->|"2 · tick: read / write"| store
+    store -->|"3 · flush merged changes"| bridge
+    store -->|"3 · flush merged changes"| hal
+    bridge <--> studio
+```
+
+Each seam is a trait, so embedders swap implementations without touching the
+loop:
+
+- **Store** — `arora_types::data::DataStore`; `SimpleDataStore` is the
+  reference implementation. Clones share storage, and `NamespacedStore` gives
+  a device-relative view into a shared backend: this is how one process (e.g.
+  Semio Studio) spawns many runtimes over one mutualized blackboard, each
+  under its own `<device>/` prefix (`Runtime::with_io_in`).
+- **HAL** — `arora_hal::Hal`, the device boundary. A robot HAL talks to
+  hardware; a simulator or a renderer (e.g. a Vizij rig-instrumented face) is
+  just another implementation.
+- **Bridge** — `arora_bridge::Bridge`, the remote boundary. The studio-bridge
+  Zenoh connector implements it for real devices; an in-process loopback can
+  implement it for embedded runtimes.
+- **Behavior** — `arora_behavior::Behavior`, the "what to do each step". The
+  behavior tree is one interpreter; a Vizij node graph is another.
+
 ## Engine
 
 The engine library (`crates/arora`) is dual-target:
