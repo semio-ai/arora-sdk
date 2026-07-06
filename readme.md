@@ -4,6 +4,8 @@
 
 Write a module in Rust or C++, declare its typed interface once, and any Arora host can load it and call its functions. Orchestrate those calls however you like: by hand, from a CLI, from the web, or as a behavior tree ticking on a robot.
 
+Arora resembles robotics runtimes like ROS 2 and [Copper](https://github.com/copper-project/copper-rs) ([study](docs/copper-study/copper_study.md)), but builds on top of them rather than replacing them — ROS 2, for instance, is supported as a HAL.
+
 > **In one breath:** [`arora-types`](#the-map) is the shared type system, [`arora-engine`](#the-map) loads and runs modules, [`arora-behavior-tree`](#the-map) orchestrates calls as trees, and [`arora`](#the-map) runs it all as a live device. → [Arora on your device](#arora-on-your-device) · [Getting started](#getting-started).
 
 ## Arora on your device
