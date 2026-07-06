@@ -1,0 +1,24 @@
+{
+  "topics": [
+    {
+      "name": "/joint_states",
+      "message_type": "sensor_msgs/JointState",
+      "direction": "Subscribe",
+      "mapping": {
+        "JointState": {
+          "conversion": "Standard"
+        }
+      }
+    },
+    {
+      "name": "/forward_position_controller/commands",
+      "message_type": "std_msgs/Float64MultiArray",
+      "direction": "Publish",
+      "mapping": {
+        "JointState": {
+          "conversion": "Standard"
+        }
+      }
+    }
+  ]
+}
