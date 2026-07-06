@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "arora-websocket"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arora-bridge",
  "arora-types",

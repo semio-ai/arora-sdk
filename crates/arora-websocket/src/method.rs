@@ -1,4 +1,4 @@
-//! RPC method metadata types for the Arora protocol.
+//! RPC method metadata types for the WebSocket messages.
 
 use arora_types::value::{Type, Value};
 use serde::{Deserialize, Serialize};

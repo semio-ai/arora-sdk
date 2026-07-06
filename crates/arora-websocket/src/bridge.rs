@@ -1,17 +1,16 @@
-//! [`WsBridge`]: the Vizij WebSocket server driven as an Arora
-//! [`Bridge`](arora_bridge::Bridge) (Phase 5C).
+//! [`WsBridge`]: the WebSocket server driven as an Arora
+//! [`Bridge`](arora_bridge::Bridge).
 //!
-//! The WS server is a parallel reimplementation of `arora-bridge`. This adapter
-//! folds it onto the real thing: each incoming protocol message becomes a
-//! [`BridgeCommand`] on [`commands`](Bridge::commands), and the consumer — the
-//! Arora runtime — reacts to the ones it cares about (value-updates apply to the
-//! store, reads reply). Runtime state flows back out through
-//! [`send_data`](Bridge::send_data) as a `slot_values_changed` push.
+//! Each incoming message becomes a [`BridgeCommand`] on
+//! [`commands`](Bridge::commands), and the consumer — the Arora runtime —
+//! reacts to the ones it cares about (writes apply to the store, reads reply).
+//! Runtime state flows back out through [`send_data`](Bridge::send_data) as a
+//! `values_changed` push.
 //!
-//! The server's existing handler API is kept and *built on top of* the command
-//! stream: the handlers registered here simply translate a message into a
-//! command. After Phase 5B the value vocabulary is `arora_types::Value`, so
-//! the translation is structural, not a conversion.
+//! The server's handler API is kept and *built on top of* the command stream:
+//! the handlers registered here simply translate a message into a command. The
+//! value vocabulary is `arora_types::Value`, so the translation is structural,
+//! not a conversion.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -28,9 +27,9 @@ use futures::channel::{mpsc, oneshot};
 use crate::messages::Outgoing;
 use crate::server::AroraWSServer;
 
-/// The Vizij WebSocket server as an Arora [`Bridge`].
+/// The WebSocket server as an Arora [`Bridge`].
 ///
-/// Note: the server's `validate_paths` (on by default) checks incoming slot
+/// Note: the server's `validate_paths` (on by default) checks written key
 /// paths against its `Registry`, which this bridge does not populate — either
 /// mirror the runtime's keys into the registry or disable `validate_paths`
 /// when serving purely through the bridge.
@@ -46,11 +45,11 @@ impl WsBridge {
     pub async fn new(server: Arc<AroraWSServer>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded::<BridgeCommand>();
 
-        // SetSlotValues -> Update. The handler is synchronous, so enqueue the
+        // WriteValues -> Update. The handler is synchronous, so enqueue the
         // command and acknowledge; the runtime applies it on its next step.
         let tx = cmd_tx.clone();
         server
-            .set_set_slot_values_handler(move |values: HashMap<String, Value>| {
+            .set_write_values_handler(move |values: HashMap<String, Value>| {
                 let mut change = StateChange::new();
                 for (path, value) in values {
                     change.set.insert(Key::from(path), Some(value));
@@ -61,22 +60,22 @@ impl WsBridge {
             })
             .await;
 
-        // GetSlotValues -> Get, awaiting the runtime's reply.
+        // ReadValues -> Get, awaiting the runtime's reply.
         let tx = cmd_tx.clone();
         server
-            .set_get_slot_values_handler(Arc::new(move |slots: Vec<String>| {
+            .set_read_values_handler(Arc::new(move |keys: Vec<String>| {
                 let tx = tx.clone();
                 Box::pin(async move {
-                    let keys: Vec<Key> = slots.iter().cloned().map(Key::from).collect();
+                    let store_keys: Vec<Key> = keys.iter().cloned().map(Key::from).collect();
                     let (reply_tx, reply_rx) = oneshot::channel();
                     if tx
-                        .unbounded_send(BridgeCommand::new(BridgeOp::Get(keys), reply_tx))
+                        .unbounded_send(BridgeCommand::new(BridgeOp::Get(store_keys), reply_tx))
                         .is_err()
                     {
                         return HashMap::new();
                     }
                     match reply_rx.await {
-                        Ok(Ok(result)) => values_from_get(&slots, result.ret),
+                        Ok(Ok(result)) => values_from_get(&keys, result.ret),
                         _ => HashMap::new(),
                     }
                 }) as _
@@ -92,12 +91,12 @@ impl WsBridge {
 
 /// Decode a `Get` reply — an `ArrayValue` of `Option`s in request order — into a
 /// `path -> value` map.
-fn values_from_get(slots: &[String], ret: Value) -> HashMap<String, Value> {
+fn values_from_get(keys: &[String], ret: Value) -> HashMap<String, Value> {
     let mut out = HashMap::new();
     if let Value::ArrayValue(items) = ret {
-        for (slot, item) in slots.iter().zip(items) {
+        for (key, item) in keys.iter().zip(items) {
             if let Value::Option(Some(value)) = item {
-                out.insert(slot.clone(), *value);
+                out.insert(key.clone(), *value);
             }
         }
     }
@@ -107,7 +106,7 @@ fn values_from_get(slots: &[String], ret: Value) -> HashMap<String, Value> {
 #[async_trait]
 impl Bridge for WsBridge {
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
-        // Vizij has no device-registration concept.
+        // A local editor connection has no device-registration concept.
         Ok(None)
     }
 
@@ -128,7 +127,7 @@ impl Bridge for WsBridge {
     }
 
     async fn send_data(&self, data: StateChange) -> BridgeResult<()> {
-        // Push the changed slots to the connected client(s).
+        // Push the changed keys to the connected client(s).
         let mut values = HashMap::new();
         for (key, value) in data.set {
             if let Some(value) = value {
@@ -136,7 +135,7 @@ impl Bridge for WsBridge {
             }
         }
         if !values.is_empty() {
-            self.server.push(Outgoing::SlotValuesChanged { values });
+            self.server.push(Outgoing::ValuesChanged { values });
         }
         Ok(())
     }
@@ -165,7 +164,7 @@ mod tests {
     use crate::server::ServerConfig;
 
     #[tokio::test]
-    async fn send_data_pushes_slot_values_changed() {
+    async fn send_data_pushes_values_changed() {
         let server = Arc::new(AroraWSServer::new(ServerConfig::default()));
         let bridge = WsBridge::new(server.clone()).await;
         let mut rx = server.subscribe();
@@ -176,10 +175,10 @@ mod tests {
             .expect("send_data");
 
         match rx.recv().await.expect("a push") {
-            Outgoing::SlotValuesChanged { values } => {
+            Outgoing::ValuesChanged { values } => {
                 assert_eq!(values.get("face/mouth"), Some(&Value::F64(0.5)));
             }
-            other => panic!("expected SlotValuesChanged, got {other:?}"),
+            other => panic!("expected ValuesChanged, got {other:?}"),
         }
     }
 }
