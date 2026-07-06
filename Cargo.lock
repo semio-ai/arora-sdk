@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -183,6 +183,7 @@ dependencies = [
  "arora-simple-data-store",
  "arora-studio-bridge-client",
  "arora-types",
+ "arora-websocket",
  "async-trait",
  "crypto_secretbox",
  "dirs",

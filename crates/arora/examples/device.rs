@@ -4,7 +4,7 @@
 //! Run it with `cargo run -p arora --example device`. There is no fork of
 //! `arora` and no per-device feature flag inside it: this example just uses the
 //! `arora` crate, provides its own [`Hal`] implementation, and hands it to
-//! [`arora::launch`]. Swap [`ExampleHal`] for a real robot HAL (and
+//! [`arora::run_with`]. Swap [`ExampleHal`] for a real robot HAL (and
 //! [`FakeBridge`] for the studio-bridge connector) and you have a real device
 //! build — same `arora` runtime, your hardware.
 
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
     // HAL and a bridge, injected from here, over a fresh private data store.
     // (Use the studio-bridge connector's `ZenohDeviceClient` in place of
     // `FakeBridge` to reach Semio Studio.)
-    arora::launch(
+    arora::run_with(
         Arc::new(ExampleHal::default()),
         Arc::new(FakeBridge::new()),
         SimpleDataStore::new(),
