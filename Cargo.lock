@@ -335,6 +335,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-hal-restful"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora",
+ "arora-hal",
+ "arora-types",
+ "async-trait",
+ "log",
+ "reqwest",
+ "rustls 0.23.41",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "webpki-roots",
+]
+
+[[package]]
 name = "arora-hal-ros2"
 version = "0.1.0"
 dependencies = [
