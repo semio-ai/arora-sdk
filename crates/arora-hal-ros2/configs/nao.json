@@ -1,0 +1,38 @@
+{
+  "topics": [
+    {
+      "name": "/joint_states",
+      "message_type": "sensor_msgs/JointState",
+      "direction": "Subscribe",
+      "mapping": {
+        "JointState": {
+          "conversion": "Standard"
+        }
+      }
+    },
+    {
+      "name": "/joint_trajectory",
+      "message_type": "trajectory_msgs/JointTrajectory",
+      "direction": "Publish",
+      "mapping": {
+        "StandardMessage": {
+          "field_mappings": {
+            "points[0].positions": "positions"
+          }
+        }
+      }
+    },
+    {
+      "name": "/speech",
+      "message_type": "std_msgs/String",
+      "direction": "Publish",
+      "mapping": {
+        "StandardMessage": {
+          "field_mappings": {
+            "data": "text"
+          }
+        }
+      }
+    }
+  ]
+}

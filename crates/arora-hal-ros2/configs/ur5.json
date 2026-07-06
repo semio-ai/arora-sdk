@@ -1,0 +1,26 @@
+{
+  "topics": [
+    {
+      "name": "/joint_states",
+      "message_type": "sensor_msgs/JointState",
+      "direction": "Subscribe",
+      "mapping": {
+        "JointState": {
+          "conversion": "Standard"
+        }
+      }
+    },
+    {
+      "name": "/joint_trajectory",
+      "message_type": "trajectory_msgs/JointTrajectory",
+      "direction": "Publish",
+      "mapping": {
+        "StandardMessage": {
+          "field_mappings": {
+            "points[0].positions": "positions"
+          }
+        }
+      }
+    }
+  ]
+}
