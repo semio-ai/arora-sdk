@@ -1,0 +1,43 @@
+[package]
+name = "arora-hal-restful"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerbot) as Arora devices"
+
+[lib]
+name = "arora_hal_restful"
+
+# The device runner: the robot's HTTP API topology comes entirely from a JSON
+# config picked at runtime (CLI arg or CONFIG env var).
+[[bin]]
+name = "arora-restful"
+path = "src/bin/arora-restful.rs"
+required-features = ["runner"]
+
+[features]
+# The arora-restful binary: pulls the full arora runtime with the Semio Studio
+# connection. The library (the HAL itself) stays lean without it.
+runner = ["dep:arora", "dep:anyhow"]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+arora-hal = { path = "../arora-hal", version = "0.1" }
+arora-types = { path = "../arora-types", version = "1.5" }
+arora = { path = "../arora", version = "0.2", features = ["studio-bridge"], optional = true }
+async-trait = "0.1"
+log = "0.4"
+# TLS is pinned to the bundled webpki roots (see `tls`) so HTTPS robots also
+# work on hosts with no populated OS trust store.
+reqwest = { version = "0.13", features = [
+  "json",
+  "rustls-no-provider",
+], default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+webpki-roots = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

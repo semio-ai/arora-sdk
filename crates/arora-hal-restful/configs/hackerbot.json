@@ -1,0 +1,95 @@
+{
+  "model_family": "hackerbot",
+  "base_url": "http://192.168.1.143:5000",
+  "endpoints": [
+    {
+      "path": "/api/v1/core",
+      "method": "POST",
+      "mapping": {
+        "Custom": {
+          "field_mappings": {
+            "ping": "core_ping"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/base",
+      "method": "POST",
+      "mapping": {
+        "Custom": {
+          "field_mappings": {
+            "start": "base_start",
+            "speak": "base_speak"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/base/actions",
+      "method": "POST",
+      "mapping": "Twist"
+    },
+    {
+      "path": "/api/v1/base/maps",
+      "method": "POST",
+      "mapping": "Navigation"
+    },
+    {
+      "path": "/api/v1/head",
+      "method": "POST",
+      "mapping": {
+        "JointPositions": {
+          "joint_mapping": {
+            "head_rotation": "yaw",
+            "head_vert": "pitch"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/head/position",
+      "method": "GET",
+      "mapping": {
+        "JointPositions": {
+          "joint_mapping": {
+            "head_rotation": "yaw",
+            "head_vert": "pitch"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/arm",
+      "method": "POST",
+      "mapping": {
+        "JointPositions": {
+          "joint_mapping": {
+            "joint1": "joint1",
+            "joint2": "joint2",
+            "joint3": "joint3",
+            "joint4": "joint4",
+            "joint5": "joint5",
+            "joint6": "joint6"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/arm/position",
+      "method": "GET",
+      "mapping": {
+        "JointPositions": {
+          "joint_mapping": {
+            "joint1": "joint1",
+            "joint2": "joint2",
+            "joint3": "joint3",
+            "joint4": "joint4",
+            "joint5": "joint5",
+            "joint6": "joint6"
+          }
+        }
+      }
+    }
+  ]
+}
