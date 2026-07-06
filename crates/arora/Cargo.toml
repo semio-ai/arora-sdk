@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -14,7 +14,7 @@ name = "arora"
 path = "src/main.rs"
 # The binary is the headless Studio device runner, so it needs the opt-in
 # studio-bridge feature. On wasm, build the library with --no-default-features.
-required-features = ["studio-bridge"]
+required-features = ["native"]
 
 # A worked example of a device-specific arora (custom HAL injected into
 # arora::launch). Native-only, like the binary.
@@ -29,6 +29,9 @@ default = ["native"]
 # target cfg).
 native = [
     "dep:tokio",
+    "dep:arora-websocket",
+    "dep:log",
+    "dep:env_logger",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -42,8 +45,6 @@ studio-bridge = [
     "dep:crypto_secretbox",
     "dep:dirs",
     "dep:rustls",
-    "dep:env_logger",
-    "dep:log",
 ]
 
 [dependencies]
@@ -51,6 +52,7 @@ arora-engine = { path = "../arora-engine", version = "0.1", default-features = f
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "0.1" }
 arora-behavior = { path = "../arora-behavior", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.4" }
+arora-websocket = { path = "../arora-websocket", version = "0.1", optional = true }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }

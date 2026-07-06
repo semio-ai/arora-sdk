@@ -1,13 +1,15 @@
-//! The headless device runner.
+//! The Semio Studio connection: what [`crate::run_with_hal`] wires around the
+//! runtime loop when the `studio-bridge` feature selects Studio as the bridge
+//! — Firebase auth, token rotation, the Zenoh connection, device registration.
 //!
-//! This is what makes `arora` the headless-capable crate (not just its binary):
+//! This is what makes `arora` Studio-capable (not just its binary):
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
 //! load/save an encrypted refresh token from a local file, build the real
 //! [`ZenohDeviceClient`] (the studio-bridge Zenoh connector), and drive it via
-//! [`crate::launch_with`] over a [`FakeHal`] and a fresh [`SimpleDataStore`].
+//! [`crate::run_with_bridge_builder`] over a fresh [`SimpleDataStore`].
 //!
-//! Ported from `studio-bridge/headless`. The binary ([`crate::main`]) is a thin
-//! wrapper that just calls [`launch`].
+//! The binary ([`crate::main`]) is a thin
+//! wrapper that just calls [`crate::run`].
 //!
 //! Configuration is environment-only for now:
 //!   - `FIREBASE_*` — Firebase project options (see
@@ -27,7 +29,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arora_bridge::Bridge;
-use arora_hal::FakeHal;
 use arora_simple_data_store::SimpleDataStore;
 use arora_studio_bridge_client::firestore_support::options::{
     FirebaseEmulatorOptions, FirebaseOptions,
@@ -37,21 +38,17 @@ use log::{info, warn};
 
 use app_data_files::ensure_app_data_dir;
 
-/// Run the headless device runner to completion (until the device is
-/// unregistered or the process is interrupted), over a [`FakeHal`].
+/// Run the Studio-connected device to completion (until the device is
+/// unregistered or the process is interrupted).
 ///
 /// Configuration is environment-only for now (a CLI / bridge-config file is a
 /// follow-up); it registers the device with Studio from the configured device
 /// info (`DEVICE_NAME`, `MODEL_FAMILY`, `HARDWARE_VERSION`, …) when any is set.
-pub fn launch() -> Result<()> {
-    launch_with_hal(Arc::new(FakeHal::new()))
-}
-
-/// [`launch`], but over the caller's HAL: the whole Studio side (Firebase
+/// The Studio-connected run, over the caller's HAL: the whole Studio side (Firebase
 /// auth, token rotation, Zenoh connection, device registration) is identical
 /// for every device — only the hardware behind it differs. A device build
 /// (e.g. a Vizij rig) injects its HAL here and is a Studio device.
-pub fn launch_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
+pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
     env_logger::init();
 
     // Read the Firebase options and Zenoh endpoints from the environment.
@@ -104,7 +101,7 @@ pub fn launch_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
 
     info!("Connecting via Zenoh (endpoints: {:?})", endpoints);
 
-    crate::launch_with(hal, SimpleDataStore::new(), move || async move {
+    crate::run_with_bridge_builder(hal, SimpleDataStore::new(), move || async move {
         let client = ZenohDeviceClient::new(
             &firebase_options,
             Some(&firebase_emulator_options),
