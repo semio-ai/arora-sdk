@@ -1,0 +1,20 @@
+[package]
+name = "arora-websocket"
+version = "0.1.0"
+edition = "2021"
+description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "1.6" }
+arora-bridge = { path = "../arora-bridge", version = "1" }
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
+tokio-tungstenite = "0.24"
+tokio-util = "0.7"
