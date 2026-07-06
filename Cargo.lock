@@ -584,6 +584,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-websocket"
+version = "0.1.0"
+dependencies = [
+ "arora-bridge",
+ "arora-types",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "tokio-util",
+]
+
+[[package]]
 name = "array-init"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
