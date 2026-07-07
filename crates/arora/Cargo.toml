@@ -23,15 +23,17 @@ name = "device"
 required-features = ["native"]
 
 [features]
-default = ["native"]
-# Native build: the wasmtime + dynamic-library engine hosts and the launcher.
-# Build for wasm32 with --no-default-features (the browser host is selected by
-# target cfg).
+default = ["native", "tui"]
+# Native build: the wasmtime + dynamic-library engine hosts and the binary. Build
+# for wasm32 with --no-default-features (the browser host is selected by target
+# cfg).
 native = [
     "dep:tokio",
     "dep:arora-bridge-ws",
     "dep:log",
     "dep:env_logger",
+    # The operator interface (`arora::operator`) is an async trait.
+    "dep:async-trait",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -46,6 +48,11 @@ studio-bridge = [
     "dep:dirs",
     "dep:rustls",
 ]
+# The terminal operator UI (`arora::tui`): device header, scrollable log pane,
+# live indicators, and the prompt line the operator answers questions on. The
+# binary uses it when it detects an interactive terminal; embedders who bring
+# their own UI can build with default-features = false + "native".
+tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
@@ -74,10 +81,19 @@ dirs = { version = "6", optional = true }
 env_logger = { version = "0.11", optional = true }
 log = { version = "0.4", optional = true }
 rustls = { version = "0.23.27", default-features = false, features = ["ring"], optional = true }
+# The operator interface (`arora::operator`) is an async trait.
+async-trait = { version = "0.1", optional = true }
+# Terminal operator UI (the "tui" feature).
+ratatui = { version = "0.29", optional = true }
+# Own-process CPU usage for the TUI's indicators panel.
+sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
+# RUST_LOG-style filtering for the TUI's in-pane log capture.
+env_filter = { version = "0.1", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
-# `time` (tests only): the runtime-loop tests sleep between `step`s to give the
-# spawned io pump wall-clock time to deliver events. The runtime itself needs no
-# timers (the pump is futures-only).
-tokio = { version = "1", features = ["time"] }
+# `time` + `test-util` (tests only): the runtime-loop tests sleep between `step`s
+# to give the spawned io pump wall-clock time to deliver events, and the operator
+# tests pause time (`start_paused`) to elapse the access grace instantly. The
+# runtime itself needs no timers (the pump is futures-only).
+tokio = { version = "1", features = ["time", "test-util"] }

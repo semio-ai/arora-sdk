@@ -34,7 +34,11 @@ use arora_bridge::Bridge;
 use arora_hal::Hal;
 #[cfg(feature = "native")]
 use arora_simple_data_store::SimpleDataStore;
+#[cfg(feature = "native")]
+use log::info;
 
+#[cfg(feature = "native")]
+use crate::operator::{serve_access_requests, Frontend};
 #[cfg(feature = "native")]
 use crate::runtime::Runtime;
 #[cfg(feature = "native")]
@@ -50,7 +54,9 @@ pub fn run() -> Result<()> {
 /// a HAL into a running device.
 #[cfg(all(feature = "native", not(feature = "studio-bridge")))]
 pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
-    let _ = env_logger::try_init();
+    // The log sink is installed by the front end that `run_with_bridge_builder`
+    // selects (env_logger headless, in-pane capture under the TUI), so don't
+    // init a logger here.
     run_with_bridge_builder(hal, SimpleDataStore::new(), || async {
         let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
             arora_bridge_ws::ServerConfig::default(),
@@ -61,7 +67,7 @@ pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
                 log::error!("local bridge server stopped: {e:?}");
             }
         });
-        println!("arora: serving the local bridge on ws://127.0.0.1:9000");
+        info!("serving the local bridge on ws://127.0.0.1:9000");
         let bridge: Arc<dyn Bridge> = Arc::new(bridge);
         Ok(bridge)
     })
@@ -109,20 +115,56 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<Arc<dyn Bridge>>>,
 {
+    run_with_frontend(hal, store, select_frontend(), make_bridge)
+}
+
+/// Like [`run_with_bridge_builder`], but with a caller-supplied [`Frontend`] —
+/// the operator that answers the device's questions and the log sink that goes
+/// with it.
+///
+/// This is the seam every other entry point funnels through to pick between the
+/// terminal operator UI and the headless front end; a device build with its own
+/// UI supplies its own [`Frontend`] here. The rest of the run family uses
+/// [`select_frontend`], which chooses the terminal UI when the process is
+/// attached to a terminal.
+#[cfg(feature = "native")]
+pub fn run_with_frontend<F, Fut>(
+    hal: Arc<dyn Hal>,
+    store: SimpleDataStore,
+    frontend: Frontend,
+    make_bridge: F,
+) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Arc<dyn Bridge>>>,
+{
+    let Frontend { operator, on_ready } = frontend;
+
     // The async setup runs inside a Tokio runtime; the step loop that drives the
     // engine is synchronous and runs on this (main) thread afterwards — the wasm
     // executor manages its own blocking runtime and must not be ticked inside
     // Tokio.
     let tokio = tokio::runtime::Runtime::new().context("failed to start Tokio runtime")?;
-    let (mut runtime, io) = tokio.block_on(async {
+    let (mut runtime, io, bridge) = tokio.block_on(async {
         let bridge = make_bridge().await.context("failed to build the bridge")?;
         let arora = Arora::start().await.context("failed to start Arora")?;
         // The public API takes a concrete `SimpleDataStore`; the runtime holds
         // `Arc<dyn DataStore>`, so wrap it here.
         let store: Arc<dyn arora_types::data::DataStore> = Arc::new(store);
-        Ok::<_, anyhow::Error>(Runtime::with_io_in(arora, hal, bridge, store))
+        let (runtime, io) = Runtime::with_io_in(arora, hal, bridge.clone(), store);
+        Ok::<_, anyhow::Error>((runtime, io, bridge))
     })?;
-    println!("arora: engine started; native behavior-tree control nodes ready.");
+
+    // Hand the front end its live view now that the runtime and bridge exist:
+    // the telemetry handle it reads indicators from, and the device identity.
+    let (info, device_id) = tokio.block_on(async {
+        let info = bridge.get_device_info().await.ok().flatten();
+        let device_id = bridge.device_id().await;
+        (info, device_id)
+    });
+    on_ready(runtime.telemetry(), info, device_id);
+
+    info!("engine started; native behavior-tree control nodes ready");
 
     if let Some(path) = std::env::args().nth(1) {
         let xml = std::fs::read_to_string(&path)
@@ -130,10 +172,39 @@ where
         runtime
             .queue_groot_xml(&xml)
             .map_err(|e| anyhow!("failed to queue behavior tree from {path}: {e}"))?;
-        println!("arora: queued behavior tree from {path}");
+        info!("queued behavior tree from {path}");
     }
 
     tokio.spawn(io);
-    println!("arora: running — Ctrl-C to stop.");
+    // Serve remote clients' access requests through the chosen operator, one at a
+    // time, for as long as the bridge yields them.
+    tokio.spawn({
+        let bridge = bridge.clone();
+        async move {
+            let requests = bridge.access_requests().await;
+            serve_access_requests(requests, operator).await;
+        }
+    });
+    info!("running — Ctrl-C to stop");
     runtime.run().map_err(|e| anyhow!("runtime error: {e}"))
+}
+
+/// Pick the front end for this process: the terminal operator UI when the `tui`
+/// feature is on and stdout is a terminal, otherwise the headless front end.
+///
+/// Building the front end installs the matching log sink, so the run path calls
+/// this before it emits any logs it wants captured.
+#[cfg(feature = "native")]
+pub(crate) fn select_frontend() -> Frontend {
+    #[cfg(feature = "tui")]
+    {
+        use std::io::IsTerminal;
+        if std::io::stdout().is_terminal() {
+            match crate::tui::tui_frontend() {
+                Ok(frontend) => return frontend,
+                Err(e) => eprintln!("arora: terminal UI unavailable ({e}); running headless"),
+            }
+        }
+    }
+    crate::operator::default_frontend()
 }

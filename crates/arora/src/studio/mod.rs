@@ -49,7 +49,10 @@ use app_data_files::ensure_app_data_dir;
 /// for every device — only the hardware behind it differs. A device build
 /// (e.g. a Vizij rig) injects its HAL here and is a Studio device.
 pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
-    env_logger::init();
+    // Pick the operator front end (terminal UI when interactive, headless
+    // otherwise) first: doing so installs the matching log sink, so the startup
+    // logging below is captured by whichever front end was chosen.
+    let frontend = crate::run::select_frontend();
 
     // Read the Firebase options and Zenoh endpoints from the environment.
     let firebase_options = FirebaseOptions::from_env();
@@ -101,7 +104,7 @@ pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
 
     info!("Connecting via Zenoh (endpoints: {:?})", endpoints);
 
-    crate::run_with_bridge_builder(hal, SimpleDataStore::new(), move || async move {
+    crate::run_with_frontend(hal, SimpleDataStore::new(), frontend, move || async move {
         let client = ZenohDeviceClient::new(
             &firebase_options,
             Some(&firebase_emulator_options),

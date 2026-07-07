@@ -8,13 +8,19 @@
 //! otherwise idles, waiting for behavior trees that will soon arrive over the
 //! bridge.
 
+#[cfg(feature = "native")]
+pub mod operator;
 mod run;
 pub mod runtime;
 #[cfg(feature = "studio-bridge")]
 mod studio;
+/// The terminal operator UI. Native, and only when the `tui` feature is on; an
+/// embedder that brings its own UI builds without it.
+#[cfg(feature = "tui")]
+pub mod tui;
 
 #[cfg(feature = "native")]
-pub use run::{run, run_with, run_with_bridge_builder, run_with_hal};
+pub use run::{run, run_with, run_with_bridge_builder, run_with_frontend, run_with_hal};
 
 use anyhow::{anyhow, Result};
 use arora_behavior_tree::{
