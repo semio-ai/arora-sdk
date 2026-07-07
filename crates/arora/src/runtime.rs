@@ -96,6 +96,46 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+/// A point-in-time copy of the runtime's live indicators.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TelemetrySnapshot {
+    /// Measured step-loop frequency in Hz. `None` until the embedder's loop
+    /// measures it (the native [`run`](Runtime::run) does; a custom `step`
+    /// driver may not).
+    pub loop_hz: Option<f32>,
+    /// Whether a remote client currently claims the device (asks for data).
+    pub claimed: bool,
+    /// Name of the behavior currently being ticked, when one is queued and
+    /// was given a name.
+    pub behavior: Option<String>,
+}
+
+/// Shared, read-only view over the runtime's live indicators — loop frequency,
+/// claim state, current behavior. Cloneable and thread-safe: the step loop
+/// writes, observers (a TUI, a GUI, a metrics exporter) read
+/// [`snapshot`](Telemetry::snapshot) at their own pace.
+#[derive(Clone, Default)]
+pub struct Telemetry {
+    inner: Arc<std::sync::RwLock<TelemetrySnapshot>>,
+}
+
+impl Telemetry {
+    /// Copy the current indicator values.
+    pub fn snapshot(&self) -> TelemetrySnapshot {
+        self.inner.read().expect("telemetry lock poisoned").clone()
+    }
+
+    fn update(&self, apply: impl FnOnce(&mut TelemetrySnapshot)) {
+        apply(&mut self.inner.write().expect("telemetry lock poisoned"));
+    }
+}
+
+/// A queued behavior plus the display name it was queued under (if any).
+struct QueuedBehavior {
+    name: Option<String>,
+    behavior: Box<dyn Behavior>,
+}
+
 /// The Arora runtime: the state's single owner plus the engine and behavior
 /// trees, advanced one [`step`](Runtime::step) at a time. Build it with
 /// [`with_io`](Runtime::with_io).
@@ -107,7 +147,8 @@ pub struct Runtime {
     store: Arc<dyn DataStore>,
     engine: PinnedEngine,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    behaviors: VecDeque<Box<dyn Behavior>>,
+    behaviors: VecDeque<QueuedBehavior>,
+    telemetry: Telemetry,
     // Channels to/from the async io pump, plus the HAL's sensor feed:
     hal_updates: Subscription,
     inbound: UnboundedReceiver<Inbound>,
@@ -168,12 +209,20 @@ impl Runtime {
             engine,
             function_index,
             behaviors: VecDeque::new(),
+            telemetry: Telemetry::default(),
             hal_updates,
             inbound,
             outbound,
             store_changes,
         };
         (runtime, pump)
+    }
+
+    /// A shared handle over the runtime's live indicators, for observers such
+    /// as an operator UI. Clone it freely; it stays readable after the
+    /// runtime stops (values simply freeze).
+    pub fn telemetry(&self) -> Telemetry {
+        self.telemetry.clone()
     }
 
     /// Queue a behavior tree (as Groot XML) to be run on the next BT step.
@@ -183,6 +232,17 @@ impl Runtime {
     /// writing `{var}` reads/writes the store directly during the tick. STEP 2's
     /// single-writer guarantee makes that race-free (no copy/sync needed).
     pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), RuntimeError> {
+        self.queue_groot_xml_as(None, xml)
+    }
+
+    /// Like [`queue_groot_xml`](Runtime::queue_groot_xml), with a display name
+    /// the runtime reports through [`telemetry`](Runtime::telemetry) while the
+    /// tree runs (e.g. the tree's file stem or its Groot tree id).
+    pub fn queue_named_groot_xml(&mut self, name: &str, xml: &str) -> Result<(), RuntimeError> {
+        self.queue_groot_xml_as(Some(name.to_string()), xml)
+    }
+
+    fn queue_groot_xml_as(&mut self, name: Option<String>, xml: &str) -> Result<(), RuntimeError> {
         let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)
             .map_err(|e| RuntimeError::BehaviorTree(format!("parse: {e:?}")))?;
         // `try_into_tree_node` fills `variables` as name → variable id.
@@ -200,10 +260,10 @@ impl Runtime {
         let behavior: BehaviorTree = tree_node
             .into_behavior_tree(&resolver, &id_to_name)
             .map_err(|e| RuntimeError::BehaviorTree(format!("instantiate: {e:?}")))?;
-        self.queue_behavior(Box::new(TreeBehavior::new(
-            behavior,
-            self.function_index.clone(),
-        )));
+        self.behaviors.push_back(QueuedBehavior {
+            name,
+            behavior: Box::new(TreeBehavior::new(behavior, self.function_index.clone())),
+        });
         Ok(())
     }
 
@@ -212,7 +272,20 @@ impl Runtime {
     /// step while it reports [`BehaviorStatus::Running`] and drops it once it
     /// reports [`BehaviorStatus::Done`].
     pub fn queue_behavior(&mut self, behavior: Box<dyn Behavior>) {
-        self.behaviors.push_back(behavior);
+        self.behaviors.push_back(QueuedBehavior {
+            name: None,
+            behavior,
+        });
+    }
+
+    /// Like [`queue_behavior`](Runtime::queue_behavior), with a display name
+    /// the runtime reports through [`telemetry`](Runtime::telemetry) while the
+    /// behavior runs.
+    pub fn queue_named_behavior(&mut self, name: &str, behavior: Box<dyn Behavior>) {
+        self.behaviors.push_back(QueuedBehavior {
+            name: Some(name.to_string()),
+            behavior,
+        });
     }
 
     /// Advance one step: drain inbound bridge/HAL updates into the state, tick the
@@ -230,22 +303,35 @@ impl Runtime {
                 Inbound::DeviceInfo(Ok(None)) => return Ok(StepOutcome::Unregistered),
                 Inbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
                 Inbound::DeviceInfo(Err(_e)) => { /* TODO: surface bridge error */ }
-                Inbound::DataRequested(_requested) => { /* TODO: claim handling */ }
+                // Claim state is surfaced through telemetry; publishing is not
+                // (yet) gated on it — the bridge implementations gate delivery
+                // themselves today.
+                Inbound::DataRequested(requested) => {
+                    self.telemetry.update(|t| t.claimed = requested);
+                }
             }
         }
         // STEP 2 — tick the active behavior (tree, node graph, …) against the
         // shared store; keep it queued while it is still running.
-        if let Some(mut behavior) = self.behaviors.pop_front() {
+        if let Some(mut queued) = self.behaviors.pop_front() {
+            self.telemetry.update(|t| {
+                if t.behavior != queued.name {
+                    t.behavior = queued.name.clone();
+                }
+            });
             let mut ctx = BehaviorContext {
                 store: &*self.store,
                 caller: &mut self.engine,
                 dt: 0.0,
             };
-            let status = behavior
+            let status = queued
+                .behavior
                 .tick(&mut ctx)
                 .map_err(|e| RuntimeError::BehaviorTree(e.to_string()))?;
             if status == BehaviorStatus::Running {
-                self.behaviors.push_back(behavior);
+                self.behaviors.push_back(queued);
+            } else {
+                self.telemetry.update(|t| t.behavior = None);
             }
         }
         // STEP 3 — flush local state changes out to the remote / hardware.
@@ -347,9 +433,21 @@ impl Runtime {
 #[cfg(not(target_arch = "wasm32"))]
 impl Runtime {
     pub fn run(&mut self) -> Result<(), RuntimeError> {
+        // Measure the achieved step frequency over ~1 s windows and publish it
+        // through the telemetry handle.
+        let mut window_start = std::time::Instant::now();
+        let mut steps_in_window: u32 = 0;
         loop {
             if self.step()? == StepOutcome::Unregistered {
                 return Ok(());
+            }
+            steps_in_window += 1;
+            let elapsed = window_start.elapsed();
+            if elapsed >= std::time::Duration::from_secs(1) {
+                let hz = steps_in_window as f32 / elapsed.as_secs_f32();
+                self.telemetry.update(|t| t.loop_hz = Some(hz));
+                window_start = std::time::Instant::now();
+                steps_in_window = 0;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
