@@ -2,30 +2,41 @@
 name = "arora-web"
 version = "0.1.0"
 edition = "2021"
-license = "Proprietary"
-description = "wasm-bindgen entry point for running the Arora engine in a browser"
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+description = "Run an Arora device in the browser: an injectable BrowserRuntime primitive (wasm-bindgen) over any HAL, bridge, and data store."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[dependencies]
-arora-engine = { path = "../arora-engine", default-features = false }
-arora-types = { path = "../arora-types", version = "1.4" }
+# The whole crate is `wasm32`-only: it builds on `arora`'s browser engine host,
+# which is gated to `wasm32`. So every real dependency is gated to that target.
+# On the host the crate is an empty shim (see `#![cfg(target_arch = "wasm32")]`)
+# with no dependencies — it still participates in a native `cargo build`/`cargo
+# package` (publish verification) without pulling the browser host into a host
+# link.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
+arora-types = { path = "../arora-types", version = "1.6" }
 # The opinionated runtime (no default features → the browser engine host, a
-# Tokio-free runtime + io pump) plus the in-process fakes it runs with.
-arora = { path = "../arora", default-features = false }
-arora-hal = { path = "../arora-hal" }
-arora-bridge = { path = "../arora-bridge" }
+# Tokio-free runtime + io pump) plus the in-process fakes it runs with and the
+# traits the primitive is injectable over.
+arora = { path = "../arora", version = "0.2", default-features = false }
+arora-behavior = { path = "../arora-behavior", version = "0.1" }
+arora-hal = { path = "../arora-hal", version = "0.1" }
+arora-bridge = { path = "../arora-bridge", version = "1" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "0.1" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
-[dev-dependencies]
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 serde_yaml = "0.9"
 # test-rust-wasm guest (wasm32-wasip1) the browser test include_bytes!s; cargo

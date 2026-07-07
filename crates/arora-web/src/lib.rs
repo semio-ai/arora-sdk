@@ -1,13 +1,20 @@
-//! Browser-facing wrapper around the Arora engine.
+//! Run an Arora device in the browser.
 //!
-//! Provides a [`Engine`] type that JavaScript can construct, load
-//! modules into (header JSON + executable bytes), and call functions
-//! on. All module hosting is done via the browser's native
+//! The centerpiece is [`BrowserRuntime`], the reusable primitive that wires a
+//! full [`arora::Runtime`] over an injected HAL, bridge, and data store and
+//! exposes the JS-facing surface every browser device needs — a synchronous
+//! `step()` plus Value↔JSON accessors on the store. [`AroraRuntime`] is the
+//! bundled demo device built on it (in-process fakes + `SimpleDataStore`); each
+//! downstream device ships its own thin `#[wasm_bindgen]` wrapper the same way.
+//!
+//! It also carries a lower-level surface: [`Engine`] and [`BehaviorTreeRunner`]
+//! load guest modules (header JSON + executable bytes) and run behavior trees
+//! directly on the engine, hosting modules via the browser's native
 //! `WebAssembly` runtime — see `arora_engine::executor::browser`.
 //!
-//! This crate only carries non-trivial content when built for
-//! `wasm32-*` targets. On the host it is an empty shim so it can sit
-//! in the workspace and participate in `cargo build --workspace`
+//! This crate only carries non-trivial content when built for `wasm32-*`
+//! targets. On the host it is an empty shim (deps are gated to `wasm32`) so it
+//! can sit in the workspace and be verified by `cargo package` on publish
 //! without pulling wasm-only deps into a host link.
 
 #![cfg(target_arch = "wasm32")]
@@ -37,43 +44,86 @@ pub fn _start() {
 }
 
 // =============================================================================
-// Opinionated Arora runtime
+// Browser runtime primitive
 //
-// Runs the full `arora` runtime (engine + behavior-tree module) in the browser
-// with an in-process fake HAL and bridge. The asynchronous io pump is spawned on
-// the event loop; JavaScript drives the synchronous `step()` — e.g. from
-// `requestAnimationFrame`, or from a Web Worker's loop.
+// `BrowserRuntime` is the reusable core for running any Arora device in the
+// browser. It wires an `arora::Runtime` over an injected HAL, bridge, and data
+// store (all trait objects, so the caller picks the backends), spawns the async
+// io pump on the browser event loop, and exposes the JS-facing surface every
+// browser device needs: a synchronous `step()` plus Value↔JSON accessors on the
+// injected store.
+//
+// It is a plain Rust type, not a `#[wasm_bindgen]` export — the wasm-bindgen
+// boundary cannot carry `Arc<dyn Trait>`. Each device ships a thin
+// `#[wasm_bindgen]` cdylib that constructs its concrete HAL/bridge/store and
+// behaviors, then forwards to a `BrowserRuntime` held inside. `AroraRuntime`
+// below is one such wrapper (the in-process fakes); Vizij ships another.
 // =============================================================================
 
 use arora::runtime::{Runtime, StepOutcome};
-use arora_bridge::FakeBridge;
-use arora_hal::FakeHal;
+use arora_behavior::Behavior;
+use arora_bridge::{Bridge, FakeBridge};
+use arora_hal::{FakeHal, Hal};
+use arora_simple_data_store::SimpleDataStore;
+use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use std::sync::Arc;
 
-/// JS-callable handle to a running opinionated Arora runtime.
-#[wasm_bindgen]
-pub struct AroraRuntime {
+/// The reusable core of a browser-hosted Arora device.
+///
+/// Assemble it with [`BrowserRuntime::start`] over your chosen HAL, bridge, and
+/// [`DataStore`]; queue one or more behaviors; then drive it a tick at a time
+/// with [`step`](Self::step) (e.g. from `requestAnimationFrame` or a Web Worker
+/// loop). Read and write the injected store across the JS boundary with the
+/// Value↔JSON accessors — values cross as JSON in the Arora [`Value`] vocabulary,
+/// e.g. `{"f32": 0.75}`.
+pub struct BrowserRuntime {
     runtime: Runtime,
+    store: Arc<dyn DataStore>,
+    changes: Subscription,
 }
 
-#[wasm_bindgen]
-impl AroraRuntime {
-    /// Start the runtime with an in-process fake HAL and bridge. The basic
-    /// behavior-tree control nodes are wired natively into the engine, so no
-    /// node module needs to be fetched or loaded. Spawns the async io pump on the
-    /// browser event loop; drive the runtime by calling `step()`.
-    pub async fn start() -> Result<AroraRuntime, JsValue> {
+impl BrowserRuntime {
+    /// Boot an [`arora::Arora`] (engine + native behavior-tree nodes), inject the
+    /// given `hal`, `bridge`, and `store` via [`Runtime::with_io_in`], and spawn
+    /// the async io pump on the browser event loop. Queue behaviors next, then
+    /// drive with [`step`](Self::step).
+    pub async fn start(
+        hal: Arc<dyn Hal>,
+        bridge: Arc<dyn Bridge>,
+        store: Arc<dyn DataStore>,
+    ) -> Result<BrowserRuntime, JsValue> {
         let arora = arora::Arora::start()
             .await
             .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
-        let (runtime, io) =
-            Runtime::with_io(arora, Arc::new(FakeHal::new()), Arc::new(FakeBridge::new()));
+        let changes = store.subscribe();
+        let (runtime, io) = Runtime::with_io_in(arora, hal, bridge, store.clone());
         wasm_bindgen_futures::spawn_local(io);
-        Ok(AroraRuntime { runtime })
+        Ok(BrowserRuntime {
+            runtime,
+            store,
+            changes,
+        })
     }
 
-    /// Advance the runtime one step. Returns `true` while live, `false` once the
-    /// device has been unregistered (stop calling then).
+    /// The injected store, for direct access beyond the JSON accessors.
+    pub fn store(&self) -> &Arc<dyn DataStore> {
+        &self.store
+    }
+
+    /// Queue a [`Behavior`] to run on the next step.
+    pub fn queue_behavior(&mut self, behavior: Box<dyn Behavior>) {
+        self.runtime.queue_behavior(behavior);
+    }
+
+    /// Queue a behavior tree (Groot XML) to run on the next step.
+    pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
+        self.runtime
+            .queue_groot_xml(xml)
+            .map_err(|e| JsValue::from_str(&format!("queue failed: {e}")))
+    }
+
+    /// Advance the runtime one tick. Returns `true` while live, `false` once the
+    /// device has been unregistered (stop stepping then).
     pub fn step(&mut self) -> Result<bool, JsValue> {
         match self.runtime.step() {
             Ok(StepOutcome::Live) => Ok(true),
@@ -82,12 +132,146 @@ impl AroraRuntime {
         }
     }
 
+    /// Write one key into the store. `value_json` is an Arora [`Value`] as JSON,
+    /// e.g. `{"f32": 0.75}`.
+    pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
+        let value: Value = serde_json::from_str(value_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid value json for {path}: {e}")))?;
+        self.store
+            .write(StateChange::set(path, value))
+            .map_err(|e| JsValue::from_str(&format!("write {path} failed: {e}")))
+    }
+
+    /// Write several keys at once, as one store change. `values_json` is a JSON
+    /// object mapping each key path to an Arora [`Value`], e.g.
+    /// `{"sensor/x": {"f32": 0.75}}`.
+    pub fn write_values(&self, values_json: &str) -> Result<(), JsValue> {
+        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(values_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid values json: {e}")))?;
+        let mut change = StateChange::new();
+        for (path, raw) in map {
+            let value: Value = serde_json::from_value(raw)
+                .map_err(|e| JsValue::from_str(&format!("invalid value for {path}: {e}")))?;
+            change.set.insert(Key::new(path), Some(value));
+        }
+        self.store
+            .write(change)
+            .map_err(|e| JsValue::from_str(&format!("write failed: {e}")))
+    }
+
+    /// Read keys from the store. `paths` is a JS `string[]`; the result is a JS
+    /// object mapping each path to its Arora [`Value`] (or `null` if absent).
+    pub fn read_values(&self, paths: JsValue) -> Result<JsValue, JsValue> {
+        let paths: Vec<String> = serde_wasm_bindgen::from_value(paths)
+            .map_err(|e| JsValue::from_str(&format!("paths must be a string[]: {e}")))?;
+        let keys: Vec<Key> = paths.iter().map(Key::new).collect();
+        let values = self.store.read(&keys);
+        let mut out = serde_json::Map::with_capacity(paths.len());
+        for (path, value) in paths.into_iter().zip(values) {
+            out.insert(path, value_to_json(value)?);
+        }
+        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
+            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+    }
+
+    /// A snapshot of every key currently in the store, as a JS object mapping
+    /// path → Arora [`Value`].
+    pub fn snapshot(&self) -> Result<JsValue, JsValue> {
+        let state = self.store.snapshot();
+        let mut out = serde_json::Map::with_capacity(state.storage.len());
+        for (key, value) in state.storage {
+            out.insert(key.path, value_to_json(value)?);
+        }
+        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
+            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+    }
+
+    /// Drain the keys that changed in the store since the last call, as a JS
+    /// object mapping path → new Arora [`Value`] (or `null` for a cleared key).
+    /// Poll-based counterpart to a push subscription: [`DataStore::subscribe`]
+    /// delivers over a std channel JavaScript cannot await, so changes accumulate
+    /// and are handed over on demand — call it right after [`step`](Self::step).
+    pub fn drain_changes(&self) -> Result<JsValue, JsValue> {
+        let mut out = serde_json::Map::new();
+        while let Some(change) = self.changes.try_recv() {
+            for (key, value) in change.set {
+                out.insert(key.path, value_to_json(value)?);
+            }
+            for key in change.unset {
+                out.insert(key.path, serde_json::Value::Null);
+            }
+        }
+        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
+            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+    }
+}
+
+/// Serialize an optional Arora value to JSON (`null` when absent).
+fn value_to_json(value: Option<Value>) -> Result<serde_json::Value, JsValue> {
+    match value {
+        Some(v) => serde_json::to_value(v)
+            .map_err(|e| JsValue::from_str(&format!("serialize value failed: {e}"))),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+// =============================================================================
+// Opinionated Arora runtime (demo)
+//
+// A `#[wasm_bindgen]` device built on `BrowserRuntime` with the in-process fake
+// HAL and bridge over a plain `SimpleDataStore`. The basic behavior-tree control
+// nodes are wired natively into the engine, so no node module needs to be
+// fetched or loaded. Drive it by calling `step()`.
+// =============================================================================
+
+/// JS-callable handle to a running opinionated Arora runtime.
+#[wasm_bindgen]
+pub struct AroraRuntime {
+    inner: BrowserRuntime,
+}
+
+#[wasm_bindgen]
+impl AroraRuntime {
+    /// Start the runtime with an in-process fake HAL and bridge over a plain
+    /// `SimpleDataStore`. Spawns the async io pump on the browser event loop;
+    /// drive the runtime by calling `step()`.
+    pub async fn start() -> Result<AroraRuntime, JsValue> {
+        let inner = BrowserRuntime::start(
+            Arc::new(FakeHal::new()),
+            Arc::new(FakeBridge::new()),
+            Arc::new(SimpleDataStore::new()),
+        )
+        .await?;
+        Ok(AroraRuntime { inner })
+    }
+
+    /// Advance the runtime one step. Returns `true` while live, `false` once the
+    /// device has been unregistered (stop calling then).
+    pub fn step(&mut self) -> Result<bool, JsValue> {
+        self.inner.step()
+    }
+
     /// Queue a behavior tree (Groot XML) to run on the next step.
     #[wasm_bindgen(js_name = queueGrootXml)]
     pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
-        self.runtime
-            .queue_groot_xml(xml)
-            .map_err(|e| JsValue::from_str(&format!("queue failed: {e}")))
+        self.inner.queue_groot_xml(xml)
+    }
+
+    /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
+    #[wasm_bindgen(js_name = setValue)]
+    pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
+        self.inner.set_value(path, value_json)
+    }
+
+    /// Read keys from the store; `paths` is a `string[]`, result maps path→Value.
+    #[wasm_bindgen(js_name = readValues)]
+    pub fn read_values(&self, paths: JsValue) -> Result<JsValue, JsValue> {
+        self.inner.read_values(paths)
+    }
+
+    /// A snapshot of every key in the store as a path→Value object.
+    pub fn snapshot(&self) -> Result<JsValue, JsValue> {
+        self.inner.snapshot()
     }
 }
 
