@@ -15,7 +15,7 @@
 //!   Studio connector).
 //!
 //! The **default bridge** depends on how the crate is built. By default it is
-//! the open local bridge ([`arora-websocket`](arora_websocket)): the device
+//! the open local bridge ([`arora-bridge-ws`](arora_bridge_ws)): the device
 //! serves `ws://127.0.0.1:9000` and any editor or app on the machine connects
 //! — no accounts. With the `studio-bridge` feature the device connects to
 //! Semio Studio instead (Firebase auth + Zenoh). The two are mutually
@@ -52,12 +52,12 @@ pub fn run() -> Result<()> {
 pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
     let _ = env_logger::try_init();
     run_with_bridge_builder(hal, SimpleDataStore::new(), || async {
-        let server = Arc::new(arora_websocket::AroraWSServer::new(
-            arora_websocket::ServerConfig::default(),
+        let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
+            arora_bridge_ws::ServerConfig::default(),
         ));
-        let bridge = arora_websocket::bridge::WsBridge::new(server.clone()).await;
+        let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
         tokio::spawn(async move {
-            if let Err(e) = server.run(arora_websocket::CancellationToken::new()).await {
+            if let Err(e) = server.run(arora_bridge_ws::CancellationToken::new()).await {
                 log::error!("local bridge server stopped: {e:?}");
             }
         });
