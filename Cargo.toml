@@ -28,7 +28,7 @@ members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
-  "crates/arora-websocket",
+  "crates/arora-bridge-ws",
   "crates/wasi-sdk",
   "modules/test-rust-wasm",
   "modules/test-rust-component",
@@ -60,7 +60,7 @@ default-members = [
   "crates/arora-cli",
   "crates/arora-util",
   "crates/arora-vfs",
-  "crates/arora-websocket",
+  "crates/arora-bridge-ws",
   "crates/wasi-sdk",
   "tests",
 ]

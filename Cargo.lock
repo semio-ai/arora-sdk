@@ -178,12 +178,12 @@ dependencies = [
  "arora-behavior",
  "arora-behavior-tree",
  "arora-bridge",
+ "arora-bridge-ws",
  "arora-engine",
  "arora-hal",
  "arora-simple-data-store",
  "arora-studio-bridge-client",
  "arora-types",
- "arora-websocket",
  "async-trait",
  "crypto_secretbox",
  "dirs",
@@ -256,6 +256,23 @@ dependencies = [
  "async-trait",
  "futures",
  "tokio",
+]
+
+[[package]]
+name = "arora-bridge-ws"
+version = "1.0.0"
+dependencies = [
+ "arora-bridge",
+ "arora-types",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "tokio-util",
 ]
 
 [[package]]
@@ -626,23 +643,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
-]
-
-[[package]]
-name = "arora-websocket"
-version = "1.0.0"
-dependencies = [
- "arora-bridge",
- "arora-types",
- "async-trait",
- "futures",
- "futures-util",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.24.0",
- "tokio-util",
 ]
 
 [[package]]

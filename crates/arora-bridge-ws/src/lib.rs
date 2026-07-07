@@ -42,7 +42,7 @@
 //! # Server Example
 //!
 //! ```rust,no_run
-//! use arora_websocket::{AroraWSServer, ServerConfig, MethodInfo, InvokeResult};
+//! use arora_bridge_ws::{AroraWSServer, ServerConfig, MethodInfo, InvokeResult};
 //! use tokio_util::sync::CancellationToken;
 //!
 //! #[tokio::main]

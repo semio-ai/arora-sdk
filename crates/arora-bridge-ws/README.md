@@ -1,4 +1,4 @@
-# arora-websocket
+# arora-bridge-ws
 
 The open local bridge for Arora: a WebSocket server that bridges the Arora API,
 implementing [`arora_bridge::Bridge`], for editors and apps on trusted local
@@ -44,7 +44,7 @@ editor renders from.
 ## Example
 
 ```rust,no_run
-use arora_websocket::{AroraWSServer, CancellationToken};
+use arora_bridge_ws::{AroraWSServer, CancellationToken};
 
 #[tokio::main]
 async fn main() {
