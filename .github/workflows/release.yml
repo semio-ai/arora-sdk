@@ -46,7 +46,7 @@ jobs:
           # crates are intentionally absent: they carry private semio-record /
           # semio-client git deps, which crates.io forbids. They join this list
           # once the semio-record migration removes those deps.
-          publishable=(arora-types arora-bridge arora-bridge-ws arora-bridge-ros2 arora-behavior arora-hal arora-simple-data-store arora-vfs arora-buffers arora-registry arora-module-core arora-module-rust arora-behavior-tree-types arora-behavior-tree arora-engine arora)
+          publishable=(arora-types arora-bridge arora-bridge-ws arora-bridge-ros2 arora-behavior arora-hal arora-simple-data-store arora-vfs arora-buffers arora-registry arora-module-core arora-module-rust arora-behavior-tree-types arora-behavior-tree arora-engine arora arora-web)
           for crate in "${publishable[@]}"; do
             ver=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')

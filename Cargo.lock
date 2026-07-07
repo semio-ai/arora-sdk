@@ -649,14 +649,17 @@ name = "arora-web"
 version = "0.1.0"
 dependencies = [
  "arora",
+ "arora-behavior",
  "arora-bridge",
  "arora-engine",
  "arora-hal",
+ "arora-simple-data-store",
  "arora-types",
  "console_error_panic_hook",
  "getrandom 0.4.3",
  "js-sys",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "serde_yaml",
  "test-rust-wasm",
