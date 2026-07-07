@@ -38,8 +38,12 @@ use arora_types::{
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(start)]
-pub fn _start() {
+/// Route Rust panics to the browser console. Called from every entry point
+/// (`BrowserRuntime::start`, `Engine::new`, `BehaviorTreeRunner::new`) rather
+/// than from a `#[wasm_bindgen(start)]`: a reusable library must not claim the
+/// module `start`, or every downstream cdylib that also defines one collides on
+/// the `_start` symbol at link time. `set_once` makes repeat calls free.
+fn install_panic_hook() {
     console_error_panic_hook::set_once();
 }
 
@@ -92,6 +96,7 @@ impl BrowserRuntime {
         bridge: Arc<dyn Bridge>,
         store: Arc<dyn DataStore>,
     ) -> Result<BrowserRuntime, JsValue> {
+        install_panic_hook();
         let arora = arora::Arora::start()
             .await
             .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
@@ -288,6 +293,7 @@ pub struct Engine {
 impl Engine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Engine {
+        install_panic_hook();
         let executor = BrowserExecutor::new();
         let loader = executor.shared();
         let inner = EngineBuilder::new().add_executor(executor).build();
@@ -656,6 +662,7 @@ pub struct BehaviorTreeRunner {
 impl BehaviorTreeRunner {
     #[wasm_bindgen(constructor)]
     pub fn new() -> BehaviorTreeRunner {
+        install_panic_hook();
         let executor = BrowserExecutor::new();
         let loader = executor.shared();
         let inner = EngineBuilder::new().add_executor(executor).build();
