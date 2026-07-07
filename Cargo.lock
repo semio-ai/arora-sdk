@@ -259,6 +259,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-bridge-ros2"
+version = "0.1.0"
+dependencies = [
+ "arora-bridge",
+ "arora-types",
+ "async-trait",
+ "env_logger",
+ "futures",
+ "log",
+ "rand 0.9.4",
+ "ros2-client",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "arora-bridge-ws"
 version = "1.0.0"
 dependencies = [
