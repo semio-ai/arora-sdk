@@ -633,6 +633,18 @@ pub async fn generate_structure_source(
         writer.begin_structure(structure_id, #field_count);
         #(#fields_serialization)*
       }
+
+      /// Serializes the structure as a *raw* element — the field count and
+      /// fields only, without the leading `TYPE_STRUCTURE` tag or the 16-byte
+      /// structure id. This is the on-wire encoding of an element inside an
+      /// array of structures, where the id is carried once by the array header.
+      /// It mirrors `arora_buffers::serde_uuid`'s `Value::ArrayStructure` so the
+      /// generated codegen and the generic value codec agree across the
+      /// `arora_call` boundary.
+      pub fn serialize_to_writer_raw(value: &#struct_ident, writer: &mut BufferWriter) {
+        writer.begin_structure_raw(#field_count);
+        #(#fields_serialization)*
+      }
     };
 
     // Struct Deserialization.
@@ -1588,13 +1600,25 @@ async fn generate_serialize_from_frozen(
                 .await
                 .map_err(GenerationError::RegistryError)?;
             // Serialize each element (borrowing the vector so we don't move the
-            // field out of `&value`), not the whole vector. `serialize_to_writer`
-            // takes the element by reference, and `element` is already a
-            // reference because we iterate over `&value.field`.
+            // field out of `&value`), not the whole vector. Elements take the
+            // value by reference, and `element` is already a reference because we
+            // iterate over `&value.field`.
+            //
+            // Structures are written in the *raw* element encoding
+            // (`serialize_to_writer_raw`: field count + fields, no per-element
+            // tag/id) to match `serde_uuid`'s `Value::ArrayStructure`, so the
+            // codegen and the generic value codec agree across the `arora_call`
+            // boundary.
+            let serialize_element = match type_def {
+                TypeDefinitionFrozen::Structure(_) => {
+                    quote! { #mod_prefix serialize_to_writer_raw(element, writer) }
+                }
+                _ => quote! { #mod_prefix serialize_to_writer(element, writer) },
+            };
             Ok(quote! {
               #prepare_array
               for element in &#value_expression {
-                #mod_prefix serialize_to_writer(element, writer);
+                #serialize_element;
               }
             })
         }
@@ -1767,13 +1791,21 @@ async fn generate_deserialize_from_frozen(
         FrozenTy::FrozenArray(array) => {
             let type_ident =
                 type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
-            // Each element is serialized as a full value (its own type tag + id
-            // via `begin_structure` / `add_enumeration_value`), so every element
-            // must be read back with a type check that consumes them. Propagate
-            // the caller's error style (`Result` vs panic) to the elements.
-            let element_check_type = match check_type {
-                CheckType::YesResult => CheckType::YesResult,
-                _ => CheckType::Yes,
+            let element_record_type = registry
+                .type_of(&Selector::Id(array.reference.id.to_owned()))
+                .await
+                .map_err(GenerationError::RegistryError)?;
+            // Structure elements are written in the raw encoding (no per-element
+            // tag/id — the id is carried once by the array header), matching
+            // `serde_uuid`'s `Value::ArrayStructure`. Reading them back with
+            // `CheckType::No` invokes the raw `get_structure_raw` path, which
+            // reads only the field count. Enumeration elements are unchanged.
+            let element_check_type = match element_record_type {
+                RecordType::Structure => CheckType::No,
+                _ => match check_type {
+                    CheckType::YesResult => CheckType::YesResult,
+                    _ => CheckType::Yes,
+                },
             };
             let deserialize_element = generate_deserialize_from_frozen(
                 &FrozenTy::FrozenScalar(FrozenScalar {
@@ -1783,11 +1815,7 @@ async fn generate_deserialize_from_frozen(
                 element_check_type,
             )
             .await?;
-            let type_enum = match registry
-                .type_of(&Selector::Id(array.reference.id.to_owned()))
-                .await
-                .map_err(GenerationError::RegistryError)?
-            {
+            let type_enum = match element_record_type {
                 RecordType::Enumeration => quote! { TYPE_ENUMERATION },
                 RecordType::Structure => quote! { TYPE_STRUCTURE },
                 _ => unreachable!("unexpected type of element in array"),

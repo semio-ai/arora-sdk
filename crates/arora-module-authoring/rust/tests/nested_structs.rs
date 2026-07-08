@@ -465,10 +465,54 @@ where
     assert_eq!(value, from_bytes, "{} buffer round-trip mismatch", what);
 }
 
+// Cross-boundary conformance: the bytes the generated codegen writes for an
+// array-of-struct MUST be exactly what `arora_buffers::serde_uuid` (the generic
+// `Value` codec that marshals the `arora_call` boundary) reads and writes. This
+// guards `serde_uuid <-> generated-codegen`, not just codegen<->codegen.
+fn cross_boundary_array_of_struct() {
+    let track = sample_track();
+
+    // (1) generated codegen ENCODES -> serde_uuid (generic Value codec) DECODES.
+    let gen_bytes: Box<[u8]> = track.clone().into();
+    let decoded: Value = arora_buffers::serde_uuid::deserialize(&gen_bytes);
+
+    // The array-of-struct field must decode as `Value::ArrayStructure` — the raw
+    // element layout — proving the wire formats agree (the old full-element
+    // encoding would misparse here).
+    let has_array_structure = match &decoded {
+        Value::Structure(s) => s
+            .fields
+            .iter()
+            .any(|f| matches!(f.value.as_ref(), Value::ArrayStructure { .. })),
+        _ => false,
+    };
+    assert!(
+        has_array_structure,
+        "generated Track did not decode via serde_uuid as an ArrayStructure: {decoded:?}"
+    );
+
+    // (2) serde_uuid RE-ENCODES; it must be byte-identical to the generated one.
+    let su_bytes = arora_buffers::serde_uuid::serialize(&decoded);
+    assert_eq!(
+        &gen_bytes[..],
+        &su_bytes[..],
+        "generated codegen and serde_uuid disagree on array-of-struct wire bytes"
+    );
+
+    // (3) generated codegen DECODES serde_uuid's bytes back to the value.
+    let from_serde =
+        Track::try_from(&su_bytes[..]).expect("generated codegen failed to decode serde_uuid bytes");
+    assert_eq!(
+        track, from_serde,
+        "serde_uuid -> generated codegen round-trip mismatch"
+    );
+}
+
 fn main() {
     round_trip(sample_track(), "Track (array-of-struct + nested + enum)");
     round_trip(sample_tree(), "Tree (recursive via Vec<Self>)");
     round_trip(sample_dynamic(), "Dynamic (raw Value field)");
+    cross_boundary_array_of_struct();
     println!("ROUNDTRIP_OK");
 }
 "#;

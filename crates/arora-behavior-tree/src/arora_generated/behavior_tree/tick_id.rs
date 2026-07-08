@@ -19,6 +19,18 @@ pub fn serialize_to_writer(value: &TickId, writer: &mut BufferWriter) {
     writer.add_structure_field(&TICK_ID_CALLABLE_ID_FIELD_RAW_ID);
     writer.add_u64(value.callable_id);
 }
+#[doc = r" Serializes the structure as a *raw* element — the field count and"]
+#[doc = r" fields only, without the leading `TYPE_STRUCTURE` tag or the 16-byte"]
+#[doc = r" structure id. This is the on-wire encoding of an element inside an"]
+#[doc = r" array of structures, where the id is carried once by the array header."]
+#[doc = r" It mirrors `arora_buffers::serde_uuid`'s `Value::ArrayStructure` so the"]
+#[doc = r" generated codegen and the generic value codec agree across the"]
+#[doc = r" `arora_call` boundary."]
+pub fn serialize_to_writer_raw(value: &TickId, writer: &mut BufferWriter) {
+    writer.begin_structure_raw(1u32);
+    writer.add_structure_field(&TICK_ID_CALLABLE_ID_FIELD_RAW_ID);
+    writer.add_u64(value.callable_id);
+}
 impl TryFrom<&[u8]> for TickId {
     type Error = DeserializationError;
     fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {

@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-rust"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Rust source generation for Arora modules (types and bindings from type records)."
 license = "MIT"
