@@ -5,6 +5,23 @@
 //! trait: push local state changes out, receive device-info updates and
 //! commands in, and learn when a client is asking for data.
 //!
+//! # Synchronous, non-blocking I/O seam
+//!
+//! The runtime is a plain synchronous stepper: it neither owns an async runtime
+//! nor spawns an I/O pump. So the bridge's inbound/outbound plane is two
+//! **synchronous, non-blocking, immediate** methods the runtime's `step` calls
+//! directly:
+//!
+//! - [`try_recv`](Bridge::try_recv) drains the next [`Inbound`] event (a
+//!   command, a device-info update, or a data-requested toggle), or `None`;
+//! - [`try_send`](Bridge::try_send) pushes an outbound [`StateChange`] toward
+//!   the remote.
+//!
+//! **Any real async work is the implementation's own responsibility.** A bridge
+//! backed by a socket (WebSocket, Zenoh, DDS) spawns and owns its own task,
+//! buffering inbound events into a queue that `try_recv` drains and flushing an
+//! outbound queue that `try_send` fills. The runtime never sees the async.
+//!
 //! The trait lives here (lean: `arora-types` + async primitives) so the runtime
 //! can depend on the *interface* without depending on `studio-bridge`.
 //! studio-bridge keeps its device-client implementations and provides a
@@ -169,41 +186,58 @@ impl std::fmt::Debug for AccessRequest {
     }
 }
 
-/// Stream of device-info updates. `Ok(None)` means the device was unregistered.
-pub type DeviceInfoStream = Pin<Box<dyn Stream<Item = BridgeResult<Option<DeviceInfo>>> + Send>>;
-/// Stream of the "a client is asking for data" (claim) toggle.
-pub type DataRequestedStream = Pin<Box<dyn Stream<Item = bool> + Send>>;
-/// Stream of commands from the remote.
-pub type CommandStream = Pin<Box<dyn Stream<Item = BridgeCommand> + Send>>;
 /// Stream of access requests from remote clients.
 pub type AccessRequestStream = Pin<Box<dyn Stream<Item = AccessRequest> + Send>>;
+
+/// An event drained from a bridge through [`Bridge::try_recv`].
+///
+/// The bridge implementation buffers these from its own transport task; the
+/// runtime drains them one at a time, non-blocking, during its step. Mirrors
+/// the events the previous async pump multiplexed (command / device-info /
+/// data-requested), now handed over synchronously.
+pub enum Inbound {
+    /// A command from the remote, carrying its one-shot reply channel.
+    Command(BridgeCommand),
+    /// A device-info update. `Ok(None)` means the device was unregistered — the
+    /// runtime should stop stepping.
+    DeviceInfo(BridgeResult<Option<DeviceInfo>>),
+    /// A client claimed/released interest in the data (the "data requested"
+    /// toggle).
+    DataRequested(bool),
+}
 
 /// The connection between an Arora runtime and a remote (e.g. Semio Studio).
 ///
 /// Modelled on studio-bridge's `device-client`. Interior-mutable (`&self`) so
-/// the runtime can share it across the tasks of its run loop.
+/// the runtime can share it, and so the inbound/outbound seam
+/// ([`try_recv`](Bridge::try_recv) / [`try_send`](Bridge::try_send)) is
+/// synchronous — the implementation owns any async internally (see the module
+/// docs).
 #[async_trait]
 pub trait Bridge: Send + Sync {
+    /// Drain the next inbound event (command / device-info update /
+    /// data-requested toggle), or `None` when nothing is queued right now.
+    ///
+    /// **Non-blocking and immediate.** Any real async work (reading a socket)
+    /// is the implementation's own responsibility: it spawns a task that
+    /// buffers events for this method to hand over. The runtime calls this in a
+    /// tight loop each step until it returns `None`.
+    fn try_recv(&self) -> Option<Inbound>;
+
+    /// Push an outbound state change toward the remote, now, without blocking.
+    ///
+    /// The implementation enqueues it onto its own outbound buffer/task; it must
+    /// not block the caller on I/O.
+    fn try_send(&self, change: &StateChange);
+
     /// The device's current info, if registered.
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>>;
-
-    /// A stream of device-info updates from the remote (`Ok(None)` = unregistered).
-    async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream>;
 
     /// Push updated device info to the remote; returns the merged result.
     async fn update_device_info(
         &self,
         info: Option<DeviceInfo>,
     ) -> BridgeResult<Option<DeviceInfo>>;
-
-    /// A stream that toggles as a client claims/releases interest in the data.
-    async fn data_requested(&self) -> DataRequestedStream;
-
-    /// Push a state change out to the remote.
-    async fn send_data(&self, data: StateChange) -> BridgeResult<()>;
-
-    /// A stream of commands the remote issues to the device.
-    async fn commands(&self) -> CommandStream;
 
     /// The device's identity on the remote (e.g. its Firestore document id),
     /// when the bridge has one. Defaults to `None` for bridges without a
@@ -216,13 +250,17 @@ pub trait Bridge: Send + Sync {
     /// joining access control". Defaults to a stream that never yields, for
     /// bridges whose remote does not (yet) send access requests; such bridges
     /// keep their current behavior of granting access implicitly.
+    ///
+    /// This is a separate concern from the inbound data plane
+    /// ([`try_recv`](Bridge::try_recv)): the operator front end pumps it on its
+    /// own task, one request at a time.
     async fn access_requests(&self) -> AccessRequestStream {
         Box::pin(futures::stream::pending())
     }
 }
 
 /// A no-op [`Bridge`] for tests and offline runs: never registers, never emits
-/// updates, commands, or claims, and accepts (drops) any data sent.
+/// inbound events, and accepts (drops) any data sent.
 #[derive(Clone, Default)]
 pub struct FakeBridge;
 
@@ -234,12 +272,14 @@ impl FakeBridge {
 
 #[async_trait]
 impl Bridge for FakeBridge {
-    async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
-        Ok(None)
+    fn try_recv(&self) -> Option<Inbound> {
+        None
     }
 
-    async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-        Ok(Box::pin(futures::stream::empty()))
+    fn try_send(&self, _change: &StateChange) {}
+
+    async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
+        Ok(None)
     }
 
     async fn update_device_info(
@@ -247,18 +287,6 @@ impl Bridge for FakeBridge {
         info: Option<DeviceInfo>,
     ) -> BridgeResult<Option<DeviceInfo>> {
         Ok(info)
-    }
-
-    async fn data_requested(&self) -> DataRequestedStream {
-        Box::pin(futures::stream::empty())
-    }
-
-    async fn send_data(&self, _data: StateChange) -> BridgeResult<()> {
-        Ok(())
-    }
-
-    async fn commands(&self) -> CommandStream {
-        Box::pin(futures::stream::empty())
     }
 }
 
@@ -271,15 +299,9 @@ mod tests {
     async fn fake_bridge_is_usable_as_trait_object() {
         let bridge: Box<dyn Bridge> = Box::new(FakeBridge::new());
         assert_eq!(bridge.get_device_info().await.unwrap(), None);
-        bridge.send_data(StateChange::new()).await.unwrap();
-        assert!(bridge
-            .device_info_updated()
-            .await
-            .unwrap()
-            .next()
-            .await
-            .is_none());
-        assert!(bridge.commands().await.next().await.is_none());
+        // Synchronous seam: nothing to drain, and outbound is dropped.
+        assert!(bridge.try_recv().is_none());
+        bridge.try_send(&StateChange::new());
     }
 
     #[tokio::test]

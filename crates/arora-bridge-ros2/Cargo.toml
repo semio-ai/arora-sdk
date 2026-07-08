@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -11,7 +11,7 @@ name = "arora_bridge_ros2"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.6" }
-arora-bridge = { path = "../arora-bridge", version = "1" }
+arora-bridge = { path = "../arora-bridge", version = "2" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
