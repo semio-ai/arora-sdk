@@ -92,36 +92,61 @@ pub struct Node { id: Uuid, function: Uuid, arguments: HashMap<Uuid, Expression>
 
 ## 3. Gap analysis → proposed changes
 
-### 3.1 One `Arora` with a builder (folds `Runtime` in)
+### 3.1 One `Arora` with a builder (folds `Runtime` in) — and **no io pump**
 
-Fold the loop into `Arora`; delete the `Arora`/`Runtime` split, the `with_io`/`with_io_in` pair, the six `run*` funnels, and the two dead `Arora::run_*` methods. One construction expression:
+> **Revised (2026-07-09, per review).** The original draft kept the async `io` pump inside the fold; Victor rejected that — the pump betrays a design issue. Corrected below: arora is purely synchronous, and the async lives *inside* each HAL/bridge implementation, behind synchronous poll/push.
+
+Fold the loop into `Arora`; delete the `Arora`/`Runtime` split, the `with_io`/`with_io_in` pair, the six `run*` funnels, and the two dead `Arora::run_*` methods. One construction expression that returns **just `Arora`** — no pump to spawn:
 ```rust
-let (arora, io) = Arora::builder()
+let arora = Arora::builder()
     .with_data_store(store)          // Arc<dyn DataStore>; default: SimpleDataStore
     .with_hal(hal)                   // exactly one; default: FakeHal
-    .with_bridge(ws_bridge)          // repeatable; default: none (or the local ws server)
+    .with_bridge(ws_bridge)          // repeatable; default: the local ws server
     .with_bridge(loopback_bridge)    // several allowed
     .with_module(anim_module)        // repeatable; default: none
     .with_behavior_interpreter(bt)   // the one interpreter; default: an empty BT
-    .build();                        // -> (Arora, impl Future /* the io pump */)
+    .build();                        // -> Arora   (no `impl Future` — see below)
 ```
-Defaults match today's `run()` (FakeHal, local ws bridge, empty BT, SimpleDataStore) so `Arora::builder().build()` ≈ `arora::run()` setup. `with_module` finally makes the advertised (but absent) module-load seam real, populating `function_index`. The behavior interpreter becomes a build-time injection, replacing the round-robin queue with one well-defined interpreter (edition, §3.4, replaces "queue another behavior").
+Defaults match today's `run()` (FakeHal, local ws bridge, empty BT, SimpleDataStore). `with_module` makes the advertised (but absent) module-load seam real, populating `function_index`. The behavior interpreter is a build-time injection: **one** interpreter, replaceable (switch) and later live-patchable (`apply(diff)`, §3.4) — no behavior queue.
 
-### 3.2 `step(dt)` and `run()` as a legible spine
-
+**No io pump — the async belongs to the seams.** Today arora spawns a separate `io()` future (`runtime.rs:513-549`) that multiplexes the bridge's async streams and the HAL feed through `Inbound`/`Outbound` mpsc channels. That is the smell: **arora should not own an async pump or channels.** Instead the `Hal` and `Bridge` traits expose *synchronous, non-blocking, immediate* I/O that `step` calls directly:
 ```rust
+trait Bridge {
+    fn try_recv(&self) -> Option<Inbound>;   // drain the next inbound command/event, now, no await
+    fn try_send(&self, change: &StateChange); // push an outbound change, now
+}
+// (Hal already has this shape via `updates()` — a sync-pollable Subscription — plus `write`.)
+```
+Preferably these are a **stream/iterator** that *indirectly* polls the seam's own async implementation. Any real async work (a WS/Zenoh socket) is the **implementation's** responsibility: it spawns and owns its task internally, buffering into a queue that `try_recv` drains and `try_send` fills. Consequences: `build()` returns just `Arora`; the `io()` future, the `Inbound`/`Outbound` channels, and the spawn dance all disappear; arora is a plain synchronous object (which is also why it drops cleanly into a Web Worker — the worker boundary is the seam's problem, not arora's).
+
+### 3.2 `step(dt)` as a function pipeline (not OO methods)
+
+> **Revised (2026-07-09, per review).** The original draft wrote the phases as `self.read_hal()`-style methods; Victor rejected that — it hides the data flow behind the object. The phases should be **functions** taking explicit arguments and returning data structs that flow to the next line; the `Arora` object is just a convenience holder passing its own fields in.
+
+Each phase is a free function with explicit inputs and an explicit return; `step` is only the wiring:
+```rust
+// The phases — free functions over explicit state, individually testable:
+fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues;                 // { time, dt } (the golden values)
+fn read_inbound(hal: &dyn Hal, bridges: &[Arc<dyn Bridge>]) -> Inbound;        // { sensors: StateChange, commands: Vec<Command> }
+fn ingest(store: &dyn DataStore, clock: &ClockValues, inbound: &Inbound);      // store <- clock + sensors + applied commands
+fn tick_behavior(bi: &mut dyn BehaviorInterpreter, store: &dyn DataStore,
+                 engine: &mut dyn CallBridge) -> StateChange;                  // the interpreter's writes (intent)
+fn flush(store: &dyn DataStore) -> StateChange;                               // coalesced changes, golden keys filtered out
+fn write_outbound(hal: &dyn Hal, bridges: &[Arc<dyn Bridge>], out: &StateChange); // hal.try_send + each bridge.try_send
+
+// `Arora::step` is just the pipe — the object hands its fields to the functions:
 pub fn step(&mut self, dt: Duration) -> StepOutcome {
-    self.update_time(dt);        // golden arora/time, arora/dt
-    self.read_hal();             // drain HAL sensor updates -> store
-    self.read_bridges();         // drain every bridge's inbound -> store / commands
-    self.tick_behavior();        // the one interpreter ticks against the store
-    self.write_hal();            // flush store changes -> HAL actuators
-    self.write_bridges();        // flush store changes -> every bridge
-    outcome
+    let clock   = tick_clock(&mut self.clock, dt);
+    let inbound = read_inbound(&*self.hal, &self.bridges);
+    ingest(&*self.store, &clock, &inbound);
+    let _intent = tick_behavior(&mut *self.interpreter, &*self.store, &mut self.engine);
+    let out     = flush(&*self.store);
+    write_outbound(&*self.hal, &self.bridges, &out);
+    outcome_of(&inbound)
 }
 pub fn run(&mut self) { while self.step(self.measured_dt()) != Unregistered {} }
 ```
-Six named phases, one per line, matching the target sentence. `run` is visibly the loop over `step`. One `dt` type (`Duration`) and one return (`StepOutcome`) across native and web; the web wrapper converts its rAF milliseconds at the boundary only.
+The intermediate structs (`ClockValues`, `Inbound`, the `StateChange`s) make the *time → hal-read → bridge-read → tick → hal-write → bridge-write* flow legible and each phase unit-testable in isolation. `Arora` is sugar over what are really free functions; it could be written entirely functionally, the object just encapsulates the engine and its friends for convenience. `run` is visibly the loop over `step`. One `dt` type (`Duration`) and one `StepOutcome` return across native and web (the web wrapper converts rAF milliseconds at the boundary only).
 
 ### 3.3 Multiple bridges
 
@@ -154,19 +179,19 @@ Once arora carries this model, the orchestrator migration largely evaporates. Th
 
 ## 5. Sequencing (PRs, unmerged — for review)
 
-Do the arora cleanup **before** finishing the orchestrator. Suggested reviewable PRs, stacked:
-1. **Builder + fold `Runtime` into `Arora`**; collapse the `run*`/`with_io*` variants; delete the dead `Arora::run_*`; `with_data_store(dyn)`. (Behavior-preserving where possible; `arora-web`/`run.rs`/`main.rs`/examples updated to the builder.)
-2. **`step`/`run` legible spine** + one `dt`/`StepOutcome` convention across native/web.
-3. **Multiple bridges** (fan-in/fan-out).
-4. **Graph model into `arora-behavior`** + `BehaviorInterpreter::apply(GraphDiff)`; the BT becomes an interpreter over it.
-5. **Behavior edition through the engine**: golden edit-function registration + wire `BridgeOp::Call` → engine dispatch.
+Do the arora cleanup **before** finishing the orchestrator. Suggested reviewable PRs, stacked (revised 2026-07-09 for the no-pump / functional-step corrections and the resolved Q-A..Q-D):
+1. **Synchronous I/O seams + delete the io pump.** Reshape `Hal`/`Bridge` to synchronous `try_recv`/`try_send` (or a stream that polls the impl's own async); remove the `io()` future and the `Inbound`/`Outbound` channels. The async becomes each impl's responsibility. Foundational — everything else assumes it.
+2. **Builder + fold `Runtime` into `Arora`** (`build() -> Arora`, no pump) + the **functional `step`/`run` pipeline** (§3.2) + one `dt`/`StepOutcome`; single replaceable interpreter (no queue); `with_data_store(Arc<dyn>)`; collapse `run*`/`with_io*`; delete the dead `Arora::run_*`; update `arora-web`/`run.rs`/`main.rs`/`studio`/examples. (1+2 may merge, since removing the pump forces the fold; kept separate here for review size.)
+3. **Multiple bridges** — `read_inbound` fans in over `&[Bridge]`, `write_outbound` fans out; small once the seams are synchronous.
+4. **One graph model in `arora-behavior`** + **unify on arora `Value`** (Q-C: remove `vizij_api_core::Value`, move `vizij-graph-core` et al. onto `arora_types::value::Value`) + `BehaviorInterpreter::apply(GraphDiff)`; BT and the vizij graph become interpreters over it. (Largest PR; the vizij-`Value` removal is a real vizij-side migration.)
+5. **Behavior edition through the engine**: `arora-behavior` exposes a golden module/function id; the **builder** registers it against the injected interpreter (Q-B); wire the stubbed `BridgeOp::Call` → engine dispatch.
 6. **Predetermined I/Os + link override** (small, on top of the graph model).
 
-Each is a breaking change on a young API; per Semio policy, real MAJOR bumps with dependents re-pinned in lockstep. **Do not merge without Victor's review.**
+Each is a breaking change on a young API; per Semio policy, real MAJOR bumps with dependents re-pinned in lockstep. The `arora-buffers` wire format stays gated (discuss before touching). **Do not merge without Victor's review.**
 
-## 6. Open questions
+## 6. Open questions — resolved (Victor, 2026-07-09)
 
-- **Q-A — behavior-queue semantics.** Today STEP 2 round-robins a `VecDeque` of behaviors (`runtime.rs:352-373`). The target is *one* injected interpreter. Confirm we drop multi-behavior round-robin entirely (a "run several behaviors" need would then be expressed *inside* one graph, not by the runtime).
-- **Q-B — how the golden edit-function reaches the interpreter.** The engine-registered edit function needs a handle to the device's interpreter. Cleanest is for the builder to wire that registration against the injected interpreter at `build()`. Confirm that's acceptable (vs. the runtime intercepting the golden module id post-dispatch).
-- **Q-C — vizij `Value` vs arora `Value`.** The shared graph model types I/Os as arora `Value`. Vizij keeps its own `Value`+`Shape` and converts at the interop boundary (as today). Confirm we are *not* unifying the two value enums in this pass (only the graph structure).
-- **Q-D — expressions in links.** You noted "expressions may sneak into links eventually." BT already has `Expression`. Confirm expressions-on-links are out of scope for this pass (structure + predetermined keys only), to be added later.
+- **Q-A — behavior semantics.** ✅ One single top interpreter, one behavior at a time; **switchable** (replace) and **live-patchable** (`apply(diff)`). Drop the `VecDeque` tick-rotation. ("Round-robin" was a poor description of the current code, not the intent.)
+- **Q-B — golden edit-function wiring.** ✅ The **builder** wires the golden edit function against the injected interpreter at `build()`.
+- **Q-C — values.** ✅ **Get rid of Vizij's `Value`** — unify on arora `Value` (`arora_types::value::Value`); remove `vizij_api_core::Value`, move `vizij-graph-core` et al. onto arora `Value`. (A real vizij-side migration, in PR 4.)
+- **Q-D — expressions on links.** ✅ Deferred — structure + predetermined keys only this pass; `Expression`-on-links comes later.
