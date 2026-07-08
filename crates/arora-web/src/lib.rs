@@ -127,10 +127,14 @@ impl BrowserRuntime {
             .map_err(|e| JsValue::from_str(&format!("queue failed: {e}")))
     }
 
-    /// Advance the runtime one tick. Returns `true` while live, `false` once the
-    /// device has been unregistered (stop stepping then).
-    pub fn step(&mut self) -> Result<bool, JsValue> {
-        match self.runtime.step() {
+    /// Advance the runtime one tick. `dt_ns` is the **nanoseconds** elapsed since
+    /// the previous step. A web driver measures it from `requestAnimationFrame`
+    /// timestamps (milliseconds) and converts — see the [`AroraRuntime::step`]
+    /// wasm boundary. The runtime publishes it (and the accumulated time) under
+    /// the golden keys before ticking. Returns `true` while live, `false` once
+    /// the device has been unregistered (stop stepping then).
+    pub fn step(&mut self, dt_ns: u64) -> Result<bool, JsValue> {
+        match self.runtime.step(dt_ns) {
             Ok(StepOutcome::Live) => Ok(true),
             Ok(StepOutcome::Unregistered) => Ok(false),
             Err(e) => Err(JsValue::from_str(&format!("step failed: {e}"))),
@@ -250,10 +254,13 @@ impl AroraRuntime {
         Ok(AroraRuntime { inner })
     }
 
-    /// Advance the runtime one step. Returns `true` while live, `false` once the
-    /// device has been unregistered (stop calling then).
-    pub fn step(&mut self) -> Result<bool, JsValue> {
-        self.inner.step()
+    /// Advance the runtime one step. `dt_ms` is the milliseconds elapsed since
+    /// the previous step — a plain JS number, exactly what a
+    /// `requestAnimationFrame` timestamp delta gives. The core clock is integer
+    /// nanoseconds, so this converts at the wasm boundary. Returns `true` while
+    /// live, `false` once the device has been unregistered (stop calling then).
+    pub fn step(&mut self, dt_ms: f64) -> Result<bool, JsValue> {
+        self.inner.step((dt_ms * 1_000_000.0) as u64)
     }
 
     /// Queue a behavior tree (Groot XML) to run on the next step.

@@ -34,7 +34,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use arora_behavior::{Behavior, BehaviorContext, BehaviorStatus};
+use arora_behavior::{golden, Behavior, BehaviorContext, BehaviorStatus};
 use arora_behavior_tree::{
     behavior::TreeBehavior, schema_groot, tree_node::TreeNode, BehaviorTree, ModuleFunction,
 };
@@ -43,7 +43,7 @@ use arora_engine::engine::PinnedEngine;
 use arora_hal::Hal;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::CallResult;
-use arora_types::data::{DataStore, Key, StateChange, Subscription};
+use arora_types::data::{DataStore, Key, Slot, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{Future, StreamExt};
@@ -154,6 +154,12 @@ pub struct Runtime {
     inbound: UnboundedReceiver<Inbound>,
     outbound: UnboundedSender<Outbound>,
     store_changes: Subscription,
+    // The golden clock: monotonic nanoseconds since start, advanced by each
+    // step's `dt`, and direct slot handles to publish it into the store before
+    // ticking. Kept local — STEP 3 never forwards the golden namespace outbound.
+    time_ns: u64,
+    time_slot: Box<dyn Slot>,
+    dt_slot: Box<dyn Slot>,
 }
 
 impl Runtime {
@@ -197,6 +203,8 @@ impl Runtime {
             function_index,
         } = arora;
         let store_changes = store.subscribe();
+        let time_slot = store.slot(&Key::from(golden::TIME));
+        let dt_slot = store.slot(&Key::from(golden::DT));
         let hal_updates = hal.updates();
 
         let (inbound_tx, inbound) = futures::channel::mpsc::unbounded::<Inbound>();
@@ -214,6 +222,9 @@ impl Runtime {
             inbound,
             outbound,
             store_changes,
+            time_ns: 0,
+            time_slot,
+            dt_slot,
         };
         (runtime, pump)
     }
@@ -288,10 +299,18 @@ impl Runtime {
         });
     }
 
-    /// Advance one step: drain inbound bridge/HAL updates into the state, tick the
-    /// behavior tree, then flush the resulting state changes out. Non-blocking;
-    /// touches the state from this (single) thread only.
-    pub fn step(&mut self) -> Result<StepOutcome, RuntimeError> {
+    /// Advance one step: drain inbound bridge/HAL updates into the state, publish
+    /// the frame clock into the golden keys, tick the behavior, then flush the
+    /// resulting state changes out. Non-blocking; touches the state from this
+    /// (single) thread only.
+    ///
+    /// `dt_ns` is the **nanoseconds** elapsed since the previous step, measured
+    /// by the caller's driver ([`run`](Runtime::run) natively,
+    /// `requestAnimationFrame` on the web). The runtime owns what it does with
+    /// it: it advances the monotonic clock and publishes both under the golden
+    /// keys ([`golden::TIME`], [`golden::DT`]) so behaviors read timing from the
+    /// store rather than as a tick argument.
+    pub fn step(&mut self, dt_ns: u64) -> Result<StepOutcome, RuntimeError> {
         // STEP 1a — HAL sensor updates (a synchronous subscription).
         while let Some(change) = self.hal_updates.try_recv() {
             self.apply(change)?;
@@ -311,6 +330,19 @@ impl Runtime {
                 }
             }
         }
+        // STEP 1c — publish the frame clock into the golden keys, before any
+        // behavior ticks, so a behavior reads this step's `dt`/time straight from
+        // the store. The runtime owns the clock: it advances the monotonic
+        // accumulator by `dt` and writes both. These writes go into the store's
+        // change feed like any other, but STEP 3 filters the golden namespace out
+        // of what it forwards outbound.
+        self.time_ns = self.time_ns.saturating_add(dt_ns);
+        self.dt_slot
+            .set(Some(Value::U64(dt_ns)))
+            .map_err(|e| RuntimeError::Store(e.to_string()))?;
+        self.time_slot
+            .set(Some(Value::U64(self.time_ns)))
+            .map_err(|e| RuntimeError::Store(e.to_string()))?;
         // STEP 2 — tick the active behavior (tree, node graph, …) against the
         // shared store; keep it queued while it is still running.
         if let Some(mut queued) = self.behaviors.pop_front() {
@@ -322,7 +354,6 @@ impl Runtime {
             let mut ctx = BehaviorContext {
                 store: &*self.store,
                 caller: &mut self.engine,
-                dt: 0.0,
             };
             let status = queued
                 .behavior
@@ -342,10 +373,18 @@ impl Runtime {
         let mut merged = StateChange::new();
         while let Some(change) = self.store_changes.try_recv() {
             for (key, value) in change.set {
+                // The golden clock keys are runtime-local: drop them so the
+                // remote/hardware never see the wall-clock churning every frame.
+                if golden::is_golden(key.get_path()) {
+                    continue;
+                }
                 merged.unset.remove(&key);
                 merged.set.insert(key, value);
             }
             for key in change.unset {
+                if golden::is_golden(key.get_path()) {
+                    continue;
+                }
                 merged.set.remove(&key);
                 merged.unset.insert(key);
             }
@@ -437,8 +476,15 @@ impl Runtime {
         // through the telemetry handle.
         let mut window_start = std::time::Instant::now();
         let mut steps_in_window: u32 = 0;
+        // Wall-clock delta between steps, in nanoseconds, fed to `step` as the
+        // frame `dt`. `as_nanos()` is u128; a single step's delta is far under
+        // u64 range, so the cast is lossless in practice.
+        let mut last_step = std::time::Instant::now();
         loop {
-            if self.step()? == StepOutcome::Unregistered {
+            let now = std::time::Instant::now();
+            let dt_ns = now.duration_since(last_step).as_nanos() as u64;
+            last_step = now;
+            if self.step(dt_ns)? == StepOutcome::Unregistered {
                 return Ok(());
             }
             steps_in_window += 1;
@@ -551,7 +597,7 @@ mod tests {
     /// Drive `step` until the runtime reports unregistered, with a safety bound.
     async fn drive_until_unregistered(mut runtime: Runtime) {
         for _ in 0..1000 {
-            match runtime.step().expect("step ok") {
+            match runtime.step(16_000_000).expect("step ok") {
                 StepOutcome::Unregistered => return,
                 // Sleep, not just yield: the io pump runs as a separate spawned
                 // task, and `yield_now` is cooperative (CPU-time, not wall-clock)
@@ -677,7 +723,7 @@ mod tests {
         runtime.queue_behavior(Box::new(WriteOnce));
 
         // One step ticks the behavior, which writes through the shared store.
-        runtime.step().expect("step");
+        runtime.step(16_000_000).expect("step");
         let (tx, rx) = oneshot::channel();
         runtime
             .handle_command(BridgeCommand::new(
@@ -783,7 +829,7 @@ mod tests {
         assert!(rx.await.unwrap().is_ok(), "update should succeed");
         // Let the change flow out through a step (the flush stage drains the
         // store's change feed).
-        assert_eq!(runtime.step().expect("step ok"), StepOutcome::Live);
+        assert_eq!(runtime.step(16_000_000).expect("step ok"), StepOutcome::Live);
 
         // In the shared backend the key lives under the device namespace…
         assert_eq!(
@@ -838,7 +884,7 @@ mod tests {
             key: "greeting",
             value: Value::String("hi".into()),
         }));
-        assert_eq!(runtime.step().expect("step"), StepOutcome::Live);
+        assert_eq!(runtime.step(16_000_000).expect("step"), StepOutcome::Live);
         assert_eq!(
             shared.read(&[Key::from("robotA/greeting")]),
             vec![Some(Value::String("hi".into()))],
@@ -850,11 +896,117 @@ mod tests {
             key: "greeting",
             value: Value::String("bye".into()),
         }));
-        assert_eq!(runtime.step().expect("step"), StepOutcome::Live);
+        assert_eq!(runtime.step(16_000_000).expect("step"), StepOutcome::Live);
         assert_eq!(
             shared.read(&[Key::from("robotA/greeting")]),
             vec![Some(Value::String("bye".into()))],
             "switching the queued behavior changed what was written"
+        );
+    }
+
+    /// The runtime publishes the frame clock into the golden keys *before* it
+    /// ticks, so a behavior reads `dt`/time from the store. Nanoseconds
+    /// accumulate into `time`; `dt` reflects only the latest step.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn golden_clock_is_published_to_the_store_each_step() {
+        let store = Arc::new(SimpleDataStore::new());
+        let (mut runtime, _pump) = build_in(Arc::new(SilentBridge), store.clone()).await;
+
+        // Before any step the golden keys are unset.
+        assert_eq!(store.read(&[Key::from(golden::DT)]), vec![None]);
+        assert_eq!(store.read(&[Key::from(golden::TIME)]), vec![None]);
+
+        // Step at 16 ms: dt and elapsed time both read 16_000_000 ns.
+        assert_eq!(runtime.step(16_000_000).expect("step"), StepOutcome::Live);
+        assert_eq!(
+            store.read(&[Key::from(golden::DT)]),
+            vec![Some(Value::U64(16_000_000))]
+        );
+        assert_eq!(
+            store.read(&[Key::from(golden::TIME)]),
+            vec![Some(Value::U64(16_000_000))]
+        );
+
+        // Step at 4 ms: dt resets to the latest delta, time accumulates to 20 ms.
+        assert_eq!(runtime.step(4_000_000).expect("step"), StepOutcome::Live);
+        assert_eq!(
+            store.read(&[Key::from(golden::DT)]),
+            vec![Some(Value::U64(4_000_000))]
+        );
+        assert_eq!(
+            store.read(&[Key::from(golden::TIME)]),
+            vec![Some(Value::U64(20_000_000))]
+        );
+    }
+
+    /// A bridge that records every `send_data` payload, and otherwise stays
+    /// silent (never unregisters), so a test can inspect what the runtime
+    /// actually forwards outbound.
+    struct RecordingBridge {
+        sent: Arc<std::sync::Mutex<Vec<StateChange>>>,
+    }
+
+    #[async_trait]
+    impl Bridge for RecordingBridge {
+        async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(None)
+        }
+        async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+        async fn update_device_info(
+            &self,
+            info: Option<DeviceInfo>,
+        ) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(info)
+        }
+        async fn data_requested(&self) -> DataRequestedStream {
+            Box::pin(futures::stream::empty())
+        }
+        async fn send_data(&self, data: StateChange) -> BridgeResult<()> {
+            self.sent.lock().unwrap().push(data);
+            Ok(())
+        }
+        async fn commands(&self) -> CommandStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    /// The golden clock keys stay local: the runtime never forwards them out to
+    /// the bridge, even though an ordinary behavior write on the same step is
+    /// forwarded. This is what keeps the wall-clock (which changes every frame)
+    /// off the wire.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn golden_keys_are_not_forwarded_outbound() {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (mut runtime, pump) = build(Arc::new(RecordingBridge { sent: sent.clone() })).await;
+        tokio::spawn(pump);
+
+        // A behavior writes one ordinary key; that write must reach the bridge.
+        runtime.queue_behavior(Box::new(WriteKey {
+            key: "greeting",
+            value: Value::String("hi".into()),
+        }));
+
+        // Step a few times, giving the pump real time to drain outbound →
+        // send_data (the pump runs on its own spawned task).
+        for _ in 0..5 {
+            runtime.step(16_000_000).expect("step");
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+
+        let sent = sent.lock().unwrap();
+        let forwarded_keys: Vec<String> = sent
+            .iter()
+            .flat_map(|c| c.set.keys().map(|k| k.path.clone()))
+            .collect();
+        assert!(
+            forwarded_keys.iter().any(|k| k.as_str() == "greeting"),
+            "the ordinary behavior write should be forwarded outbound, got {forwarded_keys:?}"
+        );
+        assert!(
+            !forwarded_keys.iter().any(|k| golden::is_golden(k.as_str())),
+            "golden keys must never be forwarded outbound, got {forwarded_keys:?}"
         );
     }
 }

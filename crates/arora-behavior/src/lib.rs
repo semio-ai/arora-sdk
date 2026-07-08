@@ -7,13 +7,19 @@
 //!
 //! Each tick a behavior gets a [`BehaviorContext`]: the shared
 //! [`DataStore`](arora_types::data::DataStore) (read inputs, write intent /
-//! outputs), a [`CallBridge`](arora_types::call::CallBridge) (so module-calling
-//! behaviors like the behavior tree can reach the engine), and the frame delta.
-//! A behavior uses whichever it needs — a graph reads/writes the store; the tree
-//! drives the caller.
+//! outputs) and a [`CallBridge`](arora_types::call::CallBridge) (so module-calling
+//! behaviors like the behavior tree can reach the engine). A behavior uses
+//! whichever it needs — a graph reads/writes the store; the tree drives the
+//! caller.
+//!
+//! Timing is not a tick argument. The runtime publishes the frame's clock into
+//! the store under the [`golden`] keys before it ticks, so a behavior that needs
+//! `dt` or elapsed time reads it from the store like any other slot.
 
 use arora_types::call::CallBridge;
 use arora_types::data::DataStore;
+
+pub mod golden;
 
 /// Whether a behavior wants to be ticked again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,8 +36,6 @@ pub struct BehaviorContext<'a> {
     pub store: &'a dyn DataStore,
     /// The module-call bridge (the engine), for behaviors that call modules.
     pub caller: &'a mut dyn CallBridge,
-    /// Seconds elapsed since the previous tick.
-    pub dt: f32,
 }
 
 /// A behavior failed to tick.
