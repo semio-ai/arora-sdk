@@ -55,6 +55,7 @@ pub fn deserialize_from_reader(
         });
     }
     let variant_raw_id = reader.get_enumeration_value_raw();
+    reader.next_type();
     match variant_raw_id
         .try_into()
         .expect("enum id is of unexpected length")

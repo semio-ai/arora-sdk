@@ -461,6 +461,11 @@ pub fn generate_enumeration_source(
         }
 
         let variant_raw_id = reader.get_enumeration_value_raw();
+        // Consume the variant's payload written by `add_unit` on the
+        // serialization side (enumeration values carry a `Unit`). Without this
+        // the reader is left one byte short, corrupting whatever value follows
+        // (for example the next element of an array of enumerations).
+        reader.next_type();
         match variant_raw_id.try_into().expect("enum id is of unexpected length") {
           #(#deserialization_cases)*
           _ => Err(DeserializationError{ message: "unexpected variant".to_string() })
@@ -558,14 +563,23 @@ pub async fn generate_structure_source(
     // Struct declaration.
     let name = &structure.name;
     let struct_ident = type_ident(name);
+    // A field that is a *scalar* reference back to this very structure would make
+    // the Rust type infinitely sized, so it is `Box`-wrapped. (Array/`Vec`
+    // self-references don't need this — a `Vec` is already heap-allocated — and
+    // are what make a recursive type actually constructible.)
+    let is_self_ref = |field: &arora_types::record::structure::frozen::StructureField| matches!(&field.ty, FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *id);
     let mut field_declarations = Vec::new();
     for (_, field) in &structure.fields {
         let field_ident = variable_ident(&field.name);
-        let field_type_ident =
+        let mut field_type_ident =
             type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+        if is_self_ref(field) {
+            field_type_ident = quote! { Box<#field_type_ident> };
+        }
         field_declarations.push(quote! { pub #field_ident: #field_type_ident });
     }
     let struct_declaration = quote! {
+      #[derive(Debug, PartialEq, Clone)]
       pub struct #struct_ident {
         #(#field_declarations),*
       }
@@ -600,9 +614,12 @@ pub async fn generate_structure_source(
         let value_expression = quote! { value.#field_ident };
         let serialize =
             generate_serialize_from_frozen(&field.ty, value_expression, registry).await?;
+        // The trailing `;` terminates the field's serialization statement so
+        // that consecutive fields don't run together (a struct with more than
+        // one field would otherwise emit `writer.add_f32(..) writer.add_..`).
         fields_serialization.push(quote! {
           writer.add_structure_field(&#field_const_id_ident);
-          #serialize
+          #serialize;
         });
     }
     let field_count = fields_serialization.len() as u32;
@@ -624,7 +641,11 @@ pub async fn generate_structure_source(
     let mut field_variable_declarations = Vec::new();
     for (_, field) in &structure.fields {
         let variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
-        let type_ident = type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+        let mut type_ident =
+            type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
+        if is_self_ref(field) {
+            type_ident = quote! { Box<#type_ident> };
+        }
         field_variable_declarations
             .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
     }
@@ -635,6 +656,11 @@ pub async fn generate_structure_source(
         let field_variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
         let deserialize =
             generate_deserialize_from_frozen(&field.ty, registry, CheckType::Yes).await?;
+        let deserialize = if is_self_ref(field) {
+            quote! { Box::new(#deserialize) }
+        } else {
+            deserialize
+        };
         deserialization_cases.push(quote! {
           if field_raw_id == #field_const_id_ident {
             #field_variable_ident = Some(#deserialize);
@@ -699,7 +725,13 @@ pub async fn generate_structure_source(
     for (_, field) in &structure.fields {
         let field_ident = variable_ident(&field.name);
         let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        let field_value = generate_value_from_frozen(&field.ty, quote! { self.#field_ident });
+        // Deref the `Box` on a self-referential field back to the owned value.
+        let field_access = if is_self_ref(field) {
+            quote! { *self.#field_ident }
+        } else {
+            quote! { self.#field_ident }
+        };
+        let field_value = generate_value_from_frozen(&field.ty, field_access);
         to_value_fields.push(quote! {
           StructureField {
             id: Uuid::from_bytes(#field_const_id_ident),
@@ -725,7 +757,7 @@ pub async fn generate_structure_source(
         let field_ident = variable_ident(&field.name);
         let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
         let field_var = struct_field_intermediate_variable_ident(name, &field.name);
-        let field_type_ident =
+        let mut field_type_ident =
             type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
         let extract = generate_field_from_value_frozen(
             &field.ty,
@@ -734,6 +766,12 @@ pub async fn generate_structure_source(
             registry,
         )
         .await?;
+        let extract = if is_self_ref(field) {
+            field_type_ident = quote! { Box<#field_type_ident> };
+            quote! { Box::new(#extract) }
+        } else {
+            extract
+        };
         from_value_field_vars
             .push(quote! { let mut #field_var: Option<#field_type_ident> = None; });
         from_value_cases.push(quote! { #field_const_id_ident => { #field_var = Some(#extract); } });
@@ -767,11 +805,26 @@ pub async fn generate_structure_source(
       }
     };
 
+    // Structures with fields of other *declared* types refer to sibling
+    // generated modules as `arora_generated::<module>::…`, so `arora_generated`
+    // must be in scope here. Structures made only of primitives or dynamic
+    // `Value` fields don't (and an unused import would trip `-D warnings`).
+    let references_generated_modules = structure.fields.values().any(|field| match &field.ty {
+        FrozenTy::Primitive(_) => false,
+        FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
+        FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
+    });
+    let generated_modules_use = if references_generated_modules {
+        quote! { use crate::arora_generated; }
+    } else {
+        quote! {}
+    };
     let type_source = quote! {
       use arora_buffers::*;
       use uuid::Uuid;
       use arora_types::value::{ConversionError, Structure, StructureField, Value};
       use crate::arora_generated::error::DeserializationError;
+      #generated_modules_use
       #struct_declaration
       #serialization
       #deserialization
@@ -917,6 +970,7 @@ async fn generate_imports_from_module_source(
         let nof_args = add_args.len() as u32;
         let prepare_call_structure = quote! {
           let mut writer = BufferWriter::new();
+          let writer = &mut writer;
           writer.begin_structure(#function_const_id_ident.as_slice(), #nof_args);
           #(#add_args)*
           let arg = writer.finalize();
@@ -944,6 +998,7 @@ async fn generate_imports_from_module_source(
           let input =
             unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
           let mut reader = BufferReader::new(&input);
+          let reader = &mut reader;
         };
 
         // It consists in a struct with the function id as id,
@@ -1096,6 +1151,7 @@ async fn generate_module_source(
 
             let call_check = quote! {
               let mut reader = BufferReader::new(&input);
+              let reader = &mut reader;
               let type_raw_id_opt = reader.next_type();
               if type_raw_id_opt.is_none() {
                 return Err("input is empty".to_string());
@@ -1230,6 +1286,7 @@ async fn generate_module_source(
             #call_check
             #deserialize_params
             let mut writer = BufferWriter::new();
+            let writer = &mut writer;
             writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
             writer.add_structure_field(&#const_id_ident);
             #call_and_write_result
@@ -1317,6 +1374,10 @@ fn generate_value_from_frozen(ty: &FrozenTy, value_expression: TokenStream) -> T
             PrimitiveKind::ArrayF64 => quote! { Value::ArrayF64(#value_expression) },
             PrimitiveKind::ArrayString => quote! { Value::ArrayString(#value_expression) },
         },
+        // A dynamic-value field already holds a `Value`; pass it through.
+        FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
+            quote! { #value_expression }
+        }
         // Nested struct/enum types implement `Into<Value>`.
         FrozenTy::FrozenScalar(_) => quote! { Into::<Value>::into(#value_expression) },
         // Arrays of struct/enum types collapse to `Value::ArrayValue`.
@@ -1374,6 +1435,10 @@ async fn generate_field_from_value_frozen(
                     _ => return Err(ConversionError { message: #mismatch.to_string() }),
                 }
             })
+        }
+        FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
+            // The field already is a `Value`; take it verbatim.
+            Ok(quote! { #value_expression })
         }
         FrozenTy::FrozenScalar(_) => {
             let type_ident = type_ident_from_frozen(ty, registry, PrefixWithMod::Yes).await?;
@@ -1482,10 +1547,19 @@ async fn generate_serialize_from_frozen(
             })
         }
         FrozenTy::FrozenScalar(scalar) => {
+            // Dynamic-value fields carry a generic `Value`; delegate to the
+            // runtime's self-describing value serializer.
+            if is_dynamic_value_id(&scalar.reference.id) {
+                return Ok(quote! {
+                  arora_buffers::serde_uuid::serialize_to_writer(&#value_expression, writer)
+                });
+            }
             let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
                 .await
                 .map_err(GenerationError::RegistryError)?;
-            Ok(quote! { #mod_prefix serialize_to_writer(&#value_expression, &mut writer) })
+            // `writer` is always a `&mut BufferWriter` binding, so reborrow it
+            // (`&mut writer` would be a `&mut &mut BufferWriter`).
+            Ok(quote! { #mod_prefix serialize_to_writer(&#value_expression, writer) })
         }
         FrozenTy::FrozenArray(array) => {
             let type_def = registry
@@ -1496,7 +1570,9 @@ async fn generate_serialize_from_frozen(
                 .await
                 .map_err(GenerationError::RegistryError)?;
             let id_bytes = RawUuidValue(&array.reference.id);
-            let add_array_args = quote! { #id_bytes, #value_expression.len() };
+            // `add_array_{structure,enumeration}` take the type id as `&[u8]`;
+            // `#id_bytes` expands to a `[u8; 16]` literal, so borrow it.
+            let add_array_args = quote! { &#id_bytes, #value_expression.len() as u32 };
             let prepare_array = match type_def {
                 TypeDefinitionFrozen::Primitive(_) => {
                     unreachable!("got an array of primitive type instead of a primitive array type")
@@ -1511,12 +1587,14 @@ async fn generate_serialize_from_frozen(
             let mod_prefix = generated_mod_ident_from_id(&array.reference.id, registry)
                 .await
                 .map_err(GenerationError::RegistryError)?;
-            let serialize_element =
-                quote! { #mod_prefix serialize_to_writer(&#value_expression, &mut writer) };
+            // Serialize each element (borrowing the vector so we don't move the
+            // field out of `&value`), not the whole vector. `serialize_to_writer`
+            // takes the element by reference, and `element` is already a
+            // reference because we iterate over `&value.field`.
             Ok(quote! {
               #prepare_array
-              for element in #value_expression {
-                #serialize_element;
+              for element in &#value_expression {
+                #mod_prefix serialize_to_writer(element, writer);
               }
             })
         }
@@ -1658,6 +1736,12 @@ async fn generate_deserialize_from_frozen(
             })
         }
         FrozenTy::FrozenScalar(scalar) => {
+            // Dynamic-value fields read back a self-describing generic `Value`.
+            if is_dynamic_value_id(&scalar.reference.id) {
+                return Ok(quote! {
+                  arora_buffers::serde_uuid::deserialize_from_reader(reader)
+                });
+            }
             let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
                 .await
                 .map_err(GenerationError::RegistryError)?;
@@ -1665,13 +1749,17 @@ async fn generate_deserialize_from_frozen(
             let type_ident =
                 type_ident_from_id(&scalar.reference.id, registry, PrefixWithMod::Yes).await?;
             let type_str = type_ident.to_string();
+            // `reader` is always a `&mut BufferReader` binding (the generated
+            // `deserialize_from_reader` takes it by mutable reference, and the
+            // export/import handlers rebind it as one). Pass it through by
+            // reborrow — `&mut reader` would be a `&mut &mut BufferReader`.
             Ok(match check_type {
                 CheckType::YesResult => quote! {
-                  #mod_prefix deserialize_from_reader(&mut reader, #check_type_bool)
+                  #mod_prefix deserialize_from_reader(reader, #check_type_bool)
                     .map_err(|e| format!("failed to deserialize {}: {}", #type_str, e))?
                 },
                 _ => quote! {
-                  #mod_prefix deserialize_from_reader(&mut reader, #check_type_bool)
+                  #mod_prefix deserialize_from_reader(reader, #check_type_bool)
                     .expect(&format!("failed to deserialize {}", #type_str))
                 },
             })
@@ -1679,12 +1767,20 @@ async fn generate_deserialize_from_frozen(
         FrozenTy::FrozenArray(array) => {
             let type_ident =
                 type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
+            // Each element is serialized as a full value (its own type tag + id
+            // via `begin_structure` / `add_enumeration_value`), so every element
+            // must be read back with a type check that consumes them. Propagate
+            // the caller's error style (`Result` vs panic) to the elements.
+            let element_check_type = match check_type {
+                CheckType::YesResult => CheckType::YesResult,
+                _ => CheckType::Yes,
+            };
             let deserialize_element = generate_deserialize_from_frozen(
                 &FrozenTy::FrozenScalar(FrozenScalar {
                     reference: array.reference.to_owned(),
                 }),
                 registry,
-                CheckType::No,
+                element_check_type,
             )
             .await?;
             let type_enum = match registry
@@ -1900,11 +1996,28 @@ async fn type_ident_from_frozen(
     })
 }
 
+/// The well-known "dynamic" record ids. A field referencing one of these is a
+/// deliberately open/recursive union: rather than a declared struct, it is kept
+/// as the generic `arora_types::value::Value` escape hatch (see the module docs
+/// / PR notes). This is how e.g. a Vizij keyframe `value` — whose leaves are a
+/// mix of primitives, declared structs and further unions — is represented.
+fn is_dynamic_value_id(id: &Uuid) -> bool {
+    *id == *arora_types::ty::ARRAY_VALUE_ID || *id == *arora_types::ty::KEY_VALUE_ID
+}
+
+/// The Rust type a dynamic-value field takes: the generic runtime `Value`.
+fn dynamic_value_type() -> TokenStream {
+    quote! { arora_types::value::Value }
+}
+
 async fn type_ident_from_id(
     id: &Uuid,
     registry: &mut dyn ReadableRegistry,
     with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
+    if is_dynamic_value_id(id) {
+        return Ok(dynamic_value_type());
+    }
     let type_def = registry
         .get_type(&Selector::Id(id.to_owned()), &VersionReq::STAR)
         .await

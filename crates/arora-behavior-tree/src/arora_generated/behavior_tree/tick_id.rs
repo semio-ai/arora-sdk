@@ -2,6 +2,7 @@ use crate::arora_generated::error::DeserializationError;
 use arora_buffers::*;
 use arora_types::value::{ConversionError, Structure, StructureField, Value};
 use uuid::Uuid;
+#[derive(Debug, PartialEq, Clone)]
 pub struct TickId {
     pub callable_id: u64,
 }
@@ -16,7 +17,7 @@ pub fn serialize_to_writer(value: &TickId, writer: &mut BufferWriter) {
     let structure_id = TICK_ID_STRUCT_RAW_ID.as_slice();
     writer.begin_structure(structure_id, 1u32);
     writer.add_structure_field(&TICK_ID_CALLABLE_ID_FIELD_RAW_ID);
-    writer.add_u64(value.callable_id)
+    writer.add_u64(value.callable_id);
 }
 impl TryFrom<&[u8]> for TickId {
     type Error = DeserializationError;
