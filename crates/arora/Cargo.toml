@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -59,13 +59,13 @@ arora-engine = { path = "../arora-engine", version = "0.1", default-features = f
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "2" }
 arora-behavior = { path = "../arora-behavior", version = "2" }
 arora-types = { path = "../arora-types", version = "1.4" }
-arora-bridge-ws = { path = "../arora-bridge-ws", version = "1", optional = true }
+arora-bridge-ws = { path = "../arora-bridge-ws", version = "2", optional = true }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }
 # The three interfaces the runtime loop wires around the shared state.
-arora-hal = { path = "../arora-hal", version = "0.1" }
-arora-bridge = { path = "../arora-bridge", version = "1" }
+arora-hal = { path = "../arora-hal", version = "1" }
+arora-bridge = { path = "../arora-bridge", version = "2" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "0.1" }
 futures = "0.3"
 # The default Bridge implementation: the studio-bridge Zenoh connector, published
