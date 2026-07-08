@@ -24,7 +24,7 @@ runner = ["dep:arora", "dep:anyhow"]
 anyhow = { version = "1", optional = true }
 arora-hal = { path = "../arora-hal", version = "0.1" }
 arora-types = { path = "../arora-types", version = "1.5" }
-arora = { path = "../arora", version = "0.2", features = ["studio-bridge"], optional = true }
+arora = { path = "../arora", version = "1", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 log = "0.4"
 # TLS is pinned to the bundled webpki roots (see `tls`) so HTTPS robots also

@@ -17,7 +17,7 @@ A device running Arora is a few parts around one shared state:
 - a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (the opt-in `studio-bridge` feature registers the device) or to any editor speaking the protocol;
 - **modules** give behaviors typed functions to call, in wasm or native code, with their types declared as [records](docs/records.md).
 
-The runtime steps these as one deterministic loop — drain the bridge and the HAL into the state, tick the behaviors, flush the changes back out — so there is a single owner of the state and no locking in your control path. Bringing a new device to Arora means writing a HAL for its hardware and picking a bridge:
+The runtime steps these as one deterministic loop — drain the bridge and the HAL into the state, stamp the frame clock into the **golden keys** (`arora/time` and `arora/dt`, in nanoseconds — timing every behavior can read straight from the state), tick the behaviors, flush the changes back out — so there is a single owner of the state and no locking in your control path. Bringing a new device to Arora means writing a HAL for its hardware and picking a bridge:
 
 ```rust
 arora::launch(my_hal, my_bridge, SimpleDataStore::new())?;

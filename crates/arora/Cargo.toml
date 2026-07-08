@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -56,8 +56,8 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "0.1" }
-arora-behavior = { path = "../arora-behavior", version = "0.1" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "1" }
+arora-behavior = { path = "../arora-behavior", version = "1" }
 arora-types = { path = "../arora-types", version = "1.4" }
 arora-bridge-ws = { path = "../arora-bridge-ws", version = "1", optional = true }
 anyhow = "1"
