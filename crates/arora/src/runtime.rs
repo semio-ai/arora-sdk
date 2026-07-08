@@ -829,7 +829,10 @@ mod tests {
         assert!(rx.await.unwrap().is_ok(), "update should succeed");
         // Let the change flow out through a step (the flush stage drains the
         // store's change feed).
-        assert_eq!(runtime.step(16_000_000).expect("step ok"), StepOutcome::Live);
+        assert_eq!(
+            runtime.step(16_000_000).expect("step ok"),
+            StepOutcome::Live
+        );
 
         // In the shared backend the key lives under the device namespace…
         assert_eq!(
