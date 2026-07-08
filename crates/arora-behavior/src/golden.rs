@@ -3,7 +3,8 @@
 //! The runtime writes these at the start of each step — before it ticks any
 //! behavior — so a behavior reads the current frame's timing straight from the
 //! [`store`](super::BehaviorContext::store) instead of taking it as a tick
-//! argument. Timing stays out of the [`Behavior`](super::Behavior) API: it is
+//! argument. Timing stays out of the
+//! [`BehaviorInterpreter`](super::BehaviorInterpreter) API: it is
 //! just data, like any other slot, and a behavior (an animation module, a graph
 //! time node) derives whatever it needs — `dt`, elapsed time — by reading these
 //! keys.

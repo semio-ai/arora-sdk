@@ -65,7 +65,7 @@ fn install_panic_hook() {
 // =============================================================================
 
 use arora::runtime::{Runtime, StepOutcome};
-use arora_behavior::Behavior;
+use arora_behavior::BehaviorInterpreter;
 use arora_bridge::{Bridge, FakeBridge};
 use arora_hal::{FakeHal, Hal};
 use arora_simple_data_store::SimpleDataStore;
@@ -115,8 +115,8 @@ impl BrowserRuntime {
         &self.store
     }
 
-    /// Queue a [`Behavior`] to run on the next step.
-    pub fn queue_behavior(&mut self, behavior: Box<dyn Behavior>) {
+    /// Queue a [`BehaviorInterpreter`] to run on the next step.
+    pub fn queue_behavior(&mut self, behavior: Box<dyn BehaviorInterpreter>) {
         self.runtime.queue_behavior(behavior);
     }
 

@@ -34,9 +34,10 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use arora_behavior::{golden, Behavior, BehaviorContext, BehaviorStatus};
+use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::{
-    behavior::TreeBehavior, schema_groot, tree_node::TreeNode, BehaviorTree, ModuleFunction,
+    behavior::BehaviorTreeInterpreter, schema_groot, tree_node::TreeNode, BehaviorTree,
+    ModuleFunction,
 };
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo};
 use arora_engine::engine::PinnedEngine;
@@ -130,10 +131,11 @@ impl Telemetry {
     }
 }
 
-/// A queued behavior plus the display name it was queued under (if any).
+/// A queued behavior interpreter plus the display name it was queued under (if
+/// any).
 struct QueuedBehavior {
     name: Option<String>,
-    behavior: Box<dyn Behavior>,
+    behavior: Box<dyn BehaviorInterpreter>,
 }
 
 /// The Arora runtime: the state's single owner plus the engine and behavior
@@ -273,16 +275,20 @@ impl Runtime {
             .map_err(|e| RuntimeError::BehaviorTree(format!("instantiate: {e:?}")))?;
         self.behaviors.push_back(QueuedBehavior {
             name,
-            behavior: Box::new(TreeBehavior::new(behavior, self.function_index.clone())),
+            behavior: Box::new(BehaviorTreeInterpreter::new(
+                behavior,
+                self.function_index.clone(),
+            )),
         });
         Ok(())
     }
 
-    /// Queue any [`Behavior`] — a behavior tree, a node graph, or another
-    /// interpreter — to be ticked on the next step. The runtime ticks it each
-    /// step while it reports [`BehaviorStatus::Running`] and drops it once it
-    /// reports [`BehaviorStatus::Done`].
-    pub fn queue_behavior(&mut self, behavior: Box<dyn Behavior>) {
+    /// Queue any [`BehaviorInterpreter`] — a behavior-tree interpreter, a
+    /// node-graph interpreter, or another executor — to be ticked on the next
+    /// step. The runtime ticks it each step while it reports
+    /// [`BehaviorStatus::Running`] and drops it once it reports
+    /// [`BehaviorStatus::Done`].
+    pub fn queue_behavior(&mut self, behavior: Box<dyn BehaviorInterpreter>) {
         self.behaviors.push_back(QueuedBehavior {
             name: None,
             behavior,
@@ -292,7 +298,7 @@ impl Runtime {
     /// Like [`queue_behavior`](Runtime::queue_behavior), with a display name
     /// the runtime reports through [`telemetry`](Runtime::telemetry) while the
     /// behavior runs.
-    pub fn queue_named_behavior(&mut self, name: &str, behavior: Box<dyn Behavior>) {
+    pub fn queue_named_behavior(&mut self, name: &str, behavior: Box<dyn BehaviorInterpreter>) {
         self.behaviors.push_back(QueuedBehavior {
             name: Some(name.to_string()),
             behavior,
@@ -694,10 +700,11 @@ mod tests {
         }
     }
 
-    /// A non-tree [`Behavior`]: writes one key through the shared store, done.
+    /// A non-tree [`BehaviorInterpreter`]: writes one key through the shared
+    /// store, done.
     struct WriteOnce;
 
-    impl Behavior for WriteOnce {
+    impl BehaviorInterpreter for WriteOnce {
         fn tick(
             &mut self,
             ctx: &mut BehaviorContext,
@@ -855,7 +862,7 @@ mod tests {
         value: Value,
     }
 
-    impl Behavior for WriteKey {
+    impl BehaviorInterpreter for WriteKey {
         fn tick(
             &mut self,
             ctx: &mut BehaviorContext,
@@ -871,8 +878,9 @@ mod tests {
 
     /// ARORA-39 acceptance, end to end through `step()`: a queued behavior writes
     /// a key into the device-namespaced store, and *switching* to a different
-    /// behavior changes what gets written. Driven by a real `Behavior` (not a
-    /// Groot literal), so it sidesteps the typed-literal coercion of ARORA-43.
+    /// behavior changes what gets written. Driven by a real
+    /// `BehaviorInterpreter` (not a Groot literal), so it sidesteps the
+    /// typed-literal coercion of ARORA-43.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn behavior_writes_then_switching_changes_the_namespaced_store() {
         let shared = SimpleDataStore::new();

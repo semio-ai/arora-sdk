@@ -13,7 +13,7 @@ Arora resembles robotics runtimes like ROS 2 and [Copper](https://github.com/cop
 A device running Arora is a few parts around one shared state:
 
 - a **HAL** ([`arora-hal`](crates/arora-hal/readme.md)) exposes your hardware — sensors in, actuators out — as typed values on a shared blackboard;
-- **behaviors** ([`arora-behavior`](crates/arora-behavior/readme.md)) execute against that state on every step: behavior trees out of the box, or any interpreter implementing the trait (a node graph, a script host);
+- **behavior interpreters** ([`arora-behavior`](crates/arora-behavior/readme.md)) execute authored behaviors against that state on every step: a behavior tree (authored in an editor) runs on the behavior-tree interpreter out of the box, and the `BehaviorInterpreter` trait lets you add another executor (a node-graph interpreter, a script host);
 - a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (the opt-in `studio-bridge` feature registers the device) or to any editor speaking the protocol;
 - **modules** give behaviors typed functions to call, in wasm or native code, with their types declared as [records](docs/records.md).
 
@@ -36,7 +36,7 @@ Arora is a single Cargo workspace of focused crates, layered from a neutral core
 | **`arora-registry`** | Resolve modules, their versions and dependencies — locally, or, optionally, against a remote store. |
 | **`arora-hal`** | The hardware abstraction: a device's sensors and actuators as typed state (+ its model for rendering). |
 | **`arora-bridge`** | The live-control link: state reads/writes, function calls and update streams over a remote connection. |
-| **`arora-behavior`** | The `Behavior` trait — what the runtime ticks each step: a behavior tree, a node graph, any interpreter. |
+| **`arora-behavior`** | The `BehaviorInterpreter` trait — the executor the runtime ticks each step to run an authored behavior: a behavior-tree interpreter, a node-graph interpreter. |
 | **`arora-engine`** | The generic runtime: load modules and call arbitrary typed functions in multiple execution contexts (native via `wasmtime`, in-browser via the platform `WebAssembly`). Implements the `CallBridge`. |
 | **`arora-behavior-tree`** | A standalone crate that uses the `CallBridge` (typically implemented by the engine) to call any function from any module — orchestrated as a behavior tree. Usable **without** the authoring crates; the module-backed node support is feature-gated (opt-out). |
 | **`arora`** | The opinionated wrapper: the engine pre-wired with behavior trees as the entry point, backed by Semio's services. Start here if you want "Arora, batteries included". |
