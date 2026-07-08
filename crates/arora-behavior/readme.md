@@ -1,15 +1,28 @@
 # arora-behavior
 
-The behavior abstraction of [Arora](https://github.com/semio-ai/arora-sdk):
-anything the runtime can tick.
+The behavior *interpreters* of [Arora](https://github.com/semio-ai/arora-sdk):
+the executors the runtime ticks each step.
 
-A `Behavior` advances one step at a time — `tick(&mut BehaviorContext)` — and
-reports whether it is `Running` or `Done`. The context hands it the shared
-data store (read inputs, write intent) and the module-call bridge, so a
-behavior can be a behavior tree
-([`arora-behavior-tree`](https://docs.rs/arora-behavior-tree)), a
-node graph, or any other interpreter: the runtime queues `Box<dyn Behavior>`
-and ticks them without knowing which is which.
+Mind the two meanings of "behavior":
+
+- A **behavior** (the noun) is an *authored, editable representation* of what a
+  device should do — a behavior tree, a node graph — produced in a visual editor
+  (Studio, the Vizij Workspace) and shipped as data.
+- A `BehaviorInterpreter` is the *runtime-level executor* that runs one of those.
+  It is the thing the runtime actually ticks.
+
+A `BehaviorInterpreter` advances one step at a time —
+`tick(&mut BehaviorContext)` — and reports whether it is `Running` or `Done`.
+The context hands it the shared data store (read inputs, write intent) and the
+module-call bridge. The behavior tree is one interpreter
+([`arora-behavior-tree`](https://docs.rs/arora-behavior-tree)'s
+`BehaviorTreeInterpreter`); a node graph is another. The runtime queues
+`Box<dyn BehaviorInterpreter>` and ticks them without knowing which is which.
+
+Implement `BehaviorInterpreter` to add a new *kind of executor* — a new
+authored-behavior representation the runtime can run. Hand-implementing it to
+hard-code one particular behavior in Rust is a corner case, not the promoted
+path: author a behavior in an editor and let an interpreter run it.
 
 ## Golden keys: timing is data, not an argument
 
