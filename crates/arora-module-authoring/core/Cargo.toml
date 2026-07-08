@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-core"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Module analysis and resolution for Arora module authoring."
 license = "MIT"

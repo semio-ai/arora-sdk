@@ -2,7 +2,8 @@ pub mod header;
 pub mod resolve;
 use arora_registry::{ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
 use arora_types::module::high::ModuleDefinition;
-use arora_types::record::{module::frozen::Export, Resolver};
+use arora_types::record::ty::FrozenTy;
+use arora_types::record::{module::frozen::Export, FrozenReference, Resolver};
 use arora_types::record::{RecordType, Selector};
 use arora_vfs::VfsError;
 use bytes::{Buf, BufMut};
@@ -10,6 +11,7 @@ use derive_more::Display;
 use resolve::resolve_high_module;
 use semver::{Version, VersionReq};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::read_to_string;
 use std::path::Path;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -43,28 +45,50 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
     let executor_name = module_definition.executor.name.to_owned();
     let resolved_module = resolve_high_module(module_definition, registry).await?;
 
-    // Collect first the actual types behind the references.
+    // Collect the actual types behind the references. The module's declared
+    // dependencies only list the types referenced *directly* by its exports and
+    // imports; a `Track` export whose field is `Vec<Keypoint>` therefore names
+    // `Track` but not `Keypoint`, `Vec3`, or the enums those reach. We walk the
+    // reference graph so that every transitively-referenced structure and
+    // enumeration is emitted too — otherwise the generated code refers to
+    // modules for types that were never generated.
     let mut assets = Vec::new();
-    for dep_ref in &resolved_module.module.dependencies {
-        let selector = Selector::Id(dep_ref.id);
+    let mut seen: HashSet<Uuid> = HashSet::new();
+    let mut pending: Vec<FrozenReference> = resolved_module.module.dependencies.to_vec();
+    while let Some(reference) = pending.pop() {
+        // `seen` also makes the walk cycle-safe: a self-referential type (a tree
+        // node holding `Vec<Self>`, say) is visited and emitted exactly once.
+        if !seen.insert(reference.id) {
+            continue;
+        }
+        // Well-known ids (primitives and the dynamic `Value`/`KeyValue`/
+        // `ArrayValue` escape hatches) are not user-declared records; they are
+        // handled inline by the code generator, so never resolve or emit them.
+        if arora_types::ty::WELL_KNOWN_IDS.contains(&reference.id) {
+            continue;
+        }
+        let selector = Selector::Id(reference.id);
         let record_type = registry
             .type_of(&selector)
             .await
             .map_err(ModuleDeclarationError::RegistryError)?;
-        match record_type {
-            RecordType::Structure | RecordType::Enumeration => assets.push(ModuleAsset::Type(
-                dep_ref.id.to_owned(),
-                dep_ref.version.0.to_owned(),
-                registry
-                    .get_type(
-                        &selector,
-                        &VersionReq::parse(dep_ref.version.to_string().as_str()).unwrap(),
-                    )
-                    .await
-                    .map_err(ModuleDeclarationError::RegistryError)?,
-            )),
-            _ => (),
+        if !matches!(record_type, RecordType::Structure | RecordType::Enumeration) {
+            continue;
         }
+        let type_def = registry
+            .get_type(
+                &selector,
+                &VersionReq::parse(reference.version.to_string().as_str()).unwrap(),
+            )
+            .await
+            .map_err(ModuleDeclarationError::RegistryError)?;
+        // Enqueue the references this type itself depends on before emitting it.
+        collect_type_references(&type_def, &mut pending);
+        assets.push(ModuleAsset::Type(
+            reference.id,
+            reference.version.0.to_owned(),
+            type_def,
+        ));
     }
 
     // Then publish imports, and then this module.
@@ -76,6 +100,30 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
         executor_name,
     ));
     Ok(assets)
+}
+
+/// Collects the pinned type references a frozen type expression depends on
+/// directly: a structure's field types and an enumeration's variant payload
+/// types. Feeds the transitive walk in [`analyze_module`].
+fn collect_type_references(type_def: &TypeDefinitionFrozen, out: &mut Vec<FrozenReference>) {
+    let push_ty = |ty: &FrozenTy, out: &mut Vec<FrozenReference>| match ty {
+        FrozenTy::Primitive(_) => {}
+        FrozenTy::FrozenScalar(scalar) => out.push(scalar.reference.to_owned()),
+        FrozenTy::FrozenArray(array) => out.push(array.reference.to_owned()),
+    };
+    match type_def {
+        TypeDefinitionFrozen::Primitive(_) => {}
+        TypeDefinitionFrozen::Structure(structure) => {
+            for field in structure.fields.values() {
+                push_ty(&field.ty, out);
+            }
+        }
+        TypeDefinitionFrozen::Enumeration(enumeration) => {
+            for variant in enumeration.variants.values() {
+                push_ty(&variant.ty, out);
+            }
+        }
+    }
 }
 
 /// Assets are records provided or referred to by a module.

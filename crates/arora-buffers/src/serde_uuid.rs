@@ -138,7 +138,10 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
     }
 }
 
-fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
+/// Reads a self-describing [`Value`] from the current reader position.
+/// Public so generated modules can round-trip "dynamic" `Value` fields
+/// (an escape hatch for open/recursive unions) mid-stream.
+pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
     match reader.next_type() {
         Some(TYPE_UNIT) => Value::Unit,
         Some(TYPE_BOOLEAN) => Value::Boolean(reader.get_boolean()),
