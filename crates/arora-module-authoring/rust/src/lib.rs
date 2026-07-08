@@ -404,13 +404,16 @@ pub fn generate_enumeration_source(
     });
 
     // Enum Serialization.
-    let serialization_match_branches = variants.clone().map(|(_, variant)| {
-        let variant_ident = enum_variant_ident(&enum_name, &variant.name);
-        let id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-        quote! {
-          #variant_ident => #id_ident.as_slice(),
-        }
-    });
+    let serialization_match_branches: Vec<TokenStream> = variants
+        .clone()
+        .map(|(_, variant)| {
+            let variant_ident = enum_variant_ident(&enum_name, &variant.name);
+            let id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
+            quote! {
+              #variant_ident => #id_ident.as_slice(),
+            }
+        })
+        .collect();
 
     let into_impl = generate_into_impl(&enum_ident);
     let serialization = quote! {
@@ -422,6 +425,19 @@ pub fn generate_enumeration_source(
           #(#serialization_match_branches)*
         };
         writer.add_enumeration_value(enumeration_id, variant_id);
+        writer.add_unit();
+      }
+
+      /// Serializes the enumeration as a *raw* element — the variant id and its
+      /// payload only, without the leading `TYPE_ENUMERATION` tag or the 16-byte
+      /// enumeration id (carried once by the array header). Mirrors
+      /// `arora_buffers::serde_uuid`'s `Value::ArrayEnumeration` so an array of
+      /// enumerations marshals identically across the `arora_call` boundary.
+      pub fn serialize_to_writer_raw(value: &#enum_ident, writer: &mut BufferWriter) {
+        let variant_id = match value {
+          #(#serialization_match_branches)*
+        };
+        writer.add_enumeration_value_raw(variant_id);
         writer.add_unit();
       }
     };
@@ -454,10 +470,12 @@ pub fn generate_enumeration_source(
           if type_raw_id_opt.unwrap() != TYPE_ENUMERATION {
             return Err(DeserializationError{ message: "next type is not an enumeration".to_string() })
           }
-        }
-
-        if #enum_const_id_ident != reader.get_structure_field() {
-          return Err(DeserializationError{ message: "missing variant information".to_string() })
+          // The enumeration id is only present in the full (non-raw) encoding.
+          // In the raw element form used inside arrays it is carried once by the
+          // array header, so it is not read per element.
+          if #enum_const_id_ident != reader.get_structure_field() {
+            return Err(DeserializationError{ message: "missing variant information".to_string() })
+          }
         }
 
         let variant_raw_id = reader.get_enumeration_value_raw();
@@ -743,7 +761,7 @@ pub async fn generate_structure_source(
         } else {
             quote! { self.#field_ident }
         };
-        let field_value = generate_value_from_frozen(&field.ty, field_access);
+        let field_value = generate_value_from_frozen(&field.ty, field_access, registry).await?;
         to_value_fields.push(quote! {
           StructureField {
             id: Uuid::from_bytes(#field_const_id_ident),
@@ -831,10 +849,47 @@ pub async fn generate_structure_source(
     } else {
         quote! {}
     };
+
+    // The `Value`-vocabulary conversions for array-of-structure /
+    // array-of-enumeration fields reference extra value types; import them only
+    // when a field needs them so structs without such fields don't carry unused
+    // imports (which would trip `-D warnings` in consumers).
+    let mut needs_structure_without_id = false;
+    let mut needs_enumeration_value_types = false;
+    for field in structure.fields.values() {
+        if let FrozenTy::FrozenArray(array) = &field.ty {
+            if is_dynamic_value_id(&array.reference.id) {
+                continue;
+            }
+            match registry
+                .type_of(&Selector::Id(array.reference.id.to_owned()))
+                .await
+                .map_err(GenerationError::RegistryError)?
+            {
+                RecordType::Structure => needs_structure_without_id = true,
+                RecordType::Enumeration => needs_enumeration_value_types = true,
+                _ => {}
+            }
+        }
+    }
+    let mut value_imports: Vec<TokenStream> = vec![
+        quote! { ConversionError },
+        quote! { Structure },
+        quote! { StructureField },
+        quote! { Value },
+    ];
+    if needs_structure_without_id {
+        value_imports.push(quote! { StructureWithoutId });
+    }
+    if needs_enumeration_value_types {
+        value_imports.push(quote! { Enumeration });
+        value_imports.push(quote! { EnumerationWithoutId });
+    }
+
     let type_source = quote! {
       use arora_buffers::*;
       use uuid::Uuid;
-      use arora_types::value::{ConversionError, Structure, StructureField, Value};
+      use arora_types::value::{ #(#value_imports),* };
       use crate::arora_generated::error::DeserializationError;
       #generated_modules_use
       #struct_declaration
@@ -1357,8 +1412,12 @@ pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
 /// Generate an expression building a generic `Value` from a Rust field value.
 /// Counterpart of [`generate_serialize_from_frozen`] for the in-memory `Value`
 /// vocabulary instead of the binary buffer format.
-fn generate_value_from_frozen(ty: &FrozenTy, value_expression: TokenStream) -> TokenStream {
-    match ty {
+async fn generate_value_from_frozen(
+    ty: &FrozenTy,
+    value_expression: TokenStream,
+    registry: &mut dyn ReadableRegistry,
+) -> Result<TokenStream, GenerationError> {
+    Ok(match ty {
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => quote! { Value::Unit },
             PrimitiveKind::Boolean => quote! { Value::Boolean(#value_expression) },
@@ -1392,13 +1451,52 @@ fn generate_value_from_frozen(ty: &FrozenTy, value_expression: TokenStream) -> T
         }
         // Nested struct/enum types implement `Into<Value>`.
         FrozenTy::FrozenScalar(_) => quote! { Into::<Value>::into(#value_expression) },
-        // Arrays of struct/enum types collapse to `Value::ArrayValue`.
-        FrozenTy::FrozenArray(_) => quote! {
-            Value::ArrayValue(
-                #value_expression.into_iter().map(|__element| Into::<Value>::into(__element)).collect()
-            )
-        },
-    }
+        // A dynamic array is already a `Vec<Value>`.
+        FrozenTy::FrozenArray(array) if is_dynamic_value_id(&array.reference.id) => {
+            quote! { Value::ArrayValue(#value_expression.into_iter().collect()) }
+        }
+        // Arrays of structures/enumerations become the corresponding typed
+        // `Value::ArrayStructure` / `Value::ArrayEnumeration` (the id carried
+        // once), matching `serde_uuid` — so `T -> Value -> serde_uuid` produces
+        // the same bytes as the direct buffer path.
+        FrozenTy::FrozenArray(array) => {
+            let raw_id = RawUuidValue(&array.reference.id);
+            match registry
+                .type_of(&Selector::Id(array.reference.id.to_owned()))
+                .await
+                .map_err(GenerationError::RegistryError)?
+            {
+                RecordType::Structure => quote! {
+                    Value::ArrayStructure {
+                        id: Uuid::from_bytes(#raw_id),
+                        elements: #value_expression
+                            .into_iter()
+                            .map(|__element| match Into::<Value>::into(__element) {
+                                Value::Structure(__s) => StructureWithoutId { fields: __s.fields },
+                                _ => unreachable!("generated structure did not convert to Value::Structure"),
+                            })
+                            .collect(),
+                    }
+                },
+                RecordType::Enumeration => quote! {
+                    Value::ArrayEnumeration {
+                        id: Uuid::from_bytes(#raw_id),
+                        elements: #value_expression
+                            .into_iter()
+                            .map(|__element| match Into::<Value>::into(__element) {
+                                Value::Enumeration(__e) => EnumerationWithoutId {
+                                    variant_id: __e.variant_id,
+                                    value: __e.value,
+                                },
+                                _ => unreachable!("generated enumeration did not convert to Value::Enumeration"),
+                            })
+                            .collect(),
+                    }
+                },
+                _ => unreachable!("unexpected array element record type"),
+            }
+        }
+    })
 }
 
 /// Generate an expression extracting a Rust field value out of a generic `Value`.
@@ -1456,30 +1554,69 @@ async fn generate_field_from_value_frozen(
             let type_ident = type_ident_from_frozen(ty, registry, PrefixWithMod::Yes).await?;
             Ok(quote! { <#type_ident as TryFrom<Value>>::try_from(#value_expression)? })
         }
-        FrozenTy::FrozenArray(array) => {
-            let element_ty = FrozenTy::FrozenScalar(FrozenScalar {
-                reference: array.reference.to_owned(),
-            });
-            let element_conversion = generate_field_from_value_frozen(
-                &element_ty,
-                quote! { __element },
-                field_name,
-                registry,
-            )
-            .await?;
+        // A dynamic array is a `Vec<Value>` taken verbatim.
+        FrozenTy::FrozenArray(array) if is_dynamic_value_id(&array.reference.id) => {
             let mismatch = format!("field {}: expected array value", field_name);
             Ok(quote! {
                 match #value_expression {
-                    Value::ArrayValue(__items) => {
-                        let mut __out = Vec::with_capacity(__items.len());
-                        for __element in __items {
-                            __out.push(#element_conversion);
-                        }
-                        __out
-                    }
+                    Value::ArrayValue(__items) => __items,
                     _ => return Err(ConversionError { message: #mismatch.to_string() }),
                 }
             })
+        }
+        // Arrays of structures/enumerations are extracted from the typed
+        // `Value::ArrayStructure` / `Value::ArrayEnumeration`; each element is
+        // rebuilt into a full `Value::Structure` / `Value::Enumeration` (the id
+        // reattached from the array header) and converted through the element's
+        // own `TryFrom<Value>`.
+        FrozenTy::FrozenArray(array) => {
+            let type_ident =
+                type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
+            match registry
+                .type_of(&Selector::Id(array.reference.id.to_owned()))
+                .await
+                .map_err(GenerationError::RegistryError)?
+            {
+                RecordType::Structure => {
+                    let mismatch = format!("field {}: expected array of structures", field_name);
+                    Ok(quote! {
+                        match #value_expression {
+                            Value::ArrayStructure { id: __id, elements: __items } => {
+                                let mut __out = Vec::with_capacity(__items.len());
+                                for __swi in __items {
+                                    __out.push(<#type_ident as TryFrom<Value>>::try_from(
+                                        Value::Structure(Structure { id: __id, fields: __swi.fields })
+                                    )?);
+                                }
+                                __out
+                            }
+                            _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                        }
+                    })
+                }
+                RecordType::Enumeration => {
+                    let mismatch = format!("field {}: expected array of enumerations", field_name);
+                    Ok(quote! {
+                        match #value_expression {
+                            Value::ArrayEnumeration { id: __id, elements: __items } => {
+                                let mut __out = Vec::with_capacity(__items.len());
+                                for __ewi in __items {
+                                    __out.push(<#type_ident as TryFrom<Value>>::try_from(
+                                        Value::Enumeration(Enumeration {
+                                            id: __id,
+                                            variant_id: __ewi.variant_id,
+                                            value: __ewi.value,
+                                        })
+                                    )?);
+                                }
+                                __out
+                            }
+                            _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                        }
+                    })
+                }
+                _ => unreachable!("unexpected array element record type"),
+            }
         }
     }
 }
@@ -1604,21 +1741,16 @@ async fn generate_serialize_from_frozen(
             // value by reference, and `element` is already a reference because we
             // iterate over `&value.field`.
             //
-            // Structures are written in the *raw* element encoding
-            // (`serialize_to_writer_raw`: field count + fields, no per-element
-            // tag/id) to match `serde_uuid`'s `Value::ArrayStructure`, so the
-            // codegen and the generic value codec agree across the `arora_call`
-            // boundary.
-            let serialize_element = match type_def {
-                TypeDefinitionFrozen::Structure(_) => {
-                    quote! { #mod_prefix serialize_to_writer_raw(element, writer) }
-                }
-                _ => quote! { #mod_prefix serialize_to_writer(element, writer) },
-            };
+            // Elements (structures and enumerations alike) are written in the
+            // *raw* encoding (`serialize_to_writer_raw`: no per-element type tag
+            // or id — the id is carried once by the array header) to match
+            // `serde_uuid`'s `Value::ArrayStructure` / `Value::ArrayEnumeration`,
+            // so the codegen and the generic value codec agree across the
+            // `arora_call` boundary.
             Ok(quote! {
               #prepare_array
               for element in &#value_expression {
-                #serialize_element;
+                #mod_prefix serialize_to_writer_raw(element, writer);
               }
             })
         }
@@ -1795,18 +1927,13 @@ async fn generate_deserialize_from_frozen(
                 .type_of(&Selector::Id(array.reference.id.to_owned()))
                 .await
                 .map_err(GenerationError::RegistryError)?;
-            // Structure elements are written in the raw encoding (no per-element
-            // tag/id — the id is carried once by the array header), matching
-            // `serde_uuid`'s `Value::ArrayStructure`. Reading them back with
-            // `CheckType::No` invokes the raw `get_structure_raw` path, which
-            // reads only the field count. Enumeration elements are unchanged.
-            let element_check_type = match element_record_type {
-                RecordType::Structure => CheckType::No,
-                _ => match check_type {
-                    CheckType::YesResult => CheckType::YesResult,
-                    _ => CheckType::Yes,
-                },
-            };
+            // Elements (structures and enumerations) are stored raw — no
+            // per-element tag/id; the id is carried once by the array header,
+            // matching `serde_uuid`'s `Value::ArrayStructure` /
+            // `Value::ArrayEnumeration`. `CheckType::No` invokes the raw read
+            // path (`get_structure_raw` for structures; the variant id + payload
+            // without the enumeration id for enumerations).
+            let element_check_type = CheckType::No;
             let deserialize_element = generate_deserialize_from_frozen(
                 &FrozenTy::FrozenScalar(FrozenScalar {
                     reference: array.reference.to_owned(),
