@@ -202,14 +202,16 @@ async fn build_registry() -> LocalRegistry {
         .await
         .unwrap();
 
-    // Track { name: String, points: Vec<Keypoint> } — the only type an export
-    // names directly.
+    // Track { name: String, points: Vec<Keypoint>, modes: Vec<Interpolation> } —
+    // exercises both an array-of-struct (`points`) and an array-of-enum
+    // (`modes`) field in one value.
     let mut track_fields = IndexMap::new();
     track_fields.insert(
         Uuid::new_v4(),
         field("name", primitive(PrimitiveKind::String)),
     );
     track_fields.insert(Uuid::new_v4(), field("points", array_ref(KEYPOINT_ID)));
+    track_fields.insert(Uuid::new_v4(), field("modes", array_ref(INTERP_ID)));
     registry
         .tag_structure(
             id(TRACK_ID),
@@ -420,6 +422,7 @@ fn sample_track() -> Track {
                 interpolation: Interpolation::Step,
             },
         ],
+        modes: vec![Interpolation::Step, Interpolation::Linear, Interpolation::Step],
     }
 }
 
@@ -465,30 +468,37 @@ where
     assert_eq!(value, from_bytes, "{} buffer round-trip mismatch", what);
 }
 
-// Cross-boundary conformance: the bytes the generated codegen writes for an
-// array-of-struct MUST be exactly what `arora_buffers::serde_uuid` (the generic
-// `Value` codec that marshals the `arora_call` boundary) reads and writes. This
-// guards `serde_uuid <-> generated-codegen`, not just codegen<->codegen.
-fn cross_boundary_array_of_struct() {
+fn track_has_array_structure(v: &Value) -> bool {
+    matches!(v, Value::Structure(s)
+        if s.fields.iter().any(|f| matches!(f.value.as_ref(), Value::ArrayStructure { .. })))
+}
+
+fn track_has_array_enumeration(v: &Value) -> bool {
+    matches!(v, Value::Structure(s)
+        if s.fields.iter().any(|f| matches!(f.value.as_ref(), Value::ArrayEnumeration { .. })))
+}
+
+// Buffer-level cross-boundary conformance: the bytes the generated codegen
+// writes for an array-of-struct (`points`) and an array-of-enum (`modes`) MUST
+// be exactly what `arora_buffers::serde_uuid` (the generic `Value` codec that
+// marshals the `arora_call` boundary) reads and writes, BOTH directions. Guards
+// `serde_uuid <-> generated-codegen`, not just codegen<->codegen.
+fn cross_boundary_buffer() {
     let track = sample_track();
 
     // (1) generated codegen ENCODES -> serde_uuid (generic Value codec) DECODES.
     let gen_bytes: Box<[u8]> = track.clone().into();
     let decoded: Value = arora_buffers::serde_uuid::deserialize(&gen_bytes);
 
-    // The array-of-struct field must decode as `Value::ArrayStructure` — the raw
-    // element layout — proving the wire formats agree (the old full-element
-    // encoding would misparse here).
-    let has_array_structure = match &decoded {
-        Value::Structure(s) => s
-            .fields
-            .iter()
-            .any(|f| matches!(f.value.as_ref(), Value::ArrayStructure { .. })),
-        _ => false,
-    };
+    // Elements must decode in the raw layout: `ArrayStructure` / `ArrayEnumeration`
+    // (the old full-element encoding would misparse here).
     assert!(
-        has_array_structure,
-        "generated Track did not decode via serde_uuid as an ArrayStructure: {decoded:?}"
+        track_has_array_structure(&decoded),
+        "buffer: `points` did not decode via serde_uuid as an ArrayStructure: {decoded:?}"
+    );
+    assert!(
+        track_has_array_enumeration(&decoded),
+        "buffer: `modes` did not decode via serde_uuid as an ArrayEnumeration: {decoded:?}"
     );
 
     // (2) serde_uuid RE-ENCODES; it must be byte-identical to the generated one.
@@ -496,7 +506,7 @@ fn cross_boundary_array_of_struct() {
     assert_eq!(
         &gen_bytes[..],
         &su_bytes[..],
-        "generated codegen and serde_uuid disagree on array-of-struct wire bytes"
+        "generated codegen and serde_uuid disagree on array-of-struct/enum wire bytes"
     );
 
     // (3) generated codegen DECODES serde_uuid's bytes back to the value.
@@ -504,15 +514,46 @@ fn cross_boundary_array_of_struct() {
         Track::try_from(&su_bytes[..]).expect("generated codegen failed to decode serde_uuid bytes");
     assert_eq!(
         track, from_serde,
-        "serde_uuid -> generated codegen round-trip mismatch"
+        "serde_uuid -> generated codegen buffer round-trip mismatch"
     );
 }
 
+// Value-level cross-boundary conformance: `Into<Value>` must produce the typed
+// `ArrayStructure` / `ArrayEnumeration` (NOT `ArrayValue`), so that encoding
+// *that* `Value` through serde_uuid yields the same bytes as the direct buffer
+// path. Closes the `Track -> Value -> serde_uuid` route, and `TryFrom<Value>`
+// round-trips it.
+fn cross_boundary_value() {
+    let track = sample_track();
+
+    let value: Value = track.clone().into();
+    assert!(
+        track_has_array_structure(&value),
+        "Value: `points` must be ArrayStructure (not ArrayValue): {value:?}"
+    );
+    assert!(
+        track_has_array_enumeration(&value),
+        "Value: `modes` must be ArrayEnumeration (not ArrayValue): {value:?}"
+    );
+
+    let value_bytes = arora_buffers::serde_uuid::serialize(&value);
+    let buffer_bytes: Box<[u8]> = track.clone().into();
+    assert_eq!(
+        &value_bytes[..],
+        &buffer_bytes[..],
+        "Track -> Value -> serde_uuid bytes differ from the direct buffer path"
+    );
+
+    let back = Track::try_from(value).expect("Value cross-boundary round-trip failed");
+    assert_eq!(track, back, "Value cross-boundary round-trip mismatch");
+}
+
 fn main() {
-    round_trip(sample_track(), "Track (array-of-struct + nested + enum)");
+    round_trip(sample_track(), "Track (array-of-struct + array-of-enum + nested)");
     round_trip(sample_tree(), "Tree (recursive via Vec<Self>)");
     round_trip(sample_dynamic(), "Dynamic (raw Value field)");
-    cross_boundary_array_of_struct();
+    cross_boundary_buffer();
+    cross_boundary_value();
     println!("ROUNDTRIP_OK");
 }
 "#;

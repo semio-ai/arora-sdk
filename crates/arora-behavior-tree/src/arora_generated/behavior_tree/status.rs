@@ -25,6 +25,20 @@ pub fn serialize_to_writer(value: &Status, writer: &mut BufferWriter) {
     writer.add_enumeration_value(enumeration_id, variant_id);
     writer.add_unit();
 }
+#[doc = r" Serializes the enumeration as a *raw* element — the variant id and its"]
+#[doc = r" payload only, without the leading `TYPE_ENUMERATION` tag or the 16-byte"]
+#[doc = r" enumeration id (carried once by the array header). Mirrors"]
+#[doc = r" `arora_buffers::serde_uuid`'s `Value::ArrayEnumeration` so an array of"]
+#[doc = r" enumerations marshals identically across the `arora_call` boundary."]
+pub fn serialize_to_writer_raw(value: &Status, writer: &mut BufferWriter) {
+    let variant_id = match value {
+        Status::Success => STATUS_SUCCESS_VARIANT_RAW_ID.as_slice(),
+        Status::Failure => STATUS_FAILURE_VARIANT_RAW_ID.as_slice(),
+        Status::Running => STATUS_RUNNING_VARIANT_RAW_ID.as_slice(),
+    };
+    writer.add_enumeration_value_raw(variant_id);
+    writer.add_unit();
+}
 impl TryFrom<&[u8]> for Status {
     type Error = DeserializationError;
     fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
@@ -48,11 +62,11 @@ pub fn deserialize_from_reader(
                 message: "next type is not an enumeration".to_string(),
             });
         }
-    }
-    if STATUS_ENUM_RAW_ID != reader.get_structure_field() {
-        return Err(DeserializationError {
-            message: "missing variant information".to_string(),
-        });
+        if STATUS_ENUM_RAW_ID != reader.get_structure_field() {
+            return Err(DeserializationError {
+                message: "missing variant information".to_string(),
+            });
+        }
     }
     let variant_raw_id = reader.get_enumeration_value_raw();
     reader.next_type();
