@@ -9,9 +9,10 @@
 //!
 //! - [`run`] — default HAL (in-process fake) and default bridge.
 //! - [`run_with_hal`] — **your hardware**, default bridge. A device build is
-//!   this one call: `arora::run_with_hal(Arc::new(MyHal::new())).await`.
-//! - [`run_with`] — your HAL, your bridge, your store. Full control; the caller
-//!   builds the bridge (awaiting its async construction itself) and hands it in.
+//!   this one call: `arora::run_with_hal(Box::new(MyHal::new())).await`.
+//! - [`run_with`] — your HAL, your bridge, your store, each owned by the
+//!   device. Full control; the caller builds the bridge (awaiting its async
+//!   construction itself) and hands it in.
 //!
 //! The **default bridge** depends on how the crate is built. By default it is
 //! the open local bridge ([`arora-bridge-ws`](arora_bridge_ws)): the device
@@ -53,13 +54,13 @@ use crate::{Arora, BehaviorTreeInterpreter};
 /// Run the default device: in-process fake HAL, default bridge.
 #[cfg(feature = "native")]
 pub async fn run() -> Result<()> {
-    run_with_hal(Arc::new(arora_hal::FakeHal::new())).await
+    run_with_hal(Box::new(arora_hal::FakeHal::new())).await
 }
 
 /// Run a device over `hal` with the default bridge — the one call that turns
 /// a HAL into a running device.
 #[cfg(all(feature = "native", not(feature = "studio-bridge")))]
-pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
+pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     // The log sink is installed by the front end that `run_with_frontend`
     // selects (env_logger headless, in-pane capture under the TUI), so don't
     // init a logger here.
@@ -73,13 +74,13 @@ pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
         }
     });
     info!("serving the local bridge on ws://127.0.0.1:9000");
-    run_with(hal, Arc::new(bridge), Arc::new(SimpleDataStore::new())).await
+    run_with(hal, Box::new(bridge), Box::new(SimpleDataStore::new())).await
 }
 
 /// Run a device over `hal`, connected to Semio Studio (the `studio-bridge`
 /// default bridge).
 #[cfg(feature = "studio-bridge")]
-pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
+pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     crate::studio::run_with_hal(hal).await
 }
 
@@ -88,18 +89,19 @@ pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
 /// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
 /// natively) around the injected HAL + bridge over `store`, installs an optional
 /// Groot tree given as the first CLI argument, then drives the step loop. There
-/// is no io pump to spawn and no bridge factory — the caller builds the bridge
-/// (awaiting any async construction on its own runtime) and hands the finished
-/// one in here; the bridge and HAL own any async internally.
+/// is no bridge factory — the caller builds the bridge endpoint (awaiting any
+/// async construction on its own runtime) and hands it in here **by value**:
+/// the device owns it, and takes its inbound stream at build. The bridge and
+/// HAL own any async internally.
 ///
-/// Pass `Arc::new(SimpleDataStore::new())` for a self-contained device, or a
-/// clone of a shared store (any [`DataStore`]) to mutualize the blackboard
-/// across devices (e.g. Studio handing one store to every spawned device).
+/// Pass `Box::new(SimpleDataStore::new())` for a self-contained device, or a
+/// clone onto shared storage (any [`DataStore`] — e.g. a `NamespacedStore`
+/// over one mutualized backend) to share the blackboard across devices.
 #[cfg(feature = "native")]
 pub async fn run_with(
-    hal: Arc<dyn Hal>,
-    bridge: Arc<dyn Bridge>,
-    store: Arc<dyn DataStore>,
+    hal: Box<dyn Hal>,
+    bridge: Box<dyn Bridge>,
+    store: Box<dyn DataStore>,
 ) -> Result<()> {
     run_with_frontend(hal, bridge, store, select_frontend()).await
 }
@@ -114,22 +116,26 @@ pub async fn run_with(
 /// attached to a terminal.
 #[cfg(feature = "native")]
 pub async fn run_with_frontend(
-    hal: Arc<dyn Hal>,
-    bridge: Arc<dyn Bridge>,
-    store: Arc<dyn DataStore>,
+    hal: Box<dyn Hal>,
+    bridge: Box<dyn Bridge>,
+    store: Box<dyn DataStore>,
     frontend: Frontend,
 ) -> Result<()> {
     let Frontend { operator, on_ready } = frontend;
+
+    // Query the bridge's control plane before the device takes ownership of the
+    // endpoint: the identity/info the front end shows, and the access-request
+    // stream the operator serves for the rest of the run.
+    let info = bridge.get_device_info().await.ok().flatten();
+    let device_id = bridge.device_id().await;
+    let access_requests = bridge.access_requests().await;
 
     // Assemble the builder. If the first CLI argument is a Groot file, construct
     // an empty behavior-tree interpreter, load that tree into it against the same
     // store the device ticks, and inject it at build — construct-empty → load →
     // inject. With no argument the builder's default (an empty, idle interpreter)
     // stands. Either way the interpreter is set once here, not swapped later.
-    let mut builder = Arora::builder()
-        .with_hal(hal)
-        .with_bridge(bridge.clone())
-        .with_data_store(store.clone());
+    let mut builder = Arora::builder().with_hal(hal).with_bridge(bridge);
     if let Some(path) = std::env::args().nth(1) {
         let xml = std::fs::read_to_string(&path)
             .with_context(|| format!("could not read Groot file {path}"))?;
@@ -137,31 +143,26 @@ pub async fn run_with_frontend(
         // empty: the tree's nodes are the natively-hosted control nodes.
         let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
         interpreter
-            .load_groot(&xml, &store)
+            .load_groot(&xml, &*store)
             .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e:?}"))?;
         builder = builder.with_behavior_interpreter(Box::new(interpreter));
         info!("installed behavior tree from {path}");
     }
-    let mut arora = builder.build().context("failed to build Arora")?;
+    let mut arora = builder
+        .with_data_store(store)
+        .build()
+        .context("failed to build Arora")?;
 
-    // Hand the front end its live view now that the device and bridge exist:
-    // the telemetry handle it reads indicators from, and the device identity.
-    let info = bridge.get_device_info().await.ok().flatten();
-    let device_id = bridge.device_id().await;
+    // Hand the front end its live view now that the device exists: the
+    // telemetry handle it reads indicators from, and the device identity.
     on_ready(arora.telemetry(), info, device_id);
 
     info!("engine started; native behavior-tree control nodes ready");
 
-    // Serve remote clients' access requests through the chosen operator, one at a
-    // time, for as long as the bridge yields them. (The bridge/HAL data plane is
-    // driven by `arora.run()`; only access requests still pump.)
-    tokio::spawn({
-        let bridge = bridge.clone();
-        async move {
-            let requests = bridge.access_requests().await;
-            serve_access_requests(requests, operator).await;
-        }
-    });
+    // Serve remote clients' access requests through the chosen operator, one at
+    // a time, for as long as the bridge yields them. (The data plane is driven
+    // by `arora.run()`; access requests are the operator's own concern.)
+    tokio::spawn(serve_access_requests(access_requests, operator));
     info!("running — Ctrl-C to stop");
     arora
         .run(Arora::DEFAULT_STEP_PERIOD)

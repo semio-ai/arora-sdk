@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use arora_behavior::{BehaviorContext, BehaviorError, BehaviorInterpreter, BehaviorStatus};
 use arora_types::data::{DataStore, Key};
@@ -54,11 +53,13 @@ impl BehaviorTreeInterpreter {
     /// [`BehaviorTree`] with the **Direct convention**: each Groot `{var}` is
     /// bound to `store`'s slot under its own name (variable name == store key),
     /// so a behavior reading or writing `{var}` reads/writes the store directly
-    /// during the tick. `store` must be the same store the device ticks against.
+    /// during the tick. `store` must be the same store the device ticks against;
+    /// it is only borrowed to resolve the slots — the tree keeps the slots, not
+    /// the store.
     pub fn load_groot(
         &mut self,
         xml: &str,
-        store: &Arc<dyn DataStore>,
+        store: &dyn DataStore,
     ) -> Result<(), BehaviorTreeError> {
         let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)?;
         // `try_into_tree_node` fills `variables` as name → variable id.
@@ -70,7 +71,6 @@ impl BehaviorTreeInterpreter {
         let id_to_name: HashMap<Uuid, String> =
             variables.into_iter().map(|(name, id)| (id, name)).collect();
         // Direct convention: a variable resolves to the store slot under its name.
-        let store = store.clone();
         let resolver = move |name: &str| Some(store.slot(&Key::from(name)));
         let behavior: BehaviorTree = tree_node.into_behavior_tree(&resolver, &id_to_name)?;
         self.tree = Some(behavior);
