@@ -22,7 +22,7 @@ arora-types = { path = "../arora-types", version = "1.6" }
 # Tokio-free synchronous runtime) plus the in-process fakes it runs with and the
 # traits the primitive is injectable over.
 arora = { path = "../arora", version = "4", default-features = false }
-arora-behavior = { path = "../arora-behavior", version = "2" }
+arora-behavior = { path = "../arora-behavior", version = "3" }
 arora-hal = { path = "../arora-hal", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "1" }

@@ -200,9 +200,11 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "arora-types",
+ "serde",
+ "uuid",
 ]
 
 [[package]]
