@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 # package` (publish verification) without pulling the browser host into a host
 # link.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
+arora-engine = { path = "../arora-engine", version = "1", default-features = false }
 arora-types = { path = "../arora-types", version = "1.6" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime) plus the in-process fakes it runs with and the
