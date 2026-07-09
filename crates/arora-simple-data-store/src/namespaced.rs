@@ -10,7 +10,8 @@
 //!
 //! It does NOT own the storage: it wraps a shared inner store (e.g. a cloned
 //! [`SimpleDataStore`], whose clones share storage) and is `Send + Sync`, so it
-//! can be handed to [`Runtime::with_io_in`] as `Arc<dyn DataStore>`.
+//! can be handed to a device via `Arora::builder().with_data_store(..)` as
+//! `Arc<dyn DataStore>`.
 
 use std::sync::Arc;
 

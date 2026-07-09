@@ -1,10 +1,9 @@
 //! Running an arora: the crate's entry points.
 //!
-//! [`run`] is the whole story for the default device; the other entry points
-//! peel away one default each. Every variant drives the same engine and
-//! [`Runtime`] to completion (until the device is unregistered or the process
-//! is interrupted), with an optional Groot tree queued from the first CLI
-//! argument:
+//! Every entry point builds an [`Arora`] with the [builder](Arora::builder) and
+//! drives it to completion (until the device is unregistered or the process is
+//! interrupted) with an optional Groot tree installed from the first CLI
+//! argument. They differ only in which seams the caller supplies vs. defaults:
 //!
 //! - [`run`] — default HAL (in-process fake) and default bridge.
 //! - [`run_with_hal`] — **your hardware**, default bridge. A device build is
@@ -19,9 +18,10 @@
 //! serves `ws://127.0.0.1:9000` and any editor or app on the machine connects
 //! — no accounts. With the `studio-bridge` feature the device connects to
 //! Semio Studio instead (Firebase auth + Zenoh). The two are mutually
-//! exclusive: the runtime owns exactly one bridge.
+//! exclusive: each of these entry points wires exactly one bridge. (Assembling
+//! an [`Arora`] directly with the builder can wire several.)
 //!
-//! On the web, drive the runtime via `arora-web`'s `AroraRuntime` instead.
+//! On the web, drive the device via `arora-web`'s `AroraRuntime` instead.
 
 #[cfg(feature = "native")]
 use std::sync::Arc;
@@ -35,12 +35,12 @@ use arora_hal::Hal;
 #[cfg(feature = "native")]
 use arora_simple_data_store::SimpleDataStore;
 #[cfg(feature = "native")]
+use arora_types::data::DataStore;
+#[cfg(feature = "native")]
 use log::info;
 
 #[cfg(feature = "native")]
 use crate::operator::{serve_access_requests, Frontend};
-#[cfg(feature = "native")]
-use crate::runtime::Runtime;
 #[cfg(feature = "native")]
 use crate::Arora;
 
@@ -57,7 +57,7 @@ pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
     // The log sink is installed by the front end that `run_with_bridge_builder`
     // selects (env_logger headless, in-pane capture under the TUI), so don't
     // init a logger here.
-    run_with_bridge_builder(hal, SimpleDataStore::new(), || async {
+    run_with_bridge_builder(hal, Arc::new(SimpleDataStore::new()), || async {
         let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
             arora_bridge_ws::ServerConfig::default(),
         ));
@@ -80,19 +80,23 @@ pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
     crate::studio::run_with_hal(hal)
 }
 
-/// Run an arora instance with the given HAL, bridge, and data store.
+/// Run an arora device with the given HAL, bridge, and data store.
 ///
-/// Starts the engine (with the basic behavior-tree control nodes wired
-/// natively), wires the portable [`Runtime`] around the injected HAL + bridge
-/// over `store`, queues an optional Groot tree given as the first CLI
-/// argument, then drives the synchronous step loop on this thread. There is no
-/// io pump to spawn — the bridge and HAL own any async internally.
+/// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
+/// natively) around the injected HAL + bridge over `store`, installs an optional
+/// Groot tree given as the first CLI argument, then drives the synchronous step
+/// loop on this thread. There is no io pump to spawn — the bridge and HAL own
+/// any async internally.
 ///
-/// Pass a freshly created [`SimpleDataStore`] for a self-contained device, or
-/// a clone of a shared one to mutualize the blackboard across runtimes (e.g.
-/// Studio handing one store to every spawned device).
+/// Pass `Arc::new(SimpleDataStore::new())` for a self-contained device, or a
+/// clone of a shared store (any [`DataStore`]) to mutualize the blackboard
+/// across devices (e.g. Studio handing one store to every spawned device).
 #[cfg(feature = "native")]
-pub fn run_with(hal: Arc<dyn Hal>, bridge: Arc<dyn Bridge>, store: SimpleDataStore) -> Result<()> {
+pub fn run_with(
+    hal: Arc<dyn Hal>,
+    bridge: Arc<dyn Bridge>,
+    store: Arc<dyn DataStore>,
+) -> Result<()> {
     run_with_bridge_builder(hal, store, move || async move { Ok(bridge) })
 }
 
@@ -108,7 +112,7 @@ pub fn run_with(hal: Arc<dyn Hal>, bridge: Arc<dyn Bridge>, store: SimpleDataSto
 #[cfg(feature = "native")]
 pub fn run_with_bridge_builder<F, Fut>(
     hal: Arc<dyn Hal>,
-    store: SimpleDataStore,
+    store: Arc<dyn DataStore>,
     make_bridge: F,
 ) -> Result<()>
 where
@@ -130,7 +134,7 @@ where
 #[cfg(feature = "native")]
 pub fn run_with_frontend<F, Fut>(
     hal: Arc<dyn Hal>,
-    store: SimpleDataStore,
+    store: Arc<dyn DataStore>,
     frontend: Frontend,
     make_bridge: F,
 ) -> Result<()>
@@ -140,44 +144,45 @@ where
 {
     let Frontend { operator, on_ready } = frontend;
 
-    // The async setup runs inside a Tokio runtime; the step loop that drives the
-    // engine is synchronous and runs on this (main) thread afterwards — the wasm
-    // executor manages its own blocking runtime and must not be ticked inside
-    // Tokio.
+    // The async bridge construction runs inside a Tokio runtime; the step loop
+    // that drives the engine is synchronous and runs on this (main) thread
+    // afterwards — the wasm executor manages its own blocking runtime and must
+    // not be ticked inside Tokio. Building the `Arora` itself is synchronous, so
+    // only the bridge needs the runtime.
     let tokio = tokio::runtime::Runtime::new().context("failed to start Tokio runtime")?;
-    let (mut runtime, bridge) = tokio.block_on(async {
-        let bridge = make_bridge().await.context("failed to build the bridge")?;
-        let arora = Arora::start().await.context("failed to start Arora")?;
-        // The public API takes a concrete `SimpleDataStore`; the runtime holds
-        // `Arc<dyn DataStore>`, so wrap it here.
-        let store: Arc<dyn arora_types::data::DataStore> = Arc::new(store);
-        let runtime = Runtime::with_io_in(arora, hal, bridge.clone(), store);
-        Ok::<_, anyhow::Error>((runtime, bridge))
-    })?;
+    let bridge = tokio
+        .block_on(async { make_bridge().await })
+        .context("failed to build the bridge")?;
+    let mut arora = Arora::builder()
+        .with_hal(hal)
+        .with_bridge(bridge.clone())
+        .with_data_store(store)
+        .build()
+        .context("failed to build Arora")?;
 
-    // Hand the front end its live view now that the runtime and bridge exist:
+    // Hand the front end its live view now that the device and bridge exist:
     // the telemetry handle it reads indicators from, and the device identity.
     let (info, device_id) = tokio.block_on(async {
         let info = bridge.get_device_info().await.ok().flatten();
         let device_id = bridge.device_id().await;
         (info, device_id)
     });
-    on_ready(runtime.telemetry(), info, device_id);
+    on_ready(arora.telemetry(), info, device_id);
 
     info!("engine started; native behavior-tree control nodes ready");
 
     if let Some(path) = std::env::args().nth(1) {
         let xml = std::fs::read_to_string(&path)
             .with_context(|| format!("could not read Groot file {path}"))?;
-        runtime
-            .queue_groot_xml(&xml)
-            .map_err(|e| anyhow!("failed to queue behavior tree from {path}: {e}"))?;
-        info!("queued behavior tree from {path}");
+        arora
+            .set_groot_xml(&xml)
+            .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e}"))?;
+        info!("installed behavior tree from {path}");
     }
 
     // Serve remote clients' access requests through the chosen operator, one at a
     // time, for as long as the bridge yields them. (The bridge/HAL data plane is
-    // driven synchronously by `runtime.run()`; only access requests still pump.)
+    // driven synchronously by `arora.run()`; only access requests still pump.)
     tokio.spawn({
         let bridge = bridge.clone();
         async move {
@@ -186,7 +191,7 @@ where
         }
     });
     info!("running — Ctrl-C to stop");
-    runtime.run().map_err(|e| anyhow!("runtime error: {e}"))
+    arora.run().map_err(|e| anyhow!("runtime error: {e}"))
 }
 
 /// Pick the front end for this process: the terminal operator UI when the `tui`

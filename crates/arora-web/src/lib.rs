@@ -1,7 +1,7 @@
 //! Run an Arora device in the browser.
 //!
 //! The centerpiece is [`BrowserRuntime`], the reusable primitive that wires a
-//! full [`arora::Runtime`] over an injected HAL, bridge, and data store and
+//! full [`arora::Arora`] over an injected HAL, bridge, and data store and
 //! exposes the JS-facing surface every browser device needs — a synchronous
 //! `step()` plus Value↔JSON accessors on the store. [`AroraRuntime`] is the
 //! bundled demo device built on it (in-process fakes + `SimpleDataStore`); each
@@ -51,7 +51,7 @@ fn install_panic_hook() {
 // Browser runtime primitive
 //
 // `BrowserRuntime` is the reusable core for running any Arora device in the
-// browser. It wires an `arora::Runtime` over an injected HAL, bridge, and data
+// browser. It wires an `arora::Arora` over an injected HAL, bridge, and data
 // store (all trait objects, so the caller picks the backends) and exposes the
 // JS-facing surface every browser device needs: a synchronous `step()` plus
 // Value↔JSON accessors on the injected store. There is no async pump — the
@@ -65,13 +65,14 @@ fn install_panic_hook() {
 // below is one such wrapper (the in-process fakes); Vizij ships another.
 // =============================================================================
 
-use arora::runtime::{Runtime, StepOutcome};
+use arora::{Arora, StepOutcome};
 use arora_behavior::BehaviorInterpreter;
 use arora_bridge::{Bridge, FakeBridge};
 use arora_hal::{FakeHal, Hal};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The reusable core of a browser-hosted Arora device.
 ///
@@ -82,30 +83,35 @@ use std::sync::Arc;
 /// Value↔JSON accessors — values cross as JSON in the Arora [`Value`] vocabulary,
 /// e.g. `{"f32": 0.75}`.
 pub struct BrowserRuntime {
-    runtime: Runtime,
+    arora: Arora,
     store: Arc<dyn DataStore>,
     changes: Subscription,
 }
 
 impl BrowserRuntime {
-    /// Boot an [`arora::Arora`] (engine + native behavior-tree nodes) and inject
-    /// the given `hal`, `bridge`, and `store` via [`Runtime::with_io_in`]. There
-    /// is no async pump to spawn — the bridge and HAL own any async internally,
-    /// behind their synchronous seams. Queue behaviors next, then drive with
+    /// Assemble an [`Arora`] (engine + native behavior-tree nodes) over the given
+    /// `hal`, `bridge`, and `store` with the [builder](Arora::builder). There is
+    /// no async pump to spawn — the bridge and HAL own any async internally,
+    /// behind their synchronous seams. Install a behavior next, then drive with
     /// [`step`](Self::step).
+    ///
+    /// `async` only so the JS surface can `await` construction uniformly; the
+    /// build itself is synchronous.
     pub async fn start(
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
         store: Arc<dyn DataStore>,
     ) -> Result<BrowserRuntime, JsValue> {
         install_panic_hook();
-        let arora = arora::Arora::start()
-            .await
-            .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
         let changes = store.subscribe();
-        let runtime = Runtime::with_io_in(arora, hal, bridge, store.clone());
+        let arora = Arora::builder()
+            .with_hal(hal)
+            .with_bridge(bridge)
+            .with_data_store(store.clone())
+            .build()
+            .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
         Ok(BrowserRuntime {
-            runtime,
+            arora,
             store,
             changes,
         })
@@ -116,26 +122,28 @@ impl BrowserRuntime {
         &self.store
     }
 
-    /// Queue a [`BehaviorInterpreter`] to run on the next step.
-    pub fn queue_behavior(&mut self, behavior: Box<dyn BehaviorInterpreter>) {
-        self.runtime.queue_behavior(behavior);
+    /// Install a [`BehaviorInterpreter`] as the one behavior, replacing any
+    /// current one.
+    pub fn set_behavior_interpreter(&mut self, behavior: Box<dyn BehaviorInterpreter>) {
+        self.arora.set_behavior_interpreter(behavior);
     }
 
-    /// Queue a behavior tree (Groot XML) to run on the next step.
-    pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
-        self.runtime
-            .queue_groot_xml(xml)
-            .map_err(|e| JsValue::from_str(&format!("queue failed: {e}")))
+    /// Install a behavior tree (Groot XML) as the one behavior, replacing any
+    /// current one.
+    pub fn set_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
+        self.arora
+            .set_groot_xml(xml)
+            .map_err(|e| JsValue::from_str(&format!("install failed: {e}")))
     }
 
-    /// Advance the runtime one tick. `dt_ns` is the **nanoseconds** elapsed since
-    /// the previous step. A web driver measures it from `requestAnimationFrame`
-    /// timestamps (milliseconds) and converts — see the [`AroraRuntime::step`]
-    /// wasm boundary. The runtime publishes it (and the accumulated time) under
-    /// the golden keys before ticking. Returns `true` while live, `false` once
-    /// the device has been unregistered (stop stepping then).
-    pub fn step(&mut self, dt_ns: u64) -> Result<bool, JsValue> {
-        match self.runtime.step(dt_ns) {
+    /// Advance the device one tick. `dt` is the wall time elapsed since the
+    /// previous step. A web driver measures it from `requestAnimationFrame`
+    /// timestamps (milliseconds) and converts to a [`Duration`] at that boundary
+    /// — see [`AroraRuntime::step`]. The device publishes it (and the accumulated
+    /// time) under the golden keys before ticking. Returns `true` while live,
+    /// `false` once the device has been unregistered (stop stepping then).
+    pub fn step(&mut self, dt: Duration) -> Result<bool, JsValue> {
+        match self.arora.step(dt) {
             Ok(StepOutcome::Live) => Ok(true),
             Ok(StepOutcome::Unregistered) => Ok(false),
             Err(e) => Err(JsValue::from_str(&format!("step failed: {e}"))),
@@ -243,8 +251,8 @@ pub struct AroraRuntime {
 #[wasm_bindgen]
 impl AroraRuntime {
     /// Start the runtime with an in-process fake HAL and bridge over a plain
-    /// `SimpleDataStore`. Spawns the async io pump on the browser event loop;
-    /// drive the runtime by calling `step()`.
+    /// `SimpleDataStore`. Purely synchronous — no io pump; drive the device by
+    /// calling `step()`.
     pub async fn start() -> Result<AroraRuntime, JsValue> {
         let inner = BrowserRuntime::start(
             Arc::new(FakeHal::new()),
@@ -255,19 +263,20 @@ impl AroraRuntime {
         Ok(AroraRuntime { inner })
     }
 
-    /// Advance the runtime one step. `dt_ms` is the milliseconds elapsed since
-    /// the previous step — a plain JS number, exactly what a
-    /// `requestAnimationFrame` timestamp delta gives. The core clock is integer
-    /// nanoseconds, so this converts at the wasm boundary. Returns `true` while
-    /// live, `false` once the device has been unregistered (stop calling then).
+    /// Advance the device one step. `dt_ms` is the milliseconds elapsed since the
+    /// previous step — a plain JS number, exactly what a `requestAnimationFrame`
+    /// timestamp delta gives. This is the only place the rAF millisecond unit is
+    /// converted to the core [`Duration`] `dt`. Returns `true` while live,
+    /// `false` once the device has been unregistered (stop calling then).
     pub fn step(&mut self, dt_ms: f64) -> Result<bool, JsValue> {
-        self.inner.step((dt_ms * 1_000_000.0) as u64)
+        self.inner.step(Duration::from_secs_f64(dt_ms / 1_000.0))
     }
 
-    /// Queue a behavior tree (Groot XML) to run on the next step.
-    #[wasm_bindgen(js_name = queueGrootXml)]
-    pub fn queue_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
-        self.inner.queue_groot_xml(xml)
+    /// Install a behavior tree (Groot XML) as the one behavior, replacing any
+    /// current one.
+    #[wasm_bindgen(js_name = setGrootXml)]
+    pub fn set_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
+        self.inner.set_groot_xml(xml)
     }
 
     /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
