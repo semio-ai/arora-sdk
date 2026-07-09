@@ -31,7 +31,7 @@ pub mod tui;
 pub use run::{run, run_with, run_with_bridge_builder, run_with_frontend, run_with_hal};
 pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use arora_behavior::BehaviorInterpreter;
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, FakeBridge};
@@ -215,7 +215,7 @@ fn build_engine() -> Result<PinnedEngine> {
     Ok(EngineBuilder::new()
         .add_executor(
             WebAssemblyExecutor::new()
-                .map_err(|e| anyhow!("failed to create wasm executor: {e}"))?,
+                .map_err(|e| anyhow::anyhow!("failed to create wasm executor: {e}"))?,
         )
         .add_executor(NativeExecutor::new())
         .build())
