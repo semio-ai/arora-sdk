@@ -11,6 +11,7 @@
 //! [`arora::run_with`] with those implementations — customization from the
 //! outside, no feature flags inside `arora`.
 
-fn main() -> anyhow::Result<()> {
-    arora::run()
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    arora::run().await
 }

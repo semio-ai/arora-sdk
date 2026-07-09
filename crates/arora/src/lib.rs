@@ -28,8 +28,13 @@ mod studio;
 pub mod tui;
 
 #[cfg(feature = "native")]
-pub use run::{run, run_with, run_with_bridge_builder, run_with_frontend, run_with_hal};
+pub use run::{run, run_with, run_with_frontend, run_with_hal};
 pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
+
+/// Re-exported so embedders can construct the default behavior executor — an
+/// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before
+/// injecting it with [`AroraBuilder::with_behavior_interpreter`].
+pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 
 use anyhow::Result;
 use arora_behavior::BehaviorInterpreter;
@@ -74,10 +79,13 @@ pub struct Arora {
     /// index; it holds only the functions of modules registered through
     /// [`AroraBuilder::with_module`].
     pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
-    /// The one behavior interpreter, ticked each step. Replaceable at runtime
-    /// with [`set_behavior_interpreter`](Arora::set_behavior_interpreter);
-    /// `None` means nothing to tick (an empty behavior). Dropped back to `None`
-    /// once it reports [`BehaviorStatus::Done`](arora_behavior::BehaviorStatus).
+    /// The one behavior interpreter, ticked each step — an executor injected once
+    /// at [`build`](AroraBuilder::build), not swapped afterwards. It defaults to
+    /// an empty, ready [`BehaviorTreeInterpreter`] (see
+    /// [`with_behavior_interpreter`](AroraBuilder::with_behavior_interpreter));
+    /// a behavior is loaded *into* it as a separate step. `None` means nothing to
+    /// tick; the interpreter is dropped back to `None` once it reports
+    /// [`BehaviorStatus::Done`](arora_behavior::BehaviorStatus).
     pub(crate) interpreter: Option<Box<dyn BehaviorInterpreter>>,
     pub(crate) telemetry: Telemetry,
     // The synchronous I/O seams the step drives directly. Each owns its own
@@ -145,9 +153,13 @@ impl AroraBuilder {
         self
     }
 
-    /// Set the behavior interpreter the device ticks — the one interpreter, not
-    /// a queue. Calling again replaces it. Default (when none is set): none, so
-    /// the device idles until one is installed (equivalent to an empty tree).
+    /// Inject the behavior interpreter the device ticks — the one executor, set
+    /// once here and not swapped afterwards. An interpreter is constructed empty
+    /// and ready; a behavior is loaded *into* it as a separate step (e.g.
+    /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here. Default
+    /// (when none is injected): an empty [`BehaviorTreeInterpreter`] over the
+    /// assembled function index, so the device idles (each tick a no-op) until a
+    /// behavior is loaded.
     pub fn with_behavior_interpreter(mut self, interpreter: Box<dyn BehaviorInterpreter>) -> Self {
         self.interpreter = Some(interpreter);
         self
@@ -192,11 +204,20 @@ impl AroraBuilder {
         let store_changes = store.subscribe();
         let hal_updates = hal.updates();
 
+        let function_index = Rc::new(self.functions);
+        // Default executor: an empty, ready behavior-tree interpreter over the
+        // assembled function index. It is injected once here (never swapped); a
+        // behavior is loaded into it as a separate step. With none loaded it
+        // idles, so an un-configured device ticks a no-op.
+        let interpreter = self
+            .interpreter
+            .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
+
         Ok(Arora {
             store,
             engine,
-            function_index: Rc::new(self.functions),
-            interpreter: self.interpreter,
+            function_index,
+            interpreter: Some(interpreter),
             telemetry: Telemetry::default(),
             hal,
             bridges,
