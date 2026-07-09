@@ -5,27 +5,35 @@
 //! trait: push local state changes out, receive device-info updates and
 //! commands in, and learn when a client is asking for data.
 //!
-//! # Synchronous, non-blocking I/O seam
+//! # The seam: an owned inbound stream, a non-blocking outbound push
 //!
-//! The runtime is a plain synchronous stepper: it neither owns an async runtime
-//! nor spawns an I/O pump. So the bridge's inbound/outbound plane is two
-//! **synchronous, non-blocking, immediate** methods the runtime's `step` calls
-//! directly:
+//! A `Bridge` value is an **endpoint**: the connection as seen by exactly one
+//! device, owned by exactly one runtime. Its data plane is two methods:
 //!
-//! - [`try_recv`](Bridge::try_recv) drains the next [`Inbound`] event (a
-//!   command, a device-info update, or a data-requested toggle), or `None`;
+//! - [`take_inbound`](Bridge::take_inbound) hands over the endpoint's inbound
+//!   event stream — **once**, at assembly. The runtime owns the stream from
+//!   then on and polls it from its own loop (natively `run`'s select drains it
+//!   between steps; on the web the per-frame sweep does). The stream
+//!   **ending** means the endpoint disconnected; the runtime maps that
+//!   explicitly, it is never silent.
 //! - [`try_send`](Bridge::try_send) pushes an outbound [`StateChange`] toward
-//!   the remote.
+//!   the remote, now, without blocking (a channel send / synchronous put).
 //!
-//! **Any real async work is the implementation's own responsibility.** A bridge
-//! backed by a socket (WebSocket, Zenoh, DDS) spawns and owns its own task,
-//! buffering inbound events into a queue that `try_recv` drains and flushing an
-//! outbound queue that `try_send` fills. The runtime never sees the async.
+//! Exclusive ownership is the point: one poller per endpoint, so there is no
+//! shared receiver and **no lock anywhere on the data plane**. An
+//! implementation whose transport genuinely serves several devices (one Zenoh
+//! session, one WebSocket server) keeps that transport in a shared *core* and
+//! hands out one endpoint per device, demuxing inbound events to the right
+//! endpoint's stream — share the core, not the endpoint.
 //!
-//! The trait lives here (lean: `arora-types` + async primitives) so the runtime
-//! can depend on the *interface* without depending on `studio-bridge`.
-//! studio-bridge keeps its device-client implementations and provides a
-//! connector that implements this trait.
+//! The trait depends on `futures` (for [`Stream`]) but on **no async runtime**:
+//! native impls may feed the stream from their own tokio task, web impls from
+//! browser events; the runtime only polls.
+//!
+//! The trait lives here (lean: `arora-types` + stream primitives) so the
+//! runtime can depend on the *interface* without depending on `studio-bridge`.
+//! studio-bridge keeps its device-client implementations and implements this
+//! trait on them.
 
 use std::pin::Pin;
 
@@ -189,12 +197,12 @@ impl std::fmt::Debug for AccessRequest {
 /// Stream of access requests from remote clients.
 pub type AccessRequestStream = Pin<Box<dyn Stream<Item = AccessRequest> + Send>>;
 
-/// An event drained from a bridge through [`Bridge::try_recv`].
+/// An inbound event on a bridge endpoint, yielded by the stream
+/// [`Bridge::take_inbound`] hands over.
 ///
-/// The bridge implementation buffers these from its own transport task; the
-/// runtime drains them one at a time, non-blocking, during its step. Mirrors
-/// the events the previous async pump multiplexed (command / device-info /
-/// data-requested), now handed over synchronously.
+/// The implementation feeds these from its own transport (a task, a browser
+/// callback); the runtime's loop buffers them and applies them in arrival
+/// order during its step.
 pub enum Inbound {
     /// A command from the remote, carrying its one-shot reply channel.
     Command(BridgeCommand),
@@ -206,29 +214,34 @@ pub enum Inbound {
     DataRequested(bool),
 }
 
-/// The connection between an Arora runtime and a remote (e.g. Semio Studio).
+/// The inbound event stream of one bridge endpoint. Owned: whoever takes it is
+/// the endpoint's one poller. The stream ending means the endpoint
+/// disconnected.
+pub type InboundStream = Pin<Box<dyn Stream<Item = Inbound> + Send>>;
+
+/// One device's connection to a remote (e.g. Semio Studio) — an **endpoint**,
+/// owned by exactly one runtime.
 ///
-/// Modelled on studio-bridge's `device-client`. Interior-mutable (`&self`) so
-/// the runtime can share it, and so the inbound/outbound seam
-/// ([`try_recv`](Bridge::try_recv) / [`try_send`](Bridge::try_send)) is
-/// synchronous — the implementation owns any async internally (see the module
-/// docs).
+/// Modelled on studio-bridge's `device-client`. The data plane is exclusive
+/// (`&mut self`, no lock): the runtime takes the inbound stream once at
+/// assembly and pushes outbound changes as it steps. The remaining methods are
+/// the control plane (device identity/info, access requests), used around the
+/// loop rather than inside it.
 #[async_trait]
 pub trait Bridge: Send + Sync {
-    /// Drain the next inbound event (command / device-info update /
-    /// data-requested toggle), or `None` when nothing is queued right now.
+    /// Hand over the endpoint's inbound event stream. Called **once**, at
+    /// assembly; the caller owns the stream from then on (one poller per
+    /// endpoint). The stream ending means the endpoint disconnected.
     ///
-    /// **Non-blocking and immediate.** Any real async work (reading a socket)
-    /// is the implementation's own responsibility: it spawns a task that
-    /// buffers events for this method to hand over. The runtime calls this in a
-    /// tight loop each step until it returns `None`.
-    fn try_recv(&self) -> Option<Inbound>;
+    /// Implementations typically move an internal channel receiver out here
+    /// (and may panic on a second call — taking twice is a programming error).
+    fn take_inbound(&mut self) -> InboundStream;
 
     /// Push an outbound state change toward the remote, now, without blocking.
     ///
-    /// The implementation enqueues it onto its own outbound buffer/task; it must
-    /// not block the caller on I/O.
-    fn try_send(&self, change: &StateChange);
+    /// The implementation enqueues it onto its own outbound channel/transport;
+    /// it must not block the caller's step.
+    fn try_send(&mut self, change: &StateChange);
 
     /// The device's current info, if registered.
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>>;
@@ -252,15 +265,16 @@ pub trait Bridge: Send + Sync {
     /// keep their current behavior of granting access implicitly.
     ///
     /// This is a separate concern from the inbound data plane
-    /// ([`try_recv`](Bridge::try_recv)): the operator front end pumps it on its
-    /// own task, one request at a time.
+    /// ([`take_inbound`](Bridge::take_inbound)): the operator front end serves
+    /// it on its own task, one request at a time.
     async fn access_requests(&self) -> AccessRequestStream {
         Box::pin(futures::stream::pending())
     }
 }
 
 /// A no-op [`Bridge`] for tests and offline runs: never registers, never emits
-/// inbound events, and accepts (drops) any data sent.
+/// inbound events (its stream never yields — the endpoint never disconnects),
+/// and accepts (drops) any data sent.
 #[derive(Clone, Default)]
 pub struct FakeBridge;
 
@@ -272,11 +286,11 @@ impl FakeBridge {
 
 #[async_trait]
 impl Bridge for FakeBridge {
-    fn try_recv(&self) -> Option<Inbound> {
-        None
+    fn take_inbound(&mut self) -> InboundStream {
+        Box::pin(futures::stream::pending())
     }
 
-    fn try_send(&self, _change: &StateChange) {}
+    fn try_send(&mut self, _change: &StateChange) {}
 
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
         Ok(None)
@@ -297,10 +311,12 @@ mod tests {
 
     #[tokio::test]
     async fn fake_bridge_is_usable_as_trait_object() {
-        let bridge: Box<dyn Bridge> = Box::new(FakeBridge::new());
+        let mut bridge: Box<dyn Bridge> = Box::new(FakeBridge::new());
         assert_eq!(bridge.get_device_info().await.unwrap(), None);
-        // Synchronous seam: nothing to drain, and outbound is dropped.
-        assert!(bridge.try_recv().is_none());
+        // The inbound stream never yields (the fake never disconnects), and
+        // outbound is dropped.
+        let mut inbound = bridge.take_inbound();
+        assert!(futures::poll!(inbound.next()).is_pending());
         bridge.try_send(&StateChange::new());
     }
 
