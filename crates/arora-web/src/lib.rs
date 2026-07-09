@@ -65,7 +65,7 @@ fn install_panic_hook() {
 // below is one such wrapper (the in-process fakes); Vizij ships another.
 // =============================================================================
 
-use arora::{Arora, StepOutcome};
+use arora::{Arora, BehaviorTreeInterpreter, StepOutcome};
 use arora_behavior::BehaviorInterpreter;
 use arora_bridge::{Bridge, FakeBridge};
 use arora_hal::{FakeHal, Hal};
@@ -76,9 +76,9 @@ use std::time::Duration;
 
 /// The reusable core of a browser-hosted Arora device.
 ///
-/// Assemble it with [`BrowserRuntime::start`] over your chosen HAL, bridge, and
-/// [`DataStore`]; queue one or more behaviors; then drive it a tick at a time
-/// with [`step`](Self::step) (e.g. from `requestAnimationFrame` or a Web Worker
+/// Assemble it with [`BrowserRuntime::start`] over your chosen HAL, bridge,
+/// [`DataStore`], and behavior interpreter; then drive it a tick at a time with
+/// [`step`](Self::step) (e.g. from `requestAnimationFrame` or a Web Worker
 /// loop). Read and write the injected store across the JS boundary with the
 /// Value↔JSON accessors — values cross as JSON in the Arora [`Value`] vocabulary,
 /// e.g. `{"f32": 0.75}`.
@@ -90,10 +90,14 @@ pub struct BrowserRuntime {
 
 impl BrowserRuntime {
     /// Assemble an [`Arora`] (engine + native behavior-tree nodes) over the given
-    /// `hal`, `bridge`, and `store` with the [builder](Arora::builder). There is
-    /// no async pump to spawn — the bridge and HAL own any async internally,
-    /// behind their synchronous seams. Install a behavior next, then drive with
-    /// [`step`](Self::step).
+    /// `hal`, `bridge`, `store`, and behavior interpreter with the
+    /// [builder](Arora::builder). There is no async pump to spawn — the bridge and
+    /// HAL own any async internally, behind their synchronous seams.
+    ///
+    /// The interpreter is an executor injected once here, not swapped afterwards:
+    /// the caller constructs it (an empty [`BehaviorTreeInterpreter`], or its own)
+    /// and loads a behavior into it as a separate step before handing it in. Then
+    /// drive with [`step`](Self::step).
     ///
     /// `async` only so the JS surface can `await` construction uniformly; the
     /// build itself is synchronous.
@@ -101,6 +105,7 @@ impl BrowserRuntime {
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
         store: Arc<dyn DataStore>,
+        behavior_interpreter: Box<dyn BehaviorInterpreter>,
     ) -> Result<BrowserRuntime, JsValue> {
         install_panic_hook();
         let changes = store.subscribe();
@@ -108,6 +113,7 @@ impl BrowserRuntime {
             .with_hal(hal)
             .with_bridge(bridge)
             .with_data_store(store.clone())
+            .with_behavior_interpreter(behavior_interpreter)
             .build()
             .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
         Ok(BrowserRuntime {
@@ -120,20 +126,6 @@ impl BrowserRuntime {
     /// The injected store, for direct access beyond the JSON accessors.
     pub fn store(&self) -> &Arc<dyn DataStore> {
         &self.store
-    }
-
-    /// Install a [`BehaviorInterpreter`] as the one behavior, replacing any
-    /// current one.
-    pub fn set_behavior_interpreter(&mut self, behavior: Box<dyn BehaviorInterpreter>) {
-        self.arora.set_behavior_interpreter(behavior);
-    }
-
-    /// Install a behavior tree (Groot XML) as the one behavior, replacing any
-    /// current one.
-    pub fn set_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
-        self.arora
-            .set_groot_xml(xml)
-            .map_err(|e| JsValue::from_str(&format!("install failed: {e}")))
     }
 
     /// Advance the device one tick. `dt` is the wall time elapsed since the
@@ -251,13 +243,18 @@ pub struct AroraRuntime {
 #[wasm_bindgen]
 impl AroraRuntime {
     /// Start the runtime with an in-process fake HAL and bridge over a plain
-    /// `SimpleDataStore`. Purely synchronous — no io pump; drive the device by
-    /// calling `step()`.
+    /// `SimpleDataStore`, with an empty (idle) behavior-tree interpreter. Purely
+    /// synchronous — no io pump; drive the device by calling `step()`.
     pub async fn start() -> Result<AroraRuntime, JsValue> {
+        // Construct the executor empty and ready — it registers no modules, so its
+        // function index is empty — and inject it at build. It idles (tick is a
+        // no-op) until a behavior is loaded into it.
+        let interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
         let inner = BrowserRuntime::start(
             Arc::new(FakeHal::new()),
             Arc::new(FakeBridge::new()),
             Arc::new(SimpleDataStore::new()),
+            Box::new(interpreter),
         )
         .await?;
         Ok(AroraRuntime { inner })
@@ -270,13 +267,6 @@ impl AroraRuntime {
     /// `false` once the device has been unregistered (stop calling then).
     pub fn step(&mut self, dt_ms: f64) -> Result<bool, JsValue> {
         self.inner.step(Duration::from_secs_f64(dt_ms / 1_000.0))
-    }
-
-    /// Install a behavior tree (Groot XML) as the one behavior, replacing any
-    /// current one.
-    #[wasm_bindgen(js_name = setGrootXml)]
-    pub fn set_groot_xml(&mut self, xml: &str) -> Result<(), JsValue> {
-        self.inner.set_groot_xml(xml)
     }
 
     /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
