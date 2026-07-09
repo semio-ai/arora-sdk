@@ -109,29 +109,30 @@ pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
         Arc::new(SimpleDataStore::new()),
         frontend,
         move || async move {
-        let client = ZenohDeviceClient::new(
-            &firebase_options,
-            Some(&firebase_emulator_options),
-            refresh_token,
-            Some(save_cb),
-            endpoints,
-        )
-        .await
-        // `arora_studio_bridge_client::error::Error` has no `Display` impl,
-        // so format it with `{e:?}`.
-        .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
-        let client: Arc<dyn Bridge> = Arc::new(client);
+            let client = ZenohDeviceClient::new(
+                &firebase_options,
+                Some(&firebase_emulator_options),
+                refresh_token,
+                Some(save_cb),
+                endpoints,
+            )
+            .await
+            // `arora_studio_bridge_client::error::Error` has no `Display` impl,
+            // so format it with `{e:?}`.
+            .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
+            let client: Arc<dyn Bridge> = Arc::new(client);
 
-        // Register this device with Studio from the configured device info.
-        if let Some(info) = device_info {
-            client
-                .update_device_info(Some(info))
-                .await
-                .context("failed to register device info with Studio")?;
-            info!("Registered device info with Studio");
-        }
-        Ok(client)
-    })
+            // Register this device with Studio from the configured device info.
+            if let Some(info) = device_info {
+                client
+                    .update_device_info(Some(info))
+                    .await
+                    .context("failed to register device info with Studio")?;
+                info!("Registered device info with Studio");
+            }
+            Ok(client)
+        },
+    )
 }
 
 /// Build the device info to register from the environment, or `None` if nothing
