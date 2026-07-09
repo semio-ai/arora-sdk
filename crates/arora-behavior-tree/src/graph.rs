@@ -201,4 +201,26 @@ mod tests {
         graph.root = Some(Uuid::from_u128(0xDEAD));
         assert!(graph_to_bt_nodes(&graph).is_err());
     }
+
+    /// Groot XML lowers to the shared graph and runs through it — the import path
+    /// is now Groot → `Graph` → `BehaviorTree`. Builtins need no function index.
+    #[test]
+    fn groot_lowers_to_graph_and_runs() {
+        use crate::arora_generated::behavior_tree::status::Status;
+        use crate::schema_groot::BehaviorTree as GrootTree;
+
+        let xml = r#"<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <Succeed/>
+      <Succeed/>
+    </Sequence>
+  </BehaviorTree>
+</root>"#;
+        let groot = GrootTree::try_from_groot_xml(xml).expect("parse");
+        let graph = groot.into_graph(&HashMap::new()).expect("lower to graph");
+        assert!(graph.root.is_some());
+        assert_eq!(graph.nodes.len(), 3, "sequence + two leaves");
+        assert_eq!(run(&graph), Status::Success);
+    }
 }

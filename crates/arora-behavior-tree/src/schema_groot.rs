@@ -1,3 +1,4 @@
+use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
 use arora_types::record::module::frozen::Parameter;
 use arora_types::record::ty::FrozenTy;
 use arora_types::value::Value;
@@ -446,6 +447,89 @@ impl BehaviorTree {
     pub fn to_groot_xml(&self) -> Vec<u8> {
         serialize_behavior_to_groot_xml(self)
     }
+
+    /// Lower this Groot tree into the shared [`Graph`], resolving action
+    /// parameters against `index`.
+    ///
+    /// The Groot front-end already lowers to a [`TreeNode`] (name → arora ids,
+    /// `{var}` → variable ids); this then assigns node ids and turns each node's
+    /// parameters into graph [`Link`]s. Named `{var}`s become
+    /// [`Graph::variables`], so an interpreter can bind them to store slots (the
+    /// Direct convention). This is the promoted import path — the arora runtime
+    /// builds an editable interpreter from the returned graph.
+    pub fn into_graph(
+        &self,
+        index: &HashMap<Uuid, ModuleFunction>,
+    ) -> Result<Graph, BehaviorTreeError> {
+        let mut names: HashMap<String, Uuid> = HashMap::new();
+        let tree_node = self.root.try_into_tree_node(index, &mut names)?;
+        let mut graph = Graph::empty();
+        let root_id = lower_tree_node_to_graph(tree_node, &mut graph)?;
+        graph.root = Some(root_id);
+        graph.variables = names.into_iter().map(|(name, id)| (id, name)).collect();
+        Ok(graph)
+    }
+}
+
+/// Lower a [`TreeNode`] (and its subtree) into `graph`, returning the assigned id
+/// of the node. Each parameter becomes a graph [`Link`] feeding this node's input
+/// slot; children recurse.
+fn lower_tree_node_to_graph(
+    tree_node: TreeNode,
+    graph: &mut Graph,
+) -> Result<Uuid, BehaviorTreeError> {
+    let node_id = Uuid::new_v4();
+    let children = match tree_node.children {
+        Some(children) => {
+            let mut ids = Vec::with_capacity(children.len());
+            for child in children {
+                ids.push(lower_tree_node_to_graph(child, graph)?);
+            }
+            Some(ids)
+        }
+        None => None,
+    };
+    let mut inputs = Vec::with_capacity(tree_node.parameters.len());
+    for (param_id, expression) in &tree_node.parameters {
+        inputs.push(Io::input(*param_id));
+        let source = groot_expression_to_link_source(expression)?;
+        graph
+            .links
+            .push(Link::new(Port::new(node_id, *param_id), source));
+    }
+    graph.nodes.insert(
+        node_id,
+        GraphNode {
+            id: node_id,
+            function: tree_node.function,
+            inputs,
+            outputs: Vec::new(),
+            children,
+        },
+    );
+    Ok(node_id)
+}
+
+/// A Groot-lowered [`Expression`] as a graph [`LinkSource`]. Groot only ever
+/// produces literals, `{var}` references and (for a `_ret` binding) a bare uuid;
+/// a `Uuid` seeds a literal holding its bytes, matching how the tree seeds a
+/// `Uuid` argument cell.
+fn groot_expression_to_link_source(
+    expression: &Expression,
+) -> Result<LinkSource, BehaviorTreeError> {
+    Ok(match expression {
+        Expression::Value(value) => LinkSource::Literal(value.clone()),
+        Expression::Uuid(uuid) => LinkSource::Literal(Value::ArrayU8(uuid.as_bytes().to_vec())),
+        Expression::VariableId(id) => LinkSource::Variable(*id),
+        Expression::NodeArgument(np) => LinkSource::Port(Port::new(np.node, np.parameter)),
+        Expression::Variable(_) | Expression::Call(_) => {
+            return Err(BehaviorTreeError::InconsistentTreeError {
+                message: "Groot lowering does not support runtime variable cells or nested \
+                          call expressions"
+                    .to_string(),
+            })
+        }
+    })
 }
 
 fn parse_groot_xml(xml_str: &str) -> Result<BehaviorTree, BehaviorTreeError> {

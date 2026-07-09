@@ -391,7 +391,7 @@ mod tests {
                 ..GraphDiff::default()
             })
             .unwrap();
-        assert!(graph.nodes.get(&b).is_none());
+        assert!(!graph.nodes.contains_key(&b));
         assert!(graph.links.is_empty(), "dangling link dropped");
     }
 
