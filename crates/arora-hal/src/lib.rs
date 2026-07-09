@@ -261,11 +261,17 @@ mod tests {
         // The synchronous seam the runtime's step calls: no async, immediate.
         let hal = FakeHal::new();
         let sub = hal.updates();
-        hal.try_send(&StateChange::set("joint1.target_position", Value::from(1.0)));
+        hal.try_send(&StateChange::set(
+            "joint1.target_position",
+            Value::from(1.0),
+        ));
         let saw_position = sub
             .try_iter()
             .any(|c| c.contains(&Key::from("joint1.position")));
-        assert!(saw_position, "try_send should mirror target to measured position");
+        assert!(
+            saw_position,
+            "try_send should mirror target to measured position"
+        );
     }
 
     #[tokio::test]
