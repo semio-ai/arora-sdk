@@ -12,8 +12,8 @@ path = "src/lib.rs"
 [[bin]]
 name = "arora"
 path = "src/main.rs"
-# The binary is the headless Studio device runner, so it needs the opt-in
-# studio-bridge feature. On wasm, build the library with --no-default-features.
+# The binary needs the native runtime; on wasm, build the library with
+# --no-default-features.
 required-features = ["native"]
 
 # A worked example of a device-specific arora (custom HAL injected into
@@ -36,17 +36,6 @@ native = [
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
-# The Semio Studio connection: the studio-bridge Zenoh connector plus the
-# headless device runner (Firebase auth, token storage, app-data dir, logging)
-# that registers the device with Studio. Opt-in: a plain arora runtime (e.g.
-# Vizij hosting a local bridge) does not talk to the Semio store at all.
-studio-bridge = [
-    "native",
-    "dep:arora-studio-bridge-client",
-    "dep:crypto_secretbox",
-    "dep:dirs",
-    "dep:rustls",
-]
 # The terminal operator UI (`arora::tui`): device header, scrollable log pane,
 # live indicators, and the prompt line the operator answers questions on. The
 # binary uses it when it detects an interactive terminal; embedders who bring
@@ -67,19 +56,8 @@ arora-hal = { path = "../arora-hal", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "0.1" }
 futures = "0.3"
-# The default Bridge implementation: the studio-bridge Zenoh connector, published
-# as `arora-studio-bridge-client` (it also provides the Firebase config types the
-# headless runner needs, under `firestore_support::options`). Native-only
-# (zenoh/firestore) and optional, so the wasm build of the library stays lean.
-# arora bundles it so a device-specific binary only has to provide its own HAL.
-arora-studio-bridge-client = { version = "2", optional = true }
-# Headless device-runner deps (native-only, optional). Versions track
-# studio-bridge/headless, the runner this is ported from.
-crypto_secretbox = { version = "0.1.1", optional = true }
-dirs = { version = "6", optional = true }
 env_logger = { version = "0.11", optional = true }
 log = "0.4"
-rustls = { version = "0.23.27", default-features = false, features = ["ring"], optional = true }
 # The operator interface (`arora::operator`) is an async trait.
 async-trait = { version = "0.1", optional = true }
 # Terminal operator UI (the "tui" feature).

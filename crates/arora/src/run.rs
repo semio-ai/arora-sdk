@@ -14,13 +14,12 @@
 //!   device. Full control; the caller builds the bridge (awaiting its async
 //!   construction itself) and hands it in.
 //!
-//! The **default bridge** depends on how the crate is built. By default it is
-//! the open local bridge ([`arora-bridge-ws`](arora_bridge_ws)): the device
-//! serves `ws://127.0.0.1:9000` and any editor or app on the machine connects
-//! — no accounts. With the `studio-bridge` feature the device connects to
-//! Semio Studio instead (Firebase auth + Zenoh). The two are mutually
-//! exclusive: each of these entry points wires exactly one bridge. (Assembling
-//! an [`Arora`] directly with the builder can wire several.)
+//! The **default bridge** is the open local bridge
+//! ([`arora-bridge-ws`](arora_bridge_ws)): the device serves
+//! `ws://127.0.0.1:9000` and any editor or app on the machine connects — no
+//! accounts. Each of these entry points wires exactly one bridge; assembling
+//! an [`Arora`] directly with the builder can wire several (e.g. the Semio
+//! Studio connector, `arora-studio-bridge-client`).
 //!
 //! On the web, drive the device via `arora-web`'s `AroraRuntime` instead.
 
@@ -37,9 +36,7 @@ use anyhow::{anyhow, Context, Result};
 use arora_bridge::Bridge;
 #[cfg(feature = "native")]
 use arora_hal::Hal;
-// Only the default-bridge `run_with_hal` builds the fallback store here; the
-// Studio variant lives in `studio::run_with_hal`.
-#[cfg(all(feature = "native", not(feature = "studio-bridge")))]
+#[cfg(feature = "native")]
 use arora_simple_data_store::SimpleDataStore;
 #[cfg(feature = "native")]
 use arora_types::data::DataStore;
@@ -59,7 +56,7 @@ pub async fn run() -> Result<()> {
 
 /// Run a device over `hal` with the default bridge — the one call that turns
 /// a HAL into a running device.
-#[cfg(all(feature = "native", not(feature = "studio-bridge")))]
+#[cfg(feature = "native")]
 pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     // The log sink is installed by the front end that `run_with_frontend`
     // selects (env_logger headless, in-pane capture under the TUI), so don't
@@ -75,13 +72,6 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     });
     info!("serving the local bridge on ws://127.0.0.1:9000");
     run_with(hal, Box::new(bridge), Box::new(SimpleDataStore::new())).await
-}
-
-/// Run a device over `hal`, connected to Semio Studio (the `studio-bridge`
-/// default bridge).
-#[cfg(feature = "studio-bridge")]
-pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
-    crate::studio::run_with_hal(hal).await
 }
 
 /// Run an arora device with the given HAL, bridge, and data store.
