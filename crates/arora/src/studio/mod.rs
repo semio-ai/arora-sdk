@@ -6,7 +6,7 @@
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
 //! load/save an encrypted refresh token from a local file, build the real
 //! [`ZenohDeviceClient`] (the studio-bridge Zenoh connector), and drive it via
-//! [`crate::run_with_bridge_builder`] over a fresh [`SimpleDataStore`].
+//! [`crate::run_with_frontend`] over a fresh [`SimpleDataStore`].
 //!
 //! The binary ([`crate::main`]) is a thin
 //! wrapper that just calls [`crate::run`].
@@ -48,7 +48,7 @@ use app_data_files::ensure_app_data_dir;
 /// auth, token rotation, Zenoh connection, device registration) is identical
 /// for every device — only the hardware behind it differs. A device build
 /// (e.g. a Vizij rig) injects its HAL here and is a Studio device.
-pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
+pub(crate) async fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
     // Pick the operator front end (terminal UI when interactive, headless
     // otherwise) first: doing so installs the matching log sink, so the startup
     // logging below is captured by whichever front end was chosen.
@@ -104,35 +104,31 @@ pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
 
     info!("Connecting via Zenoh (endpoints: {:?})", endpoints);
 
-    crate::run_with_frontend(
-        hal,
-        Arc::new(SimpleDataStore::new()),
-        frontend,
-        move || async move {
-            let client = ZenohDeviceClient::new(
-                &firebase_options,
-                Some(&firebase_emulator_options),
-                refresh_token,
-                Some(save_cb),
-                endpoints,
-            )
-            .await
-            // `arora_studio_bridge_client::error::Error` has no `Display` impl,
-            // so format it with `{e:?}`.
-            .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
-            let client: Arc<dyn Bridge> = Arc::new(client);
-
-            // Register this device with Studio from the configured device info.
-            if let Some(info) = device_info {
-                client
-                    .update_device_info(Some(info))
-                    .await
-                    .context("failed to register device info with Studio")?;
-                info!("Registered device info with Studio");
-            }
-            Ok(client)
-        },
+    // Build the Zenoh bridge here (awaiting its async construction on the caller's
+    // runtime) and hand the finished bridge to the run loop — no bridge factory.
+    let client = ZenohDeviceClient::new(
+        &firebase_options,
+        Some(&firebase_emulator_options),
+        refresh_token,
+        Some(save_cb),
+        endpoints,
     )
+    .await
+    // `arora_studio_bridge_client::error::Error` has no `Display` impl,
+    // so format it with `{e:?}`.
+    .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
+    let client: Arc<dyn Bridge> = Arc::new(client);
+
+    // Register this device with Studio from the configured device info.
+    if let Some(info) = device_info {
+        client
+            .update_device_info(Some(info))
+            .await
+            .context("failed to register device info with Studio")?;
+        info!("Registered device info with Studio");
+    }
+
+    crate::run_with_frontend(hal, client, Arc::new(SimpleDataStore::new()), frontend).await
 }
 
 /// Build the device info to register from the environment, or `None` if nothing

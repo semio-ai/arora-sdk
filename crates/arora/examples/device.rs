@@ -77,7 +77,8 @@ impl Hal for ExampleHal {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // The whole device-specific build: run the standard arora runtime with our
     // HAL and a bridge, injected from here, over a fresh private data store.
     // (Use the studio-bridge connector's `ZenohDeviceClient` in place of
@@ -87,4 +88,5 @@ fn main() -> Result<()> {
         Arc::new(FakeBridge::new()),
         Arc::new(SimpleDataStore::new()),
     )
+    .await
 }
