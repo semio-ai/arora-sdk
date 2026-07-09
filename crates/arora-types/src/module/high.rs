@@ -10,7 +10,7 @@ pub struct Executor {
   pub max_version: Option<SemanticVersion>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TypeRef {
   Scalar { id: String },
