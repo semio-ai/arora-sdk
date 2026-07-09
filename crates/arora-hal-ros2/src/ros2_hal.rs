@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use futures::channel::mpsc::UnboundedSender;
 use futures::stream::unfold;
 use futures::StreamExt;
 use log::{debug, error, info, trace, warn};
 use ros2_client::{Name, Node, NodeOptions, DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 
-use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult};
-use arora_types::data::{Key, State, StateChange, Subscription};
+use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult, UpdatesStream};
+use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 
 use crate::config::{
@@ -41,7 +42,7 @@ pub struct Ros2Hal {
     joint_ids_to_ros_names: HashMap<String, String>,
 
     // Observers registered through `updates()`; the ROS-side task feeds each one
-    subscribers: Arc<Mutex<Vec<std::sync::mpsc::Sender<StateChange>>>>,
+    subscribers: Arc<Mutex<Vec<UnboundedSender<StateChange>>>>,
 
     // Publishers that also convert StateChange to typed messages
     publishers: HashMap<String, Box<dyn StateChangePublisher>>,
@@ -157,7 +158,7 @@ impl Ros2Hal {
             }
         }
 
-        let subscribers: Arc<Mutex<Vec<std::sync::mpsc::Sender<StateChange>>>> =
+        let subscribers: Arc<Mutex<Vec<UnboundedSender<StateChange>>>> =
             Arc::new(Mutex::new(Vec::new()));
         let current_state = Arc::new(Mutex::new(State::new()));
 
@@ -192,7 +193,8 @@ impl Ros2Hal {
                         {
                             let mut subscribers =
                                 subscribers_clone.lock().expect("subscribers lock poisoned");
-                            subscribers.retain(|tx| tx.send(state_change.clone()).is_ok());
+                            subscribers
+                                .retain(|tx| tx.unbounded_send(state_change.clone()).is_ok());
                             debug!("State change processing task: Observers notified.");
                         }
                     }
@@ -552,11 +554,11 @@ impl Hal for Ros2Hal {
 
     /// A feed of the changes the robot reports.
     ///
-    /// Each subscription immediately receives the current state as one
-    /// `StateChange` (when non-empty), then every subsequent change.
-    fn updates(&self) -> Subscription {
+    /// Each feed immediately receives the current state as one `StateChange`
+    /// (when non-empty), then every subsequent change.
+    fn updates(&self) -> UpdatesStream {
         debug!("Received updates request");
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let snapshot = self
             .current_state
@@ -564,7 +566,7 @@ impl Hal for Ros2Hal {
             .expect("state lock poisoned")
             .clone();
         if !snapshot.is_empty() {
-            let _ = tx.send(StateChange {
+            let _ = tx.unbounded_send(StateChange {
                 set: snapshot.storage,
                 unset: Default::default(),
             });
@@ -574,7 +576,7 @@ impl Hal for Ros2Hal {
             .lock()
             .expect("subscribers lock poisoned")
             .push(tx);
-        Subscription::new(rx)
+        Box::pin(rx)
     }
 }
 
@@ -619,6 +621,16 @@ impl Drop for Ros2Hal {
 mod tests {
     use super::*;
     use crate::{configs::nao, JointStateConversion};
+    use futures::FutureExt;
+
+    /// Drain everything the feed has already buffered, without blocking.
+    fn drain(feed: &mut UpdatesStream) -> Vec<StateChange> {
+        let mut out = Vec::new();
+        while let Some(Some(change)) = feed.next().now_or_never() {
+            out.push(change);
+        }
+        out
+    }
 
     #[tokio::test]
     async fn test_model_glb_with_nao_config() {
@@ -786,9 +798,9 @@ mod tests {
         };
 
         // Subscribe to updates: the state is empty, so nothing arrives yet
-        let subscription = hal.updates();
+        let mut feed = hal.updates();
         assert!(
-            subscription.try_recv().is_none(),
+            drain(&mut feed).is_empty(),
             "No update expected while the state is empty"
         );
 
@@ -845,10 +857,7 @@ mod tests {
         });
 
         // Wait for the next state change: it should reflect the published joint states
-        let state_change = tokio::task::spawn_blocking(move || subscription.recv())
-            .await
-            .expect("receiver task panicked")
-            .expect("channel closed unexpectedly");
+        let state_change = feed.next().await.expect("feed closed unexpectedly");
 
         println!(
             "Received state change with {} keys: {:?}",
@@ -1067,9 +1076,9 @@ mod tests {
         let hal = Ros2Hal::new(config).await.expect("failed to create HAL");
 
         // Subscribe to updates: the state is empty, so nothing arrives yet
-        let subscription = hal.updates();
+        let mut feed = hal.updates();
         assert!(
-            subscription.try_recv().is_none(),
+            drain(&mut feed).is_empty(),
             "No update expected while the state is empty"
         );
 
@@ -1114,10 +1123,7 @@ mod tests {
         });
 
         // Wait for the state change to be received
-        let state_change = tokio::task::spawn_blocking(move || subscription.recv())
-            .await
-            .expect("receiver task panicked")
-            .expect("channel closed unexpectedly");
+        let state_change = feed.next().await.expect("feed closed unexpectedly");
 
         println!(
             "Received state change with {} keys: {:?}",

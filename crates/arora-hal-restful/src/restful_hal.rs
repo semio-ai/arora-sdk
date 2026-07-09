@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use futures::channel::mpsc::UnboundedSender;
 use log::{debug, error, info, warn};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
 
-use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult};
-use arora_types::data::{Key, State, StateChange, Subscription};
+use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult, UpdatesStream};
+use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 
 use crate::config::{EndpointConfig, EndpointMapping, RESTfulRobotConfig};
@@ -37,7 +38,7 @@ pub struct RestfulHal {
     current_state: Mutex<State>,
 
     // Observers registered through `updates()`, fed by writes
-    subscribers: Mutex<Vec<std::sync::mpsc::Sender<StateChange>>>,
+    subscribers: Mutex<Vec<UnboundedSender<StateChange>>>,
 }
 
 impl RestfulHal {
@@ -197,7 +198,7 @@ impl RestfulHal {
             return;
         }
         let mut subscribers = self.subscribers.lock().expect("subscribers lock poisoned");
-        subscribers.retain(|tx| tx.send(changes.clone()).is_ok());
+        subscribers.retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
     }
 
     /// Builds the full URL for an endpoint path.
@@ -306,11 +307,11 @@ impl Hal for RestfulHal {
 
     /// A feed of the changes the robot reports.
     ///
-    /// Each subscription immediately receives the current state as one
-    /// `StateChange` (when non-empty), then every subsequent change.
-    fn updates(&self) -> Subscription {
+    /// Each feed immediately receives the current state as one `StateChange`
+    /// (when non-empty), then every subsequent change.
+    fn updates(&self) -> UpdatesStream {
         debug!("Received updates request");
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let snapshot = self
             .current_state
@@ -318,7 +319,7 @@ impl Hal for RestfulHal {
             .expect("state lock poisoned")
             .clone();
         if !snapshot.is_empty() {
-            let _ = tx.send(StateChange {
+            let _ = tx.unbounded_send(StateChange {
                 set: snapshot.storage,
                 unset: Default::default(),
             });
@@ -328,7 +329,7 @@ impl Hal for RestfulHal {
             .lock()
             .expect("subscribers lock poisoned")
             .push(tx);
-        Subscription::new(rx)
+        Box::pin(rx)
     }
 }
 
@@ -347,9 +348,19 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
 
+    use futures::{FutureExt, StreamExt};
     use reqwest::Method;
 
     use super::*;
+
+    /// Drain everything the feed has already buffered, without blocking.
+    fn drain(feed: &mut UpdatesStream) -> Vec<StateChange> {
+        let mut out = Vec::new();
+        while let Some(Some(change)) = feed.next().now_or_never() {
+            out.push(change);
+        }
+        out
+    }
 
     fn head_config(base_url: &str) -> RESTfulRobotConfig {
         RESTfulRobotConfig {
@@ -489,9 +500,9 @@ mod tests {
     async fn test_write_joint_targets_posts_and_mirrors() {
         let (base_url, requests) = spawn_http_server(|_| 200);
         let hal = RestfulHal::new(head_config(&base_url)).expect("create HAL");
-        let subscription = hal.updates();
+        let mut feed = hal.updates();
         assert!(
-            subscription.try_recv().is_none(),
+            drain(&mut feed).is_empty(),
             "No update expected while the state is empty"
         );
 
@@ -521,7 +532,11 @@ mod tests {
         );
 
         // The subscriber saw the target and the mirrored position.
-        let change = subscription.try_recv().expect("a state change expected");
+        let change = feed
+            .next()
+            .now_or_never()
+            .flatten()
+            .expect("a state change expected");
         assert_eq!(
             change.set.get(&Key::from("head_yaw.position")),
             Some(&Some(Value::from(0.5)))
@@ -542,7 +557,7 @@ mod tests {
             format!("http://{}", listener.local_addr().unwrap())
         };
         let hal = RestfulHal::new(head_config(&dead_url)).expect("create HAL");
-        let subscription = hal.updates();
+        let mut feed = hal.updates();
 
         let result = hal
             .write(StateChange::set(
@@ -553,7 +568,7 @@ mod tests {
         assert!(matches!(result, Err(HalError::Other(_))));
 
         // Subscribers were not notified of a command the robot never took.
-        assert!(subscription.try_recv().is_none());
+        assert!(drain(&mut feed).is_empty());
 
         // The cache was updated regardless.
         assert_eq!(
@@ -625,16 +640,20 @@ mod tests {
         let hal = RestfulHal::new(head_config("http://localhost:1")).expect("create HAL");
 
         // Empty state: no first message.
-        let early = hal.updates();
-        assert!(early.try_recv().is_none());
+        let mut early = hal.updates();
+        assert!(drain(&mut early).is_empty());
 
         hal.write(StateChange::set("text", Value::from("hello".to_string())))
             .await
             .unwrap();
 
         // Non-empty state: the snapshot arrives first.
-        let late = hal.updates();
-        let first = late.try_recv().expect("current state expected first");
+        let mut late = hal.updates();
+        let first = late
+            .next()
+            .now_or_never()
+            .flatten()
+            .expect("current state expected first");
         assert_eq!(
             first.set.get(&Key::from("text")),
             Some(&Some(Value::from("hello".to_string())))
@@ -647,12 +666,12 @@ mod tests {
     #[tokio::test]
     async fn test_non_joint_write_does_not_notify() {
         let hal = RestfulHal::new(head_config("http://localhost:1")).expect("create HAL");
-        let subscription = hal.updates();
+        let mut feed = hal.updates();
 
         hal.write(StateChange::set("text", Value::from("hello".to_string())))
             .await
             .unwrap();
 
-        assert!(subscription.try_recv().is_none());
+        assert!(drain(&mut feed).is_empty());
     }
 }

@@ -9,24 +9,33 @@
 //! store writes flow to the HAL. The HAL trait depends only on `arora-types`, so
 //! any execution engine can drive it without pulling in the bridge.
 //!
-//! # Synchronous I/O seam
+//! # The I/O seam
 //!
-//! Consistent with the bridge, the runtime drives the HAL synchronously: the
-//! inbound sensor drain is [`updates`](Hal::updates) (a sync-pollable
-//! [`Subscription`] the step loop `try_recv`s), and the outbound actuator push
-//! is [`try_send`](Hal::try_send) — non-blocking, called directly from the
-//! synchronous step. Any real async work is the implementation's own
-//! responsibility (its own task/queue), the same way a bridge owns its socket.
+//! Consistent with the bridge, the HAL's data plane is an owned inbound stream
+//! and a non-blocking outbound push: [`updates`](Hal::updates) hands out the
+//! sensor feed as a [`Stream`] (each call an independent subscription, owned by
+//! its consumer — the runtime's loop is its one poller), and
+//! [`try_send`](Hal::try_send) pushes actuator writes immediately, called
+//! directly from the synchronous step. Any real async work is the
+//! implementation's own responsibility (its own task/queue), the same way a
+//! bridge owns its socket; this crate depends on no async runtime.
+//!
+//! Unlike a bridge endpoint, a HAL also has a genuinely shared control plane
+//! ([`describe`](Hal::describe), [`HalAssets`]) that an operator UI reads while
+//! the loop runs, so a HAL is handed around as `Arc<dyn Hal>` — the exclusive
+//! part is each feed, not the object.
 //!
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
 //! and the real ones (ros2, restful, nao) in their own sibling crates.
 
-use std::sync::mpsc::Sender;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use futures::channel::mpsc::UnboundedSender;
+use futures::Stream;
 
-use arora_types::data::{Key, State, StateChange, Subscription};
+use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 
 /// What device a HAL drives.
@@ -106,8 +115,15 @@ pub trait Hal: Send + Sync {
     }
 
     /// A feed of changes the hardware reports (sensors, mirrored actuation, …).
-    fn updates(&self) -> Subscription;
+    /// Each call yields an independent, owned stream; the consumer that takes
+    /// it is its one poller (natively the runtime's `run` select, on the web
+    /// the per-frame sweep).
+    fn updates(&self) -> UpdatesStream;
 }
+
+/// The sensor feed of a [`Hal`]: an owned stream of the changes the hardware
+/// reports. The stream ending means the hardware feed is gone.
+pub type UpdatesStream = Pin<Box<dyn Stream<Item = StateChange> + Send>>;
 
 /// Optional extension: HALs that can supply a 3D model (GLB) of the device.
 #[async_trait]
@@ -120,7 +136,7 @@ struct FakeInner {
     description: HalDescription,
     model_glb: Option<Vec<u8>>,
     state: State,
-    subscribers: Vec<Sender<StateChange>>,
+    subscribers: Vec<UnboundedSender<StateChange>>,
 }
 
 impl FakeInner {
@@ -129,7 +145,7 @@ impl FakeInner {
             return;
         }
         self.subscribers
-            .retain(|tx| tx.send(change.clone()).is_ok());
+            .retain(|tx| tx.unbounded_send(change.clone()).is_ok());
     }
 }
 
@@ -219,10 +235,10 @@ impl Hal for FakeHal {
         self.apply_write(changes);
     }
 
-    fn updates(&self) -> Subscription {
-        let (tx, rx) = std::sync::mpsc::channel();
+    fn updates(&self) -> UpdatesStream {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
         self.inner.lock().unwrap().subscribers.push(tx);
-        Subscription::new(rx)
+        Box::pin(rx)
     }
 }
 
@@ -236,11 +252,21 @@ impl HalAssets for FakeHal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::{FutureExt, StreamExt};
+
+    /// Drain everything the feed has already buffered, without blocking.
+    fn drain(feed: &mut UpdatesStream) -> Vec<StateChange> {
+        let mut out = Vec::new();
+        while let Some(Some(change)) = feed.next().now_or_never() {
+            out.push(change);
+        }
+        out
+    }
 
     #[tokio::test]
     async fn fake_mirrors_target_position() {
         let hal = FakeHal::new();
-        let sub = hal.updates();
+        let mut sub = hal.updates();
         hal.write(StateChange::set("joint1.target_position", Value::from(1.0)))
             .await
             .unwrap();
@@ -250,8 +276,8 @@ mod tests {
             vec![Some(Value::from(1.0))]
         );
         // a subscriber saw the mirrored position change
-        let saw_position = sub
-            .try_iter()
+        let saw_position = drain(&mut sub)
+            .iter()
             .any(|c| c.contains(&Key::from("joint1.position")));
         assert!(saw_position);
     }
@@ -260,13 +286,13 @@ mod tests {
     fn try_send_applies_synchronously_and_mirrors() {
         // The synchronous seam the runtime's step calls: no async, immediate.
         let hal = FakeHal::new();
-        let sub = hal.updates();
+        let mut sub = hal.updates();
         hal.try_send(&StateChange::set(
             "joint1.target_position",
             Value::from(1.0),
         ));
-        let saw_position = sub
-            .try_iter()
+        let saw_position = drain(&mut sub)
+            .iter()
             .any(|c| c.contains(&Key::from("joint1.position")));
         assert!(
             saw_position,
