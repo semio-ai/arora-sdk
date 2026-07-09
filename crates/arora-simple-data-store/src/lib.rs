@@ -73,16 +73,33 @@ impl DataStore for SimpleDataStore {
     }
 
     fn write(&self, changes: StateChange) -> Result<(), DataError> {
+        // Observers see value CHANGES: a write that leaves a key at the value
+        // it already holds is dropped from the notification (and an unset of an
+        // absent key likewise). This is what keeps echo cycles damped — e.g. a
+        // HAL that mirrors actuation back as state produces one change, not a
+        // feedback loop. (`f32`/`f64` NaNs compare unequal, so NaN writes
+        // always notify.)
+        let mut effective = StateChange::new();
         for (key, value) in &changes.set {
             let cell = self.cell(key);
-            *cell.write().unwrap() = value.clone();
+            let mut current = cell.write().unwrap();
+            if current.as_ref() != value.as_ref() {
+                *current = value.clone();
+                effective.set.insert(key.clone(), value.clone());
+            }
         }
         for key in &changes.unset {
             // Keep the cell (so any outstanding Slot stays valid); clear its value.
             let cell = self.cell(key);
-            *cell.write().unwrap() = None;
+            let mut current = cell.write().unwrap();
+            if current.is_some() {
+                *current = None;
+                effective.unset.insert(key.clone());
+            }
         }
-        self.inner.notify(changes);
+        if !effective.is_empty() {
+            self.inner.notify(effective);
+        }
         Ok(())
     }
 
@@ -124,7 +141,15 @@ impl Slot for SimpleSlot {
     }
 
     fn set(&self, value: Option<Value>) -> Result<(), DataError> {
-        *self.cell.write().unwrap() = value.clone();
+        // Same change-only notification as `DataStore::write`: setting the
+        // value the cell already holds is a no-op for observers.
+        {
+            let mut current = self.cell.write().unwrap();
+            if *current == value {
+                return Ok(());
+            }
+            *current = value.clone();
+        }
         self.inner.notify(StateChange {
             set: HashMap::from([(self.key.clone(), value)]),
             unset: Default::default(),

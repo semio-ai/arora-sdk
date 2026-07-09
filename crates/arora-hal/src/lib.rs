@@ -20,10 +20,10 @@
 //! implementation's own responsibility (its own task/queue), the same way a
 //! bridge owns its socket; this crate depends on no async runtime.
 //!
-//! Unlike a bridge endpoint, a HAL also has a genuinely shared control plane
-//! ([`describe`](Hal::describe), [`HalAssets`]) that an operator UI reads while
-//! the loop runs, so a HAL is handed around as `Arc<dyn Hal>` — the exclusive
-//! part is each feed, not the object.
+//! The device owns its HAL (`Box<dyn Hal>` at the builder). An implementation
+//! that also serves an observer (a simulator UI, a test double) shares its
+//! internals and hands sibling handles out itself — [`FakeHal`] clones onto
+//! the same state.
 //!
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
 //! and the real ones (ros2, restful, nao) in their own sibling crates.
@@ -32,8 +32,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::channel::mpsc::UnboundedSender;
-use futures::Stream;
+use futures_channel::mpsc::UnboundedSender;
+use futures_core::Stream;
 
 use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
@@ -73,8 +73,9 @@ pub type HalResult<T> = Result<T, HalError>;
 
 /// The Hardware Abstraction Layer: the boundary to a device.
 ///
-/// Interior-mutable (`&self`) so the runtime can share one HAL across tasks,
-/// the same way a [`DataStore`](arora_types::data::DataStore) is shared.
+/// Interior-mutable (`&self`): the methods take shared references, so an
+/// implementation that hands sibling handles to an observer keeps working —
+/// the runtime still owns its HAL by value.
 #[async_trait]
 pub trait Hal: Send + Sync {
     /// Describe the device (model family, versions).
@@ -93,26 +94,15 @@ pub trait Hal: Send + Sync {
 
     /// Push actuator/state changes toward the hardware immediately, without
     /// blocking — the outbound counterpart to the [`updates`](Hal::updates)
-    /// sensor drain, and the shape the synchronous runtime step calls directly
+    /// sensor feed, and the shape the synchronous runtime step calls directly
     /// (mirroring `Bridge::try_send`).
     ///
-    /// The default forwards to [`write`](Hal::write), which suits HALs whose
-    /// write does not truly block (in-memory fakes, cache-only writes). A HAL
-    /// that performs real async I/O (HTTP, DDS) should override this to enqueue
-    /// onto its own task so the caller's synchronous step loop never blocks on
-    /// the hardware.
-    fn try_send(&self, changes: &StateChange) {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = futures::executor::block_on(self.write(changes.clone()));
-        }
-        // On wasm there are no threads to park on; a wasm HAL (an in-process
-        // fake) overrides this with a synchronous apply.
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = changes;
-        }
-    }
+    /// **Must not block.** A HAL whose apply is truly immediate (an in-memory
+    /// fake, a cache write) applies here directly; a HAL that performs real
+    /// async I/O (HTTP, DDS) enqueues onto its own internal task and returns.
+    /// There is deliberately no default: every implementation decides how its
+    /// hardware absorbs a non-blocking push.
+    fn try_send(&self, changes: &StateChange);
 
     /// A feed of changes the hardware reports (sensors, mirrored actuation, …).
     /// Each call yields an independent, owned stream; the consumer that takes
@@ -236,7 +226,7 @@ impl Hal for FakeHal {
     }
 
     fn updates(&self) -> UpdatesStream {
-        let (tx, rx) = futures::channel::mpsc::unbounded();
+        let (tx, rx) = futures_channel::mpsc::unbounded();
         self.inner.lock().unwrap().subscribers.push(tx);
         Box::pin(rx)
     }

@@ -8,8 +8,6 @@
 //! the selected config. Device identity, registration and token handling are
 //! env-driven inside arora's Semio Studio runner.
 
-use std::sync::Arc;
-
 use arora_hal_restful::{RESTfulRobotConfig, RestfulHal};
 
 fn load_config(path: &str) -> RESTfulRobotConfig {
@@ -19,7 +17,8 @@ fn load_config(path: &str) -> RESTfulRobotConfig {
         .unwrap_or_else(|e| panic!("failed to parse robot config {path}: {e}"))
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let path = args
         .next()
@@ -32,5 +31,5 @@ fn main() -> anyhow::Result<()> {
 
     let hal = RestfulHal::new(config)
         .map_err(|e| anyhow::anyhow!("failed to start the RESTful HAL: {e}"))?;
-    arora::run_with_hal(Arc::new(hal))
+    arora::run_with_hal(Box::new(hal)).await
 }
