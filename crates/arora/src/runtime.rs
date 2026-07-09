@@ -12,40 +12,45 @@
 //! data the next phase needs; [`Arora::step`] is just the wiring that hands the
 //! object's own fields to them, top to bottom:
 //!
-//! 1. [`tick_clock`] — advance the golden clock, yield this frame's time/`dt`;
-//! 2. [`read_inbound`] — drain the HAL sensor feed and the bridge(s) into an
-//!    [`Inbound`] (sensors, commands, control signals);
-//! 3. [`ingest`] — apply sensors, publish the clock, and dispatch commands into
-//!    the store;
-//! 4. [`tick_behavior`] — tick the one interpreter against the shared store;
+//! 0. [`sweep_now`] — move everything the seams already hold into the
+//!    [`Pending`] buffers, without waiting;
+//! 1. [`tick_clock`] + [`publish_clock`] — advance the golden clock and write
+//!    it first, so the whole frame sees this frame's time/`dt`;
+//! 2. [`apply_sensors`] — the HAL's readings, oldest first;
+//! 3. [`apply_events`] — the bridge events, **after** the sensors: a remote
+//!    update to a key beats this frame's sensor reading. Commands are
+//!    dispatched and replied to here;
+//! 4. [`tick_behavior`] — the one interpreter, **last**: its writes win the
+//!    frame, and it saw what it overrode;
 //! 5. [`flush`] — coalesce the store's change feed into one outbound
 //!    [`StateChange`], golden keys filtered out;
-//! 6. [`write_outbound`] — fan that change out to the HAL and every bridge.
+//! 6. [`write_hal`] then [`write_bridges`] — fan that change out.
 //!
-//! Only one phase touches the state at a time, so there is never concurrent
-//! access — and no dedicated engine thread, just a dedicated *step*. Because
-//! the phases are free functions over explicit state, each is unit-testable in
-//! isolation; `Arora` is only a convenience holder for the engine and its
-//! friends.
+//! Per-key precedence within one frame, total and visible in that order:
+//! **behavior ▸ bridge ▸ HAL ▸ previous frame** — and inside each phase,
+//! arrival order (the newest write wins). Only one phase touches the state at
+//! a time, so there is never concurrent access — and no dedicated engine
+//! thread, just a dedicated *step*. Because the phases are free functions over
+//! explicit state, each is unit-testable in isolation; `Arora` is only a
+//! convenience holder for the engine and its friends.
 //!
-//! ## Why it is built this way (web first)
+//! ## One design, two drivers
 //!
 //! [`step`](Arora::step) is **synchronous and non-blocking**, and [`Arora`]
-//! itself spawns no threads, owns no async runtime, and never sleeps. It touches
-//! its I/O seams — the [`Bridge`] and the [`Hal`] — through their synchronous
-//! poll/push surface: `bridge.try_recv()` / `bridge.try_send()` and the HAL's
-//! [`updates`](Hal::updates) subscription / [`try_send`](Hal::try_send). Any
-//! real async work (a WebSocket, Zenoh, DDS) lives *inside* those
-//! implementations, each owning its own task; the step never sees it.
+//! itself spawns no threads, owns no async runtime, and never sleeps. Its I/O
+//! seams are owned streams in and non-blocking pushes out: the bridge
+//! endpoints' inbound streams (taken once at build and merged), the HAL's
+//! sensor feed, and their `try_send` counterparts. Any real async work (a
+//! WebSocket, Zenoh, DDS) lives *inside* those implementations; the step never
+//! sees it.
 //!
-//! The embedder just drives `step`:
-//!
-//! - **native**: call [`run`](Arora::run) (a thin `step` loop) on a thread;
-//! - **web**: drive `step()` from `requestAnimationFrame` — or run the whole
-//!   thing inside a Web Worker.
-//!
-//! Because the loop owns no async runtime and only pokes synchronous seams, it
-//! moves into a Web Worker unchanged: the worker boundary is the seam's problem.
+//! - **native**: [`run`](Arora::run) paces `step` on a fixed-period metronome
+//!   and, between ticks, drains the seams into the [`Pending`] buffers —
+//!   buffering only, nothing touches the store outside `step`;
+//! - **web / direct drive**: call `step()` yourself (from
+//!   `requestAnimationFrame`, or a faster-than-realtime preview loop with a
+//!   virtual `dt`) — phase 0's sweep picks the seams up with identical
+//!   semantics, no runtime needed.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,12 +58,12 @@ use std::time::Duration;
 
 use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::ModuleFunction;
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound as BridgeInbound};
-use arora_engine::engine::PinnedEngine;
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
 use arora_hal::Hal;
 use arora_types::call::CallResult;
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
+use futures::{FutureExt, Stream, StreamExt};
 use uuid::Uuid;
 
 use crate::Arora;
@@ -133,7 +138,8 @@ pub struct Clock {
     time_ns: u64,
 }
 
-/// The frame clock values a step publishes into the golden keys before ticking.
+/// The frame clock values a step publishes into the golden keys before anything
+/// else runs.
 pub struct ClockValues {
     /// Monotonic nanoseconds since the device started, after this step's `dt`.
     pub time_ns: u64,
@@ -141,28 +147,44 @@ pub struct ClockValues {
     pub dt_ns: u64,
 }
 
-/// Everything drained from the I/O seams in one step, before it touches the
-/// store: HAL sensor readings, remote commands, and the two control signals a
-/// step reacts to (unregistration and claim state).
-pub struct Inbound {
-    /// Sensor readings drained from the HAL feed this step.
+/// Everything the seams delivered since the previous step, in arrival order per
+/// seam. The driver only buffers here (natively [`run`](Arora::run)'s select
+/// between ticks, plus phase 0's [`sweep_now`]); the next `step` applies and
+/// drains it. Nothing touches the store outside `step`.
+#[derive(Default)]
+pub struct Pending {
+    /// Sensor readings from the HAL feed.
     pub sensors: Vec<StateChange>,
-    /// Commands from the remote(s), each carrying its reply channel.
-    pub commands: Vec<BridgeCommand>,
-    /// A bridge reported the device unregistered (stop stepping).
-    pub unregistered: bool,
-    /// The latest claim toggle a bridge reported this step, if any.
-    pub claim: Option<bool>,
+    /// Inbound bridge events: commands, device-info updates, claim toggles.
+    pub events: Vec<Inbound>,
 }
 
 // =============================================================================
 // The step pipeline — free functions over explicit state.
 // =============================================================================
 
-/// Advance the golden clock by `dt` and return this frame's clock values. The
-/// monotonic accumulator is exact integer nanoseconds (no float drift over a
-/// long run). `dt` is the elapsed wall time since the previous step, measured
-/// by the caller's driver.
+/// Phase 0 — sweep the seams: move everything the streams already hold into
+/// `pending`, without blocking or waiting. For an embedder that drives `step`
+/// directly (web rAF, a preview loop) this is the whole inbound drain; under
+/// [`run`](Arora::run) it just picks up what arrived since the select last
+/// yielded, so both drivers see identical semantics.
+pub fn sweep_now(
+    hal_feed: &mut (impl Stream<Item = StateChange> + Unpin),
+    inbound: &mut (impl Stream<Item = Inbound> + Unpin),
+    pending: &mut Pending,
+) {
+    while let Some(Some(reading)) = hal_feed.next().now_or_never() {
+        pending.sensors.push(reading);
+    }
+    while let Some(Some(event)) = inbound.next().now_or_never() {
+        pending.events.push(event);
+    }
+}
+
+/// Phase 1a — advance the golden clock by `dt` and return this frame's clock
+/// values. The monotonic accumulator is exact integer nanoseconds (no float
+/// drift over a long run). `dt` is the elapsed time since the previous step,
+/// measured (or, for a preview, chosen) by the caller's driver.
 pub fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
     // A single step's delta is far under u64 nanoseconds; the cast is lossless
     // in practice, and `saturating_add` keeps a pathological run from wrapping.
@@ -174,68 +196,64 @@ pub fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
     }
 }
 
-/// Drain the HAL sensor feed and every bridge into one [`Inbound`]. Reads fan in
-/// across all bridges. Non-blocking: each seam hands over what it has buffered
-/// off its own transport task and yields when empty.
-pub fn read_inbound(hal_updates: &Subscription, bridges: &[Arc<dyn Bridge>]) -> Inbound {
-    let mut inbound = Inbound {
-        sensors: Vec::new(),
-        commands: Vec::new(),
-        unregistered: false,
-        claim: None,
-    };
-    // HAL sensor updates (a synchronous subscription).
-    while let Some(change) = hal_updates.try_recv() {
-        inbound.sensors.push(change);
-    }
-    // Bridge events, drained synchronously from each bridge (it buffers them off
-    // its own transport task).
-    for bridge in bridges {
-        while let Some(event) = bridge.try_recv() {
-            match event {
-                BridgeInbound::Command(cmd) => inbound.commands.push(cmd),
-                BridgeInbound::DeviceInfo(Ok(None)) => inbound.unregistered = true,
-                BridgeInbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
-                BridgeInbound::DeviceInfo(Err(_e)) => { /* TODO: surface bridge error */ }
-                BridgeInbound::DataRequested(requested) => inbound.claim = Some(requested),
-            }
-        }
-    }
-    inbound
+/// Phase 1b — publish the frame clock into the golden keys, before anything
+/// else touches the store: the whole frame (sensor applies, command handling,
+/// the behavior tick) sees this frame's time. The writes go into the store's
+/// change feed like any other, but [`flush`] filters the golden namespace out
+/// of what it forwards outbound.
+pub fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), RuntimeError> {
+    let mut change = StateChange::new();
+    change
+        .set
+        .insert(Key::from(golden::DT), Some(Value::U64(clock.dt_ns)));
+    change
+        .set
+        .insert(Key::from(golden::TIME), Some(Value::U64(clock.time_ns)));
+    store
+        .write(change)
+        .map_err(|e| RuntimeError::Store(e.to_string()))
 }
 
-/// Apply this step's inbound into the store: sensor readings first, then the
-/// remote commands (each replied to on its channel), then the golden clock. The
-/// clock lands *last* here but still before any behavior ticks, since `ingest`
-/// runs before [`tick_behavior`]; [`flush`] keeps the golden namespace off the
-/// wire. Drains `inbound.sensors` and `inbound.commands`.
-pub fn ingest(
-    store: &dyn DataStore,
-    clock: &ClockValues,
-    inbound: &mut Inbound,
-    function_index: &HashMap<Uuid, ModuleFunction>,
-) -> Result<(), RuntimeError> {
-    for change in inbound.sensors.drain(..) {
+/// Phase 2 — apply the HAL's sensor readings, oldest first: within the frame,
+/// a later reading of the same key wins.
+pub fn apply_sensors(store: &dyn DataStore, sensors: Vec<StateChange>) -> Result<(), RuntimeError> {
+    for change in sensors {
         store
             .write(change)
             .map_err(|e| RuntimeError::Store(e.to_string()))?;
     }
-    for cmd in inbound.commands.drain(..) {
-        apply_command(store, function_index, cmd)?;
+    Ok(())
+}
+
+/// Phase 3 — apply the bridge events, in arrival order, **after** the sensors:
+/// a remote update to a key overwrites this frame's sensor reading
+/// (deterministic phase order, not network timing). Commands are dispatched
+/// against the store and replied to on their channel; the control signals fold
+/// into the step's outcome — an unregistration ends the run, a claim toggle
+/// lands in telemetry.
+pub fn apply_events(
+    store: &dyn DataStore,
+    function_index: &HashMap<Uuid, ModuleFunction>,
+    events: Vec<Inbound>,
+    telemetry: &Telemetry,
+) -> Result<StepOutcome, RuntimeError> {
+    let mut outcome = StepOutcome::Live;
+    for event in events {
+        match event {
+            Inbound::Command(cmd) => apply_command(store, function_index, cmd)?,
+            Inbound::DeviceInfo(Ok(None)) => outcome = StepOutcome::Unregistered,
+            Inbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
+            Inbound::DeviceInfo(Err(e)) => {
+                // A dropped link is not an unregistration: the device keeps
+                // running autonomously (the endpoint may reconnect on its own).
+                log::warn!("bridge endpoint error: {e}");
+            }
+            Inbound::DataRequested(requested) => {
+                telemetry.update(|t| t.claimed = requested);
+            }
+        }
     }
-    // Publish the frame clock into the golden keys. These writes go into the
-    // store's change feed like any other, but `flush` filters the golden
-    // namespace out of what it forwards outbound.
-    let mut clock_change = StateChange::new();
-    clock_change
-        .set
-        .insert(Key::from(golden::DT), Some(Value::U64(clock.dt_ns)));
-    clock_change
-        .set
-        .insert(Key::from(golden::TIME), Some(Value::U64(clock.time_ns)));
-    store
-        .write(clock_change)
-        .map_err(|e| RuntimeError::Store(e.to_string()))
+    Ok(outcome)
 }
 
 /// Handle one command from the remote against the store / function index, then
@@ -306,15 +324,17 @@ fn apply_command(
     Ok(())
 }
 
-/// Tick the one behavior interpreter (a tree, a node graph, …) against the
-/// shared store. A no-op when none is installed. When the interpreter reports
+/// Phase 4 — tick the one behavior interpreter (a tree, a node graph, …)
+/// against the shared store, **last**: its writes win the frame, and it ticks
+/// over everything the frame already applied (clock, sensors, remote updates).
+/// A no-op when none is installed. When the interpreter reports
 /// [`BehaviorStatus::Done`] it is dropped (back to `None`) and cleared from
 /// telemetry; while it is [`BehaviorStatus::Running`] it stays for the next
 /// step.
 pub fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
-    engine: &mut PinnedEngine,
+    engine: &mut arora_engine::engine::PinnedEngine,
     telemetry: &Telemetry,
 ) -> Result<(), RuntimeError> {
     let Some(behavior) = interpreter.as_mut() else {
@@ -334,12 +354,12 @@ pub fn tick_behavior(
     Ok(())
 }
 
-/// Coalesce everything drained from the store's change feed this step into ONE
-/// [`StateChange`], so the remote/hardware see a single, consistent update per
-/// step. Changes are drained in order, so later ones win: a set overrides an
-/// earlier unset of the same key (and vice versa). The golden clock keys are
-/// runtime-local and dropped, so the wall-clock churning every frame never
-/// reaches the wire.
+/// Phase 5 — coalesce everything drained from the store's change feed this step
+/// into ONE [`StateChange`], so the remote/hardware see a single, consistent
+/// update per step. Changes are drained in order, so later ones win: a set
+/// overrides an earlier unset of the same key (and vice versa). The golden
+/// clock keys are runtime-local and dropped, so the wall-clock churning every
+/// frame never reaches the wire.
 pub fn flush(changes: &Subscription) -> StateChange {
     let mut merged = StateChange::new();
     while let Some(change) = changes.try_recv() {
@@ -361,26 +381,17 @@ pub fn flush(changes: &Subscription) -> StateChange {
     merged
 }
 
-/// Fan the coalesced outbound change out to the hardware and every bridge,
-/// through their synchronous, non-blocking push seams. Each buffers/flushes on
-/// its own task; none blocks the step.
-pub fn write_outbound(hal: &dyn Hal, bridges: &[Arc<dyn Bridge>], out: &StateChange) {
-    for bridge in bridges {
-        bridge.try_send(out);
-    }
+/// Phase 6a — hand the coalesced outbound change to the hardware, through its
+/// non-blocking push seam.
+pub fn write_hal(hal: &dyn Hal, out: &StateChange) {
     hal.try_send(out);
 }
 
-/// Derive the step's outcome from its inbound control signals and surface the
-/// claim state through telemetry.
-pub fn outcome_of(inbound: &Inbound, telemetry: &Telemetry) -> StepOutcome {
-    if let Some(claimed) = inbound.claim {
-        telemetry.update(|t| t.claimed = claimed);
-    }
-    if inbound.unregistered {
-        StepOutcome::Unregistered
-    } else {
-        StepOutcome::Live
+/// Phase 6b — fan the same change out to every bridge endpoint. Each buffers
+/// onto its own transport; none blocks the step.
+pub fn write_bridges(bridges: &mut [Box<dyn Bridge>], out: &StateChange) {
+    for bridge in bridges {
+        bridge.try_send(out);
     }
 }
 
@@ -400,53 +411,76 @@ impl Arora {
     /// object's fields into the phase functions. Non-blocking; touches the state
     /// from this (single) thread only.
     ///
-    /// `dt` is the elapsed wall time since the previous step, measured by the
+    /// `dt` is the elapsed time since the previous step, measured by the
     /// caller's driver ([`run`](Arora::run) natively, `requestAnimationFrame` on
-    /// the web — converted to a [`Duration`] at that boundary). It advances the
-    /// monotonic clock, published (with the accumulated time) under the golden
-    /// keys before any behavior ticks, so behaviors read timing from the store
-    /// rather than as a tick argument.
+    /// the web) — or chosen freely by a driver with its own idea of time, e.g. a
+    /// faster-than-realtime preview stepping a fixed virtual `dt`. It advances
+    /// the monotonic clock, published (with the accumulated time) under the
+    /// golden keys before anything else runs, so behaviors read timing from the
+    /// store rather than as a tick argument.
     pub fn step(&mut self, dt: Duration) -> Result<StepOutcome, RuntimeError> {
+        // 0. sweep — pick up everything the seams hold right now.
+        sweep_now(&mut self.hal_feed, &mut self.inbound, &mut self.pending);
+        // 1. time — golden keys first: the whole frame sees this clock.
         let clock = tick_clock(&mut self.clock, dt);
-        let mut inbound = read_inbound(&self.hal_updates, &self.bridges);
-        ingest(&*self.store, &clock, &mut inbound, &self.function_index)?;
+        publish_clock(&*self.store, &clock)?;
+        // 2. HAL readings — oldest first; per key, the newest wins.
+        apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors))?;
+        // 3. bridge readings — after the HAL: a remote update beats this
+        //    frame's sensor value. Commands dispatch and reply here.
+        let outcome = apply_events(
+            &*self.store,
+            &self.function_index,
+            std::mem::take(&mut self.pending.events),
+            &self.telemetry,
+        )?;
+        // 4. behavior — the frame's last writer: its intent wins, and it saw
+        //    what it overrode.
         tick_behavior(
             &mut self.interpreter,
             &*self.store,
             &mut self.engine,
             &self.telemetry,
         )?;
+        // 5. flush — one coalesced change; golden keys stay local.
         let out = flush(&self.store_changes);
+        // 6. writings — the hardware first, then every remote.
         if !out.is_empty() {
-            write_outbound(&*self.hal, &self.bridges, &out);
+            write_hal(&*self.hal, &out);
+            write_bridges(&mut self.bridges, &out);
         }
-        Ok(outcome_of(&inbound, &self.telemetry))
+        Ok(outcome)
     }
 }
 
-/// Native convenience: drive [`step`](Arora::step) in a loop until the device is
-/// unregistered, paced at a fixed interval. On the web, drive `step` from
+/// Native pacing: drive [`step`](Arora::step) to completion at a fixed cadence,
+/// draining the I/O seams between ticks. On the web, drive `step` from
 /// `requestAnimationFrame` instead (this method would monopolise the loop).
 #[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
 impl Arora {
     /// The default inter-step period for [`run`](Arora::run): ~100 Hz.
     pub const DEFAULT_STEP_PERIOD: Duration = Duration::from_millis(10);
 
-    /// Drive `step` to completion at a fixed cadence, `.await`ing the interval
-    /// between steps.
+    /// Drive `step` to completion at a fixed cadence.
     ///
-    /// `run` is `async`: each `step` stays fully synchronous, but the pacing is a
-    /// [`tokio::time::interval`] metronome ticked with `.await`, so the future
-    /// yields to its executor between steps rather than blocking the thread. It
-    /// therefore needs a Tokio runtime in scope (the binary drives it from
+    /// `run` is `async`: each `step` stays fully synchronous, but between steps
+    /// the loop `.await`s a [`tokio::time::interval`] metronome *and* the
+    /// device's inbound seams in one select — whichever is ready first. A tick
+    /// runs the next step; an inbound arrival is only **buffered** into
+    /// [`Pending`] (nothing touches the store outside `step`), so the seams'
+    /// channels stay drained without extra tasks, queues, or locks. The select
+    /// is `biased` toward the tick: an event flood cannot starve the cadence.
+    ///
+    /// It therefore needs a Tokio runtime in scope (the binary drives it from
     /// `#[tokio::main]`); `step` itself owns none.
     ///
     /// `period` is the target time between steps — pass
     /// [`DEFAULT_STEP_PERIOD`](Arora::DEFAULT_STEP_PERIOD) for the ~100 Hz
-    /// default. The metronome uses [`MissedTickBehavior::Delay`](tokio::time::MissedTickBehavior::Delay),
+    /// default. The metronome uses
+    /// [`MissedTickBehavior::Delay`](tokio::time::MissedTickBehavior::Delay),
     /// so a step that overruns the period simply shifts the next tick out rather
     /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
-    /// **actual** measured wall time since the previous step, not `period`.
+    /// **actual** measured time since the previous step, not `period`.
     pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
         let mut ticker = tokio::time::interval(period);
         // A slow step delays the next tick instead of bursting to catch up.
@@ -458,8 +492,22 @@ impl Arora {
         // Wall-clock delta between steps, fed to `step` as the frame `dt`.
         let mut last_step = std::time::Instant::now();
         loop {
-            // Paces at the fixed period; the first tick completes immediately.
-            ticker.tick().await;
+            tokio::select! {
+                biased;
+                // Paces at the fixed period; the first tick completes
+                // immediately. Falls through to the step below.
+                _ = ticker.tick() => {}
+                // Between ticks, buffer what the seams deliver — in arrival
+                // order per seam, applied by the next step.
+                Some(reading) = self.hal_feed.next() => {
+                    self.pending.sensors.push(reading);
+                    continue;
+                }
+                Some(event) = self.inbound.next() => {
+                    self.pending.events.push(event);
+                    continue;
+                }
+            }
             let now = std::time::Instant::now();
             let dt = now.duration_since(last_step);
             last_step = now;
@@ -482,34 +530,27 @@ impl Arora {
 mod tests {
     use super::*;
     use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
-    use arora_bridge::{BridgeResult, DeviceInfo};
+    use arora_bridge::{BridgeResult, DeviceInfo, FakeBridge, InboundStream};
     use arora_hal::FakeHal;
     use arora_simple_data_store::{NamespacedStore, SimpleDataStore};
     use async_trait::async_trait;
-    use futures::channel::oneshot;
+    use futures::channel::{mpsc, oneshot};
+    use futures::stream;
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// 16 ms as a step `dt` — a typical frame at ~60 Hz.
     const FRAME: Duration = Duration::from_millis(16);
 
-    /// A bridge that reports the device unregistered on its first poll and is
-    /// otherwise silent.
-    #[derive(Default)]
-    struct UnregisterBridge {
-        done: AtomicBool,
-    }
+    /// A bridge whose inbound stream reports the device unregistered, then
+    /// ends.
+    struct UnregisterBridge;
 
     #[async_trait]
     impl Bridge for UnregisterBridge {
-        fn try_recv(&self) -> Option<BridgeInbound> {
-            if !self.done.swap(true, Ordering::Relaxed) {
-                Some(BridgeInbound::DeviceInfo(Ok(None)))
-            } else {
-                None
-            }
+        fn take_inbound(&mut self) -> InboundStream {
+            Box::pin(stream::once(async { Inbound::DeviceInfo(Ok(None)) }))
         }
-        fn try_send(&self, _change: &StateChange) {}
+        fn try_send(&mut self, _change: &StateChange) {}
         async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
             Ok(None)
         }
@@ -523,18 +564,18 @@ mod tests {
 
     /// Build an [`Arora`] over a fresh [`FakeHal`] and the given bridge, with a
     /// fresh private store.
-    fn build(bridge: Arc<dyn Bridge>) -> Arora {
+    fn build(bridge: Box<dyn Bridge>) -> Arora {
         Arora::builder()
-            .with_hal(Arc::new(FakeHal::new()))
+            .with_hal(Box::new(FakeHal::new()))
             .with_bridge(bridge)
             .build()
             .expect("arora builds")
     }
 
     /// Like [`build`], but over a caller-provided store.
-    fn build_in(bridge: Arc<dyn Bridge>, store: Arc<dyn DataStore>) -> Arora {
+    fn build_in(bridge: Box<dyn Bridge>, store: Box<dyn DataStore>) -> Arora {
         Arora::builder()
-            .with_hal(Arc::new(FakeHal::new()))
+            .with_hal(Box::new(FakeHal::new()))
             .with_bridge(bridge)
             .with_data_store(store)
             .build()
@@ -544,9 +585,9 @@ mod tests {
     /// Like [`build`], but injecting a behavior interpreter at build. Interpreters
     /// are executors set once at construction, not swapped afterwards, so a test
     /// that ticks a specific behavior hands it in here.
-    fn build_with(bridge: Arc<dyn Bridge>, interpreter: Box<dyn BehaviorInterpreter>) -> Arora {
+    fn build_with(bridge: Box<dyn Bridge>, interpreter: Box<dyn BehaviorInterpreter>) -> Arora {
         Arora::builder()
-            .with_hal(Arc::new(FakeHal::new()))
+            .with_hal(Box::new(FakeHal::new()))
             .with_bridge(bridge)
             .with_behavior_interpreter(interpreter)
             .build()
@@ -556,12 +597,12 @@ mod tests {
     /// Like [`build_with`], but over a caller-provided store (so the injected
     /// interpreter can resolve against the same store the device ticks).
     fn build_in_with(
-        bridge: Arc<dyn Bridge>,
-        store: Arc<dyn DataStore>,
+        bridge: Box<dyn Bridge>,
+        store: Box<dyn DataStore>,
         interpreter: Box<dyn BehaviorInterpreter>,
     ) -> Arora {
         Arora::builder()
-            .with_hal(Arc::new(FakeHal::new()))
+            .with_hal(Box::new(FakeHal::new()))
             .with_bridge(bridge)
             .with_data_store(store)
             .with_behavior_interpreter(interpreter)
@@ -572,15 +613,15 @@ mod tests {
     /// Construct an empty behavior-tree interpreter (no module functions) with a
     /// Groot tree loaded into it against `store` — the construct-empty → load →
     /// inject flow, ready to hand to [`build_in_with`].
-    fn groot_interpreter(xml: &str, store: &Arc<dyn DataStore>) -> Box<dyn BehaviorInterpreter> {
+    fn groot_interpreter(xml: &str, store: &dyn DataStore) -> Box<dyn BehaviorInterpreter> {
         let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
         interpreter.load_groot(xml, store).expect("tree loads");
         Box::new(interpreter)
     }
 
     /// Drive `step` until the device reports unregistered, with a safety bound.
-    /// Fully synchronous: the bridge hands over the unregister event through
-    /// `try_recv` on the very next step, no pump to wait on.
+    /// Fully synchronous: phase 0's sweep picks the unregister event up from the
+    /// bridge's stream on the very next step.
     fn drive_until_unregistered(mut arora: Arora) {
         for _ in 0..1000 {
             if arora.step(FRAME).expect("step ok") == StepOutcome::Unregistered {
@@ -592,21 +633,31 @@ mod tests {
 
     #[test]
     fn builder_defaults_to_a_self_contained_device() {
-        // No seams named: fake HAL, in-process bridge, private store, and the
-        // default executor — an empty, idle behavior-tree interpreter.
+        // No seams named: fake HAL, no bridge (a standalone device is legal —
+        // e.g. a preview), a private store, and the default executor — an
+        // empty, idle behavior-tree interpreter.
         let arora = Arora::builder().build().expect("default device builds");
         assert!(
             arora.interpreter.is_some(),
             "default installs an (empty) behavior interpreter"
         );
-        assert_eq!(arora.bridges.len(), 1, "one default in-process bridge");
+        assert!(arora.bridges.is_empty(), "no bridge unless one is added");
+    }
+
+    #[test]
+    fn a_bridgeless_device_steps() {
+        // The zero-bridge device (a preview, a bench test) steps and stays live.
+        let mut arora = Arora::builder().build().expect("builds");
+        for _ in 0..5 {
+            assert_eq!(arora.step(FRAME).expect("step"), StepOutcome::Live);
+        }
     }
 
     #[test]
     fn a_default_devices_empty_interpreter_idles() {
         // The default empty interpreter ticks a no-op (Running), so it is never
         // dropped: it stays installed step after step, waiting for a behavior.
-        let mut arora = build(Arc::new(SilentBridge));
+        let mut arora = build(Box::new(FakeBridge::new()));
         for _ in 0..5 {
             arora.step(FRAME).expect("step");
         }
@@ -618,7 +669,7 @@ mod tests {
 
     #[test]
     fn stops_when_unregistered() {
-        let arora = build(Arc::new(UnregisterBridge::default()));
+        let arora = build(Box::new(UnregisterBridge));
         drive_until_unregistered(arora);
     }
 
@@ -631,16 +682,22 @@ mod tests {
     </Sequence>
   </BehaviorTree>
 </root>"#;
-        // Construct an empty interpreter, load the tree into it, inject at build.
-        let store: Arc<dyn DataStore> = Arc::new(SimpleDataStore::new());
+        // Construct an empty interpreter, load the tree into it, inject at
+        // build. The clone shares the same storage, so the tree's slots and the
+        // device resolve against one blackboard.
+        let store = SimpleDataStore::new();
         let interpreter = groot_interpreter(xml, &store);
-        let arora = build_in_with(Arc::new(UnregisterBridge::default()), store, interpreter);
+        let arora = build_in_with(
+            Box::new(UnregisterBridge),
+            Box::new(store.clone()),
+            interpreter,
+        );
         drive_until_unregistered(arora);
     }
 
     #[tokio::test]
     async fn get_and_update_commands_round_trip() {
-        let arora = build(Arc::new(UnregisterBridge::default()));
+        let arora = build(Box::new(UnregisterBridge));
         let key = Key::from("greeting");
 
         // Update writes a value into the store.
@@ -676,27 +733,6 @@ mod tests {
         );
     }
 
-    /// A bridge that stays silent and never unregisters, so `step` keeps
-    /// returning `Live` and an installed behavior ticks deterministically.
-    struct SilentBridge;
-
-    #[async_trait]
-    impl Bridge for SilentBridge {
-        fn try_recv(&self) -> Option<BridgeInbound> {
-            None
-        }
-        fn try_send(&self, _change: &StateChange) {}
-        async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
-            Ok(None)
-        }
-        async fn update_device_info(
-            &self,
-            info: Option<DeviceInfo>,
-        ) -> BridgeResult<Option<DeviceInfo>> {
-            Ok(info)
-        }
-    }
-
     /// A non-tree [`BehaviorInterpreter`]: writes one key through the shared
     /// store, done.
     struct WriteOnce;
@@ -722,7 +758,7 @@ mod tests {
     /// interpreter at build is all it takes.
     #[tokio::test]
     async fn runs_an_installed_non_tree_behavior() {
-        let mut arora = build_with(Arc::new(SilentBridge), Box::new(WriteOnce));
+        let mut arora = build_with(Box::new(FakeBridge::new()), Box::new(WriteOnce));
 
         // One step ticks the behavior, which writes through the shared store.
         arora.step(FRAME).expect("step");
@@ -744,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
-        let arora = build(Arc::new(UnregisterBridge::default()));
+        let arora = build(Box::new(UnregisterBridge));
 
         // Seed three keys across two prefixes.
         let mut set = HashMap::new();
@@ -834,9 +870,8 @@ mod tests {
     #[tokio::test]
     async fn device_over_namespaced_store_writes_under_namespace() {
         let shared = SimpleDataStore::new();
-        let store: Arc<dyn DataStore> =
-            Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
-        let arora = build_in(Arc::new(SilentBridge), store.clone());
+        let store = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
+        let arora = build_in(Box::new(FakeBridge::new()), Box::new(store));
 
         // Drive a write through the store pipeline.
         let (tx, rx) = oneshot::channel();
@@ -877,13 +912,12 @@ mod tests {
     #[tokio::test]
     async fn behavior_writes_land_in_the_namespaced_store() {
         let shared = SimpleDataStore::new();
-        let store: Arc<dyn DataStore> =
-            Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
-        // SilentBridge never unregisters, so `step()` stays `Live` and ticks the
-        // installed behavior each frame.
+        let store = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
+        // The fake bridge never unregisters, so `step()` stays `Live` and ticks
+        // the installed behavior each frame.
         let mut arora = build_in_with(
-            Arc::new(SilentBridge),
-            store,
+            Box::new(FakeBridge::new()),
+            Box::new(store),
             Box::new(WriteKey {
                 key: "greeting",
                 value: Value::String("hi".into()),
@@ -910,8 +944,10 @@ mod tests {
     /// accumulate into `time`; `dt` reflects only the latest step.
     #[test]
     fn golden_clock_is_published_to_the_store_each_step() {
-        let store = Arc::new(SimpleDataStore::new());
-        let mut arora = build_in(Arc::new(SilentBridge), store.clone());
+        // The clone shares the same storage, so the test reads what the device
+        // writes.
+        let store = SimpleDataStore::new();
+        let mut arora = build_in(Box::new(FakeBridge::new()), Box::new(store.clone()));
 
         // Before any step the golden keys are unset.
         assert_eq!(store.read(&[Key::from(golden::DT)]), vec![None]);
@@ -946,20 +982,20 @@ mod tests {
         );
     }
 
-    /// A bridge that records every `try_send` payload, and otherwise stays
-    /// silent (never unregisters), so a test can inspect what the device
-    /// actually forwards outbound.
+    /// A bridge that forwards every `try_send` payload down a channel, and is
+    /// otherwise silent (never unregisters), so a test can inspect what the
+    /// device actually pushes outbound — lock-free, like a real endpoint.
     struct RecordingBridge {
-        sent: Arc<std::sync::Mutex<Vec<StateChange>>>,
+        sent: mpsc::UnboundedSender<StateChange>,
     }
 
     #[async_trait]
     impl Bridge for RecordingBridge {
-        fn try_recv(&self) -> Option<BridgeInbound> {
-            None
+        fn take_inbound(&mut self) -> InboundStream {
+            Box::pin(stream::pending())
         }
-        fn try_send(&self, change: &StateChange) {
-            self.sent.lock().unwrap().push(change.clone());
+        fn try_send(&mut self, change: &StateChange) {
+            let _ = self.sent.unbounded_send(change.clone());
         }
         async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
             Ok(None)
@@ -978,10 +1014,10 @@ mod tests {
     /// off the wire.
     #[test]
     fn golden_keys_are_not_forwarded_outbound() {
-        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (sent_tx, mut sent_rx) = mpsc::unbounded();
         // A behavior that writes one ordinary key; that write must reach the bridge.
         let mut arora = build_with(
-            Arc::new(RecordingBridge { sent: sent.clone() }),
+            Box::new(RecordingBridge { sent: sent_tx }),
             Box::new(WriteKey {
                 key: "greeting",
                 value: Value::String("hi".into()),
@@ -993,11 +1029,10 @@ mod tests {
             arora.step(FRAME).expect("step");
         }
 
-        let sent = sent.lock().unwrap();
-        let forwarded_keys: Vec<String> = sent
-            .iter()
-            .flat_map(|c| c.set.keys().map(|k| k.path.clone()))
-            .collect();
+        let mut forwarded_keys: Vec<String> = Vec::new();
+        while let Ok(change) = sent_rx.try_recv() {
+            forwarded_keys.extend(change.set.keys().map(|k| k.path.clone()));
+        }
         assert!(
             forwarded_keys.iter().any(|k| k.as_str() == "greeting"),
             "the ordinary behavior write should be forwarded outbound, got {forwarded_keys:?}"

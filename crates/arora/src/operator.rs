@@ -12,7 +12,7 @@
 //! - a device-specific build with its own GUI implements [`Operator`] with
 //!   native dialogs and reuses everything else unchanged.
 //!
-//! [`serve_access_requests`] is the reusable pump between a
+//! [`serve_access_requests`] is the reusable serving loop between a
 //! [`Bridge`](arora_bridge::Bridge) and an [`Operator`]: it forwards each
 //! request, applies remembered ("always …") rulings, and replies on the
 //! request's channel.
@@ -34,7 +34,7 @@ use crate::runtime::Telemetry;
 pub const DEFAULT_ACCESS_GRACE: Duration = Duration::from_secs(10);
 
 /// The identifying parts of an [`arora_bridge::AccessRequest`], for display
-/// and decision-making (the request itself stays with the pump, which owns
+/// and decision-making (the request itself stays with the serving loop, which owns
 /// the reply channel).
 #[derive(Debug, Clone)]
 pub struct AccessRequestSummary {
