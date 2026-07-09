@@ -117,7 +117,9 @@ trait Bridge {
 }
 // (Hal already has this shape via `updates()` — a sync-pollable Subscription — plus `write`.)
 ```
-Preferably these are a **stream/iterator** that *indirectly* polls the seam's own async implementation. Any real async work (a WS/Zenoh socket) is the **implementation's** responsibility: it spawns and owns its task internally, buffering into a queue that `try_recv` drains and `try_send` fills. Consequences: `build()` returns just `Arora`; the `io()` future, the `Inbound`/`Outbound` channels, and the spawn dance all disappear; arora is a plain synchronous object (which is also why it drops cleanly into a Web Worker — the worker boundary is the seam's problem, not arora's).
+Preferably these are a **stream/iterator** that *indirectly* polls the seam's own async implementation. Consequences: `build()` returns just `Arora`; the `io()` future, the `Inbound`/`Outbound` channels, and the spawn dance all disappear.
+
+> **Refined by §7 (design B, confirmed 2026-07-09):** the inbound seam is a **`Stream` handed over at build** (`take_inbound`), and **`run` itself is the io pump** (a biased `select!` over the interval tick and the streams). Sync `try_recv`-style polling survives only as the web's `now_or_never` sweep of the same streams. No `Arc<Mutex>` anywhere — exclusive ownership (per-device endpoints) replaces interior mutability. §3.2's sketch is likewise superseded by §7's elaborated `run`/`step`.
 
 ### 3.2 `step(dt)` as a function pipeline (not OO methods)
 
@@ -195,3 +197,94 @@ Each is a breaking change on a young API; per Semio policy, real MAJOR bumps wit
 - **Q-B — golden edit-function wiring.** ✅ The **builder** wires the golden edit function against the injected interpreter at `build()`.
 - **Q-C — values.** ✅ **Get rid of Vizij's `Value`** — unify on arora `Value` (`arora_types::value::Value`); remove `vizij_api_core::Value`, move `vizij-graph-core` et al. onto arora `Value`. (A real vizij-side migration, in PR 4.)
 - **Q-D — expressions on links.** ✅ Deferred — structure + predetermined keys only this pass; `Expression`-on-links comes later.
+
+---
+
+## 7. Design B — inbound seams as streams; `run` is the io pump (confirmed 2026-07-09)
+
+This supersedes §3.1's `try_recv(&self)` sketch and §3.2's `run`. Rationale: `&self` polling forced `Arc<Mutex<Receiver>>` interior mutability, and the first migrations grew *second* pump tasks re-buffering into intermediate queues — both smells. The fixes: **exclusive ownership** and **`run` as the only pump**.
+
+### 7.1 Ownership: shared cores, exclusive endpoints
+
+- **The data store stays `Arc<dyn DataStore>`** — genuinely multi-consumer; its trait is `&self`; each Arora's change feed (`subscribe()`) is per-instance. Studio's `NamespacedStore`-over-shared-backend is unchanged.
+- **A bridge splits into a shared *core* and per-device *endpoints*.** Inbound events are addressed (a command carries its reply channel), so two pollers on one receiver is a correctness bug under any API. The core (Zenoh session, WS connection, loopback hub) is `Arc`'d *inside* the impl with a demux routing inbound per device; each `Arora` owns its **endpoint** exclusively (`core.endpoint(device_id)` → the object handed to `with_bridge`). Outbound senders are `Clone + &self` + lock-free — N devices share one core freely.
+- **Invariant, stated by the types: one poller per endpoint; share the core, share the store.** No `Arc<dyn Bridge>` at the builder seam.
+
+### 7.2 The seam
+
+```rust
+pub trait Bridge {                                   // an ENDPOINT, owned by one Arora
+    /// The inbound event stream, handed over ONCE at build (take-once; the
+    /// endpoint keeps only outbound + one-shot setup afterwards).
+    fn take_inbound(&mut self) -> BoxStream<'static, Inbound>;
+    /// Push an outbound change, now, non-blocking (channel sender / sync put).
+    fn try_send(&mut self, change: &StateChange);
+}
+```
+- Trait crates depend on `futures_core::Stream` only — **no tokio in any trait crate** (tokio is confined to native `run` and native impls). Web impls feed streams from browser events (push-based), which is why the same design degenerates correctly there.
+- A stream **ending** means the endpoint disconnected — map it to the unregistered/disconnect semantics explicitly, never silently drop it from the merge.
+- The HAL feed aligns to the same shape (its `updates()` receiver is already an owned stream-able).
+- Existing channel-backed impls migrate by *moving the receiver out once* instead of locking it per poll (~5-line diffs for ws/ros2, keeping their internal transport tasks initially; going taskless — mapping the socket stream directly — is an optional later cleanup). The studio client hands out **per-device endpoint streams** fed by its existing run task's demux — and deletes any second pump.
+
+### 7.3 `run` is the pump; `step` is the sync pipeline with explicit precedence
+
+At `build()`, Arora merges the endpoints' streams (`SelectAll`) into an owned field, plus `pending` buffers. Then:
+
+```rust
+pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
+    let mut ticker = tokio::time::interval(period);          // DEFAULT_STEP_PERIOD = 10ms
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last = Instant::now();
+    loop {
+        // ---- between ticks, `run` IS the io pump: buffer only, in arrival
+        // ---- order per seam; nothing touches the store outside `step`.
+        tokio::select! {
+            biased;                                  // the tick outranks an event flood
+            _ = ticker.tick() => { /* fall through to step */ }
+            Some(reading) = self.hal_feed.next() => { self.pending.sensors.push(reading); continue }
+            Some(event)   = self.inbound.next()  => { self.pending.events.push(event);   continue }
+        }
+        let now = Instant::now();
+        let dt = now - last;                         // dt = measured, not `period`
+        last = now;
+        if self.step(dt)? == StepOutcome::Unregistered { return Ok(()) }
+    }
+}
+
+pub fn step(&mut self, dt: Duration) -> Result<StepOutcome, RuntimeError> {
+    // 0. sweep — final non-blocking drain into `pending` (now_or_never), so an
+    //    embedder without `run` (web/rAF) gets IDENTICAL semantics.
+    sweep_now(&mut self.hal_feed, &mut self.inbound, &mut self.pending);
+    // 1. time — golden keys written first: the whole frame sees this clock.
+    let clock = tick_clock(&mut self.clock, dt);
+    publish_clock(&*self.store, &clock)?;
+    // 2. HAL readings — oldest → newest; per key, the newest reading wins.
+    apply_sensors(&*self.store, take(&mut self.pending.sensors))?;
+    // 3. bridge readings — AFTER the HAL: a remote update to the same key
+    //    overwrites this frame's sensor value. Commands dispatch here
+    //    (Get/Update/Call via the engine's CallBridge).
+    let outcome = apply_events(&*self.store, &mut self.engine, take(&mut self.pending.events))?;
+    // 4. behavior tick — sees clock + sensors + remote updates; its writes are
+    //    the LAST of the frame: behavior intent wins over any inbound.
+    tick_behavior(&mut self.interpreter, &*self.store, &mut self.engine)?;
+    // 5. flush — drain the store's change feed IN ORDER into one StateChange:
+    //    per key the last write wins; golden keys filtered out.
+    let out = flush(&self.store_changes);
+    // 6. HAL writings, then bridge writings — one coalesced change, fanned out.
+    write_hal(&mut *self.hal, &out);
+    write_bridges(&mut self.bridges, &out);
+    Ok(outcome)
+}
+```
+
+**Per-key precedence within one frame, total and visible in the code order: behavior (last) ▸ bridge updates ▸ HAL readings ▸ previous frame** — and inside each phase, arrival order (newest wins). Confirmed consequences: bridge beats HAL within a frame (deterministic phase order, not network timing); behavior always wins the frame *and sees what it overrides*; the pump only buffers, so nothing interleaves into a tick. `biased` + `Delay` keep the cadence fixed under load.
+
+**Web:** there is no `run` on wasm — rAF drives `step`, and phase 0's `now_or_never` sweep of the same streams is the whole pump (correct because browser producers are push-based). One design, two drivers; no `cfg` in the semantics.
+
+### 7.4 Migration plan (from the current stack)
+
+1. **arora-bridge**: trait rev to `take_inbound`/`try_send(&mut)` (another honest major — 2.0 published with the interim `try_recv`); `Inbound` unchanged; define stream-end = disconnect.
+2. **Impls** (ws, ros2, fakes): hand out the existing internal channel receiver as the stream; drop every `Mutex`. Keep internal transport tasks for now.
+3. **arora** (#140 stack): builder takes endpoints by value (`Box<dyn Bridge>`), merges streams at `build()`; `run` = the §7.3 select; `step` = the §7.3 pipeline (split borrows via the free-function phases); web `BrowserRuntime` uses the same sweep.
+4. **studio-bridge #54 rework**: per-device endpoint API off the shared client core (`core.endpoint(device_id)`), streams fed by the existing run-task demux; delete the added second pump + intermediate queue + mutexes.
+5. Re-verify `--features studio-bridge` + default features + wasm; then the stack proceeds as in §5 (graph model → edition → predetermined I/Os).
