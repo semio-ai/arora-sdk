@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
 arora-types = { path = "../arora-types", version = "1.6" }
 # The opinionated runtime (no default features → the browser engine host, a
-# Tokio-free runtime + io pump) plus the in-process fakes it runs with and the
+# Tokio-free synchronous runtime) plus the in-process fakes it runs with and the
 # traits the primitive is injectable over.
 arora = { path = "../arora", version = "3", default-features = false }
 arora-behavior = { path = "../arora-behavior", version = "2" }

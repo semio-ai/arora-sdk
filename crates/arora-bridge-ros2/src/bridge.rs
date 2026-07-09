@@ -3,22 +3,21 @@
 //!
 //! The bridge exposes a device's keys over ROS 2 topics under a namespace, and
 //! treats the ROS graph as the remote control/data plane. Runtime state flows
-//! out through [`send_data`](Bridge::send_data), which publishes each changed
-//! key to its topic. Incoming messages on the configured input topics become
-//! [`BridgeOp::Update`] commands on [`commands`](Bridge::commands), which the
-//! Arora runtime applies to its store.
+//! out through [`try_send`](Bridge::try_send), which hands each changed key to
+//! the node task to publish to its topic. Incoming messages on the configured
+//! input topics become [`BridgeOp::Update`] commands the runtime drains through
+//! [`try_recv`](Bridge::try_recv) and applies to its store.
 //!
 //! A background task owns the ROS 2 [`Node`](ros2_client::Node): it spins DDS,
 //! drives the input subscriptions, and creates publishers on demand. The bridge
-//! communicates with it over channels, so the [`Bridge`] methods stay `&self`.
+//! communicates with it over channels, so the [`Bridge`] methods stay `&self`
+//! and synchronous — the async lives entirely inside that task.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use arora_bridge::{
-    Bridge, BridgeCommand, BridgeError, BridgeOp, BridgeResult, CommandStream, DataRequestedStream,
-    DeviceInfo, DeviceInfoStream,
-};
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound};
 use arora_types::data::StateChange;
 use arora_types::value::Type;
 use async_trait::async_trait;
@@ -84,8 +83,11 @@ pub struct Ros2Bridge {
     namespace: String,
     /// Outbound state changes to publish, sent to the node task.
     outbound: tmpsc::UnboundedSender<StateChange>,
-    /// The receiving half of the command stream, handed out once by [`commands`].
-    commands: Mutex<Option<fmpsc::UnboundedReceiver<BridgeCommand>>>,
+    /// Inbound commands from the node task, drained by [`try_recv`].
+    commands: Mutex<fmpsc::UnboundedReceiver<BridgeCommand>>,
+    /// A ROS 2 graph is a data consumer: signal `data_requested(true)` once on
+    /// the first [`try_recv`], before any command.
+    data_requested_signaled: AtomicBool,
     /// Stops the node task on drop.
     cancel: CancellationToken,
 }
@@ -107,7 +109,8 @@ impl Ros2Bridge {
         Self {
             namespace,
             outbound: out_tx,
-            commands: Mutex::new(Some(cmd_rx)),
+            commands: Mutex::new(cmd_rx),
+            data_requested_signaled: AtomicBool::new(false),
             cancel,
         }
     }
@@ -126,13 +129,31 @@ impl Drop for Ros2Bridge {
 
 #[async_trait]
 impl Bridge for Ros2Bridge {
+    fn try_recv(&self) -> Option<Inbound> {
+        // A ROS 2 graph is a data consumer: emit the claim once, up front. DDS
+        // does not expose a clean per-subscriber claim/release toggle.
+        if !self.data_requested_signaled.swap(true, Ordering::Relaxed) {
+            return Some(Inbound::DataRequested(true));
+        }
+        // Drain the next command the node task enqueued, if any.
+        // `Err` = empty right now or the node task stopped; either way, nothing.
+        match self.commands.lock().unwrap().try_recv() {
+            Ok(cmd) => Some(Inbound::Command(cmd)),
+            Err(_) => None,
+        }
+    }
+
+    fn try_send(&self, change: &StateChange) {
+        // Hand the change to the node task, which publishes each changed key to
+        // its topic. `unset` keys have no ROS 2 representation and are ignored.
+        // A failed send means the node task stopped; drop it (the drop of the
+        // bridge cancels the task).
+        let _ = self.outbound.send(change.clone());
+    }
+
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
         // ROS 2 has no device-registration concept.
         Ok(None)
-    }
-
-    async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-        Ok(Box::pin(futures::stream::empty()))
     }
 
     async fn update_device_info(
@@ -140,38 +161,6 @@ impl Bridge for Ros2Bridge {
         info: Option<DeviceInfo>,
     ) -> BridgeResult<Option<DeviceInfo>> {
         Ok(info)
-    }
-
-    async fn data_requested(&self) -> DataRequestedStream {
-        // A ROS 2 graph is a data consumer; signal interest once. DDS does not
-        // expose a clean per-subscriber claim/release toggle.
-        Box::pin(futures::stream::once(async { true }))
-    }
-
-    async fn send_data(&self, data: StateChange) -> BridgeResult<()> {
-        // Hand the change to the node task, which publishes each changed key to
-        // its topic. `unset` keys have no ROS 2 representation and are ignored.
-        self.outbound
-            .send(data)
-            .map_err(|_| BridgeError::Disconnected("ROS 2 node task stopped".to_string()))
-    }
-
-    /// The command stream is single-use: the channel's receiving half is handed
-    /// out on the first call, and later calls get an empty stream — with a loud
-    /// warning, because a runtime silently losing its command plane is the worst
-    /// failure mode.
-    async fn commands(&self) -> CommandStream {
-        match self.commands.lock().unwrap().take() {
-            Some(rx) => Box::pin(rx),
-            None => {
-                warn!(
-                    "Ros2Bridge::commands() called more than once (namespace {}); the command \
-                     stream was already taken, returning an empty stream",
-                    self.namespace
-                );
-                Box::pin(futures::stream::empty())
-            }
-        }
     }
 }
 

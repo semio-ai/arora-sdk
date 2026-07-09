@@ -13,13 +13,13 @@
 //!
 //! # Direction of flow
 //!
-//! - [`send_data`](arora_bridge::Bridge::send_data) publishes each changed key
+//! - [`try_send`](arora_bridge::Bridge::try_send) publishes each changed key
 //!   to its topic; the `std_msgs` message type is chosen from the value's type,
 //!   with a JSON `std_msgs/String` fallback for non-scalar values.
-//! - [`commands`](arora_bridge::Bridge::commands) turns each message received on
+//! - [`try_recv`](arora_bridge::Bridge::try_recv) turns each message received on
 //!   a configured input topic into a
-//!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) for the Arora runtime
-//!   to apply to its store.
+//!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) command for the Arora
+//!   runtime to apply to its store.
 //!
 //! # Example
 //!

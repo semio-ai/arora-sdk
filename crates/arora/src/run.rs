@@ -85,8 +85,8 @@ pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
 /// Starts the engine (with the basic behavior-tree control nodes wired
 /// natively), wires the portable [`Runtime`] around the injected HAL + bridge
 /// over `store`, queues an optional Groot tree given as the first CLI
-/// argument, spawns the asynchronous io pump on a Tokio runtime, then drives
-/// the synchronous step loop on this thread.
+/// argument, then drives the synchronous step loop on this thread. There is no
+/// io pump to spawn — the bridge and HAL own any async internally.
 ///
 /// Pass a freshly created [`SimpleDataStore`] for a self-contained device, or
 /// a clone of a shared one to mutualize the blackboard across runtimes (e.g.
@@ -145,14 +145,14 @@ where
     // executor manages its own blocking runtime and must not be ticked inside
     // Tokio.
     let tokio = tokio::runtime::Runtime::new().context("failed to start Tokio runtime")?;
-    let (mut runtime, io, bridge) = tokio.block_on(async {
+    let (mut runtime, bridge) = tokio.block_on(async {
         let bridge = make_bridge().await.context("failed to build the bridge")?;
         let arora = Arora::start().await.context("failed to start Arora")?;
         // The public API takes a concrete `SimpleDataStore`; the runtime holds
         // `Arc<dyn DataStore>`, so wrap it here.
         let store: Arc<dyn arora_types::data::DataStore> = Arc::new(store);
-        let (runtime, io) = Runtime::with_io_in(arora, hal, bridge.clone(), store);
-        Ok::<_, anyhow::Error>((runtime, io, bridge))
+        let runtime = Runtime::with_io_in(arora, hal, bridge.clone(), store);
+        Ok::<_, anyhow::Error>((runtime, bridge))
     })?;
 
     // Hand the front end its live view now that the runtime and bridge exist:
@@ -175,9 +175,9 @@ where
         info!("queued behavior tree from {path}");
     }
 
-    tokio.spawn(io);
     // Serve remote clients' access requests through the chosen operator, one at a
-    // time, for as long as the bridge yields them.
+    // time, for as long as the bridge yields them. (The bridge/HAL data plane is
+    // driven synchronously by `runtime.run()`; only access requests still pump.)
     tokio.spawn({
         let bridge = bridge.clone();
         async move {

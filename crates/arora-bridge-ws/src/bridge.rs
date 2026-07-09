@@ -1,24 +1,23 @@
 //! [`WsBridge`]: the WebSocket server driven as an Arora
 //! [`Bridge`](arora_bridge::Bridge).
 //!
-//! Each incoming message becomes a [`BridgeCommand`] on
-//! [`commands`](Bridge::commands), and the consumer — the Arora runtime —
-//! reacts to the ones it cares about (writes apply to the store, reads reply).
-//! Runtime state flows back out through [`send_data`](Bridge::send_data) as a
-//! `values_changed` push.
+//! Each incoming message becomes a [`BridgeCommand`] the runtime drains through
+//! [`try_recv`](Bridge::try_recv), and reacts to the ones it cares about (writes
+//! apply to the store, reads reply). Runtime state flows back out through
+//! [`try_send`](Bridge::try_send) as a `values_changed` push.
 //!
-//! The server's handler API is kept and *built on top of* the command stream:
-//! the handlers registered here simply translate a message into a command. The
+//! The async lives in the server (its own accept/serve task, spawned by the
+//! embedder): the server's registered handlers translate each incoming message
+//! into a command and enqueue it on an internal channel that [`try_recv`] drains
+//! non-blocking. [`try_send`] pushes to the connected clients synchronously. The
 //! value vocabulary is `arora_types::Value`, so the translation is structural,
 //! not a conversion.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use arora_bridge::{
-    Bridge, BridgeCommand, BridgeOp, BridgeResult, CommandStream, DataRequestedStream, DeviceInfo,
-    DeviceInfoStream,
-};
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound};
 use arora_types::data::{Key, StateChange};
 use arora_types::value::Value;
 use async_trait::async_trait;
@@ -35,8 +34,11 @@ use crate::server::AroraWSServer;
 /// when serving purely through the bridge.
 pub struct WsBridge {
     server: Arc<AroraWSServer>,
-    /// The receiving half of the command stream, handed out once by [`commands`].
-    commands: Mutex<Option<mpsc::UnboundedReceiver<BridgeCommand>>>,
+    /// Inbound commands the server handlers enqueue; drained by [`try_recv`].
+    commands: Mutex<mpsc::UnboundedReceiver<BridgeCommand>>,
+    /// A connected editor is a data consumer: signal `data_requested(true)` once
+    /// on the first [`try_recv`], before any command.
+    data_requested_signaled: AtomicBool,
 }
 
 impl WsBridge {
@@ -84,7 +86,8 @@ impl WsBridge {
 
         Self {
             server,
-            commands: Mutex::new(Some(cmd_rx)),
+            commands: Mutex::new(cmd_rx),
+            data_requested_signaled: AtomicBool::new(false),
         }
     }
 }
@@ -105,13 +108,35 @@ fn values_from_get(keys: &[String], ret: Value) -> HashMap<String, Value> {
 
 #[async_trait]
 impl Bridge for WsBridge {
+    fn try_recv(&self) -> Option<Inbound> {
+        // A connected editor is a data consumer: emit the claim once, up front.
+        if !self.data_requested_signaled.swap(true, Ordering::Relaxed) {
+            return Some(Inbound::DataRequested(true));
+        }
+        // Drain the next command the server's handlers enqueued, if any.
+        // `Err` = empty right now or the sender was dropped; either way, nothing.
+        match self.commands.lock().unwrap().try_recv() {
+            Ok(cmd) => Some(Inbound::Command(cmd)),
+            Err(_) => None,
+        }
+    }
+
+    fn try_send(&self, change: &StateChange) {
+        // Push the changed keys to the connected client(s).
+        let mut values = HashMap::new();
+        for (key, value) in &change.set {
+            if let Some(value) = value {
+                values.insert(key.path.clone(), value.clone());
+            }
+        }
+        if !values.is_empty() {
+            self.server.push(Outgoing::ValuesChanged { values });
+        }
+    }
+
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
         // A local editor connection has no device-registration concept.
         Ok(None)
-    }
-
-    async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-        Ok(Box::pin(futures::stream::empty()))
     }
 
     async fn update_device_info(
@@ -119,42 +144,6 @@ impl Bridge for WsBridge {
         info: Option<DeviceInfo>,
     ) -> BridgeResult<Option<DeviceInfo>> {
         Ok(info)
-    }
-
-    async fn data_requested(&self) -> DataRequestedStream {
-        // A connected editor is a data consumer; signal interest once.
-        Box::pin(futures::stream::once(async { true }))
-    }
-
-    async fn send_data(&self, data: StateChange) -> BridgeResult<()> {
-        // Push the changed keys to the connected client(s).
-        let mut values = HashMap::new();
-        for (key, value) in data.set {
-            if let Some(value) = value {
-                values.insert(key.path, value);
-            }
-        }
-        if !values.is_empty() {
-            self.server.push(Outgoing::ValuesChanged { values });
-        }
-        Ok(())
-    }
-
-    /// The command stream is single-use: the channel's receiving half is
-    /// handed out on the first call, and later calls get an empty stream —
-    /// with a loud warning, because a runtime silently losing its command
-    /// plane is the worst failure mode.
-    async fn commands(&self) -> CommandStream {
-        match self.commands.lock().unwrap().take() {
-            Some(rx) => Box::pin(rx),
-            None => {
-                log::warn!(
-                    "WsBridge::commands() called more than once; the command \
-                     stream was already taken, returning an empty stream"
-                );
-                Box::pin(futures::stream::empty())
-            }
-        }
     }
 }
 
@@ -164,15 +153,12 @@ mod tests {
     use crate::server::ServerConfig;
 
     #[tokio::test]
-    async fn send_data_pushes_values_changed() {
+    async fn try_send_pushes_values_changed() {
         let server = Arc::new(AroraWSServer::new(ServerConfig::default()));
         let bridge = WsBridge::new(server.clone()).await;
         let mut rx = server.subscribe();
 
-        bridge
-            .send_data(StateChange::set("face/mouth", Value::F64(0.5)))
-            .await
-            .expect("send_data");
+        bridge.try_send(&StateChange::set("face/mouth", Value::F64(0.5)));
 
         match rx.recv().await.expect("a push") {
             Outgoing::ValuesChanged { values } => {

@@ -9,6 +9,15 @@
 //! store writes flow to the HAL. The HAL trait depends only on `arora-types`, so
 //! any execution engine can drive it without pulling in the bridge.
 //!
+//! # Synchronous I/O seam
+//!
+//! Consistent with the bridge, the runtime drives the HAL synchronously: the
+//! inbound sensor drain is [`updates`](Hal::updates) (a sync-pollable
+//! [`Subscription`] the step loop `try_recv`s), and the outbound actuator push
+//! is [`try_send`](Hal::try_send) — non-blocking, called directly from the
+//! synchronous step. Any real async work is the implementation's own
+//! responsibility (its own task/queue), the same way a bridge owns its socket.
+//!
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
 //! and the real ones (ros2, restful, nao) in their own sibling crates.
 
@@ -73,6 +82,29 @@ pub trait Hal: Send + Sync {
     /// the resulting changes.
     async fn write(&self, changes: StateChange) -> HalResult<()>;
 
+    /// Push actuator/state changes toward the hardware immediately, without
+    /// blocking — the outbound counterpart to the [`updates`](Hal::updates)
+    /// sensor drain, and the shape the synchronous runtime step calls directly
+    /// (mirroring `Bridge::try_send`).
+    ///
+    /// The default forwards to [`write`](Hal::write), which suits HALs whose
+    /// write does not truly block (in-memory fakes, cache-only writes). A HAL
+    /// that performs real async I/O (HTTP, DDS) should override this to enqueue
+    /// onto its own task so the caller's synchronous step loop never blocks on
+    /// the hardware.
+    fn try_send(&self, changes: &StateChange) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = futures::executor::block_on(self.write(changes.clone()));
+        }
+        // On wasm there are no threads to park on; a wasm HAL (an in-process
+        // fake) overrides this with a synchronous apply.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = changes;
+        }
+    }
+
     /// A feed of changes the hardware reports (sensors, mirrored actuation, …).
     fn updates(&self) -> Subscription;
 }
@@ -130,6 +162,32 @@ impl FakeHal {
     pub fn set_model_glb(&self, glb: Vec<u8>) {
         self.inner.lock().unwrap().model_glb = Some(glb);
     }
+
+    /// Apply a write synchronously: store it, echo it to subscribers, and fake
+    /// joint actuation by mirroring any `*.target_position` to `*.position`.
+    /// Shared by [`Hal::write`] and [`Hal::try_send`].
+    fn apply_write(&self, changes: &StateChange) {
+        if changes.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.state.apply(changes.clone());
+        inner.notify(changes);
+
+        // Fake joint actuation: mirror "*.target_position" to "*.position".
+        let mut mirrored = StateChange::new();
+        for (key, value) in &changes.set {
+            if key.get_component() == Some("target_position") {
+                mirrored
+                    .set
+                    .insert(key.clone().with_component("position"), value.clone());
+            }
+        }
+        if !mirrored.is_empty() {
+            inner.state.apply(mirrored.clone());
+            inner.notify(&mirrored);
+        }
+    }
 }
 
 #[async_trait]
@@ -151,27 +209,14 @@ impl Hal for FakeHal {
     }
 
     async fn write(&self, changes: StateChange) -> HalResult<()> {
-        if changes.is_empty() {
-            return Ok(());
-        }
-        let mut inner = self.inner.lock().unwrap();
-        inner.state.apply(changes.clone());
-        inner.notify(&changes);
-
-        // Fake joint actuation: mirror "*.target_position" to "*.position".
-        let mut mirrored = StateChange::new();
-        for (key, value) in &changes.set {
-            if key.get_component() == Some("target_position") {
-                mirrored
-                    .set
-                    .insert(key.clone().with_component("position"), value.clone());
-            }
-        }
-        if !mirrored.is_empty() {
-            inner.state.apply(mirrored.clone());
-            inner.notify(&mirrored);
-        }
+        self.apply_write(&changes);
         Ok(())
+    }
+
+    /// Synchronous, immediate apply — the fake never blocks, so it needs no task
+    /// of its own (unlike a real HTTP/DDS HAL).
+    fn try_send(&self, changes: &StateChange) {
+        self.apply_write(changes);
     }
 
     fn updates(&self) -> Subscription {
@@ -209,6 +254,18 @@ mod tests {
             .try_iter()
             .any(|c| c.contains(&Key::from("joint1.position")));
         assert!(saw_position);
+    }
+
+    #[test]
+    fn try_send_applies_synchronously_and_mirrors() {
+        // The synchronous seam the runtime's step calls: no async, immediate.
+        let hal = FakeHal::new();
+        let sub = hal.updates();
+        hal.try_send(&StateChange::set("joint1.target_position", Value::from(1.0)));
+        let saw_position = sub
+            .try_iter()
+            .any(|c| c.contains(&Key::from("joint1.position")));
+        assert!(saw_position, "try_send should mirror target to measured position");
     }
 
     #[tokio::test]

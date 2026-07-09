@@ -52,10 +52,11 @@ fn install_panic_hook() {
 //
 // `BrowserRuntime` is the reusable core for running any Arora device in the
 // browser. It wires an `arora::Runtime` over an injected HAL, bridge, and data
-// store (all trait objects, so the caller picks the backends), spawns the async
-// io pump on the browser event loop, and exposes the JS-facing surface every
-// browser device needs: a synchronous `step()` plus Value↔JSON accessors on the
-// injected store.
+// store (all trait objects, so the caller picks the backends) and exposes the
+// JS-facing surface every browser device needs: a synchronous `step()` plus
+// Value↔JSON accessors on the injected store. There is no async pump — the
+// bridge and HAL own any async internally, behind their synchronous seams, so
+// the whole thing is a plain synchronous object driven by `step()`.
 //
 // It is a plain Rust type, not a `#[wasm_bindgen]` export — the wasm-bindgen
 // boundary cannot carry `Arc<dyn Trait>`. Each device ships a thin
@@ -87,10 +88,11 @@ pub struct BrowserRuntime {
 }
 
 impl BrowserRuntime {
-    /// Boot an [`arora::Arora`] (engine + native behavior-tree nodes), inject the
-    /// given `hal`, `bridge`, and `store` via [`Runtime::with_io_in`], and spawn
-    /// the async io pump on the browser event loop. Queue behaviors next, then
-    /// drive with [`step`](Self::step).
+    /// Boot an [`arora::Arora`] (engine + native behavior-tree nodes) and inject
+    /// the given `hal`, `bridge`, and `store` via [`Runtime::with_io_in`]. There
+    /// is no async pump to spawn — the bridge and HAL own any async internally,
+    /// behind their synchronous seams. Queue behaviors next, then drive with
+    /// [`step`](Self::step).
     pub async fn start(
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
@@ -101,8 +103,7 @@ impl BrowserRuntime {
             .await
             .map_err(|e| JsValue::from_str(&format!("arora start failed: {e:?}")))?;
         let changes = store.subscribe();
-        let (runtime, io) = Runtime::with_io_in(arora, hal, bridge, store.clone());
-        wasm_bindgen_futures::spawn_local(io);
+        let runtime = Runtime::with_io_in(arora, hal, bridge, store.clone());
         Ok(BrowserRuntime {
             runtime,
             store,

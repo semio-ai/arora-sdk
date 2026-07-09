@@ -2,7 +2,7 @@
 //!
 //! These create real ROS 2 nodes over DDS and verify end-to-end behaviour:
 //! an inbound topic message surfaces as a `BridgeOp::Update` command, and an
-//! outbound `send_data` reaches a topic subscriber. Each test uses a random DDS
+//! outbound `try_send` reaches a topic subscriber. Each test uses a random DDS
 //! domain to isolate itself.
 //!
 //! They are ignored on macOS for the same reason as `arora-hal-ros2`'s live
@@ -12,11 +12,10 @@
 
 use std::time::Duration;
 
-use arora_bridge::{Bridge, BridgeOp};
+use arora_bridge::{Bridge, BridgeOp, Inbound};
 use arora_bridge_ros2::conversions::topic_name;
 use arora_bridge_ros2::msg_types::{self, MessageType};
 use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type, Value};
-use futures::StreamExt;
 use rand::Rng;
 use ros2_client::{
     Context, ContextOptions, Name, NodeName, NodeOptions, DEFAULT_PUBLISHER_QOS,
@@ -58,7 +57,6 @@ async fn inbound_topic_becomes_update_command() {
     let config =
         Ros2BridgeConfig::new(&namespace, domain_id).with_input("face/mouth/open", Type::F64);
     let bridge = Ros2Bridge::new(config).await;
-    let mut commands = bridge.commands().await;
 
     let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
     let topic = Name::parse(&topic_name(&namespace, "face/mouth/open")).expect("valid topic name");
@@ -83,10 +81,19 @@ async fn inbound_topic_becomes_update_command() {
         }
     });
 
-    let command = tokio::time::timeout(Duration::from_secs(10), commands.next())
-        .await
-        .expect("timed out waiting for a command")
-        .expect("command stream ended");
+    // Poll the synchronous inbound seam for the Update command, skipping the
+    // initial `DataRequested(true)` signal, within a timeout.
+    let command = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match bridge.try_recv() {
+                Some(Inbound::Command(cmd)) => break cmd,
+                Some(_) => {}
+                None => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for a command");
 
     match &command.op {
         BridgeOp::Update(change) => {
@@ -99,7 +106,7 @@ async fn inbound_topic_becomes_update_command() {
     }
 }
 
-/// `send_data` publishes a changed key to its topic, where a separate node
+/// `try_send` publishes a changed key to its topic, where a separate node
 /// subscribed to that topic receives it.
 #[tokio::test]
 #[cfg_attr(
@@ -132,13 +139,10 @@ async fn send_data_reaches_topic_subscriber() {
     // Keep publishing until the subscriber sees the value (allow for discovery).
     let publisher = async {
         loop {
-            bridge
-                .send_data(arora_types::data::StateChange::set(
-                    "battery/level",
-                    Value::F64(0.42),
-                ))
-                .await
-                .expect("send_data");
+            bridge.try_send(&arora_types::data::StateChange::set(
+                "battery/level",
+                Value::F64(0.42),
+            ));
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     };
