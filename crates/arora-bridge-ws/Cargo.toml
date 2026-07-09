@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ws"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
 license = "MIT"
@@ -8,7 +8,7 @@ repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.6" }
-arora-bridge = { path = "../arora-bridge", version = "2" }
+arora-bridge = { path = "../arora-bridge", version = "3" }
 async-trait = "0.1"
 futures = "0.3"
 futures-util = "0.3"

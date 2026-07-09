@@ -5,19 +5,22 @@
 //! treats the ROS graph as the remote control/data plane. Runtime state flows
 //! out through [`try_send`](Bridge::try_send), which hands each changed key to
 //! the node task to publish to its topic. Incoming messages on the configured
-//! input topics become [`BridgeOp::Update`] commands the runtime drains through
-//! [`try_recv`](Bridge::try_recv) and applies to its store.
+//! input topics become [`BridgeOp::Update`] commands on the endpoint's inbound
+//! stream (handed to the runtime once, via
+//! [`take_inbound`](Bridge::take_inbound)), which the runtime applies to its
+//! store.
 //!
 //! A background task owns the ROS 2 [`Node`](ros2_client::Node): it spins DDS,
 //! drives the input subscriptions, and creates publishers on demand. The bridge
-//! communicates with it over channels, so the [`Bridge`] methods stay `&self`
-//! and synchronous — the async lives entirely inside that task.
+//! communicates with it over channels — the inbound channel's receiver *is*
+//! the stream the runtime polls, so there is no intermediate buffer and no
+//! lock; the async lives entirely inside that task.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound};
+use arora_bridge::{
+    Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
+};
 use arora_types::data::StateChange;
 use arora_types::value::Type;
 use async_trait::async_trait;
@@ -83,11 +86,8 @@ pub struct Ros2Bridge {
     namespace: String,
     /// Outbound state changes to publish, sent to the node task.
     outbound: tmpsc::UnboundedSender<StateChange>,
-    /// Inbound commands from the node task, drained by [`try_recv`].
-    commands: Mutex<fmpsc::UnboundedReceiver<BridgeCommand>>,
-    /// A ROS 2 graph is a data consumer: signal `data_requested(true)` once on
-    /// the first [`try_recv`], before any command.
-    data_requested_signaled: AtomicBool,
+    /// The inbound command receiver, moved out (once) by [`take_inbound`].
+    commands: Option<fmpsc::UnboundedReceiver<BridgeCommand>>,
     /// Stops the node task on drop.
     cancel: CancellationToken,
 }
@@ -109,8 +109,7 @@ impl Ros2Bridge {
         Self {
             namespace,
             outbound: out_tx,
-            commands: Mutex::new(cmd_rx),
-            data_requested_signaled: AtomicBool::new(false),
+            commands: Some(cmd_rx),
             cancel,
         }
     }
@@ -129,21 +128,21 @@ impl Drop for Ros2Bridge {
 
 #[async_trait]
 impl Bridge for Ros2Bridge {
-    fn try_recv(&self) -> Option<Inbound> {
-        // A ROS 2 graph is a data consumer: emit the claim once, up front. DDS
-        // does not expose a clean per-subscriber claim/release toggle.
-        if !self.data_requested_signaled.swap(true, Ordering::Relaxed) {
-            return Some(Inbound::DataRequested(true));
-        }
-        // Drain the next command the node task enqueued, if any.
-        // `Err` = empty right now or the node task stopped; either way, nothing.
-        match self.commands.lock().unwrap().try_recv() {
-            Ok(cmd) => Some(Inbound::Command(cmd)),
-            Err(_) => None,
-        }
+    fn take_inbound(&mut self) -> InboundStream {
+        // A ROS 2 graph is a data consumer: the claim opens the stream (DDS
+        // does not expose a clean per-subscriber claim/release toggle), then
+        // every command the node task enqueues follows, in order.
+        let commands = self
+            .commands
+            .take()
+            .expect("Ros2Bridge inbound stream already taken");
+        Box::pin(
+            futures::stream::once(async { Inbound::DataRequested(true) })
+                .chain(commands.map(Inbound::Command)),
+        )
     }
 
-    fn try_send(&self, change: &StateChange) {
+    fn try_send(&mut self, change: &StateChange) {
         // Hand the change to the node task, which publishes each changed key to
         // its topic. `unset` keys have no ROS 2 representation and are ignored.
         // A failed send means the node task stopped; drop it (the drop of the
