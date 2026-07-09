@@ -101,8 +101,16 @@ pub trait BehaviorInterpreter {
     /// The default rejects edition — override it in interpreters that carry an
     /// editable [`graph::Graph`] (the behavior tree does). A hand-coded,
     /// non-graph interpreter (the corner case above) can leave this as-is.
-    fn apply(&mut self, diff: graph::GraphDiff) -> Result<(), BehaviorError> {
-        let _ = diff;
+    ///
+    /// `ctx` is the same context a tick gets: an editable interpreter re-lowers
+    /// its graph against `ctx.store` (the slots are re-resolved there — the
+    /// interpreter never retains the store).
+    fn apply(
+        &mut self,
+        diff: graph::GraphDiff,
+        ctx: &mut BehaviorContext,
+    ) -> Result<(), BehaviorError> {
+        let _ = (diff, ctx);
         Err(BehaviorError {
             message: "this interpreter does not support graph edition".to_string(),
         })
