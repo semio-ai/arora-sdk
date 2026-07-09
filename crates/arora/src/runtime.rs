@@ -18,17 +18,21 @@
 //! ## Why it is built this way (web first)
 //!
 //! `step()` is **synchronous and non-blocking**, and the [`Runtime`] itself
-//! spawns no threads, owns no async runtime, and never sleeps. The asynchronous
-//! bridge/HAL I/O lives in a separate [`io`] pump (built from `futures` only)
-//! that talks to the loop through channels. The embedder drives both:
+//! spawns no threads, owns no async runtime, and never sleeps. It touches its
+//! I/O seams — the [`Bridge`] and the [`Hal`] — through their synchronous
+//! poll/push surface: `bridge.try_recv()` / `bridge.try_send()` and the HAL's
+//! [`updates`](Hal::updates) subscription / [`try_send`](Hal::try_send). Any
+//! real async work (a WebSocket, Zenoh, DDS) lives *inside* those
+//! implementations, each owning its own task; the runtime never sees it.
 //!
-//! - **native**: spawn [`io`] on Tokio and call [`run`](Runtime::run) (a thin
-//!   `step` loop) on a thread;
-//! - **web**: `spawn_local` the [`io`] pump and drive `step()` from
-//!   `requestAnimationFrame` — or run the whole thing inside a Web Worker.
+//! The embedder just drives `step`:
 //!
-//! Because the loop only ever exchanges messages over channels, it moves into a
-//! Web Worker unchanged: the channels become the worker boundary.
+//! - **native**: call [`run`](Runtime::run) (a thin `step` loop) on a thread;
+//! - **web**: drive `step()` from `requestAnimationFrame` — or run the whole
+//!   thing inside a Web Worker.
+//!
+//! Because the loop owns no async runtime and only pokes synchronous seams, it
+//! moves into a Web Worker unchanged: the worker boundary is the seam's problem.
 
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -39,34 +43,16 @@ use arora_behavior_tree::{
     behavior::BehaviorTreeInterpreter, schema_groot, tree_node::TreeNode, BehaviorTree,
     ModuleFunction,
 };
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo};
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
 use arora_engine::engine::PinnedEngine;
 use arora_hal::Hal;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::CallResult;
 use arora_types::data::{DataStore, Key, Slot, StateChange, Subscription};
 use arora_types::value::Value;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use futures::{Future, StreamExt};
 use uuid::Uuid;
 
 use crate::Arora;
-
-/// Inbound events the async [`io`] pump forwards to the sync [`Runtime`].
-enum Inbound {
-    /// A command from the remote, with its reply channel.
-    Command(BridgeCommand),
-    /// A device-info update (`Ok(None)` = the device was unregistered).
-    DeviceInfo(BridgeResult<Option<DeviceInfo>>),
-    /// A client claimed/released interest in the data.
-    DataRequested(bool),
-}
-
-/// Outbound work the [`Runtime`] hands to the async [`io`] pump.
-enum Outbound {
-    /// A local state change to mirror to the remote and the hardware.
-    StateChanged(StateChange),
-}
 
 /// What a [`step`](Runtime::step) concluded.
 #[derive(Debug, PartialEq, Eq)]
@@ -151,10 +137,12 @@ pub struct Runtime {
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     behaviors: VecDeque<QueuedBehavior>,
     telemetry: Telemetry,
-    // Channels to/from the async io pump, plus the HAL's sensor feed:
+    // The synchronous I/O seams the step drives directly. Each owns its own
+    // async internally; the runtime only pokes their non-blocking poll/push.
+    hal: Arc<dyn Hal>,
+    bridge: Arc<dyn Bridge>,
+    // The HAL's sensor feed, a sync subscription the step drains each frame.
     hal_updates: Subscription,
-    inbound: UnboundedReceiver<Inbound>,
-    outbound: UnboundedSender<Outbound>,
     store_changes: Subscription,
     // The golden clock: monotonic nanoseconds since start, advanced by each
     // step's `dt`, and direct slot handles to publish it into the store before
@@ -168,19 +156,14 @@ impl Runtime {
     /// Wire an [`Arora`] (engine + behavior-tree module) to a HAL and a bridge,
     /// with a fresh, private [`SimpleDataStore`].
     ///
-    /// Returns the synchronous `Runtime` plus the asynchronous [`io`] future that
-    /// pumps the bridge/HAL. The embedder spawns the future on its executor
-    /// (`tokio::spawn` on native, `spawn_local` on the web) and drives
-    /// [`step`](Runtime::step) on its own cadence — the two communicate only over
-    /// channels.
+    /// Returns just the synchronous `Runtime` — there is no async pump to spawn.
+    /// The bridge and HAL own any async internally, behind their synchronous
+    /// poll/push seams; the embedder only drives [`step`](Runtime::step) on its
+    /// own cadence.
     ///
     /// To share one store across several runtimes (and keep a handle to it for
     /// direct access), use [`with_io_in`](Runtime::with_io_in).
-    pub fn with_io(
-        arora: Arora,
-        hal: Arc<dyn Hal>,
-        bridge: Arc<dyn Bridge>,
-    ) -> (Self, impl Future<Output = ()>) {
+    pub fn with_io(arora: Arora, hal: Arc<dyn Hal>, bridge: Arc<dyn Bridge>) -> Self {
         Self::with_io_in(arora, hal, bridge, Arc::new(SimpleDataStore::new()))
     }
 
@@ -199,7 +182,7 @@ impl Runtime {
         hal: Arc<dyn Hal>,
         bridge: Arc<dyn Bridge>,
         store: Arc<dyn DataStore>,
-    ) -> (Self, impl Future<Output = ()>) {
+    ) -> Self {
         let Arora {
             engine,
             function_index,
@@ -209,26 +192,20 @@ impl Runtime {
         let dt_slot = store.slot(&Key::from(golden::DT));
         let hal_updates = hal.updates();
 
-        let (inbound_tx, inbound) = futures::channel::mpsc::unbounded::<Inbound>();
-        let (outbound, outbound_rx) = futures::channel::mpsc::unbounded::<Outbound>();
-
-        let pump = io(bridge, hal, inbound_tx, outbound_rx);
-
-        let runtime = Self {
+        Self {
             store,
             engine,
             function_index,
             behaviors: VecDeque::new(),
             telemetry: Telemetry::default(),
+            hal,
+            bridge,
             hal_updates,
-            inbound,
-            outbound,
             store_changes,
             time_ns: 0,
             time_slot,
             dt_slot,
-        };
-        (runtime, pump)
+        }
     }
 
     /// A shared handle over the runtime's live indicators, for observers such
@@ -321,8 +298,9 @@ impl Runtime {
         while let Some(change) = self.hal_updates.try_recv() {
             self.apply(change)?;
         }
-        // STEP 1b — bridge events forwarded by the io pump.
-        while let Ok(event) = self.inbound.try_recv() {
+        // STEP 1b — bridge events, drained synchronously from the bridge itself
+        // (it buffers them off its own transport task).
+        while let Some(event) = self.bridge.try_recv() {
             match event {
                 Inbound::Command(cmd) => self.handle_command(cmd)?,
                 Inbound::DeviceInfo(Ok(None)) => return Ok(StepOutcome::Unregistered),
@@ -396,7 +374,11 @@ impl Runtime {
             }
         }
         if !merged.is_empty() {
-            let _ = self.outbound.unbounded_send(Outbound::StateChanged(merged));
+            // Mirror the coalesced change to the remote and the hardware through
+            // their synchronous, non-blocking push seams. Each buffers/flushes
+            // on its own task; neither blocks the step.
+            self.bridge.try_send(&merged);
+            self.hal.try_send(&merged);
         }
         Ok(StepOutcome::Live)
     }
@@ -506,68 +488,35 @@ impl Runtime {
     }
 }
 
-/// The async I/O pump: forwards the bridge's command/device-info/data-requested
-/// streams to the runtime, and drains the runtime's outbound changes to the
-/// remote and the hardware. Built from `futures` only — no Tokio, no threads —
-/// so it runs equally on a Tokio task or a browser `spawn_local`.
-async fn io(
-    bridge: Arc<dyn Bridge>,
-    hal: Arc<dyn Hal>,
-    inbound_tx: UnboundedSender<Inbound>,
-    mut outbound_rx: UnboundedReceiver<Outbound>,
-) {
-    let forward = async {
-        let commands = bridge.commands().await.map(Inbound::Command);
-        let device_info = bridge
-            .device_info_updated()
-            .await
-            .unwrap_or_else(|_| Box::pin(futures::stream::empty()))
-            .map(Inbound::DeviceInfo);
-        let data_requested = bridge.data_requested().await.map(Inbound::DataRequested);
-        let mut merged = futures::stream::select(
-            commands,
-            futures::stream::select(device_info, data_requested),
-        );
-        while let Some(event) = merged.next().await {
-            if inbound_tx.unbounded_send(event).is_err() {
-                break; // the runtime was dropped
-            }
-        }
-    };
-    let drain = async {
-        while let Some(out) = outbound_rx.next().await {
-            match out {
-                Outbound::StateChanged(change) => {
-                    // Mirror local changes to the remote and the hardware.
-                    let _ = bridge.send_data(change.clone()).await;
-                    let _ = hal.write(change).await;
-                }
-            }
-        }
-    };
-    futures::future::join(forward, drain).await;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arora_bridge::{CommandStream, DataRequestedStream, DeviceInfoStream};
+    use arora_bridge::{BridgeResult, DeviceInfo};
     use arora_simple_data_store::NamespacedStore;
     use arora_types::data::{Key, StateChange};
     use async_trait::async_trait;
     use futures::channel::oneshot;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// A bridge that reports the device unregistered immediately and is otherwise
-    /// silent.
-    struct UnregisterBridge;
+    /// A bridge that reports the device unregistered on its first poll and is
+    /// otherwise silent.
+    #[derive(Default)]
+    struct UnregisterBridge {
+        done: AtomicBool,
+    }
 
     #[async_trait]
     impl Bridge for UnregisterBridge {
+        fn try_recv(&self) -> Option<Inbound> {
+            if !self.done.swap(true, Ordering::Relaxed) {
+                Some(Inbound::DeviceInfo(Ok(None)))
+            } else {
+                None
+            }
+        }
+        fn try_send(&self, _change: &StateChange) {}
         async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
             Ok(None)
-        }
-        async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-            Ok(Box::pin(futures::stream::once(async { Ok(None) })))
         }
         async fn update_device_info(
             &self,
@@ -575,56 +524,38 @@ mod tests {
         ) -> BridgeResult<Option<DeviceInfo>> {
             Ok(info)
         }
-        async fn data_requested(&self) -> DataRequestedStream {
-            Box::pin(futures::stream::empty())
-        }
-        async fn send_data(&self, _data: StateChange) -> BridgeResult<()> {
-            Ok(())
-        }
-        async fn commands(&self) -> CommandStream {
-            Box::pin(futures::stream::empty())
-        }
     }
 
-    async fn build(bridge: Arc<dyn Bridge>) -> (Runtime, impl Future<Output = ()>) {
+    async fn build(bridge: Arc<dyn Bridge>) -> Runtime {
         let arora = Arora::start().await.expect("arora starts");
         Runtime::with_io(arora, Arc::new(arora_hal::FakeHal::new()), bridge)
     }
 
     /// Like [`build`], but runs the runtime against a caller-provided store.
-    async fn build_in(
-        bridge: Arc<dyn Bridge>,
-        store: Arc<dyn DataStore>,
-    ) -> (Runtime, impl Future<Output = ()>) {
+    async fn build_in(bridge: Arc<dyn Bridge>, store: Arc<dyn DataStore>) -> Runtime {
         let arora = Arora::start().await.expect("arora starts");
         Runtime::with_io_in(arora, Arc::new(arora_hal::FakeHal::new()), bridge, store)
     }
 
     /// Drive `step` until the runtime reports unregistered, with a safety bound.
-    async fn drive_until_unregistered(mut runtime: Runtime) {
+    /// Fully synchronous now: the bridge hands over the unregister event through
+    /// `try_recv` on the very next step, no pump to wait on.
+    fn drive_until_unregistered(mut runtime: Runtime) {
         for _ in 0..1000 {
-            match runtime.step(16_000_000).expect("step ok") {
-                StepOutcome::Unregistered => return,
-                // Sleep, not just yield: the io pump runs as a separate spawned
-                // task, and `yield_now` is cooperative (CPU-time, not wall-clock)
-                // — this tight loop can burn all 1000 iterations in microseconds,
-                // before the pump is scheduled to deliver the unregister event on
-                // a loaded runner. A small sleep gives the pump real time; the
-                // loop still returns as soon as the event arrives (typically ms).
-                StepOutcome::Live => tokio::time::sleep(std::time::Duration::from_millis(1)).await,
+            if runtime.step(16_000_000).expect("step ok") == StepOutcome::Unregistered {
+                return;
             }
         }
         panic!("runtime never reported unregistered");
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn stops_when_unregistered() {
-        let (runtime, pump) = build(Arc::new(UnregisterBridge)).await;
-        tokio::spawn(pump);
-        drive_until_unregistered(runtime).await;
+        let runtime = build(Arc::new(UnregisterBridge::default())).await;
+        drive_until_unregistered(runtime);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn runs_a_queued_tree() {
         let xml = r#"<root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -633,15 +564,14 @@ mod tests {
     </Sequence>
   </BehaviorTree>
 </root>"#;
-        let (mut runtime, pump) = build(Arc::new(UnregisterBridge)).await;
+        let mut runtime = build(Arc::new(UnregisterBridge::default())).await;
         runtime.queue_groot_xml(xml).expect("tree queues");
-        tokio::spawn(pump);
-        drive_until_unregistered(runtime).await;
+        drive_until_unregistered(runtime);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn get_and_update_commands_round_trip() {
-        let (mut runtime, _pump) = build(Arc::new(UnregisterBridge)).await;
+        let mut runtime = build(Arc::new(UnregisterBridge::default())).await;
         let key = Key::from("greeting");
 
         // Update writes a value into the store.
@@ -677,26 +607,18 @@ mod tests {
 
     #[async_trait]
     impl Bridge for SilentBridge {
+        fn try_recv(&self) -> Option<Inbound> {
+            None
+        }
+        fn try_send(&self, _change: &StateChange) {}
         async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
             Ok(None)
-        }
-        async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-            Ok(Box::pin(futures::stream::empty()))
         }
         async fn update_device_info(
             &self,
             info: Option<DeviceInfo>,
         ) -> BridgeResult<Option<DeviceInfo>> {
             Ok(info)
-        }
-        async fn data_requested(&self) -> DataRequestedStream {
-            Box::pin(futures::stream::empty())
-        }
-        async fn send_data(&self, _data: StateChange) -> BridgeResult<()> {
-            Ok(())
-        }
-        async fn commands(&self) -> CommandStream {
-            Box::pin(futures::stream::empty())
         }
     }
 
@@ -723,10 +645,9 @@ mod tests {
 
     /// The runtime ticks a non-tree behavior just like a tree: swapping the
     /// interpreter is all it takes.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn runs_a_queued_non_tree_behavior() {
-        let (mut runtime, pump) = build(Arc::new(SilentBridge)).await;
-        tokio::spawn(pump);
+        let mut runtime = build(Arc::new(SilentBridge)).await;
         runtime.queue_behavior(Box::new(WriteOnce));
 
         // One step ticks the behavior, which writes through the shared store.
@@ -747,9 +668,9 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
-        let (mut runtime, _pump) = build(Arc::new(UnregisterBridge)).await;
+        let mut runtime = build(Arc::new(UnregisterBridge::default())).await;
 
         // Seed three keys across two prefixes.
         let mut set = std::collections::HashMap::new();
@@ -813,12 +734,12 @@ mod tests {
     /// `behavior_writes_store` integration test, which loads the
     /// test-behavior-tree-nodes module; `Arora` exposes no module-load API to run
     /// such a leaf through `step()` here.)
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn runtime_over_namespaced_store_writes_under_namespace() {
         let shared = SimpleDataStore::new();
         let store: Arc<dyn DataStore> =
             Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
-        let (mut runtime, _pump) = build_in(Arc::new(UnregisterBridge), store.clone()).await;
+        let mut runtime = build_in(Arc::new(UnregisterBridge::default()), store.clone()).await;
 
         // Drive a write through the runtime's store pipeline.
         let (tx, rx) = oneshot::channel();
@@ -881,14 +802,14 @@ mod tests {
     /// behavior changes what gets written. Driven by a real
     /// `BehaviorInterpreter` (not a Groot literal), so it sidesteps the
     /// typed-literal coercion of ARORA-43.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn behavior_writes_then_switching_changes_the_namespaced_store() {
         let shared = SimpleDataStore::new();
         let store: Arc<dyn DataStore> =
             Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
-        // Pump intentionally not spawned: with no inbound events the device never
-        // unregisters, so `step()` stays `Live` and ticks the queued behavior.
-        let (mut runtime, _pump) = build_in(Arc::new(UnregisterBridge), store).await;
+        // SilentBridge never unregisters, so `step()` stays `Live` and ticks the
+        // queued behavior each frame.
+        let mut runtime = build_in(Arc::new(SilentBridge), store).await;
 
         // A behavior writes greeting = "hi"; one step lands it under the namespace.
         runtime.queue_behavior(Box::new(WriteKey {
@@ -918,10 +839,10 @@ mod tests {
     /// The runtime publishes the frame clock into the golden keys *before* it
     /// ticks, so a behavior reads `dt`/time from the store. Nanoseconds
     /// accumulate into `time`; `dt` reflects only the latest step.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn golden_clock_is_published_to_the_store_each_step() {
         let store = Arc::new(SimpleDataStore::new());
-        let (mut runtime, _pump) = build_in(Arc::new(SilentBridge), store.clone()).await;
+        let mut runtime = build_in(Arc::new(SilentBridge), store.clone()).await;
 
         // Before any step the golden keys are unset.
         assert_eq!(store.read(&[Key::from(golden::DT)]), vec![None]);
@@ -950,7 +871,7 @@ mod tests {
         );
     }
 
-    /// A bridge that records every `send_data` payload, and otherwise stays
+    /// A bridge that records every `try_send` payload, and otherwise stays
     /// silent (never unregisters), so a test can inspect what the runtime
     /// actually forwards outbound.
     struct RecordingBridge {
@@ -959,11 +880,14 @@ mod tests {
 
     #[async_trait]
     impl Bridge for RecordingBridge {
+        fn try_recv(&self) -> Option<Inbound> {
+            None
+        }
+        fn try_send(&self, change: &StateChange) {
+            self.sent.lock().unwrap().push(change.clone());
+        }
         async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
             Ok(None)
-        }
-        async fn device_info_updated(&self) -> BridgeResult<DeviceInfoStream> {
-            Ok(Box::pin(futures::stream::empty()))
         }
         async fn update_device_info(
             &self,
@@ -971,27 +895,16 @@ mod tests {
         ) -> BridgeResult<Option<DeviceInfo>> {
             Ok(info)
         }
-        async fn data_requested(&self) -> DataRequestedStream {
-            Box::pin(futures::stream::empty())
-        }
-        async fn send_data(&self, data: StateChange) -> BridgeResult<()> {
-            self.sent.lock().unwrap().push(data);
-            Ok(())
-        }
-        async fn commands(&self) -> CommandStream {
-            Box::pin(futures::stream::empty())
-        }
     }
 
     /// The golden clock keys stay local: the runtime never forwards them out to
     /// the bridge, even though an ordinary behavior write on the same step is
     /// forwarded. This is what keeps the wall-clock (which changes every frame)
     /// off the wire.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn golden_keys_are_not_forwarded_outbound() {
         let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let (mut runtime, pump) = build(Arc::new(RecordingBridge { sent: sent.clone() })).await;
-        tokio::spawn(pump);
+        let mut runtime = build(Arc::new(RecordingBridge { sent: sent.clone() })).await;
 
         // A behavior writes one ordinary key; that write must reach the bridge.
         runtime.queue_behavior(Box::new(WriteKey {
@@ -999,11 +912,9 @@ mod tests {
             value: Value::String("hi".into()),
         }));
 
-        // Step a few times, giving the pump real time to drain outbound →
-        // send_data (the pump runs on its own spawned task).
+        // Step a few times; `try_send` records synchronously, in-line with step.
         for _ in 0..5 {
             runtime.step(16_000_000).expect("step");
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
         }
 
         let sent = sent.lock().unwrap();

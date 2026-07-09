@@ -380,6 +380,7 @@ version = "1.0.0"
 dependencies = [
  "arora-types",
  "async-trait",
+ "futures",
  "tokio",
 ]
 

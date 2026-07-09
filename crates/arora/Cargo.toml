@@ -92,8 +92,7 @@ env_filter = { version = "0.1", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
-# `time` + `test-util` (tests only): the runtime-loop tests sleep between `step`s
-# to give the spawned io pump wall-clock time to deliver events, and the operator
-# tests pause time (`start_paused`) to elapse the access grace instantly. The
-# runtime itself needs no timers (the pump is futures-only).
+# `time` + `test-util` (tests only): the operator tests pause time
+# (`start_paused`) to elapse the access grace instantly. The runtime-loop tests
+# are fully synchronous (the I/O seams are non-blocking), so they need no timers.
 tokio = { version = "1", features = ["time", "test-util"] }

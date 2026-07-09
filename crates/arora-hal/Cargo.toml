@@ -9,6 +9,9 @@ readme = "readme.md"
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.5" }
 async-trait = "0.1"
+# `futures::executor::block_on` backs the default `Hal::try_send` (forward to the
+# async `write`) on native targets; wasm HALs override `try_send` synchronously.
+futures = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
