@@ -36,10 +36,13 @@ pub struct BehaviorTreeInterpreter {
     tree: Option<BehaviorTree>,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     /// The authored graph behind the loaded tree, when there is one — what
-    /// [`apply`](BehaviorInterpreter::apply) edits and re-lowers. The store the
-    /// slots resolve against is never retained: lowering borrows it (at load
-    /// from the caller, at apply from the tick context).
+    /// [`apply`](BehaviorInterpreter::apply) edits. The store the slots resolve
+    /// against is never retained: lowering borrows it — at load from the
+    /// caller, after an edit from the next tick's context.
     graph: Option<Graph>,
+    /// An edit landed since the tree was last lowered; the next tick rebuilds
+    /// before running.
+    dirty: bool,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -58,6 +61,7 @@ impl BehaviorTreeInterpreter {
             tree: None,
             function_index,
             graph: None,
+            dirty: false,
         }
     }
 
@@ -68,6 +72,7 @@ impl BehaviorTreeInterpreter {
     pub fn load(&mut self, behavior: BehaviorTree) {
         self.tree = Some(behavior);
         self.graph = None;
+        self.dirty = false;
     }
 
     /// Load a behavior from the shared [`Graph`], replacing any behavior
@@ -85,6 +90,7 @@ impl BehaviorTreeInterpreter {
         let tree = build_behavior_tree(&graph, &direct_resolver(store))?;
         self.tree = Some(tree);
         self.graph = Some(graph);
+        self.dirty = false;
         Ok(())
     }
 
@@ -111,20 +117,34 @@ impl BehaviorTreeInterpreter {
 
 impl BehaviorInterpreter for BehaviorTreeInterpreter {
     fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
+        // An edit landed since the last lowering: rebuild the tree from the
+        // graph against this tick's store, so the edit (and any lowering
+        // problem it introduced) takes effect here.
+        if self.dirty {
+            let graph = self.graph.as_ref().expect("dirty implies a graph");
+            self.tree = Some(
+                build_behavior_tree(graph, &direct_resolver(ctx.store)).map_err(|e| {
+                    BehaviorError {
+                        message: format!("rebuild after apply: {e:?}"),
+                    }
+                })?,
+            );
+            self.dirty = false;
+        }
         // No behavior loaded: idle. The interpreter stays installed — it is an
         // executor waiting for a tree, not something to drop.
         let Some(tree) = self.tree.as_ref() else {
             return Ok(BehaviorStatus::Running);
         };
-        run_behavior_tree(tree, self.function_index.clone(), ctx.caller, false).map_err(|e| {
-            BehaviorError {
+        run_behavior_tree(tree, self.function_index.clone(), ctx.call_bridge, false).map_err(
+            |e| BehaviorError {
                 message: format!("behavior tree: {e:?}"),
-            }
-        })?;
+            },
+        )?;
         Ok(BehaviorStatus::Done)
     }
 
-    fn apply(&mut self, diff: GraphDiff, ctx: &mut BehaviorContext) -> Result<(), BehaviorError> {
+    fn apply(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
         let graph = self.graph.as_mut().ok_or_else(|| BehaviorError {
             message: "the loaded behavior has no editable graph; load one with load_graph or \
                       load_groot to edit it"
@@ -133,11 +153,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         graph.apply(diff).map_err(|e| BehaviorError {
             message: format!("graph diff: {e}"),
         })?;
-        self.tree = Some(
-            build_behavior_tree(graph, &direct_resolver(ctx.store)).map_err(|e| BehaviorError {
-                message: format!("rebuild after apply: {e:?}"),
-            })?,
-        );
+        self.dirty = true;
         Ok(())
     }
 }
