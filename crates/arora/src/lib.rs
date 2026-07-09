@@ -20,6 +20,8 @@
 pub mod operator;
 mod run;
 pub mod runtime;
+#[cfg(feature = "studio-bridge")]
+mod studio;
 /// The terminal operator UI. Native, and only when the `tui` feature is on; an
 /// embedder that brings its own UI builds without it.
 #[cfg(feature = "tui")]
