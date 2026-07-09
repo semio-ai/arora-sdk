@@ -177,7 +177,7 @@ dependencies = [
  "anyhow",
  "arora-behavior",
  "arora-behavior-tree",
- "arora-bridge 2.0.0",
+ "arora-bridge",
  "arora-bridge-ws",
  "arora-engine",
  "arora-hal",
@@ -253,17 +253,6 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdb38ca1266a6c84850a0c9c35d60dd0756003492ddf086f174045c52e3d0500"
-dependencies = [
- "arora-types",
- "async-trait",
- "futures",
-]
-
-[[package]]
-name = "arora-bridge"
 version = "2.0.0"
 dependencies = [
  "arora-types",
@@ -276,7 +265,7 @@ dependencies = [
 name = "arora-bridge-ros2"
 version = "1.0.0"
 dependencies = [
- "arora-bridge 2.0.0",
+ "arora-bridge",
  "arora-types",
  "async-trait",
  "env_logger",
@@ -294,7 +283,7 @@ dependencies = [
 name = "arora-bridge-ws"
 version = "2.0.0"
 dependencies = [
- "arora-bridge 2.0.0",
+ "arora-bridge",
  "arora-types",
  "async-trait",
  "futures",
@@ -590,11 +579,9 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a243e897edfe82fdd6428ddb6a0b32d7311139055e02bb891e22b46ea1a50fd3"
+version = "2.0.0"
 dependencies = [
- "arora-bridge 1.0.0",
+ "arora-bridge",
  "arora-types",
  "async-stream",
  "async-trait",
@@ -663,7 +650,7 @@ version = "3.0.0"
 dependencies = [
  "arora",
  "arora-behavior",
- "arora-bridge 2.0.0",
+ "arora-bridge",
  "arora-engine",
  "arora-hal",
  "arora-simple-data-store",
@@ -2560,7 +2547,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2691,7 +2678,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3528,7 +3515,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -4455,7 +4442,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5215,7 +5202,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.41",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5255,7 +5242,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
  "windows-sys 0.59.0",
 ]
@@ -5791,7 +5778,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5893,7 +5880,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5914,7 +5901,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6703,8 +6690,6 @@ dependencies = [
 [[package]]
 name = "studio-bridge-msgs"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc8447b3d63944f1c1ba6a5e7a46bca5a5000aacb35ece6363145606d70c5f2"
 dependencies = [
  "arora-types",
  "chrono",
@@ -6838,7 +6823,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7459,7 +7444,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.4",
  "static_assertions",
 ]
 
@@ -8443,7 +8428,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
