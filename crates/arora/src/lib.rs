@@ -1,12 +1,20 @@
 //! Opinionated Arora runtime.
 //!
 //! Where [`arora_engine`] is the bare, unopinionated runtime, this crate wires
-//! a ready-to-use [`Arora`]: an engine with the WebAssembly and native
-//! executors. The basic behavior-tree control nodes are wired natively into
+//! a ready-to-use [`Arora`]: the whole device in one object — the engine (with
+//! the WebAssembly and native executors), the shared data store, the HAL and
+//! bridge I/O seams, one behavior interpreter, and the step loop that drives
+//! them. The basic behavior-tree control nodes are wired natively into
 //! [`arora_behavior_tree`], so no module needs to be loaded to run a tree of
-//! them. It can run a behavior tree handed to it at startup (as Groot XML) and
-//! otherwise idles, waiting for behavior trees that will soon arrive over the
-//! bridge.
+//! them.
+//!
+//! Build one with the [`builder`](Arora::builder): pick a data store, a HAL, one
+//! or more bridges, the modules whose functions behaviors may call, and the
+//! behavior interpreter — each with a sensible default, so
+//! `Arora::builder().build()` yields a self-contained in-process device (fake
+//! HAL, in-process bridge, an empty behavior, a private [`SimpleDataStore`]).
+//! Then drive it with [`step`](Arora::step) (once per frame) or
+//! [`run`](Arora::run) (the visible loop over `step`).
 
 #[cfg(feature = "native")]
 pub mod operator;
@@ -21,74 +29,181 @@ pub mod tui;
 
 #[cfg(feature = "native")]
 pub use run::{run, run_with, run_with_bridge_builder, run_with_frontend, run_with_hal};
+pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
 
 use anyhow::{anyhow, Result};
-use arora_behavior_tree::{
-    arora_generated::behavior_tree::status::Status, run_behavior_tree, schema_groot,
-    tree_node::TreeNode, BehaviorTree, ModuleFunction,
-};
+use arora_behavior::BehaviorInterpreter;
+use arora_behavior_tree::ModuleFunction;
+use arora_bridge::{Bridge, FakeBridge};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
+use arora_hal::{FakeHal, Hal};
+use arora_simple_data_store::SimpleDataStore;
+use arora_types::data::{DataStore, Subscription};
+use runtime::Clock;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use uuid::Uuid;
 
-/// An opinionated Arora runtime: an engine with the basic behavior-tree control
-/// nodes wired natively, ready to run behavior trees.
+/// An opinionated Arora device: the engine (with the basic behavior-tree control
+/// nodes wired natively) plus everything a running device needs — the shared
+/// data store, the HAL and bridge I/O seams, one behavior interpreter, and the
+/// clock — advanced one [`step`](Arora::step) at a time.
+///
+/// `Arora` is the single owner of the state. Several things want to change the
+/// blackboard — the bridge (commands/state from the remote), the HAL (sensor
+/// readings), and the behavior (intent it writes while ticking) — and rather
+/// than share the state behind a lock and race, `Arora` serializes them as
+/// phases of one [`step`](Arora::step). It owns no async runtime and spawns no
+/// threads: it pokes its I/O seams through their synchronous poll/push surface,
+/// and any real async work lives *inside* those implementations. That is also
+/// why it drops unchanged into a Web Worker — the worker boundary is the seam's
+/// problem, not `Arora`'s.
+///
+/// Build one with [`Arora::builder`].
 pub struct Arora {
-    engine: PinnedEngine,
+    // Owned and touched ONLY by the stepping thread (single-threaded state).
+    // Held behind `dyn DataStore` so a wrapping store (e.g. a `NamespacedStore`
+    // over one mutualized backend) can be injected via the builder.
+    pub(crate) store: Arc<dyn DataStore>,
+    pub(crate) engine: PinnedEngine,
     /// Module functions referenced by behavior-tree nodes, keyed by function
     /// UUID. The basic control nodes are dispatched natively and are not in this
-    /// index; it stays empty until a runtime loads a real module.
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    /// index; it holds only the functions of modules registered through
+    /// [`AroraBuilder::with_module`].
+    pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    /// The one behavior interpreter, ticked each step. Replaceable at runtime
+    /// with [`set_behavior_interpreter`](Arora::set_behavior_interpreter);
+    /// `None` means nothing to tick (an empty behavior). Dropped back to `None`
+    /// once it reports [`BehaviorStatus::Done`](arora_behavior::BehaviorStatus).
+    pub(crate) interpreter: Option<Box<dyn BehaviorInterpreter>>,
+    pub(crate) telemetry: Telemetry,
+    // The synchronous I/O seams the step drives directly. Each owns its own
+    // async internally; `Arora` only pokes their non-blocking poll/push.
+    pub(crate) hal: Arc<dyn Hal>,
+    // A Vec even though exactly one is expected today: reads fan in and writes
+    // fan out over all of them, so several can be added later (see PR 3) with no
+    // shape change.
+    pub(crate) bridges: Vec<Arc<dyn Bridge>>,
+    // The HAL's sensor feed, a sync subscription the step drains each frame.
+    pub(crate) hal_updates: Subscription,
+    pub(crate) store_changes: Subscription,
+    // The golden clock: monotonic nanoseconds since start, advanced by each
+    // step's `dt`. Published into the store's golden keys each step, before any
+    // behavior ticks; the flush phase filters the golden namespace out of what
+    // it forwards outbound.
+    pub(crate) clock: Clock,
 }
 
 impl Arora {
-    /// Start the runtime: build the engine (the browser host on wasm, the
-    /// wasmtime + native hosts otherwise). The basic behavior-tree control nodes
-    /// are wired natively, so nothing needs to be loaded to run a tree of them.
-    pub async fn start() -> Result<Self> {
-        let engine = build_engine()?;
-        Ok(Self {
-            engine,
-            function_index: Rc::new(HashMap::new()),
-        })
+    /// Start assembling an [`Arora`]. Every seam has a default, so the shortest
+    /// device is `Arora::builder().build()`.
+    pub fn builder() -> AroraBuilder {
+        AroraBuilder::default()
+    }
+}
+
+/// Assembles an [`Arora`] from its seams, each defaulted so only what differs
+/// from the in-process default device has to be named. Every setter returns
+/// `self`, so calls chain; [`build`](AroraBuilder::build) wires the engine and
+/// the store subscriptions and returns the finished [`Arora`].
+#[derive(Default)]
+pub struct AroraBuilder {
+    store: Option<Arc<dyn DataStore>>,
+    hal: Option<Arc<dyn Hal>>,
+    bridges: Vec<Arc<dyn Bridge>>,
+    interpreter: Option<Box<dyn BehaviorInterpreter>>,
+    functions: HashMap<Uuid, ModuleFunction>,
+}
+
+impl AroraBuilder {
+    /// Use `store` as the device blackboard. Takes the trait object, so the
+    /// caller chooses the backend: a plain shared [`SimpleDataStore`], or a
+    /// wrapping store such as a `NamespacedStore` that prefixes every key with a
+    /// device namespace before delegating to one mutualized backend (how Studio
+    /// mutualizes one store across every spawned device). Default: a fresh,
+    /// private [`SimpleDataStore`].
+    pub fn with_data_store(mut self, store: Arc<dyn DataStore>) -> Self {
+        self.store = Some(store);
+        self
     }
 
-    /// Run a behavior tree supplied as Groot XML, ticking it until it reaches a
-    /// terminal status.
-    pub fn run_groot_xml(&mut self, xml: &str) -> Result<Status> {
-        let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)
-            .map_err(|e| anyhow!("failed to parse Groot XML: {e:?}"))?;
-        let mut variables = HashMap::new();
-        let tree_node: TreeNode = groot
-            .root
-            .try_into_tree_node(self.function_index.as_ref(), &mut variables)
-            .map_err(|e| anyhow!("failed to build behavior tree from Groot: {e:?}"))?;
-        let behavior: BehaviorTree = tree_node
-            .try_into()
-            .map_err(|e| anyhow!("failed to instantiate behavior tree: {e:?}"))?;
-        run_behavior_tree(
-            &behavior,
-            self.function_index.clone(),
-            &mut self.engine,
-            false,
-        )
-        .map_err(|e| anyhow!("behavior tree run failed: {e:?}"))
+    /// Use `hal` as the hardware abstraction layer — exactly one per device.
+    /// Default: an in-process [`FakeHal`].
+    pub fn with_hal(mut self, hal: Arc<dyn Hal>) -> Self {
+        self.hal = Some(hal);
+        self
     }
 
-    /// Idle forever, doing nothing.
+    /// Add a bridge. Repeatable: reads fan in from every bridge and writes fan
+    /// out to every bridge (PR 3), so several remotes can observe/command one
+    /// device. Default (when none is added): an in-process [`FakeBridge`].
+    pub fn with_bridge(mut self, bridge: Arc<dyn Bridge>) -> Self {
+        self.bridges.push(bridge);
+        self
+    }
+
+    /// Set the behavior interpreter the device ticks — the one interpreter, not
+    /// a queue. Calling again replaces it. Default (when none is set): none, so
+    /// the device idles until one is installed (equivalent to an empty tree).
+    pub fn with_behavior_interpreter(mut self, interpreter: Box<dyn BehaviorInterpreter>) -> Self {
+        self.interpreter = Some(interpreter);
+        self
+    }
+
+    /// Register a module's functions so behaviors may call them. Repeatable —
+    /// each call adds one module's functions to the `function_index`, keyed by
+    /// function UUID.
     ///
-    /// This is the placeholder for the steady state: a future bridge channel
-    /// will deliver behavior trees to run here. It is intentionally synchronous
-    /// (a plain sleep): ticking a tree drives the wasm executor, which manages
-    /// its own blocking runtime and must not run inside a Tokio runtime.
-    pub fn run_forever(&mut self) -> Result<()> {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            // TODO: receive behavior trees over the bridge and run them.
+    /// This makes real the function-index half of the module-load seam: a
+    /// behavior-tree node bound to one of these functions builds its call from
+    /// the frozen `Function` record carried here. The remaining half — loading
+    /// the module's executable into the engine so the call actually dispatches
+    /// to guest code — is not wired yet (a [`ModuleFunction`] carries no
+    /// executable), so registered functions must be ones the engine can already
+    /// dispatch (natively-hosted). TODO: accept a loadable module (header +
+    /// executable) and load it into the engine here too.
+    pub fn with_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
+        for function in functions {
+            self.functions.insert(function.function_id, function);
         }
+        self
+    }
+
+    /// Wire the engine, apply the defaults for any unset seam, subscribe to the
+    /// HAL and store feeds, and return the finished [`Arora`].
+    ///
+    /// Fails only if the engine's executor host cannot be created. Fully
+    /// synchronous: there is no I/O pump to spawn — the HAL and bridges own any
+    /// async internally, behind their synchronous seams.
+    pub fn build(self) -> Result<Arora> {
+        let engine = build_engine()?;
+        let store = self
+            .store
+            .unwrap_or_else(|| Arc::new(SimpleDataStore::new()));
+        let hal: Arc<dyn Hal> = self.hal.unwrap_or_else(|| Arc::new(FakeHal::new()));
+        let bridges = if self.bridges.is_empty() {
+            vec![Arc::new(FakeBridge::new()) as Arc<dyn Bridge>]
+        } else {
+            self.bridges
+        };
+        let store_changes = store.subscribe();
+        let hal_updates = hal.updates();
+
+        Ok(Arora {
+            store,
+            engine,
+            function_index: Rc::new(self.functions),
+            interpreter: self.interpreter,
+            telemetry: Telemetry::default(),
+            hal,
+            bridges,
+            hal_updates,
+            store_changes,
+            clock: Clock::default(),
+        })
     }
 }
 

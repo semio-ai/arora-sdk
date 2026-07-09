@@ -104,7 +104,11 @@ pub(crate) fn run_with_hal(hal: Arc<dyn arora_hal::Hal>) -> Result<()> {
 
     info!("Connecting via Zenoh (endpoints: {:?})", endpoints);
 
-    crate::run_with_frontend(hal, SimpleDataStore::new(), frontend, move || async move {
+    crate::run_with_frontend(
+        hal,
+        Arc::new(SimpleDataStore::new()),
+        frontend,
+        move || async move {
         let client = ZenohDeviceClient::new(
             &firebase_options,
             Some(&firebase_emulator_options),

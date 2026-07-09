@@ -85,6 +85,6 @@ fn main() -> Result<()> {
     arora::run_with(
         Arc::new(ExampleHal::default()),
         Arc::new(FakeBridge::new()),
-        SimpleDataStore::new(),
+        Arc::new(SimpleDataStore::new()),
     )
 }
