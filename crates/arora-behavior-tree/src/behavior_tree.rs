@@ -4,6 +4,7 @@
 pub mod arora_generated;
 pub mod behavior;
 pub mod error;
+pub mod graph;
 pub mod nodes;
 pub mod schema;
 pub mod schema_groot;
@@ -494,6 +495,22 @@ impl Callable for TickFunction {
 // Loading behavior trees.
 //====================================================================
 pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, BehaviorTreeError> {
+    // The bare schema (YAML) path has no variable names to resolve against a
+    // store, so every cell stays tree-local.
+    load_behavior_tree_nodes_with(nodes, &|_| None, &HashMap::new())
+}
+
+/// Like [`load_behavior_tree_nodes`], but binds each `{var}` whose name
+/// `resolver` resolves to a data-store slot (the Direct convention — variable
+/// name == store key). `names` maps each variable id to the name the resolver
+/// expects; ids absent from it (or that the resolver declines) stay tree-local.
+/// This is the path the shared-graph lowering
+/// ([`build_behavior_tree`](crate::graph::build_behavior_tree)) uses.
+pub fn load_behavior_tree_nodes_with(
+    nodes: Vec<Node>,
+    resolver: &VariableResolver,
+    names: &HashMap<Uuid, String>,
+) -> Result<BehaviorTree, BehaviorTreeError> {
     let mut node_index: HashMap<Uuid, Rc<Node>> = HashMap::new();
     let mut root: Option<Rc<Node>> = None;
     let mut variables = HashMap::new();
@@ -519,21 +536,21 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
                 node: shared_node.id.to_owned(),
                 parameter: param_id.to_owned(),
             };
-            // The schema (YAML) path has no variable names to resolve against a
-            // store, so every cell stays tree-local.
             setup_node_parameter_variable(
                 &node_param,
                 arg_expr,
                 &mut variables,
                 &mut node_parameters_variables,
-                &|_| None,
-                &HashMap::new(),
+                resolver,
+                names,
             )?;
         }
     }
 
     Ok(BehaviorTree {
-        root: root.unwrap(),
+        root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
+            message: "behavior tree has no nodes".to_string(),
+        })?,
         node_index,
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
