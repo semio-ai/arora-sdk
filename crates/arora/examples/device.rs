@@ -8,16 +8,16 @@
 //! [`FakeBridge`] for the studio-bridge connector) and you have a real device
 //! build — same `arora` runtime, your hardware.
 
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use arora_bridge::FakeBridge;
-use arora_hal::{Hal, HalDescription, HalResult};
+use arora_hal::{Hal, HalDescription, HalResult, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
-use arora_types::data::{Key, State, StateChange, Subscription};
+use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 use async_trait::async_trait;
+use futures::channel::mpsc::UnboundedSender;
 
 /// A minimal custom HAL — the one thing a device-specific Arora must supply.
 ///
@@ -32,7 +32,7 @@ struct ExampleHal {
 #[derive(Default)]
 struct Inner {
     state: State,
-    subscribers: Vec<Sender<StateChange>>,
+    subscribers: Vec<UnboundedSender<StateChange>>,
 }
 
 #[async_trait]
@@ -66,14 +66,14 @@ impl Hal for ExampleHal {
         // Tell observers what the "hardware" now reports.
         inner
             .subscribers
-            .retain(|tx| tx.send(changes.clone()).is_ok());
+            .retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
         Ok(())
     }
 
-    fn updates(&self) -> Subscription {
-        let (tx, rx) = std::sync::mpsc::channel();
+    fn updates(&self) -> UpdatesStream {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
         self.inner.lock().unwrap().subscribers.push(tx);
-        Subscription::new(rx)
+        Box::pin(rx)
     }
 }
 
@@ -84,9 +84,9 @@ async fn main() -> Result<()> {
     // (Use the studio-bridge connector's `ZenohDeviceClient` in place of
     // `FakeBridge` to reach Semio Studio.)
     arora::run_with(
-        Arc::new(ExampleHal::default()),
-        Arc::new(FakeBridge::new()),
-        Arc::new(SimpleDataStore::new()),
+        Box::new(ExampleHal::default()),
+        Box::new(FakeBridge::new()),
+        Box::new(SimpleDataStore::new()),
     )
     .await
 }
