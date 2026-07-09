@@ -739,7 +739,10 @@ mod tests {
         let shared = SimpleDataStore::new();
         let store: Arc<dyn DataStore> =
             Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
-        let mut runtime = build_in(Arc::new(UnregisterBridge::default()), store.clone()).await;
+        // A bridge that never unregisters, so the one step below stays `Live`
+        // (with the synchronous seam, `UnregisterBridge` reports its unregister on
+        // the first `try_recv`; this test only needs a live step to flush).
+        let mut runtime = build_in(Arc::new(SilentBridge), store.clone()).await;
 
         // Drive a write through the runtime's store pipeline.
         let (tx, rx) = oneshot::channel();
