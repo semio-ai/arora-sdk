@@ -8,8 +8,6 @@
 //! overrides the config's domain id. Device identity, registration and token
 //! handling are env-driven inside arora's Semio Studio runner.
 
-use std::sync::Arc;
-
 use arora_hal_ros2::{configs, ROS2RobotConfig, Ros2Hal};
 
 fn load_config(selector: &str) -> ROS2RobotConfig {
@@ -29,7 +27,8 @@ fn load_config(selector: &str) -> ROS2RobotConfig {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let selector = args
         .next()
@@ -43,11 +42,10 @@ fn main() -> anyhow::Result<()> {
         config.domain_id = Some(domain_id.parse().expect("ROS_DOMAIN_ID must be a number"));
     }
 
-    // The HAL's ROS node lives on its own Tokio runtime, kept alive for the
-    // whole run; arora::run_with_hal drives the device on its own runtime.
-    let ros_runtime = tokio::runtime::Runtime::new()?;
-    let hal = ros_runtime
-        .block_on(Ros2Hal::new(config))
+    // One runtime carries everything: the HAL's ROS tasks spawn on it at
+    // construction, and arora drives the device on it.
+    let hal = Ros2Hal::new(config)
+        .await
         .map_err(|e| anyhow::anyhow!("failed to start the ROS 2 HAL: {e}"))?;
-    arora::run_with_hal(Arc::new(hal))
+    arora::run_with_hal(Box::new(hal)).await
 }

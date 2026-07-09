@@ -35,6 +35,21 @@ struct Inner {
     subscribers: Vec<UnboundedSender<StateChange>>,
 }
 
+impl ExampleHal {
+    /// Store the change and echo it to observers — what the "hardware" now
+    /// reports. Shared by `write` and `try_send`.
+    fn apply(&self, changes: &StateChange) {
+        if changes.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.state.apply(changes.clone());
+        inner
+            .subscribers
+            .retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
+    }
+}
+
 #[async_trait]
 impl Hal for ExampleHal {
     async fn describe(&self) -> HalDescription {
@@ -58,16 +73,13 @@ impl Hal for ExampleHal {
     }
 
     async fn write(&self, changes: StateChange) -> HalResult<()> {
-        if changes.is_empty() {
-            return Ok(());
-        }
-        let mut inner = self.inner.lock().unwrap();
-        inner.state.apply(changes.clone());
-        // Tell observers what the "hardware" now reports.
-        inner
-            .subscribers
-            .retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
+        self.apply(&changes);
         Ok(())
+    }
+
+    /// Immediate in-memory apply — nothing here blocks, so no task is needed.
+    fn try_send(&self, changes: &StateChange) {
+        self.apply(changes);
     }
 
     fn updates(&self) -> UpdatesStream {

@@ -220,6 +220,9 @@ dependencies = [
  "arora-types",
  "async-trait",
  "futures",
+ "futures-channel",
+ "futures-core",
+ "futures-util",
  "tokio",
 ]
 
@@ -332,6 +335,8 @@ dependencies = [
  "arora-types",
  "async-trait",
  "futures",
+ "futures-channel",
+ "futures-core",
  "tokio",
 ]
 
@@ -535,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "arora-simple-data-store"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arora-types",
 ]

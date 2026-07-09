@@ -215,14 +215,28 @@ pub fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), R
 }
 
 /// Phase 2 — apply the HAL's sensor readings, oldest first: within the frame,
-/// a later reading of the same key wins.
-pub fn apply_sensors(store: &dyn DataStore, sensors: Vec<StateChange>) -> Result<(), RuntimeError> {
+/// a later reading of the same key wins. Returns the coalesced readings it
+/// applied, so phase 6 can keep the hardware's own reports from being written
+/// back to it ([`write_hal`]).
+pub fn apply_sensors(
+    store: &dyn DataStore,
+    sensors: Vec<StateChange>,
+) -> Result<StateChange, RuntimeError> {
+    let mut applied = StateChange::new();
     for change in sensors {
+        for (key, value) in &change.set {
+            applied.unset.remove(key);
+            applied.set.insert(key.clone(), value.clone());
+        }
+        for key in &change.unset {
+            applied.set.remove(key);
+            applied.unset.insert(key.clone());
+        }
         store
             .write(change)
             .map_err(|e| RuntimeError::Store(e.to_string()))?;
     }
-    Ok(())
+    Ok(applied)
 }
 
 /// Phase 3 — apply the bridge events, in arrival order, **after** the sensors:
@@ -382,9 +396,28 @@ pub fn flush(changes: &Subscription) -> StateChange {
 }
 
 /// Phase 6a — hand the coalesced outbound change to the hardware, through its
-/// non-blocking push seam.
-pub fn write_hal(hal: &dyn Hal, out: &StateChange) {
-    hal.try_send(out);
+/// non-blocking push seam — **minus the keys whose frame-final value came from
+/// the hardware itself** (`sensor_applied`, from [`apply_sensors`]): the HAL is
+/// not told what it just reported. The bridges are (a remote wants sensor
+/// state); and a key the behavior overwrote after the reading goes to the HAL
+/// with the behavior's value, since that no longer matches the reading.
+pub fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
+    let mut for_hal = StateChange::new();
+    for (key, value) in &out.set {
+        if sensor_applied.set.get(key) == Some(value) {
+            continue;
+        }
+        for_hal.set.insert(key.clone(), value.clone());
+    }
+    for key in &out.unset {
+        if sensor_applied.unset.contains(key) {
+            continue;
+        }
+        for_hal.unset.insert(key.clone());
+    }
+    if !for_hal.is_empty() {
+        hal.try_send(&for_hal);
+    }
 }
 
 /// Phase 6b — fan the same change out to every bridge endpoint. Each buffers
@@ -425,7 +458,8 @@ impl Arora {
         let clock = tick_clock(&mut self.clock, dt);
         publish_clock(&*self.store, &clock)?;
         // 2. HAL readings — oldest first; per key, the newest wins.
-        apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors))?;
+        let sensor_applied =
+            apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors))?;
         // 3. bridge readings — after the HAL: a remote update beats this
         //    frame's sensor value. Commands dispatch and reply here.
         let outcome = apply_events(
@@ -444,9 +478,10 @@ impl Arora {
         )?;
         // 5. flush — one coalesced change; golden keys stay local.
         let out = flush(&self.store_changes);
-        // 6. writings — the hardware first, then every remote.
+        // 6. writings — the hardware first (its own readings subtracted), then
+        //    every remote.
         if !out.is_empty() {
-            write_hal(&*self.hal, &out);
+            write_hal(&*self.hal, &out, &sensor_applied);
             write_bridges(&mut self.bridges, &out);
         }
         Ok(outcome)

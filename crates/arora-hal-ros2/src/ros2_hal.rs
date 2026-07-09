@@ -33,7 +33,27 @@ type StateChangeStream =
 /// The topology (topics, mappings, joint IDs) is fixed at construction from a
 /// [`ROS2RobotConfig`]; the remaining state is interior-mutable so every trait
 /// method takes `&self`.
+///
+/// `write()` awaits the DDS publishes directly; `try_send` hands the changes
+/// to the queued-write task, which drives the same path — the caller never
+/// waits on DDS discovery or publishing.
 pub struct Ros2Hal {
+    // The publish path and the state it drives, shared with the background tasks
+    inner: Arc<Inner>,
+
+    // Feeds the queued-write task
+    outbound: UnboundedSender<StateChange>,
+
+    // Handles to abort background tasks when the HAL is dropped
+    spinner_abort_handle: tokio::task::AbortHandle,
+    subscriber_task_abort_handle: tokio::task::AbortHandle,
+    send_task_abort_handle: tokio::task::AbortHandle,
+}
+
+/// The HAL internals behind both write entries: `write()` calls straight in,
+/// the queued-write task serving `try_send` and the ROS-side subscriber task
+/// hold their own handles.
+struct Inner {
     // Inner ROS2 client node
     node: Node,
 
@@ -42,17 +62,26 @@ pub struct Ros2Hal {
     joint_ids_to_ros_names: HashMap<String, String>,
 
     // Observers registered through `updates()`; the ROS-side task feeds each one
-    subscribers: Arc<Mutex<Vec<UnboundedSender<StateChange>>>>,
+    subscribers: Mutex<Vec<UnboundedSender<StateChange>>>,
 
     // Publishers that also convert StateChange to typed messages
     publishers: HashMap<String, Box<dyn StateChangePublisher>>,
 
     // Current state cache, shared with the ROS-side subscriber task
-    current_state: Arc<Mutex<State>>,
+    current_state: Mutex<State>,
+}
 
-    // Handles to abort background tasks when the HAL is dropped
-    spinner_abort_handle: tokio::task::AbortHandle,
-    subscriber_task_abort_handle: tokio::task::AbortHandle,
+/// Fold `later` into `earlier`, per-key newest wins: applying the folded
+/// change equals applying both in order.
+fn fold_newest_wins(earlier: &mut StateChange, later: StateChange) {
+    for key in later.unset {
+        earlier.set.remove(&key);
+        earlier.unset.insert(key);
+    }
+    for (key, value) in later.set {
+        earlier.unset.remove(&key);
+        earlier.set.insert(key, value);
+    }
 }
 
 impl Ros2Hal {
@@ -158,15 +187,17 @@ impl Ros2Hal {
             }
         }
 
-        let subscribers: Arc<Mutex<Vec<UnboundedSender<StateChange>>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let current_state = Arc::new(Mutex::new(State::new()));
-
-        // Clone the shared state for the task
-        let subscribers_clone = subscribers.clone();
-        let current_state_clone = current_state.clone();
+        let inner = Arc::new(Inner {
+            node,
+            config,
+            joint_ids_to_ros_names,
+            subscribers: Mutex::new(Vec::new()),
+            publishers,
+            current_state: Mutex::new(State::new()),
+        });
 
         // Process state changes coming from the robot
+        let task_inner = inner.clone();
         let subscriber_task_abort_handle = tokio::spawn(async move {
             debug!("State change processing task started.");
 
@@ -183,7 +214,8 @@ impl Ros2Hal {
                         debug!("Received state change from subscriber: {:?}", state_change);
                         // Update current state
                         {
-                            let mut current_state = current_state_clone
+                            let mut current_state = task_inner
+                                .current_state
                                 .lock()
                                 .expect("current state lock poisoned");
                             current_state.apply(state_change.clone());
@@ -191,8 +223,10 @@ impl Ros2Hal {
                         }
                         // Notify observers, dropping the disconnected ones
                         {
-                            let mut subscribers =
-                                subscribers_clone.lock().expect("subscribers lock poisoned");
+                            let mut subscribers = task_inner
+                                .subscribers
+                                .lock()
+                                .expect("subscribers lock poisoned");
                             subscribers
                                 .retain(|tx| tx.unbounded_send(state_change.clone()).is_ok());
                             debug!("State change processing task: Observers notified.");
@@ -212,16 +246,30 @@ impl Ros2Hal {
         })
         .abort_handle();
 
+        // The queued-write task: receives the changes `try_send` enqueues,
+        // folds any backlog into one change (per-key newest wins) so slow
+        // publishes coalesce, and drives the same write path as `write()`.
+        let (outbound, mut outbound_rx) = futures::channel::mpsc::unbounded::<StateChange>();
+        let task_inner = inner.clone();
+        let send_task_abort_handle = tokio::spawn(async move {
+            while let Some(mut changes) = outbound_rx.next().await {
+                while let Ok(later) = outbound_rx.try_recv() {
+                    fold_newest_wins(&mut changes, later);
+                }
+                if let Err(e) = task_inner.write(changes).await {
+                    warn!("Queued write failed: {e}");
+                }
+            }
+        })
+        .abort_handle();
+
         info!("Ros2Hal initialized successfully.");
         Ok(Self {
-            node,
-            config,
-            joint_ids_to_ros_names,
-            subscribers,
-            publishers,
-            current_state,
+            inner,
+            outbound,
             spinner_abort_handle,
             subscriber_task_abort_handle,
+            send_task_abort_handle,
         })
     }
 
@@ -429,45 +477,8 @@ impl Ros2Hal {
     }
 }
 
-#[async_trait]
-impl Hal for Ros2Hal {
-    /// Describe the device from the robot configuration.
-    async fn describe(&self) -> HalDescription {
-        debug!("describe called.");
-        HalDescription {
-            model_family: self.config.model_family.clone(),
-            hardware_version: self.config.hardware_version.clone(),
-            software_version: self.config.software_version.clone(),
-        }
-    }
-
-    /// Retrieves the current values for the given keys from the local state
-    /// cache. Absent keys read as `None`.
-    async fn read(&self, keys: &[Key]) -> HalResult<Vec<Option<Value>>> {
-        debug!("Received read request for {} keys", keys.len());
-        let state = self.current_state.lock().expect("state lock poisoned");
-        Ok(keys
-            .iter()
-            .map(|key| state.get(key).cloned().flatten())
-            .collect())
-    }
-
-    /// Retrieves all key/value pairs currently held in the local state cache.
-    async fn read_all(&self) -> HalResult<State> {
-        debug!("Received read_all request");
-        let state = self.current_state.lock().expect("state lock poisoned");
-        debug!(
-            "Returning all {} key-value pairs from local state",
-            state.storage.len()
-        );
-        Ok(state.clone())
-    }
-
-    /// Applies actuator/state changes to the robot.
-    ///
-    /// Publishes target values to every matching ROS2 topic and updates the
-    /// local state cache. Per-topic failures are logged as warnings; the call
-    /// only errors when every matching topic failed to publish.
+impl Inner {
+    /// The write path shared by [`Hal::write`] and the queued-write task.
     async fn write(&self, changes: StateChange) -> HalResult<()> {
         debug!(
             "Received write with state changes: {} set, {} unset",
@@ -551,6 +562,70 @@ impl Hal for Ros2Hal {
             )))
         }
     }
+}
+
+#[async_trait]
+impl Hal for Ros2Hal {
+    /// Describe the device from the robot configuration.
+    async fn describe(&self) -> HalDescription {
+        debug!("describe called.");
+        HalDescription {
+            model_family: self.inner.config.model_family.clone(),
+            hardware_version: self.inner.config.hardware_version.clone(),
+            software_version: self.inner.config.software_version.clone(),
+        }
+    }
+
+    /// Retrieves the current values for the given keys from the local state
+    /// cache. Absent keys read as `None`.
+    async fn read(&self, keys: &[Key]) -> HalResult<Vec<Option<Value>>> {
+        debug!("Received read request for {} keys", keys.len());
+        let state = self
+            .inner
+            .current_state
+            .lock()
+            .expect("state lock poisoned");
+        Ok(keys
+            .iter()
+            .map(|key| state.get(key).cloned().flatten())
+            .collect())
+    }
+
+    /// Retrieves all key/value pairs currently held in the local state cache.
+    async fn read_all(&self) -> HalResult<State> {
+        debug!("Received read_all request");
+        let state = self
+            .inner
+            .current_state
+            .lock()
+            .expect("state lock poisoned");
+        debug!(
+            "Returning all {} key-value pairs from local state",
+            state.storage.len()
+        );
+        Ok(state.clone())
+    }
+
+    /// Applies actuator/state changes to the robot.
+    ///
+    /// Publishes target values to every matching ROS2 topic and updates the
+    /// local state cache. Per-topic failures are logged as warnings; the call
+    /// only errors when every matching topic failed to publish.
+    async fn write(&self, changes: StateChange) -> HalResult<()> {
+        self.inner.write(changes).await
+    }
+
+    /// Enqueues the changes onto the queued-write task and returns; the task
+    /// folds the backlog (per-key newest wins) and drives the same path as
+    /// [`write`](Hal::write). Never waits on DDS discovery or publishing.
+    fn try_send(&self, changes: &StateChange) {
+        if changes.is_empty() {
+            return;
+        }
+        if self.outbound.unbounded_send(changes.clone()).is_err() {
+            warn!("Dropping a state change: the queued-write task is gone");
+        }
+    }
 
     /// A feed of the changes the robot reports.
     ///
@@ -561,6 +636,7 @@ impl Hal for Ros2Hal {
         let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let snapshot = self
+            .inner
             .current_state
             .lock()
             .expect("state lock poisoned")
@@ -572,7 +648,8 @@ impl Hal for Ros2Hal {
             });
         }
 
-        self.subscribers
+        self.inner
+            .subscribers
             .lock()
             .expect("subscribers lock poisoned")
             .push(tx);
@@ -586,7 +663,7 @@ impl HalAssets for Ros2Hal {
     async fn model_glb(&self) -> HalResult<Option<Vec<u8>>> {
         debug!("model_glb called.");
 
-        if let Some(ref glb_path) = self.config.model_glb_path {
+        if let Some(ref glb_path) = self.inner.config.model_glb_path {
             match std::fs::read(glb_path) {
                 Ok(bytes) => {
                     debug!(
@@ -614,6 +691,7 @@ impl Drop for Ros2Hal {
         debug!("Dropping Ros2Hal, aborting background tasks");
         self.spinner_abort_handle.abort();
         self.subscriber_task_abort_handle.abort();
+        self.send_task_abort_handle.abort();
     }
 }
 
@@ -1233,6 +1311,119 @@ mod tests {
         tokio::spawn(async move {
             loop {
                 let _ = hal.write(state_change.clone()).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+
+        // Wait for the message to be received by the external subscriber with 10s timeout
+        // Use a loop because async_take returns immediately if no message is available
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let msg = loop {
+            if tokio::time::Instant::now() >= deadline {
+                panic!("timeout waiting for String message");
+            }
+            match subscriber.async_take().await {
+                Ok((msg, _info)) => break msg,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        };
+
+        println!("Received String message: {:?}", msg);
+
+        // Verify the message content
+        assert_eq!(
+            msg.data, test_message,
+            "Message data should be '{}', got: '{}'",
+            test_message, msg.data
+        );
+
+        println!("Successfully published and received String: {:?}", msg);
+    }
+
+    /// Creates a HAL with a Publish-direction String topic, pushes a
+    /// StateChange through `try_send()`, and verifies an external subscriber
+    /// receives the correctly converted ROS2 message — published by the HAL's
+    /// queued-write task, not the caller.
+    #[tokio::test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+                  has no unicast-peer/interface config); these run on Linux CI. To run locally, \
+                  ensure an active multicast-capable interface and use `--ignored`."
+    )]
+    async fn test_hal_publish_string_via_try_send() {
+        use rand::Rng;
+        use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
+        use std::time::Duration;
+
+        // Use an isolated domain to avoid interacting with any locally-running ROS graph.
+        let domain_id: u16 = rand::rng().random_range(1..=200);
+
+        // Create a config with a Publish-direction String topic
+        // field_mappings maps ROS field "data" to the Arora key "text"
+        let config = ROS2RobotConfig {
+            domain_id: Some(domain_id),
+            topics: vec![TopicConfig::new::<msgs::String>(
+                "/speech",
+                TopicDirection::Publish,
+                TopicMapping::StandardMessage {
+                    field_mappings: {
+                        let mut mappings = std::collections::HashMap::new();
+                        mappings.insert("data".to_string(), "text".to_string());
+                        mappings
+                    },
+                },
+            )],
+            joint_ids: JointIdMapping::Override(HashMap::new()),
+            ..Default::default()
+        };
+
+        let hal = Ros2Hal::new(config).await.expect("failed to create HAL");
+
+        // Create a separate subscriber node to receive messages from the HAL
+        let context_options = ros2_client::ContextOptions::new().domain_id(domain_id);
+        let sub_ctx = ros2_client::Context::with_options(context_options)
+            .expect("failed to create subscriber context");
+
+        let sub_node_name = RosNodeName::new("/", &format!("try_send_subscriber_{domain_id}"))
+            .expect("valid node name");
+        let mut sub_node = sub_ctx
+            .new_node(sub_node_name, NodeOptions::new())
+            .expect("failed to create subscriber node");
+        tokio::spawn(sub_node.spinner().unwrap().spin());
+
+        let topic_name = RosName::parse("/speech").expect("valid topic name");
+        // Use DEFAULT_PUBLISHER_QOS for the subscriber topic to match the publisher's QoS
+        let sub_topic = sub_node
+            .create_topic(
+                &topic_name,
+                msgs::String::message_type_name(),
+                &DEFAULT_PUBLISHER_QOS,
+            )
+            .expect("create subscriber topic");
+        let subscriber = sub_node
+            .create_subscription::<msgs::String>(&sub_topic, None)
+            .expect("create subscriber");
+
+        // Give time for DDS discovery between subscriber and the HAL's publisher
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Create a state change to publish
+        // Use "text" key which will be mapped to ROS "data" field
+        let test_message = "Hello from try_send!";
+        let mut state_change = StateChange::new();
+        state_change.set.insert(
+            Key::from("text".to_string()),
+            Some(Value::from(test_message.to_string())),
+        );
+
+        // Spawn a task to repeatedly enqueue via the HAL's try_send method;
+        // the HAL's queued-write task performs the publishes.
+        tokio::spawn(async move {
+            loop {
+                hal.try_send(&state_change);
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });

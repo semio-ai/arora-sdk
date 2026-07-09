@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedSender;
+use futures::StreamExt;
 use log::{debug, error, info, warn};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
@@ -24,10 +25,24 @@ type JointGroup = (Vec<String>, Vec<f64>, Vec<f64>);
 /// from a [`RESTfulRobotConfig`]; the remaining state is interior-mutable so
 /// every trait method takes `&self`.
 ///
-/// The robot's API is write-only from the HAL's point of view: `write()` turns
-/// target values into HTTP requests and mirrors targets into measured values,
+/// The robot's API is write-only from the HAL's point of view: writes turn
+/// target values into HTTP requests and mirror targets into measured values,
 /// so reads and updates reflect the commands sent, not sensor readings.
+/// `write()` awaits that path directly; `try_send` hands the changes to the
+/// queued-write task, which drives the same path — the caller never waits on
+/// an HTTP round-trip.
 pub struct RestfulHal {
+    // The write path and the state it drives, shared with the queued-write task
+    inner: Arc<Inner>,
+
+    // Feeds the queued-write task; dropping it (with the HAL) closes the
+    // channel, and the task ends once the remaining backlog is flushed
+    outbound: UnboundedSender<StateChange>,
+}
+
+/// The HAL internals behind both write entries: `write()` calls straight in,
+/// the queued-write task serving `try_send` holds its own handle.
+struct Inner {
     // Configuration
     config: RESTfulRobotConfig,
 
@@ -41,12 +56,26 @@ pub struct RestfulHal {
     subscribers: Mutex<Vec<UnboundedSender<StateChange>>>,
 }
 
+/// Fold `later` into `earlier`, per-key newest wins: applying the folded
+/// change equals applying both in order.
+fn fold_newest_wins(earlier: &mut StateChange, later: StateChange) {
+    for key in later.unset {
+        earlier.set.remove(&key);
+        earlier.unset.insert(key);
+    }
+    for (key, value) in later.set {
+        earlier.unset.remove(&key);
+        earlier.set.insert(key, value);
+    }
+}
+
 impl RestfulHal {
     /// Create a new RestfulHal with the given configuration.
     ///
-    /// Validates the configuration and builds the HTTP client. Requests are
-    /// only issued from `write()`, which must run on a Tokio runtime (the
-    /// Arora runtime provides one).
+    /// Validates the configuration, builds the HTTP client, and spawns the
+    /// queued-write task serving `try_send`. Must be called within a Tokio
+    /// runtime that outlives the HAL (the task and `write()`'s requests run
+    /// on it).
     pub fn new(config: RESTfulRobotConfig) -> Result<Self, RESTfulRobotError> {
         config.validate()?;
         let client = Client::builder()
@@ -59,14 +88,35 @@ impl RestfulHal {
             config.base_url
         );
 
-        Ok(Self {
+        let inner = Arc::new(Inner {
             config,
             client,
             current_state: Mutex::new(State::new()),
             subscribers: Mutex::new(Vec::new()),
-        })
-    }
+        });
 
+        // The queued-write task: receives the changes `try_send` enqueues,
+        // folds any backlog into one change (per-key newest wins) so slow
+        // round-trips coalesce, and drives the same write path as `write()`.
+        // It ends when the channel closes, i.e. when the HAL is dropped.
+        let (outbound, mut outbound_rx) = futures::channel::mpsc::unbounded::<StateChange>();
+        let task_inner = inner.clone();
+        tokio::spawn(async move {
+            while let Some(mut changes) = outbound_rx.next().await {
+                while let Ok(later) = outbound_rx.try_recv() {
+                    fold_newest_wins(&mut changes, later);
+                }
+                if let Err(e) = task_inner.write(changes).await {
+                    warn!("Queued write failed: {e}");
+                }
+            }
+        });
+
+        Ok(Self { inner, outbound })
+    }
+}
+
+impl Inner {
     /// Plan the HTTP requests for the joint-position targets in `changes`.
     ///
     /// Returns the resulting state changes (the targets plus their mirrored
@@ -214,49 +264,8 @@ impl RestfulHal {
     fn find_endpoint_by_path(&self, path: &str) -> Option<&EndpointConfig> {
         self.config.endpoints.iter().find(|e| e.path == path)
     }
-}
 
-#[async_trait]
-impl Hal for RestfulHal {
-    /// Describe the device from the robot configuration.
-    async fn describe(&self) -> HalDescription {
-        debug!("describe called.");
-        HalDescription {
-            model_family: self.config.model_family.clone(),
-            hardware_version: self.config.hardware_version.clone(),
-            software_version: self.config.software_version.clone(),
-        }
-    }
-
-    /// Retrieves the current values for the given keys from the local state
-    /// cache. Absent keys read as `None`.
-    async fn read(&self, keys: &[Key]) -> HalResult<Vec<Option<Value>>> {
-        debug!("Received read request for {} keys", keys.len());
-        let state = self.current_state.lock().expect("state lock poisoned");
-        Ok(keys
-            .iter()
-            .map(|key| state.get(key).cloned().flatten())
-            .collect())
-    }
-
-    /// Retrieves all key/value pairs currently held in the local state cache.
-    async fn read_all(&self) -> HalResult<State> {
-        debug!("Received read_all request");
-        let state = self.current_state.lock().expect("state lock poisoned");
-        debug!(
-            "Returning all {} key-value pairs from local state",
-            state.storage.len()
-        );
-        Ok(state.clone())
-    }
-
-    /// Applies actuator/state changes to the robot.
-    ///
-    /// Caches the changes, POSTs the joint-position targets to every matching
-    /// API endpoint, and mirrors the targets into measured values (the API
-    /// reports no readings) — observers see the targets plus the mirrored
-    /// values. Per-endpoint failures are logged as warnings; the call only
-    /// errors when every matching endpoint failed.
+    /// The write path shared by [`Hal::write`] and the queued-write task.
     async fn write(&self, changes: StateChange) -> HalResult<()> {
         debug!(
             "Received write with state changes: {} set, {} unset",
@@ -304,6 +313,72 @@ impl Hal for RestfulHal {
             )))
         }
     }
+}
+
+#[async_trait]
+impl Hal for RestfulHal {
+    /// Describe the device from the robot configuration.
+    async fn describe(&self) -> HalDescription {
+        debug!("describe called.");
+        HalDescription {
+            model_family: self.inner.config.model_family.clone(),
+            hardware_version: self.inner.config.hardware_version.clone(),
+            software_version: self.inner.config.software_version.clone(),
+        }
+    }
+
+    /// Retrieves the current values for the given keys from the local state
+    /// cache. Absent keys read as `None`.
+    async fn read(&self, keys: &[Key]) -> HalResult<Vec<Option<Value>>> {
+        debug!("Received read request for {} keys", keys.len());
+        let state = self
+            .inner
+            .current_state
+            .lock()
+            .expect("state lock poisoned");
+        Ok(keys
+            .iter()
+            .map(|key| state.get(key).cloned().flatten())
+            .collect())
+    }
+
+    /// Retrieves all key/value pairs currently held in the local state cache.
+    async fn read_all(&self) -> HalResult<State> {
+        debug!("Received read_all request");
+        let state = self
+            .inner
+            .current_state
+            .lock()
+            .expect("state lock poisoned");
+        debug!(
+            "Returning all {} key-value pairs from local state",
+            state.storage.len()
+        );
+        Ok(state.clone())
+    }
+
+    /// Applies actuator/state changes to the robot.
+    ///
+    /// Caches the changes, POSTs the joint-position targets to every matching
+    /// API endpoint, and mirrors the targets into measured values (the API
+    /// reports no readings) — observers see the targets plus the mirrored
+    /// values. Per-endpoint failures are logged as warnings; the call only
+    /// errors when every matching endpoint failed.
+    async fn write(&self, changes: StateChange) -> HalResult<()> {
+        self.inner.write(changes).await
+    }
+
+    /// Enqueues the changes onto the queued-write task and returns; the task
+    /// folds the backlog (per-key newest wins) and drives the same path as
+    /// [`write`](Hal::write). Never waits on the HTTP round-trip.
+    fn try_send(&self, changes: &StateChange) {
+        if changes.is_empty() {
+            return;
+        }
+        if self.outbound.unbounded_send(changes.clone()).is_err() {
+            warn!("Dropping a state change: the queued-write task is gone");
+        }
+    }
 
     /// A feed of the changes the robot reports.
     ///
@@ -314,6 +389,7 @@ impl Hal for RestfulHal {
         let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let snapshot = self
+            .inner
             .current_state
             .lock()
             .expect("state lock poisoned")
@@ -325,7 +401,8 @@ impl Hal for RestfulHal {
             });
         }
 
-        self.subscribers
+        self.inner
+            .subscribers
             .lock()
             .expect("subscribers lock poisoned")
             .push(tx);
@@ -543,6 +620,45 @@ mod tests {
         );
         assert_eq!(
             change.set.get(&Key::from("head_yaw.target_position")),
+            Some(&Some(Value::from(0.5)))
+        );
+    }
+
+    /// `try_send` returns without waiting: the queued-write task POSTs the
+    /// change and notifies subscribers, same as `write`.
+    #[tokio::test]
+    async fn test_try_send_posts_and_mirrors() {
+        use std::time::Duration;
+
+        let (base_url, requests) = spawn_http_server(|_| 200);
+        let hal = RestfulHal::new(head_config(&base_url)).expect("create HAL");
+        let mut feed = hal.updates();
+
+        hal.try_send(&StateChange::set(
+            "head_yaw.target_position",
+            Value::from(0.5),
+        ));
+
+        // The endpoint receives the converted payload once the task flushes.
+        let (path, payload) =
+            tokio::task::spawn_blocking(move || requests.recv_timeout(Duration::from_secs(10)))
+                .await
+                .expect("receiving thread panicked")
+                .expect("one request expected");
+        assert_eq!(path, "/api/v1/head");
+        assert_eq!(payload["method"], serde_json::json!("look"));
+
+        // The subscriber sees the target and the mirrored measured position.
+        let change = tokio::time::timeout(Duration::from_secs(10), feed.next())
+            .await
+            .expect("a state change expected")
+            .expect("feed closed unexpectedly");
+        assert_eq!(
+            change.set.get(&Key::from("head_yaw.target_position")),
+            Some(&Some(Value::from(0.5)))
+        );
+        assert_eq!(
+            change.set.get(&Key::from("head_yaw.position")),
             Some(&Some(Value::from(0.5)))
         );
     }

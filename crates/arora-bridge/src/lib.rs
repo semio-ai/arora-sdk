@@ -26,7 +26,8 @@
 //! hands out one endpoint per device, demuxing inbound events to the right
 //! endpoint's stream — share the core, not the endpoint.
 //!
-//! The trait depends on `futures` (for [`Stream`]) but on **no async runtime**:
+//! The trait depends on `futures-core` (for [`Stream`]) but on **no async
+//! runtime**:
 //! native impls may feed the stream from their own tokio task, web impls from
 //! browser events; the runtime only polls.
 //!
@@ -38,8 +39,8 @@
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::channel::oneshot;
-use futures::Stream;
+use futures_channel::oneshot;
+use futures_core::Stream;
 
 use arora_types::call::{Call, CallResult};
 use arora_types::data::{Key, StateChange};
@@ -268,7 +269,7 @@ pub trait Bridge: Send + Sync {
     /// ([`take_inbound`](Bridge::take_inbound)): the operator front end serves
     /// it on its own task, one request at a time.
     async fn access_requests(&self) -> AccessRequestStream {
-        Box::pin(futures::stream::pending())
+        Box::pin(futures_util::stream::pending())
     }
 }
 
@@ -287,7 +288,7 @@ impl FakeBridge {
 #[async_trait]
 impl Bridge for FakeBridge {
     fn take_inbound(&mut self) -> InboundStream {
-        Box::pin(futures::stream::pending())
+        Box::pin(futures_util::stream::pending())
     }
 
     fn try_send(&mut self, _change: &StateChange) {}
