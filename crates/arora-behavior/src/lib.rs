@@ -57,7 +57,7 @@ pub struct BehaviorContext<'a> {
     /// The shared blackboard: read inputs, write intent / outputs.
     pub store: &'a dyn DataStore,
     /// The module-call bridge (the engine), for interpreters that call modules.
-    pub caller: &'a mut dyn CallBridge,
+    pub call_bridge: &'a mut dyn CallBridge,
 }
 
 /// An interpreter failed to tick.
@@ -102,15 +102,14 @@ pub trait BehaviorInterpreter {
     /// editable [`graph::Graph`] (the behavior tree does). A hand-coded,
     /// non-graph interpreter (the corner case above) can leave this as-is.
     ///
-    /// `ctx` is the same context a tick gets: an editable interpreter re-lowers
-    /// its graph against `ctx.store` (the slots are re-resolved there — the
-    /// interpreter never retains the store).
-    fn apply(
-        &mut self,
-        diff: graph::GraphDiff,
-        ctx: &mut BehaviorContext,
-    ) -> Result<(), BehaviorError> {
-        let _ = (diff, ctx);
+    /// `apply` validates and stores the edit; an implementation may defer
+    /// re-lowering its runtime form to the next [`tick`](Self::tick) (which
+    /// carries the store in its context), so a lowering problem can surface
+    /// there rather than here. This keeps `apply` callable from anywhere a
+    /// [`GraphDiff`](graph::GraphDiff) arrives — notably an engine-registered
+    /// edit function, which holds no store.
+    fn apply(&mut self, diff: graph::GraphDiff) -> Result<(), BehaviorError> {
+        let _ = diff;
         Err(BehaviorError {
             message: "this interpreter does not support graph edition".to_string(),
         })

@@ -356,7 +356,7 @@ pub fn tick_behavior(
     };
     let mut ctx = BehaviorContext {
         store,
-        caller: engine,
+        call_bridge: engine,
     };
     let status = behavior
         .tick(&mut ctx)
