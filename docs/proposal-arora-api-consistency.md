@@ -279,6 +279,12 @@ pub fn step(&mut self, dt: Duration) -> Result<StepOutcome, RuntimeError> {
 
 **Per-key precedence within one frame, total and visible in the code order: behavior (last) ▸ bridge updates ▸ HAL readings ▸ previous frame** — and inside each phase, arrival order (newest wins). Confirmed consequences: bridge beats HAL within a frame (deterministic phase order, not network timing); behavior always wins the frame *and sees what it overrides*; the pump only buffers, so nothing interleaves into a tick. `biased` + `Delay` keep the cadence fixed under load.
 
+Two rules keep the loop echo-free: the store's change feed carries **value
+changes only** (a write that leaves a key at the value it already holds does
+not notify — `SimpleDataStore` dedups per key), and phase 6 writes the HAL
+**minus the keys whose frame-final value came from the HAL's own readings**
+(the hardware is not told what it just reported; the bridges are).
+
 **Web:** there is no `run` on wasm — rAF drives `step`, and phase 0's `now_or_never` sweep of the same streams is the whole pump (correct because browser producers are push-based). One design, two drivers; no `cfg` in the semantics.
 
 ### 7.4 Migration plan (from the current stack)
