@@ -491,7 +491,7 @@ fn lower_tree_node_to_graph(
     };
     let mut inputs = Vec::with_capacity(tree_node.parameters.len());
     for (param_id, expression) in &tree_node.parameters {
-        inputs.push(Io::input(*param_id));
+        inputs.push(Io::new(*param_id));
         let source = groot_expression_to_link_source(expression)?;
         graph
             .links

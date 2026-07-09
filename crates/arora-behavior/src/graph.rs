@@ -5,7 +5,8 @@
 //! set of [`Node`]s, each bound to a **function** (a statically-known id the
 //! interpreter handles natively, **or** a module call routed by that same id —
 //! exactly how `arora-behavior-tree` already treats its builtins and module
-//! actions homogeneously), with typed **inputs/outputs** ([`Io`]) and **links**
+//! actions homogeneously), with typed slots ([`Io`] — inputs and outputs, told apart by
+//! which [`Node`] list holds them) and **links**
 //! ([`Link`]) wiring an output/port of one node into the input of another.
 //!
 //! This module is *only* the data model. It does not tick anything and it does
@@ -27,18 +28,10 @@ use arora_types::value::Value;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Whether an [`Io`] is a node **input** (a sink the interpreter feeds) or an
-/// **output** (a source it can link elsewhere).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum Direction {
-    /// A value the node consumes — the target end of a [`Link`].
-    Input,
-    /// A value the node produces — a source a [`Link`] can read from.
-    Output,
-}
-
-/// A typed input or output on a [`Node`].
+/// A typed slot on a [`Node`] — one entry of [`Node::inputs`] or
+/// [`Node::outputs`]. **Which of the two lists holds it is what makes it an
+/// input or an output**; the slot itself carries no direction, so the two can
+/// never disagree.
 ///
 /// `id` matches the function's parameter id (for an input) or is the node's
 /// output slot id (a return is conventionally the function id itself). `ty` is
@@ -49,8 +42,6 @@ pub enum Direction {
 pub struct Io {
     /// The slot id: a parameter id for an input, an output slot id for an output.
     pub id: Uuid,
-    /// Whether this slot is consumed (input) or produced (output).
-    pub direction: Direction,
     /// The slot's arora `Value` type, when known from the function signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ty: Option<TypeRef>,
@@ -64,21 +55,10 @@ pub struct Io {
 }
 
 impl Io {
-    /// A bare input slot with no type or predetermined key.
-    pub fn input(id: Uuid) -> Self {
+    /// A bare slot with no type or predetermined key.
+    pub fn new(id: Uuid) -> Self {
         Self {
             id,
-            direction: Direction::Input,
-            ty: None,
-            predetermined_key: None,
-        }
-    }
-
-    /// A bare output slot with no type or predetermined key.
-    pub fn output(id: Uuid) -> Self {
-        Self {
-            id,
-            direction: Direction::Output,
             ty: None,
             predetermined_key: None,
         }
@@ -430,7 +410,7 @@ mod tests {
             Node {
                 id: a,
                 function: Uuid::from_u128(0xF1),
-                inputs: vec![Io::input(slot)],
+                inputs: vec![Io::new(slot)],
                 ..Node::default()
             },
         );
