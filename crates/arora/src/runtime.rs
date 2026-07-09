@@ -60,7 +60,7 @@ use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatu
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
 use arora_hal::Hal;
-use arora_types::call::CallResult;
+use arora_types::call::{CallBridge, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
@@ -248,13 +248,14 @@ pub fn apply_sensors(
 pub fn apply_events(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
+    call_bridge: &mut dyn CallBridge,
     events: Vec<Inbound>,
     telemetry: &Telemetry,
 ) -> Result<StepOutcome, RuntimeError> {
     let mut outcome = StepOutcome::Live;
     for event in events {
         match event {
-            Inbound::Command(cmd) => apply_command(store, function_index, cmd)?,
+            Inbound::Command(cmd) => apply_command(store, function_index, call_bridge, cmd)?,
             Inbound::DeviceInfo(Ok(None)) => outcome = StepOutcome::Unregistered,
             Inbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
             Inbound::DeviceInfo(Err(e)) => {
@@ -275,6 +276,7 @@ pub fn apply_events(
 fn apply_command(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
+    call_bridge: &mut dyn CallBridge,
     cmd: BridgeCommand,
 ) -> Result<(), RuntimeError> {
     let result = match &cmd.op {
@@ -296,10 +298,19 @@ fn apply_command(
             }),
             Err(e) => Err(e.to_string()),
         },
-        BridgeOp::Call(_call) => {
-            // TODO(PR 5): dispatch the call through the engine (the golden
-            // behavior-edit functions plug in exactly here).
-            Err("call handling is not yet wired".to_string())
+        BridgeOp::Call(call) => {
+            // A bridge Call dispatches through the engine's `CallBridge` (the
+            // arora-types abstraction over the engine implementation).
+            // TODO(PR 5b / edition): a Call to arora-behavior's golden
+            // behavior-edit module id will reach `interpreter.apply(GraphDiff)`
+            // through this same dispatch, once that id is registered against the
+            // interpreter by the builder.
+            match call.module_id {
+                Some(module) => call_bridge
+                    .arora_call(&module, call.clone())
+                    .map_err(|e| format!("call failed: {e:?}")),
+                None => Err("call is missing its module id".to_string()),
+            }
         }
         BridgeOp::ListKeys { prefix } => {
             // Introspection: enumerate the live (set) key paths, optionally
@@ -465,6 +476,7 @@ impl Arora {
         let outcome = apply_events(
             &*self.store,
             &self.function_index,
+            &mut self.engine,
             std::mem::take(&mut self.pending.events),
             &self.telemetry,
         )?;
@@ -704,7 +716,7 @@ mod tests {
 
     #[test]
     fn stops_when_unregistered() {
-        let arora = build(Box::new(UnregisterBridge));
+        let mut arora = build(Box::new(UnregisterBridge));
         drive_until_unregistered(arora);
     }
 
@@ -732,7 +744,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_and_update_commands_round_trip() {
-        let arora = build(Box::new(UnregisterBridge));
+        let mut arora = build(Box::new(UnregisterBridge));
         let key = Key::from("greeting");
 
         // Update writes a value into the store.
@@ -746,6 +758,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(BridgeOp::Update(change), tx),
         )
         .unwrap();
@@ -756,6 +769,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(BridgeOp::Get(vec![key]), tx),
         )
         .unwrap();
@@ -801,6 +815,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(BridgeOp::Get(vec![Key::from("from_behavior")]), tx),
         )
         .unwrap();
@@ -815,7 +830,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
-        let arora = build(Box::new(UnregisterBridge));
+        let mut arora = build(Box::new(UnregisterBridge));
 
         // Seed three keys across two prefixes.
         let mut set = HashMap::new();
@@ -826,6 +841,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::Update(StateChange {
                     set,
@@ -841,6 +857,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::ListKeys {
                     prefix: Some("face".into()),
@@ -863,6 +880,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(BridgeOp::ListMethods { prefix: None }, tx),
         )
         .unwrap();
@@ -906,7 +924,7 @@ mod tests {
     async fn device_over_namespaced_store_writes_under_namespace() {
         let shared = SimpleDataStore::new();
         let store = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
-        let arora = build_in(Box::new(FakeBridge::new()), Box::new(store));
+        let mut arora = build_in(Box::new(FakeBridge::new()), Box::new(store));
 
         // Drive a write through the store pipeline.
         let (tx, rx) = oneshot::channel();
@@ -915,6 +933,7 @@ mod tests {
         apply_command(
             &*arora.store,
             &arora.function_index,
+            &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::Update(StateChange {
                     set,
