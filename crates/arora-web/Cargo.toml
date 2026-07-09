@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -21,7 +21,7 @@ arora-types = { path = "../arora-types", version = "1.6" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime) plus the in-process fakes it runs with and the
 # traits the primitive is injectable over.
-arora = { path = "../arora", version = "4", default-features = false }
+arora = { path = "../arora", version = "5", default-features = false }
 arora-behavior = { path = "../arora-behavior", version = "3" }
 arora-hal = { path = "../arora-hal", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "3" }
