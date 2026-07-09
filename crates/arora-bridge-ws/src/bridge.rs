@@ -1,27 +1,30 @@
 //! [`WsBridge`]: the WebSocket server driven as an Arora
 //! [`Bridge`](arora_bridge::Bridge).
 //!
-//! Each incoming message becomes a [`BridgeCommand`] the runtime drains through
-//! [`try_recv`](Bridge::try_recv), and reacts to the ones it cares about (writes
-//! apply to the store, reads reply). Runtime state flows back out through
-//! [`try_send`](Bridge::try_send) as a `values_changed` push.
+//! Each incoming message becomes a [`BridgeCommand`] on the endpoint's inbound
+//! stream (handed to the runtime once, via
+//! [`take_inbound`](Bridge::take_inbound)); the runtime reacts to the ones it
+//! cares about (writes apply to the store, reads reply). Runtime state flows
+//! back out through [`try_send`](Bridge::try_send) as a `values_changed` push.
 //!
 //! The async lives in the server (its own accept/serve task, spawned by the
 //! embedder): the server's registered handlers translate each incoming message
-//! into a command and enqueue it on an internal channel that [`try_recv`] drains
-//! non-blocking. [`try_send`] pushes to the connected clients synchronously. The
-//! value vocabulary is `arora_types::Value`, so the translation is structural,
-//! not a conversion.
+//! into a command and send it down the inbound channel whose receiver *is* the
+//! stream the runtime polls — no intermediate buffer, no lock. [`try_send`]
+//! pushes to the connected clients synchronously. The value vocabulary is
+//! `arora_types::Value`, so the translation is structural, not a conversion.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound};
+use arora_bridge::{
+    Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
+};
 use arora_types::data::{Key, StateChange};
 use arora_types::value::Value;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
+use futures::StreamExt;
 
 use crate::messages::Outgoing;
 use crate::server::AroraWSServer;
@@ -34,11 +37,8 @@ use crate::server::AroraWSServer;
 /// when serving purely through the bridge.
 pub struct WsBridge {
     server: Arc<AroraWSServer>,
-    /// Inbound commands the server handlers enqueue; drained by [`try_recv`].
-    commands: Mutex<mpsc::UnboundedReceiver<BridgeCommand>>,
-    /// A connected editor is a data consumer: signal `data_requested(true)` once
-    /// on the first [`try_recv`], before any command.
-    data_requested_signaled: AtomicBool,
+    /// The inbound command receiver, moved out (once) by [`take_inbound`].
+    commands: Option<mpsc::UnboundedReceiver<BridgeCommand>>,
 }
 
 impl WsBridge {
@@ -86,8 +86,7 @@ impl WsBridge {
 
         Self {
             server,
-            commands: Mutex::new(cmd_rx),
-            data_requested_signaled: AtomicBool::new(false),
+            commands: Some(cmd_rx),
         }
     }
 }
@@ -108,20 +107,20 @@ fn values_from_get(keys: &[String], ret: Value) -> HashMap<String, Value> {
 
 #[async_trait]
 impl Bridge for WsBridge {
-    fn try_recv(&self) -> Option<Inbound> {
-        // A connected editor is a data consumer: emit the claim once, up front.
-        if !self.data_requested_signaled.swap(true, Ordering::Relaxed) {
-            return Some(Inbound::DataRequested(true));
-        }
-        // Drain the next command the server's handlers enqueued, if any.
-        // `Err` = empty right now or the sender was dropped; either way, nothing.
-        match self.commands.lock().unwrap().try_recv() {
-            Ok(cmd) => Some(Inbound::Command(cmd)),
-            Err(_) => None,
-        }
+    fn take_inbound(&mut self) -> InboundStream {
+        // A connected editor is a data consumer: the claim opens the stream,
+        // then every command the server's handlers enqueue follows, in order.
+        let commands = self
+            .commands
+            .take()
+            .expect("WsBridge inbound stream already taken");
+        Box::pin(
+            futures::stream::once(async { Inbound::DataRequested(true) })
+                .chain(commands.map(Inbound::Command)),
+        )
     }
 
-    fn try_send(&self, change: &StateChange) {
+    fn try_send(&mut self, change: &StateChange) {
         // Push the changed keys to the connected client(s).
         let mut values = HashMap::new();
         for (key, value) in &change.set {
@@ -155,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn try_send_pushes_values_changed() {
         let server = Arc::new(AroraWSServer::new(ServerConfig::default()));
-        let bridge = WsBridge::new(server.clone()).await;
+        let mut bridge = WsBridge::new(server.clone()).await;
         let mut rx = server.subscribe();
 
         bridge.try_send(&StateChange::set("face/mouth", Value::F64(0.5)));

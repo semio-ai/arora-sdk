@@ -16,6 +16,7 @@ use arora_bridge::{Bridge, BridgeOp, Inbound};
 use arora_bridge_ros2::conversions::topic_name;
 use arora_bridge_ros2::msg_types::{self, MessageType};
 use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type, Value};
+use futures::StreamExt;
 use rand::Rng;
 use ros2_client::{
     Context, ContextOptions, Name, NodeName, NodeOptions, DEFAULT_PUBLISHER_QOS,
@@ -56,7 +57,8 @@ async fn inbound_topic_becomes_update_command() {
 
     let config =
         Ros2BridgeConfig::new(&namespace, domain_id).with_input("face/mouth/open", Type::F64);
-    let bridge = Ros2Bridge::new(config).await;
+    let mut bridge = Ros2Bridge::new(config).await;
+    let mut inbound = bridge.take_inbound();
 
     let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
     let topic = Name::parse(&topic_name(&namespace, "face/mouth/open")).expect("valid topic name");
@@ -81,14 +83,14 @@ async fn inbound_topic_becomes_update_command() {
         }
     });
 
-    // Poll the synchronous inbound seam for the Update command, skipping the
+    // Await the Update command on the endpoint's inbound stream, skipping the
     // initial `DataRequested(true)` signal, within a timeout.
     let command = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            match bridge.try_recv() {
+            match inbound.next().await {
                 Some(Inbound::Command(cmd)) => break cmd,
                 Some(_) => {}
-                None => tokio::time::sleep(Duration::from_millis(20)).await,
+                None => panic!("the inbound stream ended before a command arrived"),
             }
         }
     })
@@ -120,7 +122,7 @@ async fn send_data_reaches_topic_subscriber() {
     let domain_id = random_domain_id();
     let namespace = format!("test_out_{domain_id}");
 
-    let bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
+    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
 
     // Subscribe on a separate node to the key's topic.
     let (_ctx, mut sub_node) = create_test_node(domain_id, &format!("sub_{domain_id}"));
