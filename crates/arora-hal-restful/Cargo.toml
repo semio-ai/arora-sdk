@@ -38,7 +38,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# rt only: the queued-write task serving `try_send` runs on the caller's runtime.
+tokio = { version = "1", features = ["rt"] }
 webpki-roots = "1"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# `time` (tests only): the try_send test times out around the queued write.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

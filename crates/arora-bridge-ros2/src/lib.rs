@@ -16,8 +16,8 @@
 //! - [`try_send`](arora_bridge::Bridge::try_send) publishes each changed key
 //!   to its topic; the `std_msgs` message type is chosen from the value's type,
 //!   with a JSON `std_msgs/String` fallback for non-scalar values.
-//! - [`try_recv`](arora_bridge::Bridge::try_recv) turns each message received on
-//!   a configured input topic into a
+//! - the inbound stream ([`take_inbound`](arora_bridge::Bridge::take_inbound))
+//!   carries each message received on a configured input topic as a
 //!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) command for the Arora
 //!   runtime to apply to its store.
 //!

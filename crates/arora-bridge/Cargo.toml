@@ -14,7 +14,10 @@ categories = ["api-bindings"]
 [dependencies]
 arora-types = { path = "../arora-types", version = "1.5" }
 async-trait = "0.1"
-futures = "0.3"
+futures-channel = "0.3"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
+futures = "0.3"
 tokio = { version = "1", features = ["macros", "rt"] }
