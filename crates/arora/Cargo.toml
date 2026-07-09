@@ -43,7 +43,7 @@ native = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "0.1", default-features = false }
+arora-engine = { path = "../arora-engine", version = "1", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "3" }
 arora-behavior = { path = "../arora-behavior", version = "2" }
 arora-types = { path = "../arora-types", version = "1.4" }
