@@ -3,15 +3,15 @@
 //! Every entry point builds an [`Arora`] with the [builder](Arora::builder) and
 //! drives it to completion (until the device is unregistered or the process is
 //! interrupted) with an optional Groot tree installed from the first CLI
-//! argument. They differ only in which seams the caller supplies vs. defaults:
+//! argument. They are `async` — the caller drives them on its own Tokio runtime
+//! (the binary from `#[tokio::main]`) — and differ only in which seams the caller
+//! supplies vs. defaults:
 //!
 //! - [`run`] — default HAL (in-process fake) and default bridge.
 //! - [`run_with_hal`] — **your hardware**, default bridge. A device build is
-//!   this one call: `arora::run_with_hal(Arc::new(MyHal::new()))`.
-//! - [`run_with`] — your HAL, your bridge, your store. Full control.
-//! - [`run_with_bridge_builder`] — like [`run_with`], for bridges whose
-//!   construction is `async` and must live on arora's runtime (e.g. the Semio
-//!   Studio connector).
+//!   this one call: `arora::run_with_hal(Arc::new(MyHal::new())).await`.
+//! - [`run_with`] — your HAL, your bridge, your store. Full control; the caller
+//!   builds the bridge (awaiting its async construction itself) and hands it in.
 //!
 //! The **default bridge** depends on how the crate is built. By default it is
 //! the open local bridge ([`arora-bridge-ws`](arora_bridge_ws)): the device
@@ -24,6 +24,10 @@
 //! On the web, drive the device via `arora-web`'s `AroraRuntime` instead.
 
 #[cfg(feature = "native")]
+use std::collections::HashMap;
+#[cfg(feature = "native")]
+use std::rc::Rc;
+#[cfg(feature = "native")]
 use std::sync::Arc;
 
 #[cfg(feature = "native")]
@@ -32,7 +36,9 @@ use anyhow::{anyhow, Context, Result};
 use arora_bridge::Bridge;
 #[cfg(feature = "native")]
 use arora_hal::Hal;
-#[cfg(feature = "native")]
+// Only the default-bridge `run_with_hal` builds the fallback store here; the
+// Studio variant lives in `studio::run_with_hal`.
+#[cfg(all(feature = "native", not(feature = "studio-bridge")))]
 use arora_simple_data_store::SimpleDataStore;
 #[cfg(feature = "native")]
 use arora_types::data::DataStore;
@@ -42,89 +48,64 @@ use log::info;
 #[cfg(feature = "native")]
 use crate::operator::{serve_access_requests, Frontend};
 #[cfg(feature = "native")]
-use crate::Arora;
+use crate::{Arora, BehaviorTreeInterpreter};
 
 /// Run the default device: in-process fake HAL, default bridge.
 #[cfg(feature = "native")]
-pub fn run() -> Result<()> {
-    run_with_hal(Arc::new(arora_hal::FakeHal::new()))
+pub async fn run() -> Result<()> {
+    run_with_hal(Arc::new(arora_hal::FakeHal::new())).await
 }
 
 /// Run a device over `hal` with the default bridge — the one call that turns
 /// a HAL into a running device.
 #[cfg(all(feature = "native", not(feature = "studio-bridge")))]
-pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
-    // The log sink is installed by the front end that `run_with_bridge_builder`
+pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
+    // The log sink is installed by the front end that `run_with_frontend`
     // selects (env_logger headless, in-pane capture under the TUI), so don't
     // init a logger here.
-    run_with_bridge_builder(hal, Arc::new(SimpleDataStore::new()), || async {
-        let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
-            arora_bridge_ws::ServerConfig::default(),
-        ));
-        let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
-        tokio::spawn(async move {
-            if let Err(e) = server.run(arora_bridge_ws::CancellationToken::new()).await {
-                log::error!("local bridge server stopped: {e:?}");
-            }
-        });
-        info!("serving the local bridge on ws://127.0.0.1:9000");
-        let bridge: Arc<dyn Bridge> = Arc::new(bridge);
-        Ok(bridge)
-    })
+    let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
+        arora_bridge_ws::ServerConfig::default(),
+    ));
+    let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
+    tokio::spawn(async move {
+        if let Err(e) = server.run(arora_bridge_ws::CancellationToken::new()).await {
+            log::error!("local bridge server stopped: {e:?}");
+        }
+    });
+    info!("serving the local bridge on ws://127.0.0.1:9000");
+    run_with(hal, Arc::new(bridge), Arc::new(SimpleDataStore::new())).await
 }
 
 /// Run a device over `hal`, connected to Semio Studio (the `studio-bridge`
 /// default bridge).
 #[cfg(feature = "studio-bridge")]
-pub fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
-    crate::studio::run_with_hal(hal)
+pub async fn run_with_hal(hal: Arc<dyn Hal>) -> Result<()> {
+    crate::studio::run_with_hal(hal).await
 }
 
 /// Run an arora device with the given HAL, bridge, and data store.
 ///
 /// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
 /// natively) around the injected HAL + bridge over `store`, installs an optional
-/// Groot tree given as the first CLI argument, then drives the synchronous step
-/// loop on this thread. There is no io pump to spawn — the bridge and HAL own
-/// any async internally.
+/// Groot tree given as the first CLI argument, then drives the step loop. There
+/// is no io pump to spawn and no bridge factory — the caller builds the bridge
+/// (awaiting any async construction on its own runtime) and hands the finished
+/// one in here; the bridge and HAL own any async internally.
 ///
 /// Pass `Arc::new(SimpleDataStore::new())` for a self-contained device, or a
 /// clone of a shared store (any [`DataStore`]) to mutualize the blackboard
 /// across devices (e.g. Studio handing one store to every spawned device).
 #[cfg(feature = "native")]
-pub fn run_with(
+pub async fn run_with(
     hal: Arc<dyn Hal>,
     bridge: Arc<dyn Bridge>,
     store: Arc<dyn DataStore>,
 ) -> Result<()> {
-    run_with_bridge_builder(hal, store, move || async move { Ok(bridge) })
+    run_with_frontend(hal, bridge, store, select_frontend()).await
 }
 
-/// Like [`run_with`], but constructs the bridge inside arora's Tokio runtime
-/// via an asynchronous builder.
-///
-/// A bridge whose construction is `async` and whose background tasks must
-/// live on the runtime that drives it — such as the studio-bridge connector's
-/// `ZenohDeviceClient` — can't be built before this function creates its
-/// runtime, and must not be built on a throwaway one it would outlive. This
-/// variant runs the builder on arora's runtime, so the bridge and its tasks
-/// share that runtime's lifetime.
-#[cfg(feature = "native")]
-pub fn run_with_bridge_builder<F, Fut>(
-    hal: Arc<dyn Hal>,
-    store: Arc<dyn DataStore>,
-    make_bridge: F,
-) -> Result<()>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<Arc<dyn Bridge>>>,
-{
-    run_with_frontend(hal, store, select_frontend(), make_bridge)
-}
-
-/// Like [`run_with_bridge_builder`], but with a caller-supplied [`Frontend`] —
-/// the operator that answers the device's questions and the log sink that goes
-/// with it.
+/// Like [`run_with`], but with a caller-supplied [`Frontend`] — the operator that
+/// answers the device's questions and the log sink that goes with it.
 ///
 /// This is the seam every other entry point funnels through to pick between the
 /// terminal operator UI and the headless front end; a device build with its own
@@ -132,58 +113,49 @@ where
 /// [`select_frontend`], which chooses the terminal UI when the process is
 /// attached to a terminal.
 #[cfg(feature = "native")]
-pub fn run_with_frontend<F, Fut>(
+pub async fn run_with_frontend(
     hal: Arc<dyn Hal>,
+    bridge: Arc<dyn Bridge>,
     store: Arc<dyn DataStore>,
     frontend: Frontend,
-    make_bridge: F,
-) -> Result<()>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<Arc<dyn Bridge>>>,
-{
+) -> Result<()> {
     let Frontend { operator, on_ready } = frontend;
 
-    // The async bridge construction runs inside a Tokio runtime; the step loop
-    // that drives the engine is synchronous and runs on this (main) thread
-    // afterwards — the wasm executor manages its own blocking runtime and must
-    // not be ticked inside Tokio. Building the `Arora` itself is synchronous, so
-    // only the bridge needs the runtime.
-    let tokio = tokio::runtime::Runtime::new().context("failed to start Tokio runtime")?;
-    let bridge = tokio
-        .block_on(async { make_bridge().await })
-        .context("failed to build the bridge")?;
-    let mut arora = Arora::builder()
+    // Assemble the builder. If the first CLI argument is a Groot file, construct
+    // an empty behavior-tree interpreter, load that tree into it against the same
+    // store the device ticks, and inject it at build — construct-empty → load →
+    // inject. With no argument the builder's default (an empty, idle interpreter)
+    // stands. Either way the interpreter is set once here, not swapped later.
+    let mut builder = Arora::builder()
         .with_hal(hal)
         .with_bridge(bridge.clone())
-        .with_data_store(store)
-        .build()
-        .context("failed to build Arora")?;
+        .with_data_store(store.clone());
+    if let Some(path) = std::env::args().nth(1) {
+        let xml = std::fs::read_to_string(&path)
+            .with_context(|| format!("could not read Groot file {path}"))?;
+        // run.rs registers no modules, so the interpreter's function index is
+        // empty: the tree's nodes are the natively-hosted control nodes.
+        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interpreter
+            .load_groot(&xml, &store)
+            .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e:?}"))?;
+        builder = builder.with_behavior_interpreter(Box::new(interpreter));
+        info!("installed behavior tree from {path}");
+    }
+    let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device and bridge exist:
     // the telemetry handle it reads indicators from, and the device identity.
-    let (info, device_id) = tokio.block_on(async {
-        let info = bridge.get_device_info().await.ok().flatten();
-        let device_id = bridge.device_id().await;
-        (info, device_id)
-    });
+    let info = bridge.get_device_info().await.ok().flatten();
+    let device_id = bridge.device_id().await;
     on_ready(arora.telemetry(), info, device_id);
 
     info!("engine started; native behavior-tree control nodes ready");
 
-    if let Some(path) = std::env::args().nth(1) {
-        let xml = std::fs::read_to_string(&path)
-            .with_context(|| format!("could not read Groot file {path}"))?;
-        arora
-            .set_groot_xml(&xml)
-            .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e}"))?;
-        info!("installed behavior tree from {path}");
-    }
-
     // Serve remote clients' access requests through the chosen operator, one at a
     // time, for as long as the bridge yields them. (The bridge/HAL data plane is
-    // driven synchronously by `arora.run()`; only access requests still pump.)
-    tokio.spawn({
+    // driven by `arora.run()`; only access requests still pump.)
+    tokio::spawn({
         let bridge = bridge.clone();
         async move {
             let requests = bridge.access_requests().await;
@@ -191,7 +163,10 @@ where
         }
     });
     info!("running — Ctrl-C to stop");
-    arora.run().map_err(|e| anyhow!("runtime error: {e}"))
+    arora
+        .run(Arora::DEFAULT_STEP_PERIOD)
+        .await
+        .map_err(|e| anyhow!("runtime error: {e}"))
 }
 
 /// Pick the front end for this process: the terminal operator UI when the `tui`

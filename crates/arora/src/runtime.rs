@@ -52,10 +52,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
-use arora_behavior_tree::{
-    behavior::BehaviorTreeInterpreter, schema_groot, tree_node::TreeNode, BehaviorTree,
-    ModuleFunction,
-};
+use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound as BridgeInbound};
 use arora_engine::engine::PinnedEngine;
 use arora_hal::Hal;
@@ -399,79 +396,6 @@ impl Arora {
         self.telemetry.clone()
     }
 
-    /// Install the behavior interpreter to tick each step, replacing any current
-    /// one — a tree interpreter, a node-graph interpreter, or another executor.
-    /// The device ticks it while it reports [`BehaviorStatus::Running`] and drops
-    /// it once it reports [`BehaviorStatus::Done`].
-    pub fn set_behavior_interpreter(&mut self, interpreter: Box<dyn BehaviorInterpreter>) {
-        self.interpreter = Some(interpreter);
-        self.telemetry.update(|t| t.behavior = None);
-    }
-
-    /// Like [`set_behavior_interpreter`](Arora::set_behavior_interpreter), with a
-    /// display name the device reports through [`telemetry`](Arora::telemetry)
-    /// while the behavior is installed.
-    pub fn set_named_behavior_interpreter(
-        &mut self,
-        name: &str,
-        interpreter: Box<dyn BehaviorInterpreter>,
-    ) {
-        self.interpreter = Some(interpreter);
-        let name = name.to_string();
-        self.telemetry.update(|t| t.behavior = Some(name));
-    }
-
-    /// Install a behavior tree (as Groot XML) as the interpreter, replacing any
-    /// current one.
-    ///
-    /// Each Groot `{var}` is bound to the data store under its own name — the
-    /// Direct convention (variable name == store key) — so a behavior reading or
-    /// writing `{var}` reads/writes the store directly during the tick. The
-    /// step's single-writer guarantee makes that race-free.
-    pub fn set_groot_xml(&mut self, xml: &str) -> Result<(), RuntimeError> {
-        let behavior = self.build_groot_interpreter(xml)?;
-        self.set_behavior_interpreter(behavior);
-        Ok(())
-    }
-
-    /// Like [`set_groot_xml`](Arora::set_groot_xml), with a display name the
-    /// device reports through [`telemetry`](Arora::telemetry) while the tree is
-    /// installed (e.g. the tree's file stem or its Groot tree id).
-    pub fn set_named_groot_xml(&mut self, name: &str, xml: &str) -> Result<(), RuntimeError> {
-        let behavior = self.build_groot_interpreter(xml)?;
-        self.set_named_behavior_interpreter(name, behavior);
-        Ok(())
-    }
-
-    /// Build a [`BehaviorTreeInterpreter`] from Groot XML, resolving variables to
-    /// store slots under the Direct convention.
-    fn build_groot_interpreter(
-        &self,
-        xml: &str,
-    ) -> Result<Box<dyn BehaviorInterpreter>, RuntimeError> {
-        let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)
-            .map_err(|e| RuntimeError::BehaviorTree(format!("parse: {e:?}")))?;
-        // `try_into_tree_node` fills `variables` as name → variable id.
-        let mut variables = HashMap::new();
-        let tree_node: TreeNode = groot
-            .root
-            .try_into_tree_node(self.function_index.as_ref(), &mut variables)
-            .map_err(|e| RuntimeError::BehaviorTree(format!("build: {e:?}")))?;
-        // Invert to variable id → name for the BT builder.
-        let id_to_name: HashMap<Uuid, String> =
-            variables.into_iter().map(|(name, id)| (id, name)).collect();
-        // Direct convention: a variable resolves to the store slot under its name.
-        let store = self.store.clone();
-        let resolver = move |name: &str| Some(store.slot(&Key::from(name)));
-        let behavior: BehaviorTree = tree_node
-            .into_behavior_tree(&resolver, &id_to_name)
-            .map_err(|e| RuntimeError::BehaviorTree(format!("instantiate: {e:?}")))?;
-        Ok(Box::new(BehaviorTreeInterpreter::new(
-            behavior,
-            self.function_index.clone(),
-        )))
-    }
-
     /// Advance one step: the [module pipeline](self) top to bottom, wiring this
     /// object's fields into the phase functions. Non-blocking; touches the state
     /// from this (single) thread only.
@@ -501,11 +425,32 @@ impl Arora {
 }
 
 /// Native convenience: drive [`step`](Arora::step) in a loop until the device is
-/// unregistered, pacing with a short sleep. On the web, drive `step` from
-/// `requestAnimationFrame` instead (this method would block the event loop).
-#[cfg(not(target_arch = "wasm32"))]
+/// unregistered, paced at a fixed interval. On the web, drive `step` from
+/// `requestAnimationFrame` instead (this method would monopolise the loop).
+#[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
 impl Arora {
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
+    /// The default inter-step period for [`run`](Arora::run): ~100 Hz.
+    pub const DEFAULT_STEP_PERIOD: Duration = Duration::from_millis(10);
+
+    /// Drive `step` to completion at a fixed cadence, `.await`ing the interval
+    /// between steps.
+    ///
+    /// `run` is `async`: each `step` stays fully synchronous, but the pacing is a
+    /// [`tokio::time::interval`] metronome ticked with `.await`, so the future
+    /// yields to its executor between steps rather than blocking the thread. It
+    /// therefore needs a Tokio runtime in scope (the binary drives it from
+    /// `#[tokio::main]`); `step` itself owns none.
+    ///
+    /// `period` is the target time between steps — pass
+    /// [`DEFAULT_STEP_PERIOD`](Arora::DEFAULT_STEP_PERIOD) for the ~100 Hz
+    /// default. The metronome uses [`MissedTickBehavior::Delay`](tokio::time::MissedTickBehavior::Delay),
+    /// so a step that overruns the period simply shifts the next tick out rather
+    /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
+    /// **actual** measured wall time since the previous step, not `period`.
+    pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
+        let mut ticker = tokio::time::interval(period);
+        // A slow step delays the next tick instead of bursting to catch up.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // Measure the achieved step frequency over ~1 s windows and publish it
         // through the telemetry handle.
         let mut window_start = std::time::Instant::now();
@@ -513,6 +458,8 @@ impl Arora {
         // Wall-clock delta between steps, fed to `step` as the frame `dt`.
         let mut last_step = std::time::Instant::now();
         loop {
+            // Paces at the fixed period; the first tick completes immediately.
+            ticker.tick().await;
             let now = std::time::Instant::now();
             let dt = now.duration_since(last_step);
             last_step = now;
@@ -527,7 +474,6 @@ impl Arora {
                 window_start = std::time::Instant::now();
                 steps_in_window = 0;
             }
-            std::thread::sleep(Duration::from_millis(10));
         }
     }
 }
@@ -535,11 +481,13 @@ impl Arora {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
     use arora_bridge::{BridgeResult, DeviceInfo};
     use arora_hal::FakeHal;
     use arora_simple_data_store::{NamespacedStore, SimpleDataStore};
     use async_trait::async_trait;
     use futures::channel::oneshot;
+    use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     /// 16 ms as a step `dt` — a typical frame at ~60 Hz.
@@ -593,6 +541,43 @@ mod tests {
             .expect("arora builds")
     }
 
+    /// Like [`build`], but injecting a behavior interpreter at build. Interpreters
+    /// are executors set once at construction, not swapped afterwards, so a test
+    /// that ticks a specific behavior hands it in here.
+    fn build_with(bridge: Arc<dyn Bridge>, interpreter: Box<dyn BehaviorInterpreter>) -> Arora {
+        Arora::builder()
+            .with_hal(Arc::new(FakeHal::new()))
+            .with_bridge(bridge)
+            .with_behavior_interpreter(interpreter)
+            .build()
+            .expect("arora builds")
+    }
+
+    /// Like [`build_with`], but over a caller-provided store (so the injected
+    /// interpreter can resolve against the same store the device ticks).
+    fn build_in_with(
+        bridge: Arc<dyn Bridge>,
+        store: Arc<dyn DataStore>,
+        interpreter: Box<dyn BehaviorInterpreter>,
+    ) -> Arora {
+        Arora::builder()
+            .with_hal(Arc::new(FakeHal::new()))
+            .with_bridge(bridge)
+            .with_data_store(store)
+            .with_behavior_interpreter(interpreter)
+            .build()
+            .expect("arora builds")
+    }
+
+    /// Construct an empty behavior-tree interpreter (no module functions) with a
+    /// Groot tree loaded into it against `store` — the construct-empty → load →
+    /// inject flow, ready to hand to [`build_in_with`].
+    fn groot_interpreter(xml: &str, store: &Arc<dyn DataStore>) -> Box<dyn BehaviorInterpreter> {
+        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interpreter.load_groot(xml, store).expect("tree loads");
+        Box::new(interpreter)
+    }
+
     /// Drive `step` until the device reports unregistered, with a safety bound.
     /// Fully synchronous: the bridge hands over the unregister event through
     /// `try_recv` on the very next step, no pump to wait on.
@@ -607,10 +592,28 @@ mod tests {
 
     #[test]
     fn builder_defaults_to_a_self_contained_device() {
-        // No seams named: fake HAL, in-process bridge, private store, no behavior.
+        // No seams named: fake HAL, in-process bridge, private store, and the
+        // default executor — an empty, idle behavior-tree interpreter.
         let arora = Arora::builder().build().expect("default device builds");
-        assert!(arora.interpreter.is_none(), "default has no behavior");
+        assert!(
+            arora.interpreter.is_some(),
+            "default installs an (empty) behavior interpreter"
+        );
         assert_eq!(arora.bridges.len(), 1, "one default in-process bridge");
+    }
+
+    #[test]
+    fn a_default_devices_empty_interpreter_idles() {
+        // The default empty interpreter ticks a no-op (Running), so it is never
+        // dropped: it stays installed step after step, waiting for a behavior.
+        let mut arora = build(Arc::new(SilentBridge));
+        for _ in 0..5 {
+            arora.step(FRAME).expect("step");
+        }
+        assert!(
+            arora.interpreter.is_some(),
+            "the empty interpreter idles and stays installed"
+        );
     }
 
     #[test]
@@ -628,8 +631,10 @@ mod tests {
     </Sequence>
   </BehaviorTree>
 </root>"#;
-        let mut arora = build(Arc::new(UnregisterBridge::default()));
-        arora.set_groot_xml(xml).expect("tree installs");
+        // Construct an empty interpreter, load the tree into it, inject at build.
+        let store: Arc<dyn DataStore> = Arc::new(SimpleDataStore::new());
+        let interpreter = groot_interpreter(xml, &store);
+        let arora = build_in_with(Arc::new(UnregisterBridge::default()), store, interpreter);
         drive_until_unregistered(arora);
     }
 
@@ -713,12 +718,11 @@ mod tests {
         }
     }
 
-    /// The device ticks a non-tree behavior just like a tree: swapping the
-    /// interpreter is all it takes.
+    /// The device ticks a non-tree behavior just like a tree: injecting the
+    /// interpreter at build is all it takes.
     #[tokio::test]
     async fn runs_an_installed_non_tree_behavior() {
-        let mut arora = build(Arc::new(SilentBridge));
-        arora.set_behavior_interpreter(Box::new(WriteOnce));
+        let mut arora = build_with(Arc::new(SilentBridge), Box::new(WriteOnce));
 
         // One step ticks the behavior, which writes through the shared store.
         arora.step(FRAME).expect("step");
@@ -799,7 +803,8 @@ mod tests {
     }
 
     /// A behavior that writes one key/value and is then `Done` — the minimal
-    /// store-writing behavior, value-parameterized so two of them differ.
+    /// store-writing behavior, key/value-parameterized so a test can vary what it
+    /// writes.
     struct WriteKey {
         key: &'static str,
         value: Value,
@@ -865,40 +870,38 @@ mod tests {
         );
     }
 
-    /// ARORA-39 acceptance, end to end through `step()`: an installed behavior
-    /// writes a key into the device-namespaced store, and *switching* to a
-    /// different behavior changes what gets written.
+    /// ARORA-39 acceptance, end to end through `step()`: the installed behavior's
+    /// writes land under the device namespace in the shared backend, never under
+    /// the bare key. The interpreter is injected once at build — it is an
+    /// executor, not something the device swaps at runtime.
     #[tokio::test]
-    async fn behavior_writes_then_switching_changes_the_namespaced_store() {
+    async fn behavior_writes_land_in_the_namespaced_store() {
         let shared = SimpleDataStore::new();
         let store: Arc<dyn DataStore> =
             Arc::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA"));
         // SilentBridge never unregisters, so `step()` stays `Live` and ticks the
         // installed behavior each frame.
-        let mut arora = build_in(Arc::new(SilentBridge), store);
+        let mut arora = build_in_with(
+            Arc::new(SilentBridge),
+            store,
+            Box::new(WriteKey {
+                key: "greeting",
+                value: Value::String("hi".into()),
+            }),
+        );
 
-        // A behavior writes greeting = "hi"; one step lands it under the namespace.
-        arora.set_behavior_interpreter(Box::new(WriteKey {
-            key: "greeting",
-            value: Value::String("hi".into()),
-        }));
+        // The behavior writes greeting = "hi"; one step lands it under the namespace.
         assert_eq!(arora.step(FRAME).expect("step"), StepOutcome::Live);
         assert_eq!(
             shared.read(&[Key::from("robotA/greeting")]),
             vec![Some(Value::String("hi".into()))],
             "the behavior's write landed under the device namespace"
         );
-
-        // Switch to a different behavior; the next step changes the stored value.
-        arora.set_behavior_interpreter(Box::new(WriteKey {
-            key: "greeting",
-            value: Value::String("bye".into()),
-        }));
-        assert_eq!(arora.step(FRAME).expect("step"), StepOutcome::Live);
+        // …and NOT under the bare key.
         assert_eq!(
-            shared.read(&[Key::from("robotA/greeting")]),
-            vec![Some(Value::String("bye".into()))],
-            "switching the installed behavior changed what was written"
+            shared.read(&[Key::from("greeting")]),
+            vec![None],
+            "the bare key must not be set in the shared store"
         );
     }
 
@@ -976,13 +979,14 @@ mod tests {
     #[test]
     fn golden_keys_are_not_forwarded_outbound() {
         let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut arora = build(Arc::new(RecordingBridge { sent: sent.clone() }));
-
-        // A behavior writes one ordinary key; that write must reach the bridge.
-        arora.set_behavior_interpreter(Box::new(WriteKey {
-            key: "greeting",
-            value: Value::String("hi".into()),
-        }));
+        // A behavior that writes one ordinary key; that write must reach the bridge.
+        let mut arora = build_with(
+            Arc::new(RecordingBridge { sent: sent.clone() }),
+            Box::new(WriteKey {
+                key: "greeting",
+                value: Value::String("hi".into()),
+            }),
+        );
 
         // Step a few times; `try_send` records synchronously, in-line with step.
         for _ in 0..5 {
