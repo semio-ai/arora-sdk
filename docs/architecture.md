@@ -7,30 +7,44 @@ For the *why* behind these choices, see
 ## Repo layout
 
 ```
-engine/
-├── crates/               Rust crates that make up the engine and tooling
-│   ├── arora                  engine library (host + browser dual-target)
+arora-sdk/
+├── crates/
+│   ├── arora                  the runtime: a synchronous step loop over four
+│   │                          seams (store, HAL, bridge, behavior) + launch API
+│   ├── arora-engine           the module engine: executors, dispatch,
+│   │                          host-defined modules (ModuleBuilder)
+│   ├── arora-types            value / type / record vocabulary, value_serde
+│   ├── arora-buffers          wire buffers + serde straight to the wire
+│   ├── arora-behavior         BehaviorInterpreter seam, interpreter module
+│   │                          ids (load/edit), golden store keys (time/dt)
+│   ├── arora-behavior-tree         behavior-tree interpreter
+│   ├── arora-behavior-tree-types       BT primitive types
+│   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records
+│   ├── arora-bridge           Bridge seam + in-process FakeBridge
+│   ├── arora-bridge-ws        WebSocket bridge
+│   ├── arora-bridge-ros2      ROS 2 bridge
+│   ├── arora-hal              HAL seam + FakeHal
+│   ├── arora-hal-ros2         ROS 2 HAL
+│   ├── arora-hal-restful      RESTful HAL
+│   ├── arora-simple-data-store  trivial owned DataStore
+│   ├── arora-web              browser runtime: BrowserRuntime over injected
+│   │                          seams + the JS engine surface
 │   ├── arora-cli              host CLI: load modules, call functions
-│   ├── arora-web              wasm-bindgen JS surface for the engine
-│   ├── arora-buffers          buffer impls (Rust, C, C++ headers)
-│   ├── arora-util             C-helper utilities written in Rust
-│   ├── arora-vfs              virtual filesystem used by code generation
-│   ├── arora-registry         local + remote record registry
+│   ├── arora-registry         local record registry
+│   ├── arora-registry-remote  remote record registry
 │   ├── arora-module-authoring/  module-author toolbox (grouped crates)
 │   │   ├── core               type/module analysis + resolution
 │   │   ├── cli                host code-generator entry point
 │   │   ├── rust               Rust code generator
 │   │   └── cpp                C++ code generator
-│   ├── arora-behavior-tree         behavior-tree runtime
-│   ├── arora-behavior-tree-types         BT primitive types
-│   ├── arora-behavior-tree-types-yaml    same types serialised as YAML records
-│   └── wasi-sdk               downloads + caches wasi-sdk-33 for build scripts
+│   ├── arora-buffers, arora-util, arora-vfs, wasi-sdk   support crates
 ├── modules/              Arora modules (guest code loaded by the engine)
-│   ├── behavior-tree-nodes    Rust → wasm32-wasip1; BT primitives
 │   ├── test-rust-wasm         Rust → wasm32-wasip1; reference module
+│   ├── test-behavior-tree-nodes  test-only module exercising BT dispatch
 │   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
 │   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
+│   ├── transcribe             speech-to-text module
 │   └── nao                    cross-built i686-musl cdylib (opt-in)
 ├── libs/
 │   └── cpp/                   shared C++ helpers used by C++ modules
@@ -47,7 +61,6 @@ engine/
 └── .github/workflows/    CI
 ```
 
-`transcribe/` is an independent module project not currently in the workspace.
 
 ## Layers
 
@@ -133,7 +146,7 @@ loop:
 
 ## Engine
 
-The engine library (`crates/arora`) is dual-target:
+The engine library (`crates/arora-engine`) is dual-target:
 
 - On native (`cfg(not(target_arch = "wasm32"))`), it compiles `executor::native`
   (libloading), `executor::wasm` (wasmtime core modules), and
@@ -159,8 +172,23 @@ ELF) plus a `module.yaml` header. The header declares:
 - **Functions**: each has an id, an args struct id, and a return struct id.
 
 The runtime contract — buffer layout, dispatch ABI, struct serialization —
-lives in [`arora-types`](https://github.com/semio-ai/arora-types) (published
-to crates.io) and `arora-buffers` (in-tree).
+lives in `arora-types` and `arora-buffers` (both in this workspace, published
+to crates.io).
+
+Modules do not have to be binaries. The host can define a module in plain
+Rust with `arora_engine::ModuleBuilder`: give it the module's UUID and attach
+closures under function UUIDs, and the engine dispatches to it exactly as it
+does to guest code — same argument decoding, same result encoding. The
+behavior interpreter is exposed this way: `arora-behavior` declares the
+interpreter module's ids (`load`, `edit`), and the `arora` runtime builds the
+module from the running interpreter, so behaviors are loaded and edited
+through ordinary module calls.
+
+Rust types cross these boundaries via serde: `arora_types::value_serde`
+converts any `Serialize`/`Deserialize` type to and from an Arora `Value`, and
+`arora_buffers::typed` serializes the same types straight to the wire bytes,
+skipping the intermediate `Value`. Generated code from `module.yaml` remains
+the path for cross-language modules; the serde path serves host-side Rust.
 
 Authors write a `module.yaml` and run `arora-module-cli` to generate the
 language-specific scaffold (`arora-module-rust` for Rust, `arora-module-cpp`

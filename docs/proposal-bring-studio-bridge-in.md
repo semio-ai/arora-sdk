@@ -5,7 +5,8 @@ Date: 2026-06-01.
 Author: Victor (with research help from an LLM agent).
 
 Companion to and continuation of
-[`proposal-split-arora-repos.md`](proposal-split-arora-repos.md).
+the workspace consolidation (see
+[design note](design_decisions.md#one-workspace-not-a-repo-split)).
 Read that first — this document assumes the
 engine / module / SDK / BT split, the "extraction recipe", and the
 existence of `arora-sdk` as the integration layer.
