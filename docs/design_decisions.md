@@ -369,3 +369,44 @@ the vfs `sync` is content-hash-guarded: an unchanged regeneration writes
 nothing. Committed generated code keeps `cargo publish`'s tarball
 verification happy (build scripts must not modify the source directory) and
 means builds from the crates.io checkout never write into it either.
+
+## Workspace topology
+
+### One workspace, not a repo split
+
+Everything lives in this single `arora-sdk` workspace: the engine, the
+runtime, the vocabulary crates, the seams and their implementations, the
+authoring tools, and the guest modules. A multi-repo split (separate
+`arora-types`, `arora-ecbs`, `arora-sdk`, and a binary repo) was executed and
+then reversed: with crates published to crates.io, external consumers already
+get the narrow surface they need, and the split only added cross-repo
+version choreography for every internal change. Publishing, not repo
+boundaries, is the isolation mechanism.
+
+## Runtime surface
+
+### One builder, one step spine
+
+`arora` exposes a single way to assemble a runtime: a builder over the four
+seams (store, HAL, bridge, behavior), producing a synchronous `step(dt)` the
+host paces — natively from `run`'s metronome, in the browser from
+`requestAnimationFrame`. Each step publishes the golden clock keys
+(`arora/time`, `arora/dt`) to the store before the behavior ticks, so time is
+data like everything else.
+
+### The behavior interpreter is a module
+
+Loading and editing behaviors go through the engine's ordinary module-call
+path: `arora-behavior` declares the interpreter module's UUID and its
+`load`/`edit` function ids, and the runtime builds that module
+(`arora_engine::ModuleBuilder`) from the running interpreter. There is no
+host-function special case in dispatch — a remote editing a behavior calls a
+module function like any other, and interpreter implementations stay engine-
+agnostic behind the `BehaviorInterpreter` trait.
+
+### Predetermined keys are conventions, not wiring
+
+Behaviors read their inputs from store paths and write outputs back; the
+golden keys are reserved names, not hard-wired node plumbing. Anything a node
+would be "predetermined" to read can be overridden by linking a different
+producer onto the same path.

@@ -141,9 +141,8 @@ for other uses.
   - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
   - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
     boundary (Semio Studio via the studio-bridge connector);
-  - [`arora-behavior`](../crates/arora-behavior): the `BehaviorInterpreter`
-    trait — the executor ticked by the runtime each step to run an authored
-    behavior;
+  - [`arora-behavior`](../crates/arora-behavior): the `Behavior` trait ticked
+    by the runtime each step;
   - [`arora-simple-data-store`](../crates/arora-simple-data-store): the
     reference `DataStore`, plus the `NamespacedStore` view for mutualizing
     one store across runtimes.
