@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
