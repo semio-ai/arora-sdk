@@ -176,8 +176,7 @@ impl BrowserRuntime {
         for (path, value) in paths.into_iter().zip(values) {
             out.insert(path, value_to_json(value)?);
         }
-        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
-            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+        to_js_object(out)
     }
 
     /// A snapshot of every key currently in the store, as a JS object mapping
@@ -188,8 +187,7 @@ impl BrowserRuntime {
         for (key, value) in state.storage {
             out.insert(key.path, value_to_json(value)?);
         }
-        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
-            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+        to_js_object(out)
     }
 
     /// Drain the keys that changed in the store since the last call, as a JS
@@ -207,9 +205,18 @@ impl BrowserRuntime {
                 out.insert(key.path, serde_json::Value::Null);
             }
         }
-        serde_wasm_bindgen::to_value(&serde_json::Value::Object(out))
-            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+        to_js_object(out)
     }
+}
+
+/// Serialize a path-keyed JSON map to a **plain JS object**. serde-wasm-bindgen's
+/// default representation for maps is a JS `Map`, but these accessors promise
+/// plain objects (`{"sensor/x": {"f32": 0.5}}`), so serialize JSON-compatibly.
+fn to_js_object(out: serde_json::Map<String, serde_json::Value>) -> Result<JsValue, JsValue> {
+    use serde::Serialize;
+    serde_json::Value::Object(out)
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
 }
 
 /// Serialize an optional Arora value to JSON (`null` when absent).
