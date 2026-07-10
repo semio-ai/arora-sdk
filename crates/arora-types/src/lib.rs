@@ -5,6 +5,7 @@ pub mod module;
 pub mod record;
 pub mod ty;
 pub mod value;
+pub mod value_serde;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub mod wasm_value;

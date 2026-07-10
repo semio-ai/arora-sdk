@@ -11,13 +11,16 @@
 //! - [`EDIT`] → [`BehaviorInterpreter::apply`](crate::BehaviorInterpreter::apply):
 //!   apply a [`GraphDiff`] to it.
 //!
-//! Both payloads travel as one JSON-string argument. A
-//! `Call{module_id: ID, id: LOAD|EDIT}` — a remote's `BridgeOp::Call`, or a
-//! behavior's own call bridge — reaches the interpreter through the engine's
-//! normal dispatch, like any module function.
+//! Both payloads travel as one structured [`Value`] argument, converted
+//! generically through [`arora_types::value_serde`] — any serde type flows,
+//! no bespoke encoding. A `Call{module_id: ID, id: LOAD|EDIT}` — a remote's
+//! `BridgeOp::Call`, or a behavior's own call bridge — reaches the
+//! interpreter through the engine's normal dispatch, like any module
+//! function.
 
 use arora_types::call::Call;
-use arora_types::value::{StructureField, Value};
+use arora_types::value::StructureField;
+use arora_types::value_serde;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use uuid::{uuid, Uuid};
@@ -32,15 +35,15 @@ pub const ID: Uuid = uuid!("61726f72-6100-0000-0000-000000000001");
 /// Function id of **edit**: apply a [`GraphDiff`] to the running behavior.
 pub const EDIT: Uuid = uuid!("61726f72-6100-0000-0000-000000000002");
 
-/// Argument id of [`EDIT`]'s one argument: the [`GraphDiff`], serialized as a
-/// JSON string.
+/// Argument id of [`EDIT`]'s one argument: the [`GraphDiff`], as a structured
+/// [`Value`](arora_types::value::Value).
 pub const EDIT_ARG: Uuid = uuid!("61726f72-6100-0000-0000-000000000003");
 
 /// Function id of **load**: replace the running behavior with a [`Graph`].
 pub const LOAD: Uuid = uuid!("61726f72-6100-0000-0000-000000000004");
 
-/// Argument id of [`LOAD`]'s one argument: the [`Graph`], serialized as a
-/// JSON string.
+/// Argument id of [`LOAD`]'s one argument: the [`Graph`], as a structured
+/// [`Value`](arora_types::value::Value).
 pub const LOAD_ARG: Uuid = uuid!("61726f72-6100-0000-0000-000000000005");
 
 /// Build the [`Call`] that applies `diff` to the running behavior.
@@ -64,13 +67,13 @@ pub fn decode_load(call: &Call) -> Result<Graph, String> {
 }
 
 fn encode<T: Serialize>(function: Uuid, arg: Uuid, payload: &T) -> Call {
-    let json = serde_json::to_string(payload).expect("a graph payload serializes");
+    let value = value_serde::to_value(payload).expect("a graph payload converts to a Value");
     Call {
         module_id: Some(ID),
         id: function,
         args: vec![StructureField {
             id: arg,
-            value: Box::new(Value::String(json)),
+            value: Box::new(value),
         }],
     }
 }
@@ -92,10 +95,8 @@ fn decode<T: DeserializeOwned>(
         .iter()
         .find(|field| field.id == arg)
         .ok_or_else(|| format!("the call is missing its {what} argument"))?;
-    let Value::String(json) = field.value.as_ref() else {
-        return Err(format!("the {what} argument must be a JSON string"));
-    };
-    serde_json::from_str(json).map_err(|e| format!("malformed {what}: {e}"))
+    value_serde::from_value(field.value.as_ref().clone())
+        .map_err(|e| format!("malformed {what}: {e}"))
 }
 
 #[cfg(test)]
@@ -137,14 +138,13 @@ mod tests {
         call.args.clear();
         assert!(decode_edit(&call).is_err());
 
-        // The argument is not a JSON string.
+        // The argument does not decode into the expected payload.
         let mut call = encode_edit(&GraphDiff::default());
-        call.args[0].value = Box::new(Value::Boolean(true));
+        call.args[0].value = Box::new(arora_types::value::Value::Boolean(true));
         assert!(decode_edit(&call).is_err());
-
-        // The string is not the expected payload.
         let mut call = encode_load(&Graph::empty());
-        call.args[0].value = Box::new(Value::String("not json".to_string()));
+        call.args[0].value =
+            Box::new(arora_types::value::Value::String("not a graph".to_string()));
         assert!(decode_load(&call).is_err());
     }
 }
