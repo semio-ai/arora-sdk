@@ -121,7 +121,10 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
             }
         },
         Value::KeyValue(kv) => {
-            let fields = kv.get_fields();
+            // Deterministic wire: the backing map has no order of its own, so
+            // fields are written sorted by key (matching the typed backend).
+            let mut fields: Vec<_> = kv.get_fields().iter().collect();
+            fields.sort_by(|a, b| a.0.cmp(b.0));
             writer.begin_map(kv.id.as_bytes(), fields.len() as u32);
             for (key, field) in fields {
                 writer.add_map_field_key(key);
@@ -182,31 +185,54 @@ pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
         }
         Some(TYPE_ARRAY) => {
             let (ty, count) = reader.get_array();
-            unsafe {
-                // calling get_xx_bulk functions is unsafe, but result is copied.
+            let count = count as usize;
+            // Primitive elements are raw little-endian payloads after one
+            // alignment skip; they are read one by one — a bulk transmute
+            // would need the slice aligned for the element type (UB
+            // otherwise) and a little-endian host. String, structure,
+            // enumeration and value elements are unaligned self-describing
+            // entries.
+            fn each<T>(count: usize, mut read: impl FnMut() -> T) -> Vec<T> {
+                (0..count).map(|_| read()).collect()
+            }
+            if matches!(
+                ty,
+                TYPE_BOOLEAN
+                    | TYPE_U8
+                    | TYPE_U16
+                    | TYPE_U32
+                    | TYPE_U64
+                    | TYPE_I8
+                    | TYPE_I16
+                    | TYPE_I32
+                    | TYPE_I64
+                    | TYPE_F32
+                    | TYPE_F64
+            ) {
+                reader.align();
+            }
+            {
                 match ty {
-                    TYPE_BOOLEAN => {
-                        Value::ArrayBoolean(reader.get_boolean_bulk(count as usize).into())
-                    }
-                    TYPE_U8 => Value::ArrayU8(reader.get_u8_bulk(count as usize).into()),
-                    TYPE_U16 => Value::ArrayU16(reader.get_u16_bulk(count as usize).into()),
-                    TYPE_U32 => Value::ArrayU32(reader.get_u32_bulk(count as usize).into()),
-                    TYPE_U64 => Value::ArrayU64(reader.get_u64_bulk(count as usize).into()),
-                    TYPE_I8 => Value::ArrayI8(reader.get_i8_bulk(count as usize).into()),
-                    TYPE_I16 => Value::ArrayI16(reader.get_i16_bulk(count as usize).into()),
-                    TYPE_I32 => Value::ArrayI32(reader.get_i32_bulk(count as usize).into()),
-                    TYPE_I64 => Value::ArrayI64(reader.get_i64_bulk(count as usize).into()),
-                    TYPE_F32 => Value::ArrayF32(reader.get_f32_bulk(count as usize).into()),
-                    TYPE_F64 => Value::ArrayF64(reader.get_f64_bulk(count as usize).into()),
+                    TYPE_BOOLEAN => Value::ArrayBoolean(each(count, || reader.get_boolean())),
+                    TYPE_U8 => Value::ArrayU8(each(count, || reader.get_u8())),
+                    TYPE_U16 => Value::ArrayU16(each(count, || reader.get_u16())),
+                    TYPE_U32 => Value::ArrayU32(each(count, || reader.get_u32())),
+                    TYPE_U64 => Value::ArrayU64(each(count, || reader.get_u64())),
+                    TYPE_I8 => Value::ArrayI8(each(count, || reader.get_i8())),
+                    TYPE_I16 => Value::ArrayI16(each(count, || reader.get_i16())),
+                    TYPE_I32 => Value::ArrayI32(each(count, || reader.get_i32())),
+                    TYPE_I64 => Value::ArrayI64(each(count, || reader.get_i64())),
+                    TYPE_F32 => Value::ArrayF32(each(count, || reader.get_f32())),
+                    TYPE_F64 => Value::ArrayF64(each(count, || reader.get_f64())),
                     TYPE_STRING => Value::ArrayString({
-                        let mut strings = Vec::with_capacity(count as usize);
+                        let mut strings = Vec::with_capacity(count);
                         for _ in 0..count {
                             strings.push(reader.get_string().into());
                         }
                         strings
                     }),
                     TYPE_STRUCTURE => {
-                        let mut structures = Vec::with_capacity(count as usize);
+                        let mut structures = Vec::with_capacity(count);
                         let structure_id = reader.get_structure_field();
                         for _ in 0..count {
                             let field_count = reader.get_structure_raw();
@@ -226,7 +252,7 @@ pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
                         }
                     }
                     TYPE_ENUMERATION => {
-                        let mut enumerations = Vec::with_capacity(count as usize);
+                        let mut enumerations = Vec::with_capacity(count);
                         let enumeration_id = reader.get_structure_field();
                         for _ in 0..count {
                             let variant_id = reader.get_enumeration_value_raw();
@@ -241,7 +267,7 @@ pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
                         }
                     }
                     TYPE_VALUE => {
-                        let mut values = Vec::with_capacity(count as usize);
+                        let mut values = Vec::with_capacity(count);
                         for _ in 0..count {
                             values.push(deserialize_from_reader(reader));
                         }
@@ -297,4 +323,23 @@ pub fn serialize(value: &Value) -> Box<[u8]> {
 pub fn deserialize(data: &[u8]) -> Value {
     let mut reader = BufferReader::new(data);
     deserialize_from_reader(&mut reader)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F64 scalars and arrays used to double-tag on the wire (`add_f64_raw`
+    /// wrote the type tag), so they round-tripped to garbage. Pinned here.
+    #[test]
+    fn f64_values_round_trip() {
+        for value in [
+            Value::F64(0.5),
+            Value::F64(-2.5e300),
+            Value::ArrayF64(vec![1.0, -2.0, 3.5]),
+        ] {
+            let bytes = serialize(&value);
+            assert_eq!(deserialize(&bytes), value, "round-trip of {value:?}");
+        }
+    }
 }

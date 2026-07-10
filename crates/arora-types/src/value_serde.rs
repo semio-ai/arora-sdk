@@ -56,7 +56,7 @@ impl de::Error for Error {
 }
 
 /// Convert any `Serialize` type into a [`Value`].
-pub fn to_value<T: Serialize>(value: &T) -> Result<Value, Error> {
+pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
   value.serialize(ValueSerializer)
 }
 
@@ -95,6 +95,12 @@ fn keyvalue_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
     );
   }
   Value::KeyValue(kv)
+}
+
+/// The well-known id every serde-converted map travels under: maps carry
+/// their keys by name, so no per-type id applies.
+pub fn map_id() -> Uuid {
+  gen_uuid_from_str("map")
 }
 
 fn enumeration_from(type_name: &str, variant: &str, value: Value) -> Value {
@@ -338,10 +344,12 @@ impl ser::SerializeMap for MapSerializer {
     self.fields.push((key, value.serialize(ValueSerializer)?));
     Ok(())
   }
-  fn end(self) -> Result<Value, Error> {
-    // A plain map has no type name: its KeyValue takes a fresh id, like
-    // `KeyValue::new` does.
-    Ok(keyvalue_from(KeyValue::new().id, self.fields))
+  fn end(mut self) -> Result<Value, Error> {
+    // Deterministic encoding: entries sort by key, and the KeyValue takes the
+    // well-known map id — so the same map always converts to the same Value
+    // (and the same bytes, whichever serde backend produced them).
+    self.fields.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(keyvalue_from(map_id(), self.fields))
   }
 }
 

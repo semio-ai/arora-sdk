@@ -9,7 +9,7 @@ license = "MIT"
 path = "src/behavior_tree.rs"
 
 [dependencies]
-arora-buffers = { path = "../arora-buffers", version = "0.2" }
+arora-buffers = { path = "../arora-buffers", version = "1" }
 arora-behavior = { path = "../arora-behavior", version = "4" }
 arora-types = { path = "../arora-types", version = "1.6" }
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "0.1" }
