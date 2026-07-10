@@ -52,15 +52,18 @@
 //!   virtual `dt`) — phase 0's sweep picks the seams up with identical
 //!   semantics, no runtime needed.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
+use arora_engine::engine::HostFunction;
 use arora_hal::Hal;
-use arora_types::call::{CallBridge, CallResult};
+use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
@@ -300,11 +303,11 @@ fn apply_command(
         },
         BridgeOp::Call(call) => {
             // A bridge Call dispatches through the engine's `CallBridge` (the
-            // arora-types abstraction over the engine implementation).
-            // TODO(PR 5b / edition): a Call to arora-behavior's golden
-            // behavior-edit module id will reach `interpreter.apply(GraphDiff)`
-            // through this same dispatch, once that id is registered against the
-            // interpreter by the builder.
+            // arora-types abstraction over the engine implementation). That
+            // includes the golden behavior edit: the builder registered
+            // `golden::{BEHAVIOR_MODULE, APPLY_DIFF}` against the injected
+            // interpreter, so an edit Call reaches `interpreter.apply` through
+            // this same dispatch — no special case here.
             match call.module_id {
                 Some(module) => call_bridge
                     .arora_call(&module, call.clone())
@@ -347,6 +350,46 @@ fn apply_command(
     };
     cmd.reply(result);
     Ok(())
+}
+
+/// The shared cell holding the device's one behavior interpreter: the step
+/// loop ticks it (phase 4) and the engine-registered [`GoldenEdit`] applies
+/// diffs to it (phase 3). The phases are sequential on one thread, so the cell
+/// is uncontended; `RefCell` (not a lock) enforces exactly that.
+pub type InterpreterCell = Rc<RefCell<Option<Box<dyn BehaviorInterpreter>>>>;
+
+/// The golden behavior-edit function ([`golden::APPLY_DIFF`]), registered on
+/// the engine at build against the same [`InterpreterCell`] the step loop
+/// ticks. A `Call{module_id: BEHAVIOR_MODULE, id: APPLY_DIFF}` — a remote's
+/// `BridgeOp::Call`, or a behavior's own `call_bridge` — reaches
+/// [`BehaviorInterpreter::apply`] through the engine's normal dispatch: no
+/// bypass, editors and behaviors use the same door.
+pub(crate) struct GoldenEdit {
+    pub(crate) interpreter: InterpreterCell,
+}
+
+impl HostFunction for GoldenEdit {
+    fn call(&self, call: Call) -> Result<CallResult, CallError> {
+        let diff = golden::decode_apply(&call).map_err(|message| CallError::Guest { message })?;
+        // A behavior editing behaviors *from inside its own tick* finds the
+        // cell borrowed by phase 4 — refuse cleanly instead of aborting.
+        let mut cell = self
+            .interpreter
+            .try_borrow_mut()
+            .map_err(|_| CallError::Generic {
+                message: "the behavior is being ticked; edit between steps".to_string(),
+            })?;
+        let interpreter = cell.as_mut().ok_or_else(|| CallError::Generic {
+            message: "no behavior interpreter is installed".to_string(),
+        })?;
+        interpreter.apply(diff).map_err(|e| CallError::Guest {
+            message: e.to_string(),
+        })?;
+        Ok(CallResult {
+            ret: Value::Unit,
+            mutated: Vec::new(),
+        })
+    }
 }
 
 /// Phase 4 — tick the one behavior interpreter (a tree, a node graph, …)
@@ -481,9 +524,11 @@ impl Arora {
             &self.telemetry,
         )?;
         // 4. behavior — the frame's last writer: its intent wins, and it saw
-        //    what it overrode.
+        //    what it overrode. The cell borrow spans exactly this phase; a
+        //    tick-time golden edit through the engine finds it held and fails
+        //    cleanly rather than racing the tick.
         tick_behavior(
-            &mut self.interpreter,
+            &mut self.interpreter.borrow_mut(),
             &*self.store,
             &mut self.engine,
             &self.telemetry,
@@ -685,7 +730,7 @@ mod tests {
         // empty, idle behavior-tree interpreter.
         let arora = Arora::builder().build().expect("default device builds");
         assert!(
-            arora.interpreter.is_some(),
+            arora.interpreter.borrow().is_some(),
             "default installs an (empty) behavior interpreter"
         );
         assert!(arora.bridges.is_empty(), "no bridge unless one is added");
@@ -709,15 +754,67 @@ mod tests {
             arora.step(FRAME).expect("step");
         }
         assert!(
-            arora.interpreter.is_some(),
+            arora.interpreter.borrow().is_some(),
             "the empty interpreter idles and stays installed"
         );
     }
 
     #[test]
     fn stops_when_unregistered() {
-        let mut arora = build(Box::new(UnregisterBridge));
+        let arora = build(Box::new(UnregisterBridge));
         drive_until_unregistered(arora);
+    }
+
+    #[tokio::test]
+    async fn a_call_edits_the_behavior_through_the_engine() {
+        // The builder registered the golden edit against the injected (default,
+        // empty) interpreter; a bridge Call to the golden ids reaches
+        // `interpreter.apply` through the engine's normal dispatch. An empty
+        // diff is a valid no-op edit, so the call succeeds.
+        let mut arora = build(Box::new(UnregisterBridge));
+        let (tx, rx) = oneshot::channel();
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(
+                BridgeOp::Call(golden::encode_apply(&arora_behavior::GraphDiff::default())),
+                tx,
+            ),
+        )
+        .unwrap();
+        let result = rx.await.expect("reply").expect("the edit call succeeds");
+        assert_eq!(result.ret, Value::Unit);
+    }
+
+    #[test]
+    fn a_tick_time_edit_fails_cleanly() {
+        // A behavior editing behaviors from inside its own tick would find the
+        // interpreter cell borrowed by phase 4: the golden edit refuses with an
+        // error instead of aborting the process.
+        let interpreter: InterpreterCell = Rc::new(RefCell::new(Some(Box::new(
+            BehaviorTreeInterpreter::new(Rc::new(HashMap::new())),
+        )
+            as Box<dyn BehaviorInterpreter>)));
+        let edit = GoldenEdit {
+            interpreter: interpreter.clone(),
+        };
+        let _phase_4_holds_it = interpreter.borrow_mut();
+        let err = edit
+            .call(golden::encode_apply(&arora_behavior::GraphDiff::default()))
+            .expect_err("a tick-time edit is refused");
+        assert!(err.to_string().contains("being ticked"), "{err}");
+    }
+
+    #[test]
+    fn an_edit_without_an_interpreter_errors() {
+        let edit = GoldenEdit {
+            interpreter: Rc::new(RefCell::new(None)),
+        };
+        let err = edit
+            .call(golden::encode_apply(&arora_behavior::GraphDiff::default()))
+            .expect_err("no interpreter to edit");
+        assert!(err.to_string().contains("no behavior interpreter"), "{err}");
     }
 
     #[test]

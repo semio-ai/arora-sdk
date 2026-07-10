@@ -37,7 +37,7 @@ pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 
 use anyhow::Result;
-use arora_behavior::BehaviorInterpreter;
+use arora_behavior::{golden, BehaviorInterpreter};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeError, Inbound, InboundStream};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
@@ -49,6 +49,7 @@ use arora_types::data::{DataStore, Subscription};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use uuid::Uuid;
@@ -88,7 +89,12 @@ pub struct Arora {
     /// a behavior is loaded *into* it as a separate step. `None` means nothing to
     /// tick; the interpreter is dropped back to `None` once it reports
     /// [`BehaviorStatus::Done`](arora_behavior::BehaviorStatus).
-    pub(crate) interpreter: Option<Box<dyn BehaviorInterpreter>>,
+    ///
+    /// Held in a shared cell because two single-threaded phases reach it: the
+    /// step loop ticks it, and the golden behavior-edit function the builder
+    /// registered on the engine applies [`GraphDiff`](arora_behavior::GraphDiff)s
+    /// to it (see [`runtime::InterpreterCell`]).
+    pub(crate) interpreter: runtime::InterpreterCell,
     pub(crate) telemetry: Telemetry,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
@@ -227,7 +233,7 @@ impl AroraBuilder {
     /// synchronous: there is nothing to spawn — the HAL and bridges own any
     /// async internally, behind their stream/push seams.
     pub fn build(self) -> Result<Arora> {
-        let engine = build_engine()?;
+        let mut engine = build_engine()?;
         let store = self
             .store
             .unwrap_or_else(|| Box::new(SimpleDataStore::new()));
@@ -260,11 +266,24 @@ impl AroraBuilder {
             .interpreter
             .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
 
+        // The golden behavior-edit function, registered against the injected
+        // interpreter: a Call to `golden::{BEHAVIOR_MODULE, APPLY_DIFF}` — from
+        // a remote or from a behavior — reaches `interpreter.apply(GraphDiff)`
+        // through the engine's normal dispatch.
+        let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
+        engine.register_host_function(
+            golden::BEHAVIOR_MODULE,
+            golden::APPLY_DIFF,
+            Rc::new(runtime::GoldenEdit {
+                interpreter: interpreter.clone(),
+            }),
+        );
+
         Ok(Arora {
             store,
             engine,
             function_index,
-            interpreter: Some(interpreter),
+            interpreter,
             telemetry: Telemetry::default(),
             hal,
             bridges,
