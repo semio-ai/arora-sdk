@@ -143,8 +143,7 @@ mod tests {
         call.args[0].value = Box::new(arora_types::value::Value::Boolean(true));
         assert!(decode_edit(&call).is_err());
         let mut call = encode_load(&Graph::empty());
-        call.args[0].value =
-            Box::new(arora_types::value::Value::String("not a graph".to_string()));
+        call.args[0].value = Box::new(arora_types::value::Value::String("not a graph".to_string()));
         assert!(decode_load(&call).is_err());
     }
 }
