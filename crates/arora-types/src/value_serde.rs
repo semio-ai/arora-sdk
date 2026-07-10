@@ -2,16 +2,16 @@
 //! from an arora [`Value`], no type declaration or code generation involved —
 //! the [`serde_json::to_value`]-style bridge, with `Value` as the data model.
 //!
-//! - **structs** map to [`KeyValue`] — serde carries the field names, ids
-//!   derive from them via [`gen_uuid_from_str`] (the same convention as
-//!   record values), so they round-trip by name;
-//! - **enums** map to [`Enumeration`] — the type and variant ids derive from
-//!   their names. Deserialization matches the stored `variant_id` against the
-//!   hashes of the candidate variant names serde provides, so the one-way
-//!   hash still round-trips;
-//! - **sequences and tuples** map to [`Value::ArrayValue`], maps with string
-//!   keys to [`KeyValue`], primitives to their `Value` twins, `Option` to
-//!   [`Value::Option`], unit to [`Value::Unit`].
+//! - **structs** map to [`Structure`] — the type and field ids derive from
+//!   their names via [`gen_uuid_from_str`]. The names are not stored:
+//!   deserialization matches the stored ids against the hashes of the
+//!   candidate field names serde provides, so the one-way hash round-trips;
+//! - **enums** map to [`Enumeration`] — same scheme for the variant ids;
+//! - **maps** (dynamic string keys, no declaration to hash against) map to
+//!   [`KeyValue`], which carries the names;
+//! - **sequences and tuples** map to [`Value::ArrayValue`], primitives to
+//!   their `Value` twins, `Option` to [`Value::Option`], unit to
+//!   [`Value::Unit`].
 //!
 //! [`to_value`]/[`from_value`] are the entry points. The bridge is host-side
 //! convenience: the module ABI's declared type specs (code generation) are a
@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use crate::gen_uuid_from_str;
 use crate::keyvalue::{KeyValue, KeyValueField};
-use crate::value::{Enumeration, Value};
+use crate::value::{Enumeration, Structure, StructureField, Value};
 
 /// A conversion between a Rust type and a [`Value`] failed.
 #[derive(Debug)]
@@ -68,6 +68,19 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
 // ---- serialization ---------------------------------------------------------
 
 struct ValueSerializer;
+
+fn structure_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
+  Value::Structure(Structure {
+    id,
+    fields: fields
+      .into_iter()
+      .map(|(name, value)| StructureField {
+        id: gen_uuid_from_str(&name),
+        value: Box::new(value),
+      })
+      .collect(),
+  })
+}
 
 fn keyvalue_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
   let mut kv = KeyValue::new_with_id(id);
@@ -351,7 +364,7 @@ impl ser::SerializeStruct for StructSerializer {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    Ok(keyvalue_from(
+    Ok(structure_from(
       gen_uuid_from_str(self.type_name),
       self.fields,
     ))
@@ -378,7 +391,7 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    let inner = keyvalue_from(gen_uuid_from_str(self.variant), self.fields);
+    let inner = structure_from(gen_uuid_from_str(self.variant), self.fields);
     Ok(enumeration_from(self.type_name, self.variant, inner))
   }
 }
@@ -482,9 +495,25 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     visitor.visit_newtype_struct(self)
   }
 
+  fn deserialize_struct<V: Visitor<'de>>(
+    self,
+    _name: &'static str,
+    fields: &'static [&'static str],
+    visitor: V,
+  ) -> Result<V::Value, Error> {
+    match self.0 {
+      Value::Structure(structure) => visit_structure(structure, fields, visitor),
+      // A KeyValue carries its names directly; accept it for a struct too.
+      Value::KeyValue(kv) => visit_keyvalue(kv, visitor),
+      other => Err(de::Error::custom(format!(
+        "expected a structure, got {other:?}"
+      ))),
+    }
+  }
+
   serde::forward_to_deserialize_any! {
       bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-      bytes byte_buf unit unit_struct seq tuple tuple_struct map struct
+      bytes byte_buf unit unit_struct seq tuple tuple_struct map
       identifier ignored_any
   }
 }
@@ -492,6 +521,29 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
 fn visit_seq<'de, V: Visitor<'de>>(items: Vec<Value>, visitor: V) -> Result<V::Value, Error> {
   visitor.visit_seq(SeqDeserializer {
     iter: items.into_iter(),
+  })
+}
+
+/// Drive a visitor over a [`Structure`], resolving each stored field id back
+/// to its declared name by hashing the candidates serde provides. Fields with
+/// ids outside the declaration are skipped, like unknown fields elsewhere.
+fn visit_structure<'de, V: Visitor<'de>>(
+  structure: Structure,
+  fields: &'static [&'static str],
+  visitor: V,
+) -> Result<V::Value, Error> {
+  let mut named = Vec::with_capacity(structure.fields.len());
+  for field in structure.fields {
+    if let Some(name) = fields
+      .iter()
+      .find(|candidate| gen_uuid_from_str(candidate) == field.id)
+    {
+      named.push((*name, *field.value));
+    }
+  }
+  visitor.visit_map(StructDeserializer {
+    iter: named.into_iter(),
+    value: None,
   })
 }
 
@@ -555,6 +607,31 @@ impl<'de> MapAccess<'de> for MapDeserializer {
   }
 }
 
+struct StructDeserializer {
+  iter: std::vec::IntoIter<(&'static str, Value)>,
+  value: Option<Value>,
+}
+
+impl<'de> MapAccess<'de> for StructDeserializer {
+  type Error = Error;
+  fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Error> {
+    match self.iter.next() {
+      Some((name, value)) => {
+        self.value = Some(value);
+        seed.deserialize(name.into_deserializer()).map(Some)
+      }
+      None => Ok(None),
+    }
+  }
+  fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Error> {
+    let value = self
+      .value
+      .take()
+      .ok_or_else(|| de::Error::custom("struct value without a field"))?;
+    seed.deserialize(ValueDeserializer(value))
+  }
+}
+
 struct EnumDeserializer {
   variant: &'static str,
   value: Value,
@@ -599,10 +676,11 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
   }
   fn struct_variant<V: Visitor<'de>>(
     self,
-    _fields: &'static [&'static str],
+    fields: &'static [&'static str],
     visitor: V,
   ) -> Result<V::Value, Error> {
     match self.value {
+      Value::Structure(structure) => visit_structure(structure, fields, visitor),
       Value::KeyValue(kv) => visit_keyvalue(kv, visitor),
       other => Err(de::Error::custom(format!(
         "expected a struct variant payload, got {other:?}"
@@ -655,10 +733,22 @@ mod tests {
   #[test]
   fn round_trips_a_nested_struct() {
     let value = to_value(&sample()).unwrap();
-    // Structs travel as KeyValue, so the names survive.
-    assert!(matches!(value, Value::KeyValue(_)));
+    // Structs travel as Structure — ids derive from the declared names, and
+    // deserialization resolves them against the candidates serde provides.
+    assert!(matches!(value, Value::Structure(_)));
     let back: Sample = from_value(value).unwrap();
     assert_eq!(back, sample());
+  }
+
+  #[test]
+  fn maps_travel_as_keyvalue() {
+    let pairs = HashMap::from([("x".to_string(), 1i32), ("y".to_string(), -1i32)]);
+    let value = to_value(&pairs).unwrap();
+    // Dynamic keys have no declaration to hash against, so the names ride
+    // along in a KeyValue.
+    assert!(matches!(value, Value::KeyValue(_)));
+    let back: HashMap<String, i32> = from_value(value).unwrap();
+    assert_eq!(back, pairs);
   }
 
   #[test]
