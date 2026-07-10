@@ -122,13 +122,19 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // problem it introduced) takes effect here.
         if self.dirty {
             let graph = self.graph.as_ref().expect("dirty implies a graph");
-            self.tree = Some(
-                build_behavior_tree(graph, &direct_resolver(ctx.store)).map_err(|e| {
-                    BehaviorError {
-                        message: format!("rebuild after apply: {e:?}"),
-                    }
-                })?,
-            );
+            // Edits can leave the graph empty (or start it empty): nothing to
+            // run, idle like a fresh interpreter instead of lowering nothing.
+            self.tree = if graph.nodes.is_empty() {
+                None
+            } else {
+                Some(
+                    build_behavior_tree(graph, &direct_resolver(ctx.store)).map_err(|e| {
+                        BehaviorError {
+                            message: format!("rebuild after apply: {e:?}"),
+                        }
+                    })?,
+                )
+            };
             self.dirty = false;
         }
         // No behavior loaded: idle. The interpreter stays installed — it is an
@@ -145,6 +151,12 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
     }
 
     fn apply(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
+        // A fresh, empty interpreter is editable from the start: loading a
+        // behavior IS applying a diff onto an empty graph. Only a tree loaded
+        // without a graph representation (legacy XML `load`) cannot be edited.
+        if self.graph.is_none() && self.tree.is_none() {
+            self.graph = Some(Graph::empty());
+        }
         let graph = self.graph.as_mut().ok_or_else(|| BehaviorError {
             message: "the loaded behavior has no editable graph; load one with load_graph or \
                       load_groot to edit it"

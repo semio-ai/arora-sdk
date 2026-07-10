@@ -407,3 +407,32 @@ fn seq_star_resumes_and_resets() {
         "first re-ticked after reset"
     );
 }
+
+/// A fresh interpreter is editable before anything is loaded — loading IS
+/// applying a diff onto an empty graph — and an empty graph ticks as idle.
+#[test]
+fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
+    use crate::behavior::BehaviorTreeInterpreter;
+    use arora_behavior::graph::GraphDiff;
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter, BehaviorStatus};
+    use arora_simple_data_store::SimpleDataStore;
+
+    let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+
+    // The empty (no-op) edit is valid: it starts an empty graph.
+    interpreter
+        .apply(GraphDiff::default())
+        .expect("a fresh interpreter accepts a diff");
+    assert!(interpreter.graph().is_some(), "the edit started a graph");
+
+    // The re-lowering tick sees an empty graph: idle, stay installed.
+    let store = SimpleDataStore::new();
+    let (statuses, ticks) = (LeafStatuses::default(), LeafTicks::default());
+    let mut bridge = TestBridge::new(statuses, ticks);
+    let mut ctx = BehaviorContext {
+        store: &store,
+        call_bridge: &mut bridge,
+    };
+    let status = interpreter.tick(&mut ctx).expect("an empty graph idles");
+    assert_eq!(status, BehaviorStatus::Running);
+}
