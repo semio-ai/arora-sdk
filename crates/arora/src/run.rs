@@ -68,8 +68,17 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
         arora_bridge_ws::ServerConfig::default(),
     ));
     let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
+    // Bind before spawning: an unusable address (port already taken) fails the
+    // run here instead of leaving a device serving a bridge nobody can reach.
+    let listener = server
+        .bind()
+        .await
+        .map_err(|e| anyhow!("local bridge: {e}"))?;
     tokio::spawn(async move {
-        if let Err(e) = server.run(arora_bridge_ws::CancellationToken::new()).await {
+        if let Err(e) = server
+            .run_on(listener, arora_bridge_ws::CancellationToken::new())
+            .await
+        {
             log::error!("local bridge server stopped: {e:?}");
         }
     });

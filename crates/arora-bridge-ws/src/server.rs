@@ -92,6 +92,11 @@ pub struct AroraWSServer {
     is_running: RwLock<bool>,
     /// Server-initiated pushes (Bridge::send_data) reach the active client here.
     outbound_tx: broadcast::Sender<Outgoing>,
+    /// Cancelled when the serve loop exits — on the external cancel, a bind
+    /// failure, or any accept-loop end — so an observer
+    /// ([`stopped`](Self::stopped), e.g. the `WsBridge` inbound stream) sees
+    /// the server die.
+    lifecycle: CancellationToken,
 }
 
 impl AroraWSServer {
@@ -106,6 +111,7 @@ impl AroraWSServer {
             active_client: Arc::new(RwLock::new(None)),
             is_running: RwLock::new(false),
             outbound_tx: broadcast::channel(256).0,
+            lifecycle: CancellationToken::new(),
         }
     }
 
@@ -171,12 +177,41 @@ impl AroraWSServer {
         self.config.port
     }
 
+    /// Resolves when the serve loop has exited — whether by the external
+    /// cancel, a bind failure, or the accept loop ending. The `WsBridge`
+    /// inbound stream ends on this, so a device polling that stream sees a
+    /// dead server as an endpoint disconnect instead of running on silently.
+    pub fn stopped(&self) -> tokio_util::sync::WaitForCancellationFutureOwned {
+        self.lifecycle.clone().cancelled_owned()
+    }
+
+    /// Bind the configured address, without serving yet. Splitting this from
+    /// [`run_on`](Self::run_on) lets an embedder fail fast on an unusable
+    /// address (port taken) instead of discovering it from a spawned task.
+    pub async fn bind(&self) -> Result<TcpListener, String> {
+        let addr = format!("{}:{}", self.config.bind_address, self.config.port);
+        TcpListener::bind(&addr)
+            .await
+            .map_err(|e| format!("Failed to bind to {}: {}", addr, e))
+    }
+
     /// Run the server until the cancellation token is triggered.
     pub async fn run(&self, cancel_token: CancellationToken) -> Result<(), String> {
+        // The guard covers a bind failure too: any exit cancels `lifecycle`.
+        let _stopped = self.lifecycle.clone().drop_guard();
+        let listener = self.bind().await?;
+        self.run_on(listener, cancel_token).await
+    }
+
+    /// Serve on an already-bound listener until the cancellation token is
+    /// triggered (see [`bind`](Self::bind)).
+    pub async fn run_on(
+        &self,
+        listener: TcpListener,
+        cancel_token: CancellationToken,
+    ) -> Result<(), String> {
+        let _stopped = self.lifecycle.clone().drop_guard();
         let addr = format!("{}:{}", self.config.bind_address, self.config.port);
-        let listener = TcpListener::bind(&addr)
-            .await
-            .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
 
         info!("Arora WebSocket server listening on ws://{}", addr);
         if self.config.serve_control_panel {
