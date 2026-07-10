@@ -4,6 +4,12 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.2.2] - 2026-07-10
+
+### Changed
+
+- Refreshed documentation; the crate now ships its CHANGELOG.
+
 ## [5.2.1] - 2026-07-10
 
 ### Fixed

@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"

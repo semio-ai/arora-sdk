@@ -1,6 +1,6 @@
 [package]
 name = "arora-registry-remote"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Semio-store-backed remote registries for Arora (private; keeps the semio-client seam out of the publishable crates)."
 publish = false
