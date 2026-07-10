@@ -61,9 +61,8 @@ use std::time::Duration;
 use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
-use arora_engine::engine::HostFunction;
 use arora_hal::Hal;
-use arora_types::call::{Call, CallBridge, CallError, CallResult};
+use arora_types::call::{CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
@@ -353,43 +352,35 @@ fn apply_command(
 }
 
 /// The shared cell holding the device's one behavior interpreter: the step
-/// loop ticks it (phase 4) and the engine-registered [`GoldenEdit`] applies
-/// diffs to it (phase 3). The phases are sequential on one thread, so the cell
-/// is uncontended; `RefCell` (not a lock) enforces exactly that.
+/// loop ticks it (phase 4) and the interpreter module the builder registered
+/// on the engine loads/edits it (phase 3). The phases are sequential on one
+/// thread, so the cell is uncontended; `RefCell` (not a lock) enforces exactly
+/// that. A behavior calling its own interpreter *from inside its tick* finds
+/// the cell borrowed and gets a clean error instead of a race.
 pub type InterpreterCell = Rc<RefCell<Option<Box<dyn BehaviorInterpreter>>>>;
 
-/// The golden behavior-edit function ([`golden::APPLY_DIFF`]), registered on
-/// the engine at build against the same [`InterpreterCell`] the step loop
-/// ticks. A `Call{module_id: BEHAVIOR_MODULE, id: APPLY_DIFF}` — a remote's
-/// `BridgeOp::Call`, or a behavior's own `call_bridge` — reaches
-/// [`BehaviorInterpreter::apply`] through the engine's normal dispatch: no
-/// bypass, editors and behaviors use the same door.
-pub(crate) struct GoldenEdit {
-    pub(crate) interpreter: InterpreterCell,
-}
-
-impl HostFunction for GoldenEdit {
-    fn call(&self, call: Call) -> Result<CallResult, CallError> {
-        let diff = golden::decode_apply(&call).map_err(|message| CallError::Guest { message })?;
-        // A behavior editing behaviors *from inside its own tick* finds the
-        // cell borrowed by phase 4 — refuse cleanly instead of aborting.
-        let mut cell = self
-            .interpreter
-            .try_borrow_mut()
-            .map_err(|_| CallError::Generic {
-                message: "the behavior is being ticked; edit between steps".to_string(),
-            })?;
-        let interpreter = cell.as_mut().ok_or_else(|| CallError::Generic {
-            message: "no behavior interpreter is installed".to_string(),
-        })?;
-        interpreter.apply(diff).map_err(|e| CallError::Guest {
-            message: e.to_string(),
-        })?;
-        Ok(CallResult {
-            ret: Value::Unit,
-            mutated: Vec::new(),
-        })
-    }
+/// Run `operation` on the interpreter behind `cell` — the body of the
+/// interpreter module's functions ([`arora_behavior::interpreter_module`]).
+/// A behavior calling its own interpreter *from inside its tick* finds the
+/// cell borrowed by phase 4 and gets a clean error instead of aborting; an
+/// empty cell (no interpreter installed) errors likewise.
+pub(crate) fn with_interpreter(
+    cell: &InterpreterCell,
+    operation: impl FnOnce(&mut dyn BehaviorInterpreter) -> Result<(), arora_behavior::BehaviorError>,
+) -> Result<CallResult, CallError> {
+    let mut slot = cell.try_borrow_mut().map_err(|_| CallError::Generic {
+        message: "the behavior is being ticked; call between steps".to_string(),
+    })?;
+    let interpreter = slot.as_mut().ok_or_else(|| CallError::Generic {
+        message: "no behavior interpreter is installed".to_string(),
+    })?;
+    operation(interpreter.as_mut()).map_err(|e| CallError::Guest {
+        message: e.to_string(),
+    })?;
+    Ok(CallResult {
+        ret: Value::Unit,
+        mutated: Vec::new(),
+    })
 }
 
 /// Phase 4 — tick the one behavior interpreter (a tree, a node graph, …)
@@ -621,6 +612,7 @@ impl Arora {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arora_behavior::interpreter_module;
     use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
     use arora_bridge::{BridgeResult, DeviceInfo, FakeBridge, InboundStream};
     use arora_hal::FakeHal;
@@ -767,8 +759,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_call_edits_the_behavior_through_the_engine() {
-        // The builder registered the golden edit against the injected (default,
-        // empty) interpreter; a bridge Call to the golden ids reaches
+        // The builder registered the interpreter module over the injected
+        // (default, empty) interpreter; a bridge Call to its EDIT id reaches
         // `interpreter.apply` through the engine's normal dispatch. An empty
         // diff is a valid no-op edit, so the call succeeds.
         let mut arora = build(Box::new(UnregisterBridge));
@@ -778,7 +770,9 @@ mod tests {
             &arora.function_index,
             &mut arora.engine,
             BridgeCommand::new(
-                BridgeOp::Call(golden::encode_apply(&arora_behavior::GraphDiff::default())),
+                BridgeOp::Call(interpreter_module::encode_edit(
+                    &arora_behavior::GraphDiff::default(),
+                )),
                 tx,
             ),
         )
@@ -787,33 +781,53 @@ mod tests {
         assert_eq!(result.ret, Value::Unit);
     }
 
+    #[tokio::test]
+    async fn a_call_loads_a_behavior_through_the_engine() {
+        // The interpreter module's LOAD function replaces the running behavior
+        // with a whole graph — here an empty one, which the tree interpreter
+        // accepts and idles on.
+        let mut arora = build(Box::new(UnregisterBridge));
+        let (tx, rx) = oneshot::channel();
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(
+                BridgeOp::Call(interpreter_module::encode_load(
+                    &arora_behavior::Graph::empty(),
+                )),
+                tx,
+            ),
+        )
+        .unwrap();
+        let result = rx.await.expect("reply").expect("the load call succeeds");
+        assert_eq!(result.ret, Value::Unit);
+    }
+
     #[test]
-    fn a_tick_time_edit_fails_cleanly() {
-        // A behavior editing behaviors from inside its own tick would find the
-        // interpreter cell borrowed by phase 4: the golden edit refuses with an
-        // error instead of aborting the process.
+    fn a_tick_time_call_fails_cleanly() {
+        // A behavior calling its own interpreter from inside its tick would
+        // find the cell borrowed by phase 4: the module function refuses with
+        // an error instead of aborting the process.
         let interpreter: InterpreterCell = Rc::new(RefCell::new(Some(Box::new(
             BehaviorTreeInterpreter::new(Rc::new(HashMap::new())),
         )
             as Box<dyn BehaviorInterpreter>)));
-        let edit = GoldenEdit {
-            interpreter: interpreter.clone(),
-        };
         let _phase_4_holds_it = interpreter.borrow_mut();
-        let err = edit
-            .call(golden::encode_apply(&arora_behavior::GraphDiff::default()))
-            .expect_err("a tick-time edit is refused");
+        let err = with_interpreter(&interpreter, |interpreter| {
+            interpreter.apply(arora_behavior::GraphDiff::default())
+        })
+        .expect_err("a tick-time call is refused");
         assert!(err.to_string().contains("being ticked"), "{err}");
     }
 
     #[test]
-    fn an_edit_without_an_interpreter_errors() {
-        let edit = GoldenEdit {
-            interpreter: Rc::new(RefCell::new(None)),
-        };
-        let err = edit
-            .call(golden::encode_apply(&arora_behavior::GraphDiff::default()))
-            .expect_err("no interpreter to edit");
+    fn a_call_without_an_interpreter_errors() {
+        let empty: InterpreterCell = Rc::new(RefCell::new(None));
+        let err = with_interpreter(&empty, |interpreter| {
+            interpreter.apply(arora_behavior::GraphDiff::default())
+        })
+        .expect_err("no interpreter to call");
         assert!(err.to_string().contains("no behavior interpreter"), "{err}");
     }
 

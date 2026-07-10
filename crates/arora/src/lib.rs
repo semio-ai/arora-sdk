@@ -37,14 +37,16 @@ pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 
 use anyhow::Result;
-use arora_behavior::{golden, BehaviorInterpreter};
+use arora_behavior::{interpreter_module, BehaviorInterpreter};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeError, Inbound, InboundStream};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
+use arora_engine::module::ModuleBuilder;
 use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
+use arora_types::call::CallError;
 use arora_types::data::{DataStore, Subscription};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
@@ -91,9 +93,9 @@ pub struct Arora {
     /// [`BehaviorStatus::Done`](arora_behavior::BehaviorStatus).
     ///
     /// Held in a shared cell because two single-threaded phases reach it: the
-    /// step loop ticks it, and the golden behavior-edit function the builder
-    /// registered on the engine applies [`GraphDiff`](arora_behavior::GraphDiff)s
-    /// to it (see [`runtime::InterpreterCell`]).
+    /// step loop ticks it, and the interpreter module the builder registered
+    /// on the engine loads/edits it (see [`runtime::InterpreterCell`] and
+    /// [`arora_behavior::interpreter_module`]).
     pub(crate) interpreter: runtime::InterpreterCell,
     pub(crate) telemetry: Telemetry,
     // The HAL, owned by the device; outbound writes go through its
@@ -266,18 +268,31 @@ impl AroraBuilder {
             .interpreter
             .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
 
-        // The golden behavior-edit function, registered against the injected
-        // interpreter: a Call to `golden::{BEHAVIOR_MODULE, APPLY_DIFF}` — from
-        // a remote or from a behavior — reaches `interpreter.apply(GraphDiff)`
-        // through the engine's normal dispatch.
+        // The interpreter as a module: a function module under
+        // `interpreter_module::ID` whose `LOAD`/`EDIT` functions run on the
+        // same cell the step loop ticks. A Call to those ids — from a remote
+        // or from a behavior — reaches the interpreter through the engine's
+        // normal dispatch, like any module function.
         let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
-        engine.register_host_function(
-            golden::BEHAVIOR_MODULE,
-            golden::APPLY_DIFF,
-            Rc::new(runtime::GoldenEdit {
-                interpreter: interpreter.clone(),
-            }),
-        );
+        let module = ModuleBuilder::new(interpreter_module::ID)
+            .function(interpreter_module::LOAD, {
+                let cell = interpreter.clone();
+                move |call| {
+                    let graph = interpreter_module::decode_load(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter(&cell, |interpreter| interpreter.load(graph))
+                }
+            })
+            .function(interpreter_module::EDIT, {
+                let cell = interpreter.clone();
+                move |call| {
+                    let diff = interpreter_module::decode_edit(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))
+                }
+            })
+            .build();
+        engine.register_module(module.id(), Box::new(module));
 
         Ok(Arora {
             store,
