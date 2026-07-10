@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-restful"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "MIT"
 description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerbot) as Arora devices"

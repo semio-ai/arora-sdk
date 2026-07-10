@@ -4,6 +4,12 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.1] - 2026-07-10
+
+### Changed
+
+- Refreshed documentation; the crate now ships its CHANGELOG.
+
 ## [3.1.0] - 2026-07-10
 
 ### Fixed

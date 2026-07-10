@@ -4,6 +4,12 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.1] - 2026-07-10
+
+### Changed
+
+- Refreshed documentation; the crate now ships its CHANGELOG.
+
 ## [3.0.0] - 2026-07-09
 
 ### Breaking
