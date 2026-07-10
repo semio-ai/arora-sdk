@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ws"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "arora-bridge",
  "arora-types",

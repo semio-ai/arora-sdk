@@ -110,13 +110,22 @@ impl Bridge for WsBridge {
     fn take_inbound(&mut self) -> InboundStream {
         // A connected editor is a data consumer: the claim opens the stream,
         // then every command the server's handlers enqueue follows, in order.
+        //
+        // The handlers holding the command senders live in the server this
+        // bridge keeps alive, so the channel alone can never close — the
+        // stream ends on the server's `stopped` signal instead. Ending is the
+        // endpoint-disconnect signal (the runtime chains its marker on it), so
+        // a dead server (port taken, accept loop gone) surfaces as a
+        // disconnect instead of a device running on with an unreachable
+        // bridge.
         let commands = self
             .commands
             .take()
             .expect("WsBridge inbound stream already taken");
         Box::pin(
             futures::stream::once(async { Inbound::DataRequested(true) })
-                .chain(commands.map(Inbound::Command)),
+                .chain(commands.map(Inbound::Command))
+                .take_until(self.server.stopped()),
         )
     }
 
@@ -165,5 +174,33 @@ mod tests {
             }
             other => panic!("expected ValuesChanged, got {other:?}"),
         }
+    }
+
+    /// A dead server ends the inbound stream — the endpoint-disconnect signal.
+    /// Here the server dies at bind (port already taken); the same lifecycle
+    /// signal covers an accept loop exiting later.
+    #[tokio::test]
+    async fn inbound_ends_when_the_server_dies() {
+        use futures::StreamExt;
+
+        // Occupy a port, then point the server at it so run() fails to bind.
+        let taken = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = taken.local_addr().unwrap().port();
+        let server = Arc::new(AroraWSServer::new(ServerConfig::with_port(port)));
+        let mut bridge = WsBridge::new(server.clone()).await;
+
+        let error = server
+            .run(crate::CancellationToken::new())
+            .await
+            .expect_err("the port is taken");
+        assert!(error.contains("bind"), "{error}");
+
+        // The stream ends (instead of pending forever on the open channel).
+        let mut inbound = bridge.take_inbound();
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while inbound.next().await.is_some() {}
+        })
+        .await;
+        assert!(ended.is_ok(), "the inbound stream must end, not hang");
     }
 }
