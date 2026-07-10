@@ -3,9 +3,9 @@ use std::{collections::HashMap, rc::Rc};
 use rand::{rng, Rng};
 use uuid::Uuid;
 
-use arora_buffers::serde_uuid::serialize;
+use arora_buffers::serde_uuid::{deserialize, serialize};
 pub use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
-use arora_types::value::{Structure, Value};
+use arora_types::value::{Structure, StructureField, Value};
 
 use crate::module::DispatchError;
 
@@ -13,6 +13,44 @@ pub fn serialize_to_arg(call: Call) -> Box<[u8]> {
     serialize(&Value::Structure(Structure {
         id: call.id,
         fields: call.args,
+    }))
+}
+
+/// Decode a dispatch argument buffer back into the [`Call`] it serializes —
+/// the inverse of [`serialize_to_arg`]. `module_id` is not on the wire (the
+/// dispatch already routed), so it comes back `None`.
+pub fn decode_arg(function_id: Uuid, arg: &[u8]) -> Result<Call, String> {
+    match deserialize(arg) {
+        Value::Structure(structure) => {
+            if structure.id != function_id {
+                return Err(format!(
+                    "argument structure id {} differs from function id {}",
+                    structure.id, function_id
+                ));
+            }
+            Ok(Call {
+                module_id: None,
+                id: structure.id,
+                args: structure.fields,
+            })
+        }
+        _ => Err("argument buffer is not a structure".to_string()),
+    }
+}
+
+/// Encode a [`CallResult`] the way guest modules do — a [`Structure`] whose id
+/// is the function id, first field the return value, remaining fields the
+/// mutated arguments. The exact form `arora_call`'s result parsing expects.
+pub fn encode_call_result(function_id: Uuid, result: CallResult) -> Box<[u8]> {
+    let mut fields = Vec::with_capacity(1 + result.mutated.len());
+    fields.push(StructureField {
+        id: function_id,
+        value: Box::new(result.ret),
+    });
+    fields.extend(result.mutated);
+    serialize(&Value::Structure(Structure {
+        id: function_id,
+        fields,
     }))
 }
 

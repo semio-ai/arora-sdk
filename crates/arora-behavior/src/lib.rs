@@ -39,6 +39,7 @@ use arora_types::data::DataStore;
 
 pub mod golden;
 pub mod graph;
+pub mod interpreter_module;
 
 pub use graph::{Graph, GraphDiff};
 
@@ -106,12 +107,24 @@ pub trait BehaviorInterpreter {
     /// re-lowering its runtime form to the next [`tick`](Self::tick) (which
     /// carries the store in its context), so a lowering problem can surface
     /// there rather than here. This keeps `apply` callable from anywhere a
-    /// [`GraphDiff`](graph::GraphDiff) arrives — notably an engine-registered
-    /// edit function, which holds no store.
+    /// [`GraphDiff`](graph::GraphDiff) arrives — notably the interpreter's
+    /// engine-registered edit function, which holds no store.
     fn apply(&mut self, diff: graph::GraphDiff) -> Result<(), BehaviorError> {
         let _ = diff;
         Err(BehaviorError {
             message: "this interpreter does not support graph edition".to_string(),
+        })
+    }
+
+    /// Replace the running behavior with `graph`, whole. Like
+    /// [`apply`](Self::apply) it is store-less — an implementation may defer
+    /// lowering to the next [`tick`](Self::tick) — so it is callable from the
+    /// interpreter's engine-registered load function. The default rejects
+    /// loading, for hand-coded interpreters that carry no graph.
+    fn load(&mut self, graph: graph::Graph) -> Result<(), BehaviorError> {
+        let _ = graph;
+        Err(BehaviorError {
+            message: "this interpreter does not support loading a graph".to_string(),
         })
     }
 }

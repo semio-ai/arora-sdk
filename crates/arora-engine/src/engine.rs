@@ -78,25 +78,12 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
     }
 }
 
-/// A host-side function addressable through [`CallBridge::arora_call`] like a
-/// loaded module's function: registered under a module + function id pair, it
-/// receives the whole [`Call`] (arguments included) and returns the
-/// [`CallResult`] directly — no guest executor, no buffer round-trip.
-///
-/// This is how the runtime exposes its *golden* functions (e.g.
-/// arora-behavior's behavior edit) to remotes and behaviors alike: the same
-/// dispatch that reaches guest code reaches these.
-pub trait HostFunction {
-    fn call(&self, call: Call) -> Result<CallResult, CallError>;
-}
-
 /// [`Engine`] is the main encapsulation of the Arora runtime.
 /// It consists of a set of [`Executor`]s and [`Module`]s.
 pub struct Engine {
     executors: HashMap<&'static str, Box<dyn Executor>>,
     modules: HashMap<Uuid, Box<dyn Module>>,
     callables: CallableRegistry,
-    host_functions: HashMap<(Uuid, Uuid), Rc<dyn HostFunction>>,
 }
 
 impl Engine {
@@ -106,7 +93,6 @@ impl Engine {
             executors,
             modules: HashMap::new(),
             callables: CallableRegistry::new(),
-            host_functions: HashMap::new(),
         });
 
         {
@@ -145,19 +131,16 @@ impl Engine {
         Ok(())
     }
 
-    /// Register a [`HostFunction`] under a module + function id, making it
-    /// reachable through [`CallBridge::arora_call`] exactly like a loaded
-    /// module's function. A host function registered under an id pair shadows
-    /// nothing: guest dispatch is only consulted when no host function
-    /// matches.
-    pub fn register_host_function(
-        &mut self,
-        module_id: Uuid,
-        function_id: Uuid,
-        function: Rc<dyn HostFunction>,
-    ) {
-        self.host_functions
-            .insert((module_id, function_id), function);
+    /// Register an already-instantiated [`Module`] under `id`, making its
+    /// functions reachable through [`CallBridge::arora_call`] exactly like a
+    /// loaded module's. Where [`load_module`](Self::load_module) instantiates a
+    /// module from a definition through an [`Executor`], this hands one over
+    /// directly — how host-side modules (e.g. a
+    /// [`FunctionModule`](crate::module::FunctionModule) built from closures)
+    /// enter the same dispatch as guest code. Registering an id that is
+    /// already present replaces the module.
+    pub fn register_module(&mut self, id: Uuid, module: Box<dyn Module>) {
+        self.modules.insert(id, module);
     }
 
     /// Dispatch a method call to a module. `arg` must be a raw Arora Buffer.
@@ -180,9 +163,6 @@ pub type EngineRef = *mut Engine;
 
 impl CallBridge for Engine {
     fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
-        if let Some(host) = self.host_functions.get(&(*module, call.id)).cloned() {
-            return host.call(call);
-        }
         let call_id = call.id;
         let result_data = self
             .dispatch(module, &call_id, serialize_to_arg(call).as_ref())
@@ -254,49 +234,59 @@ impl CallBridge for PinnedEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct Doubler;
-    impl HostFunction for Doubler {
-        fn call(&self, call: Call) -> Result<CallResult, CallError> {
-            let Value::I32(n) = call.args[0].value.as_ref() else {
-                return Err(CallError::Guest {
-                    message: "expected an i32".to_string(),
-                });
-            };
-            Ok(CallResult {
-                ret: Value::I32(n * 2),
-                mutated: Vec::new(),
-            })
-        }
-    }
+    use crate::module::ModuleBuilder;
 
     #[test]
-    fn host_functions_dispatch_like_module_functions() {
+    fn function_modules_dispatch_like_loaded_modules() {
         let mut engine = EngineBuilder::new().build();
-        let module = Uuid::from_u128(1);
+        let module_id = Uuid::from_u128(1);
         let function = Uuid::from_u128(2);
-        engine.register_host_function(module, function, Rc::new(Doubler));
+        let module = ModuleBuilder::new(module_id)
+            .function(function, |call: Call| {
+                let Value::I32(n) = call.args[0].value.as_ref() else {
+                    return Err(CallError::Guest {
+                        message: "expected an i32".to_string(),
+                    });
+                };
+                Ok(CallResult {
+                    ret: Value::I32(n * 2),
+                    mutated: Vec::new(),
+                })
+            })
+            .build();
+        engine.register_module(module.id(), Box::new(module));
 
         let call = Call {
-            module_id: Some(module),
+            module_id: Some(module_id),
             id: function,
             args: vec![arora_types::value::StructureField {
                 id: Uuid::from_u128(3),
                 value: Box::new(Value::I32(21)),
             }],
         };
-        let result = engine.arora_call(&module, call).unwrap();
+        let result = engine.arora_call(&module_id, call).unwrap();
         assert_eq!(result.ret, Value::I32(42));
 
-        // An unregistered id still falls through to guest dispatch (and fails
-        // there, since no module is loaded).
+        // An unattached function id fails like a missing guest function.
         let miss = Call {
-            module_id: Some(module),
+            module_id: Some(module_id),
             id: Uuid::from_u128(4),
             args: Vec::new(),
         };
         assert!(matches!(
-            engine.arora_call(&module, miss),
+            engine.arora_call(&module_id, miss),
+            Err(CallError::FunctionNotFound { .. })
+        ));
+
+        // An unregistered module id fails as before.
+        let other = Uuid::from_u128(9);
+        let elsewhere = Call {
+            module_id: Some(other),
+            id: function,
+            args: Vec::new(),
+        };
+        assert!(matches!(
+            engine.arora_call(&other, elsewhere),
             Err(CallError::ModuleNotFound { .. })
         ));
     }

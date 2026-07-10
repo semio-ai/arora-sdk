@@ -168,4 +168,13 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         self.dirty = true;
         Ok(())
     }
+
+    fn load(&mut self, graph: Graph) -> Result<(), BehaviorError> {
+        // A whole-behavior replacement: the previous tree is gone now, the new
+        // graph lowers at the next tick (like an edit).
+        self.tree = None;
+        self.graph = Some(graph);
+        self.dirty = true;
+        Ok(())
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior"
-version = "3.1.0"
+version = "4.0.0"
 edition = "2021"
 description = "The Behavior abstraction the Arora runtime ticks: a behavior tree, a node graph, or any interpreter, against the shared data store — plus the shared behavior graph model."
 license = "MIT"
