@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "7.0.1"
+version = "8.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -193,7 +193,9 @@ dependencies = [
  "log",
  "ratatui",
  "rustls 0.23.41",
+ "serde_yaml",
  "sysinfo",
+ "test-rust-wasm",
  "tokio",
  "uuid",
 ]
@@ -382,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-restful"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -402,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-ros2"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -657,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "5.2.2"
+version = "5.3.0"
 dependencies = [
  "arora",
  "arora-behavior",
