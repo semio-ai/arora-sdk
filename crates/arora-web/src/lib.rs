@@ -66,7 +66,7 @@ fn install_panic_hook() {
 // below is one such wrapper (the in-process fakes); Vizij ships another.
 // =============================================================================
 
-use arora::{Arora, BehaviorTreeInterpreter, StepOutcome};
+use arora::{Arora, AroraBuilder, BehaviorTreeInterpreter, ModuleFunction, StepOutcome};
 use arora_behavior::BehaviorInterpreter;
 use arora_bridge::{Bridge, FakeBridge};
 use arora_hal::{FakeHal, Hal};
@@ -107,16 +107,22 @@ impl BrowserRuntime {
         store: Box<dyn DataStore>,
         behavior_interpreter: Box<dyn BehaviorInterpreter>,
     ) -> Result<BrowserRuntime, JsValue> {
-        install_panic_hook();
-        let changes = store.subscribe();
-        let arora = Arora::builder()
+        Self::builder()
             .with_hal(hal)
             .with_bridge(bridge)
             .with_data_store(store)
             .with_behavior_interpreter(behavior_interpreter)
             .build()
-            .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
-        Ok(BrowserRuntime { arora, changes })
+    }
+
+    /// Start assembling a [`BrowserRuntime`] seam by seam, mirroring
+    /// [`arora::Arora::builder`] — the same `with_*` setters, so a browser
+    /// device is configured exactly like a native one, plus the store-change
+    /// subscription wired at [`build`](BrowserRuntimeBuilder::build). Use this
+    /// over [`start`](Self::start) when the device needs modules, several
+    /// bridges, or a non-default store.
+    pub fn builder() -> BrowserRuntimeBuilder {
+        BrowserRuntimeBuilder::default()
     }
 
     /// The device's store, for direct access beyond the JSON accessors.
@@ -206,6 +212,70 @@ impl BrowserRuntime {
             }
         }
         to_js_object(out)
+    }
+}
+
+/// Assembles a [`BrowserRuntime`], mirroring [`arora::AroraBuilder`] so a browser
+/// device is configured exactly like a native one: a HAL, zero or more bridges, a
+/// data store, the behavior interpreter, and the modules whose functions behaviors
+/// may call — each defaulted. Every setter forwards to the underlying
+/// [`AroraBuilder`]; [`build`](Self::build) assembles the [`Arora`] and subscribes
+/// to its store's change feed.
+#[derive(Default)]
+pub struct BrowserRuntimeBuilder {
+    inner: AroraBuilder,
+}
+
+impl BrowserRuntimeBuilder {
+    /// See [`AroraBuilder::with_hal`].
+    pub fn with_hal(mut self, hal: Box<dyn Hal>) -> Self {
+        self.inner = self.inner.with_hal(hal);
+        self
+    }
+
+    /// See [`AroraBuilder::with_bridge`]. Repeatable — reads fan in and writes
+    /// fan out across every bridge.
+    pub fn with_bridge(mut self, bridge: Box<dyn Bridge>) -> Self {
+        self.inner = self.inner.with_bridge(bridge);
+        self
+    }
+
+    /// See [`AroraBuilder::with_data_store`].
+    pub fn with_data_store(mut self, store: Box<dyn DataStore>) -> Self {
+        self.inner = self.inner.with_data_store(store);
+        self
+    }
+
+    /// See [`AroraBuilder::with_behavior_interpreter`].
+    pub fn with_behavior_interpreter(mut self, interpreter: Box<dyn BehaviorInterpreter>) -> Self {
+        self.inner = self.inner.with_behavior_interpreter(interpreter);
+        self
+    }
+
+    /// See [`AroraBuilder::with_module`]. Loads a guest module into the device's
+    /// engine — in the browser, a `.wasm` run by the native `WebAssembly` host.
+    pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
+        self.inner = self.inner.with_module(header, executable);
+        self
+    }
+
+    /// See [`AroraBuilder::with_host_module`].
+    pub fn with_host_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
+        self.inner = self.inner.with_host_module(functions);
+        self
+    }
+
+    /// Assemble the [`Arora`] and subscribe to its store's change feed (for
+    /// [`drain_changes`](BrowserRuntime::drain_changes)). Fails only if the
+    /// engine host cannot be created or a module fails to load.
+    pub fn build(self) -> Result<BrowserRuntime, JsValue> {
+        install_panic_hook();
+        let arora = self
+            .inner
+            .build()
+            .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
+        let changes = arora.store().subscribe();
+        Ok(BrowserRuntime { arora, changes })
     }
 }
 

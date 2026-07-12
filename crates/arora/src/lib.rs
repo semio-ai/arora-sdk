@@ -35,10 +35,12 @@ pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
 /// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before
 /// injecting it with [`AroraBuilder::with_behavior_interpreter`].
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
+/// Re-exported so binding crates (e.g. `arora-web`) can name the host-function
+/// type that [`AroraBuilder::with_host_module`] accepts.
+pub use arora_behavior_tree::ModuleFunction;
 
 use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
-use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeError, Inbound, InboundStream};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
