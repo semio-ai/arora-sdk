@@ -95,3 +95,11 @@ async-trait = "0.1"
 # (`start_paused`) to elapse the access grace instantly. The runtime-loop tests
 # are fully synchronous (the I/O seams are non-blocking), so they need no timers.
 tokio = { version = "1", features = ["time", "test-util"] }
+# Parse the test module's low-level header YAML in the with_module load test.
+serde_yaml = "0.9"
+# The test-rust-wasm guest (built for wasm32-wasip1 as a cdylib artifact
+# dependency): its `.wasm` bytes back the `with_module` load test. Cargo exposes
+# the bytes as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm; its build script
+# emits the generated header the test include_str!s. Built automatically by
+# `cargo test` (the wasm32-wasip1 target is pinned in rust-toolchain.toml).
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
