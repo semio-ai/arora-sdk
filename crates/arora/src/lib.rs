@@ -43,11 +43,13 @@ use arora_bridge::{Bridge, BridgeError, Inbound, InboundStream};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
+use arora_engine::load::load_module_from_parts;
 use arora_engine::module::ModuleBuilder;
 use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::CallError;
 use arora_types::data::{DataStore, Subscription};
+use arora_types::module::low::Header;
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
@@ -82,7 +84,7 @@ pub struct Arora {
     /// Module functions referenced by behavior-tree nodes, keyed by function
     /// UUID. The basic control nodes are dispatched natively and are not in this
     /// index; it holds only the functions of modules registered through
-    /// [`AroraBuilder::with_module`].
+    /// [`AroraBuilder::with_host_module`].
     pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     /// The one behavior interpreter, ticked each step — an executor injected once
     /// at [`build`](AroraBuilder::build), not swapped afterwards. It defaults to
@@ -155,6 +157,7 @@ pub struct AroraBuilder {
     bridges: Vec<Box<dyn Bridge>>,
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
+    modules: Vec<(Header, Box<[u8]>)>,
 }
 
 impl AroraBuilder {
@@ -208,19 +211,37 @@ impl AroraBuilder {
         self
     }
 
-    /// Register a module's functions so behaviors may call them. Repeatable —
-    /// each call adds one module's functions to the `function_index`, keyed by
-    /// function UUID.
+    /// Load a module into the device's engine so behaviors may call its
+    /// functions. Repeatable — each call loads one module.
     ///
-    /// This makes real the function-index half of the module-load seam: a
-    /// behavior-tree node bound to one of these functions builds its call from
-    /// the frozen `Function` record carried here. The remaining half — loading
-    /// the module's executable into the engine so the call actually dispatches
-    /// to guest code — is not wired yet (a [`ModuleFunction`] carries no
-    /// executable), so registered functions must be ones the engine can already
-    /// dispatch (natively-hosted). TODO: accept a loadable module (header +
-    /// executable) and load it into the engine here too.
-    pub fn with_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
+    /// `header` is the module's low-level [`Header`] — its id, its exported
+    /// functions (each with a UUID), and the **executor** that runs it.
+    /// `executable` is the module's bytes in whatever format that executor
+    /// expects: a `.wasm` for the WebAssembly executor, or a native dynamic
+    /// library for the native executor. The engine selects the executor by the
+    /// name the header announces, so this one seam loads either format. The
+    /// module is loaded at [`build`](Self::build); once loaded, its exported
+    /// functions dispatch to guest code through the engine's `CallBridge` —
+    /// what a behavior reaches to call them.
+    ///
+    /// For functions the engine hosts in-process (Rust closures rather than a
+    /// loadable executable), use [`with_host_module`](Self::with_host_module).
+    pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
+        self.modules.push((header, executable.into()));
+        self
+    }
+
+    /// Register natively-hosted module functions so behaviors may call them.
+    /// Repeatable — each call adds one module's functions to the
+    /// `function_index`, keyed by function UUID.
+    ///
+    /// This is the host-side counterpart to [`with_module`](Self::with_module):
+    /// where `with_module` loads a guest executable, this registers functions
+    /// the engine already dispatches in-process. A behavior-tree node bound to
+    /// one of these functions builds its call from the frozen `Function` record
+    /// carried here. A [`ModuleFunction`] carries no executable, so these must
+    /// be functions the engine can already dispatch (natively-hosted).
+    pub fn with_host_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
         for function in functions {
             self.functions.insert(function.function_id, function);
         }
@@ -236,6 +257,15 @@ impl AroraBuilder {
     /// async internally, behind their stream/push seams.
     pub fn build(self) -> Result<Arora> {
         let mut engine = build_engine()?;
+
+        // Load each guest module into the engine so its exported functions
+        // dispatch through the engine's `CallBridge`. Done before the store and
+        // seams are wired: a module that fails to load fails the whole build.
+        for (header, executable) in self.modules {
+            load_module_from_parts(&mut engine, header, executable)
+                .map_err(|e| anyhow::anyhow!("failed to load module: {e}"))?;
+        }
+
         let store = self
             .store
             .unwrap_or_else(|| Box::new(SimpleDataStore::new()));
@@ -331,4 +361,77 @@ fn build_engine() -> Result<PinnedEngine> {
     Ok(EngineBuilder::new()
         .add_executor(BrowserExecutor::new())
         .build())
+}
+
+/// Loading a guest wasm module through the builder and dispatching it. Needs
+/// the `native` feature: the module runs on the WebAssembly (wasmtime)
+/// executor. `test-rust-wasm` is a small guest built as a `wasm32-wasip1`
+/// cdylib artifact dependency; Cargo hands its generated header and `.wasm`
+/// bytes to the test.
+#[cfg(all(test, feature = "native"))]
+mod module_loading_tests {
+    use super::*;
+    use arora_types::call::{Call, CallBridge};
+    use arora_types::value::Value;
+
+    const HEADER_YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../modules/test-rust-wasm/src/arora_generated/module.yaml"
+    ));
+    const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
+
+    // Function id from modules/test-rust-wasm/module.yaml.
+    const SUCCEED: &str = "00cd31a8-2cf4-48e6-a957-69a55de90424"; // () -> bool
+
+    fn test_module_header() -> Header {
+        serde_yaml::from_str(HEADER_YAML).expect("parse test-rust-wasm header yaml")
+    }
+
+    /// `with_module` loads the guest executable into the engine, and its
+    /// exported functions dispatch through the engine's `CallBridge` — the same
+    /// bridge a behavior reaches when it calls a module.
+    #[test]
+    fn with_module_loads_a_wasm_module_callable_through_the_engine() {
+        let header = test_module_header();
+        let module_id = header.id;
+        let mut arora = Arora::builder()
+            .with_module(header, WASM.to_vec())
+            .build()
+            .expect("build a device with a loaded wasm module");
+
+        let result = arora
+            .engine
+            .arora_call(
+                &module_id,
+                Call {
+                    module_id: None,
+                    id: Uuid::parse_str(SUCCEED).expect("valid uuid"),
+                    args: Vec::new(),
+                },
+            )
+            .expect("call succeed() on the loaded module");
+        assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// The default device builds fine with no modules loaded.
+    #[test]
+    fn builds_without_any_module() {
+        Arora::builder()
+            .build()
+            .expect("the default device builds with no modules loaded");
+    }
+
+    /// A module whose executable cannot load fails the whole build, rather than
+    /// silently yielding a device with a broken module.
+    #[test]
+    fn a_module_that_fails_to_load_fails_the_build() {
+        let header = test_module_header();
+        let result = Arora::builder()
+            .with_module(header, vec![0xDE, 0xAD, 0xBE, 0xEF]) // not a valid wasm binary
+            .build();
+        assert!(
+            result.is_err(),
+            "build must fail when a module's executable cannot load"
+        );
+    }
 }
