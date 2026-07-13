@@ -52,6 +52,33 @@ pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
     // logging below is captured by whichever front end was chosen.
     let frontend = crate::run::select_frontend();
 
+    // Build (and register) the Studio bridge, then drive the runtime over it.
+    let client = connect().await?;
+    crate::run_with_frontend(hal, client, Box::new(SimpleDataStore::new()), frontend).await
+}
+
+/// Build the Semio Studio bridge — a ready-to-inject [`Bridge`] endpoint — from
+/// the environment, register the device from any configured device info, and
+/// return it.
+///
+/// This is the injectable counterpart to [`run_with_hal`]: where `run_with_hal`
+/// builds the bridge *and* owns the run loop, `connect` returns just the
+/// finished, registered bridge so an embedder can attach it to a device with
+/// [`AroraBuilder::with_bridge`](crate::AroraBuilder::with_bridge) — the
+/// producer side of "let a Studio see this runtime's live data". A host that
+/// already runs its own Arora (e.g. the Vizij standalone) opts into a Studio
+/// connection with:
+///
+/// ```ignore
+/// let studio_bridge = arora::studio::connect().await?;
+/// let device = arora::Arora::builder().with_bridge(studio_bridge).build()?;
+/// ```
+///
+/// The whole Studio side (Firebase auth, token rotation, the Zenoh connection,
+/// device registration) is identical for every device; only the runtime it is
+/// attached to differs. Configuration is environment-only — see the
+/// [module docs](self) for the variables read.
+pub async fn connect() -> Result<Box<dyn Bridge>> {
     // Read the Firebase options and Zenoh endpoints from the environment.
     let firebase_options = FirebaseOptions::from_env();
     let firebase_emulator_options = FirebaseEmulatorOptions::from_env();
@@ -126,7 +153,7 @@ pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
         info!("Registered device info with Studio");
     }
 
-    crate::run_with_frontend(hal, client, Box::new(SimpleDataStore::new()), frontend).await
+    Ok(client)
 }
 
 /// Build the device info to register from the environment, or `None` if nothing
