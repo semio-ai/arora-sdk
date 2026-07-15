@@ -1,6 +1,6 @@
 # Arora Types
 
-Shared type definitions for the [Arora](https://github.com/semio-ai/arora-engine)
+Shared type definitions for the [Arora](https://github.com/semio-ai/arora-sdk)
 framework: the vocabulary the engine, modules, registries and clients use to
 describe modules, types and runtime values. It carries no engine dependencies, so
 it is safe to depend on from tools, bindings and remote clients.
@@ -9,7 +9,7 @@ it is safe to depend on from tools, bindings and remote clients.
 
 High-level types use names to reference other entities. Names are meant to be
 resolved using a
-[registry](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-registry/readme.md),
+[registry](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-registry/readme.md),
 or local indexes associating [UUIDs](https://docs.rs/uuid) to names.
 
 Low-level types are produced for contexts where [UUIDs](https://docs.rs/uuid) are
@@ -18,18 +18,18 @@ sufficient, if not more efficient for looking them up.
 ## Module
 
 The "high-level"
-[`ModuleDefinition`](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/module/high.rs)
+[`ModuleDefinition`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/high.rs)
 completely describes a module to implement. It is usually saved as a `module.yaml`
 file (using [`serde_yaml`](https://docs.rs/serde_yaml)). It can be used by the
 code generators of
-[`arora-module-cli`](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-module-authoring/cli/readme.md)
+[`arora-module-cli`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-module-authoring/cli/readme.md)
 to produce the proper bindings for a module.
 
 The "low-level" format of a module is called a
-[`Header`](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/module/low.rs),
+[`Header`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/low.rs),
 and is produced by the code generators under the file name `header.yaml`. It is
 used to load the module in the engine, with
-[`arora-cli`](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-cli/readme.md).
+[`arora-cli`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-cli/readme.md).
 
 Modules may export symbols, so that they can be called by any client. Modules may
 also declare symbols to import from other modules, so that the right bindings are
@@ -44,13 +44,13 @@ functions. Their declaration may involve references to existing [types](#type-ty
 ## Type (`ty`)
 
 Structured types can be described in both
-[high-level](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/ty/high.rs)
+[high-level](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/high.rs)
 or
-[low-level](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/ty/low.rs)
+[low-level](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/low.rs)
 ways, so that they can be used in both high-level or low-level modules. This
 library can describe:
 
-- [primitive types](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/ty/mod.rs),
+- [primitive types](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/mod.rs),
   equivalent in Rust to: `bool`, `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`,
   `i64`, `f32`, `f64`, `String`.
 - enumerations, similar to Rust `enum`s: each variant can hold a value of any
@@ -60,7 +60,7 @@ library can describe:
 
 ## Value
 
-A [`Value`](https://github.com/semio-ai/arora-engine/blob/main/crates/arora-types/src/value.rs)
+A [`Value`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/value.rs)
 describes a value defined in the low-level [types](#type-ty). It is generic and
 can also be serialized (using [`serde`](https://docs.rs/serde)). For other kinds
 of conversions a common error type is suggested:

@@ -4,7 +4,7 @@ How the engine routes a call from a caller to the function that runs it, the
 two addressing schemes it supports today (direct and indirect), and how the
 behavior-tree runtime leans on the indirect one.
 
-For the buffer/ABI basics see [`crates/arora/readme.md`](../crates/arora-engine/readme.md#call-mechanism);
+For the buffer/ABI basics see [`crates/arora-engine/readme.md`](../crates/arora-engine/readme.md#call-mechanism);
 for the *why* behind broader choices see [`design_decisions.md`](design_decisions.md).
 
 ## Two ways to address a call
@@ -99,15 +99,15 @@ dispatch (both are runtime hash-map lookups). The real differences:
 
 ## How behavior trees use indirect dispatch
 
-The [`arora-behavior-tree`](https://github.com/semio-ai/arora-behavior-tree) runtime is
+The [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md) runtime is
 a host-side orchestrator: the control-flow logic (sequence, fallback, …) lives
-in the [`behavior-tree-nodes`](https://github.com/semio-ai/arora-behavior-tree) **guest
+in the [`behavior-tree-nodes`](../modules/test-behavior-tree-nodes/readme.md) **guest
 module**, while the tree structure and blackboard variables live host-side. The
 two recurse into each other, and indirect dispatch is the bridge.
 
 ### Setup: one callable per node
 
-[`setup_tick_function`](https://github.com/semio-ai/arora-behavior-tree) walks
+[`setup_tick_function`](../crates/arora-behavior-tree/readme.md) walks
 the tree bottom-up. For every node it constructs a `TickFunction` capturing that
 node, its already-registered children, and `Rc`-shared clones of the tree-wide
 `function_index`, `locals`, and `node_arg_variables` maps. Each `TickFunction`
@@ -145,10 +145,10 @@ sequenceDiagram
    `arora_call(module, fn, …)`, **passing the children as an array of
    `TickId`s** — the children are required to be the node's first parameter,
    named `children` (UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`), typed
-   `Vec<TickId>` (see [`crates/arora-behavior-tree/readme.md`](https://github.com/semio-ai/arora-behavior-tree)).
+   `Vec<TickId>` (see [`crates/arora-behavior-tree/readme.md`](../crates/arora-behavior-tree/readme.md)).
 3. The guest control logic decides when to tick a child and calls back
    `arora_dispatch_indirect(child.callable_id)`
-   ([`modules/behavior-tree-nodes/src/lib.rs`](https://github.com/semio-ai/arora-behavior-tree)).
+   ([`modules/test-behavior-tree-nodes/src/lib.rs`](../modules/test-behavior-tree-nodes/src/lib.rs)).
 4. That re-enters the host, which ticks the child `TickFunction` — a leaf calls
    its module function via `arora_call`; a composite recurses from step 2.
 

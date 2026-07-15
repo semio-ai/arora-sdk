@@ -145,10 +145,10 @@ cargo test -- --nocapture
 cargo build --workspace
 
 # Specific module (will trigger build.rs and code generation)
-cargo build -p behavior-tree-nodes
+cargo build -p test-behavior-tree-nodes
 
 # Clean a specific module (useful after changing module.yaml)
-cargo clean -p behavior-tree-nodes && cargo build -p behavior-tree-nodes
+cargo clean -p test-behavior-tree-nodes && cargo build -p test-behavior-tree-nodes
 ```
 
 ### Debugging Build Scripts
@@ -187,7 +187,7 @@ The workspace handles cross-compilation via artifact dependencies:
 5. Implement functions in `src/lib.rs`
 6. Build and test
 
-See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) or [`modules/behavior-tree-nodes/`](https://github.com/semio-ai/arora-behavior-tree) for working examples.
+See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) or [`modules/test-behavior-tree-nodes/`](modules/test-behavior-tree-nodes/) for working examples.
 
 ### Module Interface Contract
 
@@ -198,7 +198,7 @@ All modules communicate via:
   - `arora_dispatch(module_id, method_id, arg)` — direct call
   - `arora_dispatch_indirect(callable_id)` — anonymous callable
 
-See [`arora-types`](https://github.com/semio-ai/arora-types) for the runtime contract.
+See [`arora-types`](crates/arora-types/readme.md) for the runtime contract.
 
 ## Testing Strategy
 
@@ -273,7 +273,7 @@ Diagnostic checklist:
 
 ## Related Repositories
 
-- [arora-types](https://github.com/semio-ai/arora-types) — Core type definitions and runtime contract
+- [arora-types](crates/arora-types/readme.md) — Core type definitions and runtime contract
 - [semio-record](https://github.com/semio-ai/semio-record) — Record system for types and modules
 - [semio-client](https://github.com/semio-ai/semio-client) — Client for Semio database
 

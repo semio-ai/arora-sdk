@@ -15,7 +15,7 @@ The YAML format to the schema defined in [`src/schema.rs`](src/schema.rs).
 It consist of a list of nodes,
 which arguments can be expressed dynamically with a flexible `Expression`.
 It can be:
-- a serialized [`Value`, like defined in `arora-types`](https://github.com/semio-ai/arora-types),
+- a serialized [`Value`, like defined in `arora-types`](https://github.com/semio-ai/arora-sdk),
   or more specifically an [UUID](https://docs.rs/uuid/latest/uuid/),
 - a reference to a variable, in-memory or identified with the
   [UUID](https://docs.rs/uuid/latest/uuid/) of blackboard variable.
@@ -44,8 +44,8 @@ return value is written to the variable after each tick, and the node
 always reports `Status::Success` to its parent. This lets non-Status
 functions (e.g. `add`, `cos`) participate in a behavior tree.
 
-Setting up the runtime requires a [`CallBridge`](https://github.com/semio-ai/arora-engine),
-which the [Arora engine](https://github.com/semio-ai/arora-engine) implements.
+Setting up the runtime requires a [`CallBridge`](https://github.com/semio-ai/arora-sdk),
+which the [Arora engine](https://github.com/semio-ai/arora-sdk) implements.
 The setup mechanism will compute every binding of node arguments,
 so that every node can be `tick`ed with no argument.
 Thus the tick functions can be registered to the engine in exchange of a `CallableId`.
@@ -58,7 +58,7 @@ identified with the UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`,
 and accept a `Vec<TickId>`.
 At runtime, the children are passed as `TickId`s
 that can be converted into `CallableId`s
-before calling [`arora_dispatch_indirect`](https://github.com/semio-ai/arora-engine).
+before calling [`arora_dispatch_indirect`](https://github.com/semio-ai/arora-sdk).
 The return value is always expected to be a `behavior_tree::Status`.
 
 ## Basic Nodes and Helpers
@@ -96,7 +96,7 @@ Instead, stateful information is meant to be passed as mutable parameters
 to the node functions. Thus, it is the behavior tree that holds this state
 in variables (anonymously or in the blackboard),
 and it is capable of resetting them to their default values,
-if they are mentioned in the [module function description](https://github.com/semio-ai/arora-types).
+if they are mentioned in the [module function description](https://github.com/semio-ai/arora-sdk).
 
 Statelessness is important in a client / server architecture - behavior tree / module, here -
 to ensure that the server is designed to not maintain resources busy

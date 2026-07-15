@@ -8,9 +8,9 @@ and puts all the sources under `src/arora-generated`,
 and provides bindings for the Arora engine.
 
 This module exports symbols imported by the module
-[Behavior Tree Nodes](https://github.com/semio-ai/arora-behavior-tree),
+[Behavior Tree Nodes](https://github.com/semio-ai/arora-sdk),
 and is used in the tests of the
-[Behavior Tree library](https://github.com/semio-ai/arora-behavior-tree).
+[Behavior Tree library](https://github.com/semio-ai/arora-sdk).
 
 Exported functions:
 
