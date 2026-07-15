@@ -64,6 +64,21 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     // The log sink is installed by the front end that `run_with_frontend`
     // selects (env_logger headless, in-pane capture under the TUI), so don't
     // init a logger here.
+    run_with(
+        hal,
+        local_ws_bridge().await?,
+        Box::new(SimpleDataStore::new()),
+    )
+    .await
+}
+
+/// Build (and start serving) the open local bridge — the device serves
+/// `ws://127.0.0.1:9000` and any editor or app on the machine connects, no
+/// accounts. This is the default-build bridge; the `studio-bridge` build also
+/// falls back to it when the operator declines a Studio connection, so a device
+/// without an owner still exposes a local bridge (just no Semio Studio).
+#[cfg(feature = "native")]
+pub(crate) async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
     let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
         arora_bridge_ws::ServerConfig::default(),
     ));
@@ -83,7 +98,7 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
         }
     });
     info!("serving the local bridge on ws://127.0.0.1:9000");
-    run_with(hal, Box::new(bridge), Box::new(SimpleDataStore::new())).await
+    Ok(Box::new(bridge))
 }
 
 /// Run a device over `hal`, connected to Semio Studio (the `studio-bridge`
@@ -130,7 +145,9 @@ pub async fn run_with_frontend(
     store: Box<dyn DataStore>,
     frontend: Frontend,
 ) -> Result<()> {
-    let Frontend { operator, on_ready } = frontend;
+    let Frontend {
+        operator, on_ready, ..
+    } = frontend;
 
     // Query the bridge's control plane before the device takes ownership of the
     // endpoint: the identity/info the front end shows, and the access-request

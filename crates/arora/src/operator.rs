@@ -148,6 +148,13 @@ impl Operator for UnattendedOperator {
 pub struct Frontend {
     /// Who answers the device's questions.
     pub operator: Arc<dyn Operator>,
+    /// Whether a human actually answers this front end's prompts (the terminal
+    /// UI), as opposed to the [`UnattendedOperator`], which never does. A run
+    /// that needs registration input (the Studio connection) asks the operator
+    /// only when this is true, and falls back to environment-only configuration
+    /// otherwise — so a headless device never blocks waiting on input nobody
+    /// will type.
+    pub interactive: bool,
     /// Called once, after the runtime and bridge are up, with the telemetry
     /// handle, the registered device info, and the backend device id.
     pub on_ready: ReadyHook,
@@ -165,6 +172,7 @@ pub fn default_frontend() -> Frontend {
     let _ = env_logger::try_init();
     Frontend {
         operator: Arc::new(UnattendedOperator::default()),
+        interactive: false,
         on_ready: Box::new(|_telemetry, _info, _device_id| {}),
     }
 }

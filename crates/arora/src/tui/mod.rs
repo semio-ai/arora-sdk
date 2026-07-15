@@ -150,7 +150,11 @@ pub(crate) fn tui_frontend() -> anyhow::Result<Frontend> {
             }
         },
     );
-    Ok(Frontend { operator, on_ready })
+    Ok(Frontend {
+        operator,
+        interactive: true,
+        on_ready,
+    })
 }
 
 /// The header identity, from what the bridge knows about the device.
