@@ -5,7 +5,7 @@ Welcome to the core of the project!
 ## WASM Executor
 
 The Arora engine runs WASM modules — advertised with
-[a custom module description format (or schema)](https://github.com/semio-ai/arora-types) —
+[a custom module description format (or schema)](https://github.com/semio-ai/arora-sdk) —
 through pluggable [`Executor`](src/executor/mod.rs) implementations.
 Two are shipped today:
 
@@ -52,7 +52,7 @@ An `u64` identifier is attributed to each registered function,
 so that they can be called later using `arora_call_indirect` from the host side,
 or from any module via `arora_dispatch_indirect`.
 
-> [Behavior Trees](https://github.com/semio-ai/arora-behavior-tree) typically use this mechanism
+> [Behavior Trees](https://github.com/semio-ai/arora-sdk) typically use this mechanism
 > to wrap the various node functions into uniform tick functions.
 
 ### Call Mechanism

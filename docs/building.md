@@ -98,7 +98,7 @@ crates/arora-web/www/serve.sh    # demo page on :8080
 > `GECKODRIVER` env var. The same applies to `--chrome` /
 > `chromedriver`.
 
-See [`crates/arora-web/readme.md`](https://github.com/semio-ai/arora-sdk) for
+See [`crates/arora-web/readme.md`](../crates/arora-web/readme.md) for
 details.
 
 ### Dependency overview

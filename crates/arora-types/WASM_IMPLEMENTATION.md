@@ -1,6 +1,6 @@
 # WASM Value Interface Implementation Summary
 
-This document summarizes the WASM interface implementation for the `Value` enum in arora-schema.
+This document summarizes the WASM interface implementation for the `Value` enum in arora-types.
 
 ## Implementation Overview
 

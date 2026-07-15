@@ -277,7 +277,7 @@ Arora module functions. Node primitives live in
 `arora-behavior-tree-types-yaml` (YAML records consumable by C++ via
 `arora-module-cpp`).
 
-The behavior-tree-nodes module (`modules/behavior-tree-nodes`) bundles a
+The test-behavior-tree-nodes module (`modules/test-behavior-tree-nodes`) bundles a
 baseline collection of nodes as a wasm guest.
 
 The runtime registers each node as a host callable and ticks children through

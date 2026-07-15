@@ -2,7 +2,7 @@
 
 A Rust WASM module providing the core nodes for behavior trees.
 
-It depends on the [Test Rust WASM Module](https://github.com/semio-ai/arora-engine).
+It depends on the [Test Rust WASM Module](https://github.com/semio-ai/arora-sdk).
 
 ## Requirements
 
@@ -24,7 +24,7 @@ $ cargo component build
 > This module cannot be built for the host because it depends
 > on another module, and it expects functions
 > `arora_dispatch` and `arora_dispatch_indirect` of
-> [the Arora Engine](https://github.com/semio-ai/arora-engine) to be available at build time.
+> [the Arora Engine](https://github.com/semio-ai/arora-sdk) to be available at build time.
 > Adding the whole crate as a dependency would unreasonably heavy.
 
 It is also automatically built via the parent project (Arora engine),
