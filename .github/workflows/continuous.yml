@@ -12,6 +12,9 @@ env:
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
+    # Fail fast on a wedged run (e.g. a stalled dependency fetch): the suite
+    # normally finishes in ~20 min, so cap well under GitHub's 6h default.
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v6
