@@ -4,6 +4,24 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.1.0] - 2026-07-15
+
+### Added
+
+- `studio::connect()` is exposed as an injectable Studio Bridge.
+
+### Changed
+
+- The `studio-bridge` integration runs on `arora-studio-bridge-client` v3.1: the
+  Firebase config and bridge endpoint are baked in, and the device prompts
+  interactively for the owner / device name / model family on first connect.
+
+## [8.0.0] - 2026-07-12
+
+### Breaking
+
+- `with_module` loads a guest module; host functions move to `with_host_module`.
+
 ## [7.0.1] - 2026-07-10
 
 ### Changed

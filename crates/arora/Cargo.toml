@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "8.0.0"
+version = "8.1.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
