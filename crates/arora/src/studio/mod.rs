@@ -242,8 +242,9 @@ async fn build_studio_bridge() -> Result<Box<dyn Bridge>> {
 
     // Build the Zenoh bridge here (awaiting its async construction on the caller's
     // runtime) and hand the finished bridge to the run loop — no bridge factory.
-    // Default to the endpoint baked into the client crate; `ZENOH_ENDPOINTS` routes
-    // to `new_endpoint` for a local/preprod bridge.
+    // Default to the endpoint baked into the client crate; a non-empty
+    // `STUDIO_BRIDGE_ENDPOINT` (captured above as `endpoint_override`) routes to
+    // `new_endpoint` instead, targeting a local/preprod bridge.
     let client = match endpoint_override {
         Some(endpoint) => {
             info!("Connecting to Semio Studio via Zenoh (endpoint: {endpoint})");
