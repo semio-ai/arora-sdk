@@ -254,6 +254,36 @@ impl AroraBuilder {
         self
     }
 
+    /// Run the assembled device to completion with the standard operator flow:
+    /// pick the front end (terminal UI or headless), fill the default bridge
+    /// when none was injected — Semio Studio under the `studio-bridge` feature
+    /// (operator prompt, local-bridge fallback when declined), the open local
+    /// bridge otherwise — default any other unset seam (a private
+    /// `SimpleDataStore`, the fake HAL, an empty interpreter), and drive the
+    /// step loop.
+    ///
+    /// This is the run entrypoint for composed devices: features only pick the
+    /// *defaults*, never what you can inject — e.g. a device whose blackboard
+    /// is a custom [`DataStore`] runs with
+    /// `Arora::builder().with_hal(hal).with_data_store(store).run()`.
+    #[cfg(feature = "native")]
+    pub async fn run(mut self) -> Result<()> {
+        // The front end is picked first: building it installs the matching log
+        // sink, so everything after (including bridge resolution) is captured.
+        let frontend = run::select_frontend();
+        if self.bridges.is_empty() {
+            #[cfg(feature = "studio-bridge")]
+            {
+                self = self.with_bridge(studio::default_bridge(&frontend).await?);
+            }
+            #[cfg(not(feature = "studio-bridge"))]
+            {
+                self = self.with_bridge(run::local_ws_bridge().await?);
+            }
+        }
+        run::run_builder_with_frontend(self, frontend).await
+    }
+
     /// Wire the engine, apply the defaults for any unset seam, take each
     /// endpoint's inbound stream and merge them, subscribe to the HAL and store
     /// feeds, and return the finished [`Arora`].
