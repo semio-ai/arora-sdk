@@ -1,11 +1,15 @@
 //! Running an arora: the crate's entry points.
 //!
-//! Every entry point builds an [`Arora`] with the [builder](Arora::builder) and
-//! drives it to completion (until the device is unregistered or the process is
-//! interrupted) with an optional Groot tree installed from the first CLI
-//! argument. They are `async` — the caller drives them on its own Tokio runtime
-//! (the binary from `#[tokio::main]`) — and differ only in which seams the caller
-//! supplies vs. defaults:
+//! Every entry point is sugar over the [builder](Arora::builder): it assembles
+//! an [`AroraBuilder`](crate::AroraBuilder) and calls
+//! [`run`](crate::AroraBuilder::run), which drives the device to completion
+//! (until the device is unregistered or the process is interrupted) with an
+//! optional Groot tree installed from the first CLI argument. A device that
+//! composes its own parts (a custom store, several bridges, modules) skips
+//! this module and uses the builder directly. All entry points are `async` —
+//! the caller drives them on its own Tokio runtime (the binary from
+//! `#[tokio::main]`) — and differ only in which seams the caller supplies vs.
+//! defaults:
 //!
 //! - [`run`] — default HAL (in-process fake) and default bridge.
 //! - [`run_with_hal`] — **your hardware**, default bridge. A device build is
@@ -37,9 +41,12 @@ use anyhow::{anyhow, Context, Result};
 use arora_bridge::Bridge;
 #[cfg(feature = "native")]
 use arora_hal::Hal;
-// Only the default-bridge `run_with_hal` builds the fallback store here; the
-// Studio variant lives in `studio::run_with_hal`.
-#[cfg(all(feature = "native", not(feature = "studio-bridge")))]
+// `SimpleDataStore` appears here only as the default backend for devices that
+// do not care about their store; injecting any other [`DataStore`]
+// implementation is always a runtime choice (`run_with`, or the builder's
+// `with_data_store` + [`AroraBuilder::run`](crate::AroraBuilder::run)), never
+// gated by a feature.
+#[cfg(feature = "native")]
 use arora_simple_data_store::SimpleDataStore;
 #[cfg(feature = "native")]
 use arora_types::data::DataStore;
@@ -54,22 +61,16 @@ use crate::{Arora, BehaviorTreeInterpreter};
 /// Run the default device: in-process fake HAL, default bridge.
 #[cfg(feature = "native")]
 pub async fn run() -> Result<()> {
-    run_with_hal(Box::new(arora_hal::FakeHal::new())).await
+    Arora::builder().run().await
 }
 
 /// Run a device over `hal` with the default bridge — the one call that turns
-/// a HAL into a running device.
-#[cfg(all(feature = "native", not(feature = "studio-bridge")))]
+/// a HAL into a running device. Sugar for
+/// `Arora::builder().with_hal(hal).run()`; use the builder directly to inject
+/// any other part (a custom [`DataStore`], extra bridges, modules, …).
+#[cfg(feature = "native")]
 pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
-    // The log sink is installed by the front end that `run_with_frontend`
-    // selects (env_logger headless, in-pane capture under the TUI), so don't
-    // init a logger here.
-    run_with(
-        hal,
-        local_ws_bridge().await?,
-        Box::new(SimpleDataStore::new()),
-    )
-    .await
+    Arora::builder().with_hal(hal).run().await
 }
 
 /// Build (and start serving) the open local bridge — the device serves
@@ -101,13 +102,6 @@ pub(crate) async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
     Ok(Box::new(bridge))
 }
 
-/// Run a device over `hal`, connected to Semio Studio (the `studio-bridge`
-/// default bridge).
-#[cfg(feature = "studio-bridge")]
-pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
-    crate::studio::run_with_hal(hal).await
-}
-
 /// Run an arora device with the given HAL, bridge, and data store.
 ///
 /// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
@@ -127,7 +121,12 @@ pub async fn run_with(
     bridge: Box<dyn Bridge>,
     store: Box<dyn DataStore>,
 ) -> Result<()> {
-    run_with_frontend(hal, bridge, store, select_frontend()).await
+    Arora::builder()
+        .with_hal(hal)
+        .with_bridge(bridge)
+        .with_data_store(store)
+        .run()
+        .await
 }
 
 /// Like [`run_with`], but with a caller-supplied [`Frontend`] — the operator that
@@ -145,23 +144,52 @@ pub async fn run_with_frontend(
     store: Box<dyn DataStore>,
     frontend: Frontend,
 ) -> Result<()> {
+    run_builder_with_frontend(
+        Arora::builder()
+            .with_hal(hal)
+            .with_bridge(bridge)
+            .with_data_store(store),
+        frontend,
+    )
+    .await
+}
+
+/// The run loop over a fully-assembled [`AroraBuilder`] — the funnel every
+/// entry point (and [`AroraBuilder::run`]) goes through. Expects at least one
+/// bridge to be injected already; every other unset part gets its default
+/// (the store here — so the Groot tree below loads against the same store the
+/// device ticks — the rest at `build()`).
+#[cfg(feature = "native")]
+pub(crate) async fn run_builder_with_frontend(
+    mut builder: crate::AroraBuilder,
+    frontend: Frontend,
+) -> Result<()> {
     let Frontend {
         operator, on_ready, ..
     } = frontend;
 
+    if builder.store.is_none() {
+        builder.store = Some(Box::new(SimpleDataStore::new()));
+    }
+
     // Query the bridge's control plane before the device takes ownership of the
     // endpoint: the identity/info the front end shows, and the access-request
-    // stream the operator serves for the rest of the run.
+    // stream the operator serves for the rest of the run. Multi-bridge devices
+    // expose the first (default) bridge's control plane to the front end.
+    let bridge = builder
+        .bridges
+        .first_mut()
+        .ok_or_else(|| anyhow!("no bridge injected"))?;
     let info = bridge.get_device_info().await.ok().flatten();
     let device_id = bridge.device_id().await;
     let access_requests = bridge.access_requests().await;
 
-    // Assemble the builder. If the first CLI argument is a Groot file, construct
-    // an empty behavior-tree interpreter, load that tree into it against the same
-    // store the device ticks, and inject it at build — construct-empty → load →
-    // inject. With no argument the builder's default (an empty, idle interpreter)
-    // stands. Either way the interpreter is set once here, not swapped later.
-    let mut builder = Arora::builder().with_hal(hal).with_bridge(bridge);
+    // If the first CLI argument is a Groot file, construct an empty
+    // behavior-tree interpreter, load that tree into it against the same store
+    // the device ticks, and inject it at build — construct-empty → load →
+    // inject. With no argument the builder's default (an empty, idle
+    // interpreter) stands. Either way the interpreter is set once here, not
+    // swapped later.
     if let Some(path) = std::env::args().nth(1) {
         let xml = std::fs::read_to_string(&path)
             .with_context(|| format!("could not read Groot file {path}"))?;
@@ -169,15 +197,15 @@ pub async fn run_with_frontend(
         // empty: the tree's nodes are the natively-hosted control nodes.
         let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
         interpreter
-            .load_groot(&xml, &*store)
+            .load_groot(
+                &xml,
+                builder.store.as_deref().expect("store defaulted above"),
+            )
             .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e:?}"))?;
         builder = builder.with_behavior_interpreter(Box::new(interpreter));
         info!("installed behavior tree from {path}");
     }
-    let mut arora = builder
-        .with_data_store(store)
-        .build()
-        .context("failed to build Arora")?;
+    let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device exists: the
     // telemetry handle it reads indicators from, and the device identity.

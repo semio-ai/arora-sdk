@@ -6,7 +6,9 @@
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
 //! load/save an encrypted refresh token from a local file, build the real
 //! [`ZenohDeviceClient`] (the studio-bridge Zenoh connector), and drive it via
-//! [`crate::run_with_frontend`] over a fresh [`SimpleDataStore`].
+//! [`crate::run_with_frontend`] over the caller's [`DataStore`]
+//! (`arora_types::data::DataStore` — the entrypoints default it to a fresh
+//! `SimpleDataStore` for devices that do not care).
 //!
 //! The binary ([`crate::main`]) is a thin
 //! wrapper that just calls [`crate::run`].
@@ -35,7 +37,6 @@ mod token_storage;
 
 use anyhow::{Context, Result};
 use arora_bridge::{Bridge, DeviceInfo};
-use arora_simple_data_store::SimpleDataStore;
 use arora_studio_bridge_client::firestore_support::options::{
     FirebaseEmulatorOptions, FirebaseOptions,
 };
@@ -57,24 +58,20 @@ const NAME_LABEL: &str = "Device name — leave empty for a generated name";
 /// model family).
 const MODEL_FAMILY_LABEL: &str = "Model family — optional, leave empty to skip";
 
-/// Run the Studio-connected device to completion (until the device is
-/// unregistered or the process is interrupted).
+/// Resolve the default bridge of a `studio-bridge` run: the Semio Studio
+/// connection, or the open local bridge when the operator declines it.
 ///
 /// Under the terminal UI, the operator is prompted for the device info (owner,
-/// name, model family) at startup, each field pre-filled by its env var when
-/// set (`DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`, …). Leaving the owner
-/// empty disables Studio: the device then runs over the open local bridge
+/// name, model family), each field pre-filled by its env var when set
+/// (`DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`, …). Leaving the owner
+/// empty disables Studio: the returned bridge is then the open local bridge
 /// instead. Headless, there is nobody to prompt, so the device info comes from
 /// the environment only. The whole Studio side (Firebase auth, token rotation,
 /// Zenoh connection, device registration) is identical for every device — only
-/// the hardware behind it differs. A device build (e.g. a Vizij rig) injects its
-/// HAL here and is a Studio device.
-pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
-    // Pick the operator front end (terminal UI when interactive, headless
-    // otherwise) first: doing so installs the matching log sink, so the startup
-    // logging below is captured by whichever front end was chosen.
-    let frontend = crate::run::select_frontend();
-
+/// the hardware behind it differs.
+pub(crate) async fn default_bridge(
+    frontend: &crate::operator::Frontend,
+) -> Result<Box<dyn Bridge>> {
     // Decide the Studio connection.
     //
     // Interactive front end (the terminal UI): ask the operator for the device
@@ -82,9 +79,9 @@ pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
     // An empty owner means "disable Studio", in which case we do not connect at
     // all and fall through to the open local bridge (see below).
     //
-    // Headless / unattended: there is nobody to prompt, so keep today's
-    // behavior exactly — `connect()` builds the bridge and registers device info
-    // from the environment only (skipping registration when nothing is set).
+    // Headless / unattended: there is nobody to prompt — `connect()` builds the
+    // bridge and registers device info from the environment only (skipping
+    // registration when nothing is set).
     let client = if frontend.interactive {
         connect_with_operator(&*frontend.operator).await?
     } else {
@@ -92,9 +89,7 @@ pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
     };
 
     match client {
-        Some(client) => {
-            crate::run_with_frontend(hal, client, Box::new(SimpleDataStore::new()), frontend).await
-        }
+        Some(client) => Ok(client),
         None => {
             // Skip-Studio fallback: the operator left the owner empty, so there
             // is no Studio to connect to. Rather than run with no remote at all,
@@ -102,8 +97,7 @@ pub(crate) async fn run_with_hal(hal: Box<dyn arora_hal::Hal>) -> Result<()> {
             // serves — local editors still reach the device, just without Semio
             // Studio.
             info!("studio-bridge: skipped by operator (no owner) — running without Studio");
-            let bridge = crate::run::local_ws_bridge().await?;
-            crate::run_with_frontend(hal, bridge, Box::new(SimpleDataStore::new()), frontend).await
+            crate::run::local_ws_bridge().await
         }
     }
 }
