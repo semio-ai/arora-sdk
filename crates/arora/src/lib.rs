@@ -116,9 +116,9 @@ pub struct Arora {
     // serve outbound `try_send` fan-out and nothing else. A Vec: writes fan
     // out to every remote, reads fan in through the merge.
     pub(crate) bridges: Vec<Box<dyn Bridge>>,
-    // The HAL's sensor feed, owned by this device — the step (and natively the
-    // `run` select) is its one poller. Fused: once the hardware feed ends it
-    // stays quietly finished.
+    // The HAL's sensor feed, owned by this device — the step (and the `run`
+    // select) is its one poller. Fused: once the hardware feed ends it stays
+    // quietly finished.
     pub(crate) hal_feed: Fuse<UpdatesStream>,
     // Every endpoint's inbound stream, merged. Each is chained with a terminal
     // disconnect marker at build, so an endpoint's stream ending is an explicit

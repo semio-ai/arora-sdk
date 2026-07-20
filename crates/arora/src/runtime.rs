@@ -1,56 +1,13 @@
-//! The Arora step loop — the data plane, expressed as a function pipeline.
+//! The Arora step loop: the device's data plane.
 //!
-//! # Portable, step-dispatched, single state owner
+//! Several sources want to change the data storage — the bridges (remote state
+//! and commands), the HAL (sensor readings), and the behavior (the intent it
+//! writes while ticking). Rather than share the state behind a lock and race,
+//! [`Arora`] owns it alone and serializes the others into the phases of one
+//! [`step`](Arora::step).
 //!
-//! Several things want to change the blackboard: the **bridge** (commands and
-//! state from the remote), the **HAL** (sensor readings), and the **behavior**
-//! (intent it writes while ticking). Rather than share the state behind a lock
-//! and race, [`Arora`] gives it a single owner and dispatches the others as
-//! serialized phases of one loop ([`step`](Arora::step)).
-//!
-//! Each phase is a **free function** taking explicit arguments and returning the
-//! data the next phase needs; [`Arora::step`] is just the wiring that hands the
-//! object's own fields to them, top to bottom:
-//!
-//! 0. [`sweep_now`] — move everything the seams already hold into the
-//!    [`Pending`] buffers, without waiting;
-//! 1. [`tick_clock`] + [`publish_clock`] — advance the golden clock and write
-//!    it first, so the whole frame sees this frame's time/`dt`;
-//! 2. [`apply_sensors`] — the HAL's readings, oldest first;
-//! 3. [`apply_events`] — the bridge events, **after** the sensors: a remote
-//!    update to a key beats this frame's sensor reading. Commands are
-//!    dispatched and replied to here;
-//! 4. [`tick_behavior`] — the one interpreter, **last**: its writes win the
-//!    frame, and it saw what it overrode;
-//! 5. [`flush`] — coalesce the store's change feed into one outbound
-//!    [`StateChange`], golden keys filtered out;
-//! 6. [`write_hal`] then [`write_bridges`] — fan that change out.
-//!
-//! Per-key precedence within one frame, total and visible in that order:
-//! **behavior ▸ bridge ▸ HAL ▸ previous frame** — and inside each phase,
-//! arrival order (the newest write wins). Only one phase touches the state at
-//! a time, so there is never concurrent access — and no dedicated engine
-//! thread, just a dedicated *step*. Because the phases are free functions over
-//! explicit state, each is unit-testable in isolation; `Arora` is only a
-//! convenience holder for the engine and its friends.
-//!
-//! ## One design, two drivers
-//!
-//! [`step`](Arora::step) is **synchronous and non-blocking**, and [`Arora`]
-//! itself spawns no threads, owns no async runtime, and never sleeps. Its I/O
-//! seams are owned streams in and non-blocking pushes out: the bridge
-//! endpoints' inbound streams (taken once at build and merged), the HAL's
-//! sensor feed, and their `try_send` counterparts. Any real async work (a
-//! WebSocket, Zenoh, DDS) lives *inside* those implementations; the step never
-//! sees it.
-//!
-//! - **native**: [`run`](Arora::run) paces `step` on a fixed-period metronome
-//!   and, between ticks, drains the seams into the [`Pending`] buffers —
-//!   buffering only, nothing touches the store outside `step`;
-//! - **web / direct drive**: call `step()` yourself (from
-//!   `requestAnimationFrame`, or a faster-than-realtime preview loop with a
-//!   virtual `dt`) — phase 0's sweep picks the seams up with identical
-//!   semantics, no runtime needed.
+//! A device runs either on [`run`](Arora::run), which paces the steps itself,
+//! or on an embedder calling [`step`](Arora::step) from its own clock.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -67,8 +24,98 @@ use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::Arora;
+
+/// Self-pacing: drive [`step`](Arora::step) to completion at a fixed cadence,
+/// draining the I/O seams between ticks. One API on every target; only the
+/// metronome's sleep differs inside.
+///
+/// On the web this belongs in a **dedicated Web Worker**, never on the main
+/// thread (there, drive `step` from `requestAnimationFrame` instead — `run`
+/// would monopolise the event loop). Worker timers are exempt from the
+/// browsers' visibility-based throttling of *page* timers, so a worker-hosted
+/// `run` keeps stepping at full rate while the page is hidden but its process
+/// lives (a backgrounded tab, an occluded-yet-running window). It does **not**
+/// survive process-level suspension — macOS App Nap occluding a WKWebView, iOS
+/// backgrounding, Android's cached-app freezer all stop the whole renderer,
+/// workers included; riding those out takes native-side measures outside this
+/// crate.
+impl Arora {
+    /// The default inter-step period for [`run`](Arora::run): ~100 Hz.
+    pub const DEFAULT_STEP_PERIOD: Duration = Duration::from_millis(10);
+
+    /// Drive `step` to completion at a fixed cadence.
+    ///
+    /// `run` is `async`: each `step` stays fully synchronous, but between steps
+    /// the loop `.await`s the next tick *and* the device's inbound seams in one
+    /// select — whichever is ready first. A tick runs the next step; an inbound
+    /// arrival is only **buffered** into [`Pending`] (nothing touches the store
+    /// outside `step`), so the seams' channels stay drained without extra
+    /// tasks, queues, or locks. The select is biased toward the tick: an event
+    /// flood cannot starve the cadence.
+    ///
+    /// The caller brings the executor; `step` itself owns none. Natively that
+    /// means a Tokio runtime in scope (the binary drives it from
+    /// `#[tokio::main]`; the metronome sleeps on Tokio's timer). On the web it
+    /// is whatever polls the future — e.g. `wasm_bindgen_futures::spawn_local`
+    /// inside a dedicated worker; the metronome sleeps on a JS timer.
+    ///
+    /// `period` is the target time between steps — pass
+    /// [`DEFAULT_STEP_PERIOD`](Arora::DEFAULT_STEP_PERIOD) for the ~100 Hz
+    /// default. A step that overruns the period shifts the next tick out rather
+    /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
+    /// **actual** measured time since the previous step, not `period`.
+    pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
+        let mut metronome = Metronome::new(period);
+        // Measure the achieved step frequency over ~1 s windows and publish it
+        // through the telemetry handle.
+        let mut window_start = Instant::now();
+        let mut steps_in_window: u32 = 0;
+        // Wall-clock delta between steps, fed to `step` as the frame `dt`.
+        let mut last_step = Instant::now();
+        loop {
+            // Wait out the period, buffering what the seams deliver meanwhile —
+            // in arrival order per seam, applied by the next step. The select
+            // polls the tick first (biased); the seams' `next()` futures are
+            // fused, so an ended stream's branch is simply never taken again.
+            {
+                let tick = metronome.tick().fuse();
+                futures::pin_mut!(tick);
+                loop {
+                    futures::select_biased! {
+                        _ = tick => break,
+                        reading = self.hal_feed.next() => {
+                            if let Some(reading) = reading {
+                                self.pending.sensors.push(reading);
+                            }
+                        }
+                        event = self.inbound.next() => {
+                            if let Some(event) = event {
+                                self.pending.events.push(event);
+                            }
+                        }
+                    }
+                }
+            }
+            let now = Instant::now();
+            let dt = now.duration_since(last_step);
+            last_step = now;
+            if self.step(dt)? == StepOutcome::Unregistered {
+                return Ok(());
+            }
+            steps_in_window += 1;
+            let elapsed = window_start.elapsed();
+            if elapsed >= Duration::from_secs(1) {
+                let hz = steps_in_window as f32 / elapsed.as_secs_f32();
+                self.telemetry.update(|t| t.loop_hz = Some(hz));
+                window_start = Instant::now();
+                steps_in_window = 0;
+            }
+        }
+    }
+}
 
 /// What a [`step`](Arora::step) concluded.
 #[derive(Debug, PartialEq, Eq)]
@@ -134,7 +181,7 @@ impl Telemetry {
 }
 
 /// The golden clock: monotonic nanoseconds since the device started, advanced by
-/// each step's `dt`. Zero at build; [`tick_clock`] moves it forward.
+/// each step's `dt`. Zero at build.
 #[derive(Default)]
 pub struct Clock {
     time_ns: u64,
@@ -150,9 +197,9 @@ pub struct ClockValues {
 }
 
 /// Everything the seams delivered since the previous step, in arrival order per
-/// seam. The driver only buffers here (natively [`run`](Arora::run)'s select
-/// between ticks, plus phase 0's [`sweep_now`]); the next `step` applies and
-/// drains it. Nothing touches the store outside `step`.
+/// seam. The driver only buffers here ([`run`](Arora::run)'s select between
+/// ticks, plus phase 0's [`sweep_now`]); the next `step` applies and drains it.
+/// Nothing touches the store outside `step`.
 #[derive(Default)]
 pub struct Pending {
     /// Sensor readings from the HAL feed.
@@ -187,7 +234,7 @@ pub fn sweep_now(
 /// values. The monotonic accumulator is exact integer nanoseconds (no float
 /// drift over a long run). `dt` is the elapsed time since the previous step,
 /// measured (or, for a preview, chosen) by the caller's driver.
-pub fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
+fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
     // A single step's delta is far under u64 nanoseconds; the cast is lossless
     // in practice, and `saturating_add` keeps a pathological run from wrapping.
     let dt_ns = dt.as_nanos() as u64;
@@ -203,7 +250,7 @@ pub fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
 /// the behavior tick) sees this frame's time. The writes go into the store's
 /// change feed like any other, but [`flush`] filters the golden namespace out
 /// of what it forwards outbound.
-pub fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), RuntimeError> {
+fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), RuntimeError> {
     let mut change = StateChange::new();
     change
         .set
@@ -485,9 +532,18 @@ impl Arora {
         self.telemetry.clone()
     }
 
-    /// Advance one step: the [module pipeline](self) top to bottom, wiring this
-    /// object's fields into the phase functions. Non-blocking; touches the state
-    /// from this (single) thread only.
+    /// Advance one step, applying everything the seams delivered since the
+    /// previous one. Non-blocking; touches the state from this (single) thread
+    /// only.
+    ///
+    /// Writers apply in a fixed order within the step: the clock first — under
+    /// the golden keys, so the whole frame reads this frame's time — then the
+    /// HAL's readings, then the bridges' events (commands dispatch and reply
+    /// here), then the behavior. Per-key precedence is therefore total:
+    /// **behavior ▸ bridge ▸ HAL ▸ previous frame**, and within each, arrival
+    /// order — the newest write wins. What changed is coalesced into a single
+    /// outbound change and fanned out to the HAL and every bridge, golden keys
+    /// excluded.
     ///
     /// `dt` is the elapsed time since the previous step, measured by the
     /// caller's driver ([`run`](Arora::run) natively, `requestAnimationFrame` on
@@ -536,80 +592,157 @@ impl Arora {
     }
 }
 
-/// Native pacing: drive [`step`](Arora::step) to completion at a fixed cadence,
-/// draining the I/O seams between ticks. On the web, drive `step` from
-/// `requestAnimationFrame` instead (this method would monopolise the loop).
-#[cfg(all(not(target_arch = "wasm32"), feature = "native"))]
-impl Arora {
-    /// The default inter-step period for [`run`](Arora::run): ~100 Hz.
-    pub const DEFAULT_STEP_PERIOD: Duration = Duration::from_millis(10);
+/// A cadence: one [`tick`](Metronome::tick) completes per `period`, the first
+/// one immediately. Ticks are anchored to when they were due rather than when
+/// they completed, so a slow caller neither drifts nor gets a burst of
+/// catch-up ticks.
+///
+/// Dropping a `tick()` before it completes leaves the cadence untouched: the
+/// next one completes at the instant the dropped one was waiting for.
+struct Metronome {
+    period: Duration,
+    /// When the next tick is due; `None` until the first (immediate) tick.
+    next_due: Option<Instant>,
+}
 
-    /// Drive `step` to completion at a fixed cadence.
-    ///
-    /// `run` is `async`: each `step` stays fully synchronous, but between steps
-    /// the loop `.await`s a [`tokio::time::interval`] metronome *and* the
-    /// device's inbound seams in one select — whichever is ready first. A tick
-    /// runs the next step; an inbound arrival is only **buffered** into
-    /// [`Pending`] (nothing touches the store outside `step`), so the seams'
-    /// channels stay drained without extra tasks, queues, or locks. The select
-    /// is `biased` toward the tick: an event flood cannot starve the cadence.
-    ///
-    /// It therefore needs a Tokio runtime in scope (the binary drives it from
-    /// `#[tokio::main]`); `step` itself owns none.
-    ///
-    /// `period` is the target time between steps — pass
-    /// [`DEFAULT_STEP_PERIOD`](Arora::DEFAULT_STEP_PERIOD) for the ~100 Hz
-    /// default. The metronome uses
-    /// [`MissedTickBehavior::Delay`](tokio::time::MissedTickBehavior::Delay),
-    /// so a step that overruns the period simply shifts the next tick out rather
-    /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
-    /// **actual** measured time since the previous step, not `period`.
-    pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
-        let mut ticker = tokio::time::interval(period);
-        // A slow step delays the next tick instead of bursting to catch up.
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // Measure the achieved step frequency over ~1 s windows and publish it
-        // through the telemetry handle.
-        let mut window_start = std::time::Instant::now();
-        let mut steps_in_window: u32 = 0;
-        // Wall-clock delta between steps, fed to `step` as the frame `dt`.
-        let mut last_step = std::time::Instant::now();
-        loop {
-            tokio::select! {
-                biased;
-                // Paces at the fixed period; the first tick completes
-                // immediately. Falls through to the step below.
-                _ = ticker.tick() => {}
-                // Between ticks, buffer what the seams deliver — in arrival
-                // order per seam, applied by the next step.
-                Some(reading) = self.hal_feed.next() => {
-                    self.pending.sensors.push(reading);
-                    continue;
-                }
-                Some(event) = self.inbound.next() => {
-                    self.pending.events.push(event);
-                    continue;
-                }
+impl Metronome {
+    fn new(period: Duration) -> Self {
+        Self {
+            period,
+            next_due: None,
+        }
+    }
+
+    /// Complete when the next tick is due.
+    async fn tick(&mut self) {
+        let now = Instant::now();
+        match self.next_due {
+            // First tick: immediate.
+            None => self.next_due = Some(now + self.period),
+            // On schedule: sleep out the remainder, keep the cadence anchored
+            // to the previous due time (no cumulative drift).
+            Some(due) if now < due => {
+                let duration = due - now;
+                // WASM targets inherit their time-based functions from their runtime.
+                #[cfg(target_arch = "wasm32")]
+                gloo_timers::future::sleep(duration).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::time::sleep(duration).await;
+                self.next_due = Some(due + self.period);
             }
-            let now = std::time::Instant::now();
-            let dt = now.duration_since(last_step);
-            last_step = now;
-            if self.step(dt)? == StepOutcome::Unregistered {
-                return Ok(());
-            }
-            steps_in_window += 1;
-            let elapsed = window_start.elapsed();
-            if elapsed >= Duration::from_secs(1) {
-                let hz = steps_in_window as f32 / elapsed.as_secs_f32();
-                self.telemetry.update(|t| t.loop_hz = Some(hz));
-                window_start = std::time::Instant::now();
-                steps_in_window = 0;
-            }
+            // Overrun: the due tick fires now; the next is a full period out.
+            Some(_) => self.next_due = Some(now + self.period),
         }
     }
 }
 
+/// The cadence guarantees hold identically on every target, so these run both
+/// natively and in a browser (`wasm-pack test --headless --firefox
+/// crates/arora --no-default-features --lib`). They assert against real
+/// elapsed time with margins wide enough for browser timer granularity.
 #[cfg(test)]
+mod metronome_tests {
+    use super::*;
+
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    const PERIOD: Duration = Duration::from_millis(60);
+
+    async fn sleep(duration: Duration) {
+        // WASM targets inherit their time-based functions from their runtime.
+        #[cfg(target_arch = "wasm32")]
+        gloo_timers::future::sleep(duration).await;
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::time::sleep(duration).await;
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn the_first_tick_completes_immediately() {
+        let mut metronome = Metronome::new(PERIOD);
+        let start = Instant::now();
+        metronome.tick().await;
+        assert!(
+            start.elapsed() < PERIOD / 2,
+            "first tick waited {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// Four ticks with half a period of work between them land at ~3.5 periods
+    /// when anchored to when the ticks were due; restarting the wait after each
+    /// delay would take ~5.
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn a_slow_caller_does_not_drift() {
+        let mut metronome = Metronome::new(PERIOD);
+        let start = Instant::now();
+        for _ in 0..4 {
+            metronome.tick().await;
+            sleep(PERIOD / 2).await;
+        }
+        assert!(
+            start.elapsed() < PERIOD * 17 / 4,
+            "four ticks took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn an_overrun_delays_the_cadence_instead_of_bursting() {
+        let mut metronome = Metronome::new(PERIOD);
+        metronome.tick().await;
+        sleep(PERIOD * 5 / 2).await;
+
+        let overrun_end = Instant::now();
+        metronome.tick().await;
+        assert!(
+            overrun_end.elapsed() < PERIOD / 2,
+            "the due tick waited {:?}",
+            overrun_end.elapsed()
+        );
+
+        let late_tick = Instant::now();
+        metronome.tick().await;
+        assert!(
+            late_tick.elapsed() > PERIOD * 3 / 4,
+            "the missed periods fired as a burst, {:?} apart",
+            late_tick.elapsed()
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn a_dropped_tick_keeps_its_deadline() {
+        let mut metronome = Metronome::new(PERIOD);
+        metronome.tick().await;
+
+        let start = Instant::now();
+        {
+            let tick = metronome.tick().fuse();
+            futures::pin_mut!(tick);
+            let abandon = sleep(PERIOD * 9 / 10).fuse();
+            futures::pin_mut!(abandon);
+            futures::select_biased! {
+                _ = abandon => {}
+                _ = tick => panic!("the tick completed before its deadline"),
+            }
+        }
+        metronome.tick().await;
+        assert!(
+            start.elapsed() < PERIOD * 3 / 2,
+            "the tick restarted its wait instead of keeping its deadline, {:?}",
+            start.elapsed()
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use arora_behavior::interpreter_module;
@@ -757,6 +890,58 @@ mod tests {
         drive_until_unregistered(arora);
     }
 
+    /// `run` ends cleanly when the remote unregisters the device: the select
+    /// buffers the bridge event, the next paced step applies it, and the loop
+    /// returns.
+    #[tokio::test]
+    async fn run_returns_when_unregistered() {
+        let mut arora = build(Box::new(UnregisterBridge));
+        tokio::time::timeout(Duration::from_secs(5), arora.run(Duration::from_millis(1)))
+            .await
+            .expect("run returns once the device is unregistered")
+            .expect("run ends cleanly");
+    }
+
+    /// A behavior that counts its ticks through a shared counter and stays
+    /// `Running`, so a paced run keeps stepping it — one count per step.
+    struct CountTicks(Arc<std::sync::atomic::AtomicU32>);
+
+    impl BehaviorInterpreter for CountTicks {
+        fn tick(
+            &mut self,
+            _ctx: &mut BehaviorContext,
+        ) -> Result<BehaviorStatus, arora_behavior::BehaviorError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(BehaviorStatus::Running)
+        }
+    }
+
+    /// `run` paces the step at the requested period: over a fixed wall-clock
+    /// window the device makes roughly window/period steps — enough that the
+    /// loop is really stepping, and no runaway burst (the metronome delays
+    /// after an overrun instead of catching up).
+    #[tokio::test]
+    async fn run_paces_steps_at_the_period() {
+        let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let mut arora = build_with(
+            Box::new(FakeBridge::new()),
+            Box::new(CountTicks(ticks.clone())),
+        );
+        // 200 ms at a 10 ms period targets ~20 steps; the bounds leave generous
+        // slack for a loaded machine while still catching an unpaced spin (which
+        // would run thousands) or a stalled loop.
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
+            arora.run(Duration::from_millis(10)),
+        )
+        .await;
+        let stepped = ticks.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            (5..=60).contains(&stepped),
+            "expected ~20 paced steps, got {stepped}"
+        );
+    }
+
     #[tokio::test]
     async fn a_call_edits_the_behavior_through_the_engine() {
         // The builder registered the interpreter module over the injected
@@ -842,7 +1027,7 @@ mod tests {
 </root>"#;
         // Construct an empty interpreter, load the tree into it, inject at
         // build. The clone shares the same storage, so the tree's slots and the
-        // device resolve against one blackboard.
+        // device resolve against one data storage.
         let store = SimpleDataStore::new();
         let interpreter = groot_interpreter(xml, &store);
         let arora = build_in_with(
