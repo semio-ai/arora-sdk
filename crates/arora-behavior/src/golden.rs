@@ -9,14 +9,14 @@
 //! time node) derives whatever it needs — `dt`, elapsed time — by reading these
 //! keys.
 //!
-//! The keys live under the reserved [`PREFIX`] namespace. The runtime keeps them
-//! local: it never forwards them out to the bridge or hardware, since a
-//! wall-clock advancing every frame is noise to a remote. Behaviors must not
-//! publish their own keys under this prefix.
+//! The keys live under the reserved [`PREFIX`] namespace, which the runtime
+//! owns: behaviors must not publish their own keys under it. They travel
+//! outbound with every other change, so a remote reads the device's clock and
+//! derives what it needs from it — a step rate, jitter, a stalled loop. A
+//! remote that does not want them filters them on its side.
 
-/// Reserved namespace for runtime-maintained golden keys. The runtime owns it
-/// and does not forward it outbound; behaviors must not write their own keys
-/// under this prefix.
+/// Reserved namespace for runtime-maintained golden keys. The runtime owns it;
+/// behaviors must not write their own keys under this prefix.
 pub const PREFIX: &str = "arora/";
 
 /// Monotonic **nanoseconds** since the runtime started, as a
@@ -30,9 +30,8 @@ pub const TIME: &str = "arora/time";
 /// behaviors that pace themselves (an animation module, a graph time node).
 pub const DT: &str = "arora/dt";
 
-/// Whether `key` is a reserved golden key: runtime-owned and never forwarded
-/// outbound. The runtime uses this to keep the golden namespace out of the
-/// changes it flushes to the bridge and hardware each step.
+/// Whether `key` is a reserved golden key — runtime-owned, so a behavior must
+/// not write it, and a consumer that wants to skip the clock can recognize it.
 pub fn is_golden(key: &str) -> bool {
     key.starts_with(PREFIX)
 }

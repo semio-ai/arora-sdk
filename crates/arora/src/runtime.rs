@@ -242,8 +242,8 @@ fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
 /// Phase 1b — publish the frame clock into the golden keys, before anything
 /// else touches the store: the whole frame (sensor applies, command handling,
 /// the behavior tick) sees this frame's time. The writes go into the store's
-/// change feed like any other, but [`flush`] filters the golden namespace out
-/// of what it forwards outbound.
+/// change feed like any other, and travel outbound like any other — a remote
+/// derives the device's step rate from them.
 fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), RuntimeError> {
     let mut change = StateChange::new();
     change
@@ -266,7 +266,16 @@ fn apply_sensors(
     sensors: Vec<StateChange>,
 ) -> Result<StateChange, RuntimeError> {
     let mut applied = StateChange::new();
-    for change in sensors {
+    for mut change in sensors {
+        // The runtime owns the golden namespace. A HAL that echoes what it was
+        // written (and the clock now goes out with everything else) would
+        // otherwise hand this frame the previous frame's time.
+        change
+            .set
+            .retain(|key, _| !golden::is_golden(key.get_path()));
+        change
+            .unset
+            .retain(|key| !golden::is_golden(key.get_path()));
         for (key, value) in &change.set {
             applied.unset.remove(key);
             applied.set.insert(key.clone(), value.clone());
@@ -334,7 +343,18 @@ fn apply_command(
                 mutated: Vec::new(),
             })
         }
-        BridgeOp::Update(change) => match store.write(change.clone()) {
+        BridgeOp::Update(change) => match store.write({
+            // The runtime owns the golden namespace; a remote writes state, not
+            // the device's clock.
+            let mut change = change.clone();
+            change
+                .set
+                .retain(|key, _| !golden::is_golden(key.get_path()));
+            change
+                .unset
+                .retain(|key| !golden::is_golden(key.get_path()));
+            change
+        }) {
             Ok(()) => Ok(CallResult {
                 ret: Value::Unit,
                 mutated: Vec::new(),
@@ -464,16 +484,10 @@ fn flush(changes: &Subscription) -> StateChange {
     let mut merged = StateChange::new();
     while let Some(change) = changes.try_recv() {
         for (key, value) in change.set {
-            if golden::is_golden(key.get_path()) {
-                continue;
-            }
             merged.unset.remove(&key);
             merged.set.insert(key, value);
         }
         for key in change.unset {
-            if golden::is_golden(key.get_path()) {
-                continue;
-            }
             merged.set.remove(&key);
             merged.unset.insert(key);
         }
@@ -536,8 +550,7 @@ impl Arora {
     /// here), then the behavior. Per-key precedence is therefore total:
     /// **behavior ▸ bridge ▸ HAL ▸ previous frame**, and within each, arrival
     /// order — the newest write wins. What changed is coalesced into a single
-    /// outbound change and fanned out to the HAL and every bridge, golden keys
-    /// excluded.
+    /// outbound change and fanned out to the HAL and every bridge.
     ///
     /// `dt` is the elapsed time since the previous step, measured by the
     /// caller's driver ([`run`](Arora::run) natively, `requestAnimationFrame` on
@@ -574,7 +587,7 @@ impl Arora {
             &mut self.engine,
             &self.telemetry,
         )?;
-        // 5. flush — one coalesced change; golden keys stay local.
+        // 5. flush — everything this frame changed, as one change.
         let out = flush(&self.store_changes);
         // 6. writings — the hardware first (its own readings subtracted), then
         //    every remote.
@@ -1341,12 +1354,11 @@ mod tests {
         }
     }
 
-    /// The golden clock keys stay local: the device never forwards them out to
-    /// the bridge, even though an ordinary behavior write on the same step is
-    /// forwarded. This is what keeps the wall-clock (which changes every frame)
-    /// off the wire.
+    /// The clock travels outbound with everything else, so a remote can derive
+    /// the device's step rate from it; a consumer that does not want it says so
+    /// on its own side.
     #[test]
-    fn golden_keys_are_not_forwarded_outbound() {
+    fn the_clock_is_forwarded_outbound() {
         let (sent_tx, mut sent_rx) = mpsc::unbounded();
         // A behavior that writes one ordinary key; that write must reach the bridge.
         let mut arora = build_with(
@@ -1371,8 +1383,8 @@ mod tests {
             "the ordinary behavior write should be forwarded outbound, got {forwarded_keys:?}"
         );
         assert!(
-            !forwarded_keys.iter().any(|k| golden::is_golden(k.as_str())),
-            "golden keys must never be forwarded outbound, got {forwarded_keys:?}"
+            forwarded_keys.iter().any(|k| k.as_str() == golden::DT),
+            "the clock travels outbound like any other state, got {forwarded_keys:?}"
         );
     }
 }
