@@ -66,7 +66,7 @@ fn install_panic_hook() {
 // below is one such wrapper (the in-process fakes); Vizij ships another.
 // =============================================================================
 
-use arora::{Arora, AroraBuilder, BehaviorTreeInterpreter, ModuleFunction, StepOutcome};
+use arora::{Arora, AroraBuilder, BehaviorTreeInterpreter, ModuleFunction};
 use arora_behavior::BehaviorInterpreter;
 use arora_bridge::{Bridge, FakeBridge};
 use arora_hal::{FakeHal, Hal};
@@ -134,14 +134,11 @@ impl BrowserRuntime {
     /// previous step. A web driver measures it from `requestAnimationFrame`
     /// timestamps (milliseconds) and converts to a [`Duration`] at that boundary
     /// — see [`AroraRuntime::step`]. The device publishes it (and the accumulated
-    /// time) under the golden keys before ticking. Returns `true` while live,
-    /// `false` once the device has been unregistered (stop stepping then).
-    pub fn step(&mut self, dt: Duration) -> Result<bool, JsValue> {
-        match self.arora.step(dt) {
-            Ok(StepOutcome::Live) => Ok(true),
-            Ok(StepOutcome::Unregistered) => Ok(false),
-            Err(e) => Err(JsValue::from_str(&format!("step failed: {e}"))),
-        }
+    /// time) under the golden keys before ticking.
+    pub fn step(&mut self, dt: Duration) -> Result<(), JsValue> {
+        self.arora
+            .step(dt)
+            .map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
     }
 
     /// Write one key into the store. `value_json` is an Arora [`Value`] as JSON,
@@ -336,9 +333,8 @@ impl AroraRuntime {
     /// Advance the device one step. `dt_ms` is the milliseconds elapsed since the
     /// previous step — a plain JS number, exactly what a `requestAnimationFrame`
     /// timestamp delta gives. This is the only place the rAF millisecond unit is
-    /// converted to the core [`Duration`] `dt`. Returns `true` while live,
-    /// `false` once the device has been unregistered (stop calling then).
-    pub fn step(&mut self, dt_ms: f64) -> Result<bool, JsValue> {
+    /// converted to the core [`Duration`] `dt`.
+    pub fn step(&mut self, dt_ms: f64) -> Result<(), JsValue> {
         self.inner.step(Duration::from_secs_f64(dt_ms / 1_000.0))
     }
 
