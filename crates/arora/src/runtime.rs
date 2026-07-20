@@ -211,7 +211,7 @@ pub struct Pending {
 /// directly (web rAF, a preview loop) this is the whole inbound drain; under
 /// [`run`](Arora::run) it just picks up what arrived since the select last
 /// yielded, so both drivers see identical semantics.
-pub fn sweep_now(
+fn sweep_now(
     hal_feed: &mut (impl Stream<Item = StateChange> + Unpin),
     inbound: &mut (impl Stream<Item = Inbound> + Unpin),
     pending: &mut Pending,
@@ -261,7 +261,7 @@ fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), Runti
 /// a later reading of the same key wins. Returns the coalesced readings it
 /// applied, so phase 6 can keep the hardware's own reports from being written
 /// back to it ([`write_hal`]).
-pub fn apply_sensors(
+fn apply_sensors(
     store: &dyn DataStore,
     sensors: Vec<StateChange>,
 ) -> Result<StateChange, RuntimeError> {
@@ -287,7 +287,7 @@ pub fn apply_sensors(
 /// (deterministic phase order, not network timing). Commands are dispatched
 /// against the store and replied to on their channel; a claim toggle lands in
 /// telemetry.
-pub fn apply_events(
+fn apply_events(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
     call_bridge: &mut dyn CallBridge,
@@ -431,7 +431,7 @@ pub(crate) fn with_interpreter(
 /// [`BehaviorStatus::Done`] it is dropped (back to `None`) and cleared from
 /// telemetry; while it is [`BehaviorStatus::Running`] it stays for the next
 /// step.
-pub fn tick_behavior(
+fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
     engine: &mut arora_engine::engine::PinnedEngine,
@@ -460,7 +460,7 @@ pub fn tick_behavior(
 /// overrides an earlier unset of the same key (and vice versa). The golden
 /// clock keys are runtime-local and dropped, so the wall-clock churning every
 /// frame never reaches the wire.
-pub fn flush(changes: &Subscription) -> StateChange {
+fn flush(changes: &Subscription) -> StateChange {
     let mut merged = StateChange::new();
     while let Some(change) = changes.try_recv() {
         for (key, value) in change.set {
@@ -487,7 +487,7 @@ pub fn flush(changes: &Subscription) -> StateChange {
 /// not told what it just reported. The bridges are (a remote wants sensor
 /// state); and a key the behavior overwrote after the reading goes to the HAL
 /// with the behavior's value, since that no longer matches the reading.
-pub fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
+fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
     let mut for_hal = StateChange::new();
     for (key, value) in &out.set {
         if sensor_applied.set.get(key) == Some(value) {
@@ -508,7 +508,7 @@ pub fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange)
 
 /// Phase 6b — fan the same change out to every bridge endpoint. Each buffers
 /// onto its own transport; none blocks the step.
-pub fn write_bridges(bridges: &mut [Box<dyn Bridge>], out: &StateChange) {
+fn write_bridges(bridges: &mut [Box<dyn Bridge>], out: &StateChange) {
     for bridge in bridges {
         bridge.try_send(out);
     }
