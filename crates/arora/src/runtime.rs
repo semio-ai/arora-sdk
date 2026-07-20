@@ -266,16 +266,7 @@ fn apply_sensors(
     sensors: Vec<StateChange>,
 ) -> Result<StateChange, RuntimeError> {
     let mut applied = StateChange::new();
-    for mut change in sensors {
-        // The runtime owns the golden namespace. A HAL that echoes what it was
-        // written (and the clock now goes out with everything else) would
-        // otherwise hand this frame the previous frame's time.
-        change
-            .set
-            .retain(|key, _| !golden::is_golden(key.get_path()));
-        change
-            .unset
-            .retain(|key| !golden::is_golden(key.get_path()));
+    for change in sensors {
         for (key, value) in &change.set {
             applied.unset.remove(key);
             applied.set.insert(key.clone(), value.clone());
@@ -343,18 +334,7 @@ fn apply_command(
                 mutated: Vec::new(),
             })
         }
-        BridgeOp::Update(change) => match store.write({
-            // The runtime owns the golden namespace; a remote writes state, not
-            // the device's clock.
-            let mut change = change.clone();
-            change
-                .set
-                .retain(|key, _| !golden::is_golden(key.get_path()));
-            change
-                .unset
-                .retain(|key| !golden::is_golden(key.get_path()));
-            change
-        }) {
+        BridgeOp::Update(change) => match store.write(change.clone()) {
             Ok(()) => Ok(CallResult {
                 ret: Value::Unit,
                 mutated: Vec::new(),

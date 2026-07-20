@@ -169,30 +169,35 @@ impl FakeHal {
         self.inner.lock().unwrap().model_glb = Some(glb);
     }
 
-    /// Apply a write synchronously: store it, echo it to subscribers, and fake
-    /// joint actuation by mirroring any `*.target_position` to `*.position`.
-    /// Shared by [`Hal::write`] and [`Hal::try_send`].
+    /// Apply a write synchronously. The fake deals only in setpoints — the
+    /// `*.target_position` keys — and ignores every other key in the change,
+    /// the way hardware ignores what it has no actuator for. Each setpoint is
+    /// held and sensed back as the matching `*.position`, the fake's joint
+    /// actuation. Shared by [`Hal::write`] and [`Hal::try_send`].
     fn apply_write(&self, changes: &StateChange) {
-        if changes.is_empty() {
-            return;
-        }
-        let mut inner = self.inner.lock().unwrap();
-        inner.state.apply(changes.clone());
-        inner.notify(changes);
-
-        // Fake joint actuation: mirror "*.target_position" to "*.position".
-        let mut mirrored = StateChange::new();
+        let mut setpoints = StateChange::new();
+        let mut sensed = StateChange::new();
         for (key, value) in &changes.set {
             if key.get_component() == Some("target_position") {
-                mirrored
+                setpoints.set.insert(key.clone(), value.clone());
+                sensed
                     .set
                     .insert(key.clone().with_component("position"), value.clone());
             }
         }
-        if !mirrored.is_empty() {
-            inner.state.apply(mirrored.clone());
-            inner.notify(&mirrored);
+        for key in &changes.unset {
+            if key.get_component() == Some("target_position") {
+                setpoints.unset.insert(key.clone());
+                sensed.unset.insert(key.clone().with_component("position"));
+            }
         }
+        if setpoints.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.state.apply(setpoints);
+        inner.state.apply(sensed.clone());
+        inner.notify(&sensed);
     }
 }
 
