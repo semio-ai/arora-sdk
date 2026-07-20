@@ -24,6 +24,7 @@ use arora_types::value::Value;
 /// The inner store is held as `Arc<dyn DataStore>`, so the same underlying
 /// storage can back several differently-namespaced views (and other,
 /// un-namespaced holders) at once.
+#[derive(Clone)]
 pub struct NamespacedStore {
     inner: Arc<dyn DataStore>,
     namespace: String,
@@ -93,6 +94,10 @@ impl DataStore for NamespacedStore {
     /// wants) and the device's HAL/bridge are fakes.
     fn subscribe(&self) -> Subscription {
         self.inner.subscribe()
+    }
+
+    fn clone_box(&self) -> Box<dyn DataStore> {
+        Box::new(self.clone())
     }
 }
 

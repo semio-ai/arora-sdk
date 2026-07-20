@@ -120,6 +120,10 @@ impl DataStore for SimpleDataStore {
         })
     }
 
+    fn clone_box(&self) -> Box<dyn DataStore> {
+        Box::new(self.clone())
+    }
+
     fn subscribe(&self) -> Subscription {
         let (tx, rx) = channel();
         // The current state, as the subscription's first change: whoever
