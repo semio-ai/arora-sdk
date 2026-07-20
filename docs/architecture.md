@@ -27,8 +27,8 @@ arora-sdk/
 │   ├── arora-hal-ros2         ROS 2 HAL
 │   ├── arora-hal-restful      RESTful HAL
 │   ├── arora-simple-data-store  trivial owned DataStore
-│   ├── arora-web              browser runtime: BrowserRuntime over injected
-│   │                          seams + the JS engine surface
+│   ├── arora-web              browser runtime: the AroraRuntime JS device
+│   │                          over arora + the JS engine surface
 │   ├── arora-cli              host CLI: load modules, call functions
 │   ├── arora-registry         local record registry
 │   ├── arora-registry-remote  remote record registry

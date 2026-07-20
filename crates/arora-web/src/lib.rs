@@ -1,11 +1,16 @@
 //! Run an Arora device in the browser.
 //!
-//! The centerpiece is [`BrowserRuntime`], the reusable primitive that wires a
-//! full [`arora::Arora`] over an injected HAL, bridge, and data store and
-//! exposes the JS-facing surface every browser device needs — a synchronous
-//! `step()` plus Value↔JSON accessors on the store. [`AroraRuntime`] is the
-//! bundled demo device built on it (in-process fakes + `SimpleDataStore`); each
-//! downstream device ships its own thin `#[wasm_bindgen]` wrapper the same way.
+//! The centerpiece is [`AroraWeb`] — exported to JavaScript as `AroraRuntime`
+//! — the `wasm_bindgen` surface over an [`arora::Arora`]: a synchronous
+//! [`step`](AroraWeb::step), a self-pacing [`run`](AroraWeb::run), in-process
+//! [`call`](AroraWeb::call) dispatch, and the [`store_json`] accessors that
+//! move store values across the JS boundary as JSON in the Arora
+//! [`Value`] vocabulary. Its JS constructor (and [`AroraWebBuilder`], JS
+//! `AroraRuntimeBuilder`) builds the self-contained demo device on the
+//! runtime's in-process defaults; a downstream device composes its own
+//! [`arora::Arora`] with [`arora::AroraBuilder`] — the HAL, bridge, and store
+//! seams are trait objects that cannot cross the JS boundary — and wraps it
+//! with `AroraWeb::from`, reusing this whole JS surface.
 //!
 //! It also carries a lower-level surface: [`Engine`] and [`BehaviorTreeRunner`]
 //! load guest modules (header JSON + executable bytes) and run behavior trees
@@ -39,114 +44,37 @@ use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
 /// Route Rust panics to the browser console. Called from every entry point
-/// (`BrowserRuntime::start`, `Engine::new`, `BehaviorTreeRunner::new`) rather
-/// than from a `#[wasm_bindgen(start)]`: a reusable library must not claim the
-/// module `start`, or every downstream cdylib that also defines one collides on
-/// the `_start` symbol at link time. `set_once` makes repeat calls free.
+/// (the [`AroraWeb`] constructors, `Engine::new`, `BehaviorTreeRunner::new`)
+/// rather than from a `#[wasm_bindgen(start)]`: a reusable library must not
+/// claim the module `start`, or every downstream cdylib that also defines one
+/// collides on the `_start` symbol at link time. `set_once` makes repeat calls
+/// free.
 fn install_panic_hook() {
     console_error_panic_hook::set_once();
 }
 
 // =============================================================================
-// Browser runtime primitive
-//
-// `BrowserRuntime` is the reusable core for running any Arora device in the
-// browser. It wires an `arora::Arora` over an injected HAL, bridge, and data
-// store (all trait objects, so the caller picks the backends) and exposes the
-// JS-facing surface every browser device needs: a synchronous `step()` plus
-// Value↔JSON accessors on the injected store. Nothing runs between steps — the
-// bridge and HAL own any async internally behind their stream/push seams, and
-// `step`'s sweep drains them, so the whole thing is a plain synchronous object
-// driven by `step()`.
-//
-// It is a plain Rust type, not a `#[wasm_bindgen]` export — the wasm-bindgen
-// boundary cannot carry `dyn Trait` objects. Each device ships a thin
-// `#[wasm_bindgen]` cdylib that constructs its concrete HAL/bridge/store and
-// behaviors, then forwards to a `BrowserRuntime` held inside. `AroraRuntime`
-// below is one such wrapper (the in-process fakes); Vizij ships another.
+// The browser device
 // =============================================================================
 
-use arora::{Arora, AroraBuilder, BehaviorTreeInterpreter, ModuleFunction};
-use arora_behavior::BehaviorInterpreter;
-use arora_bridge::{Bridge, FakeBridge};
-use arora_hal::{FakeHal, Hal};
-use arora_simple_data_store::SimpleDataStore;
+use arora::{Arora, AroraBuilder, Caller};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use std::time::Duration;
 
-/// The reusable core of a browser-hosted Arora device.
-///
-/// Assemble it with [`BrowserRuntime::start`] over your chosen HAL, bridge,
-/// [`DataStore`], and behavior interpreter; then drive it a tick at a time with
-/// [`step`](Self::step) (e.g. from `requestAnimationFrame` or a Web Worker
-/// loop). Read and write the injected store across the JS boundary with the
-/// Value↔JSON accessors — values cross as JSON in the Arora [`Value`] vocabulary,
-/// e.g. `{"f32": 0.75}`.
-pub struct BrowserRuntime {
-    arora: Arora,
-    changes: Subscription,
-}
+/// Value↔JSON accessors over a device's [`DataStore`] and change
+/// [`Subscription`] — the store surface every browser device shares. Values
+/// cross the JS boundary as JSON in the Arora [`Value`] vocabulary, e.g.
+/// `{"f32": 0.75}`. [`AroraWeb`] exposes them as methods; a downstream device
+/// wrapping its own store reaches them here directly.
+pub mod store_json {
+    use super::*;
 
-impl BrowserRuntime {
-    /// Assemble an [`Arora`] (engine + native behavior-tree nodes) over the given
-    /// `hal`, `bridge`, `store`, and behavior interpreter with the
-    /// [builder](Arora::builder), each owned by the device. There is nothing to
-    /// spawn — the bridge and HAL own any async internally, behind their
-    /// stream/push seams.
-    ///
-    /// The interpreter is an executor injected once here, not swapped afterwards:
-    /// the caller constructs it (an empty [`BehaviorTreeInterpreter`], or its own)
-    /// and loads a behavior into it as a separate step before handing it in. Then
-    /// drive with [`step`](Self::step).
-    ///
-    /// `async` only so the JS surface can `await` construction uniformly; the
-    /// build itself is synchronous.
-    pub async fn start(
-        hal: Box<dyn Hal>,
-        bridge: Box<dyn Bridge>,
-        store: Box<dyn DataStore>,
-        behavior_interpreter: Box<dyn BehaviorInterpreter>,
-    ) -> Result<BrowserRuntime, JsValue> {
-        Self::builder()
-            .with_hal(hal)
-            .with_bridge(bridge)
-            .with_data_store(store)
-            .with_behavior_interpreter(behavior_interpreter)
-            .build()
-    }
-
-    /// Start assembling a [`BrowserRuntime`] seam by seam, mirroring
-    /// [`arora::Arora::builder`] — the same `with_*` setters, so a browser
-    /// device is configured exactly like a native one, plus the store-change
-    /// subscription wired at [`build`](BrowserRuntimeBuilder::build). Use this
-    /// over [`start`](Self::start) when the device needs modules, several
-    /// bridges, or a non-default store.
-    pub fn builder() -> BrowserRuntimeBuilder {
-        BrowserRuntimeBuilder::default()
-    }
-
-    /// The device's store, for direct access beyond the JSON accessors.
-    pub fn store(&self) -> &dyn DataStore {
-        self.arora.store()
-    }
-
-    /// Advance the device one tick. `dt` is the wall time elapsed since the
-    /// previous step. A web driver measures it from `requestAnimationFrame`
-    /// timestamps (milliseconds) and converts to a [`Duration`] at that boundary
-    /// — see [`AroraRuntime::step`]. The device publishes it (and the accumulated
-    /// time) under the golden keys before ticking.
-    pub fn step(&mut self, dt: Duration) -> Result<(), JsValue> {
-        self.arora
-            .step(dt)
-            .map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
-    }
-
-    /// Write one key into the store. `value_json` is an Arora [`Value`] as JSON,
-    /// e.g. `{"f32": 0.75}`.
-    pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
+    /// Write one key into the store. `value_json` is an Arora [`Value`] as
+    /// JSON, e.g. `{"f32": 0.75}`.
+    pub fn set_value(store: &dyn DataStore, path: &str, value_json: &str) -> Result<(), JsValue> {
         let value: Value = serde_json::from_str(value_json)
             .map_err(|e| JsValue::from_str(&format!("invalid value json for {path}: {e}")))?;
-        self.store()
+        store
             .write(StateChange::set(path, value))
             .map_err(|e| JsValue::from_str(&format!("write {path} failed: {e}")))
     }
@@ -154,7 +82,7 @@ impl BrowserRuntime {
     /// Write several keys at once, as one store change. `values_json` is a JSON
     /// object mapping each key path to an Arora [`Value`], e.g.
     /// `{"sensor/x": {"f32": 0.75}}`.
-    pub fn write_values(&self, values_json: &str) -> Result<(), JsValue> {
+    pub fn write_values(store: &dyn DataStore, values_json: &str) -> Result<(), JsValue> {
         let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(values_json)
             .map_err(|e| JsValue::from_str(&format!("invalid values json: {e}")))?;
         let mut change = StateChange::new();
@@ -163,18 +91,18 @@ impl BrowserRuntime {
                 .map_err(|e| JsValue::from_str(&format!("invalid value for {path}: {e}")))?;
             change.set.insert(Key::new(path), Some(value));
         }
-        self.store()
+        store
             .write(change)
             .map_err(|e| JsValue::from_str(&format!("write failed: {e}")))
     }
 
     /// Read keys from the store. `paths` is a JS `string[]`; the result is a JS
     /// object mapping each path to its Arora [`Value`] (or `null` if absent).
-    pub fn read_values(&self, paths: JsValue) -> Result<JsValue, JsValue> {
+    pub fn read_values(store: &dyn DataStore, paths: JsValue) -> Result<JsValue, JsValue> {
         let paths: Vec<String> = serde_wasm_bindgen::from_value(paths)
             .map_err(|e| JsValue::from_str(&format!("paths must be a string[]: {e}")))?;
         let keys: Vec<Key> = paths.iter().map(Key::new).collect();
-        let values = self.store().read(&keys);
+        let values = store.read(&keys);
         let mut out = serde_json::Map::with_capacity(paths.len());
         for (path, value) in paths.into_iter().zip(values) {
             out.insert(path, value_to_json(value)?);
@@ -184,8 +112,8 @@ impl BrowserRuntime {
 
     /// A snapshot of every key currently in the store, as a JS object mapping
     /// path → Arora [`Value`].
-    pub fn snapshot(&self) -> Result<JsValue, JsValue> {
-        let state = self.store().snapshot();
+    pub fn snapshot(store: &dyn DataStore) -> Result<JsValue, JsValue> {
+        let state = store.snapshot();
         let mut out = serde_json::Map::with_capacity(state.storage.len());
         for (key, value) in state.storage {
             out.insert(key.path, value_to_json(value)?);
@@ -193,14 +121,15 @@ impl BrowserRuntime {
         to_js_object(out)
     }
 
-    /// Drain the keys that changed in the store since the last call, as a JS
-    /// object mapping path → new Arora [`Value`] (or `null` for a cleared key).
-    /// Poll-based counterpart to a push subscription: [`DataStore::subscribe`]
-    /// delivers over a std channel JavaScript cannot await, so changes accumulate
-    /// and are handed over on demand — call it right after [`step`](Self::step).
-    pub fn drain_changes(&self) -> Result<JsValue, JsValue> {
+    /// Drain the changes the subscription accumulated, as a JS object mapping
+    /// path → new Arora [`Value`] (or `null` for a cleared key). Poll-based
+    /// counterpart to a push subscription: [`DataStore::subscribe`] delivers
+    /// over a std channel JavaScript cannot await, so changes accumulate and
+    /// are handed over on demand. A subscription opens on the store's whole
+    /// current state, so the first drain returns the full picture.
+    pub fn drain_changes(changes: &Subscription) -> Result<JsValue, JsValue> {
         let mut out = serde_json::Map::new();
-        while let Some(change) = self.changes.try_recv() {
+        while let Some(change) = changes.try_recv() {
             for (key, value) in change.set {
                 out.insert(key.path, value_to_json(value)?);
             }
@@ -210,149 +139,217 @@ impl BrowserRuntime {
         }
         to_js_object(out)
     }
+
+    /// Serialize a path-keyed JSON map to a **plain JS object**.
+    /// serde-wasm-bindgen's default representation for maps is a JS `Map`, but
+    /// these accessors promise plain objects (`{"sensor/x": {"f32": 0.5}}`),
+    /// so serialize JSON-compatibly.
+    fn to_js_object(out: serde_json::Map<String, serde_json::Value>) -> Result<JsValue, JsValue> {
+        use serde::Serialize;
+        serde_json::Value::Object(out)
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+    }
+
+    /// Serialize an optional Arora value to JSON (`null` when absent).
+    fn value_to_json(value: Option<Value>) -> Result<serde_json::Value, JsValue> {
+        match value {
+            Some(v) => serde_json::to_value(v)
+                .map_err(|e| JsValue::from_str(&format!("serialize value failed: {e}"))),
+            None => Ok(serde_json::Value::Null),
+        }
+    }
 }
 
-/// Assembles a [`BrowserRuntime`], mirroring [`arora::AroraBuilder`] so a browser
-/// device is configured exactly like a native one: a HAL, zero or more bridges, a
-/// data store, the behavior interpreter, and the modules whose functions behaviors
-/// may call — each defaulted. Every setter forwards to the underlying
-/// [`AroraBuilder`]; [`build`](Self::build) assembles the [`Arora`] and subscribes
-/// to its store's change feed.
-#[derive(Default)]
-pub struct BrowserRuntimeBuilder {
-    inner: AroraBuilder,
+/// The browser Arora device, exported to JavaScript as `AroraRuntime`.
+///
+/// The JS constructor builds the self-contained demo device — the runtime's
+/// in-process defaults: fake hardware, no bridge, a private store, an empty
+/// behavior — and [`AroraWebBuilder`] (JS `AroraRuntimeBuilder`) additionally
+/// loads guest modules. A downstream device composes its own [`Arora`] with
+/// [`arora::AroraBuilder`] and wraps it with `AroraWeb::from`, reusing this
+/// whole JS surface.
+///
+/// Drive it by calling [`step`](Self::step) from your own clock (e.g.
+/// `requestAnimationFrame`) or by awaiting [`run`](Self::run), which hands the
+/// device to [`Arora::run`] for good. Either way the rest of the surface stays
+/// live: `setValue`/`readValues`/`snapshot` work on a sibling handle of the
+/// store, `drainChanges` on its subscription, and `call` on the device's
+/// in-process [`Caller`] — none of them touch the stepping device.
+#[wasm_bindgen(js_name = AroraRuntime)]
+pub struct AroraWeb {
+    // The device parks here between manual steps; `run` takes it out for its
+    // whole life.
+    device: RefCell<Option<Arora>>,
+    caller: Caller,
+    store: Box<dyn DataStore>,
+    changes: Subscription,
 }
 
-impl BrowserRuntimeBuilder {
-    /// See [`AroraBuilder::with_hal`].
-    pub fn with_hal(mut self, hal: Box<dyn Hal>) -> Self {
-        self.inner = self.inner.with_hal(hal);
-        self
-    }
-
-    /// See [`AroraBuilder::with_bridge`]. Repeatable — reads fan in and writes
-    /// fan out across every bridge.
-    pub fn with_bridge(mut self, bridge: Box<dyn Bridge>) -> Self {
-        self.inner = self.inner.with_bridge(bridge);
-        self
-    }
-
-    /// See [`AroraBuilder::with_data_store`].
-    pub fn with_data_store(mut self, store: Box<dyn DataStore>) -> Self {
-        self.inner = self.inner.with_data_store(store);
-        self
-    }
-
-    /// See [`AroraBuilder::with_behavior_interpreter`].
-    pub fn with_behavior_interpreter(mut self, interpreter: Box<dyn BehaviorInterpreter>) -> Self {
-        self.inner = self.inner.with_behavior_interpreter(interpreter);
-        self
-    }
-
-    /// See [`AroraBuilder::with_module`]. Loads a guest module into the device's
-    /// engine — in the browser, a `.wasm` run by the native `WebAssembly` host.
-    pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
-        self.inner = self.inner.with_module(header, executable);
-        self
-    }
-
-    /// See [`AroraBuilder::with_host_module`].
-    pub fn with_host_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
-        self.inner = self.inner.with_host_module(functions);
-        self
-    }
-
-    /// Assemble the [`Arora`] and subscribe to its store's change feed (for
-    /// [`drain_changes`](BrowserRuntime::drain_changes)). Fails only if the
-    /// engine host cannot be created or a module fails to load.
-    pub fn build(self) -> Result<BrowserRuntime, JsValue> {
+impl From<Arora> for AroraWeb {
+    /// Wrap a composed device: keep its in-process [`Caller`], a sibling
+    /// handle of its store, and a subscription (opening on the whole current
+    /// state), then expose it all to JavaScript.
+    fn from(arora: Arora) -> Self {
         install_panic_hook();
-        let arora = self
-            .inner
-            .build()
-            .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
-        let changes = arora.store().subscribe();
-        Ok(BrowserRuntime { arora, changes })
+        let caller = arora.caller();
+        let store = arora.store().clone_box();
+        let changes = store.subscribe();
+        Self {
+            device: RefCell::new(Some(arora)),
+            caller,
+            store,
+            changes,
+        }
     }
 }
 
-/// Serialize a path-keyed JSON map to a **plain JS object**. serde-wasm-bindgen's
-/// default representation for maps is a JS `Map`, but these accessors promise
-/// plain objects (`{"sensor/x": {"f32": 0.5}}`), so serialize JSON-compatibly.
-fn to_js_object(out: serde_json::Map<String, serde_json::Value>) -> Result<JsValue, JsValue> {
-    use serde::Serialize;
-    serde_json::Value::Object(out)
-        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-        .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
-}
-
-/// Serialize an optional Arora value to JSON (`null` when absent).
-fn value_to_json(value: Option<Value>) -> Result<serde_json::Value, JsValue> {
-    match value {
-        Some(v) => serde_json::to_value(v)
-            .map_err(|e| JsValue::from_str(&format!("serialize value failed: {e}"))),
-        None => Ok(serde_json::Value::Null),
-    }
-}
-
-// =============================================================================
-// Opinionated Arora runtime (demo)
-//
-// A `#[wasm_bindgen]` device built on `BrowserRuntime` with the in-process fake
-// HAL and bridge over a plain `SimpleDataStore`. The basic behavior-tree control
-// nodes are wired natively into the engine, so no node module needs to be
-// fetched or loaded. Drive it by calling `step()`.
-// =============================================================================
-
-/// JS-callable handle to a running opinionated Arora runtime.
-#[wasm_bindgen]
-pub struct AroraRuntime {
-    inner: BrowserRuntime,
-}
-
-#[wasm_bindgen]
-impl AroraRuntime {
-    /// Start the runtime with an in-process fake HAL and bridge over a plain
-    /// `SimpleDataStore`, with an empty (idle) behavior-tree interpreter. Purely
-    /// synchronous — nothing runs between steps; drive the device by calling `step()`.
-    pub async fn start() -> Result<AroraRuntime, JsValue> {
-        // Construct the executor empty and ready — it registers no modules, so its
-        // function index is empty — and inject it at build. It idles (tick is a
-        // no-op) until a behavior is loaded into it.
-        let interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        let inner = BrowserRuntime::start(
-            Box::new(FakeHal::new()),
-            Box::new(FakeBridge::new()),
-            Box::new(SimpleDataStore::new()),
-            Box::new(interpreter),
-        )
-        .await?;
-        Ok(AroraRuntime { inner })
+#[wasm_bindgen(js_class = "AroraRuntime")]
+impl AroraWeb {
+    /// Build the demo device on the runtime's in-process defaults: fake HAL,
+    /// no bridge, a private store, an empty (idle) behavior interpreter.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<AroraWeb, JsValue> {
+        Ok(AroraWeb::from(Arora::builder().build().map_err(|e| {
+            JsValue::from_str(&format!("arora build failed: {e:?}"))
+        })?))
     }
 
-    /// Advance the device one step. `dt_ms` is the milliseconds elapsed since the
-    /// previous step — a plain JS number, exactly what a `requestAnimationFrame`
-    /// timestamp delta gives. This is the only place the rAF millisecond unit is
-    /// converted to the core [`Duration`] `dt`.
-    pub fn step(&mut self, dt_ms: f64) -> Result<(), JsValue> {
-        self.inner.step(Duration::from_secs_f64(dt_ms / 1_000.0))
+    /// Advance the device one step. `dt_ms` is the milliseconds elapsed since
+    /// the previous step — a plain JS number, exactly what a
+    /// `requestAnimationFrame` timestamp delta gives. This is the only place
+    /// the rAF millisecond unit is converted to the core `Duration` dt.
+    /// Unavailable once [`run`](Self::run) has taken the device.
+    pub fn step(&self, dt_ms: f64) -> Result<(), JsValue> {
+        let mut slot = self
+            .device
+            .try_borrow_mut()
+            .map_err(|_| JsValue::from_str("the device is mid-step; call between steps"))?;
+        let device = slot
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("run() drives the device; step() is unavailable"))?;
+        device
+            .step(Duration::from_secs_f64(dt_ms / 1_000.0))
+            .map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
+    }
+
+    /// Hand the device to [`Arora::run`]: a self-paced loop at `period_ms`
+    /// (default: the runtime's ~100 Hz) that owns the device until stepping
+    /// fails — the returned promise only ever rejects, and `step()` is
+    /// unavailable from then on. The rest of the surface keeps working: it
+    /// never touches the stepping device.
+    ///
+    /// `run` awaits between steps, so it shares its thread; see
+    /// [`Arora::run`] for where a cadence survives in a browser (main thread
+    /// vs dedicated worker).
+    pub fn run(&self, period_ms: Option<f64>) -> js_sys::Promise {
+        let device = self.device.borrow_mut().take();
+        wasm_bindgen_futures::future_to_promise(async move {
+            let mut device =
+                device.ok_or_else(|| JsValue::from_str("the device is already running"))?;
+            let period = period_ms
+                .map(|ms| Duration::from_secs_f64(ms / 1_000.0))
+                .unwrap_or(Arora::DEFAULT_STEP_PERIOD);
+            device
+                .run(period)
+                .await
+                .map_err(|e| JsValue::from_str(&format!("run failed: {e}")))?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Dispatch a [`Call`] into the device through its in-process caller. The
+    /// promise resolves after the step that applies it — the device must be
+    /// stepping (a `run()` loop, or your own `step` calls) for it to land.
+    /// `call_json` is an `arora_types::call::Call` as JSON; the result is the
+    /// `CallResult` as JSON.
+    pub fn call(&self, call_json: &str) -> js_sys::Promise {
+        let parsed: Result<Call, _> = serde_json::from_str(call_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));
+        let caller = self.caller.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            let result = caller
+                .call(parsed?)
+                .await
+                .map_err(|e| JsValue::from_str(&format!("call failed: {e}")))?;
+            let json = serde_json::to_string(&result)
+                .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))?;
+            Ok(JsValue::from_str(&json))
+        })
     }
 
     /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
     #[wasm_bindgen(js_name = setValue)]
     pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
-        self.inner.set_value(path, value_json)
+        store_json::set_value(&*self.store, path, value_json)
+    }
+
+    /// Write several keys at once, as one store change (a JSON object mapping
+    /// each key path to an Arora [`Value`]).
+    #[wasm_bindgen(js_name = writeValues)]
+    pub fn write_values(&self, values_json: &str) -> Result<(), JsValue> {
+        store_json::write_values(&*self.store, values_json)
     }
 
     /// Read keys from the store; `paths` is a `string[]`, result maps path→Value.
     #[wasm_bindgen(js_name = readValues)]
     pub fn read_values(&self, paths: JsValue) -> Result<JsValue, JsValue> {
-        self.inner.read_values(paths)
+        store_json::read_values(&*self.store, paths)
     }
 
     /// A snapshot of every key in the store as a path→Value object.
     pub fn snapshot(&self) -> Result<JsValue, JsValue> {
-        self.inner.snapshot()
+        store_json::snapshot(&*self.store)
+    }
+
+    /// Drain the keys that changed since the last call, as a path→Value object
+    /// (`null` for a cleared key). The first drain returns the store's whole
+    /// current state — the subscription opens on it.
+    #[wasm_bindgen(js_name = drainChanges)]
+    pub fn drain_changes(&self) -> Result<JsValue, JsValue> {
+        store_json::drain_changes(&self.changes)
+    }
+}
+
+/// Assemble a browser device from what the JS world can supply — guest wasm
+/// modules over the demo defaults; exported to JavaScript as
+/// `AroraRuntimeBuilder`. A device that needs a real HAL, bridge, store, or
+/// behavior interpreter is composed in Rust with [`arora::AroraBuilder`] and
+/// wrapped with `AroraWeb::from` instead: those seams are trait objects that
+/// cannot cross the JS boundary.
+#[wasm_bindgen(js_name = AroraRuntimeBuilder)]
+#[derive(Default)]
+pub struct AroraWebBuilder {
+    inner: AroraBuilder,
+}
+
+#[wasm_bindgen(js_class = "AroraRuntimeBuilder")]
+impl AroraWebBuilder {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> AroraWebBuilder {
+        AroraWebBuilder::default()
+    }
+
+    /// Load a guest module into the device's engine — in the browser, a
+    /// `.wasm` run by the native `WebAssembly` host. `header_json` is the
+    /// module's low-level header as JSON; `executable` its wasm bytes.
+    /// Repeatable — each call loads one module.
+    #[wasm_bindgen(js_name = withModule)]
+    pub fn with_module(&mut self, header_json: &str, executable: &[u8]) -> Result<(), JsValue> {
+        let header: Header = serde_json::from_str(header_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+        let inner = std::mem::take(&mut self.inner);
+        self.inner = inner.with_module(header, executable.to_vec());
+        Ok(())
+    }
+
+    /// Build the device. The builder resets to its defaults, ready to
+    /// assemble another.
+    pub fn build(&mut self) -> Result<AroraWeb, JsValue> {
+        let arora = std::mem::take(&mut self.inner)
+            .build()
+            .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
+        Ok(AroraWeb::from(arora))
     }
 }
 

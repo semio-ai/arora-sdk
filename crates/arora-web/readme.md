@@ -4,42 +4,54 @@ Run an Arora device inside a browser. Compiles `arora` (with
 `--no-default-features`, so no wasmtime, no libloading) to
 `wasm32-unknown-unknown` and exposes two things:
 
-- **`BrowserRuntime`** — the reusable Rust primitive that runs a full Arora
-  runtime in the browser over an *injected* HAL, bridge, and data store (all
-  trait objects), with a synchronous `step()` and Value↔JSON store accessors.
-  Each device ships a thin `#[wasm_bindgen]` cdylib that constructs its concrete
-  parts and forwards to a `BrowserRuntime` — the wasm-bindgen boundary can't
-  carry `Arc<dyn Trait>`, so the generic core stays Rust-side.
+- **`AroraRuntime`** (Rust name: `AroraWeb`) — the wasm-bindgen device over an
+  `arora::Arora`: a synchronous `step()`, a self-pacing `run()`, in-process
+  `call()` dispatch, and Value↔JSON store accessors.
 - **`Engine`** / **`BehaviorTreeRunner`** — a lower-level JS surface for loading
   guest modules and running behavior trees directly on the engine.
 
-## `BrowserRuntime` (the primitive)
+## `AroraRuntime` (the device)
 
-`BrowserRuntime` is a plain Rust type, not a JS class:
+```ts
+class AroraRuntime {
+  constructor();                          // the demo device (fake HAL, no bridge)
+  step(dtMs: number): void;               // one step, e.g. from requestAnimationFrame
+  run(periodMs?: number): Promise<never>; // hands the device to arora's own loop; rejects when stepping fails
+  call(callJson: string): Promise<string>; // in-process Call, applied by the next step; resolves to result JSON
+  setValue(path: string, valueJson: string): void;
+  writeValues(valuesJson: string): void;
+  readValues(paths: string[]): Record<string, unknown>;
+  snapshot(): Record<string, unknown>;
+  drainChanges(): Record<string, unknown>; // first drain = the store's whole state
+}
 
-```rust
-let store: Arc<dyn DataStore> = Arc::new(MyStore::new());
-let mut rt = BrowserRuntime::start(
-    Arc::new(MyHal::new()),      // Arc<dyn Hal>
-    Arc::new(MyBridge::new()),   // Arc<dyn Bridge>
-    store,                       // Arc<dyn DataStore>
-).await?;
-rt.queue_behavior(Box::new(my_behavior)); // or rt.queue_groot_xml(xml)?
-// drive from requestAnimationFrame / a Web Worker loop:
-rt.step()?;                      // -> bool (false once unregistered)
+class AroraRuntimeBuilder {
+  constructor();
+  withModule(headerJson: string, executable: Uint8Array): void; // repeatable
+  build(): AroraRuntime;
+}
 ```
 
-Its methods (`step`, `set_value`, `write_values`, `read_values`, `snapshot`,
-`drain_changes`) all take/return `JsValue` or JSON strings, so a device's cdylib
-forwards them as one-liners. Values cross the JS boundary as JSON in the Arora
-`Value` vocabulary, e.g. `{"f32": 0.75}`. `drain_changes` is the poll-based
-counterpart to a store subscription (JavaScript can't await the std channel
-`DataStore::subscribe` delivers on), so call it right after `step`.
+Values cross the JS boundary as JSON in the Arora `Value` vocabulary, e.g.
+`{"f32": 0.75}`. `drainChanges` is the poll-based counterpart to a store
+subscription (JavaScript can't await the std channel `DataStore::subscribe`
+delivers on); a subscription opens on the store's whole current state, so the
+first drain returns the full picture.
 
-**`AroraRuntime`** is the bundled demo device built on `BrowserRuntime`: the
-in-process fake HAL and bridge over a plain `SimpleDataStore`, driving native
-behavior-tree nodes. Downstream devices (e.g. Vizij) ship their own wrapper the
-same way.
+`run()` hands the device to `arora::Arora::run` for good (`step()` is
+unavailable from then on). The rest of the surface keeps working while the
+device runs, because none of it touches the stepping device: `setValue`/
+`readValues`/`snapshot` work on a sibling handle of the store, `drainChanges`
+on its subscription, and `call` goes through the device's in-process
+`arora::Caller` — enqueued at once, applied at the next step's event phase
+exactly like a remote's call, resolved on that step's reply. The device must
+be stepping (`run()` or your own `step` calls) for a `call` to land.
+
+A downstream device (e.g. Vizij) composes its own `arora::Arora` with
+`arora::AroraBuilder` — the HAL, bridge, and store seams are trait objects that
+cannot cross the JS boundary — and wraps it with `AroraWeb::from`, reusing the
+same JS surface. The `store_json` module exposes the Value↔JSON accessors over
+any store for wrappers that add their own methods.
 
 ## Engine / BehaviorTreeRunner JS surface (see [src/lib.rs](src/lib.rs)):
 
