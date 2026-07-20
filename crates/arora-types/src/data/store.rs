@@ -53,9 +53,9 @@ pub trait Slot: Send + Sync {
   fn set(&self, value: Option<Value>) -> Result<(), DataError>;
 }
 
-/// A feed of changes applied to a [`DataStore`], obtained from
-/// [`DataStore::subscribe`]. Each subscription receives every change applied
-/// after it was created.
+/// A feed of changes from a [`DataStore`], obtained from
+/// [`DataStore::subscribe`]. A subscription's first change is the store's
+/// whole current state; every change applied after it was created follows.
 ///
 /// This is deliberately a plain synchronous channel so `arora-types` needs no
 /// async runtime. Async consumers can poll [`try_recv`](Subscription::try_recv)
@@ -106,6 +106,9 @@ pub trait DataStore: Send + Sync {
   /// without repeating the lookup).
   fn slot(&self, key: &Key) -> Box<dyn Slot>;
 
-  /// Subscribe to changes. Each call yields an independent [`Subscription`].
+  /// Subscribe to changes. Each call yields an independent [`Subscription`],
+  /// whose first change is the store's whole current state: a subscriber
+  /// starts from the full picture and stays current from the changes that
+  /// follow, without a separate snapshot read that could race them.
   fn subscribe(&self) -> Subscription;
 }

@@ -122,7 +122,18 @@ impl DataStore for SimpleDataStore {
 
     fn subscribe(&self) -> Subscription {
         let (tx, rx) = channel();
-        self.inner.subscribers.lock().unwrap().push(tx);
+        // The current state, as the subscription's first change: whoever
+        // attaches sees everything the store holds, then stays current from
+        // what follows. Taken while holding the subscriber list so a
+        // concurrent write lands either in this snapshot or in a later
+        // change, never in neither.
+        let mut subscribers = self.inner.subscribers.lock().unwrap();
+        let mut initial = StateChange::new();
+        for (key, value) in self.snapshot().storage {
+            initial.set.insert(key, value);
+        }
+        let _ = tx.send(initial);
+        subscribers.push(tx);
         Subscription::new(rx)
     }
 }
@@ -197,6 +208,8 @@ mod tests {
         let store = SimpleDataStore::new();
         let s1 = store.subscribe();
         let s2 = store.subscribe();
+        s1.try_recv().expect("s1 opening state");
+        s2.try_recv().expect("s2 opening state");
         store
             .write(StateChange::set("k", Value::Boolean(true)))
             .unwrap();
@@ -204,10 +217,34 @@ mod tests {
         assert!(s2.try_recv().expect("s2 change").contains(&Key::from("k")));
     }
 
+    /// A subscription opens on everything the store already holds, so a
+    /// subscriber never has to read a snapshot separately and race the
+    /// changes that follow.
+    #[test]
+    fn subscribe_opens_on_the_current_state() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("already", Value::Boolean(true)))
+            .unwrap();
+
+        let sub = store.subscribe();
+        let opening = sub.try_recv().expect("opening state");
+        assert!(opening.contains(&Key::from("already")));
+
+        store
+            .write(StateChange::set("later", Value::Boolean(false)))
+            .unwrap();
+        assert!(sub
+            .try_recv()
+            .expect("change")
+            .contains(&Key::from("later")));
+    }
+
     #[test]
     fn slot_set_notifies_subscribers() {
         let store = SimpleDataStore::new();
         let sub = store.subscribe();
+        sub.try_recv().expect("opening state");
         store
             .slot(&Key::from("y"))
             .set(Some(Value::Boolean(true)))
