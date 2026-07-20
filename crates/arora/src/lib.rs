@@ -43,9 +43,10 @@ pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 /// type that [`AroraBuilder::with_host_module`] accepts.
 pub use arora_behavior_tree::ModuleFunction;
 
+use crate::runtime::EndpointInbound;
 use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
-use arora_bridge::{Bridge, BridgeError, Inbound, InboundStream};
+use arora_bridge::{Bridge, BridgeError, Inbound};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
@@ -122,10 +123,14 @@ pub struct Arora {
     // Every endpoint's inbound stream, merged. Each is chained with a terminal
     // disconnect marker at build, so an endpoint's stream ending is an explicit
     // event, never a silent drop from the merge.
-    pub(crate) inbound: SelectAll<InboundStream>,
+    pub(crate) inbound: SelectAll<EndpointInbound>,
     // What the seams delivered since the previous step; applied and drained by
     // the next step.
     pub(crate) pending: Pending,
+    // Per endpoint, whether that remote asked for the device's data — parallel
+    // to `bridges`. Outbound changes go to an endpoint only while it asks; a
+    // device nobody listens to keeps stepping, it just does not talk.
+    pub(crate) data_requested: Vec<bool>,
     pub(crate) store_changes: Subscription,
     // The golden clock: monotonic nanoseconds since start, advanced by each
     // step's `dt`. Published into the store's golden keys each step, before any
@@ -315,15 +320,24 @@ impl AroraBuilder {
         // endpoint silently.
         let mut bridges = self.bridges;
         let mut inbound = SelectAll::new();
-        for bridge in &mut bridges {
+        for (endpoint, bridge) in bridges.iter_mut().enumerate() {
             let disconnected = stream::once(async {
                 Inbound::DeviceInfo(Err(BridgeError::Disconnected(
                     "the endpoint's inbound stream ended".into(),
                 )))
             });
-            inbound.push(bridge.take_inbound().chain(disconnected).boxed() as InboundStream);
+            // Each event carries the endpoint it came from: what one remote
+            // asks for is not what another asks for.
+            inbound.push(
+                bridge
+                    .take_inbound()
+                    .chain(disconnected)
+                    .map(move |event| (endpoint, event))
+                    .boxed(),
+            );
         }
 
+        let endpoints = bridges.len();
         let function_index = Rc::new(self.functions);
         // Default executor: an empty, ready behavior-tree interpreter over the
         // assembled function index. It is injected once here (never swapped); a
@@ -369,6 +383,7 @@ impl AroraBuilder {
             hal_feed,
             inbound,
             pending: Pending::default(),
+            data_requested: vec![false; endpoints],
             store_changes,
             clock: Clock::default(),
         })
