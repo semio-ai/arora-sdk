@@ -72,6 +72,12 @@ jobs:
       - name: Browser executor test (headless Firefox)
         run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
 
+      # The run loop's cadence rides a JS timer on wasm32 and Tokio's natively,
+      # with the same guarantees either way; the native run above covers the
+      # latter, this the former.
+      - name: Metronome cadence test (headless Firefox)
+        run: wasm-pack test --headless --firefox crates/arora --no-default-features --lib
+
       # The opinionated `arora` runtime must also compile for the browser:
       # arora-web wraps it (AroraRuntime) with no default features, selecting the
       # browser engine host and the Tokio-free runtime. Building it here guards

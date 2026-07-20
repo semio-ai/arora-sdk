@@ -24,11 +24,11 @@ required-features = ["native"]
 
 [features]
 default = ["native", "tui"]
-# Native build: the wasmtime + dynamic-library engine hosts and the binary. Build
-# for wasm32 with --no-default-features (the browser host is selected by target
-# cfg).
+# Native build: the wasmtime + dynamic-library engine hosts, the operator flow,
+# and the binary. Build for wasm32 with --no-default-features (the browser host
+# is selected by target cfg). Platform divergence inside the always-available
+# runtime (`step`/`run`) is expressed by target cfg, not by this feature.
 native = [
-    "dep:tokio",
     "dep:arora-bridge-ws",
     "dep:env_logger",
     # The operator interface (`arora::operator`) is an async trait.
@@ -60,8 +60,10 @@ arora-behavior = { path = "../arora-behavior", version = "4" }
 arora-types = { path = "../arora-types", version = "1.4" }
 arora-bridge-ws = { path = "../arora-bridge-ws", version = "3", optional = true }
 anyhow = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"], optional = true }
 uuid = { version = "1", features = ["serde", "v4"] }
+# Portable instant for the run loop's dt/Hz measurements: `performance.now()`
+# on wasm32-unknown-unknown, a zero-cost re-export of `std::time` elsewhere.
+web-time = "1"
 # The three interfaces the runtime loop wires around the shared state.
 arora-hal = { path = "../arora-hal", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "3" }
@@ -89,6 +91,17 @@ sysinfo = { version = "0.33", default-features = false, features = ["system"], o
 # RUST_LOG-style filtering for the TUI's in-pane log capture.
 env_filter = { version = "0.1", optional = true }
 
+# The async runtime for everything native: the run loop's metronome (`time`),
+# the binary's `#[tokio::main]` and spawned servers (`rt-multi-thread`,
+# `macros`). Target-gated rather than feature-gated — on wasm32 the metronome
+# sleeps on a JS timer instead (below), and the embedder brings the executor.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+# The run loop's metronome sleep on wasm32: a `setTimeout`-backed future.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+
 [dev-dependencies]
 async-trait = "0.1"
 # `time` + `test-util` (tests only): the operator tests pause time
@@ -103,3 +116,7 @@ serde_yaml = "0.9"
 # emits the generated header the test include_str!s. Built automatically by
 # `cargo test` (the wasm32-wasip1 target is pinned in rust-toolchain.toml).
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+
+# The metronome tests also run in a browser, where the cadence rides a JS timer.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
