@@ -33,7 +33,7 @@ pub mod tui;
 
 #[cfg(feature = "native")]
 pub use run::{run, run_with, run_with_frontend, run_with_hal};
-pub use runtime::{RuntimeError, StepOutcome, Telemetry, TelemetrySnapshot};
+pub use runtime::{RuntimeError, Telemetry, TelemetrySnapshot};
 
 /// Re-exported so embedders can construct the default behavior executor — an
 /// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before

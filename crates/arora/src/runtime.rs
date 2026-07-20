@@ -107,9 +107,7 @@ impl Arora {
             let now = Instant::now();
             let dt = now.duration_since(last_step);
             last_step = now;
-            if self.step(dt)? == StepOutcome::Unregistered {
-                return Ok(());
-            }
+            self.step(dt)?;
             steps_in_window += 1;
             let elapsed = window_start.elapsed();
             if elapsed >= Duration::from_secs(1) {
@@ -120,15 +118,6 @@ impl Arora {
             }
         }
     }
-}
-
-/// What a [`step`](Arora::step) concluded.
-#[derive(Debug, PartialEq, Eq)]
-pub enum StepOutcome {
-    /// The device is live; keep stepping.
-    Live,
-    /// The device was unregistered from the remote; stop stepping.
-    Unregistered,
 }
 
 /// Something went wrong running a step.
@@ -296,21 +285,21 @@ pub fn apply_sensors(
 /// Phase 3 — apply the bridge events, in arrival order, **after** the sensors:
 /// a remote update to a key overwrites this frame's sensor reading
 /// (deterministic phase order, not network timing). Commands are dispatched
-/// against the store and replied to on their channel; the control signals fold
-/// into the step's outcome — an unregistration ends the run, a claim toggle
-/// lands in telemetry.
+/// against the store and replied to on their channel; a claim toggle lands in
+/// telemetry.
 pub fn apply_events(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
     call_bridge: &mut dyn CallBridge,
     events: Vec<Inbound>,
     telemetry: &Telemetry,
-) -> Result<StepOutcome, RuntimeError> {
-    let mut outcome = StepOutcome::Live;
+) -> Result<(), RuntimeError> {
     for event in events {
         match event {
             Inbound::Command(cmd) => apply_command(store, function_index, call_bridge, cmd)?,
-            Inbound::DeviceInfo(Ok(None)) => outcome = StepOutcome::Unregistered,
+            // A remote that no longer knows this device says nothing about the
+            // device itself: it keeps running for whoever else it serves.
+            Inbound::DeviceInfo(Ok(None)) => {}
             Inbound::DeviceInfo(Ok(Some(_info))) => { /* TODO: apply device info */ }
             Inbound::DeviceInfo(Err(e)) => {
                 // A dropped link is not an unregistration: the device keeps
@@ -322,7 +311,7 @@ pub fn apply_events(
             }
         }
     }
-    Ok(outcome)
+    Ok(())
 }
 
 /// Handle one command from the remote against the store / function index, then
@@ -557,7 +546,7 @@ impl Arora {
     /// the monotonic clock, published (with the accumulated time) under the
     /// golden keys before anything else runs, so behaviors read timing from the
     /// store rather than as a tick argument.
-    pub fn step(&mut self, dt: Duration) -> Result<StepOutcome, RuntimeError> {
+    pub fn step(&mut self, dt: Duration) -> Result<(), RuntimeError> {
         // 0. sweep — pick up everything the seams hold right now.
         sweep_now(&mut self.hal_feed, &mut self.inbound, &mut self.pending);
         // 1. time — golden keys first: the whole frame sees this clock.
@@ -568,7 +557,7 @@ impl Arora {
             apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors))?;
         // 3. bridge readings — after the HAL: a remote update beats this
         //    frame's sensor value. Commands dispatch and reply here.
-        let outcome = apply_events(
+        apply_events(
             &*self.store,
             &self.function_index,
             &mut self.engine,
@@ -593,7 +582,7 @@ impl Arora {
             write_hal(&*self.hal, &out, &sensor_applied);
             write_bridges(&mut self.bridges, &out);
         }
-        Ok(outcome)
+        Ok(())
     }
 }
 
@@ -841,18 +830,6 @@ mod tests {
         Box::new(interpreter)
     }
 
-    /// Drive `step` until the device reports unregistered, with a safety bound.
-    /// Fully synchronous: phase 0's sweep picks the unregister event up from the
-    /// bridge's stream on the very next step.
-    fn drive_until_unregistered(mut arora: Arora) {
-        for _ in 0..1000 {
-            if arora.step(FRAME).expect("step ok") == StepOutcome::Unregistered {
-                return;
-            }
-        }
-        panic!("device never reported unregistered");
-    }
-
     #[test]
     fn builder_defaults_to_a_self_contained_device() {
         // No seams named: fake HAL, no bridge (a standalone device is legal —
@@ -871,7 +848,7 @@ mod tests {
         // The zero-bridge device (a preview, a bench test) steps and stays live.
         let mut arora = Arora::builder().build().expect("builds");
         for _ in 0..5 {
-            assert_eq!(arora.step(FRAME).expect("step"), StepOutcome::Live);
+            arora.step(FRAME).expect("step");
         }
     }
 
@@ -889,22 +866,27 @@ mod tests {
         );
     }
 
+    /// One remote forgetting the device says nothing about the device: it
+    /// serves whoever else it is attached to, so it keeps stepping.
     #[test]
-    fn stops_when_unregistered() {
-        let arora = build(Box::new(UnregisterBridge));
-        drive_until_unregistered(arora);
+    fn an_unregistering_remote_does_not_stop_the_device() {
+        let mut arora = build(Box::new(UnregisterBridge));
+        for _ in 0..5 {
+            arora.step(FRAME).expect("step");
+        }
     }
 
-    /// `run` ends cleanly when the remote unregisters the device: the select
-    /// buffers the bridge event, the next paced step applies it, and the loop
-    /// returns.
+    /// `run` outlives the remote that forgot the device: nothing a bridge
+    /// reports ends the loop, so the timeout — not the loop — is what returns.
     #[tokio::test]
-    async fn run_returns_when_unregistered() {
+    async fn run_outlives_an_unregistering_remote() {
         let mut arora = build(Box::new(UnregisterBridge));
-        tokio::time::timeout(Duration::from_secs(5), arora.run(Duration::from_millis(1)))
-            .await
-            .expect("run returns once the device is unregistered")
-            .expect("run ends cleanly");
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            arora.run(Duration::from_millis(1)),
+        )
+        .await
+        .expect_err("run keeps pacing the device");
     }
 
     /// A behavior that counts its ticks through a shared counter and stays
@@ -1035,12 +1017,14 @@ mod tests {
         // device resolve against one data storage.
         let store = SimpleDataStore::new();
         let interpreter = groot_interpreter(xml, &store);
-        let arora = build_in_with(
+        let mut arora = build_in_with(
             Box::new(UnregisterBridge),
             Box::new(store.clone()),
             interpreter,
         );
-        drive_until_unregistered(arora);
+        for _ in 0..5 {
+            arora.step(FRAME).expect("step");
+        }
     }
 
     #[tokio::test]
@@ -1280,7 +1264,7 @@ mod tests {
         );
 
         // The behavior writes greeting = "hi"; one step lands it under the namespace.
-        assert_eq!(arora.step(FRAME).expect("step"), StepOutcome::Live);
+        arora.step(FRAME).expect("step");
         assert_eq!(
             shared.read(&[Key::from("robotA/greeting")]),
             vec![Some(Value::String("hi".into()))],
@@ -1309,10 +1293,7 @@ mod tests {
         assert_eq!(store.read(&[Key::from(golden::TIME)]), vec![None]);
 
         // Step at 16 ms: dt and elapsed time both read 16_000_000 ns.
-        assert_eq!(
-            arora.step(Duration::from_millis(16)).expect("step"),
-            StepOutcome::Live
-        );
+        arora.step(Duration::from_millis(16)).expect("step");
         assert_eq!(
             store.read(&[Key::from(golden::DT)]),
             vec![Some(Value::U64(16_000_000))]
@@ -1323,10 +1304,7 @@ mod tests {
         );
 
         // Step at 4 ms: dt resets to the latest delta, time accumulates to 20 ms.
-        assert_eq!(
-            arora.step(Duration::from_millis(4)).expect("step"),
-            StepOutcome::Live
-        );
+        arora.step(Duration::from_millis(4)).expect("step");
         assert_eq!(
             store.read(&[Key::from(golden::DT)]),
             vec![Some(Value::U64(4_000_000))]
