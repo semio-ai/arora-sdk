@@ -63,14 +63,11 @@ fn loads_and_dispatches_in_browser() {
     assert_eq!(loaded.id, module_id);
 
     let result = engine
-        .arora_call(
-            &module_id,
-            Call {
-                module_id: Some(module_id),
-                id: id(SUCCEED),
-                args: vec![],
-            },
-        )
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: id(SUCCEED),
+            args: vec![],
+        })
         .expect("dispatch succeed()");
     assert_eq!(result.ret, Value::Boolean(true));
 }
@@ -87,23 +84,20 @@ fn marshals_arguments_in_browser() {
     load_module_from_parts(&mut engine, header, WASM.to_vec().into_boxed_slice()).expect("load");
 
     let result = engine
-        .arora_call(
-            &module_id,
-            Call {
-                module_id: Some(module_id),
-                id: id(ADD),
-                args: vec![
-                    StructureField {
-                        id: id(ADD_A),
-                        value: Box::new(Value::F32(2.0)),
-                    },
-                    StructureField {
-                        id: id(ADD_B),
-                        value: Box::new(Value::F32(3.0)),
-                    },
-                ],
-            },
-        )
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: id(ADD),
+            args: vec![
+                StructureField {
+                    id: id(ADD_A),
+                    value: Box::new(Value::F32(2.0)),
+                },
+                StructureField {
+                    id: id(ADD_B),
+                    value: Box::new(Value::F32(3.0)),
+                },
+            ],
+        })
         .expect("dispatch add(2, 3)");
     assert_eq!(result.ret, Value::F32(5.0));
 }
@@ -128,14 +122,11 @@ async fn prepares_asynchronously_then_dispatches() {
     assert_eq!(loaded.id, module_id);
 
     let result = engine
-        .arora_call(
-            &module_id,
-            Call {
-                module_id: Some(module_id),
-                id: id(SUCCEED),
-                args: vec![],
-            },
-        )
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: id(SUCCEED),
+            args: vec![],
+        })
         .expect("dispatch succeed()");
     assert_eq!(result.ret, Value::Boolean(true));
 }

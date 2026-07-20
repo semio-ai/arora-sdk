@@ -182,7 +182,7 @@ impl TestBridge {
 }
 
 impl CallBridge for TestBridge {
-    fn arora_call(&mut self, _module: &Uuid, call: Call) -> Result<CallResult, CallError> {
+    fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
         *self.leaf_ticks.borrow_mut().entry(call.id).or_insert(0) += 1;
         let status = self
             .leaf_statuses

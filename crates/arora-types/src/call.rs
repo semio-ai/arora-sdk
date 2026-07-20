@@ -37,8 +37,9 @@ pub trait Callable {
 /// mock in tests). It lives here, in the interface layer, so module-shaped
 /// libraries can make host calls without depending on the engine crate.
 pub trait CallBridge {
-  /// Calls the given function, with the arguments provided via `call`.
-  fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError>;
+  /// Dispatch `call` to the module it names: the call is the full description
+  /// of the invocation, and one naming no module is refused.
+  fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError>;
 
   /// Registers the given function in the executor and associates it to an
   /// identifier generated on the fly. The function is made available to
@@ -155,7 +156,7 @@ mod tests {
     }
 
     impl CallBridge for MockBridge {
-      fn arora_call(&mut self, _module: &Uuid, _call: Call) -> Result<CallResult, CallError> {
+      fn arora_call(&mut self, _call: Call) -> Result<CallResult, CallError> {
         Err(CallError::Generic {
           message: "the mock has no modules".to_string(),
         })

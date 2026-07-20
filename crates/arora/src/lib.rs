@@ -171,7 +171,7 @@ impl Arora {
     /// thread. Errors are the dispatch's own — a call naming no module, a
     /// module or function the engine does not know, or the callee failing.
     pub fn call(&mut self, call: Call) -> Result<CallResult, CallError> {
-        runtime::dispatch_call(&mut self.engine, call)
+        self.engine.arora_call(call)
     }
 
     /// Borrow the engine's call seam. [`call`](Arora::call) covers plain

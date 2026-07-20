@@ -18,7 +18,7 @@ use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatu
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
 use arora_hal::Hal;
-use arora_types::call::{Call, CallBridge, CallError, CallResult};
+use arora_types::call::{CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
@@ -276,24 +276,6 @@ fn apply_events(
     Ok(())
 }
 
-/// Dispatch a [`Call`] through the engine's `CallBridge`, against the module
-/// the call names — the one dispatch path, whether the call arrived over a
-/// bridge or from the embedding process. That includes the interpreter module
-/// the builder registered: a Call to its LOAD/EDIT ids reaches the behavior
-/// interpreter through this same dispatch, no special case. A call that names
-/// no module is refused: dispatch is always module-scoped.
-pub(crate) fn dispatch_call(
-    call_bridge: &mut dyn CallBridge,
-    call: Call,
-) -> Result<CallResult, CallError> {
-    let Some(module) = call.module_id else {
-        return Err(CallError::Generic {
-            message: "call is missing its module id".to_string(),
-        });
-    };
-    call_bridge.arora_call(&module, call)
-}
-
 /// Handle one command from the remote against the store / function index, then
 /// reply on its channel.
 fn apply_command(
@@ -321,9 +303,9 @@ fn apply_command(
             }),
             Err(e) => Err(e.to_string()),
         },
-        BridgeOp::Call(call) => {
-            dispatch_call(call_bridge, call.clone()).map_err(|e| format!("call failed: {e:?}"))
-        }
+        BridgeOp::Call(call) => call_bridge
+            .arora_call(call.clone())
+            .map_err(|e| format!("call failed: {e:?}")),
         BridgeOp::ListKeys { prefix } => {
             // Introspection: enumerate the live (set) key paths, optionally
             // filtered by prefix, sorted for a deterministic reply.

@@ -169,7 +169,7 @@ mod tests {
     }
 
     impl CallBridge for NativeBridge {
-        fn arora_call(&mut self, _module: &Uuid, call: Call) -> Result<CallResult, CallError> {
+        fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
             Err(CallError::FunctionNotFound { id: call.id })
         }
         fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {

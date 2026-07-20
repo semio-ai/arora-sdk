@@ -162,10 +162,13 @@ impl Engine {
 pub type EngineRef = *mut Engine;
 
 impl CallBridge for Engine {
-    fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
+    fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+        let module = call.module_id.ok_or_else(|| CallError::Generic {
+            message: "call is missing its module id".to_string(),
+        })?;
         let call_id = call.id;
         let result_data = self
-            .dispatch(module, &call_id, serialize_to_arg(call).as_ref())
+            .dispatch(&module, &call_id, serialize_to_arg(call).as_ref())
             .map_err(Into::<CallError>::into)?;
         if let Value::Structure(structure) = deserialize(result_data.as_ref()) {
             if call_id != structure.id {
@@ -214,8 +217,8 @@ impl CallBridge for Engine {
 pub type PinnedEngine = Pin<Box<Engine>>;
 
 impl CallBridge for PinnedEngine {
-    fn arora_call(&mut self, module: &Uuid, call: Call) -> Result<CallResult, CallError> {
-        self.deref_mut().arora_call(module, call)
+    fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+        self.deref_mut().arora_call(call)
     }
 
     fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
@@ -264,7 +267,7 @@ mod tests {
                 value: Box::new(Value::I32(21)),
             }],
         };
-        let result = engine.arora_call(&module_id, call).unwrap();
+        let result = engine.arora_call(call).unwrap();
         assert_eq!(result.ret, Value::I32(42));
 
         // An unattached function id fails like a missing guest function.
@@ -274,7 +277,7 @@ mod tests {
             args: Vec::new(),
         };
         assert!(matches!(
-            engine.arora_call(&module_id, miss),
+            engine.arora_call(miss),
             Err(CallError::FunctionNotFound { .. })
         ));
 
@@ -286,7 +289,7 @@ mod tests {
             args: Vec::new(),
         };
         assert!(matches!(
-            engine.arora_call(&other, elsewhere),
+            engine.arora_call(elsewhere),
             Err(CallError::ModuleNotFound { .. })
         ));
     }

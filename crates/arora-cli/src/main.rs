@@ -238,8 +238,12 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
 
         let nof_iterations = args.repeat;
         for _i in 0..nof_iterations {
-            let result =
-                tokio::task::block_in_place(|| engine.arora_call(module_id, call.clone()))?;
+            let result = tokio::task::block_in_place(|| {
+                engine.arora_call(Call {
+                    module_id: Some(*module_id),
+                    ..call.clone()
+                })
+            })?;
             let mut out = Vec::new();
             let mut serializer = serde_yaml::Serializer::new(&mut out);
             serde_yaml::with::singleton_map_recursive::serialize(&result, &mut serializer)?;
