@@ -4,6 +4,19 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-07-20
+
+### Breaking
+
+- `DataStore::subscribe`'s contract: a subscription's first change is the
+  store's whole current state — a subscriber starts from the full picture
+  without a separate snapshot read that could race the feed.
+- `DataStore::clone_box` (new required method): a sibling handle onto the same
+  storage, putting the stores-share-storage-across-clones fact on the trait.
+- `CallBridge::arora_call` takes the `Call` alone: the call is the full
+  description of the invocation — the engine routes by `Call::module_id` and
+  refuses a call naming no module.
+
 ## [1.9.1] - 2026-07-10
 
 ### Changed

@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 arora-buffers = { path = "../../crates/arora-buffers" }
-arora-types = { path = "../../crates/arora-types", version = "1.4" }
+arora-types = { path = "../../crates/arora-types", version = "2" }
 bytes = "1"
 derive_more = "2"
 regex = "1"

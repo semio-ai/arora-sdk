@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,7 +9,7 @@ edition = "2021"
 arora-module-core = { path = "../core" }
 arora-registry = { path = "../../arora-registry" }
 arora-registry-remote = { path = "../../arora-registry-remote" }
-arora-types = { path = "../../arora-types", version = "1.4" }
+arora-types = { path = "../../arora-types", version = "2" }
 arora-vfs = { path = "../../arora-vfs" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 anyhow = "*"

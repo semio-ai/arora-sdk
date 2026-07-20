@@ -4,6 +4,13 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-07-20
+
+### Breaking
+
+- `arora_call` takes the `Call` alone (the module comes from `Call::module_id`;
+  a call naming no module is refused). Re-pinned to `arora-types` 2.
+
 ## [2.0.1] - 2026-07-10
 
 ### Changed

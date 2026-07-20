@@ -4,6 +4,17 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-07-20
+
+### Breaking
+
+- Re-pinned to `arora-types` 2 (its types are part of this API).
+
+### Changed
+
+- The golden keys (`arora/time`, `arora/dt`) travel outbound with every other
+  change; a remote that does not want them filters them on its side.
+
 ## [4.0.1] - 2026-07-10
 
 ### Changed

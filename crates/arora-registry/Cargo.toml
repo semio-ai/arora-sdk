@@ -1,6 +1,6 @@
 [package]
 name = "arora-registry"
-version = "0.1.2"
+version = "1.0.0"
 edition = "2021"
 description = "Local type-record registry for Arora: stores, tags and freezes type records."
 license = "MIT"
@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1"
-arora-types = { path = "../arora-types", version = "1.6" }
+arora-types = { path = "../arora-types", version = "2" }
 async-trait = "0.1"
 derive_more = "2"
 semver = { version = "1", features = ["serde"] }

@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "2.0.1"
+version = "3.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -10,8 +10,8 @@ repository = "https://github.com/semio-ai/arora-sdk"
 name = "arora_bridge_ros2"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "1.6" }
-arora-bridge = { path = "../arora-bridge", version = "3" }
+arora-types = { path = "../arora-types", version = "2" }
+arora-bridge = { path = "../arora-bridge", version = "4" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"

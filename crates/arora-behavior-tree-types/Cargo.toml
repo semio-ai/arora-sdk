@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree-types"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2021"
 description = "Type records the Arora behavior tree declares (Status, TickId, folder)."
 license = "MIT"
@@ -8,7 +8,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "1.6" }
+arora-types = { path = "../arora-types", version = "2" }
 lazy_static = "1"
 semver = "1"
 uuid = "1"

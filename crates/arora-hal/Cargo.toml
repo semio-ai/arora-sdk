@@ -1,13 +1,13 @@
 [package]
 name = "arora-hal"
-version = "2.0.1"
+version = "3.0.0"
 edition = "2021"
 description = "Arora Hardware Abstraction Layer (HAL) trait, with a fake implementation."
 license = "MIT"
 readme = "readme.md"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "1.5" }
+arora-types = { path = "../arora-types", version = "2" }
 async-trait = "0.1"
 # async `write`) on native targets; wasm HALs override `try_send` synchronously.
 futures-channel = "0.3"

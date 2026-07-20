@@ -1,13 +1,13 @@
 [package]
 name = "arora-registry-remote"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2021"
 description = "Semio-store-backed remote registries for Arora (private; keeps the semio-client seam out of the publishable crates)."
 publish = false
 
 [dependencies]
 arora-registry = { path = "../arora-registry" }
-arora-types = { path = "../arora-types", version = "1.6" }
+arora-types = { path = "../arora-types", version = "2" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
 anyhow = "*"
