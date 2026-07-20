@@ -4,6 +4,29 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-07-20
+
+### Breaking
+
+- `BrowserRuntime` and `BrowserRuntimeBuilder` are gone: `arora::Arora` is the
+  inner object. `AroraWeb` (JavaScript name: `AroraRuntime`) wraps it —
+  constructed by its JS constructor (the demo device), by `AroraRuntimeBuilder`
+  (adding guest modules), or in Rust via `From<Arora>` for composed devices.
+- `AroraRuntime.start()` is `new AroraRuntime()`: it builds, it does not start.
+
+### Added
+
+- `run(periodMs?)` — hands the device to `Arora::run` for good (`step()` is
+  unavailable from then on); the rest of the surface keeps working because it
+  never touches the stepping device.
+- `call(callJson)` — a promise dispatched through the device's in-process
+  `Caller`, resolved after the step that applies it.
+- `setValue`/`writeValues`/`readValues`/`snapshot` work on a sibling handle of
+  the store (`DataStore::clone_box`), `drainChanges` on its subscription —
+  usable while the device runs.
+- The `store_json` module: the Value↔JSON store accessors over any
+  `DataStore`/`Subscription`, for downstream wrappers.
+
 ## [5.2.2] - 2026-07-10
 
 ### Changed
