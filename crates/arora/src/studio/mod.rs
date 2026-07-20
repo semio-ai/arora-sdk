@@ -5,21 +5,20 @@
 //! This is what makes `arora` Studio-capable (not just its binary):
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
 //! load/save an encrypted refresh token from a local file, build the real
-//! [`ZenohDeviceClient`] (the studio-bridge Zenoh connector), and drive it via
+//! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and drive it via
 //! [`crate::run_with_frontend`] over the caller's [`DataStore`]
 //! (`arora_types::data::DataStore` — the entrypoints default it to a fresh
 //! `SimpleDataStore` for devices that do not care).
 //!
-//! The binary ([`crate::main`]) is a thin
-//! wrapper that just calls [`crate::run`].
+//! The binary (`src/main.rs`) is a thin wrapper that just calls [`crate::run`].
 //!
 //! The public Firebase config and the production bridge endpoint are baked into
 //! `arora-studio-bridge-client`, so this is zero-config for production. These env
 //! vars override at runtime:
 //!   - `FIREBASE_*` — Firebase project options (see
-//!     [`FirebaseOptions::from_env`]).
+//!     `FirebaseOptions::from_env`).
 //!   - `FIREBASE_*_EMULATOR_HOST` — Firebase emulator overrides (see
-//!     [`FirebaseEmulatorOptions::from_env`]).
+//!     `FirebaseEmulatorOptions::from_env`).
 //!   - `STUDIO_BRIDGE_ENDPOINT` — override the baked bridge endpoint (e.g.
 //!     `tcp/localhost:7447`) to target a local/preprod bridge without a rebuild.
 //!   - `IDENTITY_FILE` — path to the refresh-token file; defaults to
@@ -149,7 +148,7 @@ pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Option<Box
 /// the environment, register the device from any configured device info, and
 /// return it.
 ///
-/// This is the injectable counterpart to [`run_with_hal`]: where `run_with_hal`
+/// This is the injectable counterpart to [`crate::run_with_hal`]: where `run_with_hal`
 /// builds the bridge *and* owns the run loop, `connect` returns just the
 /// finished, registered bridge so an embedder can attach it to a device with
 /// [`AroraBuilder::with_bridge`](crate::AroraBuilder::with_bridge) — the

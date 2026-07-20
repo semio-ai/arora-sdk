@@ -1,14 +1,15 @@
 //! The terminal operator UI: a device header, a scrollable log pane, a strip of
 //! live indicators, and the prompt line the operator answers questions on.
 //!
-//! [`State`] holds everything shown and all the input logic (drawing-free, so it
-//! is unit-tested on its own); [`view`] renders a frame from an immutable
+//! `State` holds everything shown and all the input logic (drawing-free, so it
+//! is unit-tested on its own); `view` renders a frame from an immutable
 //! `&State`. This module is the moving part around them: it owns the `State`
 //! behind a shared mutex, runs the terminal in a background thread (input,
 //! periodic ticks, an own-process CPU sample, and drawing), and captures the
-//! `log` crate into the pane. [`Tui`] is also an [`Operator`]: it asks the
-//! operator by pushing a [`Prompt`](state::Prompt) and awaiting its reply, so a
-//! question raised anywhere in the runtime appears in the prompt line.
+//! `log` crate into the pane. [`Tui`](crate::tui::Tui) is also an
+//! [`Operator`](crate::operator::Operator): it asks the
+//! operator by pushing a `Prompt` and awaiting its reply, so a question raised
+//! anywhere in the runtime appears in the prompt line.
 
 mod state;
 mod view;
@@ -43,10 +44,9 @@ use state::{DeviceIdentity, State};
 /// and the operator prompts all touch this one instance.
 type SharedState = Arc<Mutex<State>>;
 
-/// A live terminal operator UI. Constructed through [`tui_frontend`], it owns the
-/// render thread and restores the terminal when dropped; as an [`Operator`] it
-/// renders questions in the prompt line and resolves them from the reply typed
-/// there.
+/// A live terminal operator UI. It owns the render thread and restores the
+/// terminal when dropped; as an [`Operator`] it renders questions in the
+/// prompt line and resolves them from the reply typed there.
 pub struct Tui {
     state: SharedState,
     running: Arc<AtomicBool>,
