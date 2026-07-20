@@ -57,7 +57,7 @@ fn install_panic_hook() {
 // The browser device
 // =============================================================================
 
-use arora::{Arora, AroraBuilder, Caller};
+use arora::{Arora, AroraBuilder, Caller, LocalCaller};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use std::time::Duration;
 
@@ -181,13 +181,13 @@ pub struct AroraWeb {
     // The device parks here between manual steps; `run` takes it out for its
     // whole life.
     device: RefCell<Option<Arora>>,
-    caller: Caller,
+    caller: LocalCaller,
     store: Box<dyn DataStore>,
     changes: Subscription,
 }
 
 impl From<Arora> for AroraWeb {
-    /// Wrap a composed device: keep its in-process [`Caller`], a sibling
+    /// Wrap a composed device: keep its in-process [`LocalCaller`], a sibling
     /// handle of its store, and a subscription (opening on the whole current
     /// state), then expose it all to JavaScript.
     fn from(arora: Arora) -> Self {

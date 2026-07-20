@@ -42,7 +42,7 @@ use async_trait::async_trait;
 use futures_channel::oneshot;
 use futures_core::Stream;
 
-use arora_types::call::{Call, CallResult};
+use arora_types::call::{Call, CallError, CallResult};
 use arora_types::data::{Key, StateChange};
 
 /// Neutral device metadata the bridge syncs with the remote. The bridge-flavored
@@ -221,6 +221,20 @@ pub enum Inbound {
 /// the endpoint's one poller. The stream ending means the endpoint
 /// disconnected.
 pub type InboundStream = Pin<Box<dyn Stream<Item = Inbound> + Send>>;
+
+/// A [`Caller`]'s pending reply.
+pub type CallFuture<'a> =
+    Pin<Box<dyn std::future::Future<Output = Result<CallResult, CallError>> + Send + 'a>>;
+
+/// The client side of calling a device — the counterpart of a [`Bridge`]
+/// endpoint: carry a fully-specified [`Call`] to a device and resolve on its
+/// reply. A device applies external calls at a step boundary, so calling is
+/// asynchronous by nature wherever the device lives — in the same process or
+/// across a transport.
+pub trait Caller {
+    /// Dispatch `call`, resolving on the device's reply.
+    fn call(&self, call: Call) -> CallFuture<'_>;
+}
 
 /// One device's connection to a remote (e.g. Semio Studio) — an **endpoint**,
 /// owned by exactly one runtime.
