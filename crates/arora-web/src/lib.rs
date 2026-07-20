@@ -436,19 +436,20 @@ impl Engine {
     /// `arora_engine::call::Call`. Returns the result as a JSON string.
     #[wasm_bindgen]
     pub fn call(&mut self, call_json: &str) -> Result<String, JsValue> {
-        let call: Call = serde_json::from_str(call_json)
+        let mut call: Call = serde_json::from_str(call_json)
             .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")))?;
-        let module_id = if let Some(m) = call.module_id {
-            m
-        } else {
-            *self
-                .function_module
-                .get(&call.id)
-                .ok_or_else(|| JsValue::from_str("no module known for function"))?
-        };
+        if call.module_id.is_none() {
+            // Resolve locally: the module the function was loaded with.
+            call.module_id = Some(
+                *self
+                    .function_module
+                    .get(&call.id)
+                    .ok_or_else(|| JsValue::from_str("no module known for function"))?,
+            );
+        }
         let result = self
             .inner
-            .arora_call(&module_id, call)
+            .arora_call(call)
             .map_err(|e| JsValue::from_str(&format!("call failed: {e}")))?;
         serde_json::to_string(&result)
             .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
@@ -629,14 +630,11 @@ impl Callable for NodeCallable {
             })
             .collect();
 
-        let result = caller.arora_call(
-            &self.module_id,
-            Call {
-                module_id: None,
-                id: self.fn_id,
-                args,
-            },
-        )?;
+        let result = caller.arora_call(Call {
+            module_id: Some(self.module_id),
+            id: self.fn_id,
+            args,
+        })?;
 
         // Write back mutated parameter values to bound variables.
         for mutated in &result.mutated {

@@ -295,7 +295,7 @@ fn tick(
     let function = &module_function.function;
 
     let mut call = Call {
-        module_id: None,
+        module_id: Some(module_function.module_id),
         id: node.function,
         args: Vec::with_capacity(
             node.arguments.len() + if node.children.is_some() { 1 } else { 0 },
@@ -406,7 +406,7 @@ fn tick(
     }
 
     let result = caller
-        .arora_call(&module_function.module_id, call)
+        .arora_call(call)
         .map_err(BehaviorTreeError::CallError)?;
 
     for mutated in result.mutated {
@@ -769,14 +769,11 @@ fn call_expression(
         });
     }
     let result = caller
-        .arora_call(
-            &module_id,
-            Call {
-                module_id: None,
-                id: function_id,
-                args,
-            },
-        )
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: function_id,
+            args,
+        })
         .map_err(BehaviorTreeError::CallError)?;
     Ok(result.ret)
 }
