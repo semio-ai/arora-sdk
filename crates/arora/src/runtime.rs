@@ -143,21 +143,22 @@ pub struct ClockValues {
     pub dt_ns: u64,
 }
 
-/// One bridge endpoint's inbound stream, tagged with the endpoint it belongs
-/// to so the device can answer each remote on its own terms.
-pub type EndpointInbound = futures::stream::BoxStream<'static, (usize, Inbound)>;
+/// One inbound event stream, tagged with the bridge endpoint it belongs to so
+/// the device can answer each remote on its own terms — `None` for events from
+/// an in-process [`Caller`](crate::Caller), which is no remote.
+pub type EndpointInbound = futures::stream::BoxStream<'static, (Option<usize>, Inbound)>;
 
 /// Everything the seams delivered since the previous step, in arrival order per
 /// seam. The driver only buffers here ([`run`](Arora::run)'s select between
-/// ticks, plus phase 0's [`sweep_now`]); the next `step` applies and drains it.
-/// Nothing touches the store outside `step`.
+/// ticks, plus the step's own opening sweep); the next `step` applies and
+/// drains it. Nothing touches the store outside `step`.
 #[derive(Default)]
 pub struct Pending {
     /// Sensor readings from the HAL feed.
     pub sensors: Vec<StateChange>,
-    /// Inbound bridge events, each with the endpoint it arrived on: commands,
-    /// device-info updates, data-request toggles.
-    pub events: Vec<(usize, Inbound)>,
+    /// Inbound events — commands, device-info updates, data-request toggles —
+    /// each with the bridge endpoint it arrived on (`None`: in-process).
+    pub events: Vec<(Option<usize>, Inbound)>,
 }
 
 // =============================================================================
@@ -171,7 +172,7 @@ pub struct Pending {
 /// yielded, so both drivers see identical semantics.
 fn sweep_now(
     hal_feed: &mut (impl Stream<Item = StateChange> + Unpin),
-    inbound: &mut (impl Stream<Item = (usize, Inbound)> + Unpin),
+    inbound: &mut (impl Stream<Item = (Option<usize>, Inbound)> + Unpin),
     pending: &mut Pending,
 ) {
     while let Some(Some(reading)) = hal_feed.next().now_or_never() {
@@ -249,7 +250,7 @@ fn apply_events(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
     call_bridge: &mut dyn CallBridge,
-    events: Vec<(usize, Inbound)>,
+    events: Vec<(Option<usize>, Inbound)>,
     data_requested: &mut [bool],
 ) -> Result<(), RuntimeError> {
     for (endpoint, event) in events {
@@ -265,7 +266,8 @@ fn apply_events(
                 log::warn!("bridge endpoint error: {e}");
             }
             Inbound::DataRequested(requested) => {
-                if let Some(asked) = data_requested.get_mut(endpoint) {
+                if let Some(asked) = endpoint.and_then(|endpoint| data_requested.get_mut(endpoint))
+                {
                     *asked = requested;
                 }
             }

@@ -39,14 +39,14 @@ pub use runtime::RuntimeError;
 /// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before
 /// injecting it with [`AroraBuilder::with_behavior_interpreter`].
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
-/// Re-exported so binding crates (e.g. `arora-web`) can name the host-function
-/// type that [`AroraBuilder::with_host_module`] accepts.
+/// Re-exported so an embedder can name the host-function type that
+/// [`AroraBuilder::with_host_module`] accepts.
 pub use arora_behavior_tree::ModuleFunction;
 
 use crate::runtime::EndpointInbound;
 use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
-use arora_bridge::{Bridge, BridgeError, Inbound};
+use arora_bridge::{Bridge, BridgeCommand, BridgeError, BridgeOp, Inbound};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
@@ -57,6 +57,7 @@ use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Subscription};
 use arora_types::module::low::Header;
+use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
@@ -131,6 +132,10 @@ pub struct Arora {
     // to `bridges`. Outbound changes go to an endpoint only while it asks; a
     // device nobody listens to keeps stepping, it just does not talk.
     pub(crate) data_requested: Vec<bool>,
+    // The sending end every in-process `Caller` clones; its receiving end is
+    // merged into `inbound`, so a caller's Call travels the same path as a
+    // remote's.
+    pub(crate) caller_tx: mpsc::UnboundedSender<Inbound>,
     pub(crate) store_changes: Subscription,
     // The golden clock: monotonic nanoseconds since start, advanced by each
     // step's `dt`. Published into the store's golden keys each step, before any
@@ -179,6 +184,51 @@ impl Arora {
     /// [`CallableId`]: arora_types::call::CallableId
     pub fn engine(&mut self) -> &mut dyn CallBridge {
         &mut self.engine
+    }
+
+    /// An in-process [`Caller`] onto this device. Take it before handing the
+    /// device to [`run`](Arora::run) — `run` owns the device for its whole
+    /// life, while the caller stays usable throughout.
+    pub fn caller(&self) -> Caller {
+        Caller {
+            tx: self.caller_tx.clone(),
+        }
+    }
+}
+
+/// Dispatch [`Call`]s into the device from the same process, including while
+/// [`run`](Arora::run) owns it. Obtained from [`Arora::caller`]; clones
+/// freely, every clone reaching the same device.
+///
+/// A call is enqueued immediately and applied at the next step's event phase —
+/// the same path and ordering as a remote's Call — and the future resolves on
+/// that step's reply. [`Arora::call`] is the synchronous counterpart for an
+/// embedder holding the device between steps.
+#[derive(Clone)]
+pub struct Caller {
+    tx: mpsc::UnboundedSender<Inbound>,
+}
+
+impl Caller {
+    /// Dispatch `call`, resolving after the step that applies it. Errors are
+    /// the dispatch's own ([`Arora::call`]'s), plus the device being gone.
+    pub async fn call(&self, call: Call) -> Result<CallResult, CallError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .unbounded_send(Inbound::Command(BridgeCommand::new(
+                BridgeOp::Call(call),
+                tx,
+            )))
+            .map_err(|_| CallError::Generic {
+                message: "the device is gone".to_string(),
+            })?;
+        match rx.await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(message)) => Err(CallError::Generic { message }),
+            Err(_) => Err(CallError::Generic {
+                message: "the device dropped the call".to_string(),
+            }),
+        }
     }
 }
 
@@ -358,10 +408,15 @@ impl AroraBuilder {
                 bridge
                     .take_inbound()
                     .chain(disconnected)
-                    .map(move |event| (endpoint, event))
+                    .map(move |event| (Some(endpoint), event))
                     .boxed(),
             );
         }
+
+        // The in-process callers' feed: one more inbound stream, delivered and
+        // applied exactly like a remote's, tagged as no endpoint.
+        let (caller_tx, caller_rx) = mpsc::unbounded();
+        inbound.push(caller_rx.map(|event| (None, event)).boxed());
 
         let endpoints = bridges.len();
         let function_index = Rc::new(self.functions);
@@ -410,6 +465,7 @@ impl AroraBuilder {
             inbound,
             pending: Pending::default(),
             data_requested: vec![false; endpoints],
+            caller_tx,
             store_changes,
             clock: Clock::default(),
         })
@@ -509,6 +565,51 @@ mod module_loading_tests {
             ))
             .expect("the load call succeeds");
         assert_eq!(result.ret, arora_types::value::Value::Unit);
+    }
+
+    /// A [`Caller`] reaches the device without borrowing it: the call is
+    /// enqueued at once and applied by the next step.
+    #[tokio::test]
+    async fn a_caller_call_lands_on_the_next_step() {
+        let mut arora = Arora::builder().build().expect("build the default device");
+        let caller = arora.caller();
+        let mut call = Box::pin(caller.call(interpreter_module::encode_load(
+            &arora_behavior::Graph::empty(),
+        )));
+        // Enqueued but not applied: nothing has stepped yet.
+        assert!(futures::poll!(call.as_mut()).is_pending());
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("step");
+        let result = call.await.expect("the load call succeeds");
+        assert_eq!(result.ret, arora_types::value::Value::Unit);
+    }
+
+    /// The caller serves a running device: [`run`](Arora::run) owns the device
+    /// exclusively for its whole life, and the caller still gets its reply.
+    #[tokio::test]
+    async fn a_caller_reaches_a_running_device() {
+        use futures::FutureExt;
+
+        let mut arora = Arora::builder().build().expect("build the default device");
+        let caller = arora.caller();
+        let run = arora.run(std::time::Duration::from_millis(5));
+        let call = caller.call(interpreter_module::encode_load(
+            &arora_behavior::Graph::empty(),
+        ));
+        futures::pin_mut!(run, call);
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            futures::select! {
+                result = call.fuse() => result,
+                _ = run.fuse() => panic!("run ended before the call resolved"),
+            }
+        })
+        .await
+        .expect("the running device answers promptly");
+        assert_eq!(
+            outcome.expect("the load call succeeds").ret,
+            arora_types::value::Value::Unit
+        );
     }
 
     /// [`Arora::engine`] exposes the rest of the `CallBridge`: registering an
