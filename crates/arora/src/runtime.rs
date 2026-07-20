@@ -143,6 +143,10 @@ pub struct ClockValues {
     pub dt_ns: u64,
 }
 
+/// One bridge endpoint's inbound stream, tagged with the endpoint it belongs
+/// to so the device can answer each remote on its own terms.
+pub type EndpointInbound = futures::stream::BoxStream<'static, (usize, Inbound)>;
+
 /// Everything the seams delivered since the previous step, in arrival order per
 /// seam. The driver only buffers here ([`run`](Arora::run)'s select between
 /// ticks, plus phase 0's [`sweep_now`]); the next `step` applies and drains it.
@@ -151,8 +155,9 @@ pub struct ClockValues {
 pub struct Pending {
     /// Sensor readings from the HAL feed.
     pub sensors: Vec<StateChange>,
-    /// Inbound bridge events: commands, device-info updates, claim toggles.
-    pub events: Vec<Inbound>,
+    /// Inbound bridge events, each with the endpoint it arrived on: commands,
+    /// device-info updates, data-request toggles.
+    pub events: Vec<(usize, Inbound)>,
 }
 
 // =============================================================================
@@ -166,7 +171,7 @@ pub struct Pending {
 /// yielded, so both drivers see identical semantics.
 fn sweep_now(
     hal_feed: &mut (impl Stream<Item = StateChange> + Unpin),
-    inbound: &mut (impl Stream<Item = Inbound> + Unpin),
+    inbound: &mut (impl Stream<Item = (usize, Inbound)> + Unpin),
     pending: &mut Pending,
 ) {
     while let Some(Some(reading)) = hal_feed.next().now_or_never() {
@@ -244,9 +249,10 @@ fn apply_events(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
     call_bridge: &mut dyn CallBridge,
-    events: Vec<Inbound>,
+    events: Vec<(usize, Inbound)>,
+    data_requested: &mut [bool],
 ) -> Result<(), RuntimeError> {
-    for event in events {
+    for (endpoint, event) in events {
         match event {
             Inbound::Command(cmd) => apply_command(store, function_index, call_bridge, cmd)?,
             // A remote that no longer knows this device says nothing about the
@@ -258,9 +264,11 @@ fn apply_events(
                 // running autonomously (the endpoint may reconnect on its own).
                 log::warn!("bridge endpoint error: {e}");
             }
-            // Whether a remote listens changes nothing about what the device
-            // does: it steps and publishes the same either way.
-            Inbound::DataRequested(_) => {}
+            Inbound::DataRequested(requested) => {
+                if let Some(asked) = data_requested.get_mut(endpoint) {
+                    *asked = requested;
+                }
+            }
         }
     }
     Ok(())
@@ -452,9 +460,11 @@ fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
 
 /// Phase 6b — fan the same change out to every bridge endpoint. Each buffers
 /// onto its own transport; none blocks the step.
-fn write_bridges(bridges: &mut [Box<dyn Bridge>], out: &StateChange) {
-    for bridge in bridges {
-        bridge.try_send(out);
+fn write_bridges(bridges: &mut [Box<dyn Bridge>], asked: &[bool], out: &StateChange) {
+    for (endpoint, bridge) in bridges.iter_mut().enumerate() {
+        if asked.get(endpoint).copied().unwrap_or(false) {
+            bridge.try_send(out);
+        }
     }
 }
 
@@ -498,6 +508,7 @@ impl Arora {
             &self.function_index,
             &mut self.engine,
             std::mem::take(&mut self.pending.events),
+            &mut self.data_requested,
         )?;
         // 4. behavior — the frame's last writer: its intent wins, and it saw
         //    what it overrode. The cell borrow spans exactly this phase; a
@@ -514,7 +525,7 @@ impl Arora {
         //    every remote.
         if !out.is_empty() {
             write_hal(&*self.hal, &out, &sensor_applied);
-            write_bridges(&mut self.bridges, &out);
+            write_bridges(&mut self.bridges, &self.data_requested, &out);
         }
         Ok(())
     }
@@ -1255,12 +1266,21 @@ mod tests {
     /// device actually pushes outbound — lock-free, like a real endpoint.
     struct RecordingBridge {
         sent: mpsc::UnboundedSender<StateChange>,
+        /// Whether this remote asks for the device's data, as a real one does
+        /// when a client attaches.
+        requests_data: bool,
     }
 
     #[async_trait]
     impl Bridge for RecordingBridge {
         fn take_inbound(&mut self) -> InboundStream {
-            Box::pin(stream::pending())
+            if self.requests_data {
+                Box::pin(
+                    stream::once(async { Inbound::DataRequested(true) }).chain(stream::pending()),
+                )
+            } else {
+                Box::pin(stream::pending())
+            }
         }
         fn try_send(&mut self, change: &StateChange) {
             let _ = self.sent.unbounded_send(change.clone());
@@ -1276,6 +1296,66 @@ mod tests {
         }
     }
 
+    /// A remote that never asks for the device's data is not written to: the
+    /// device steps and keeps its state, it just does not talk to a listener
+    /// that is not there.
+    #[test]
+    fn a_remote_that_asks_for_nothing_is_not_written_to() {
+        let (sent_tx, mut sent_rx) = mpsc::unbounded();
+        let mut arora = build_in_with(
+            Box::new(RecordingBridge {
+                sent: sent_tx,
+                requests_data: false,
+            }),
+            Box::new(SimpleDataStore::new()),
+            Box::new(WriteKey {
+                key: "greeting",
+                value: Value::String("hi".into()),
+            }),
+        );
+        for _ in 0..5 {
+            arora.step(FRAME).expect("step");
+        }
+        assert!(
+            sent_rx.try_recv().is_err(),
+            "nothing should reach a remote that asked for nothing"
+        );
+    }
+
+    /// What one remote asks for is not what another asks for: a change reaches
+    /// the endpoint that asked and no other, even on the same device.
+    #[test]
+    fn each_endpoint_is_answered_on_its_own_terms() {
+        let (asking_tx, mut asking_rx) = mpsc::unbounded();
+        let (silent_tx, mut silent_rx) = mpsc::unbounded();
+        let mut arora = Arora::builder()
+            .with_bridge(Box::new(RecordingBridge {
+                sent: asking_tx,
+                requests_data: true,
+            }))
+            .with_bridge(Box::new(RecordingBridge {
+                sent: silent_tx,
+                requests_data: false,
+            }))
+            .with_behavior_interpreter(Box::new(WriteKey {
+                key: "greeting",
+                value: Value::String("hi".into()),
+            }))
+            .build()
+            .expect("builds");
+        for _ in 0..5 {
+            arora.step(FRAME).expect("step");
+        }
+        assert!(
+            asking_rx.try_recv().is_ok(),
+            "the endpoint that asked should be written to"
+        );
+        assert!(
+            silent_rx.try_recv().is_err(),
+            "the endpoint that asked for nothing should not be"
+        );
+    }
+
     /// The clock travels outbound with everything else, so a remote can derive
     /// the device's step rate from it; a consumer that does not want it says so
     /// on its own side.
@@ -1284,7 +1364,10 @@ mod tests {
         let (sent_tx, mut sent_rx) = mpsc::unbounded();
         // A behavior that writes one ordinary key; that write must reach the bridge.
         let mut arora = build_with(
-            Box::new(RecordingBridge { sent: sent_tx }),
+            Box::new(RecordingBridge {
+                sent: sent_tx,
+                requests_data: true,
+            }),
             Box::new(WriteKey {
                 key: "greeting",
                 value: Value::String("hi".into()),
