@@ -134,9 +134,9 @@ pub async fn run_with(
 ///
 /// This is the seam every other entry point funnels through to pick between the
 /// terminal operator UI and the headless front end; a device build with its own
-/// UI supplies its own [`Frontend`] here. The rest of the run family uses
-/// [`select_frontend`], which chooses the terminal UI when the process is
-/// attached to a terminal.
+/// UI supplies its own [`Frontend`] here. The rest of the run family picks one
+/// itself: the terminal UI when the process is attached to a terminal, headless
+/// otherwise.
 #[cfg(feature = "native")]
 pub async fn run_with_frontend(
     hal: Box<dyn Hal>,
