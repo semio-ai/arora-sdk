@@ -111,4 +111,12 @@ pub trait DataStore: Send + Sync {
   /// starts from the full picture and stays current from the changes that
   /// follow, without a separate snapshot read that could race them.
   fn subscribe(&self) -> Subscription;
+
+  /// A sibling handle onto the **same** storage: reads and writes through the
+  /// clone coincide with the original's. Stores share their storage across
+  /// clones by design (interior mutability, `&self` everywhere), and this
+  /// puts that fact on the trait, so a holder of `dyn DataStore` can keep an
+  /// independent live handle — e.g. one kept aside before handing a store to
+  /// a device that takes it by value.
+  fn clone_box(&self) -> Box<dyn DataStore>;
 }
