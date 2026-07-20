@@ -33,7 +33,7 @@ pub mod tui;
 
 #[cfg(feature = "native")]
 pub use run::{run, run_with, run_with_frontend, run_with_hal};
-pub use runtime::{RuntimeError, Telemetry, TelemetrySnapshot};
+pub use runtime::RuntimeError;
 
 /// Re-exported so embedders can construct the default behavior executor — an
 /// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before
@@ -105,7 +105,6 @@ pub struct Arora {
     /// on the engine loads/edits it (see [`runtime::InterpreterCell`] and
     /// [`arora_behavior::interpreter_module`]).
     pub(crate) interpreter: runtime::InterpreterCell,
-    pub(crate) telemetry: Telemetry,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
@@ -365,7 +364,6 @@ impl AroraBuilder {
             engine,
             function_index,
             interpreter,
-            telemetry: Telemetry::default(),
             hal,
             bridges,
             hal_feed,

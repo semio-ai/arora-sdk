@@ -8,7 +8,9 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::channel::oneshot;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use crate::runtime::Telemetry;
+use arora_behavior::golden;
+use arora_types::data::{Key, Subscription};
+use arora_types::value::Value;
 
 /// How many log lines the pane remembers.
 pub(crate) const LOG_CAPACITY: usize = 4000;
@@ -80,7 +82,11 @@ pub(crate) struct State {
     /// Log-pane height from the last draw, for page-sized scrolling.
     pub viewport_height: usize,
     pub identity: DeviceIdentity,
-    pub telemetry: Option<Telemetry>,
+    /// The device's state as it changes, opening on everything the store held
+    /// when the front end attached.
+    pub device_state: Option<Subscription>,
+    /// Step frequency, from the `dt` the device publishes each step.
+    pub loop_hz: Option<f32>,
     /// Own-process CPU usage (percent of one core), sampled by the UI thread.
     pub cpu_percent: Option<f32>,
     /// Front = the prompt currently shown in the prompt line.
@@ -100,7 +106,8 @@ impl State {
             scroll_from_bottom: 0,
             viewport_height: 20,
             identity: DeviceIdentity::default(),
-            telemetry: None,
+            device_state: None,
+            loop_hz: None,
             cpu_percent: None,
             prompts: VecDeque::new(),
             input: String::new(),
@@ -161,6 +168,23 @@ impl State {
         self.prompts.pop_front();
         self.input.clear();
         self.hint = None;
+    }
+
+    /// Take what the device published since the last read and update the
+    /// indicators derived from it: the step frequency, from the frame `dt`.
+    pub fn read_device_state(&mut self) {
+        let Some(feed) = self.device_state.as_ref() else {
+            return;
+        };
+        let mut changes = Vec::new();
+        while let Some(change) = feed.try_recv() {
+            changes.push(change);
+        }
+        for change in changes {
+            if let Some(Some(Value::U64(dt_ns))) = change.set.get(&Key::from(golden::DT)) {
+                self.loop_hz = (*dt_ns > 0).then(|| 1e9 / *dt_ns as f32);
+            }
+        }
     }
 
     /// Advance time-based behavior: a decision prompt whose deadline passed

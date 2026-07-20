@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use log::{info, warn};
 
-use crate::runtime::Telemetry;
+use arora_types::data::Subscription;
 
 /// How long an unanswered access request waits before it is granted, when no
 /// configured value applies. (The access-control spec's time-based approval;
@@ -143,7 +143,7 @@ impl Operator for UnattendedOperator {
 /// into its pane; the headless one prints them), which is why building a
 /// `Frontend` is what installs the logger. [`on_ready`](Frontend::on_ready) is
 /// called by the launcher after the runtime and bridge exist, to hand the front
-/// end the live [`Telemetry`] handle and the device identity — a no-op for a
+/// end its view of the device's state and the device identity — a no-op for a
 /// front end that shows neither.
 pub struct Frontend {
     /// Who answers the device's questions.
@@ -155,14 +155,16 @@ pub struct Frontend {
     /// otherwise — so a headless device never blocks waiting on input nobody
     /// will type.
     pub interactive: bool,
-    /// Called once, after the runtime and bridge are up, with the telemetry
-    /// handle, the registered device info, and the backend device id.
+    /// Called once, after the runtime and bridge are up, with a subscription to
+    /// the device's state, the registered device info, and the backend device
+    /// id.
     pub on_ready: ReadyHook,
 }
 
-/// The [`Frontend::on_ready`] hook: hands a front end the live telemetry handle,
-/// the registered device info, and the backend device id, once they exist.
-pub type ReadyHook = Box<dyn FnOnce(Telemetry, Option<DeviceInfo>, Option<String>) + Send>;
+/// The [`Frontend::on_ready`] hook: hands a front end a subscription to the
+/// device's state — opening on everything the store holds, then every change
+/// as it happens — plus the registered device info and the backend device id.
+pub type ReadyHook = Box<dyn FnOnce(Subscription, Option<DeviceInfo>, Option<String>) + Send>;
 
 /// The headless front end: plain `env_logger` output and the
 /// [`UnattendedOperator`]. Its ready hook does nothing — there is no UI to feed.
@@ -173,7 +175,7 @@ pub fn default_frontend() -> Frontend {
     Frontend {
         operator: Arc::new(UnattendedOperator::default()),
         interactive: false,
-        on_ready: Box::new(|_telemetry, _info, _device_id| {}),
+        on_ready: Box::new(|_state, _info, _device_id| {}),
     }
 }
 

@@ -36,7 +36,7 @@ use arora_bridge::{AccessDecision, DeviceInfo};
 use crate::operator::{
     AccessRequestSummary, AccessRuling, Frontend, Operator, DEFAULT_ACCESS_GRACE,
 };
-use crate::runtime::Telemetry;
+use arora_types::data::Subscription;
 use state::{DeviceIdentity, State};
 
 /// The shared UI state: the render thread, the input handling, the log capture,
@@ -143,9 +143,9 @@ pub(crate) fn tui_frontend() -> anyhow::Result<Frontend> {
     let state = tui.state.clone();
     let operator: Arc<dyn Operator> = tui.clone();
     let on_ready = Box::new(
-        move |telemetry: Telemetry, info: Option<DeviceInfo>, device_id: Option<String>| {
+        move |device_state: Subscription, info: Option<DeviceInfo>, device_id: Option<String>| {
             if let Ok(mut state) = state.lock() {
-                state.telemetry = Some(telemetry);
+                state.device_state = Some(device_state);
                 state.identity = identity_from(info, device_id);
             }
         },
@@ -212,6 +212,7 @@ fn run_ui(
 
         let now = Instant::now();
         if let Ok(mut state) = state.lock() {
+            state.read_device_state();
             state.tick(now);
             if state.quit_requested {
                 quit = true;
