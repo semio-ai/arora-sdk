@@ -29,19 +29,24 @@ use web_time::Instant;
 use crate::Arora;
 
 /// Self-pacing: drive [`step`](Arora::step) to completion at a fixed cadence,
-/// draining the I/O seams between ticks. One API on every target; only the
-/// metronome's sleep differs inside.
+/// draining the I/O seams between ticks.
 ///
-/// On the web this belongs in a **dedicated Web Worker**, never on the main
-/// thread (there, drive `step` from `requestAnimationFrame` instead — `run`
-/// would monopolise the event loop). Worker timers are exempt from the
-/// browsers' visibility-based throttling of *page* timers, so a worker-hosted
-/// `run` keeps stepping at full rate while the page is hidden but its process
-/// lives (a backgrounded tab, an occluded-yet-running window). It does **not**
-/// survive process-level suspension — macOS App Nap occluding a WKWebView, iOS
-/// backgrounding, Android's cached-app freezer all stop the whole renderer,
-/// workers included; riding those out takes native-side measures outside this
-/// crate.
+/// On the web it awaits between steps like any other future, so it shares its
+/// thread rather than holding it; what changes with the thread is where the
+/// cadence survives. On the main thread the steps compete with rendering and
+/// input, and the browser throttles the timers the cadence sleeps on once the
+/// page is hidden — seconds, then a minute apart — so a backgrounded device
+/// slows to a crawl, which is the right behavior for an app that should idle
+/// with its page. A **dedicated Web Worker** is exempt from that throttling and
+/// keeps stepping at full rate while the page is hidden but its process lives.
+/// Neither survives process-level suspension: macOS App Nap occluding a
+/// WKWebView, iOS backgrounding, and Android's cached-app freezer stop the
+/// whole renderer, workers included, and riding those out takes native-side
+/// measures outside this crate.
+///
+/// When stepping is render-coupled, drive [`step`](Arora::step) from
+/// `requestAnimationFrame` instead — one step per painted frame, no cadence of
+/// its own.
 impl Arora {
     /// The default inter-step period for [`run`](Arora::run): ~100 Hz.
     pub const DEFAULT_STEP_PERIOD: Duration = Duration::from_millis(10);
