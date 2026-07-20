@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "2.0.1"
+version = "3.0.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -20,8 +20,8 @@ native-host = ["dep:libloading", "dep:tempfile"]
 
 [dependencies]
 anyhow = "1"
-arora-buffers = { path = "../arora-buffers", version = "1" }
-arora-types = { path = "../arora-types", version = "1.4" }
+arora-buffers = { path = "../arora-buffers", version = "2" }
+arora-types = { path = "../arora-types", version = "2" }
 async-trait = "0.1"
 bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
@@ -60,7 +60,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # uuid above supply the header/value types; these add the test harness, the
 # panic hook, and the guest module the test loads through the browser executor.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-arora-types = { path = "../arora-types", version = "1.4" }
+arora-types = { path = "../arora-types", version = "2" }
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1"
 # test-rust-wasm guest (wasm32-wasip1) that the browser test include_bytes!s;

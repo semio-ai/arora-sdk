@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 arora-engine = { path = "../arora-engine" }
 arora-buffers = { path = "../arora-buffers" }
-arora-types = { path = "../arora-types", version = "1.6" }
+arora-types = { path = "../arora-types", version = "2" }
 arora-module-core = { path = "../arora-module-authoring/core" }
 arora-registry = { path = "../arora-registry" }
 arora-registry-remote = { path = "../arora-registry-remote" }

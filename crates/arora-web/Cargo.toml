@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "5.3.0"
+version = "6.0.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -16,12 +16,12 @@ crate-type = ["cdylib", "rlib"]
 # package` (publish verification) without pulling the browser host into a host
 # link.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-arora-engine = { path = "../arora-engine", version = "2", default-features = false }
-arora-types = { path = "../arora-types", version = "1.6" }
+arora-engine = { path = "../arora-engine", version = "3", default-features = false }
+arora-types = { path = "../arora-types", version = "2" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates
 # (arora-hal, arora-bridge, …) itself for whatever it composes.
-arora = { path = "../arora", version = "8", default-features = false }
+arora = { path = "../arora", version = "9", default-features = false }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

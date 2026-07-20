@@ -4,6 +4,13 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-07-20
+
+### Breaking
+
+- Dispatch follows the one-argument `arora_call`: node calls carry their
+  module in `Call::module_id`. Re-pinned to `arora-types` 2 / `arora-engine` 3.
+
 ## [5.0.1] - 2026-07-10
 
 ### Changed

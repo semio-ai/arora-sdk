@@ -4,6 +4,35 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-07-20
+
+### Breaking
+
+- The step-phase functions are private: the step pipeline is internal, `step`
+  and `run` are the surface.
+- `StepOutcome` is gone — `step` returns `Result<(), RuntimeError>`, and a
+  remote reporting the device unregistered no longer stops it: the device keeps
+  serving whoever else it is attached to.
+- `Telemetry`/`TelemetrySnapshot`/`Arora::telemetry` are gone — indicators are
+  state. `ReadyHook` hands a store `Subscription` (opening on the whole current
+  state); the TUI derives the loop rate from `arora/dt`.
+- The clock (`arora/time`, `arora/dt`) travels outbound like any other state;
+  a consumer that does not want it filters it on its side.
+- Outbound bridge writes are gated per endpoint on `Inbound::DataRequested`:
+  a change reaches only the remotes that asked. The HAL is written either way.
+
+### Added
+
+- `Arora::call` dispatches a `Call` in-process, synchronously, between steps —
+  the same module-scoped path a bridge command takes, including the
+  interpreter module's LOAD/EDIT.
+- `LocalCaller` (from `Arora::caller()`), the in-process `arora_bridge::Caller`:
+  dispatch `Call`s into the device while `run` owns it — enqueued immediately,
+  applied at the next step's event phase like a remote's, resolved on that
+  step's reply.
+- `Arora::engine()` exposes the engine's `CallBridge` seam (registering
+  in-process callables).
+
 ## [8.1.0] - 2026-07-15
 
 ### Added

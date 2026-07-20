@@ -27,7 +27,7 @@ test-cpp-2 = { path = "../modules/test-cpp-2" }
 # in-process rather than through arora-cli.
 arora-engine = { path = "../crates/arora-engine" }
 arora-buffers = { path = "../crates/arora-buffers" }
-arora-types = { path = "../crates/arora-types", version = "1.4" }
+arora-types = { path = "../crates/arora-types", version = "2" }
 serde_yaml = "0.9"
 uuid = "1"
 

@@ -1,9 +1,9 @@
 [package]
 name = "arora-simple-data-store"
-version = "1.0.1"
+version = "2.0.0"
 edition = "2021"
 description = "A simple hashmap-backed implementation of the arora-types DataStore."
 license = "MIT"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "1.5" }
+arora-types = { path = "../arora-types", version = "2" }
