@@ -15,7 +15,6 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::state::{LogLine, Prompt, State};
-use crate::runtime::TelemetrySnapshot;
 
 /// Draw the whole UI for one frame.
 pub(crate) fn draw(frame: &mut Frame, state: &State, now: Instant) {
@@ -108,45 +107,18 @@ fn log_line(line: &LogLine) -> Line<'_> {
     Line::from(spans)
 }
 
-/// The live indicators: own-process CPU, step-loop frequency, claim state, and
-/// the behavior being ticked.
+/// The live indicators: own-process CPU and step-loop frequency.
 fn telemetry(state: &State) -> Paragraph<'_> {
-    let snapshot = state
-        .telemetry
-        .as_ref()
-        .map(|t| t.snapshot())
-        .unwrap_or_default();
-    let TelemetrySnapshot {
-        loop_hz,
-        claimed,
-        behavior,
-    } = snapshot;
-
     let dim = Style::default().fg(Color::DarkGray);
     let cpu = match state.cpu_percent {
         Some(pct) => format!("CPU {pct:.0}%"),
         None => "CPU --".to_string(),
     };
-    let hz = match loop_hz {
+    let hz = match state.loop_hz {
         Some(hz) => format!("loop {hz:.0} Hz"),
         None => "loop -- Hz".to_string(),
     };
-    let mut spans = vec![
-        Span::raw(cpu),
-        Span::styled("  ·  ", dim),
-        Span::raw(hz),
-        Span::styled("  ·  ", dim),
-    ];
-    if claimed {
-        spans.push(Span::styled("claimed", Style::default().fg(Color::Green)));
-    } else {
-        spans.push(Span::styled("idle", dim));
-    }
-    spans.push(Span::styled("  ·  ", dim));
-    match behavior {
-        Some(name) => spans.push(Span::styled(name, Style::default().fg(Color::Yellow))),
-        None => spans.push(Span::styled("no behavior", dim)),
-    }
+    let spans = vec![Span::raw(cpu), Span::styled("  ·  ", dim), Span::raw(hz)];
     Paragraph::new(Line::from(spans))
 }
 

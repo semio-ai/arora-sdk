@@ -207,9 +207,9 @@ pub(crate) async fn run_builder_with_frontend(
     }
     let mut arora = builder.build().context("failed to build Arora")?;
 
-    // Hand the front end its live view now that the device exists: the
-    // telemetry handle it reads indicators from, and the device identity.
-    on_ready(arora.telemetry(), info, device_id);
+    // Hand the front end its live view now that the device exists: a
+    // subscription opening on the device's whole state, and its identity.
+    on_ready(arora.store().subscribe(), info, device_id);
 
     info!("engine started; native behavior-tree control nodes ready");
 

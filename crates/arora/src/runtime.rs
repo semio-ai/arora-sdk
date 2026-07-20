@@ -12,7 +12,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
@@ -74,10 +73,6 @@ impl Arora {
     /// **actual** measured time since the previous step, not `period`.
     pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
         let mut metronome = Metronome::new(period);
-        // Measure the achieved step frequency over ~1 s windows and publish it
-        // through the telemetry handle.
-        let mut window_start = Instant::now();
-        let mut steps_in_window: u32 = 0;
         // Wall-clock delta between steps, fed to `step` as the frame `dt`.
         let mut last_step = Instant::now();
         loop {
@@ -108,14 +103,6 @@ impl Arora {
             let dt = now.duration_since(last_step);
             last_step = now;
             self.step(dt)?;
-            steps_in_window += 1;
-            let elapsed = window_start.elapsed();
-            if elapsed >= Duration::from_secs(1) {
-                let hz = steps_in_window as f32 / elapsed.as_secs_f32();
-                self.telemetry.update(|t| t.loop_hz = Some(hz));
-                window_start = Instant::now();
-                steps_in_window = 0;
-            }
         }
     }
 }
@@ -139,40 +126,6 @@ impl std::fmt::Display for RuntimeError {
 }
 
 impl std::error::Error for RuntimeError {}
-
-/// A point-in-time copy of the device's live indicators.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TelemetrySnapshot {
-    /// Measured step-loop frequency in Hz. `None` until the embedder's loop
-    /// measures it (the native [`run`](Arora::run) does; a custom `step` driver
-    /// may not).
-    pub loop_hz: Option<f32>,
-    /// Whether a remote client currently claims the device (asks for data).
-    pub claimed: bool,
-    /// Name of the behavior currently installed, when one is set and was given a
-    /// name.
-    pub behavior: Option<String>,
-}
-
-/// Shared, read-only view over the device's live indicators — loop frequency,
-/// claim state, current behavior. Cloneable and thread-safe: the step loop
-/// writes, observers (a TUI, a GUI, a metrics exporter) read
-/// [`snapshot`](Telemetry::snapshot) at their own pace.
-#[derive(Clone, Default)]
-pub struct Telemetry {
-    inner: Arc<std::sync::RwLock<TelemetrySnapshot>>,
-}
-
-impl Telemetry {
-    /// Copy the current indicator values.
-    pub fn snapshot(&self) -> TelemetrySnapshot {
-        self.inner.read().expect("telemetry lock poisoned").clone()
-    }
-
-    fn update(&self, apply: impl FnOnce(&mut TelemetrySnapshot)) {
-        apply(&mut self.inner.write().expect("telemetry lock poisoned"));
-    }
-}
 
 /// The golden clock: monotonic nanoseconds since the device started, advanced by
 /// each step's `dt`. Zero at build.
@@ -292,7 +245,6 @@ fn apply_events(
     function_index: &HashMap<Uuid, ModuleFunction>,
     call_bridge: &mut dyn CallBridge,
     events: Vec<Inbound>,
-    telemetry: &Telemetry,
 ) -> Result<(), RuntimeError> {
     for event in events {
         match event {
@@ -306,9 +258,9 @@ fn apply_events(
                 // running autonomously (the endpoint may reconnect on its own).
                 log::warn!("bridge endpoint error: {e}");
             }
-            Inbound::DataRequested(requested) => {
-                telemetry.update(|t| t.claimed = requested);
-            }
+            // Whether a remote listens changes nothing about what the device
+            // does: it steps and publishes the same either way.
+            Inbound::DataRequested(_) => {}
         }
     }
     Ok(())
@@ -435,7 +387,6 @@ fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
     engine: &mut arora_engine::engine::PinnedEngine,
-    telemetry: &Telemetry,
 ) -> Result<(), RuntimeError> {
     let Some(behavior) = interpreter.as_mut() else {
         return Ok(());
@@ -449,7 +400,6 @@ fn tick_behavior(
         .map_err(|e| RuntimeError::BehaviorTree(e.to_string()))?;
     if status == BehaviorStatus::Done {
         *interpreter = None;
-        telemetry.update(|t| t.behavior = None);
     }
     Ok(())
 }
@@ -513,13 +463,6 @@ fn write_bridges(bridges: &mut [Box<dyn Bridge>], out: &StateChange) {
 // =============================================================================
 
 impl Arora {
-    /// A shared handle over the device's live indicators, for observers such as
-    /// an operator UI. Clone it freely; it stays readable after the device stops
-    /// (values simply freeze).
-    pub fn telemetry(&self) -> Telemetry {
-        self.telemetry.clone()
-    }
-
     /// Advance one step, applying everything the seams delivered since the
     /// previous one. Non-blocking; touches the state from this (single) thread
     /// only.
@@ -555,7 +498,6 @@ impl Arora {
             &self.function_index,
             &mut self.engine,
             std::mem::take(&mut self.pending.events),
-            &self.telemetry,
         )?;
         // 4. behavior — the frame's last writer: its intent wins, and it saw
         //    what it overrode. The cell borrow spans exactly this phase; a
@@ -565,7 +507,6 @@ impl Arora {
             &mut self.interpreter.borrow_mut(),
             &*self.store,
             &mut self.engine,
-            &self.telemetry,
         )?;
         // 5. flush — everything this frame changed, as one change.
         let out = flush(&self.store_changes);
@@ -741,6 +682,7 @@ mod tests {
     use futures::channel::{mpsc, oneshot};
     use futures::stream;
     use std::rc::Rc;
+    use std::sync::Arc;
 
     /// 16 ms as a step `dt` — a typical frame at ~60 Hz.
     const FRAME: Duration = Duration::from_millis(16);

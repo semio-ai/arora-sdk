@@ -207,11 +207,13 @@ pub type AccessRequestStream = Pin<Box<dyn Stream<Item = AccessRequest> + Send>>
 pub enum Inbound {
     /// A command from the remote, carrying its one-shot reply channel.
     Command(BridgeCommand),
-    /// A device-info update. `Ok(None)` means the device was unregistered — the
-    /// runtime should stop stepping.
+    /// A device-info update. `Ok(None)` means this remote no longer knows the
+    /// device — it says nothing about the device, which serves whoever else it
+    /// is attached to.
     DeviceInfo(BridgeResult<Option<DeviceInfo>>),
-    /// A client claimed/released interest in the data (the "data requested"
-    /// toggle).
+    /// Whether anyone over this endpoint wants the device's data. Any number
+    /// of clients may ask at once, so this is the aggregate: `true` while at
+    /// least one does.
     DataRequested(bool),
 }
 
