@@ -46,6 +46,9 @@ pub use arora_behavior_tree::ModuleFunction;
 use crate::runtime::EndpointInbound;
 use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
+/// Re-exported so an embedder holding a device's [`LocalCaller`] (or any other
+/// caller) can name the trait its `call` comes from.
+pub use arora_bridge::Caller;
 use arora_bridge::{Bridge, BridgeCommand, BridgeError, BridgeOp, Inbound};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
@@ -132,9 +135,9 @@ pub struct Arora {
     // to `bridges`. Outbound changes go to an endpoint only while it asks; a
     // device nobody listens to keeps stepping, it just does not talk.
     pub(crate) data_requested: Vec<bool>,
-    // The sending end every in-process `Caller` clones; its receiving end is
-    // merged into `inbound`, so a caller's Call travels the same path as a
-    // remote's.
+    // The sending end every in-process `LocalCaller` clones; its receiving
+    // end is merged into `inbound`, so a caller's Call travels the same path
+    // as a remote's.
     pub(crate) caller_tx: mpsc::UnboundedSender<Inbound>,
     pub(crate) store_changes: Subscription,
     // The golden clock: monotonic nanoseconds since start, advanced by each
@@ -186,49 +189,49 @@ impl Arora {
         &mut self.engine
     }
 
-    /// An in-process [`Caller`] onto this device. Take it before handing the
-    /// device to [`run`](Arora::run) — `run` owns the device for its whole
+    /// An in-process [`LocalCaller`] onto this device. Take it before handing
+    /// the device to [`run`](Arora::run) — `run` owns the device for its whole
     /// life, while the caller stays usable throughout.
-    pub fn caller(&self) -> Caller {
-        Caller {
+    pub fn caller(&self) -> LocalCaller {
+        LocalCaller {
             tx: self.caller_tx.clone(),
         }
     }
 }
 
-/// Dispatch [`Call`]s into the device from the same process, including while
-/// [`run`](Arora::run) owns it. Obtained from [`Arora::caller`]; clones
-/// freely, every clone reaching the same device.
+/// The in-process [`Caller`]: dispatch [`Call`]s into the device from the same
+/// process, including while [`run`](Arora::run) owns it. Obtained from
+/// [`Arora::caller`]; clones freely, every clone reaching the same device.
 ///
 /// A call is enqueued immediately and applied at the next step's event phase —
 /// the same path and ordering as a remote's Call — and the future resolves on
 /// that step's reply. [`Arora::call`] is the synchronous counterpart for an
 /// embedder holding the device between steps.
 #[derive(Clone)]
-pub struct Caller {
+pub struct LocalCaller {
     tx: mpsc::UnboundedSender<Inbound>,
 }
 
-impl Caller {
-    /// Dispatch `call`, resolving after the step that applies it. Errors are
-    /// the dispatch's own ([`Arora::call`]'s), plus the device being gone.
-    pub async fn call(&self, call: Call) -> Result<CallResult, CallError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .unbounded_send(Inbound::Command(BridgeCommand::new(
-                BridgeOp::Call(call),
-                tx,
-            )))
-            .map_err(|_| CallError::Generic {
-                message: "the device is gone".to_string(),
-            })?;
-        match rx.await {
-            Ok(Ok(result)) => Ok(result),
-            Ok(Err(message)) => Err(CallError::Generic { message }),
-            Err(_) => Err(CallError::Generic {
-                message: "the device dropped the call".to_string(),
-            }),
-        }
+impl Caller for LocalCaller {
+    fn call(&self, call: Call) -> arora_bridge::CallFuture<'_> {
+        Box::pin(async move {
+            let (tx, rx) = oneshot::channel();
+            self.tx
+                .unbounded_send(Inbound::Command(BridgeCommand::new(
+                    BridgeOp::Call(call),
+                    tx,
+                )))
+                .map_err(|_| CallError::Generic {
+                    message: "the device is gone".to_string(),
+                })?;
+            match rx.await {
+                Ok(Ok(result)) => Ok(result),
+                Ok(Err(message)) => Err(CallError::Generic { message }),
+                Err(_) => Err(CallError::Generic {
+                    message: "the device dropped the call".to_string(),
+                }),
+            }
+        })
     }
 }
 
