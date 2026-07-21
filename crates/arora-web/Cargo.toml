@@ -24,6 +24,9 @@ arora-types = { path = "../arora-types", version = "2" }
 arora = { path = "../arora", version = "9", default-features = false }
 wasm-bindgen = "0.2"
 futures = "0.3"
+# Runtime-free sync primitives only: the receiving end of the device's
+# behavior-error watch.
+tokio = { version = "1", default-features = false, features = ["sync"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }

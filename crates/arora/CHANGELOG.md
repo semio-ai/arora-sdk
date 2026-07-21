@@ -4,6 +4,30 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.1.0] - 2026-07-21
+
+### Changed
+
+- A failing behavior no longer stops the device: the step (and so `run`)
+  goes on — the HAL keeps being driven, the behavior is ticked again next
+  step. The failure is logged once per distinct message and stands on a
+  watch — `Arora::behavior_error` hands a receiver that outlives `run`
+  owning the device, so a self-paced device's embedder still observes it;
+  nothing reaches the store.
+- `LocalCaller` enqueues a call before `call` returns rather than when the
+  returned future is first polled, so firing and stepping the device in the
+  same breath lands the call on that step — a JS Promise, in particular, is
+  first polled a microtask later.
+
+### Fixed
+
+- `run` yields its thread even when every step overruns the period: the
+  metronome's overrun arm now suspends through the timer, so a saturated
+  device shares its thread — on the web, an overrunning device used to
+  freeze the whole page.
+- `arora-studio-bridge-client` re-pinned to 6: claims inform the embedding
+  application and no longer filter commands.
+
 ## [9.0.2] - 2026-07-21
 
 ### Changed

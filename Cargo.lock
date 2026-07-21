@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "9.0.2"
+version = "9.1.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -592,9 +592,9 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "5.0.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b4633ea0a0e4b4f9ed0609c84ccb22971ecafce4717437488d3f2ab700ffd32"
+checksum = "0c15511e5dd5fe205fda59066db205740ec3e1256936025a1918970fa94e89e3"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -662,12 +662,13 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "6.0.0"
+version = "6.1.0"
 dependencies = [
  "arora",
  "arora-engine",
  "arora-types",
  "console_error_panic_hook",
+ "futures",
  "getrandom 0.4.3",
  "js-sys",
  "serde",
@@ -675,6 +676,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "test-rust-wasm",
+ "tokio",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -6713,9 +6715,9 @@ dependencies = [
 
 [[package]]
 name = "studio-bridge-msgs"
-version = "3.0.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2e2d3e60adb7e9f3fa25c98e0ccda740963872fb997a7b7580f8f67f193fd33"
+checksum = "2d33e3c9d81b89b46140184efa3b8c16d8b7e68a52bae43b081766b9e4bc4d2b"
 dependencies = [
  "arora-types",
  "chrono",
