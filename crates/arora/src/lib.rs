@@ -67,6 +67,7 @@ use runtime::{Clock, Pending};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 /// An opinionated Arora device: the engine (with the basic behavior-tree control
@@ -110,6 +111,11 @@ pub struct Arora {
     /// on the engine loads/edits it (see [`runtime::InterpreterCell`] and
     /// [`arora_behavior::interpreter_module`]).
     pub(crate) interpreter: runtime::InterpreterCell,
+    /// The behavior's standing error — the message of its latest failed
+    /// tick, `None` while healthy. A watch, so a receiver taken before
+    /// [`run`](Arora::run) owns the device still observes a self-paced
+    /// loop's failures; each distinct failure is sent once.
+    pub(crate) behavior_error: watch::Sender<Option<String>>,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
@@ -197,16 +203,29 @@ impl Arora {
             tx: self.caller_tx.clone(),
         }
     }
+
+    /// Watch the behavior's standing error: the message of its latest failed
+    /// tick, `None` while the behavior is healthy or none is installed. A
+    /// failing tick does not stop the device — the failure stands (and is
+    /// logged, once per distinct message) until a tick succeeds. The
+    /// receiver outlives [`run`](Arora::run) owning the device, so a
+    /// self-paced device's embedder takes one first and still observes
+    /// failures.
+    pub fn behavior_error(&self) -> watch::Receiver<Option<String>> {
+        self.behavior_error.subscribe()
+    }
 }
 
 /// The in-process [`Caller`]: dispatch [`Call`]s into the device from the same
 /// process, including while [`run`](Arora::run) owns it. Obtained from
 /// [`Arora::caller`]; clones freely, every clone reaching the same device.
 ///
-/// A call is enqueued immediately and applied at the next step's event phase —
-/// the same path and ordering as a remote's Call — and the future resolves on
-/// that step's reply. [`Arora::call`] is the synchronous counterpart for an
-/// embedder holding the device between steps.
+/// A call is enqueued before [`call`](Caller::call) returns — the future is
+/// only the reply — and applied at the next step's event phase, the same path
+/// and ordering as a remote's Call. A caller can therefore fire and step the
+/// device in the same breath without touching the future (a JS Promise, for
+/// one, is first polled a microtask later). [`Arora::call`] is the synchronous
+/// counterpart for an embedder holding the device between steps.
 #[derive(Clone)]
 pub struct LocalCaller {
     tx: mpsc::UnboundedSender<Inbound>,
@@ -214,16 +233,18 @@ pub struct LocalCaller {
 
 impl Caller for LocalCaller {
     fn call(&self, call: Call) -> arora_bridge::CallFuture<'_> {
+        let (tx, rx) = oneshot::channel();
+        let sent = self
+            .tx
+            .unbounded_send(Inbound::Command(BridgeCommand::new(
+                BridgeOp::Call(call),
+                tx,
+            )))
+            .map_err(|_| CallError::Generic {
+                message: "the device is gone".to_string(),
+            });
         Box::pin(async move {
-            let (tx, rx) = oneshot::channel();
-            self.tx
-                .unbounded_send(Inbound::Command(BridgeCommand::new(
-                    BridgeOp::Call(call),
-                    tx,
-                )))
-                .map_err(|_| CallError::Generic {
-                    message: "the device is gone".to_string(),
-                })?;
+            sent?;
             match rx.await {
                 Ok(Ok(result)) => Ok(result),
                 Ok(Err(message)) => Err(CallError::Generic { message }),
@@ -471,6 +492,7 @@ impl AroraBuilder {
             caller_tx,
             store_changes,
             clock: Clock::default(),
+            behavior_error: watch::Sender::new(None),
         })
     }
 }
@@ -568,6 +590,91 @@ mod module_loading_tests {
             ))
             .expect("the load call succeeds");
         assert_eq!(result.ret, arora_types::value::Value::Unit);
+    }
+
+    /// A call is enqueued when [`Caller::call`] returns, not when its future
+    /// is first polled: firing and stepping in the same breath — a JS Promise
+    /// is first polled a microtask later — still lands on that step.
+    #[tokio::test]
+    async fn a_call_is_enqueued_before_its_future_is_polled() {
+        let mut arora = Arora::builder().build().expect("build the default device");
+        let caller = arora.caller();
+        let call = caller.call(interpreter_module::encode_load(
+            &arora_behavior::Graph::empty(),
+        ));
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("step");
+        let result = call.await.expect("the load call succeeds");
+        assert_eq!(result.ret, arora_types::value::Value::Unit);
+    }
+
+    /// A failing behavior does not stop the device: the step succeeds, the
+    /// standing error is readable through [`Arora::behavior_error`], and the
+    /// next successful tick clears it. Nothing reaches the store.
+    #[tokio::test]
+    async fn a_failing_behavior_is_state_not_a_stop() {
+        struct Flaky {
+            failures_left: u32,
+        }
+        impl BehaviorInterpreter for Flaky {
+            fn tick(
+                &mut self,
+                _ctx: &mut arora_behavior::BehaviorContext,
+            ) -> Result<arora_behavior::BehaviorStatus, arora_behavior::BehaviorError> {
+                if self.failures_left > 0 {
+                    self.failures_left -= 1;
+                    return Err(arora_behavior::BehaviorError {
+                        message: "the input is not there yet".to_string(),
+                    });
+                }
+                Ok(arora_behavior::BehaviorStatus::Running)
+            }
+        }
+
+        let mut arora = Arora::builder()
+            .with_behavior_interpreter(Box::new(Flaky { failures_left: 2 }))
+            .build()
+            .expect("build the device");
+        // The receiver is taken before anything steps — the way an embedder
+        // takes one before `run` owns the device.
+        let mut errors = arora.behavior_error();
+        assert_eq!(*errors.borrow_and_update(), None);
+
+        let changes = arora.store.subscribe();
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("a failing behavior must not fail the step");
+        assert!(errors.has_changed().expect("the device is alive"));
+        assert_eq!(
+            errors.borrow_and_update().as_deref(),
+            Some("the input is not there yet"),
+            "the standing error is observable"
+        );
+        for _ in 0..3 {
+            arora
+                .step(std::time::Duration::from_millis(10))
+                .expect("a failing behavior must not fail the step");
+        }
+        assert_eq!(
+            *errors.borrow_and_update(),
+            None,
+            "recovery clears the standing error"
+        );
+
+        // The failure never reaches the store: the steps wrote the clock and
+        // nothing else.
+        while let Some(change) = changes.try_recv() {
+            for key in change.set.keys() {
+                assert!(
+                    key.path == arora_behavior::golden::TIME
+                        || key.path == arora_behavior::golden::DT,
+                    "unexpected store write: {}",
+                    key.path
+                );
+            }
+            assert!(change.unset.is_empty(), "unexpected store unset");
+        }
     }
 
     /// A [`Caller`] reaches the device without borrowing it: the call is

@@ -22,6 +22,7 @@ use arora_types::call::{CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
+use tokio::sync::watch;
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -379,36 +380,50 @@ pub(crate) fn with_interpreter(
 /// against the shared store, **last**: its writes win the frame, and it ticks
 /// over everything the frame already applied (clock, sensors, remote updates).
 /// A no-op when none is installed. When the interpreter reports
-/// [`BehaviorStatus::Done`] it is dropped (back to `None`) and cleared from
-/// telemetry; while it is [`BehaviorStatus::Running`] it stays for the next
-/// step.
+/// [`BehaviorStatus::Done`] it is dropped (back to `None`); while it is
+/// [`BehaviorStatus::Running`] it stays for the next step.
+///
+/// A failing tick does not stop the device: the behavior stays installed and
+/// ticks again next step, and the rest of the pipeline — HAL writes included —
+/// goes on. The failure is sent once per distinct message on the standing
+/// error watch (received through [`Arora::behavior_error`]) and logged;
+/// the next successful tick clears it.
 fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
     engine: &mut arora_engine::engine::PinnedEngine,
-) -> Result<(), RuntimeError> {
+    standing_error: &watch::Sender<Option<String>>,
+) {
     let Some(behavior) = interpreter.as_mut() else {
-        return Ok(());
+        return;
     };
     let mut ctx = BehaviorContext {
         store,
         call_bridge: engine,
     };
-    let status = behavior
-        .tick(&mut ctx)
-        .map_err(|e| RuntimeError::BehaviorTree(e.to_string()))?;
-    if status == BehaviorStatus::Done {
-        *interpreter = None;
+    match behavior.tick(&mut ctx) {
+        Ok(status) => {
+            if standing_error.borrow().is_some() {
+                standing_error.send_replace(None);
+            }
+            if status == BehaviorStatus::Done {
+                *interpreter = None;
+            }
+        }
+        Err(error) => {
+            let message = error.to_string();
+            if standing_error.borrow().as_deref() != Some(message.as_str()) {
+                log::warn!("the behavior failed and will be retried: {message}");
+                standing_error.send_replace(Some(message));
+            }
+        }
     }
-    Ok(())
 }
 
 /// Phase 5 — coalesce everything drained from the store's change feed this step
 /// into ONE [`StateChange`], so the remote/hardware see a single, consistent
 /// update per step. Changes are drained in order, so later ones win: a set
-/// overrides an earlier unset of the same key (and vice versa). The golden
-/// clock keys are runtime-local and dropped, so the wall-clock churning every
-/// frame never reaches the wire.
+/// overrides an earlier unset of the same key (and vice versa).
 fn flush(changes: &Subscription) -> StateChange {
     let mut merged = StateChange::new();
     while let Some(change) = changes.try_recv() {
@@ -509,7 +524,8 @@ impl Arora {
             &mut self.interpreter.borrow_mut(),
             &*self.store,
             &mut self.engine,
-        )?;
+            &self.behavior_error,
+        );
         // 5. flush — everything this frame changed, as one change.
         let out = flush(&self.store_changes);
         // 6. writings — the hardware first (its own readings subtracted), then
