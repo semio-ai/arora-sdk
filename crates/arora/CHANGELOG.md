@@ -4,6 +4,15 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.2] - 2026-07-21
+
+### Changed
+
+- `arora-studio-bridge-client` re-pinned to 5: the client now watches the
+  device's per-studio claim set (`DeviceClient::claims`) and refuses a
+  command whose named caller has not claimed the device. Nothing changes
+  in this crate's surface — claims stay outside the runtime.
+
 ## [9.0.1] - 2026-07-21
 
 ### Fixed
