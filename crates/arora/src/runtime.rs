@@ -577,7 +577,19 @@ impl Metronome {
                 self.next_due = Some(due + self.period);
             }
             // Overrun: the due tick fires now; the next is a full period out.
-            Some(_) => self.next_due = Some(now + self.period),
+            // Firing "now" still suspends once — through the same timer the
+            // on-schedule arm sleeps on, so control reaches the browser's
+            // macrotask queue (timers, rendering) and not just the executor's
+            // microtask loop. Without it, a device whose steps always overrun
+            // the period would never yield its thread — on the web, freezing
+            // the whole page.
+            Some(_) => {
+                self.next_due = Some(now + self.period);
+                #[cfg(target_arch = "wasm32")]
+                gloo_timers::future::sleep(Duration::ZERO).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::task::yield_now().await;
+            }
         }
     }
 }
@@ -604,6 +616,22 @@ mod metronome_tests {
         gloo_timers::future::sleep(duration).await;
         #[cfg(not(target_arch = "wasm32"))]
         tokio::time::sleep(duration).await;
+    }
+
+    /// An overrun tick fires now but still suspends: a step loop that always
+    /// overruns its period keeps sharing its thread instead of freezing it.
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn an_overrun_tick_still_suspends() {
+        let mut metronome = Metronome::new(Duration::ZERO);
+        metronome.tick().await;
+        let tick = metronome.tick();
+        futures::pin_mut!(tick);
+        assert!(
+            futures::poll!(tick.as_mut()).is_pending(),
+            "the overrun arm must yield before completing"
+        );
+        tick.await;
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
