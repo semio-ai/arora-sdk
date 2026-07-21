@@ -172,18 +172,30 @@ pub mod store_json {
 ///
 /// Drive it by calling [`step`](Self::step) from your own clock (e.g.
 /// `requestAnimationFrame`) or by awaiting [`run`](Self::run), which hands the
-/// device to [`Arora::run`] for good. Either way the rest of the surface stays
+/// device to [`Arora::run`] until [`stop`](AroraWeb::stop) reclaims it.
+/// Either way the rest of the surface stays
 /// live: `setValue`/`readValues`/`snapshot` work on a sibling handle of the
 /// store, `drainChanges` on its subscription, and `call` on the device's
 /// in-process [`Caller`] — none of them touch the stepping device.
 #[wasm_bindgen(js_name = AroraRuntime)]
 pub struct AroraWeb {
-    // The device parks here between manual steps; `run` takes it out for its
-    // whole life.
-    device: RefCell<Option<Arora>>,
+    // The device parks here between manual steps; `run` takes it out and
+    // `stop` puts it back. Shared with the run future, which returns the
+    // device on a stop.
+    device: Rc<RefCell<Option<Arora>>>,
+    // Ends the current `run` loop at its next step boundary; `None` while no
+    // loop runs (the sender is consumed by `stop`).
+    stop: RefCell<Option<futures::channel::oneshot::Sender<()>>>,
     caller: LocalCaller,
     store: Box<dyn DataStore>,
     changes: Subscription,
+    // The device's standing-error watch, taken before `run` can own the
+    // device, so the reading stays available while it self-paces.
+    behavior_error: tokio::sync::watch::Receiver<Option<String>>,
+    // The awaitable end of the same watch: taken out for the duration of one
+    // `behaviorErrorChanged` await, so sequential awaits share one seen
+    // cursor and no change is missed between them.
+    behavior_error_changes: Rc<RefCell<Option<tokio::sync::watch::Receiver<Option<String>>>>>,
 }
 
 impl From<Arora> for AroraWeb {
@@ -195,11 +207,16 @@ impl From<Arora> for AroraWeb {
         let caller = arora.caller();
         let store = arora.store().clone_box();
         let changes = store.subscribe();
+        let behavior_error = arora.behavior_error();
+        let behavior_error_changes = Rc::new(RefCell::new(Some(arora.behavior_error())));
         Self {
-            device: RefCell::new(Some(arora)),
+            device: Rc::new(RefCell::new(Some(arora))),
+            stop: RefCell::new(None),
             caller,
             store,
             changes,
+            behavior_error,
+            behavior_error_changes,
         }
     }
 }
@@ -235,26 +252,96 @@ impl AroraWeb {
 
     /// Hand the device to [`Arora::run`]: a self-paced loop at `period_ms`
     /// (default: the runtime's ~100 Hz) that owns the device until stepping
-    /// fails — the returned promise only ever rejects, and `step()` is
-    /// unavailable from then on. The rest of the surface keeps working: it
-    /// never touches the stepping device.
+    /// fails — the promise rejects — or [`stop`](Self::stop) reclaims it — the
+    /// promise resolves and `step()` works again. While it runs the rest of
+    /// the surface keeps working: it never touches the stepping device.
     ///
     /// `run` awaits between steps, so it shares its thread; see
     /// [`Arora::run`] for where a cadence survives in a browser (main thread
     /// vs dedicated worker).
     pub fn run(&self, period_ms: Option<f64>) -> js_sys::Promise {
-        let device = self.device.borrow_mut().take();
+        let Some(mut device) = self.device.borrow_mut().take() else {
+            return js_sys::Promise::reject(&JsValue::from_str("the device is already running"));
+        };
+        let slot = self.device.clone();
+        let (stop_tx, stop_rx) = futures::channel::oneshot::channel::<()>();
+        *self.stop.borrow_mut() = Some(stop_tx);
         wasm_bindgen_futures::future_to_promise(async move {
-            let mut device =
-                device.ok_or_else(|| JsValue::from_str("the device is already running"))?;
             let period = period_ms
                 .map(|ms| Duration::from_secs_f64(ms / 1_000.0))
                 .unwrap_or(Arora::DEFAULT_STEP_PERIOD);
-            device
-                .run(period)
-                .await
-                .map_err(|e| JsValue::from_str(&format!("run failed: {e}")))?;
-            Ok(JsValue::UNDEFINED)
+            let outcome = {
+                use futures::FutureExt;
+                let run = device.run(period).fuse();
+                let mut stop_rx = stop_rx.fuse();
+                futures::pin_mut!(run);
+                futures::select_biased! {
+                    result = run => Some(result),
+                    _ = stop_rx => None,
+                }
+            };
+            // Whatever ended the loop, the device parks back in its slot: a
+            // failed run leaves a device the embedder can still step, probe
+            // ([`Arora::behavior_error`]), or run again.
+            slot.borrow_mut().replace(device);
+            match outcome {
+                // `Arora::run` only returns by failing; surface that.
+                Some(result) => {
+                    result.map_err(|e| JsValue::from_str(&format!("run failed: {e}")))?;
+                    Ok(JsValue::UNDEFINED)
+                }
+                // Stopped: the loop ended between steps.
+                None => Ok(JsValue::UNDEFINED),
+            }
+        })
+    }
+
+    /// Reclaim the device from [`run`](Self::run): the loop ends at its next
+    /// step boundary, the run promise resolves, and `step()` (or another
+    /// `run()`) works again. A no-op while nothing runs.
+    pub fn stop(&self) {
+        if let Some(stop) = self.stop.borrow_mut().take() {
+            let _ = stop.send(());
+        }
+    }
+
+    /// Whether [`run`](Self::run) currently owns the device.
+    #[wasm_bindgen(getter)]
+    pub fn running(&self) -> bool {
+        self.device.borrow().is_none()
+    }
+
+    /// The behavior's standing error — the message of its latest failed
+    /// tick, `undefined` while the behavior is healthy or none is installed.
+    /// A failing tick does not stop the device; the reading stays available
+    /// while `run()` owns it.
+    #[wasm_bindgen(getter, js_name = behaviorError)]
+    pub fn behavior_error(&self) -> Option<String> {
+        self.behavior_error.borrow().clone()
+    }
+
+    /// Resolves on the next change of the behavior's standing error, with
+    /// the new reading: a message when a distinct failure appears,
+    /// `undefined` when a tick recovers. Sequential awaits share one cursor,
+    /// so no change is missed between them; one await may be pending at a
+    /// time. Rejects when the device is gone.
+    #[wasm_bindgen(js_name = behaviorErrorChanged)]
+    pub fn behavior_error_changed(&self) -> js_sys::Promise {
+        let Some(mut errors) = self.behavior_error_changes.borrow_mut().take() else {
+            return js_sys::Promise::reject(&JsValue::from_str(
+                "a behaviorErrorChanged await is already pending",
+            ));
+        };
+        let slot = self.behavior_error_changes.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            let outcome = errors.changed().await;
+            let value = errors.borrow_and_update().clone();
+            slot.borrow_mut().replace(errors);
+            outcome.map_err(|_| JsValue::from_str("the device is gone"))?;
+            Ok(match value {
+                Some(message) => JsValue::from_str(&message),
+                None => JsValue::UNDEFINED,
+            })
         })
     }
 
