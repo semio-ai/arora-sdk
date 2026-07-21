@@ -4,6 +4,14 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.1] - 2026-07-21
+
+### Fixed
+
+- The optional `studio-bridge` feature compiles again:
+  `arora-studio-bridge-client` re-pinned to 4, the release built on this
+  crate's own arora-bridge 4 / arora-types 2.
+
 ## [9.0.0] - 2026-07-20
 
 ### Breaking
