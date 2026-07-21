@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "9.0.1"
+version = "9.0.2"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -592,9 +592,9 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98f10fc8555f3f2074c2f54d68f5c394f015130041cea629c42e3d7bdcc5fcb"
+checksum = "2b4633ea0a0e4b4f9ed0609c84ccb22971ecafce4717437488d3f2ab700ffd32"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -6713,9 +6713,9 @@ dependencies = [
 
 [[package]]
 name = "studio-bridge-msgs"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0fb0e18a0be8835cd2959437106213de8c3e8d0f2bc80542fc18b9a6f90e21f"
+checksum = "b2e2d3e60adb7e9f3fa25c98e0ccda740963872fb997a7b7580f8f67f193fd33"
 dependencies = [
  "arora-types",
  "chrono",
