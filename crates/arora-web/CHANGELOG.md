@@ -4,6 +4,26 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-07-21
+
+### Added
+
+- `stop()`: reclaims the device from `run()` at the next step boundary — the
+  run promise resolves and `step()` (or another `run()`) works again. `run`
+  is no longer a one-way door.
+- `running` getter: whether `run()` currently owns the device.
+- `behaviorError` getter: the behavior's standing error, `undefined` while
+  healthy — readable while the device runs.
+- `behaviorErrorChanged()`: resolves on the next standing-error change with
+  the new reading. Sequential awaits share one cursor, so a notify loop
+  misses no change.
+
+### Fixed
+
+- A failed `run()` parks the device back in its slot instead of consuming
+  it: the embedder can still `step()`, read the standing error, or `run()`
+  again.
+
 ## [6.0.0] - 2026-07-20
 
 ### Breaking
