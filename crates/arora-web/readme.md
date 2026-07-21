@@ -16,7 +16,11 @@ Run an Arora device inside a browser. Compiles `arora` (with
 class AroraRuntime {
   constructor();                          // the demo device (fake HAL, no bridge)
   step(dtMs: number): void;               // one step, e.g. from requestAnimationFrame
-  run(periodMs?: number): Promise<never>; // hands the device to arora's own loop; rejects when stepping fails
+  run(periodMs?: number): Promise<void>; // hands the device to arora's own loop; resolves on stop(), rejects when stepping fails
+  stop(): void;                           // reclaims the device at the next step boundary; step() works again
+  readonly running: boolean;              // whether run() currently owns the device
+  readonly behaviorError?: string;        // the behavior's standing error; undefined while healthy
+  behaviorErrorChanged(): Promise<string | undefined>; // resolves on the next standing-error change
   call(callJson: string): Promise<string>; // in-process Call, applied by the next step; resolves to result JSON
   setValue(path: string, valueJson: string): void;
   writeValues(valuesJson: string): void;
@@ -38,8 +42,10 @@ subscription (JavaScript can't await the std channel `DataStore::subscribe`
 delivers on); a subscription opens on the store's whole current state, so the
 first drain returns the full picture.
 
-`run()` hands the device to `arora::Arora::run` for good (`step()` is
-unavailable from then on). The rest of the surface keeps working while the
+`run()` hands the device to `arora::Arora::run` until `stop()` reclaims it —
+the loop ends at its next step boundary, the run promise resolves, and
+`step()` (or another `run()`) works again; while it runs, `step()` is
+unavailable. The rest of the surface keeps working while the
 device runs, because none of it touches the stepping device: `setValue`/
 `readValues`/`snapshot` work on a sibling handle of the store, `drainChanges`
 on its subscription, and `call` goes through the device's in-process

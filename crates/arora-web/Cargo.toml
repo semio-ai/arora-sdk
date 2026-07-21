@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "6.0.0"
+version = "6.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -23,6 +23,7 @@ arora-types = { path = "../arora-types", version = "2" }
 # (arora-hal, arora-bridge, …) itself for whatever it composes.
 arora = { path = "../arora", version = "9", default-features = false }
 wasm-bindgen = "0.2"
+futures = "0.3"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
