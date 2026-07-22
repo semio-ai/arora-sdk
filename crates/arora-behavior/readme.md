@@ -24,6 +24,12 @@ authored-behavior representation the runtime can run. Hand-implementing it to
 hard-code one particular behavior in Rust is a corner case, not the promoted
 path: author a behavior in an editor and let an interpreter run it.
 
+**How it works, with diagrams:** [`docs/interpreter-workflow.md`](docs/interpreter-workflow.md)
+walks the interpreter lifecycle — load, time update, ticks, graph updates, and
+"keeps ticking" — grounded in the source. See a concrete interpreter in
+[`arora-behavior-tree`](../arora-behavior-tree/docs/nodes.md) and the whole
+device loop in [`arora`](../arora/docs/runtime-and-data-flow.md).
+
 ## Golden keys: timing is data, not an argument
 
 The runtime keeps time out of the `tick` signature. Before it ticks any

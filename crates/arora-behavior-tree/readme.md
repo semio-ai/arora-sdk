@@ -9,6 +9,11 @@ The [`BehaviorTree`](src/behavior_tree.rs) holds a list `variables`, *a.k.a.* th
 This is property is checked when the behavior tree is loaded from a set of nodes,
 using [`load_behavior_tree_nodes` or `load_behavior_tree_yaml`](src/behavior_tree.rs).
 
+> **How the tree fits the Arora interpreter model** — what a node is, and how
+> nodes touch the data store and the engine's modules — is diagrammed in
+> [`docs/nodes.md`](docs/nodes.md), which builds on
+> [arora-behavior's interpreter workflow](../arora-behavior/docs/interpreter-workflow.md).
+
 ## Schema
 
 The YAML format to the schema defined in [`src/schema.rs`](src/schema.rs).

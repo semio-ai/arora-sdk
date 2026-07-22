@@ -12,6 +12,11 @@ bare, unopinionated engine, this crate gives you a batteries-included
 It can run a behavior tree handed to it at startup (as [Groot] XML); otherwise
 it idles, waiting for behavior trees that will soon arrive over the bridge.
 
+> **Architecture, with diagrams:** [`docs/runtime-and-data-flow.md`](docs/runtime-and-data-flow.md)
+> shows all of the device's components and how data flows between them, plus a
+> sequence diagram of one `step`. It pairs with
+> [arora-behavior's interpreter workflow](../arora-behavior/docs/interpreter-workflow.md).
+
 ## Run it
 
 `arora` embeds the behavior-tree node module (built automatically as a wasm
