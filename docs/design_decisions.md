@@ -39,7 +39,7 @@ Cargo exports the artifact paths to the consumer's `build.rs` as environment
 variables. **Mind the exact names** — this has bitten us:
 
 - The fully-qualified form is `CARGO_<KIND>_FILE_<DEP>_<ARTIFACT-NAME>`, e.g.
-  `CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes` or
+  `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm` or
   `CARGO_STATICLIB_FILE_ARORA_BUFFERS_arora_buffers`.
 - Cargo *also* emits the short convenience form `CARGO_<KIND>_FILE_<DEP>`
   **only when the artifact's target name equals the dependency name.** A
@@ -78,14 +78,13 @@ not actually use forced-target (see below).
 
 ### Wasm guests build for the host by default; wasm32-wasip1 on demand
 
-`behavior-tree-nodes` and `test-rust-wasm` are plain
+`test-behavior-tree-nodes` and `test-rust-wasm` are plain
 `crate-type = ["cdylib", "rlib"]` crates with **no** `forced-target` /
 `package.target`. A bare `cargo build` compiles them for the host (so
 `cargo test -p test-rust-wasm` runs natively). Their wasm32-wasip1 flavour is
-produced on demand by whoever needs it: both `arora-behavior-tree`
-(dev-dependency) and the integration-test crate declare them as
-`artifact = "cdylib", target = "wasm32-wasip1"`, so `cargo test` builds the
-wasm guests and the tests locate them through the forwarded
+produced on demand by whoever needs it: the integration-test crate declares
+them as `artifact = "cdylib", target = "wasm32-wasip1"`, so `cargo test` builds
+the wasm guests and the tests locate them through the forwarded
 `CARGO_CDYLIB_FILE_*` env vars. No explicit `--target wasm32-wasip1` build is
 needed — `cargo test --release` is self-sufficient.
 
@@ -177,7 +176,7 @@ This pulls Boost and OpenSSL transitively — expect ~10 min on a cold build.
 
 ### Four executors, one engine
 
-The engine (`crates/arora`) exposes four `Executor` implementations and
+The engine (`crates/arora-engine`) exposes four `Executor` implementations and
 selects between them by the `executor.name` in a module's header:
 
 | Executor                   | Name             | Module location  | Cfg                                | Default feature |
@@ -203,9 +202,9 @@ over.
 ### `arora-web` is a separate crate
 
 The wasm-bindgen JS surface lives in `crates/arora-web`, not inside
-`crates/arora`. This mirrors the `vizij-rs/crates/animation/vizij-animation-wasm`
-pattern: the core crate is dual-target with `cdylib, rlib`; the `-wasm`
-crate is just the JS binding surface.
+`crates/arora`. The engine crates (`arora-engine`, `arora`) are plain `rlib`s;
+`arora-web` is the `cdylib, rlib` crate wasm-pack builds into the JS package —
+the one place the binding surface lives.
 
 **Why:** keeps `wasm-bindgen` out of the dependency graph of native consumers
 of `arora`, and lets `arora-web` be built/published independently.
@@ -249,34 +248,30 @@ its own dir, so consumer build scripts copy both into a single
 
 ## Testing
 
-### Behavior-tree tests load the wasm guest via its bindep env var
+### Behavior-tree tests run natively — no wasm guest
 
-`crates/arora-behavior-tree/src/tests.rs` loads `behavior-tree-nodes` from
-`env!("CARGO_CDYLIB_FILE_BEHAVIOR_TREE_NODES_behavior_tree_nodes")` — the
-artifact-dependency path that `arora-behavior-tree/build.rs` forwards as a
-`rustc-env`. Because `behavior-tree-nodes` is declared as an
-`artifact = "cdylib", target = "wasm32-wasip1"` dev-dependency, `cargo test`
-builds the wasm guest itself and the test picks it up directly. **No prior
-`cargo build --target wasm32-wasip1` is required** — verified by wiping the
-guests and running `cargo test --release` with no pre-build.
-
-The loader also has a fallback branch that resolves other modules from
-`<workspace>/target/wasm32-wasip1/<profile>/<name>.wasm`, but no current test
-exercises it (every test loads only `behavior-tree-nodes`). If a future test
-loads a different wasm module by name, either bindep it the same way or build
-it for `wasm32-wasip1` first.
+The basic control nodes are wired natively into `arora-behavior-tree`, so its
+tests exercise the tree in-process with no wasm module at all:
+`crates/arora-behavior-tree/src/tests.rs` builds trees with
+`load_behavior_tree_yaml` and ticks them directly. The crate's only
+dev-dependencies are `anyhow` and `arora-simple-data-store` — there is no
+wasm-guest bindep and no `CARGO_CDYLIB_FILE_*` env var forwarded from its
+`build.rs`. (The `test-behavior-tree-nodes` wasm module still exists — it
+carries wasm implementations of the same nodes — but it is test-only, and
+nothing in the default build loads it for control flow.)
 
 ### Integration tests rely on a mix of bindeps and published artefacts
 
 `tests/Cargo.toml` (`arora-integration-tests`) pulls in artefacts two ways:
 
 - **Bindeps** (`[build-dependencies]`): `arora-cli` (`artifact = "bin"`),
-  `behavior-tree-nodes` and `test-rust-wasm`
-  (`artifact = "cdylib", target = "wasm32-wasip1"`), and `polly`
-  (`artifact = "cdylib"`, host). `tests/build.rs` forwards their paths to the
-  test binary via `cargo::rustc-env` (`ARORA_CLI_BIN`,
-  `CARGO_CDYLIB_FILE_POLLY_polly`, `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`),
-  and `integration.rs` reads them with `env!`.
+  `test-rust-wasm` and `test-behavior-tree-nodes`
+  (`artifact = "cdylib", target = "wasm32-wasip1"`), and `test-rust-component`
+  (`artifact = "cdylib", target = "wasm32-wasip2"`). `tests/build.rs` forwards
+  their paths to the test binary via `cargo::rustc-env` (`ARORA_CLI_BIN`,
+  `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`), and `integration.rs` reads
+  them with `env!`. (`polly` is not a dependency of this crate — it is a
+  workspace member staged under `target/<profile>/modules/`.)
 - **Dev-dependencies** (plain path): `test-cpp` and `test-cpp-2`. They are not
   bindep'd — declaring an empty-lib C++ module as a `cdylib` artifact adds
   nothing and their `build.rs` is what matters. Listing them as
@@ -399,7 +394,7 @@ data like everything else.
 Loading and editing behaviors go through the engine's ordinary module-call
 path: `arora-behavior` declares the interpreter module's UUID and its
 `load`/`edit` function ids, and the runtime builds that module
-(`arora_engine::ModuleBuilder`) from the running interpreter. There is no
+(`arora_engine::module::ModuleBuilder`) from the running interpreter. There is no
 host-function special case in dispatch — a remote editing a behavior calls a
 module function like any other, and interpreter implementations stay engine-
 agnostic behind the `BehaviorInterpreter` trait.

@@ -95,7 +95,7 @@ graph TB
     mods -->|"runtime contract: arora-types Module + Call"| eng
 ```
 
-## Runtime: an Arora instance — store, HAL, bridges, behavior
+## Runtime: an Arora instance and its seams
 
 The `arora` crate wraps the engine in a device runtime: an `arora::Arora`
 instance built around one blackboard. Around that store sit four kinds of seam

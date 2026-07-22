@@ -132,7 +132,7 @@ cargo test
 cargo test -p arora-behavior-tree
 
 # Specific test
-cargo test --lib schema_groot::tests::tree_node_from_groot
+cargo test -p arora-behavior-tree graph::tests::groot_lowers_to_graph_and_runs
 
 # With output
 cargo test -- --nocapture
@@ -211,9 +211,8 @@ Behavior tree tests often need to:
 2. Build a behavior tree referencing those modules
 3. Tick the tree and verify results
 
-Helper functions:
+Helper functions (test-local, e.g. `modules/polly/tests/`):
 - `setup_engine_with_modules(&vec!["module-name"])`
-- `read_header_to_index()` — loads module definitions into index
 - `add_module_functions_to_index()` — populates function lookup
 
 ## Crate Purposes
@@ -222,7 +221,8 @@ Quick reference:
 
 | Crate | Purpose |
 |-------|---------|
-| `arora` | Core engine (host + browser) |
+| `arora-engine` | Core engine (host + browser executors) |
+| `arora` | Opinionated device runtime (engine + native BT nodes + step loop) |
 | `arora-cli` | Command-line interface |
 | `arora-web` | Browser wasm bindings |
 | `arora-buffers` | Serialization primitives |

@@ -18,8 +18,9 @@ C++ modules each carry their own `CMakeLists.txt` invoked from a
 ### Prerequisites
 
 - Rust nightly with the standard toolchain. The pinned `rust-toolchain.toml`
-  also requests the `wasm32-wasip1`, `wasm32-wasip2`, and
-  `i686-unknown-linux-musl` targets.
+  also requests the `wasm32-wasip1` and `wasm32-wasip2` targets. (The NAO
+  cross-build's `i686-unknown-linux-musl` is a linker toolchain, not a rustup
+  target — see the NAO prerequisite below.)
 - A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
   Linux).
 - For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`.
@@ -39,9 +40,11 @@ This produces:
 - Host cdylibs for native modules (`libpolly.dylib` / `.so`).
 - C++ wasm guests (`test-cpp.wasm`, `test-cpp-2.wasm`) staged under
   `target/<profile>/modules/`.
-- Rust modules (`behavior-tree-nodes`, `test-rust-wasm`) built for the
+- Rust modules (`test-behavior-tree-nodes`, `test-rust-wasm`) built for the
   **host** by default — `cargo test -p test-rust-wasm` runs natively.
   Their wasm flavour is produced on demand (see *Testing* below).
+  (`test-behavior-tree-nodes` is test-only now: the basic control nodes moved
+  native into `arora-behavior-tree`.)
 
 The NAO module is opt-in and requires the i686-unknown-linux-musl cross-toolchain:
 
@@ -62,21 +65,20 @@ cargo build --release
 cargo test --release
 ```
 
-`cargo test` is self-sufficient: the `arora-behavior-tree` and
-`arora-integration-tests` crates declare the wasm guests
-(`behavior-tree-nodes`, `test-rust-wasm`) and `polly` as artifact
-dependencies, so running the tests builds the `wasm32-wasip1` guests on its
-own and the tests find them through env vars forwarded by their `build.rs`
-(`CARGO_CDYLIB_FILE_*`). No separate `cargo build --target wasm32-wasip1` is
-needed. The `test-cpp` / `test-cpp-2` wasm (plus their `module.yaml` /
-`records/`) are published by those modules' `build.rs` under
-`target/<profile>/modules/` and read by path.
+`cargo test` is self-sufficient: the `arora-integration-tests` crate declares
+the wasm guests as artifact dependencies — `test-rust-wasm` and
+`test-behavior-tree-nodes` (`wasm32-wasip1`) plus `test-rust-component`
+(`wasm32-wasip2`) — so running the tests builds the guests on its own and finds
+them through env vars forwarded by its `build.rs` (`CARGO_CDYLIB_FILE_*`). No
+separate `cargo build --target wasm32-wasip1` is needed. The `test-cpp` /
+`test-cpp-2` wasm (plus their `module.yaml` / `records/`) are published by those
+modules' `build.rs` under `target/<profile>/modules/` and read by path.
 
-All three integration tests run green from a clean build:
-`call_polly_from_engine`, `call_test_rust_wasm_from_engine`, and the
-C++-into-wasm `call_test_cpp_2_from_engine_with_struct` (multi-module
-`--call`). None is `#[ignore]`d — the earlier arora-cli tokio-runtime issue
-on multi-module calls was fixed by reusing the caller's runtime.
+Both integration tests run green from a clean build:
+`call_test_rust_wasm_from_engine` and the C++-into-wasm
+`call_test_cpp_2_from_engine_with_struct` (multi-module `--call`). Neither is
+`#[ignore]`d — the earlier arora-cli tokio-runtime issue on multi-module calls
+was fixed by reusing the caller's runtime.
 
 ### Browser target
 
@@ -133,11 +135,12 @@ flowchart TD
     nao[arora-nao libnao.so i686-musl]
   end
 
-  subgraph wasm_guests [wasm32-wasip1 guests]
+  subgraph wasm_guests [wasm guests wasip1 and wasip2]
     tcpp[test-cpp.wasm]
     tcpp2[test-cpp-2.wasm]
-    btn[behavior-tree-nodes]
+    btn[test-behavior-tree-nodes]
     trw[test-rust-wasm]
+    trc["test-rust-component (wasip2)"]
   end
 
   subgraph tests [arora-integration-tests]
@@ -189,11 +192,12 @@ flowchart TD
   itest -->|bindep bin| cli
   itest -->|bindep cdylib wasm| btn
   itest -->|bindep cdylib wasm| trw
-  itest -->|bindep cdylib host| polly
+  itest -->|bindep cdylib wasm-p2| trc
   itest -->|dev-dep, build.rs publishes| tcpp
   itest -->|dev-dep, build.rs publishes| tcpp2
   itest -.->|runtime lookup target/modules| tcpp
   itest -.->|runtime lookup target/modules| tcpp2
+  itest -.->|runtime lookup target/modules| polly
 ```
 
 Solid arrows are `cargo` dependency edges (regular, build-, or
@@ -208,19 +212,30 @@ dashes→underscores, e.g. `CARGO_STATICLIB_FILE_ARORA_BUFFERS_arora_buffers`)
 and `CARGO_<KIND>_DIR_<DEP>` — *not* the bare `CARGO_<KIND>_FILE_<DEP>`. Read
 the suffixed or `DIR` form (see `modules/test-cpp/build.rs`).
 
-What the integration test crate actually drags in:
+What the integration test crate actually declares as artifact dependencies
+(bindeps):
 
-- **`behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip1"` — forces a wasm32-wasip1 build of the Rust behavior-tree-nodes module and exposes the path to its `.wasm`.
-- **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip1"` — same, for the Rust test module.
-- **`arora-cli`** as `artifact = "bin"` and **`polly`** as
-  `artifact = "cdylib"` (host) — `tests/build.rs` forwards their paths to the
-  test binary, which reads `ARORA_CLI_BIN` and `CARGO_CDYLIB_FILE_POLLY_polly`.
+- **`arora-cli`** as `artifact = "bin"` — `tests/build.rs` forwards its path as
+  `ARORA_CLI_BIN`.
+- **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip1"` —
+  forces a wasm32-wasip1 build and exposes its `.wasm` as
+  `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`; the
+  `call_test_rust_wasm_from_engine` test loads it.
+- **`test-rust-component`** as `artifact = "cdylib", target = "wasm32-wasip2"` —
+  a wasip2 **component** guest.
+- **`test-behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip1"` —
+  built so `cargo fmt --check` / clippy have its generated sources and the
+  artifact is available; the control nodes it once shipped are now native in
+  `arora-behavior-tree`, so nothing in the default build depends on it at
+  runtime.
 - **`test-cpp`** and **`test-cpp-2`** are plain **dev-dependencies** (not
   bindeps): listing them makes `cargo test` run their `build.rs`, which builds
   the wasm via cmake and publishes `*.wasm` / `module.yaml` / `records/` under
   `target/<profile>/modules/`. The C++ integration test reads those published
   files by path. (They are excluded from `default-members`, so a bare
-  `cargo build` does not build them — `cargo test` does.)
+  `cargo build` does not build them — `cargo test` does.) `polly` is not a
+  dependency of this crate — it is a workspace member built in its own right and
+  staged under `target/<profile>/modules/`.
 
 ### Build flags & options
 

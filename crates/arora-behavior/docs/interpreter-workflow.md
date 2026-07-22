@@ -100,14 +100,14 @@ flowchart TB
     direction TB
     read["read inputs from store<br/>(golden time, sensor values,<br/>remote writes, own prior outputs)"]
     compute["walk the lowered behavior<br/>(tree nodes / graph nodes)"]
-    call["optionally call modules<br/>via ctx.call_bridge"]
+    invoke["optionally call modules<br/>via ctx.call_bridge"]
     write["write intent / outputs<br/>back to store"]
-    read --> compute --> call --> write
+    read --> compute --> invoke --> write
   end
   store --> read
   write --> store
-  call --> engine["Engine (modules)"]
-  engine --> call
+  invoke --> engine["Engine (modules)"]
+  engine --> invoke
 ```
 
 Concretely, `tick` gets `ctx.store` and `ctx.call_bridge` ([`lib.rs:57-62`](../src/lib.rs#L57-L62)). It reads whatever slots it cares about, does its work (which may include calling engine modules through the call bridge), and writes its results back into the store with `store.write(...)`. Those writes are coalesced by the runtime after the tick and fanned out to the HAL and to any subscribed bridges ([`arora/src/runtime.rs:427-475`](../../arora/src/runtime.rs#L427-L475)). Per-key precedence within a frame is **behavior ▸ bridge ▸ HAL ▸ previous frame** — the behavior's writes win ([`arora/src/runtime.rs:486-492`](../../arora/src/runtime.rs#L486-L492)).
