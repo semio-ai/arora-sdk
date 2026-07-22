@@ -16,11 +16,11 @@ use arora_types::value::{Type, Value};
 use futures::stream::unfold;
 use futures::Stream;
 use log::warn;
+#[cfg(feature = "zenoh")]
+use ros2_client::QosProfile;
 use ros2_client::{Name, Node, Publisher};
 #[cfg(feature = "dds")]
 use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
-#[cfg(feature = "zenoh")]
-use ros2_client::QosProfile;
 use tokio::time::{sleep, Duration};
 
 use crate::msg_types::{
