@@ -5717,7 +5717,7 @@ dependencies = [
 [[package]]
 name = "ros2-client"
 version = "0.10.0"
-source = "git+https://github.com/semio-ai/ros2-client?branch=master#c044dc105689e2692e620b2072284e452c618f89"
+source = "git+https://github.com/semio-ai/ros2-client?branch=feat%2Fstd-msgs-scalar-hashes#aac27652a892ae2d5e2be21b14f1188acc26254e"
 dependencies = [
  "async-channel",
  "bstr",
