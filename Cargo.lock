@@ -282,7 +282,7 @@ dependencies = [
  "futures",
  "log",
  "rand 0.9.4",
- "ros2-client",
+ "ros2-client 0.10.0",
  "serde",
  "serde_json",
  "tokio",
@@ -421,7 +421,7 @@ dependencies = [
  "log",
  "rand 0.9.4",
  "reqwest",
- "ros2-client",
+ "ros2-client 0.8.2",
  "rustls 0.23.41",
  "serde",
  "serde_json",
@@ -1372,6 +1372,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1621,6 +1630,21 @@ dependencies = [
  "byteorder",
  "log",
  "paste",
+ "serde",
+ "serde_repr",
+ "static_assertions",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "cdr-encoding"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cd0f96619d833f771daff46c9755785f6fdea3d9ff67ec329f52f66936b0d6d"
+dependencies = [
+ "byteorder",
+ "log",
+ "pastey",
  "serde",
  "serde_repr",
  "static_assertions",
@@ -4417,6 +4441,7 @@ dependencies = [
  "cfg-if 1.0.4",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -4687,6 +4712,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "pem"
@@ -5675,12 +5706,46 @@ dependencies = [
  "mio-extras",
  "nom 8.0.0",
  "pin-utils",
- "rustdds",
+ "rustdds 0.11.8",
  "serde",
  "serde_repr",
  "tracing",
  "uuid",
  "widestring",
+]
+
+[[package]]
+name = "ros2-client"
+version = "0.10.0"
+source = "git+https://github.com/semio-ai/ros2-client?branch=master#c044dc105689e2692e620b2072284e452c618f89"
+dependencies = [
+ "async-channel",
+ "bstr",
+ "byteorder",
+ "bytes",
+ "cdr-encoding 0.10.2",
+ "cdr-encoding-size",
+ "chrono",
+ "clap 4.6.1",
+ "futures",
+ "itertools 0.14.0",
+ "lazy_static",
+ "libc",
+ "log",
+ "mio 0.6.23",
+ "mio-extras",
+ "nom 8.0.0",
+ "pin-utils",
+ "rustdds 0.13.1",
+ "serde",
+ "serde_repr",
+ "sha2 0.10.9",
+ "tracing",
+ "uuid",
+ "widestring",
+ "xxhash-rust",
+ "zenoh",
+ "zenoh-ext",
 ]
 
 [[package]]
@@ -5744,7 +5809,7 @@ dependencies = [
  "bit-vec 0.8.0",
  "byteorder",
  "bytes",
- "cdr-encoding",
+ "cdr-encoding 0.10.2",
  "cdr-encoding-size",
  "chrono",
  "enumflags2",
@@ -5760,6 +5825,44 @@ dependencies = [
  "num-derive",
  "num-traits",
  "paste",
+ "pnet",
+ "pnet_sys",
+ "rand 0.9.4",
+ "serde",
+ "serde_repr",
+ "socket2 0.6.4",
+ "socketpair",
+ "speedy",
+ "static_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rustdds"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "679e56ae1ec6eb11214e965875e732ef5fd265e63d82200f4aa7cd7f43b1c1d5"
+dependencies = [
+ "bit-vec 0.8.0",
+ "byteorder",
+ "bytes",
+ "cdr-encoding 0.11.0",
+ "cdr-encoding-size",
+ "chrono",
+ "enumflags2",
+ "futures",
+ "if-addrs",
+ "io-extras",
+ "local-ip-address",
+ "log",
+ "md5",
+ "mio 0.6.23",
+ "mio 0.8.11",
+ "mio-extras",
+ "nix",
+ "num-derive",
+ "num-traits",
+ "pastey",
  "pnet",
  "pnet_sys",
  "rand 0.9.4",
@@ -9034,6 +9137,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
+name = "xxhash-rust"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
+
+[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9167,6 +9276,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serde_yaml",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "uhlc",
  "validated_struct",
@@ -9202,6 +9312,26 @@ dependencies = [
  "rand_chacha 0.3.1",
  "sha3",
  "zenoh-result",
+]
+
+[[package]]
+name = "zenoh-ext"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e4de171bff459816b1ca9e6657c4ae9783d2c1fc569e1721a380521425e897d"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "flume",
+ "futures",
+ "leb128",
+ "serde",
+ "tokio",
+ "tracing",
+ "uhlc",
+ "zenoh",
+ "zenoh-macros",
+ "zenoh-util",
 ]
 
 [[package]]

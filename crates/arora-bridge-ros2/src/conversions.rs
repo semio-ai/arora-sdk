@@ -16,7 +16,11 @@ use arora_types::value::{Type, Value};
 use futures::stream::unfold;
 use futures::Stream;
 use log::warn;
-use ros2_client::{Name, Node, Publisher, DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
+use ros2_client::{Name, Node, Publisher};
+#[cfg(feature = "dds")]
+use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
+#[cfg(feature = "zenoh")]
+use ros2_client::QosProfile;
 use tokio::time::{sleep, Duration};
 
 use crate::msg_types::{
@@ -121,9 +125,17 @@ fn setup_typed<M: MessageType>(
     let ros_name =
         Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
 
+    #[cfg(feature = "dds")]
     let topic = node
         .create_topic(&ros_name, M::message_type_name(), &DEFAULT_SUBSCRIPTION_QOS)
         .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
+    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
+    #[cfg(feature = "zenoh")]
+    let topic = node.create_topic(
+        &ros_name,
+        M::message_type_name(),
+        &QosProfile::subscription_default(),
+    );
 
     let subscription = node
         .create_subscription::<M>(&topic, None)
@@ -236,9 +248,17 @@ fn make_publisher<M: MessageType>(
 ) -> Result<Publisher<M>, String> {
     let ros_name =
         Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
+    #[cfg(feature = "dds")]
     let topic = node
         .create_topic(&ros_name, M::message_type_name(), &DEFAULT_PUBLISHER_QOS)
         .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
+    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
+    #[cfg(feature = "zenoh")]
+    let topic = node.create_topic(
+        &ros_name,
+        M::message_type_name(),
+        &QosProfile::publisher_default(),
+    );
     node.create_publisher::<M>(&topic, None)
         .map_err(|e| format!("failed to create publisher for {topic_name}: {e:?}"))
 }

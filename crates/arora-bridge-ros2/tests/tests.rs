@@ -10,6 +10,12 @@
 //! 0.11 has no unicast-peer/interface config); they run on Linux CI. To run
 //! locally, ensure an active multicast-capable interface and use `--ignored`.
 
+// These live tests drive the DDS backend's ros2-client API directly (QoS
+// statics, spinner, fallible topic creation), so they only build under `dds`.
+// The Zenoh backend's interop is validated out-of-process against `rmw_zenoh`
+// (see examples/zenoh_probe.rs and the interop runbook).
+#![cfg(feature = "dds")]
+
 use std::time::Duration;
 
 use arora_bridge::{Bridge, BridgeOp, Inbound};
