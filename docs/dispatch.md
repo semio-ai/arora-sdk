@@ -9,13 +9,14 @@ for the *why* behind broader choices see [`design_decisions.md`](design_decision
 
 ## Two ways to address a call
 
-The engine implements the [`CallBridge`](../crates/arora-engine/src/call.rs) trait,
-which exposes two distinct call paths. They differ in **what the target is
-addressed by** and **what is passed**:
+The engine implements the [`CallBridge`](../crates/arora-types/src/call.rs) trait
+(defined in `arora-types`, re-exported by the engine), which exposes two distinct
+call paths. They differ in **what the target is addressed by** and **what is
+passed**:
 
 | | **Direct** | **Indirect** |
 | --- | --- | --- |
-| Host method | `arora_call(module, Call)` | `arora_call_indirect(CallableId)` |
+| Host method | `arora_call(Call)` — module routed by `Call::module_id` | `arora_call_indirect(CallableId)` |
 | Guest import | `arora_dispatch(module_id, method_id, arg)` | `arora_dispatch_indirect(callable_id)` |
 | Target addressed by | `(module UUID, function UUID)` — u128 + u128 | `CallableId` — a `u64` |
 | Arguments | an args buffer is passed | **none** — the target captured its state at registration |
@@ -100,10 +101,15 @@ dispatch (both are runtime hash-map lookups). The real differences:
 ## How behavior trees use indirect dispatch
 
 The [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md) runtime is
-a host-side orchestrator: the control-flow logic (sequence, fallback, …) lives
-in the [`behavior-tree-nodes`](../modules/test-behavior-tree-nodes/readme.md) **guest
-module**, while the tree structure and blackboard variables live host-side. The
-two recurse into each other, and indirect dispatch is the bridge.
+a host-side orchestrator. The **basic control nodes** (sequence, fallback,
+parallel, succeed, fail, run) are ticked **natively in the host** — they never
+leave the process and never consult the engine. Only a node backed by a *module
+function* — a leaf, or a module-provided composite — dispatches into the engine.
+The tree structure and blackboard variables live host-side; **indirect dispatch**
+is what lets a module node tick its children back in the host. (The
+[`test-behavior-tree-nodes`](../modules/test-behavior-tree-nodes/readme.md) guest
+module still carries wasm implementations of the basic nodes, but it is test-only
+now — the runtime does not use it for control flow.)
 
 ### Setup: one callable per node
 
@@ -126,31 +132,38 @@ incidental rather than fundamental.
 sequenceDiagram
     participant Host as BT runtime (host)
     participant Eng as Engine
-    participant Guest as behavior-tree-nodes (guest)
+    participant Mod as module function
 
     Host->>Eng: arora_call_indirect(root TickId)
     Eng->>Host: invoke root TickFunction
-    Note over Host: composite node (e.g. sequence)
-    Host->>Eng: arora_call(module, "sequence", [children TickIds])
-    Eng->>Guest: run sequence control logic
-    Guest->>Eng: arora_dispatch_indirect(child TickId)
-    Eng->>Host: invoke child TickFunction
-    Note over Host: recurse (leaf calls arora_call; composite recurses)
-    Host-->>Guest: child Status
-    Guest-->>Host: sequence Status
+    Note over Host: builtin composite ticks its children directly
+    loop each child
+        Host->>Eng: arora_call_indirect(child TickId)
+        Eng->>Host: invoke child TickFunction
+        alt builtin composite
+            Note over Host: recurse in-process (no engine round-trip)
+        else leaf or module-provided node
+            Host->>Eng: arora_call(Call{module_id, id, args})
+            Eng->>Mod: run the function
+            Mod-->>Host: a module composite calls back arora_dispatch_indirect(grandchild)
+        end
+    end
+    Host-->>Eng: composite Status
 ```
 
 1. The host ticks the root with `arora_call_indirect(root TickId)`.
-2. For a composite node, the host calls the guest control function via
-   `arora_call(module, fn, …)`, **passing the children as an array of
-   `TickId`s** — the children are required to be the node's first parameter,
-   named `children` (UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`), typed
-   `Vec<TickId>` (see [`crates/arora-behavior-tree/readme.md`](../crates/arora-behavior-tree/readme.md)).
-3. The guest control logic decides when to tick a child and calls back
-   `arora_dispatch_indirect(child.callable_id)`
+2. A **builtin composite** (sequence, fallback, parallel, …) ticks each child
+   *directly* with `arora_call_indirect(child TickId)` — the control logic runs
+   in-process, with no dispatch into a guest ([`behavior_tree.rs` `tick_builtin`](../crates/arora-behavior-tree/src/behavior_tree.rs)).
+3. A **leaf** — or any node backed by a module function — dispatches into the
+   engine with `arora_call(Call { module_id, id, args })`: one `Call` whose
+   `module_id` routes it to the module.
+4. Recursion: a child that is itself a builtin composite repeats step 2
+   in-process; a **module-provided composite** receives its children as its first
+   parameter (named `children`, UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`,
+   typed `Vec<TickId>`) and calls back `arora_dispatch_indirect(child.callable_id)`
+   to re-enter the host and tick a child
    ([`modules/test-behavior-tree-nodes/src/lib.rs`](../modules/test-behavior-tree-nodes/src/lib.rs)).
-4. That re-enters the host, which ticks the child `TickFunction` — a leaf calls
-   its module function via `arora_call`; a composite recurses from step 2.
 
 The child's arguments are not passed by the guest — they live host-side in the
 blackboard variable graph and were bound at setup. The guest only knows an

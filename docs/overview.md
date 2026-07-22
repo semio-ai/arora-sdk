@@ -110,7 +110,7 @@ for other uses.
 - [Arora Types](../crates/arora-types/readme.md)
   defines the data formats used to communicate between modules,
   and to advertise them locally — including the shared
-  [`DataStore`](architecture.md#runtime-store-hal-bridge-behavior) vocabulary
+  [`DataStore`](architecture.md#runtime-an-arora-instance-and-its-seams) vocabulary
   (`Key`, `State`, `StateChange`).
 
 - [Arora Buffers](../crates/arora-buffers/readme.md),
@@ -135,14 +135,14 @@ for other uses.
   (browser-native `WebAssembly` instead of wasmtime).
 
 - The device runtime around the engine — see the
-  [runtime architecture](architecture.md#runtime-store-hal-bridge-behavior):
+  [runtime architecture](architecture.md#runtime-an-arora-instance-and-its-seams):
   - [`arora`](../crates/arora/readme.md): the opinionated runtime — the
-    step loop (`Runtime`), the launcher, and the headless device runner;
+    step loop (`Arora`), the launcher, and the headless device runner;
   - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
   - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
     boundary (Semio Studio via the studio-bridge connector);
-  - [`arora-behavior`](../crates/arora-behavior): the `Behavior` trait ticked
-    by the runtime each step;
+  - [`arora-behavior`](../crates/arora-behavior): the `BehaviorInterpreter`
+    trait ticked by the runtime each step;
   - [`arora-simple-data-store`](../crates/arora-simple-data-store): the
     reference `DataStore`, plus the `NamespacedStore` view for mutualizing
     one store across runtimes.
