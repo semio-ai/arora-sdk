@@ -19,7 +19,7 @@ log = "0.4"
 # ROS 2-over-Zenoh backend (rmw_zenoh compatible). The backend is chosen by this
 # crate's `dds` / `zenoh` features (see [features]); `jazzy` selects the ROS 2
 # distro wire format and is always on.
-ros2-client = { git = "https://github.com/semio-ai/ros2-client", branch = "feat/std-msgs-scalar-hashes", default-features = false, features = ["jazzy"] }
+ros2-client = { git = "https://github.com/semio-ai/ros2-client", branch = "master", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
