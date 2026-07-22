@@ -282,7 +282,7 @@ dependencies = [
  "futures",
  "log",
  "rand 0.9.4",
- "ros2-client 0.10.0",
+ "ros2-client-multi-rmw",
  "serde",
  "serde_json",
  "tokio",
@@ -421,7 +421,7 @@ dependencies = [
  "log",
  "rand 0.9.4",
  "reqwest",
- "ros2-client 0.8.2",
+ "ros2-client",
  "rustls 0.23.41",
  "serde",
  "serde_json",
@@ -5199,7 +5199,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -5715,9 +5715,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ros2-client"
+name = "ros2-client-multi-rmw"
 version = "0.10.0"
-source = "git+https://github.com/semio-ai/ros2-client?branch=master#f8861079cf1b36793972a02b3f1ef89d87dff7d9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f47619bfa11de20638db4075ddbc35d9da492d928346ae3d409bd414fda5dc7c"
 dependencies = [
  "async-channel",
  "bstr",
