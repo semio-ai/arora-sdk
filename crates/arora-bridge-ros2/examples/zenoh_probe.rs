@@ -39,9 +39,13 @@ async fn main() {
     let mut inbound = bridge.take_inbound();
 
     println!("probe: Ros2Bridge up over ZENOH  (namespace=/{namespace}, domain_id={domain_id})");
-    println!("probe: SUBSCRIBED (inputs):  /{namespace}/keys/face/mouth/open  /{namespace}/keys/enabled");
+    println!(
+        "probe: SUBSCRIBED (inputs):  /{namespace}/keys/face/mouth/open  /{namespace}/keys/enabled"
+    );
     println!("probe: PUBLISHING (outputs): /{namespace}/keys/battery/level (Float64)  /{namespace}/keys/status (String)");
-    println!("probe: ---- ready; drive me with the ros2 CLI (RMW_IMPLEMENTATION=rmw_zenoh_cpp) ----");
+    println!(
+        "probe: ---- ready; drive me with the ros2 CLI (RMW_IMPLEMENTATION=rmw_zenoh_cpp) ----"
+    );
 
     let mut ticker = tokio::time::interval(Duration::from_millis(500));
     let mut tick: f64 = 0.0;
