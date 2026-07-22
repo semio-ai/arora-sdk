@@ -4,6 +4,20 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-07-20
+
+### Breaking
+
+- Re-pinned to `arora-types` 2 / `arora-hal` 3 (their types are part of this
+  API); the optional `arora` dependency moves to 9.
+
+## [1.1.0] - 2026-07-12
+
+### Changed
+
+- Re-pinned the optional `arora` dependency to 8 (the breaking `with_module`
+  wave); no change to this crate's own surface.
+
 ## [1.0.1] - 2026-07-10
 
 ### Changed
