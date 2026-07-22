@@ -4,6 +4,9 @@
       "pattern": "^https://github.com/semio-ai/"
     },
     {
+      "pattern": "^https://github.com/vizij-ai/"
+    },
+    {
       "pattern": "^http://localhost"
     }
   ],
