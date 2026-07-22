@@ -701,6 +701,23 @@ mod tests {
     use crate::{configs::nao, JointStateConversion};
     use futures::FutureExt;
 
+    /// A DDS domain id that is unique across the tests in this binary, for
+    /// isolation. A plain random domain (the previous approach) collides when two
+    /// concurrently-running tests happen to draw the same value, letting one
+    /// test's messages leak into another's subscription. Instead, seed a single
+    /// process-wide counter once with a random base — so parallel `cargo test`
+    /// binaries and any locally-running ROS graph rarely overlap — then hand out
+    /// strictly-increasing ids, so no two tests here ever share a domain.
+    fn unique_test_domain() -> u16 {
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::sync::OnceLock;
+        static COUNTER: OnceLock<AtomicU16> = OnceLock::new();
+        let counter = COUNTER.get_or_init(|| AtomicU16::new(rand::random_range(1..=200)));
+        // Keep within ROS 2's usable domain-id range and never 0 (the default
+        // graph a local ROS install would use).
+        1 + (counter.fetch_add(1, Ordering::Relaxed) % 232)
+    }
+
     /// Drain everything the feed has already buffered, without blocking.
     fn drain(feed: &mut UpdatesStream) -> Vec<StateChange> {
         let mut out = Vec::new();
@@ -843,12 +860,11 @@ mod tests {
     )]
     async fn test_hal_updates_with_fake_ros() {
         use crate::get_now;
-        use rand::Rng;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
 
         // Use an isolated domain to avoid interacting with any locally-running ROS graph.
-        let domain_id: u16 = rand::rng().random_range(1..=200);
+        let domain_id: u16 = unique_test_domain();
 
         // Create a minimal config similar to NAO but with our isolated domain
         let config = ROS2RobotConfig {
@@ -983,12 +999,11 @@ mod tests {
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
     async fn test_hal_publish_via_write() {
-        use rand::Rng;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
 
         // Use an isolated domain to avoid interacting with any locally-running ROS graph.
-        let domain_id: u16 = rand::rng().random_range(1..=200);
+        let domain_id: u16 = unique_test_domain();
 
         // Create a config with a Publish-direction topic
         let config = ROS2RobotConfig {
@@ -1125,12 +1140,11 @@ mod tests {
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
     async fn test_hal_subscribe_string_topic() {
-        use rand::Rng;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
 
         // Use an isolated domain to avoid interacting with any locally-running ROS graph.
-        let domain_id: u16 = rand::rng().random_range(1..=200);
+        let domain_id: u16 = unique_test_domain();
 
         // Create a config with a Subscribe-direction String topic
         // field_mappings maps ROS field "data" to the Arora key "text"
@@ -1242,12 +1256,11 @@ mod tests {
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
     async fn test_hal_publish_string_via_write() {
-        use rand::Rng;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
 
         // Use an isolated domain to avoid interacting with any locally-running ROS graph.
-        let domain_id: u16 = rand::rng().random_range(1..=200);
+        let domain_id: u16 = unique_test_domain();
 
         // Create a config with a Publish-direction String topic
         // field_mappings maps ROS field "data" to the Arora key "text"
@@ -1354,12 +1367,11 @@ mod tests {
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
     async fn test_hal_publish_string_via_try_send() {
-        use rand::Rng;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
 
         // Use an isolated domain to avoid interacting with any locally-running ROS graph.
-        let domain_id: u16 = rand::rng().random_range(1..=200);
+        let domain_id: u16 = unique_test_domain();
 
         // Create a config with a Publish-direction String topic
         // field_mappings maps ROS field "data" to the Arora key "text"
