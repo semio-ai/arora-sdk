@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
