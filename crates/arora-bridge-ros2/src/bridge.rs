@@ -169,8 +169,17 @@ fn build_node(namespace: &str, domain_id: u16) -> Result<Node, String> {
         .map_err(|e| format!("failed to create ROS 2 context: {e:?}"))?;
     let node_name = NodeName::new(&format!("/{namespace}"), "arora_bridge")
         .map_err(|e| format!("invalid node name: {e:?}"))?;
-    ctx.new_node(node_name, NodeOptions::new().enable_rosout(true))
-        .map_err(|e| format!("failed to create ROS 2 node: {e:?}"))
+    #[cfg(feature = "dds")]
+    {
+        ctx.new_node(node_name, NodeOptions::new().enable_rosout(true))
+            .map_err(|e| format!("failed to create ROS 2 node: {e:?}"))
+    }
+    // The Zenoh backend's `new_node` is infallible (returns `Node`, not a Result),
+    // and its `NodeOptions` has no rosout toggle.
+    #[cfg(feature = "zenoh")]
+    {
+        Ok(ctx.new_node(node_name, NodeOptions::new()))
+    }
 }
 
 /// The node task: owns the DDS node, drives input subscriptions into
@@ -195,8 +204,10 @@ async fn run_node(
         }
     };
 
-    // Spin DDS in the background so discovery, subscriptions, and publishers
-    // make progress.
+    // The DDS backend needs a background spinner so discovery, subscriptions,
+    // and publishers make progress; the Zenoh backend drives them on its own
+    // async session, so there is nothing to spin.
+    #[cfg(feature = "dds")]
     let spinner_task = match node.spinner() {
         Ok(spinner) => Some(tokio::spawn(spinner.spin())),
         Err(e) => {
@@ -204,6 +215,8 @@ async fn run_node(
             None
         }
     };
+    #[cfg(feature = "zenoh")]
+    let spinner_task: Option<tokio::task::JoinHandle<()>> = None;
 
     // Subscribe to every declared input key; each yields single-key state
     // changes we turn into `Update` commands.
