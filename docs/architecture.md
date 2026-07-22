@@ -10,7 +10,7 @@ For the *why* behind these choices, see
 arora-sdk/
 ├── crates/
 │   ├── arora                  the runtime: a synchronous step loop over four
-│   │                          seams (store, HAL, bridge, behavior) + launch API
+│   │                          seams (store, HAL, bridges, behavior) + launch API
 │   ├── arora-engine           the module engine: executors, dispatch,
 │   │                          host-defined modules (ModuleBuilder)
 │   ├── arora-types            value / type / record vocabulary, value_serde
@@ -95,37 +95,54 @@ graph TB
     mods -->|"runtime contract: arora-types Module + Call"| eng
 ```
 
-## Runtime: store, HAL, bridge, behavior
+## Runtime: an Arora instance — store, HAL, bridges, behavior
 
-The `arora` crate wraps the engine in a device runtime built around one
-blackboard with four seams. The store is the single shared state; everything
-else either feeds it or reads it, serialized as the steps of one loop
-(`arora::runtime::Runtime::step`): drain HAL and bridge updates into the
-store, tick the behavior against it, flush the merged changes back out to the
-remote and the hardware. `step()` is synchronous and non-blocking; the async
-bridge/HAL I/O lives in a separate futures-only pump, which is what lets the
-same loop run on a native thread or in a browser Web Worker.
+The `arora` crate wraps the engine in a device runtime: an `arora::Arora`
+instance built around one blackboard. Around that store sit four kinds of seam
+— the store itself, a HAL, **zero or more bridges**, and a behavior. The store
+is the single shared state and the only medium through which the seams reach one
+another: none of them talks to another directly; each only feeds the store or
+reads it. One loop (`arora::Arora::step`) serializes that traffic — drain the
+HAL and every bridge's inbound into the store, tick the behavior against it,
+then flush the merged changes back out to the hardware and to each remote that
+asked for them. `step()` is synchronous and non-blocking (it drives the seams
+through `try_recv` / `try_send`); each bridge and HAL owns whatever async I/O
+task it needs, so the same loop runs unchanged on a native thread or in a
+browser Web Worker.
 
 ```mermaid
 graph LR
     hw["Device hardware\n(sensors / actuators)"]
-    studio["Remote\n(Semio Studio)"]
+    studio["Remote · Semio Studio\n(Zenoh · studio-bridge)"]
+    peer["Remote · other client\n(WebSocket · ROS 2 · in-process)"]
 
-    subgraph runtime["arora::runtime::Runtime — one device"]
+    subgraph arora["An Arora instance — arora::Arora (one device)"]
         hal["HAL\n(arora-hal)"]
-        store[("DataStore\n(arora-types · arora-simple-data-store)")]
-        bridge["Bridge\n(arora-bridge)"]
-        behavior["Behavior\n(arora-behavior: behavior tree,\nnode graph, …) + engine calls"]
+        store[("DataStore — the one shared blackboard\n(arora-types · arora-simple-data-store)")]
+        behavior["BehaviorInterpreter\n(behavior tree · Vizij node graph · …)\nleaves call engine module functions"]
+        bridge0["Bridge · endpoint 0\n(arora-bridge-ws / -ros2 / studio)"]
+        bridge1["Bridge · endpoint 1"]
     end
 
-    hw <--> hal
-    hal -->|"1 · sensor updates"| store
-    bridge -->|"1 · commands / device info"| store
+    hw <-->|"actuation / sensing"| hal
+    hal -->|"1 · sensor readings"| store
+    bridge0 -->|"1 · commands (via engine) · device info · data-requests"| store
+    bridge1 -->|"1 · …"| store
     behavior <-->|"2 · tick: read / write"| store
-    store -->|"3 · flush merged changes"| bridge
-    store -->|"3 · flush merged changes"| hal
-    bridge <--> studio
+    store -->|"3 · flush changes (per endpoint, while it asked)"| bridge0
+    store -->|"3 · …"| bridge1
+    store -->|"3 · flush changes (always)"| hal
+    bridge0 <--> studio
+    bridge1 <--> peer
 ```
+
+An Arora holds a *vector* of bridges — each an independent endpoint (a device
+can face Studio, a WebSocket client and a ROS 2 graph at once, or none at all).
+Inbound, every endpoint drains into the same store; outbound, a change reaches
+an endpoint only while that endpoint has asked for the affected keys (its
+`DataRequested` toggle), whereas the HAL is always written. The seams never
+address each other — bridge 0 and bridge 1, the behavior and the HAL all meet
+only in the store.
 
 Each seam is a trait, so embedders swap implementations without touching the
 loop:
@@ -133,16 +150,21 @@ loop:
 - **Store** — `arora_types::data::DataStore`; `SimpleDataStore` is the
   reference implementation. Clones share storage, and `NamespacedStore` gives
   a device-relative view into a shared backend: this is how one process (e.g.
-  Semio Studio) spawns many runtimes over one mutualized blackboard, each
-  under its own `<device>/` prefix (`Runtime::with_io_in`).
+  Semio Studio) spawns many instances over one mutualized blackboard, each
+  built with `Arora::builder().with_data_store(…)` over its own `<device>/`
+  prefix.
 - **HAL** — `arora_hal::Hal`, the device boundary. A robot HAL talks to
   hardware; a simulator or a renderer (e.g. a Vizij rig-instrumented face) is
   just another implementation.
-- **Bridge** — `arora_bridge::Bridge`, the remote boundary. The studio-bridge
-  Zenoh connector implements it for real devices; an in-process loopback can
-  implement it for embedded runtimes.
-- **Behavior** — `arora_behavior::Behavior`, the "what to do each step". The
-  behavior tree is one interpreter; a Vizij node graph is another.
+- **Bridges** — `arora_bridge::Bridge`, the remote boundary. An instance holds
+  a *vector* of them (`AroraBuilder::with_bridge` adds one), each a numbered
+  endpoint: the studio-bridge Zenoh connector for Studio, `arora-bridge-ws` for
+  a WebSocket client, `arora-bridge-ros2` for a ROS 2 graph, a `FakeBridge`
+  loopback for an embedded host. Outbound is gated per endpoint by its
+  `DataRequested` toggle, so a change is sent only to the endpoints that asked
+  for those keys.
+- **Behavior** — `arora_behavior::BehaviorInterpreter`, the "what to do each
+  step". The behavior tree is one interpreter; a Vizij node graph is another.
 
 ## Engine
 
