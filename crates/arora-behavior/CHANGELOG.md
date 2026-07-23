@@ -4,6 +4,15 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-07-23
+
+### Breaking
+
+- Renamed the "golden" concept to "built-in" (ARORA-59): the `golden` module is
+  now `built_in`, and `golden::is_golden` is now `built_in::is_built_in`. The
+  reserved keys and their wire names (`arora/time`, `arora/dt`, the `arora/`
+  prefix) are unchanged — only the Rust identifiers and prose changed.
+
 ## [5.0.0] - 2026-07-20
 
 ### Breaking

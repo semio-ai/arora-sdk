@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use arora_behavior::{golden, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
+use arora_behavior::{built_in, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
 use arora_hal::Hal;
@@ -128,14 +128,14 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// The golden clock: monotonic nanoseconds since the device started, advanced by
+/// The built-in clock: monotonic nanoseconds since the device started, advanced by
 /// each step's `dt`. Zero at build.
 #[derive(Default)]
 pub struct Clock {
     time_ns: u64,
 }
 
-/// The frame clock values a step publishes into the golden keys before anything
+/// The frame clock values a step publishes into the built-in keys before anything
 /// else runs.
 pub struct ClockValues {
     /// Monotonic nanoseconds since the device started, after this step's `dt`.
@@ -184,7 +184,7 @@ fn sweep_now(
     }
 }
 
-/// Phase 1a — advance the golden clock by `dt` and return this frame's clock
+/// Phase 1a — advance the built-in clock by `dt` and return this frame's clock
 /// values. The monotonic accumulator is exact integer nanoseconds (no float
 /// drift over a long run). `dt` is the elapsed time since the previous step,
 /// measured (or, for a preview, chosen) by the caller's driver.
@@ -199,7 +199,7 @@ fn tick_clock(clock: &mut Clock, dt: Duration) -> ClockValues {
     }
 }
 
-/// Phase 1b — publish the frame clock into the golden keys, before anything
+/// Phase 1b — publish the frame clock into the built-in keys, before anything
 /// else touches the store: the whole frame (sensor applies, command handling,
 /// the behavior tick) sees this frame's time. The writes go into the store's
 /// change feed like any other, and travel outbound like any other — a remote
@@ -208,10 +208,10 @@ fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), Runti
     let mut change = StateChange::new();
     change
         .set
-        .insert(Key::from(golden::DT), Some(Value::U64(clock.dt_ns)));
+        .insert(Key::from(built_in::DT), Some(Value::U64(clock.dt_ns)));
     change
         .set
-        .insert(Key::from(golden::TIME), Some(Value::U64(clock.time_ns)));
+        .insert(Key::from(built_in::TIME), Some(Value::U64(clock.time_ns)));
     store
         .write(change)
         .map_err(|e| RuntimeError::Store(e.to_string()))
@@ -484,7 +484,7 @@ impl Arora {
     /// only.
     ///
     /// Writers apply in a fixed order within the step: the clock first — under
-    /// the golden keys, so the whole frame reads this frame's time — then the
+    /// the built-in keys, so the whole frame reads this frame's time — then the
     /// HAL's readings, then the bridges' events (commands dispatch and reply
     /// here), then the behavior. Per-key precedence is therefore total:
     /// **behavior ▸ bridge ▸ HAL ▸ previous frame**, and within each, arrival
@@ -496,12 +496,12 @@ impl Arora {
     /// the web) — or chosen freely by a driver with its own idea of time, e.g. a
     /// faster-than-realtime preview stepping a fixed virtual `dt`. It advances
     /// the monotonic clock, published (with the accumulated time) under the
-    /// golden keys before anything else runs, so behaviors read timing from the
+    /// built-in keys before anything else runs, so behaviors read timing from the
     /// store rather than as a tick argument.
     pub fn step(&mut self, dt: Duration) -> Result<(), RuntimeError> {
         // 0. sweep — pick up everything the seams hold right now.
         sweep_now(&mut self.hal_feed, &mut self.inbound, &mut self.pending);
-        // 1. time — golden keys first: the whole frame sees this clock.
+        // 1. time — built-in keys first: the whole frame sees this clock.
         let clock = tick_clock(&mut self.clock, dt);
         publish_clock(&*self.store, &clock)?;
         // 2. HAL readings — oldest first; per key, the newest wins.
@@ -518,7 +518,7 @@ impl Arora {
         )?;
         // 4. behavior — the frame's last writer: its intent wins, and it saw
         //    what it overrode. The cell borrow spans exactly this phase; a
-        //    tick-time golden edit through the engine finds it held and fails
+        //    tick-time built-in edit through the engine finds it held and fails
         //    cleanly rather than racing the tick.
         tick_behavior(
             &mut self.interpreter.borrow_mut(),
@@ -1259,39 +1259,39 @@ mod tests {
         );
     }
 
-    /// The device publishes the frame clock into the golden keys *before* it
+    /// The device publishes the frame clock into the built-in keys *before* it
     /// ticks, so a behavior reads `dt`/time from the store. Nanoseconds
     /// accumulate into `time`; `dt` reflects only the latest step.
     #[test]
-    fn golden_clock_is_published_to_the_store_each_step() {
+    fn built_in_clock_is_published_to_the_store_each_step() {
         // The clone shares the same storage, so the test reads what the device
         // writes.
         let store = SimpleDataStore::new();
         let mut arora = build_in(Box::new(FakeBridge::new()), Box::new(store.clone()));
 
-        // Before any step the golden keys are unset.
-        assert_eq!(store.read(&[Key::from(golden::DT)]), vec![None]);
-        assert_eq!(store.read(&[Key::from(golden::TIME)]), vec![None]);
+        // Before any step the built-in keys are unset.
+        assert_eq!(store.read(&[Key::from(built_in::DT)]), vec![None]);
+        assert_eq!(store.read(&[Key::from(built_in::TIME)]), vec![None]);
 
         // Step at 16 ms: dt and elapsed time both read 16_000_000 ns.
         arora.step(Duration::from_millis(16)).expect("step");
         assert_eq!(
-            store.read(&[Key::from(golden::DT)]),
+            store.read(&[Key::from(built_in::DT)]),
             vec![Some(Value::U64(16_000_000))]
         );
         assert_eq!(
-            store.read(&[Key::from(golden::TIME)]),
+            store.read(&[Key::from(built_in::TIME)]),
             vec![Some(Value::U64(16_000_000))]
         );
 
         // Step at 4 ms: dt resets to the latest delta, time accumulates to 20 ms.
         arora.step(Duration::from_millis(4)).expect("step");
         assert_eq!(
-            store.read(&[Key::from(golden::DT)]),
+            store.read(&[Key::from(built_in::DT)]),
             vec![Some(Value::U64(4_000_000))]
         );
         assert_eq!(
-            store.read(&[Key::from(golden::TIME)]),
+            store.read(&[Key::from(built_in::TIME)]),
             vec![Some(Value::U64(20_000_000))]
         );
     }
@@ -1423,7 +1423,7 @@ mod tests {
             "the ordinary behavior write should be forwarded outbound, got {forwarded_keys:?}"
         );
         assert!(
-            forwarded_keys.iter().any(|k| k.as_str() == golden::DT),
+            forwarded_keys.iter().any(|k| k.as_str() == built_in::DT),
             "the clock travels outbound like any other state, got {forwarded_keys:?}"
         );
     }

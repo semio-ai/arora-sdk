@@ -16,7 +16,7 @@ arora-sdk/
 │   ├── arora-types            value / type / record vocabulary, value_serde
 │   ├── arora-buffers          wire buffers + serde straight to the wire
 │   ├── arora-behavior         BehaviorInterpreter seam, interpreter module
-│   │                          ids (load/edit), golden store keys (time/dt)
+│   │                          ids (load/edit), built-in store keys (time/dt)
 │   ├── arora-behavior-tree         behavior-tree interpreter
 │   ├── arora-behavior-tree-types       BT primitive types
 │   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records

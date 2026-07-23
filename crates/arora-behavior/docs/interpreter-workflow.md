@@ -18,8 +18,8 @@ flowchart LR
     store[("Data store<br/>(blackboard)")]
     interp["BehaviorInterpreter<br/>(the executor)"]
   end
-  runtime -- "publishes golden clock<br/>then ticks" --> interp
-  interp -- "reads inputs / golden time" --> store
+  runtime -- "publishes built-in clock<br/>then ticks" --> interp
+  interp -- "reads inputs / built-in time" --> store
   interp -- "writes intent / outputs" --> store
   interp -- "calls modules (optional)" --> engine["Engine<br/>(modules)"]
 ```
@@ -52,11 +52,11 @@ sequenceDiagram
     Note over Interp: stash graph, mark dirty (store-less)
 
     loop every step
-        Runtime->>Store: publish golden clock (arora/time, arora/dt)
+        Runtime->>Store: publish built-in clock (arora/time, arora/dt)
         Runtime->>Store: apply sensors, then bridge/caller events
         Runtime->>Interp: tick(ctx = {store, call_bridge})
         Note over Interp: if dirty, re-lower graph against ctx.store
-        Interp->>Store: read inputs (incl. golden time)
+        Interp->>Store: read inputs (incl. built-in time)
         Interp->>Store: write intent / outputs
         Interp-->>Runtime: Running (keep) | Done (drop)
         opt graph edit arrives between ticks
@@ -76,18 +76,18 @@ The runtime injects one interpreter at build time; if none is supplied it defaul
 
 ### 2. Time update — the store↔behavior relationship
 
-There is **no separate "time update" method**. Timing is *data*, not a tick argument. Before it ticks any behavior, the runtime writes the frame's clock into the store under two reserved **golden keys** ([`golden.rs`](../src/golden.rs)):
+There is **no separate "time update" method**. Timing is *data*, not a tick argument. Before it ticks any behavior, the runtime writes the frame's clock into the store under two reserved **built-in keys** ([`built_in.rs`](../src/built_in.rs)):
 
 | Key | Meaning | Constant |
 |---|---|---|
-| `arora/time` | monotonic nanoseconds since start (`U64`) | [`golden.rs:26`](../src/golden.rs#L26) |
-| `arora/dt` | nanoseconds elapsed since the previous step (`U64`) | [`golden.rs:31`](../src/golden.rs#L31) |
+| `arora/time` | monotonic nanoseconds since start (`U64`) | [`built_in.rs:26`](../src/built_in.rs#L26) |
+| `arora/dt` | nanoseconds elapsed since the previous step (`U64`) | [`built_in.rs:31`](../src/built_in.rs#L31) |
 
-An interpreter that needs elapsed time reads `arora/dt` from `ctx.store` like any other slot ([`lib.rs:33-35`](../src/lib.rs#L33-L35), [`golden.rs:1-16`](../src/golden.rs#L1-L16)). The runtime publishes them in phase 1 of the step, before sensors, events, or the behavior touch the store ([`arora/src/runtime.rs:207-218`](../../arora/src/runtime.rs#L207-L218)).
+An interpreter that needs elapsed time reads `arora/dt` from `ctx.store` like any other slot ([`lib.rs:33-35`](../src/lib.rs#L33-L35), [`built_in.rs:1-16`](../src/built_in.rs#L1-L16)). The runtime publishes them in phase 1 of the step, before sensors, events, or the behavior touch the store ([`arora/src/runtime.rs:207-218`](../../arora/src/runtime.rs#L207-L218)).
 
 More broadly, **the store is the entire relationship between the runtime and a behavior**. The store is path-keyed and uses interior mutability (`&self` for both read and write), so one store can be shared by the HAL, the bridge, and the interpreter at once ([`arora-types/src/data/store.rs:1-14`](../../arora-types/src/data/store.rs#L1-L14)) — which is why `BehaviorContext.store` is a shared `&dyn DataStore` yet the interpreter can still write to it.
 
-**Interpreters have wide freedom in how they use the store.** The crate imposes no convention beyond the reserved `arora/` golden namespace: a node graph can treat links as dataflow over store slots; a behavior tree binds its authored variables to store slots by name and drives the call bridge instead ([`graph.rs:12-16`](../src/graph.rs#L12-L16)). For a concrete, worked example of one interpreter's store discipline — the behavior tree's `VariableCell` (tree-local scratch vs. a `Slot` handle into the store, bound once at build under the "Direct" name==key convention) — see **[arora-behavior-tree/docs/nodes.md](../../arora-behavior-tree/docs/nodes.md)**.
+**Interpreters have wide freedom in how they use the store.** The crate imposes no convention beyond the reserved `arora/` built-in namespace: a node graph can treat links as dataflow over store slots; a behavior tree binds its authored variables to store slots by name and drives the call bridge instead ([`graph.rs:12-16`](../src/graph.rs#L12-L16)). For a concrete, worked example of one interpreter's store discipline — the behavior tree's `VariableCell` (tree-local scratch vs. a `Slot` handle into the store, bound once at build under the "Direct" name==key convention) — see **[arora-behavior-tree/docs/nodes.md](../../arora-behavior-tree/docs/nodes.md)**.
 
 ### 3. Ticks — how data flows
 
@@ -98,7 +98,7 @@ flowchart TB
   store[("Data store")]
   subgraph frame["one tick"]
     direction TB
-    read["read inputs from store<br/>(golden time, sensor values,<br/>remote writes, own prior outputs)"]
+    read["read inputs from store<br/>(built-in time, sensor values,<br/>remote writes, own prior outputs)"]
     compute["walk the lowered behavior<br/>(tree nodes / graph nodes)"]
     invoke["optionally call modules<br/>via ctx.call_bridge"]
     write["write intent / outputs<br/>back to store"]
@@ -149,7 +149,7 @@ The fully worked reference implementation of all three methods — including the
 |---|---|
 | `BehaviorInterpreter` trait, `BehaviorContext`, `BehaviorStatus` | [`crates/arora-behavior/src/lib.rs`](../src/lib.rs) |
 | Shared graph model, `GraphDiff`, `Graph::apply` | [`crates/arora-behavior/src/graph.rs`](../src/graph.rs) |
-| Golden clock keys (timing as data) | [`crates/arora-behavior/src/golden.rs`](../src/golden.rs) |
+| Built-in clock keys (timing as data) | [`crates/arora-behavior/src/built_in.rs`](../src/built_in.rs) |
 | Interpreter-as-module (`LOAD`/`EDIT` ids, codecs) | [`crates/arora-behavior/src/interpreter_module.rs`](../src/interpreter_module.rs) |
 | The `DataStore` / `Slot` an interpreter reads & writes | [`crates/arora-types/src/data/store.rs`](../../arora-types/src/data/store.rs) |
 | The step loop that ticks the interpreter | [`crates/arora/src/runtime.rs`](../../arora/src/runtime.rs) |

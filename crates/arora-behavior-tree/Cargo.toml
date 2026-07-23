@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree"
-version = "6.0.0"
+version = "6.1.0"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "MIT"
@@ -10,7 +10,7 @@ path = "src/behavior_tree.rs"
 
 [dependencies]
 arora-buffers = { path = "../arora-buffers", version = "2" }
-arora-behavior = { path = "../arora-behavior", version = "5" }
+arora-behavior = { path = "../arora-behavior", version = "6" }
 arora-types = { path = "../arora-types", version = "2" }
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "1" }
 lazy_static = "1"

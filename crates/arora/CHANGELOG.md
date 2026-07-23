@@ -4,6 +4,14 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.2.0] - 2026-07-23
+
+### Changed
+
+- Adopt `arora-behavior` 6's "golden"→"built-in" rename (ARORA-59): the runtime
+  publishes the built-in clock keys via `arora_behavior::built_in`. Public API
+  and the `arora/time`/`arora/dt` wire keys are unchanged.
+
 ## [9.1.0] - 2026-07-21
 
 ### Changed

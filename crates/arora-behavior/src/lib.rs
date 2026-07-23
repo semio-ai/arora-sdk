@@ -31,13 +31,13 @@
 //! tree drives the caller.
 //!
 //! Timing is not a tick argument. The runtime publishes the frame's clock into
-//! the store under the [`golden`] keys before it ticks, so an interpreter that
+//! the store under the [`built_in`] keys before it ticks, so an interpreter that
 //! needs `dt` or elapsed time reads it from the store like any other slot.
 
 use arora_types::call::CallBridge;
 use arora_types::data::DataStore;
 
-pub mod golden;
+pub mod built_in;
 pub mod graph;
 pub mod interpreter_module;
 

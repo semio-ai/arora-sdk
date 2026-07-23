@@ -146,9 +146,9 @@ pub struct Arora {
     // as a remote's.
     pub(crate) caller_tx: mpsc::UnboundedSender<Inbound>,
     pub(crate) store_changes: Subscription,
-    // The golden clock: monotonic nanoseconds since start, advanced by each
-    // step's `dt`. Published into the store's golden keys each step, before any
-    // behavior ticks; the flush phase filters the golden namespace out of what
+    // The built-in clock: monotonic nanoseconds since start, advanced by each
+    // step's `dt`. Published into the store's built-in keys each step, before any
+    // behavior ticks; the flush phase filters the built-in namespace out of what
     // it forwards outbound.
     pub(crate) clock: Clock,
 }
@@ -667,8 +667,8 @@ mod module_loading_tests {
         while let Some(change) = changes.try_recv() {
             for key in change.set.keys() {
                 assert!(
-                    key.path == arora_behavior::golden::TIME
-                        || key.path == arora_behavior::golden::DT,
+                    key.path == arora_behavior::built_in::TIME
+                        || key.path == arora_behavior::built_in::DT,
                     "unexpected store write: {}",
                     key.path
                 );

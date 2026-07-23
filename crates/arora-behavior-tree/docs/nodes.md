@@ -7,7 +7,7 @@ The interpreter type is [`BehaviorTreeInterpreter`](../src/behavior.rs#L35-L46).
 | Interpreter lifecycle | Behavior tree |
 |---|---|
 | load | `load` / `load_graph` / `load_groot`, or first `apply` onto an empty graph ([`behavior.rs:72-110`](../src/behavior.rs#L72-L110)) |
-| time update | no hook — nodes read the golden `arora/dt` from the store like any slot |
+| time update | no hook — nodes read the built-in `arora/dt` from the store like any slot |
 | tick | run-once-per-tick: re-lower if dirty, then run the tree to `Success`/`Failure`; idle → `Running` ([`behavior.rs:119-151`](../src/behavior.rs#L119-L151)) |
 | graph update | `apply(GraphDiff)` sets `dirty`; the next tick re-lowers against the live store ([`behavior.rs:123-139`](../src/behavior.rs#L123-L139)) |
 
