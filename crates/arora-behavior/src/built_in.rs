@@ -1,4 +1,4 @@
-//! Golden keys: well-known store slots the runtime maintains for every behavior.
+//! Built-in keys: well-known store slots the runtime maintains for every behavior.
 //!
 //! The runtime writes these at the start of each step — before it ticks any
 //! behavior — so a behavior reads the current frame's timing straight from the
@@ -15,7 +15,7 @@
 //! derives what it needs from it — a step rate, jitter, a stalled loop. A
 //! remote that does not want them filters them on its side.
 
-/// Reserved namespace for runtime-maintained golden keys. The runtime owns it;
+/// Reserved namespace for runtime-maintained built-in keys. The runtime owns it;
 /// behaviors must not write their own keys under this prefix.
 pub const PREFIX: &str = "arora/";
 
@@ -30,9 +30,9 @@ pub const TIME: &str = "arora/time";
 /// behaviors that pace themselves (an animation module, a graph time node).
 pub const DT: &str = "arora/dt";
 
-/// Whether `key` is a reserved golden key — runtime-owned, so a behavior must
+/// Whether `key` is a reserved built-in key — runtime-owned, so a behavior must
 /// not write it, and a consumer that wants to skip the clock can recognize it.
-pub fn is_golden(key: &str) -> bool {
+pub fn is_built_in(key: &str) -> bool {
     key.starts_with(PREFIX)
 }
 
@@ -41,18 +41,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn golden_keys_share_the_reserved_prefix() {
-        assert!(is_golden(TIME));
-        assert!(is_golden(DT));
+    fn built_in_keys_share_the_reserved_prefix() {
+        assert!(is_built_in(TIME));
+        assert!(is_built_in(DT));
         assert!(TIME.starts_with(PREFIX));
         assert!(DT.starts_with(PREFIX));
     }
 
     #[test]
-    fn ordinary_keys_are_not_golden() {
-        assert!(!is_golden("sensor/x"));
-        assert!(!is_golden("actuator/y"));
+    fn ordinary_keys_are_not_built_in() {
+        assert!(!is_built_in("sensor/x"));
+        assert!(!is_built_in("actuator/y"));
         // A key that merely mentions "arora" later in the path is not reserved.
-        assert!(!is_golden("device/arora/time"));
+        assert!(!is_built_in("device/arora/time"));
     }
 }

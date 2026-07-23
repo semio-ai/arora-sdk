@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::channel::oneshot;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use arora_behavior::golden;
+use arora_behavior::built_in;
 use arora_types::data::{Key, Subscription};
 use arora_types::value::Value;
 
@@ -181,7 +181,7 @@ impl State {
             changes.push(change);
         }
         for change in changes {
-            if let Some(Some(Value::U64(dt_ns))) = change.set.get(&Key::from(golden::DT)) {
+            if let Some(Some(Value::U64(dt_ns))) = change.set.get(&Key::from(built_in::DT)) {
                 self.loop_hz = (*dt_ns > 0).then(|| 1e9 / *dt_ns as f32);
             }
         }

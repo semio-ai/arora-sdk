@@ -30,11 +30,11 @@ walks the interpreter lifecycle — load, time update, ticks, graph updates, and
 [`arora-behavior-tree`](../arora-behavior-tree/docs/nodes.md) and the whole
 device loop in [`arora`](../arora/docs/runtime-and-data-flow.md).
 
-## Golden keys: timing is data, not an argument
+## Built-in keys: timing is data, not an argument
 
 The runtime keeps time out of the `tick` signature. Before it ticks any
 behavior, it publishes the frame's clock into the shared store under two
-reserved **golden keys** a behavior can rely on:
+reserved **built-in keys** a behavior can rely on:
 
 | Key | Value | Meaning |
 |---|---|---|
@@ -44,9 +44,9 @@ reserved **golden keys** a behavior can rely on:
 A behavior that paces itself — an animation module, a graph time node — reads
 them from `ctx.store` like any other slot, so timing composes as ordinary data
 rather than a special tick parameter. They live under the reserved `arora/`
-namespace (`golden::is_golden`) and stay local to the device: the runtime never
+namespace (`built_in::is_built_in`) and stay local to the device: the runtime never
 forwards them out over the bridge. The names and the predicate are in the
-[`golden`](src/golden.rs) module.
+[`built_in`](src/built_in.rs) module.
 
 Part of the device runtime interfaces, with
 [`arora-hal`](https://docs.rs/arora-hal) and

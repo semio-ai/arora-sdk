@@ -4,6 +4,13 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-07-23
+
+### Changed
+
+- Re-pinned to `arora-behavior` 6 (the "golden"→"built-in" rename, ARORA-59). No
+  API change here; the built-in clock keys this crate reads are unchanged.
+
 ## [6.0.0] - 2026-07-20
 
 ### Breaking

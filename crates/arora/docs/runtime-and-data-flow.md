@@ -82,7 +82,7 @@ sequenceDiagram
 |---|---|---|---|
 | 0 sweep | `sweep_now` | non-blocking drain of HAL + inbound into `pending` (the whole inbound drain for a direct-`step` driver) | [`runtime.rs:174`](../src/runtime.rs#L174) |
 | 1a clock | `tick_clock` | advance the monotonic nanosecond accumulator by `dt` | [`runtime.rs:191`](../src/runtime.rs#L191) |
-| 1b publish | `publish_clock` | write golden `arora/time` + `arora/dt` into the store **first**, so the whole frame sees this frame's time | [`runtime.rs:207`](../src/runtime.rs#L207) |
+| 1b publish | `publish_clock` | write built-in `arora/time` + `arora/dt` into the store **first**, so the whole frame sees this frame's time | [`runtime.rs:207`](../src/runtime.rs#L207) |
 | 2 sensors | `apply_sensors` | apply HAL readings oldest-first; return the coalesced set so phase 6a can subtract them | [`runtime.rs:224`](../src/runtime.rs#L224) |
 | 3 events | `apply_events` / `apply_command` | apply bridge/caller events after sensors; `Get`→read, `Update`→write, `Call`→engine, then reply on the command channel | [`runtime.rs:250`](../src/runtime.rs#L250) / [`:282`](../src/runtime.rs#L282) |
 | 4 behavior | `tick_behavior` | tick the one interpreter **last** (its writes win); `Done`→drop, `Err`→standing `behavior_error`, device keeps running | [`runtime.rs:391`](../src/runtime.rs#L391) |
@@ -116,4 +116,4 @@ The loop code is identical on both targets; only the metronome's sleep and the e
 | Data store / `Slot` / `StateChange` | [`crates/arora-types/src/data/store.rs`](../../arora-types/src/data/store.rs) |
 | Behavior interpreter (the thing ticked in phase 4) | [`crates/arora-behavior/docs/interpreter-workflow.md`](../../arora-behavior/docs/interpreter-workflow.md) |
 
-Tests that exercise the loop end-to-end: `run_paces_steps_at_the_period` ([`runtime.rs:891`](../src/runtime.rs#L891)), `golden_clock_is_published_to_the_store_each_step` ([`runtime.rs:1265`](../src/runtime.rs#L1265)), the outbound fan-out trio ([`runtime.rs:1337-1430`](../src/runtime.rs#L1337-L1430)), `a_failing_behavior_is_state_not_a_stop` ([`lib.rs:615-678`](../src/lib.rs#L615-L678)), and the metronome cadence tests that also run in a headless browser ([`runtime.rs:601-717`](../src/runtime.rs#L601-L717)).
+Tests that exercise the loop end-to-end: `run_paces_steps_at_the_period` ([`runtime.rs:891`](../src/runtime.rs#L891)), `built_in_clock_is_published_to_the_store_each_step` ([`runtime.rs:1265`](../src/runtime.rs#L1265)), the outbound fan-out trio ([`runtime.rs:1337-1430`](../src/runtime.rs#L1337-L1430)), `a_failing_behavior_is_state_not_a_stop` ([`lib.rs:615-678`](../src/lib.rs#L615-L678)), and the metronome cadence tests that also run in a headless browser ([`runtime.rs:601-717`](../src/runtime.rs#L601-L717)).

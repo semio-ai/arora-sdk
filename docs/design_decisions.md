@@ -385,7 +385,7 @@ boundaries, is the isolation mechanism.
 `arora` exposes a single way to assemble a runtime: a builder over the four
 seams (store, HAL, bridge, behavior), producing a synchronous `step(dt)` the
 host paces — natively from `run`'s metronome, in the browser from
-`requestAnimationFrame`. Each step publishes the golden clock keys
+`requestAnimationFrame`. Each step publishes the built-in clock keys
 (`arora/time`, `arora/dt`) to the store before the behavior ticks, so time is
 data like everything else.
 
@@ -402,6 +402,6 @@ agnostic behind the `BehaviorInterpreter` trait.
 ### Predetermined keys are conventions, not wiring
 
 Behaviors read their inputs from store paths and write outputs back; the
-golden keys are reserved names, not hard-wired node plumbing. Anything a node
+built-in keys are reserved names, not hard-wired node plumbing. Anything a node
 would be "predetermined" to read can be overridden by linking a different
 producer onto the same path.
