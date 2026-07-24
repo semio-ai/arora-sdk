@@ -67,7 +67,7 @@ impl CdrWriter {
     }
 
     fn align(&mut self, n: usize) {
-        while self.body.len() % n != 0 {
+        while !self.body.len().is_multiple_of(n) {
             self.body.push(0);
         }
     }
@@ -169,7 +169,7 @@ impl<'a> CdrReader<'a> {
     }
 
     fn align(&mut self, n: usize) {
-        while self.pos % n != 0 {
+        while !self.pos.is_multiple_of(n) {
             self.pos += 1;
         }
     }
