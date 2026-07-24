@@ -424,7 +424,10 @@ mod test {
 
   #[test]
   fn select_empty_path_returns_the_value() {
-    assert_eq!(Key::new("").select(&Value::F32(1.5)).unwrap(), Value::F32(1.5));
+    assert_eq!(
+      Key::new("").select(&Value::F32(1.5)).unwrap(),
+      Value::F32(1.5)
+    );
   }
 
   #[test]
@@ -442,7 +445,9 @@ mod test {
       Value::F32(2.0)
     );
     // A field id that is not present errors.
-    assert!(sel(&[&Uuid::from_u128(0x999).to_string()]).select(&v).is_err());
+    assert!(sel(&[&Uuid::from_u128(0x999).to_string()])
+      .select(&v)
+      .is_err());
   }
 
   #[test]
