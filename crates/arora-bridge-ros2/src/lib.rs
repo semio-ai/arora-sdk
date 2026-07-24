@@ -37,6 +37,7 @@
 //! ```
 
 pub mod bridge;
+pub mod cdr;
 pub mod conversions;
 pub mod msg_types;
 
