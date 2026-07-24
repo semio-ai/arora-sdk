@@ -134,8 +134,8 @@ fn arora_id_attr(attrs: &[Attribute]) -> syn::Result<Option<(String, Span)>> {
 
 /// Validate a UUID literal at macro time and emit it as a `Uuid::from_bytes`.
 fn uuid_bytes_expr(literal: &str, span: Span) -> syn::Result<TokenStream2> {
-  let uuid =
-    uuid::Uuid::parse_str(literal).map_err(|e| syn::Error::new(span, format!("invalid uuid: {e}")))?;
+  let uuid = uuid::Uuid::parse_str(literal)
+    .map_err(|e| syn::Error::new(span, format!("invalid uuid: {e}")))?;
   let bytes = uuid.as_bytes().iter().map(|b| quote! { #b });
   Ok(quote! { arora_types::Uuid::from_bytes([ #(#bytes),* ]) })
 }

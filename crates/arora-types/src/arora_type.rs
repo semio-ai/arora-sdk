@@ -47,9 +47,9 @@ pub trait AroraType {
 mod tests {
   // Brings both the trait (for `Outer::arora_type()`) and the derive macro
   // (for `#[derive(AroraType)]`) into scope — same name, different namespaces.
-  use crate::AroraType;
   use crate::module::low::TypeRef;
   use crate::ty::low::TypeKind;
+  use crate::AroraType;
   use crate::{gen_uuid_from_str, ty};
 
   #[derive(AroraType)]

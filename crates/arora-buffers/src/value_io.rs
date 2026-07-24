@@ -203,10 +203,10 @@ impl ValueReader for BuffersValueReader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arora_types::value_serde::{read_value, write_value, TypeRegistry};
     use arora_types::module::low::TypeRef;
     use arora_types::ty::{self, low};
     use arora_types::value::{Structure, StructureField, Value};
+    use arora_types::value_serde::{read_value, write_value, TypeRegistry};
 
     fn id(n: u128) -> Uuid {
         Uuid::from_u128(n)
