@@ -77,10 +77,15 @@ pub trait ValueReader {
   fn read_f64(&mut self) -> Result<f64>;
   fn read_string(&mut self) -> Result<String>;
 
-  /// Read a structure header: its id and field count.
-  fn read_struct_header(&mut self) -> Result<(Uuid, usize)>;
-  /// Read the next field id.
-  fn read_field_id(&mut self) -> Result<Uuid>;
+  /// Enter a structure the walk expects to carry `expected_id` and
+  /// `field_count` fields. A self-describing format reads its inline header and
+  /// validates it against these; a positional format (CDR) takes the shape from
+  /// the type and reads nothing here.
+  fn enter_struct(&mut self, expected_id: Uuid, field_count: usize) -> Result<()>;
+  /// Enter the next field, which the walk expects to carry `expected_id`. A
+  /// self-describing format reads and validates its inline field id; a
+  /// positional format reads nothing.
+  fn enter_field(&mut self, expected_id: Uuid) -> Result<()>;
 }
 
 /// Serialize `value` against `ty` into `writer`. Errors if `value` does not
@@ -160,24 +165,12 @@ fn read_structure<R: ValueReader>(
   registry: &TypeRegistry,
   reader: &mut R,
 ) -> Result<Value> {
-  let (got_id, count) = reader.read_struct_header()?;
-  if got_id != id {
-    return err(format!(
-      "structure id {got_id} does not match expected type id {id}"
-    ));
-  }
-  if count != structure.fields.len() {
-    return err(format!(
-      "structure declares {count} fields, type expects {}",
-      structure.fields.len()
-    ));
-  }
-  let mut fields = Vec::with_capacity(count);
+  // The type drives the shape; the reader validates (self-describing) or takes
+  // it as given (positional). Field ids come from the type, not the wire.
+  reader.enter_struct(id, structure.fields.len())?;
+  let mut fields = Vec::with_capacity(structure.fields.len());
   for (field_id, field) in &structure.fields {
-    let got = reader.read_field_id()?;
-    if got != *field_id {
-      return err(format!("field id {got} does not match expected {field_id}"));
-    }
+    reader.enter_field(*field_id)?;
     fields.push(StructureField {
       id: *field_id,
       value: Box::new(read_by_ref(&field.type_ref, registry, reader)?),
