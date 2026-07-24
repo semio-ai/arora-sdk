@@ -1,21 +1,25 @@
 //! Serde over [`Value`]: any `Serialize`/`Deserialize` type converts to and
-//! from an arora [`Value`], no type declaration or code generation involved —
-//! the [`serde_json::to_value`]-style bridge, with `Value` as the data model.
+//! from an arora [`Value`], no code generation involved — the
+//! [`serde_json::to_value`]-style bridge, with `Value` as the data model.
 //!
-//! - **structs** map to [`Structure`] — the type and field ids derive from
-//!   their names via [`gen_uuid_from_str`]. The names are not stored:
-//!   deserialization matches the stored ids against the hashes of the
-//!   candidate field names serde provides, so the one-way hash round-trips;
-//! - **enums** map to [`Enumeration`] — same scheme for the variant ids;
-//! - **maps** (dynamic string keys, no declaration to hash against) map to
-//!   [`KeyValue`], which carries the names;
-//! - **sequences and tuples** map to [`Value::ArrayValue`], primitives to
-//!   their `Value` twins, `Option` to [`Value::Option`], unit to
-//!   [`Value::Unit`].
+//! It runs in two modes:
 //!
-//! [`to_value`]/[`from_value`] are the entry points. The bridge is host-side
-//! convenience: the module ABI's declared type specs (code generation) are a
-//! separate concern and unaffected.
+//! - **un-seeded** ([`to_value`]/[`from_value`]) — no type is supplied, so
+//!   struct/enum ids are derived by hashing field, type and variant names via
+//!   [`gen_uuid_from_str`]. The names are not stored; deserialization matches
+//!   the stored ids against the hashes of the candidate names serde provides.
+//! - **seeded** ([`to_value_seeded`]/[`from_value_seeded`]) — a declared
+//!   [`low::Type`] is threaded through the (de)serializer, so struct ids come
+//!   from the *type* rather than from names. serde supplies the structure; the
+//!   type supplies the ids. The result is a [`Value`] carrying the type's
+//!   declared ids, and such a value reads back the same way — which the
+//!   un-seeded reader cannot, as it only recognises name-hash ids.
+//!
+//! Maps map to [`KeyValue`] (they carry their keys by name), sequences and
+//! tuples to [`Value::ArrayValue`], primitives to their `Value` twins, `Option`
+//! to [`Value::Option`], unit to [`Value::Unit`]. Only structs are affected by
+//! the seed; enums and sequences are still name-hashed / untyped (seeded enum
+//! and array support extends the same seams).
 
 use std::collections::HashMap;
 
@@ -29,21 +33,96 @@ use uuid::Uuid;
 use super::Error;
 use crate::gen_uuid_from_str;
 use crate::keyvalue::{KeyValue, KeyValueField};
+use crate::module::low::TypeRef;
+use crate::ty::{self, low, TypeRegistry};
 use crate::value::{Enumeration, Structure, StructureField, Value};
 
-/// Convert any `Serialize` type into a [`Value`].
+/// Convert any `Serialize` type into a [`Value`], deriving ids from names.
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
-  value.serialize(ValueSerializer)
+  value.serialize(ValueSerializer { seed: None })
 }
 
-/// Convert a [`Value`] back into any `Deserialize` type.
+/// Convert a [`Value`] back into any `Deserialize` type, matching name hashes.
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
-  T::deserialize(ValueDeserializer(value))
+  T::deserialize(ValueDeserializer { value, seed: None })
+}
+
+/// Convert a `Serialize` type into a [`Value`] whose struct ids are `ty`'s
+/// declared ids (resolving nested types through `registry`).
+pub fn to_value_seeded<T: Serialize + ?Sized>(
+  value: &T,
+  ty: &low::Type,
+  registry: &TypeRegistry,
+) -> Result<Value, Error> {
+  value.serialize(ValueSerializer {
+    seed: Some(Seed { ty, registry }),
+  })
+}
+
+/// Read a [`Value`] carrying `ty`'s declared ids back into a `Deserialize` type.
+pub fn from_value_seeded<T: DeserializeOwned>(
+  value: Value,
+  ty: &low::Type,
+  registry: &TypeRegistry,
+) -> Result<T, Error> {
+  T::deserialize(ValueDeserializer {
+    value,
+    seed: Some(Seed { ty, registry }),
+  })
+}
+
+// ---- the type seed ---------------------------------------------------------
+
+/// A declared type threaded through (de)serialization so a struct's ids come
+/// from the type instead of from hashed names.
+#[derive(Clone, Copy)]
+struct Seed<'a> {
+  ty: &'a low::Type,
+  registry: &'a TypeRegistry,
+}
+
+impl<'a> Seed<'a> {
+  /// This seed's type as a structure, if it is one.
+  fn as_structure(&self) -> Option<&'a low::Structure> {
+    match &self.ty.kind {
+      low::TypeKind::Structure(structure) => Some(structure),
+      _ => None,
+    }
+  }
+
+  /// The seed for a struct field of type `type_ref`: a nested user-defined type
+  /// resolves to its [`low::Type`]; well-known primitives (and, for now,
+  /// arrays/maps) carry no seed.
+  fn child(&self, type_ref: &TypeRef) -> Option<Seed<'a>> {
+    match type_ref {
+      TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {
+        self.registry.get(id).map(|ty| Seed {
+          ty,
+          registry: self.registry,
+        })
+      }
+      _ => None,
+    }
+  }
+}
+
+/// Find a declared field by name, returning its id and definition.
+fn declared_field<'a>(
+  structure: &'a low::Structure,
+  name: &str,
+) -> Option<(Uuid, &'a low::StructureField)> {
+  structure
+    .fields
+    .iter()
+    .find(|(_, field)| field.name == name)
+    .map(|(id, field)| (*id, field))
 }
 
 // ---- serialization ---------------------------------------------------------
 
-struct ValueSerializer;
+struct ValueSerializer<'a> {
+  seed: Option<Seed<'a>>,
+}
 
 fn structure_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
   Value::Structure(Structure {
@@ -87,7 +166,7 @@ fn enumeration_from(type_name: &str, variant: &str, value: Value) -> Value {
   })
 }
 
-impl ser::Serializer for ValueSerializer {
+impl<'a> ser::Serializer for ValueSerializer<'a> {
   type Ok = Value;
   type Error = Error;
   type SerializeSeq = SeqSerializer;
@@ -95,7 +174,7 @@ impl ser::Serializer for ValueSerializer {
   type SerializeTupleStruct = SeqSerializer;
   type SerializeTupleVariant = VariantSeqSerializer;
   type SerializeMap = MapSerializer;
-  type SerializeStruct = StructSerializer;
+  type SerializeStruct = StructSerializer<'a>;
   type SerializeStructVariant = VariantStructSerializer;
 
   fn serialize_bool(self, v: bool) -> Result<Value, Error> {
@@ -144,8 +223,9 @@ impl ser::Serializer for ValueSerializer {
     Ok(Value::Option(None))
   }
   fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<Value, Error> {
+    // An `Option<T>` is transparent: the inner value keeps this seed.
     Ok(Value::Option(Some(Box::new(
-      value.serialize(ValueSerializer)?,
+      value.serialize(ValueSerializer { seed: self.seed })?,
     ))))
   }
   fn serialize_unit(self) -> Result<Value, Error> {
@@ -167,7 +247,8 @@ impl ser::Serializer for ValueSerializer {
     _name: &'static str,
     value: &T,
   ) -> Result<Value, Error> {
-    value.serialize(ValueSerializer)
+    // A newtype struct is transparent: the inner value keeps this seed.
+    value.serialize(ValueSerializer { seed: self.seed })
   }
   fn serialize_newtype_variant<T: Serialize + ?Sized>(
     self,
@@ -179,7 +260,7 @@ impl ser::Serializer for ValueSerializer {
     Ok(enumeration_from(
       name,
       variant,
-      value.serialize(ValueSerializer)?,
+      value.serialize(ValueSerializer { seed: None })?,
     ))
   }
   fn serialize_seq(self, len: Option<usize>) -> Result<SeqSerializer, Error> {
@@ -212,8 +293,9 @@ impl ser::Serializer for ValueSerializer {
       fields: Vec::new(),
     })
   }
-  fn serialize_struct(self, name: &'static str, len: usize) -> Result<StructSerializer, Error> {
+  fn serialize_struct(self, name: &'static str, len: usize) -> Result<StructSerializer<'a>, Error> {
     Ok(StructSerializer {
+      seed: self.seed,
       type_name: name,
       fields: Vec::with_capacity(len),
     })
@@ -241,7 +323,9 @@ impl ser::SerializeSeq for SeqSerializer {
   type Ok = Value;
   type Error = Error;
   fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
-    self.items.push(value.serialize(ValueSerializer)?);
+    self
+      .items
+      .push(value.serialize(ValueSerializer { seed: None })?);
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
@@ -281,7 +365,9 @@ impl ser::SerializeTupleVariant for VariantSeqSerializer {
   type Ok = Value;
   type Error = Error;
   fn serialize_field<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
-    self.items.push(value.serialize(ValueSerializer)?);
+    self
+      .items
+      .push(value.serialize(ValueSerializer { seed: None })?);
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
@@ -302,7 +388,7 @@ impl ser::SerializeMap for MapSerializer {
   type Ok = Value;
   type Error = Error;
   fn serialize_key<T: Serialize + ?Sized>(&mut self, key: &T) -> Result<(), Error> {
-    match key.serialize(ValueSerializer)? {
+    match key.serialize(ValueSerializer { seed: None })? {
       Value::String(name) => {
         self.key = Some(name);
         Ok(())
@@ -317,7 +403,9 @@ impl ser::SerializeMap for MapSerializer {
       .key
       .take()
       .ok_or_else(|| ser::Error::custom("map value without a key"))?;
-    self.fields.push((key, value.serialize(ValueSerializer)?));
+    self
+      .fields
+      .push((key, value.serialize(ValueSerializer { seed: None })?));
     Ok(())
   }
   fn end(mut self) -> Result<Value, Error> {
@@ -329,12 +417,13 @@ impl ser::SerializeMap for MapSerializer {
   }
 }
 
-struct StructSerializer {
+struct StructSerializer<'a> {
+  seed: Option<Seed<'a>>,
   type_name: &'static str,
   fields: Vec<(String, Value)>,
 }
 
-impl ser::SerializeStruct for StructSerializer {
+impl ser::SerializeStruct for StructSerializer<'_> {
   type Ok = Value;
   type Error = Error;
   fn serialize_field<T: Serialize + ?Sized>(
@@ -342,16 +431,47 @@ impl ser::SerializeStruct for StructSerializer {
     key: &'static str,
     value: &T,
   ) -> Result<(), Error> {
-    self
-      .fields
-      .push((key.to_string(), value.serialize(ValueSerializer)?));
+    // When seeded, this field's value is itself seeded with its declared type,
+    // so a nested structure carries the nested type's ids too.
+    let child = self.seed.and_then(|seed| {
+      let (_, field) = declared_field(seed.as_structure()?, key)?;
+      seed.child(&field.type_ref)
+    });
+    self.fields.push((
+      key.to_string(),
+      value.serialize(ValueSerializer { seed: child })?,
+    ));
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    Ok(structure_from(
-      gen_uuid_from_str(self.type_name),
-      self.fields,
-    ))
+    match self.seed {
+      Some(seed) => {
+        let structure = seed.as_structure().ok_or_else(|| {
+          ser::Error::custom(format!("seeded type {} is not a structure", seed.ty.name))
+        })?;
+        let mut fields = Vec::with_capacity(self.fields.len());
+        for (name, value) in self.fields {
+          let (id, _) = declared_field(structure, &name).ok_or_else(|| {
+            ser::Error::custom(format!(
+              "field `{name}` is not declared in type {}",
+              seed.ty.name
+            ))
+          })?;
+          fields.push(StructureField {
+            id,
+            value: Box::new(value),
+          });
+        }
+        Ok(Value::Structure(Structure {
+          id: seed.ty.id,
+          fields,
+        }))
+      }
+      None => Ok(structure_from(
+        gen_uuid_from_str(self.type_name),
+        self.fields,
+      )),
+    }
   }
 }
 
@@ -369,9 +489,10 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
     key: &'static str,
     value: &T,
   ) -> Result<(), Error> {
-    self
-      .fields
-      .push((key.to_string(), value.serialize(ValueSerializer)?));
+    self.fields.push((
+      key.to_string(),
+      value.serialize(ValueSerializer { seed: None })?,
+    ));
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
@@ -382,13 +503,16 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
 
 // ---- deserialization -------------------------------------------------------
 
-struct ValueDeserializer(Value);
+struct ValueDeserializer<'a> {
+  value: Value,
+  seed: Option<Seed<'a>>,
+}
 
-impl<'de> de::Deserializer<'de> for ValueDeserializer {
+impl<'de> de::Deserializer<'de> for ValueDeserializer<'_> {
   type Error = Error;
 
   fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-    match self.0 {
+    match self.value {
       Value::Unit => visitor.visit_unit(),
       Value::Boolean(v) => visitor.visit_bool(v),
       Value::U8(v) => visitor.visit_u8(v),
@@ -403,7 +527,10 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
       Value::F64(v) => visitor.visit_f64(v),
       Value::String(v) => visitor.visit_string(v),
       Value::Option(None) => visitor.visit_none(),
-      Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer(*v)),
+      Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer {
+        value: *v,
+        seed: self.seed,
+      }),
       Value::ArrayValue(items) => visit_seq(items, visitor),
       Value::ArrayBoolean(items) => {
         visit_seq(items.into_iter().map(Value::Boolean).collect(), visitor)
@@ -433,10 +560,16 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
   }
 
   fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-    match self.0 {
+    match self.value {
       Value::Option(None) | Value::Unit => visitor.visit_none(),
-      Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer(*v)),
-      other => visitor.visit_some(ValueDeserializer(other)),
+      Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer {
+        value: *v,
+        seed: self.seed,
+      }),
+      other => visitor.visit_some(ValueDeserializer {
+        value: other,
+        seed: self.seed,
+      }),
     }
   }
 
@@ -446,7 +579,7 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     variants: &'static [&'static str],
     visitor: V,
   ) -> Result<V::Value, Error> {
-    match self.0 {
+    match self.value {
       Value::Enumeration(e) => {
         let variant = variants
           .iter()
@@ -476,6 +609,7 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     _name: &'static str,
     visitor: V,
   ) -> Result<V::Value, Error> {
+    // Transparent: `self` keeps carrying its seed into the inner value.
     visitor.visit_newtype_struct(self)
   }
 
@@ -485,8 +619,18 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     fields: &'static [&'static str],
     visitor: V,
   ) -> Result<V::Value, Error> {
-    match self.0 {
-      Value::Structure(structure) => visit_structure(structure, fields, visitor),
+    match self.value {
+      Value::Structure(structure) => {
+        match self
+          .seed
+          .and_then(|seed| seed.as_structure().map(|declared| (seed, declared)))
+        {
+          // Seeded: resolve each stored field id to its declared name and type.
+          Some((seed, declared)) => visit_structure_seeded(structure, seed, declared, visitor),
+          // Un-seeded: resolve ids by hashing the candidate names serde provides.
+          None => visit_structure(structure, fields, visitor),
+        }
+      }
       // A KeyValue carries its names directly; accept it for a struct too.
       Value::KeyValue(kv) => visit_keyvalue(kv, visitor),
       other => Err(de::Error::custom(format!(
@@ -531,6 +675,28 @@ fn visit_structure<'de, V: Visitor<'de>>(
   })
 }
 
+/// Drive a visitor over a [`Structure`] using the seed type: each stored field
+/// id resolves to its declared name (and its value to that field's seed).
+/// Fields whose id is not declared are skipped, like unknown fields elsewhere.
+fn visit_structure_seeded<'de, 'a, V: Visitor<'de>>(
+  structure: Structure,
+  seed: Seed<'a>,
+  declared: &'a low::Structure,
+  visitor: V,
+) -> Result<V::Value, Error> {
+  let mut named = Vec::with_capacity(structure.fields.len());
+  for field in structure.fields {
+    if let Some(declared_field) = declared.fields.get(&field.id) {
+      let child = seed.child(&declared_field.type_ref);
+      named.push((declared_field.name.clone(), *field.value, child));
+    }
+  }
+  visitor.visit_map(SeededStructDeserializer {
+    iter: named.into_iter(),
+    value: None,
+  })
+}
+
 fn visit_keyvalue<'de, V: Visitor<'de>>(kv: KeyValue, visitor: V) -> Result<V::Value, Error> {
   let fields: HashMap<String, Option<Box<Value>>> = kv
     .fields
@@ -554,7 +720,9 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
     seed: T,
   ) -> Result<Option<T::Value>, Error> {
     match self.iter.next() {
-      Some(value) => seed.deserialize(ValueDeserializer(value)).map(Some),
+      Some(value) => seed
+        .deserialize(ValueDeserializer { value, seed: None })
+        .map(Some),
       None => Ok(None),
     }
   }
@@ -587,7 +755,7 @@ impl<'de> MapAccess<'de> for MapDeserializer {
       .value
       .take()
       .ok_or_else(|| de::Error::custom("map value without a key"))?;
-    seed.deserialize(ValueDeserializer(value))
+    seed.deserialize(ValueDeserializer { value, seed: None })
   }
 }
 
@@ -612,7 +780,32 @@ impl<'de> MapAccess<'de> for StructDeserializer {
       .value
       .take()
       .ok_or_else(|| de::Error::custom("struct value without a field"))?;
-    seed.deserialize(ValueDeserializer(value))
+    seed.deserialize(ValueDeserializer { value, seed: None })
+  }
+}
+
+struct SeededStructDeserializer<'a> {
+  iter: std::vec::IntoIter<(String, Value, Option<Seed<'a>>)>,
+  value: Option<(Value, Option<Seed<'a>>)>,
+}
+
+impl<'de> MapAccess<'de> for SeededStructDeserializer<'_> {
+  type Error = Error;
+  fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Error> {
+    match self.iter.next() {
+      Some((name, value, child)) => {
+        self.value = Some((value, child));
+        seed.deserialize(name.into_deserializer()).map(Some)
+      }
+      None => Ok(None),
+    }
+  }
+  fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Error> {
+    let (value, child) = self
+      .value
+      .take()
+      .ok_or_else(|| de::Error::custom("struct value without a field"))?;
+    seed.deserialize(ValueDeserializer { value, seed: child })
   }
 }
 
@@ -648,7 +841,10 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
     }
   }
   fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, Error> {
-    seed.deserialize(ValueDeserializer(self.value))
+    seed.deserialize(ValueDeserializer {
+      value: self.value,
+      seed: None,
+    })
   }
   fn tuple_variant<V: Visitor<'de>>(self, _len: usize, visitor: V) -> Result<V::Value, Error> {
     match self.value {
@@ -769,5 +965,71 @@ mod tests {
       value: Box::new(Value::Unit),
     });
     assert!(from_value::<Shape>(value).is_err());
+  }
+
+  // ---- seeded: ids come from the type, not from names ----------------------
+
+  mod seeded {
+    use super::*;
+    use crate::AroraType;
+
+    const POINT_ID: &str = "0a0a0a0a-0000-4000-8000-000000000001";
+    const POINT_X_ID: &str = "0a0a0a0a-0000-4000-8000-000000000002";
+
+    #[derive(Serialize, Deserialize, AroraType, Debug, PartialEq)]
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000001")]
+    struct Point {
+      // An explicit id no name-hash would produce.
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")]
+      x: f64,
+      y: f64,
+    }
+
+    #[derive(Serialize, Deserialize, AroraType, Debug, PartialEq)]
+    struct Line {
+      from: Point,
+      to: Point,
+    }
+
+    #[test]
+    fn seeded_value_carries_the_types_declared_ids() {
+      let (ty, registry) = Point::arora_type_with_registry();
+      let value = to_value_seeded(&Point { x: 1.0, y: 2.0 }, &ty, &registry).unwrap();
+
+      let Value::Structure(s) = &value else {
+        panic!("expected a structure");
+      };
+      assert_eq!(s.id, crate::Uuid::parse_str(POINT_ID).unwrap());
+      // The x field's id is the explicit one, not hash("x").
+      assert_eq!(s.fields[0].id, crate::Uuid::parse_str(POINT_X_ID).unwrap());
+      assert_ne!(s.fields[0].id, gen_uuid_from_str("x"));
+    }
+
+    #[test]
+    fn plain_reader_cannot_read_seeded_ids_but_seeded_reader_can() {
+      let (ty, registry) = Point::arora_type_with_registry();
+      let point = Point { x: 1.0, y: 2.0 };
+      let value = to_value_seeded(&point, &ty, &registry).unwrap();
+
+      // The explicit x id is not hash("x"), so the plain (un-seeded) reader
+      // drops that field and fails.
+      assert!(from_value::<Point>(value.clone()).is_err());
+
+      // The seeded reader resolves ids through the type and round-trips.
+      let back: Point = from_value_seeded(value, &ty, &registry).unwrap();
+      assert_eq!(back, point);
+    }
+
+    #[test]
+    fn nested_structs_round_trip_seeded() {
+      let (ty, registry) = Line::arora_type_with_registry();
+      let line = Line {
+        from: Point { x: 0.0, y: 0.0 },
+        to: Point { x: 3.0, y: 4.0 },
+      };
+      let value = to_value_seeded(&line, &ty, &registry).unwrap();
+      let back: Line = from_value_seeded(value, &ty, &registry).unwrap();
+      assert_eq!(back, line);
+    }
   }
 }
