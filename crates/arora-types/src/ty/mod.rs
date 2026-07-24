@@ -8,6 +8,13 @@ use crate::ty::low::{Type, TypeKind};
 pub mod high;
 pub mod low;
 
+/// A set of [`low::Type`]s keyed by id, used to resolve the [`TypeRef`]s that
+/// name nested types during a type-directed traversal (validation, defaulting,
+/// (de)serialization). Well-known primitives are recognised by id and need no
+/// entry (see [`PRIMITIVE_TYPES`]); user-defined structures and enumerations
+/// must be present.
+pub type TypeRegistry = HashMap<Uuid, Type>;
+
 lazy_static::lazy_static! {
   pub static ref UNIT_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
   pub static ref BOOLEAN_ID: Uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
