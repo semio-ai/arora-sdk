@@ -354,10 +354,7 @@ mod tests {
                         vec![
                             f(
                                 0x221,
-                                st(
-                                    0x11,
-                                    vec![f(0x111, Value::I32(1)), f(0x112, Value::U32(2))],
-                                ),
+                                st(0x11, vec![f(0x111, Value::I32(1)), f(0x112, Value::U32(2))]),
                             ),
                             f(0x222, Value::String(frame.to_string())),
                         ],
