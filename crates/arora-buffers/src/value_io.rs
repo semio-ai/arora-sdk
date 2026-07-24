@@ -346,4 +346,55 @@ mod tests {
         let mut w = BuffersValueWriter::new();
         assert!(write_value(&outer, &registry, &bad, &mut w).is_err());
     }
+
+    // Proves the derive obsoletes the hand-authored `inner_type()`/`outer_type()`
+    // above: the same nested shape, its `ty::low::Type` and registry generated
+    // from the Rust definition, round-trips through the arora-buffers walk.
+    #[test]
+    fn a_derived_type_drives_the_buffers_walk() {
+        use arora_types::AroraType;
+
+        #[derive(arora_types::AroraType)]
+        struct Inner {
+            a: i32,
+            b: f32,
+        }
+        #[derive(arora_types::AroraType)]
+        struct Outer {
+            inner: Inner,
+            name: String,
+            x: f64,
+        }
+
+        let (ty, registry) = Outer::arora_type_with_registry();
+
+        // A Value shaped by the derived type — field ids are the derived ids (a
+        // hash of each field name), so no hand-authored Type is needed.
+        let g = arora_types::gen_uuid_from_str;
+        let sf = |field_id, value| StructureField {
+            id: field_id,
+            value: Box::new(value),
+        };
+        let value = Value::Structure(Structure {
+            id: Outer::arora_type_id(),
+            fields: vec![
+                sf(
+                    g("inner"),
+                    Value::Structure(Structure {
+                        id: Inner::arora_type_id(),
+                        fields: vec![sf(g("a"), Value::I32(7)), sf(g("b"), Value::F32(1.5))],
+                    }),
+                ),
+                sf(g("name"), Value::String("hi".to_string())),
+                sf(g("x"), Value::F64(2.0)),
+            ],
+        });
+
+        let mut w = BuffersValueWriter::new();
+        write_value(&ty, &registry, &value, &mut w).expect("write");
+        let buf = w.finish();
+        let mut r = BuffersValueReader::new(&buf);
+        let back = read_value(&ty, &registry, &mut r).expect("read");
+        assert_eq!(back, value);
+    }
 }

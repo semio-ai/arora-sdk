@@ -1,0 +1,19 @@
+[package]
+name = "arora-types-derive"
+version = "0.1.0"
+edition = "2021"
+description = "#[derive(AroraType)] — generate an arora ty::low::Type from a Rust type."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-engine"
+homepage = "https://github.com/semio-ai/arora-engine"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["derive"] }
+# Used at macro-expansion time to validate `#[arora(id = "…")]` literals and emit
+# their bytes; the generated code reaches Uuid through `arora_types::uuid`.
+uuid = "1"

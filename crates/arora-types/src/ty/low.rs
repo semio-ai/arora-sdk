@@ -24,6 +24,14 @@ pub struct Structure {
 }
 
 impl Structure {
+  /// Build a structure from `(field_id, field)` pairs, preserving their order
+  /// (the declared field order a type-directed walk relies on).
+  pub fn from_fields(fields: impl IntoIterator<Item = (Uuid, StructureField)>) -> Self {
+    Self {
+      fields: fields.into_iter().collect(),
+    }
+  }
+
   pub fn type_dependencies(&self) -> HashSet<Uuid> {
     let mut deps = HashSet::new();
     for value in self.fields.values() {
