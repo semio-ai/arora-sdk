@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,7 +20,7 @@ pub struct StructureField {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Structure {
-  pub fields: HashMap<Uuid, StructureField>,
+  pub fields: IndexMap<Uuid, StructureField>,
 }
 
 impl Structure {
@@ -41,7 +42,7 @@ pub struct EnumerationValue {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Enumeration {
-  pub values: HashMap<Uuid, EnumerationValue>,
+  pub values: IndexMap<Uuid, EnumerationValue>,
 }
 
 impl Enumeration {
@@ -124,9 +125,9 @@ pub fn default_value(ty: &Type) -> Value {
         .collect(),
     }),
     TypeKind::Enumeration(enumeration) => {
-      // HashMap iteration order is non-deterministic, so we pick the lowest UUID
-      // to keep default generation stable across runs.
-      if let Some((variant_id, variant)) = enumeration.values.iter().min_by_key(|(id, _)| *id) {
+      // Fields are ordered (IndexMap preserves declared order), so the default
+      // uses the first declared variant.
+      if let Some((variant_id, variant)) = enumeration.values.first() {
         Value::Enumeration(ValueEnumeration {
           id: ty.id,
           variant_id: *variant_id,
@@ -435,6 +436,7 @@ fn validation_error(message: &str) -> ConversionError {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use indexmap::IndexMap;
   use std::collections::HashMap;
 
   #[test]
@@ -447,7 +449,7 @@ mod tests {
       id: ty_id,
       description: "sample structure".to_string(),
       kind: TypeKind::Structure(Structure {
-        fields: HashMap::from([
+        fields: IndexMap::from([
           (
             field_bool_id,
             StructureField {
@@ -489,7 +491,7 @@ mod tests {
       id: Uuid::new_v4(),
       description: "structure with one bool".to_string(),
       kind: TypeKind::Structure(Structure {
-        fields: HashMap::from([(
+        fields: IndexMap::from([(
           Uuid::new_v4(),
           StructureField {
             name: "enabled".to_string(),
@@ -514,7 +516,7 @@ mod tests {
       id: Uuid::new_v4(),
       description: "structure with one bool".to_string(),
       kind: TypeKind::Structure(Structure {
-        fields: HashMap::from([(
+        fields: IndexMap::from([(
           field_id,
           StructureField {
             name: "enabled".to_string(),
