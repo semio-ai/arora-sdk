@@ -1,9 +1,12 @@
-//! (De)serialization to and from arora's [`Value`], in two layers:
+//! (De)serialization to and from arora's [`Value`], in three layers:
 //!
 //! - [`bridge`] — the serde bridge: any `Serialize`/`Deserialize` Rust type
 //!   converts to and from a [`Value`], the `serde_json::to_value`-style path
 //!   with `Value` as the data model. [`to_value`]/[`from_value`] are the entry
-//!   points.
+//!   points. Ids come from hashing names.
+//! - [`seeded`] — the bridge seeded with a declared [`low::Type`]: the same
+//!   Rust ⇄ `Value` conversion, but ids come from the *type* rather than from
+//!   names. [`to_value_seeded`]/[`from_value_seeded`] are the entry points.
 //! - [`walk`] — the type-directed walk: a runtime recursion over a
 //!   [`low::Type`] that drives a [`ValueWriter`]/[`ValueReader`] wire format
 //!   (arora-buffers, ROS 2 CDR) over a [`Value`]. [`write_value`]/[`read_value`]
@@ -19,9 +22,11 @@ use std::fmt::{self, Display};
 use serde::{de, ser};
 
 pub mod bridge;
+pub mod seeded;
 pub mod walk;
 
 pub use bridge::*;
+pub use seeded::*;
 pub use walk::*;
 
 /// A registry that resolves the nested types a [`walk`] traverses. Re-exported
