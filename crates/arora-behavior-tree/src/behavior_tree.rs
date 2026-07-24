@@ -638,6 +638,16 @@ pub(crate) fn setup_node_parameter_variable(
                 ),
             })?
             .to_owned(),
+        // A selection shares its source's cell; the `Key` path is applied on
+        // read (see `compute_expression`), not at bind time.
+        Expression::Select { source, .. } => setup_node_parameter_variable(
+            node_parameter,
+            source,
+            variables,
+            node_parameters_variables,
+            resolver,
+            names,
+        )?,
         Expression::Call(_) => VariableCell::local(),
     };
     node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
@@ -670,6 +680,17 @@ fn compute_expression(
             let variable =
                 get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
             variable.get_or_unit()
+        }
+        Expression::Select { source, path } => {
+            let value = compute_expression(
+                variables,
+                node_parameters_variables,
+                source,
+                caller,
+                node_parameter,
+            )?;
+            path.select(&value)
+                .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?
         }
     };
     Ok(value)
@@ -704,6 +725,18 @@ fn compute_uuid(
             let variable =
                 get_node_parameter_variable(other_node_parameter, node_parameters_variables)?;
             try_into_uuid(&variable.get_or_unit(), &None)
+        }
+        Expression::Select { source, path } => {
+            let value = compute_expression(
+                variables,
+                node_parameters_variables,
+                source,
+                caller,
+                node_parameter,
+            )?;
+            let selected = path.select(&value)
+                .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?;
+            try_into_uuid(&selected, &None)
         }
     }
 }

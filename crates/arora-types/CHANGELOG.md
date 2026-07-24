@@ -4,6 +4,17 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-07-24
+
+### Added
+
+- `Key::select(&self, value: &Value)` (ARORA-72): read a key's attribute
+  sub-path out of a value — a `Value::Structure` field by **id**, a
+  `Value::KeyValue` field by **key**, or an array by **index**. An empty
+  attribute path returns the value unchanged. Selection lives with `Key`/`Value`
+  so any consumer (the shared behavior model, Vizij) can project a value by a
+  key path without a registry at runtime.
+
 ## [2.0.0] - 2026-07-20
 
 ### Breaking

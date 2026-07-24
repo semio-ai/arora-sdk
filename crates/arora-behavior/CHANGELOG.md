@@ -4,6 +4,28 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-07-24
+
+### Breaking
+
+- `LinkSource` gains a **`Select { source, path }`** variant (ARORA-72): reading
+  a `Key` sub-path of another source's value is now a composable *operation over
+  any source* — `Select { source: Variable(id), .. }` selects into a variable,
+  nested `Select`s chain — rather than a field on one source kind. `Port(Port)`
+  is unchanged; the break is the added enum variant. The `path` segments are
+  resolved **ids** (a `Value::Structure` field id, or an array index), so an
+  interpreter reads a sub-path with no registry at runtime — names are resolved
+  to ids when a graph is built. Heavier "compute a value" operations (calls,
+  arithmetic) are nodes, not link sources.
+
+- Re-pinned to `arora-types` 2.1 for `Key::select`, which a `Select` source's
+  value is projected through at read time (selection lives with `Key`/`Value`).
+
+### Added
+
+- `source_port(&LinkSource)`: the `Port` a source ultimately reads from, through
+  any `Select` wrappers.
+
 ## [6.0.0] - 2026-07-23
 
 ### Breaking

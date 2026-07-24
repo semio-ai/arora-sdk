@@ -23,6 +23,7 @@
 
 use std::collections::HashMap;
 
+use arora_types::data::Key;
 use arora_types::module::high::TypeRef;
 use arora_types::value::Value;
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,30 @@ pub enum LinkSource {
     /// Another node's slot: the output/port the link reads from. Generalizes
     /// `Expression::NodeArgument`.
     Port(Port),
+    /// Read a [`Key`] sub-path of another source's value on read — a structured
+    /// output's field (by id) or an array element (by index). Selection is an
+    /// *operation over any source*, not a property of one: `Select { source:
+    /// Variable(id), .. }` selects into a variable, and nested `Select`s chain.
+    /// The path segments are resolved **ids**, not names (the type registry
+    /// maps authored field names to ids when a graph is built), so the runtime
+    /// resolves nothing. See [`Key::select`]. Heavier "compute a value"
+    /// operations (calls, arithmetic) are nodes, not link sources.
+    Select {
+        /// The source whose value is projected.
+        source: Box<LinkSource>,
+        /// The sub-path (`Key` attributes = ids) read out of that value.
+        path: Key,
+    },
+}
+
+/// The source `Port` a link ultimately reads from, through any [`LinkSource::Select`]
+/// wrappers; `None` for a literal or variable source.
+pub fn source_port(source: &LinkSource) -> Option<Port> {
+    match source {
+        LinkSource::Port(port) => Some(*port),
+        LinkSource::Select { source, .. } => source_port(source),
+        _ => None,
+    }
 }
 
 /// A directed wire feeding one node input from a [`LinkSource`].
@@ -302,7 +327,7 @@ impl Graph {
 /// Whether a [`LinkSource`] reads from node `id` (so the link dangles once that
 /// node is removed).
 fn links_source_is_node(source: &LinkSource, id: &Uuid) -> bool {
-    matches!(source, LinkSource::Port(p) if &p.node == id)
+    source_port(source).is_some_and(|port| &port.node == id)
 }
 
 #[cfg(test)]

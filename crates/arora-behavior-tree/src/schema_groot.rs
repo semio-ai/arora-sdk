@@ -522,6 +522,10 @@ fn groot_expression_to_link_source(
         Expression::Uuid(uuid) => LinkSource::Literal(Value::ArrayU8(uuid.as_bytes().to_vec())),
         Expression::VariableId(id) => LinkSource::Variable(*id),
         Expression::NodeArgument(np) => LinkSource::Port(Port::new(np.node, np.parameter)),
+        Expression::Select { source, path } => LinkSource::Select {
+            source: Box::new(groot_expression_to_link_source(source)?),
+            path: path.clone(),
+        },
         Expression::Variable(_) | Expression::Call(_) => {
             return Err(BehaviorTreeError::InconsistentTreeError {
                 message: "Groot lowering does not support runtime variable cells or nested \
