@@ -190,13 +190,30 @@ impl ValueReader for BuffersValueReader<'_> {
         self.expect_tag(TYPE_STRING, "string")?;
         Ok(self.inner.get_string().to_string())
     }
-    fn read_struct_header(&mut self) -> Result<(Uuid, usize)> {
+    fn enter_struct(&mut self, expected_id: Uuid, field_count: usize) -> Result<()> {
         self.expect_tag(TYPE_STRUCTURE, "struct")?;
         let (id, count) = self.inner.get_structure();
-        Ok((Self::uuid_from(id)?, count as usize))
+        let id = Self::uuid_from(id)?;
+        if id != expected_id {
+            return Err(Error::new(format!(
+                "structure id {id} does not match expected type id {expected_id}"
+            )));
+        }
+        if count as usize != field_count {
+            return Err(Error::new(format!(
+                "structure declares {count} fields, type expects {field_count}"
+            )));
+        }
+        Ok(())
     }
-    fn read_field_id(&mut self) -> Result<Uuid> {
-        Self::uuid_from(self.inner.get_structure_field())
+    fn enter_field(&mut self, expected_id: Uuid) -> Result<()> {
+        let id = Self::uuid_from(self.inner.get_structure_field())?;
+        if id != expected_id {
+            return Err(Error::new(format!(
+                "field id {id} does not match expected {expected_id}"
+            )));
+        }
+        Ok(())
     }
 }
 
