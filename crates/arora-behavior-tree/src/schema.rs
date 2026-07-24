@@ -1,5 +1,5 @@
 use crate::variable::VariableCell;
-use arora_types::{module::high::TypeRef, value::Value};
+use arora_types::{data::Key, module::high::TypeRef, value::Value};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 use uuid::Uuid;
@@ -59,6 +59,14 @@ pub enum Expression {
     VariableId(Uuid),
     /// Reference to another parameter.
     NodeArgument(NodeParameterId),
+    /// Read a `Key` sub-path of another expression's value on read (the shared
+    /// model's `LinkSource::Select`). Composes over any source.
+    Select {
+        /// The expression whose value is projected.
+        source: Box<Expression>,
+        /// The sub-path (`Key` attributes = ids) read out of that value.
+        path: Key,
+    },
     /// Local variable resulting from some computation.
     Call(Box<CallExpression>),
 }

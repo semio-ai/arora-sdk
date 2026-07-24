@@ -51,7 +51,7 @@ fn lower_graph(
     // Group links by the node they feed, so each node collects its arguments.
     let mut args_by_node: HashMap<Uuid, HashMap<Uuid, Expression>> = HashMap::new();
     for link in &graph.links {
-        let expr = link_source_to_expression(&link.source);
+        let expr = link_source_to_expression(&link.source)?;
         args_by_node
             .entry(link.target.node)
             .or_default()
@@ -62,10 +62,7 @@ fn lower_graph(
     let linked_sources: HashSet<Port> = graph
         .links
         .iter()
-        .filter_map(|link| match &link.source {
-            LinkSource::Port(port) => Some(*port),
-            _ => None,
-        })
+        .filter_map(|link| arora_behavior::graph::source_port(&link.source))
         .collect();
 
     // Predetermined, unlinked slots bind to the store variable named by their
@@ -138,16 +135,22 @@ pub fn build_behavior_tree(
     load_behavior_tree_nodes_with(nodes, resolver, &variables)
 }
 
-/// A graph link source, as the tree's argument [`Expression`].
-fn link_source_to_expression(source: &LinkSource) -> Expression {
-    match source {
+/// A graph link source, as the tree's argument [`Expression`]. A
+/// [`LinkSource::Select`] becomes an [`Expression::Select`] wrapping the lowered
+/// source, so the `Key` path is applied on read (see the eval below).
+fn link_source_to_expression(source: &LinkSource) -> Result<Expression, BehaviorTreeError> {
+    Ok(match source {
         LinkSource::Literal(value) => Expression::Value(value.clone()),
         LinkSource::Variable(id) => Expression::VariableId(*id),
         LinkSource::Port(port) => Expression::NodeArgument(NodeParameterId {
             node: port.node,
             parameter: port.port,
         }),
-    }
+        LinkSource::Select { source, path } => Expression::Select {
+            source: Box::new(link_source_to_expression(source)?),
+            path: path.clone(),
+        },
+    })
 }
 
 #[cfg(test)]
@@ -214,6 +217,41 @@ mod tests {
         let tree = build_behavior_tree(graph, &|_| None).expect("tree builds");
         let mut bridge = NativeBridge::default();
         run_behavior_tree(&tree, Rc::new(HashMap::new()), &mut bridge, false).expect("run")
+    }
+
+    /// A `Select` link lowers to a `Select` expression wrapping the lowered
+    /// source, carrying the `Key` path — the tree applies it on read (the
+    /// path semantics are unit-tested in `arora-behavior`).
+    #[test]
+    fn a_select_link_lowers_to_a_select_expression() {
+        use arora_behavior::graph::{Link, LinkSource, Port};
+        use arora_types::data::Key;
+
+        let source = Uuid::from_u128(0xA);
+        let target = Uuid::from_u128(0xB);
+        let out = Uuid::from_u128(0x1);
+        let input = Uuid::from_u128(0x2);
+
+        let mut graph = Graph::empty();
+        graph.nodes.insert(source, leaf(source, SUCCEED_FUNCTION_ID));
+        graph.nodes.insert(target, leaf(target, SUCCEED_FUNCTION_ID));
+        graph.links.push(Link::new(
+            Port::new(target, input),
+            LinkSource::Select {
+                source: Box::new(LinkSource::Port(Port::new(source, out))),
+                path: Key::new(".field"),
+            },
+        ));
+
+        let (nodes, _) = lower_graph(&graph).expect("lower");
+        let target_node = nodes.iter().find(|n| n.id == target).expect("target node");
+        match target_node.arguments.get(&input).expect("input argument") {
+            Expression::Select { source, path } => {
+                assert_eq!(path.get_path(), ".field");
+                assert!(matches!(**source, Expression::NodeArgument(_)));
+            }
+            other => panic!("expected a Select expression, got {other:?}"),
+        }
     }
 
     #[test]

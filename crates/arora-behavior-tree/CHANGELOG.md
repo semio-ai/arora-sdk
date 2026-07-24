@@ -4,6 +4,22 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.2.0] - 2026-07-24
+
+### Added
+
+- `Expression::Select { source, path }`, mirroring the shared model's
+  `LinkSource::Select` (ARORA-72): a `Select` link lowers to it, and the tree
+  applies the `Key` path on read (`compute_expression`/`compute_uuid`). The
+  selection shares its source's reactive cell; the path is applied per tick, not
+  at bind time.
+
+### Changed
+
+- Re-pinned to `arora-behavior` 7 and `arora-types` 2.1 (the `LinkSource::Select`
+  change and `Key::select`, ARORA-72); a `Select` expression projects its
+  source's value through `Key::select`.
+
 ## [6.1.0] - 2026-07-23
 
 ### Changed

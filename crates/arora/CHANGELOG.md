@@ -4,6 +4,13 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.3.0] - 2026-07-24
+
+### Changed
+
+- Re-pinned to `arora-behavior` 7 (the `LinkSource::Select` change, ARORA-72).
+  No engine behavior change.
+
 ## [9.2.0] - 2026-07-23
 
 ### Changed
