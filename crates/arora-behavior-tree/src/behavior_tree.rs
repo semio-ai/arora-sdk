@@ -734,7 +734,8 @@ fn compute_uuid(
                 caller,
                 node_parameter,
             )?;
-            let selected = path.select(&value)
+            let selected = path
+                .select(&value)
                 .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?;
             try_into_uuid(&selected, &None)
         }

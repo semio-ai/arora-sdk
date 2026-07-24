@@ -233,8 +233,12 @@ mod tests {
         let input = Uuid::from_u128(0x2);
 
         let mut graph = Graph::empty();
-        graph.nodes.insert(source, leaf(source, SUCCEED_FUNCTION_ID));
-        graph.nodes.insert(target, leaf(target, SUCCEED_FUNCTION_ID));
+        graph
+            .nodes
+            .insert(source, leaf(source, SUCCEED_FUNCTION_ID));
+        graph
+            .nodes
+            .insert(target, leaf(target, SUCCEED_FUNCTION_ID));
         graph.links.push(Link::new(
             Port::new(target, input),
             LinkSource::Select {
