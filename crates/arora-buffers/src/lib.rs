@@ -11,6 +11,7 @@ pub mod read;
 pub mod serde_raw_id;
 pub mod serde_uuid;
 pub mod typed;
+pub mod value_io;
 pub mod write;
 
 pub use read::*;

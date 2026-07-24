@@ -18,7 +18,6 @@
 //! separate concern and unaffected.
 
 use std::collections::HashMap;
-use std::fmt::{self, Display};
 
 use serde::de::{
   self, DeserializeOwned, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
@@ -27,33 +26,10 @@ use serde::de::{
 use serde::ser::{self, Serialize};
 use uuid::Uuid;
 
+use super::Error;
 use crate::gen_uuid_from_str;
 use crate::keyvalue::{KeyValue, KeyValueField};
 use crate::value::{Enumeration, Structure, StructureField, Value};
-
-/// A conversion between a Rust type and a [`Value`] failed.
-#[derive(Debug)]
-pub struct Error(String);
-
-impl Display for Error {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.write_str(&self.0)
-  }
-}
-
-impl std::error::Error for Error {}
-
-impl ser::Error for Error {
-  fn custom<T: Display>(msg: T) -> Self {
-    Error(msg.to_string())
-  }
-}
-
-impl de::Error for Error {
-  fn custom<T: Display>(msg: T) -> Self {
-    Error(msg.to_string())
-  }
-}
 
 /// Convert any `Serialize` type into a [`Value`].
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
