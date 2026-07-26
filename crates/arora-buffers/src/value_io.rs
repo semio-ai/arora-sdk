@@ -103,6 +103,14 @@ impl ValueWriter for BuffersValueWriter {
         self.inner.add_structure_field(id.as_bytes());
         Ok(())
     }
+    fn begin_array(&mut self, _element_id: Uuid, _len: usize) -> Result<()> {
+        // The buffer format has array primitives (`add_array_*`), but their
+        // elements are stored untagged, so wiring them through the walk needs
+        // raw element writes that `BufferWriter` does not yet expose. Follow-up.
+        Err(Error::new(
+            "arora-buffers array (de)serialization via the walk is not implemented yet",
+        ))
+    }
 }
 
 /// Deserialize a [`Value`] from an arora buffer, validating each inline type tag
@@ -214,6 +222,11 @@ impl ValueReader for BuffersValueReader<'_> {
             )));
         }
         Ok(())
+    }
+    fn enter_array(&mut self, _element_id: Uuid) -> Result<usize> {
+        Err(Error::new(
+            "arora-buffers array (de)serialization via the walk is not implemented yet",
+        ))
     }
 }
 
