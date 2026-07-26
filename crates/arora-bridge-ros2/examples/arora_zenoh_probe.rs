@@ -21,7 +21,7 @@
 
 use std::time::Duration;
 
-use arora_bridge_ros2::cdr;
+use arora_bridge_ros2::{cdr, type_hash};
 use arora_types::module::low::TypeRef;
 use arora_types::ty::{self, low, TypeRegistry};
 use arora_types::value::{Structure, StructureField, Value};
@@ -39,9 +39,11 @@ fn scalar(name: &str, type_id: Uuid) -> low::StructureField {
     }
 }
 
-fn structure(type_id: Uuid, fields: Vec<(Uuid, low::StructureField)>) -> low::Type {
+fn structure(name: &str, type_id: Uuid, fields: Vec<(Uuid, low::StructureField)>) -> low::Type {
     low::Type {
-        name: String::new(),
+        // The ROS-qualified name is load-bearing for `pub` mode: REP-2016 hashes
+        // it, so it must match the real `.msg` (e.g. geometry_msgs/msg/Point).
+        name: name.to_string(),
         id: type_id,
         description: String::new(),
         kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
@@ -55,6 +57,7 @@ fn structure(type_id: Uuid, fields: Vec<(Uuid, low::StructureField)>) -> low::Ty
 //   geometry_msgs/PointStamped { Header header; Point point }
 fn point_stamped_types() -> (low::Type, TypeRegistry) {
     let time = structure(
+        "builtin_interfaces/msg/Time",
         id(0x11),
         vec![
             (id(0x111), scalar("sec", *ty::I32_ID)),
@@ -62,6 +65,7 @@ fn point_stamped_types() -> (low::Type, TypeRegistry) {
         ],
     );
     let header = structure(
+        "std_msgs/msg/Header",
         id(0x22),
         vec![
             (id(0x221), scalar("stamp", id(0x11))),
@@ -69,6 +73,7 @@ fn point_stamped_types() -> (low::Type, TypeRegistry) {
         ],
     );
     let point = structure(
+        "geometry_msgs/msg/Point",
         id(0x33),
         vec![
             (id(0x331), scalar("x", *ty::F64_ID)),
@@ -77,6 +82,7 @@ fn point_stamped_types() -> (low::Type, TypeRegistry) {
         ],
     );
     let point_stamped = structure(
+        "geometry_msgs/msg/PointStamped",
         id(0x44),
         vec![
             (id(0x441), scalar("header", id(0x22))),
@@ -163,21 +169,45 @@ async fn main() {
                 .expect("create subscription");
             eprintln!("[arora] subscribed /point (geometry_msgs/PointStamped); waiting for a native publisher...");
             loop {
-                let (bytes, info) = sub.take_raw().await.expect("take_raw");
+                let (key, bytes, info) = sub.take_raw_keyed().await.expect("take_raw");
                 match cdr::decode(&ty, &registry, &bytes) {
                     Ok(value) => println!(
-                        "[arora] DECODED /point (seq {}, {} bytes): {value:?}",
+                        "[arora] DECODED /point (seq {}, {} bytes)\n    key: {key}\n    value: {value:?}",
                         info.sequence_number(),
                         bytes.len()
                     ),
-                    Err(e) => println!("[arora] decode error: {e} ({} bytes)", bytes.len()),
+                    Err(e) => println!("[arora] decode error: {e} ({} bytes, key {key})", bytes.len()),
                 }
             }
         }
         "pub" => {
-            let publisher = node
-                .create_publisher::<()>(&topic, None)
-                .expect("create publisher");
+            // The type comes from the Arora realm. Choose the key's type-hash
+            // slot with an optional second arg:
+            //   (none)          compute the exact REP-2016 RIHS01 from the arora
+            //                   type — matches hash-checking subscribers (Iron+);
+            //   placeholder     the all-zeros RIHS01 (ros2-client's default);
+            //   <literal>       any literal, e.g. `TypeHashNotSupported`, which
+            //                   is what hash-less Humble rmw_zenoh keys on.
+            let hash_arg = std::env::args().nth(2);
+            let publisher = match hash_arg.as_deref() {
+                Some("placeholder") => {
+                    eprintln!("[arora] publisher hash: placeholder (default)");
+                    node.create_publisher::<()>(&topic, None)
+                        .expect("create publisher")
+                }
+                Some(explicit) => {
+                    eprintln!("[arora] publisher hash: {explicit}");
+                    node.create_publisher_with_type_hash::<()>(&topic, None, explicit)
+                        .expect("create publisher")
+                }
+                None => {
+                    let hash =
+                        type_hash::rihs01(&ty, &registry).expect("compute PointStamped RIHS01");
+                    eprintln!("[arora] publisher hash: {hash}");
+                    node.create_publisher_with_type_hash::<()>(&topic, None, &hash)
+                        .expect("create publisher")
+                }
+            };
             let bytes = cdr::encode(&ty, &registry, &point_stamped_value("arora_frame"))
                 .expect("cdr encode");
             eprintln!(

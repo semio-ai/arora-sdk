@@ -40,6 +40,7 @@ pub mod bridge;
 pub mod cdr;
 pub mod conversions;
 pub mod msg_types;
+pub mod type_hash;
 
 pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
 
