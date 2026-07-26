@@ -3,13 +3,10 @@
 //! Every entry point is sugar over the [builder](Arora::builder): it assembles
 //! an [`AroraBuilder`](crate::AroraBuilder) and calls
 //! [`run`](crate::AroraBuilder::run), which drives the device to completion
-//! (until the device is unregistered or the process is interrupted). None of
-//! them reads argv — a binary parses its own command line (the [`DeviceCli`]
-//! helper gives it the standard device arguments, e.g. the optional Groot
-//! tree, injected via
-//! [`with_groot_file`](crate::AroraBuilder::with_groot_file)). A device that
-//! composes its own parts (a custom store, several bridges, modules) skips
-//! this module and uses the builder directly. All entry points are `async` —
+//! (until the device is unregistered or the process is interrupted). The
+//! [`DeviceCli`] helper gives a binary the standard device arguments to
+//! parse. A device that composes its own parts (a custom store, several
+//! bridges, modules) skips this module and uses the builder directly. All entry points are `async` —
 //! the caller drives them on its own Tokio runtime (the binary from
 //! `#[tokio::main]`) — and differ only in which seams the caller supplies vs.
 //! defaults:
@@ -52,8 +49,7 @@ use crate::Arora;
 
 /// The standard device binary's command line, as a clap helper: parse it in
 /// your `main` (or `#[command(flatten)]` it into a larger CLI) and inject the
-/// results through the builder's seams. The library never parses argv — a
-/// command line is a binary's concern, and only a native binary has one.
+/// results through the builder's seams.
 ///
 /// The Groot argument is a behavior-tree option: it loads into a
 /// [`BehaviorTreeInterpreter`](crate::BehaviorTreeInterpreter)

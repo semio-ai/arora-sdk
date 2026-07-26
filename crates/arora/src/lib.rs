@@ -370,13 +370,6 @@ impl AroraBuilder {
     /// *defaults*, never what you can inject — e.g. a device whose blackboard
     /// is a custom [`DataStore`] runs with
     /// `Arora::builder().with_hal(hal).with_data_store(store).run()`.
-    ///
-    /// Reads no CLI arguments — bin/lib 101: a binary parses its own command
-    /// line (the helper [`DeviceCli`](crate::DeviceCli) gives it the standard
-    /// device arguments) and injects the results through the builder's seams —
-    /// e.g. a Groot tree loads into a [`BehaviorTreeInterpreter`] injected via
-    /// [`with_behavior_interpreter`](Self::with_behavior_interpreter) (the
-    /// `arora` binary's `main` is the worked example).
     #[cfg(feature = "native")]
     pub async fn run(mut self) -> Result<()> {
         // The front end is picked first: building it installs the matching log
