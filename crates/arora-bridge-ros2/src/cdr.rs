@@ -154,6 +154,14 @@ impl ValueWriter for CdrWriter {
     fn begin_field(&mut self, _id: Uuid) -> Result<()> {
         Ok(())
     }
+    fn begin_array(&mut self, _element_id: Uuid, len: usize) -> Result<()> {
+        // ROS 2 CDR sequence: a 4-aligned u32 element count, then the elements
+        // (each self-aligned by its own write op). The element type is positional
+        // (from the schema), so it is not on the wire.
+        self.align(4);
+        self.put(&(len as u32).to_le_bytes());
+        Ok(())
+    }
 }
 
 /// Reads a CDR payload body. Alignment is measured against `pos` — the payload
@@ -251,6 +259,10 @@ impl ValueReader for CdrReader<'_> {
     fn enter_field(&mut self, _expected_id: Uuid) -> Result<()> {
         Ok(())
     }
+    fn enter_array(&mut self, _element_id: Uuid) -> Result<usize> {
+        // Read the 4-aligned u32 element count; the elements follow positionally.
+        Ok(u32::from_le_bytes(self.take_aligned::<4>(4)?) as usize)
+    }
 }
 
 #[cfg(test)]
@@ -258,7 +270,7 @@ mod tests {
     use super::*;
     use arora_types::module::low::TypeRef;
     use arora_types::ty;
-    use arora_types::value::{Structure, StructureField};
+    use arora_types::value::{Structure, StructureField, StructureWithoutId};
 
     fn id(n: u128) -> Uuid {
         Uuid::from_u128(n)
@@ -433,5 +445,111 @@ mod tests {
             ],
         );
         assert!(encode(&ty, &registry, &bad).is_err());
+    }
+
+    fn array_field(name: &str, element_id: Uuid) -> low::StructureField {
+        low::StructureField {
+            name: name.to_string(),
+            type_ref: TypeRef::Array { id: element_id },
+        }
+    }
+
+    // Shape { float64[] weights; geometry_msgs/Point[] points } — a scalar
+    // sequence and a sequence of nested structures.
+    fn shape_ty() -> low::Type {
+        structure(
+            id(0x55),
+            vec![
+                (id(0x551), array_field("weights", *ty::F64_ID)),
+                (id(0x552), array_field("points", id(0x33))),
+            ],
+        )
+    }
+
+    fn shape_registry() -> TypeRegistry {
+        let mut r = registry();
+        r.insert(id(0x55), shape_ty());
+        r
+    }
+
+    fn point_element(x: f64, y: f64, z: f64) -> StructureWithoutId {
+        StructureWithoutId {
+            fields: vec![
+                f(0x331, Value::F64(x)),
+                f(0x332, Value::F64(y)),
+                f(0x333, Value::F64(z)),
+            ],
+        }
+    }
+
+    #[test]
+    fn scalar_and_struct_arrays_round_trip() {
+        let ty = shape_ty();
+        let registry = shape_registry();
+        let value = st(
+            0x55,
+            vec![
+                f(0x551, Value::ArrayF64(vec![1.5, -2.5, 3.75])),
+                f(
+                    0x552,
+                    Value::ArrayStructure {
+                        id: id(0x33),
+                        elements: vec![point_element(1.0, 2.0, 3.0), point_element(4.0, 5.0, 6.0)],
+                    },
+                ),
+            ],
+        );
+        let bytes = encode(&ty, &registry, &value).unwrap();
+        assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
+    }
+
+    #[test]
+    fn empty_arrays_round_trip() {
+        let ty = shape_ty();
+        let registry = shape_registry();
+        let value = st(
+            0x55,
+            vec![
+                f(0x551, Value::ArrayF64(vec![])),
+                f(
+                    0x552,
+                    Value::ArrayStructure {
+                        id: id(0x33),
+                        elements: vec![],
+                    },
+                ),
+            ],
+        );
+        let bytes = encode(&ty, &registry, &value).unwrap();
+        assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
+    }
+
+    /// A bare `float64[]` at the top level, against the hand-computed CDR wire
+    /// form: a 4-aligned u32 count, then 8-aligned doubles (4 bytes of pad after
+    /// the count precede the first double).
+    #[test]
+    fn scalar_array_matches_golden_cdr() {
+        let ty = low::Type {
+            name: String::new(),
+            id: id(0x60),
+            description: String::new(),
+            kind: low::TypeKind::Primitive(TypeRef::Array { id: *ty::F64_ID }),
+        };
+        let registry = TypeRegistry::new();
+        let bytes = encode(&ty, &registry, &Value::ArrayF64(vec![1.0, 2.0])).unwrap();
+
+        #[rustfmt::skip]
+        let golden: Vec<u8> = vec![
+            0x00, 0x01, 0x00, 0x00,                         // encapsulation: CDR_LE
+            0x02, 0x00, 0x00, 0x00,                         // sequence length = 2 (u32)
+            0x00, 0x00, 0x00, 0x00,                         // pad to 8-align the first double
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F, // 1.0 (f64 LE)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, // 2.0
+        ];
+        assert_eq!(bytes, golden);
+        assert_eq!(
+            decode(&ty, &registry, &golden).unwrap(),
+            Value::ArrayF64(vec![1.0, 2.0])
+        );
     }
 }
