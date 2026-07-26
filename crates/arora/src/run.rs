@@ -52,10 +52,14 @@ use crate::Arora;
 
 /// The standard device binary's command line, as a clap helper: parse it in
 /// your `main` (or `#[command(flatten)]` it into a larger CLI) and inject the
-/// results into the builder (e.g.
-/// [`with_groot_file`](crate::AroraBuilder::with_groot_file)). The library
-/// never parses argv — a command line is a binary's concern, and only a
-/// native binary has one.
+/// results through the builder's seams. The library never parses argv — a
+/// command line is a binary's concern, and only a native binary has one.
+///
+/// The Groot argument is a behavior-tree option: it loads into a
+/// [`BehaviorTreeInterpreter`](crate::BehaviorTreeInterpreter)
+/// (`load_groot`, against the store the device will tick) injected via
+/// [`with_behavior_interpreter`](crate::AroraBuilder::with_behavior_interpreter)
+/// — the `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
 pub struct DeviceCli {

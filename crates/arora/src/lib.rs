@@ -44,7 +44,7 @@ pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 pub use arora_behavior_tree::ModuleFunction;
 
 use crate::runtime::EndpointInbound;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
 /// Re-exported so an embedder holding a device's [`LocalCaller`] (or any other
 /// caller) can name the trait its `call` comes from.
@@ -268,12 +268,6 @@ pub struct AroraBuilder {
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<(Header, Box<[u8]>)>,
-    /// Optional Groot file to install as the behavior at
-    /// [`build`](AroraBuilder::build) (see
-    /// [`with_groot_file`](AroraBuilder::with_groot_file)). Behavior trees are
-    /// platform-agnostic; only *parsing a command line* is a (native) binary's
-    /// concern — the library never reads argv.
-    pub(crate) groot: Option<std::path::PathBuf>,
 }
 
 impl AroraBuilder {
@@ -324,17 +318,6 @@ impl AroraBuilder {
     /// behavior is loaded.
     pub fn with_behavior_interpreter(mut self, interpreter: Box<dyn BehaviorInterpreter>) -> Self {
         self.interpreter = Some(interpreter);
-        self
-    }
-
-    /// Install the Groot behavior-tree file at `path` as the device's behavior:
-    /// at [`build`](Self::build) the tree loads into a fresh
-    /// [`BehaviorTreeInterpreter`] over the device's function index, against
-    /// the device's own store — replacing any injected interpreter. The
-    /// library never reads argv; a device binary parses its own command line
-    /// (the `DeviceCli` helper, on native) and injects the path here.
-    pub fn with_groot_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.groot = Some(path.into());
         self
     }
 
@@ -390,8 +373,10 @@ impl AroraBuilder {
     ///
     /// Reads no CLI arguments — bin/lib 101: a binary parses its own command
     /// line (the helper [`DeviceCli`](crate::DeviceCli) gives it the standard
-    /// device arguments) and injects the results, e.g. through
-    /// [`with_groot_file`](Self::with_groot_file).
+    /// device arguments) and injects the results through the builder's seams —
+    /// e.g. a Groot tree loads into a [`BehaviorTreeInterpreter`] injected via
+    /// [`with_behavior_interpreter`](Self::with_behavior_interpreter) (the
+    /// `arora` binary's `main` is the worked example).
     #[cfg(feature = "native")]
     pub async fn run(mut self) -> Result<()> {
         // The front end is picked first: building it installs the matching log
@@ -466,28 +451,13 @@ impl AroraBuilder {
 
         let endpoints = bridges.len();
         let function_index = Rc::new(self.functions);
-        // The executor, injected once here (never swapped). A named Groot file
-        // wins: it loads into a fresh behavior-tree interpreter over the
-        // assembled function index (so its trees may call host-module
-        // functions), against the device's own store. Otherwise the injected
-        // interpreter stands, or the default — an empty, ready behavior-tree
-        // interpreter that idles until a behavior is loaded into it, so an
-        // un-configured device ticks a no-op.
-        let interpreter = if let Some(path) = self.groot {
-            let xml = std::fs::read_to_string(&path)
-                .with_context(|| format!("could not read Groot file {}", path.display()))?;
-            let mut interpreter = BehaviorTreeInterpreter::new(function_index.clone());
-            interpreter.load_groot(&xml, &*store).map_err(|e| {
-                anyhow::anyhow!(
-                    "failed to install behavior tree from {}: {e:?}",
-                    path.display()
-                )
-            })?;
-            Box::new(interpreter) as Box<dyn BehaviorInterpreter>
-        } else {
-            self.interpreter
-                .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())))
-        };
+        // Default executor: an empty, ready behavior-tree interpreter over the
+        // assembled function index. It is injected once here (never swapped); a
+        // behavior is loaded into it as a separate step. With none loaded it
+        // idles, so an un-configured device ticks a no-op.
+        let interpreter = self
+            .interpreter
+            .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
 
         // The interpreter as a module: a function module under
         // `interpreter_module::ID` whose `LOAD`/`EDIT` functions run on the
