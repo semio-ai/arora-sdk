@@ -11,7 +11,15 @@
 //! [`arora::run_with`] with those implementations — customization from the
 //! outside, no feature flags inside `arora`.
 
+use clap::Parser;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    arora::run().await
+    // The binary parses the command line; the library never does.
+    let cli = arora::DeviceCli::parse();
+    let mut builder = arora::Arora::builder();
+    if let Some(groot) = cli.groot {
+        builder = builder.with_groot_file(groot);
+    }
+    builder.run().await
 }
