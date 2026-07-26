@@ -10,9 +10,9 @@
 //! `#[arora(id = "…uuid…")]` to pin an explicit id.
 //!
 //! First cut mirrors the type-directed walk it feeds: named-field structs whose
-//! fields are primitive scalars, `String`, or other `#[derive(AroraType)]`
-//! types. Arrays, options, maps and enums are rejected pending a `ty::low`
-//! model extension.
+//! fields are primitive scalars, `String`, other `#[derive(AroraType)]` types,
+//! or a `Vec<T>` of any of those (a homogeneous array). Options, maps and enums
+//! are rejected pending a `ty::low` model extension.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -156,12 +156,22 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     .ok_or_else(|| syn::Error::new(ty.span(), "empty type path"))?;
   let ident = segment.ident.to_string();
 
-  // Containers need a `ty::low` model extension — arrays carry an element id
-  // only, and there is no Option/Map `TypeRef` yet — so reject rather than
-  // mis-encode.
+  // `Vec<T>` -> a homogeneous array whose element type is `T`.
+  if ident == "Vec" {
+    let element = vec_element(segment)?;
+    let (element_id, nested) = element_id_for(element)?;
+    let expr = quote! {
+      arora_types::module::low::TypeRef::Array { id: #element_id }
+    };
+    return Ok((expr, nested));
+  }
+
+  // The remaining containers still need a `ty::low` model extension — there is
+  // no Option/Map `TypeRef`, and an array carries a single element id only (so
+  // no nested arrays) — so reject rather than mis-encode.
   if matches!(
     ident.as_str(),
-    "Vec" | "Option" | "HashMap" | "BTreeMap" | "HashSet" | "Box"
+    "Option" | "HashMap" | "BTreeMap" | "HashSet" | "Box"
   ) {
     return Err(syn::Error::new(
       ty.span(),
@@ -169,21 +179,74 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     ));
   }
 
+  let (id_expr, nested) = element_id_for(ty)?;
+  let expr = quote! {
+    arora_types::module::low::TypeRef::Scalar { id: #id_expr }
+  };
+  Ok((expr, nested))
+}
+
+/// The type id a scalar or nested-struct type is referenced by — a well-known
+/// primitive id, or the nested type's `arora_type_id()` — plus that nested type
+/// so it gets registered. Shared by plain fields and `Vec` elements. Rejects
+/// containers: an array/option/map element would need its own registered type,
+/// which the `ty::low` model does not carry.
+fn element_id_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
+  let Type::Path(type_path) = ty else {
+    return Err(syn::Error::new(
+      ty.span(),
+      "unsupported type (expected a named type)",
+    ));
+  };
+  let ident = type_path
+    .path
+    .segments
+    .last()
+    .ok_or_else(|| syn::Error::new(ty.span(), "empty type path"))?
+    .ident
+    .to_string();
+  if matches!(
+    ident.as_str(),
+    "Vec" | "Option" | "HashMap" | "BTreeMap" | "HashSet" | "Box"
+  ) {
+    return Err(syn::Error::new(
+      ty.span(),
+      format!("`{ident}` as an array element is not supported yet"),
+    ));
+  }
   if let Some(id) = primitive_id_ident(&ident) {
     let id = syn::Ident::new(id, Span::call_site());
-    let expr = quote! {
-      arora_types::module::low::TypeRef::Scalar { id: *arora_types::ty::#id }
-    };
-    Ok((expr, None))
+    Ok((quote! { *arora_types::ty::#id }, None))
   } else {
-    // A nested `#[derive(AroraType)]` type: reference it by id and register it.
-    let expr = quote! {
-      arora_types::module::low::TypeRef::Scalar {
-        id: <#ty as arora_types::AroraType>::arora_type_id(),
-      }
-    };
-    Ok((expr, Some(ty)))
+    Ok((
+      quote! { <#ty as arora_types::AroraType>::arora_type_id() },
+      Some(ty),
+    ))
   }
+}
+
+/// The single element type `T` of a `Vec<T>` path segment.
+fn vec_element(segment: &syn::PathSegment) -> syn::Result<&Type> {
+  let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+    return Err(syn::Error::new(
+      segment.ident.span(),
+      "`Vec` needs a single type argument",
+    ));
+  };
+  let mut elements = args.args.iter().filter_map(|arg| match arg {
+    syn::GenericArgument::Type(ty) => Some(ty),
+    _ => None,
+  });
+  let element = elements
+    .next()
+    .ok_or_else(|| syn::Error::new(segment.ident.span(), "`Vec` needs a type argument"))?;
+  if elements.next().is_some() {
+    return Err(syn::Error::new(
+      segment.ident.span(),
+      "`Vec` must have exactly one type argument",
+    ));
+  }
+  Ok(element)
 }
 
 /// The well-known primitive id constant (in `arora_types::ty`) a Rust primitive

@@ -552,4 +552,58 @@ mod tests {
             Value::ArrayF64(vec![1.0, 2.0])
         );
     }
+
+    // A `#[derive(AroraType)]` struct with `Vec` fields generates the array
+    // `TypeRef`s (scalar `Vec<f64>` and struct `Vec<Point3>`) that the walk + CDR
+    // then round-trip — the derive, the array walk, and the codec composing.
+    #[test]
+    fn a_derived_vec_type_round_trips() {
+        use arora_types::AroraType;
+
+        // Fields are read by the derive at compile time, not at run time.
+        #[derive(arora_types::AroraType)]
+        #[allow(dead_code)]
+        struct Point3 {
+            x: f64,
+            y: f64,
+            z: f64,
+        }
+        #[derive(arora_types::AroraType)]
+        #[allow(dead_code)]
+        struct Poly {
+            weights: Vec<f64>,
+            points: Vec<Point3>,
+        }
+
+        let (ty, registry) = Poly::arora_type_with_registry();
+
+        let g = arora_types::gen_uuid_from_str;
+        let sf = |field_id, value| StructureField {
+            id: field_id,
+            value: Box::new(value),
+        };
+        let point = |x, y, z| StructureWithoutId {
+            fields: vec![
+                sf(g("x"), Value::F64(x)),
+                sf(g("y"), Value::F64(y)),
+                sf(g("z"), Value::F64(z)),
+            ],
+        };
+        let value = Value::Structure(Structure {
+            id: Poly::arora_type_id(),
+            fields: vec![
+                sf(g("weights"), Value::ArrayF64(vec![1.0, 2.0, 3.0])),
+                sf(
+                    g("points"),
+                    Value::ArrayStructure {
+                        id: Point3::arora_type_id(),
+                        elements: vec![point(1.0, 2.0, 3.0), point(4.0, 5.0, 6.0)],
+                    },
+                ),
+            ],
+        });
+
+        let bytes = encode(&ty, &registry, &value).unwrap();
+        assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
+    }
 }
