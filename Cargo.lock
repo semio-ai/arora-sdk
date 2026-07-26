@@ -287,6 +287,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "zenoh",
 ]
 
 [[package]]
@@ -5728,8 +5729,6 @@ dependencies = [
 [[package]]
 name = "ros2-client-multi-rmw"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f47619bfa11de20638db4075ddbc35d9da492d928346ae3d409bd414fda5dc7c"
 dependencies = [
  "async-channel",
  "bstr",

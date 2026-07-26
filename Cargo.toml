@@ -82,4 +82,8 @@ debug = 1
 [patch.crates-io]
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
+# Local fork with publish_raw/take_raw for runtime-typed CDR over Zenoh (used to
+# validate the CDR codec against real ROS 2; the relative path resolves both on
+# the host and in the mounted test container).
+ros2-client-multi-rmw = { path = "../ros2-client" }
 
