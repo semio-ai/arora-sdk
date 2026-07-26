@@ -13,9 +13,51 @@ use uuid::Uuid;
 use crate::read::BufferReader;
 use crate::write::BufferWriter;
 use crate::{
-    TYPE_BOOLEAN, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING,
-    TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
+    TYPE_ARRAY, TYPE_BOOLEAN, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8,
+    TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
 };
+
+/// Generates the buffers `write_*_array` methods for numeric/bool elements: the
+/// element type tagged once at the array head, then the raw little-endian bulk.
+/// Matches `serde_uuid`'s `Value` encoding so the walk and that path agree.
+macro_rules! buffers_write_arrays {
+    ($($method:ident($elem:ty) => ($tag:expr, $bulk:ident);)*) => {
+        $(
+            fn $method(&mut self, v: &[$elem]) -> Result<()> {
+                self.inner.add_array_primitive($tag, v.len() as u32);
+                self.inner.$bulk(v);
+                Ok(())
+            }
+        )*
+    };
+}
+
+/// The read counterpart of [`buffers_write_arrays`]: validate the element tag,
+/// skip the single alignment, then read the raw elements one by one. A bulk
+/// transmute would need an element-aligned, little-endian slice (UB otherwise)
+/// — see the same reasoning on `serde_uuid`'s reader.
+///
+/// The walk owns its `Vec`s, so this per-element copy is at its floor (one
+/// memcpy's worth). A future zero-copy borrowing accessor — returning `&[T]`
+/// straight from the buffer for GPU / bulk consumers — is possible once the
+/// buffer backing is guaranteed 8-aligned at its base (which would also retire
+/// the `get_*_bulk` transmute's latent misalignment and let TS take a
+/// `Float64Array` view). Deferred until such a consumer exists.
+macro_rules! buffers_read_arrays {
+    ($($method:ident($elem:ty) => ($tag:expr, $name:expr, $get:ident);)*) => {
+        $(
+            fn $method(&mut self) -> Result<Vec<$elem>> {
+                let count = self.enter_scalar_array($tag, $name)?;
+                self.inner.align();
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(self.inner.$get());
+                }
+                Ok(items)
+            }
+        )*
+    };
+}
 
 /// Serialize a [`Value`] into an arora buffer via the shared walk.
 pub struct BuffersValueWriter {
@@ -103,13 +145,38 @@ impl ValueWriter for BuffersValueWriter {
         self.inner.add_structure_field(id.as_bytes());
         Ok(())
     }
-    fn begin_array(&mut self, _element_id: Uuid, _len: usize) -> Result<()> {
-        // The buffer format has array primitives (`add_array_*`), but their
-        // elements are stored untagged, so wiring them through the walk needs
-        // raw element writes that `BufferWriter` does not yet expose. Follow-up.
-        Err(Error::new(
-            "arora-buffers array (de)serialization via the walk is not implemented yet",
-        ))
+    buffers_write_arrays! {
+        write_bool_array(bool) => (TYPE_BOOLEAN, add_boolean_raw_bulk);
+        write_u8_array(u8) => (TYPE_U8, add_u8_raw_bulk);
+        write_u16_array(u16) => (TYPE_U16, add_u16_raw_bulk);
+        write_u32_array(u32) => (TYPE_U32, add_u32_raw_bulk);
+        write_u64_array(u64) => (TYPE_U64, add_u64_raw_bulk);
+        write_i8_array(i8) => (TYPE_I8, add_i8_raw_bulk);
+        write_i16_array(i16) => (TYPE_I16, add_i16_raw_bulk);
+        write_i32_array(i32) => (TYPE_I32, add_i32_raw_bulk);
+        write_i64_array(i64) => (TYPE_I64, add_i64_raw_bulk);
+        write_f32_array(f32) => (TYPE_F32, add_f32_raw_bulk);
+        write_f64_array(f64) => (TYPE_F64, add_f64_raw_bulk);
+    }
+    // Strings are variable-width: tag once, then length-prefixed bytes with no
+    // per-element tag and no alignment (matching `serde_uuid`'s reader).
+    fn write_string_array(&mut self, v: &[String]) -> Result<()> {
+        self.inner.add_array_primitive(TYPE_STRING, v.len() as u32);
+        for s in v {
+            self.inner.add_string_raw(s);
+        }
+        Ok(())
+    }
+    fn begin_struct_array(&mut self, element_id: Uuid, len: usize) -> Result<()> {
+        self.inner
+            .add_array_structure(element_id.as_bytes(), len as u32);
+        Ok(())
+    }
+    fn begin_struct_element(&mut self, field_count: usize) -> Result<()> {
+        // The element type is fixed by the array head, so a headerless struct
+        // body: only the field count (no tag, no id), then the fields.
+        self.inner.begin_structure_raw(field_count as u32);
+        Ok(())
     }
 }
 
@@ -141,6 +208,18 @@ impl<'a> BuffersValueReader<'a> {
 
     fn uuid_from(bytes: &[u8]) -> Result<Uuid> {
         Uuid::from_slice(bytes).map_err(|e| Error::new(format!("invalid uuid bytes: {e}")))
+    }
+
+    /// Consumes an array head and validates its element tag, returning the count.
+    fn enter_scalar_array(&mut self, expected_tag: u8, name: &str) -> Result<usize> {
+        self.expect_tag(TYPE_ARRAY, "array")?;
+        let (tag, count) = self.inner.get_array();
+        if tag != expected_tag {
+            return Err(Error::new(format!(
+                "expected an array of {name} (element tag {expected_tag}), found element tag {tag}"
+            )));
+        }
+        Ok(count as usize)
     }
 }
 
@@ -223,10 +302,53 @@ impl ValueReader for BuffersValueReader<'_> {
         }
         Ok(())
     }
-    fn enter_array(&mut self, _element_id: Uuid) -> Result<usize> {
-        Err(Error::new(
-            "arora-buffers array (de)serialization via the walk is not implemented yet",
-        ))
+    buffers_read_arrays! {
+        read_bool_array(bool) => (TYPE_BOOLEAN, "bool", get_boolean);
+        read_u8_array(u8) => (TYPE_U8, "u8", get_u8);
+        read_u16_array(u16) => (TYPE_U16, "u16", get_u16);
+        read_u32_array(u32) => (TYPE_U32, "u32", get_u32);
+        read_u64_array(u64) => (TYPE_U64, "u64", get_u64);
+        read_i8_array(i8) => (TYPE_I8, "i8", get_i8);
+        read_i16_array(i16) => (TYPE_I16, "i16", get_i16);
+        read_i32_array(i32) => (TYPE_I32, "i32", get_i32);
+        read_i64_array(i64) => (TYPE_I64, "i64", get_i64);
+        read_f32_array(f32) => (TYPE_F32, "f32", get_f32);
+        read_f64_array(f64) => (TYPE_F64, "f64", get_f64);
+    }
+    fn read_string_array(&mut self) -> Result<Vec<String>> {
+        // Strings are variable-width and unaligned: no `align()`, no per-element
+        // tag (matching the writer above and `serde_uuid`).
+        let count = self.enter_scalar_array(TYPE_STRING, "string")?;
+        let mut items = Vec::with_capacity(count);
+        for _ in 0..count {
+            items.push(self.inner.get_string().to_string());
+        }
+        Ok(items)
+    }
+    fn enter_struct_array(&mut self, element_id: Uuid) -> Result<usize> {
+        self.expect_tag(TYPE_ARRAY, "array")?;
+        let (tag, count) = self.inner.get_array();
+        if tag != TYPE_STRUCTURE {
+            return Err(Error::new(format!(
+                "expected an array of structures (element tag {TYPE_STRUCTURE}), found element tag {tag}"
+            )));
+        }
+        let id = Self::uuid_from(self.inner.get_uuid())?;
+        if id != element_id {
+            return Err(Error::new(format!(
+                "array element type id {id} does not match expected {element_id}"
+            )));
+        }
+        Ok(count as usize)
+    }
+    fn enter_struct_element(&mut self, field_count: usize) -> Result<()> {
+        let count = self.inner.get_structure_raw();
+        if count as usize != field_count {
+            return Err(Error::new(format!(
+                "struct array element declares {count} fields, type expects {field_count}"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -235,7 +357,7 @@ mod tests {
     use super::*;
     use arora_types::module::low::TypeRef;
     use arora_types::ty::{self, low};
-    use arora_types::value::{Structure, StructureField, Value};
+    use arora_types::value::{Structure, StructureField, StructureWithoutId, Value};
     use arora_types::value_serde::{read_value, write_value, TypeRegistry};
 
     fn id(n: u128) -> Uuid {
@@ -426,5 +548,145 @@ mod tests {
         let mut r = BuffersValueReader::new(&buf);
         let back = read_value(&ty, &registry, &mut r).expect("read");
         assert_eq!(back, value);
+    }
+
+    fn array_field(name: &str, element_id: Uuid) -> low::StructureField {
+        low::StructureField {
+            name: name.to_string(),
+            type_ref: TypeRef::Array { id: element_id },
+        }
+    }
+
+    // Point { x, y, z : f64 } and Shape { weights: f64[]; labels: string[];
+    // flags: bool[]; points: Point[] } — a numeric, a string, a bool and a
+    // struct array in one value.
+    const POINT: u128 = 0x30;
+    const SHAPE: u128 = 0x40;
+
+    fn point_type() -> low::Type {
+        let fields = [
+            (id(0x31), field("x", *ty::F64_ID)),
+            (id(0x32), field("y", *ty::F64_ID)),
+            (id(0x33), field("z", *ty::F64_ID)),
+        ]
+        .into_iter()
+        .collect();
+        low::Type {
+            name: "Point".to_string(),
+            id: id(POINT),
+            description: String::new(),
+            kind: low::TypeKind::Structure(low::Structure { fields }),
+        }
+    }
+
+    fn shape_type() -> low::Type {
+        let fields = [
+            (id(0x41), array_field("weights", *ty::F64_ID)),
+            (id(0x42), array_field("labels", *ty::STRING_ID)),
+            (id(0x43), array_field("flags", *ty::BOOLEAN_ID)),
+            (id(0x44), array_field("points", id(POINT))),
+        ]
+        .into_iter()
+        .collect();
+        low::Type {
+            name: "Shape".to_string(),
+            id: id(SHAPE),
+            description: String::new(),
+            kind: low::TypeKind::Structure(low::Structure { fields }),
+        }
+    }
+
+    fn shape_registry() -> TypeRegistry {
+        let mut r = TypeRegistry::new();
+        r.insert(id(POINT), point_type());
+        r.insert(id(SHAPE), shape_type());
+        r
+    }
+
+    fn point_element(x: f64, y: f64, z: f64) -> StructureWithoutId {
+        StructureWithoutId {
+            fields: vec![
+                vfield(0x31, Value::F64(x)),
+                vfield(0x32, Value::F64(y)),
+                vfield(0x33, Value::F64(z)),
+            ],
+        }
+    }
+
+    fn shape_value(
+        weights: Vec<f64>,
+        labels: Vec<String>,
+        flags: Vec<bool>,
+        points: Vec<StructureWithoutId>,
+    ) -> Value {
+        // Fields in the type's declared order — the walk requires it.
+        Value::Structure(Structure {
+            id: id(SHAPE),
+            fields: vec![
+                vfield(0x41, Value::ArrayF64(weights)),
+                vfield(0x42, Value::ArrayString(labels)),
+                vfield(0x43, Value::ArrayBoolean(flags)),
+                vfield(
+                    0x44,
+                    Value::ArrayStructure {
+                        id: id(POINT),
+                        elements: points,
+                    },
+                ),
+            ],
+        })
+    }
+
+    fn populated_shape() -> Value {
+        shape_value(
+            vec![1.5, -2.5, 3.75],
+            vec!["a".to_string(), String::new(), "cee".to_string()],
+            vec![true, false, true],
+            vec![point_element(1.0, 2.0, 3.0), point_element(4.0, 5.0, 6.0)],
+        )
+    }
+
+    #[test]
+    fn arrays_round_trip_through_the_walk() {
+        let shape = shape_type();
+        let registry = shape_registry();
+        let value = populated_shape();
+
+        let mut w = BuffersValueWriter::new();
+        write_value(&shape, &registry, &value, &mut w).expect("write");
+        let buf = w.finish();
+        let mut r = BuffersValueReader::new(&buf);
+        assert_eq!(read_value(&shape, &registry, &mut r).expect("read"), value);
+    }
+
+    #[test]
+    fn empty_arrays_round_trip_through_the_walk() {
+        let shape = shape_type();
+        let registry = shape_registry();
+        let value = shape_value(vec![], vec![], vec![], vec![]);
+
+        let mut w = BuffersValueWriter::new();
+        write_value(&shape, &registry, &value, &mut w).expect("write");
+        let buf = w.finish();
+        let mut r = BuffersValueReader::new(&buf);
+        assert_eq!(read_value(&shape, &registry, &mut r).expect("read"), value);
+    }
+
+    /// The unify proof: the walk's buffers backend and the registry-less
+    /// `serde_uuid` `Value` path encode the same value — arrays and all — into
+    /// byte-identical buffers, so a buffer written by one reads on the other.
+    #[test]
+    fn walk_and_serde_uuid_encode_identically() {
+        let shape = shape_type();
+        let registry = shape_registry();
+        let value = populated_shape();
+
+        let mut w = BuffersValueWriter::new();
+        write_value(&shape, &registry, &value, &mut w).expect("write");
+        let via_walk = w.finish();
+
+        let via_serde_uuid = crate::serde_uuid::serialize(&value);
+        assert_eq!(via_walk, via_serde_uuid, "walk and serde_uuid diverge");
+        assert_eq!(crate::serde_uuid::deserialize(&via_walk), value);
     }
 }

@@ -59,11 +59,37 @@ pub trait ValueWriter {
   fn begin_struct(&mut self, id: Uuid, field_count: usize) -> Result<()>;
   /// Announce the next field's id; its value follows via the datum ops.
   fn begin_field(&mut self, id: Uuid) -> Result<()>;
-  /// Begin a homogeneous array (sequence) of `len` elements, each of type
-  /// `element_id`. The `len` elements follow, in order, via the datum/struct
-  /// ops. A positional format (CDR) emits the count and alignment here; a
-  /// self-describing one emits its array tag and element type.
-  fn begin_array(&mut self, element_id: Uuid, len: usize) -> Result<()>;
+
+  // Homogeneous scalar arrays are written whole, not element-by-element: a
+  // self-describing format (arora-buffers) tags the element type *once* at the
+  // array head and then writes the elements raw, so a per-element datum op —
+  // which would re-tag every element — is the wrong shape. Each backend frames
+  // its own way (buffers: tag + raw bulk; CDR: 4-aligned count + elements), so
+  // these are honest bulk operations rather than sugar over the scalar ops.
+  fn write_bool_array(&mut self, v: &[bool]) -> Result<()>;
+  fn write_u8_array(&mut self, v: &[u8]) -> Result<()>;
+  fn write_u16_array(&mut self, v: &[u16]) -> Result<()>;
+  fn write_u32_array(&mut self, v: &[u32]) -> Result<()>;
+  fn write_u64_array(&mut self, v: &[u64]) -> Result<()>;
+  fn write_i8_array(&mut self, v: &[i8]) -> Result<()>;
+  fn write_i16_array(&mut self, v: &[i16]) -> Result<()>;
+  fn write_i32_array(&mut self, v: &[i32]) -> Result<()>;
+  fn write_i64_array(&mut self, v: &[i64]) -> Result<()>;
+  fn write_f32_array(&mut self, v: &[f32]) -> Result<()>;
+  fn write_f64_array(&mut self, v: &[f64]) -> Result<()>;
+  fn write_string_array(&mut self, v: &[String]) -> Result<()>;
+
+  /// Begin an array of `len` structures, each of type `element_id`. The element
+  /// type is named once here; the `len` element bodies follow, each introduced
+  /// by [`begin_struct_element`](Self::begin_struct_element) — they carry no id
+  /// of their own. A positional format (CDR) emits the count and alignment; a
+  /// self-describing one emits its array tag and the element type id.
+  fn begin_struct_array(&mut self, element_id: Uuid, len: usize) -> Result<()>;
+  /// Begin one element of a [`begin_struct_array`](Self::begin_struct_array),
+  /// carrying `field_count` fields (which follow via the field/datum ops). The
+  /// element's type is already fixed by the array head, so no id is written: a
+  /// self-describing format emits only the field count, a positional one nothing.
+  fn begin_struct_element(&mut self, field_count: usize) -> Result<()>;
 }
 
 /// A format a [`Value`] is read from, type-directed by the walk. A
@@ -92,11 +118,34 @@ pub trait ValueReader {
   /// self-describing format reads and validates its inline field id; a
   /// positional format reads nothing.
   fn enter_field(&mut self, expected_id: Uuid) -> Result<()>;
-  /// Enter a homogeneous array whose elements are of type `element_id`,
-  /// returning the element count. The walk then reads that many elements via
-  /// the datum/struct ops. A positional format (CDR) reads the count here; a
-  /// self-describing one reads and validates its array header.
-  fn enter_array(&mut self, element_id: Uuid) -> Result<usize>;
+
+  // Counterparts of the `write_*_array` bulk writers: read a whole homogeneous
+  // scalar array. A self-describing format validates the array head's element
+  // tag against the type the walk asks for.
+  fn read_bool_array(&mut self) -> Result<Vec<bool>>;
+  fn read_u8_array(&mut self) -> Result<Vec<u8>>;
+  fn read_u16_array(&mut self) -> Result<Vec<u16>>;
+  fn read_u32_array(&mut self) -> Result<Vec<u32>>;
+  fn read_u64_array(&mut self) -> Result<Vec<u64>>;
+  fn read_i8_array(&mut self) -> Result<Vec<i8>>;
+  fn read_i16_array(&mut self) -> Result<Vec<i16>>;
+  fn read_i32_array(&mut self) -> Result<Vec<i32>>;
+  fn read_i64_array(&mut self) -> Result<Vec<i64>>;
+  fn read_f32_array(&mut self) -> Result<Vec<f32>>;
+  fn read_f64_array(&mut self) -> Result<Vec<f64>>;
+  fn read_string_array(&mut self) -> Result<Vec<String>>;
+
+  /// Enter an array of structures of type `element_id`, returning the element
+  /// count. Each of the `count` element bodies is then read via
+  /// [`enter_struct_element`](Self::enter_struct_element) then the field ops. A
+  /// positional format (CDR) reads the count here; a self-describing one reads
+  /// and validates its array header, including the element type id.
+  fn enter_struct_array(&mut self, element_id: Uuid) -> Result<usize>;
+  /// Enter one element of an [`enter_struct_array`](Self::enter_struct_array),
+  /// which the walk expects to carry `field_count` fields. A self-describing
+  /// format reads and validates the on-wire field count; a positional one takes
+  /// it from the type and reads nothing.
+  fn enter_struct_element(&mut self, field_count: usize) -> Result<()>;
 }
 
 /// Serialize `value` against `ty` into `writer`. Errors if `value` does not
@@ -150,9 +199,8 @@ fn write_structure<W: ValueWriter>(
   write_structure_fields(id, structure, registry, &actual.fields, writer)
 }
 
-/// Write a structure's `fields` against `structure` in declared order. Shared by
-/// [`write_structure`] and array-of-structure elements — the latter carry no id
-/// of their own, so the array's element id is passed as `id`.
+/// Write a standalone structure's `fields` against `structure` in declared
+/// order, with the id-bearing struct header.
 fn write_structure_fields<W: ValueWriter>(
   id: Uuid,
   structure: &low::Structure,
@@ -160,6 +208,12 @@ fn write_structure_fields<W: ValueWriter>(
   fields: &[StructureField],
   writer: &mut W,
 ) -> Result<()> {
+  check_field_count(structure, fields)?;
+  writer.begin_struct(id, structure.fields.len())?;
+  write_fields(structure, registry, fields, writer)
+}
+
+fn check_field_count(structure: &low::Structure, fields: &[StructureField]) -> Result<()> {
   if fields.len() != structure.fields.len() {
     return err(format!(
       "structure has {} fields, type declares {}",
@@ -167,9 +221,19 @@ fn write_structure_fields<W: ValueWriter>(
       structure.fields.len()
     ));
   }
-  writer.begin_struct(id, structure.fields.len())?;
-  // Declared order (IndexMap) drives the wire order; the value's fields must be
-  // in that same order, field id by field id.
+  Ok(())
+}
+
+/// The field body shared by standalone structures and array-of-structure
+/// elements — the caller writes the header (id-bearing or element-only) first.
+/// Declared order (IndexMap) drives the wire order; the value's fields must be
+/// in that same order, field id by field id.
+fn write_fields<W: ValueWriter>(
+  structure: &low::Structure,
+  registry: &TypeRegistry,
+  fields: &[StructureField],
+  writer: &mut W,
+) -> Result<()> {
   for ((field_id, field), actual_field) in structure.fields.iter().zip(fields) {
     if actual_field.id != *field_id {
       return err(format!(
@@ -195,10 +259,8 @@ fn read_structure<R: ValueReader>(
   }))
 }
 
-/// Read a structure's fields against `structure` in declared order. Shared by
-/// [`read_structure`] and array-of-structure elements. The type drives the
-/// shape; the reader validates (self-describing) or takes it as given
-/// (positional). Field ids come from the type, not the wire.
+/// Read a standalone structure's fields against `structure` in declared order,
+/// consuming the id-bearing struct header first.
 fn read_structure_fields<R: ValueReader>(
   id: Uuid,
   structure: &low::Structure,
@@ -206,6 +268,18 @@ fn read_structure_fields<R: ValueReader>(
   reader: &mut R,
 ) -> Result<Vec<StructureField>> {
   reader.enter_struct(id, structure.fields.len())?;
+  read_fields(structure, registry, reader)
+}
+
+/// The field body shared by standalone structures and array-of-structure
+/// elements — the caller consumes the header first. The type drives the shape;
+/// the reader validates (self-describing) or takes it as given (positional).
+/// Field ids come from the type, not the wire.
+fn read_fields<R: ValueReader>(
+  structure: &low::Structure,
+  registry: &TypeRegistry,
+  reader: &mut R,
+) -> Result<Vec<StructureField>> {
   let mut fields = Vec::with_capacity(structure.fields.len());
   for (field_id, field) in &structure.fields {
     reader.enter_field(*field_id)?;
@@ -287,9 +361,16 @@ fn write_array<W: ValueWriter>(
           "array-of-structure element id {id} does not match type element id {element_id}"
         ));
       }
-      writer.begin_array(element_id, elements.len())?;
+      // Framing: the element type id is named once, in the array head; each
+      // element is a headerless struct body (field count + fields), never
+      // re-tagged. This matches the self-describing `Value` backend
+      // (arora-buffers `serde_uuid`), so the two encode a struct array
+      // identically.
+      writer.begin_struct_array(element_id, elements.len())?;
       for element in elements {
-        write_structure_fields(element_id, structure, registry, &element.fields, writer)?;
+        check_field_count(structure, &element.fields)?;
+        writer.begin_struct_element(structure.fields.len())?;
+        write_fields(structure, registry, &element.fields, writer)?;
       }
       Ok(())
     }
@@ -298,66 +379,52 @@ fn write_array<W: ValueWriter>(
 }
 
 /// Write a scalar array (`Value::Array*`) whose elements are of the well-known
-/// type `element_id`.
+/// type `element_id`, dispatching to the writer's bulk method for that type.
 fn write_scalar_array<W: ValueWriter>(
   element_id: Uuid,
   value: &Value,
   writer: &mut W,
 ) -> Result<()> {
-  macro_rules! copy_array {
+  macro_rules! write_array_of {
     ($variant:ident, $write:ident) => {{
-      let items = match value {
-        Value::$variant(items) => items,
-        other => {
-          return err(format!(
-            concat!("expected ", stringify!($variant), ", got {}"),
-            other
-          ))
-        }
-      };
-      writer.begin_array(element_id, items.len())?;
-      for item in items {
-        writer.$write(*item)?;
+      match value {
+        Value::$variant(items) => writer.$write(items),
+        other => err(format!(
+          concat!("expected ", stringify!($variant), ", got {}"),
+          other
+        )),
       }
     }};
   }
   if element_id == *ty::BOOLEAN_ID {
-    copy_array!(ArrayBoolean, write_bool)
+    write_array_of!(ArrayBoolean, write_bool_array)
   } else if element_id == *ty::U8_ID {
-    copy_array!(ArrayU8, write_u8)
+    write_array_of!(ArrayU8, write_u8_array)
   } else if element_id == *ty::U16_ID {
-    copy_array!(ArrayU16, write_u16)
+    write_array_of!(ArrayU16, write_u16_array)
   } else if element_id == *ty::U32_ID {
-    copy_array!(ArrayU32, write_u32)
+    write_array_of!(ArrayU32, write_u32_array)
   } else if element_id == *ty::U64_ID {
-    copy_array!(ArrayU64, write_u64)
+    write_array_of!(ArrayU64, write_u64_array)
   } else if element_id == *ty::I8_ID {
-    copy_array!(ArrayI8, write_i8)
+    write_array_of!(ArrayI8, write_i8_array)
   } else if element_id == *ty::I16_ID {
-    copy_array!(ArrayI16, write_i16)
+    write_array_of!(ArrayI16, write_i16_array)
   } else if element_id == *ty::I32_ID {
-    copy_array!(ArrayI32, write_i32)
+    write_array_of!(ArrayI32, write_i32_array)
   } else if element_id == *ty::I64_ID {
-    copy_array!(ArrayI64, write_i64)
+    write_array_of!(ArrayI64, write_i64_array)
   } else if element_id == *ty::F32_ID {
-    copy_array!(ArrayF32, write_f32)
+    write_array_of!(ArrayF32, write_f32_array)
   } else if element_id == *ty::F64_ID {
-    copy_array!(ArrayF64, write_f64)
+    write_array_of!(ArrayF64, write_f64_array)
   } else if element_id == *ty::STRING_ID {
-    let items = match value {
-      Value::ArrayString(items) => items,
-      other => return err(format!("expected ArrayString, got {other}")),
-    };
-    writer.begin_array(element_id, items.len())?;
-    for item in items {
-      writer.write_string(item)?;
-    }
+    write_array_of!(ArrayString, write_string_array)
   } else {
-    return err(format!(
+    err(format!(
       "array element type {element_id} is neither a registered type nor a supported scalar"
-    ));
+    ))
   }
-  Ok(())
 }
 
 /// Read an array whose element type is `element_id` (the counterpart of
@@ -374,11 +441,12 @@ fn read_array<R: ValueReader>(
           "array element type {element_id} is not a structure"
         ));
       };
-      let len = reader.enter_array(element_id)?;
+      let len = reader.enter_struct_array(element_id)?;
       let mut elements = Vec::with_capacity(len);
       for _ in 0..len {
+        reader.enter_struct_element(structure.fields.len())?;
         elements.push(StructureWithoutId {
-          fields: read_structure_fields(element_id, structure, registry, reader)?,
+          fields: read_fields(structure, registry, reader)?,
         });
       }
       Ok(Value::ArrayStructure {
@@ -390,42 +458,38 @@ fn read_array<R: ValueReader>(
   }
 }
 
-/// Read a scalar array whose elements are of the well-known type `element_id`.
+/// Read a scalar array whose elements are of the well-known type `element_id`,
+/// dispatching to the reader's bulk method for that type.
 fn read_scalar_array<R: ValueReader>(element_id: Uuid, reader: &mut R) -> Result<Value> {
-  macro_rules! copy_array {
+  macro_rules! read_array_of {
     ($variant:ident, $read:ident) => {{
-      let len = reader.enter_array(element_id)?;
-      let mut items = Vec::with_capacity(len);
-      for _ in 0..len {
-        items.push(reader.$read()?);
-      }
-      Value::$variant(items)
+      Value::$variant(reader.$read()?)
     }};
   }
   Ok(if element_id == *ty::BOOLEAN_ID {
-    copy_array!(ArrayBoolean, read_bool)
+    read_array_of!(ArrayBoolean, read_bool_array)
   } else if element_id == *ty::U8_ID {
-    copy_array!(ArrayU8, read_u8)
+    read_array_of!(ArrayU8, read_u8_array)
   } else if element_id == *ty::U16_ID {
-    copy_array!(ArrayU16, read_u16)
+    read_array_of!(ArrayU16, read_u16_array)
   } else if element_id == *ty::U32_ID {
-    copy_array!(ArrayU32, read_u32)
+    read_array_of!(ArrayU32, read_u32_array)
   } else if element_id == *ty::U64_ID {
-    copy_array!(ArrayU64, read_u64)
+    read_array_of!(ArrayU64, read_u64_array)
   } else if element_id == *ty::I8_ID {
-    copy_array!(ArrayI8, read_i8)
+    read_array_of!(ArrayI8, read_i8_array)
   } else if element_id == *ty::I16_ID {
-    copy_array!(ArrayI16, read_i16)
+    read_array_of!(ArrayI16, read_i16_array)
   } else if element_id == *ty::I32_ID {
-    copy_array!(ArrayI32, read_i32)
+    read_array_of!(ArrayI32, read_i32_array)
   } else if element_id == *ty::I64_ID {
-    copy_array!(ArrayI64, read_i64)
+    read_array_of!(ArrayI64, read_i64_array)
   } else if element_id == *ty::F32_ID {
-    copy_array!(ArrayF32, read_f32)
+    read_array_of!(ArrayF32, read_f32_array)
   } else if element_id == *ty::F64_ID {
-    copy_array!(ArrayF64, read_f64)
+    read_array_of!(ArrayF64, read_f64_array)
   } else if element_id == *ty::STRING_ID {
-    copy_array!(ArrayString, read_string)
+    read_array_of!(ArrayString, read_string_array)
   } else {
     return err(format!(
       "array element type {element_id} is neither a registered type nor a supported scalar"
