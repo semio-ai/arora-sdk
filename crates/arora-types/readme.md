@@ -123,7 +123,8 @@ impl ValueWriter for MyWriter {
         Ok(())
     }
     // ...one method per primitive: write_unit, write_bool, write_u8 ..= write_u64,
-    // write_i8 ..= write_i64, write_f32, write_f64...
+    // write_i8 ..= write_i64, write_f32, write_f64, and one bulk method per scalar
+    // array: write_bool_array ..= write_f64_array, write_string_array...
 
     fn begin_struct(&mut self, _id: Uuid, _field_count: usize) -> Result<()> {
         Ok(()) // this format is positional — nothing to frame here
@@ -131,6 +132,7 @@ impl ValueWriter for MyWriter {
     fn begin_field(&mut self, _id: Uuid) -> Result<()> {
         Ok(())
     }
+    // ...plus the struct-array framing: begin_struct_array / begin_struct_element.
 }
 ```
 
@@ -160,8 +162,12 @@ The one decision a new format makes is whether it is **self-describing** or
   writes no framing at all: the type alone determines the layout, so the framing
   methods are no-ops and the reader takes each field's type from the walk.
 
-The first cut of the walk covers scalars, strings and nested structures; arrays,
-enumerations and options extend the trait and the walk together.
+The walk covers scalars, strings, nested structures and homogeneous arrays. A
+scalar array goes through the `write_*_array` / `read_*_array` bulk methods (the
+element type framed once, not re-tagged per element); an array of structures
+through `begin_struct_array` / `begin_struct_element`, each element a headerless
+struct body. Enumerations, options and maps extend the trait and the walk
+together.
 
 ## Web Bindings
 

@@ -75,12 +75,51 @@ impl CdrWriter {
     fn put(&mut self, bytes: &[u8]) {
         self.body.extend_from_slice(bytes);
     }
+
+    /// A ROS 2 CDR sequence header: a 4-aligned `u32` element count.
+    fn put_sequence_len(&mut self, len: usize) {
+        self.align(4);
+        self.put(&(len as u32).to_le_bytes());
+    }
 }
 
 impl Default for CdrWriter {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Generates the `write_*_array` methods: a CDR sequence is a 4-aligned `u32`
+/// count followed by the elements, each written (and self-aligned) by the
+/// matching scalar op.
+macro_rules! cdr_write_arrays {
+    ($($method:ident($elem:ty) => $write:ident;)*) => {
+        $(
+            fn $method(&mut self, v: &[$elem]) -> Result<()> {
+                self.put_sequence_len(v.len());
+                for item in v {
+                    self.$write(*item)?;
+                }
+                Ok(())
+            }
+        )*
+    };
+}
+
+/// The read counterpart of [`cdr_write_arrays`].
+macro_rules! cdr_read_arrays {
+    ($($method:ident($elem:ty) => $read:ident;)*) => {
+        $(
+            fn $method(&mut self) -> Result<Vec<$elem>> {
+                let len = self.take_sequence_len()?;
+                let mut items = Vec::with_capacity(len);
+                for _ in 0..len {
+                    items.push(self.$read()?);
+                }
+                Ok(items)
+            }
+        )*
+    };
 }
 
 impl ValueWriter for CdrWriter {
@@ -154,12 +193,36 @@ impl ValueWriter for CdrWriter {
     fn begin_field(&mut self, _id: Uuid) -> Result<()> {
         Ok(())
     }
-    fn begin_array(&mut self, _element_id: Uuid, len: usize) -> Result<()> {
-        // ROS 2 CDR sequence: a 4-aligned u32 element count, then the elements
-        // (each self-aligned by its own write op). The element type is positional
-        // (from the schema), so it is not on the wire.
-        self.align(4);
-        self.put(&(len as u32).to_le_bytes());
+    // Scalar arrays are CDR sequences: a 4-aligned u32 count, then the elements,
+    // each self-aligned by its own scalar op. The element type is positional
+    // (from the schema), so it is not on the wire.
+    cdr_write_arrays! {
+        write_bool_array(bool) => write_bool;
+        write_u8_array(u8) => write_u8;
+        write_u16_array(u16) => write_u16;
+        write_u32_array(u32) => write_u32;
+        write_u64_array(u64) => write_u64;
+        write_i8_array(i8) => write_i8;
+        write_i16_array(i16) => write_i16;
+        write_i32_array(i32) => write_i32;
+        write_i64_array(i64) => write_i64;
+        write_f32_array(f32) => write_f32;
+        write_f64_array(f64) => write_f64;
+    }
+    fn write_string_array(&mut self, v: &[String]) -> Result<()> {
+        self.put_sequence_len(v.len());
+        for item in v {
+            self.write_string(item)?;
+        }
+        Ok(())
+    }
+    fn begin_struct_array(&mut self, _element_id: Uuid, len: usize) -> Result<()> {
+        // Same CDR sequence header; the struct elements follow positionally.
+        self.put_sequence_len(len);
+        Ok(())
+    }
+    fn begin_struct_element(&mut self, _field_count: usize) -> Result<()> {
+        // Positional: the element's fields follow directly, with no header.
         Ok(())
     }
 }
@@ -200,6 +263,11 @@ impl<'a> CdrReader<'a> {
         let mut out = [0u8; N];
         out.copy_from_slice(self.take(N)?);
         Ok(out)
+    }
+
+    /// Reads a ROS 2 CDR sequence header: a 4-aligned `u32` element count.
+    fn take_sequence_len(&mut self) -> Result<usize> {
+        Ok(u32::from_le_bytes(self.take_aligned::<4>(4)?) as usize)
     }
 }
 
@@ -259,9 +327,34 @@ impl ValueReader for CdrReader<'_> {
     fn enter_field(&mut self, _expected_id: Uuid) -> Result<()> {
         Ok(())
     }
-    fn enter_array(&mut self, _element_id: Uuid) -> Result<usize> {
-        // Read the 4-aligned u32 element count; the elements follow positionally.
-        Ok(u32::from_le_bytes(self.take_aligned::<4>(4)?) as usize)
+    cdr_read_arrays! {
+        read_bool_array(bool) => read_bool;
+        read_u8_array(u8) => read_u8;
+        read_u16_array(u16) => read_u16;
+        read_u32_array(u32) => read_u32;
+        read_u64_array(u64) => read_u64;
+        read_i8_array(i8) => read_i8;
+        read_i16_array(i16) => read_i16;
+        read_i32_array(i32) => read_i32;
+        read_i64_array(i64) => read_i64;
+        read_f32_array(f32) => read_f32;
+        read_f64_array(f64) => read_f64;
+    }
+    fn read_string_array(&mut self) -> Result<Vec<String>> {
+        let len = self.take_sequence_len()?;
+        let mut items = Vec::with_capacity(len);
+        for _ in 0..len {
+            items.push(self.read_string()?);
+        }
+        Ok(items)
+    }
+    fn enter_struct_array(&mut self, _element_id: Uuid) -> Result<usize> {
+        // The 4-aligned u32 element count; the struct elements follow positionally.
+        self.take_sequence_len()
+    }
+    fn enter_struct_element(&mut self, _field_count: usize) -> Result<()> {
+        // Positional: the element's fields follow directly, no header.
+        Ok(())
     }
 }
 
