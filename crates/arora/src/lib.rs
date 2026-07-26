@@ -32,7 +32,7 @@ pub mod studio;
 pub mod tui;
 
 #[cfg(feature = "native")]
-pub use run::{run, run_with, run_with_frontend, run_with_hal};
+pub use run::{run, run_with, run_with_frontend, run_with_hal, DeviceCli};
 pub use runtime::RuntimeError;
 
 /// Re-exported so embedders can construct the default behavior executor — an
@@ -44,7 +44,7 @@ pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 pub use arora_behavior_tree::ModuleFunction;
 
 use crate::runtime::EndpointInbound;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
 /// Re-exported so an embedder holding a device's [`LocalCaller`] (or any other
 /// caller) can name the trait its `call` comes from.
@@ -268,6 +268,12 @@ pub struct AroraBuilder {
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<(Header, Box<[u8]>)>,
+    /// Optional Groot file to install as the behavior at
+    /// [`build`](AroraBuilder::build) (see
+    /// [`with_groot_file`](AroraBuilder::with_groot_file)). Behavior trees are
+    /// platform-agnostic; only *parsing a command line* is a (native) binary's
+    /// concern — the library never reads argv.
+    pub(crate) groot: Option<std::path::PathBuf>,
 }
 
 impl AroraBuilder {
@@ -321,6 +327,17 @@ impl AroraBuilder {
         self
     }
 
+    /// Install the Groot behavior-tree file at `path` as the device's behavior:
+    /// at [`build`](Self::build) the tree loads into a fresh
+    /// [`BehaviorTreeInterpreter`] over the device's function index, against
+    /// the device's own store — replacing any injected interpreter. The
+    /// library never reads argv; a device binary parses its own command line
+    /// (the `DeviceCli` helper, on native) and injects the path here.
+    pub fn with_groot_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.groot = Some(path.into());
+        self
+    }
+
     /// Load a module into the device's engine so behaviors may call its
     /// functions. Repeatable — each call loads one module.
     ///
@@ -370,6 +387,11 @@ impl AroraBuilder {
     /// *defaults*, never what you can inject — e.g. a device whose blackboard
     /// is a custom [`DataStore`] runs with
     /// `Arora::builder().with_hal(hal).with_data_store(store).run()`.
+    ///
+    /// Reads no CLI arguments — bin/lib 101: a binary parses its own command
+    /// line (the helper [`DeviceCli`](crate::DeviceCli) gives it the standard
+    /// device arguments) and injects the results, e.g. through
+    /// [`with_groot_file`](Self::with_groot_file).
     #[cfg(feature = "native")]
     pub async fn run(mut self) -> Result<()> {
         // The front end is picked first: building it installs the matching log
@@ -444,13 +466,28 @@ impl AroraBuilder {
 
         let endpoints = bridges.len();
         let function_index = Rc::new(self.functions);
-        // Default executor: an empty, ready behavior-tree interpreter over the
-        // assembled function index. It is injected once here (never swapped); a
-        // behavior is loaded into it as a separate step. With none loaded it
-        // idles, so an un-configured device ticks a no-op.
-        let interpreter = self
-            .interpreter
-            .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
+        // The executor, injected once here (never swapped). A named Groot file
+        // wins: it loads into a fresh behavior-tree interpreter over the
+        // assembled function index (so its trees may call host-module
+        // functions), against the device's own store. Otherwise the injected
+        // interpreter stands, or the default — an empty, ready behavior-tree
+        // interpreter that idles until a behavior is loaded into it, so an
+        // un-configured device ticks a no-op.
+        let interpreter = if let Some(path) = self.groot {
+            let xml = std::fs::read_to_string(&path)
+                .with_context(|| format!("could not read Groot file {}", path.display()))?;
+            let mut interpreter = BehaviorTreeInterpreter::new(function_index.clone());
+            interpreter.load_groot(&xml, &*store).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to install behavior tree from {}: {e:?}",
+                    path.display()
+                )
+            })?;
+            Box::new(interpreter) as Box<dyn BehaviorInterpreter>
+        } else {
+            self.interpreter
+                .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())))
+        };
 
         // The interpreter as a module: a function module under
         // `interpreter_module::ID` whose `LOAD`/`EDIT` functions run on the

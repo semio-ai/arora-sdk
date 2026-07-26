@@ -3,8 +3,11 @@
 //! Every entry point is sugar over the [builder](Arora::builder): it assembles
 //! an [`AroraBuilder`](crate::AroraBuilder) and calls
 //! [`run`](crate::AroraBuilder::run), which drives the device to completion
-//! (until the device is unregistered or the process is interrupted) with an
-//! optional Groot tree installed from the first CLI argument. A device that
+//! (until the device is unregistered or the process is interrupted). None of
+//! them reads argv — a binary parses its own command line (the [`DeviceCli`]
+//! helper gives it the standard device arguments, e.g. the optional Groot
+//! tree, injected via
+//! [`with_groot_file`](crate::AroraBuilder::with_groot_file)). A device that
 //! composes its own parts (a custom store, several bridges, modules) skips
 //! this module and uses the builder directly. All entry points are `async` —
 //! the caller drives them on its own Tokio runtime (the binary from
@@ -29,10 +32,6 @@
 //! On the web, drive the device via `arora-web`'s `AroraRuntime` instead.
 
 #[cfg(feature = "native")]
-use std::collections::HashMap;
-#[cfg(feature = "native")]
-use std::rc::Rc;
-#[cfg(feature = "native")]
 use std::sync::Arc;
 
 #[cfg(feature = "native")]
@@ -41,13 +40,6 @@ use anyhow::{anyhow, Context, Result};
 use arora_bridge::Bridge;
 #[cfg(feature = "native")]
 use arora_hal::Hal;
-// `SimpleDataStore` appears here only as the default backend for devices that
-// do not care about their store; injecting any other [`DataStore`]
-// implementation is always a runtime choice (`run_with`, or the builder's
-// `with_data_store` + [`AroraBuilder::run`](crate::AroraBuilder::run)), never
-// gated by a feature.
-#[cfg(feature = "native")]
-use arora_simple_data_store::SimpleDataStore;
 #[cfg(feature = "native")]
 use arora_types::data::DataStore;
 #[cfg(feature = "native")]
@@ -56,7 +48,20 @@ use log::info;
 #[cfg(feature = "native")]
 use crate::operator::{serve_access_requests, Frontend};
 #[cfg(feature = "native")]
-use crate::{Arora, BehaviorTreeInterpreter};
+use crate::Arora;
+
+/// The standard device binary's command line, as a clap helper: parse it in
+/// your `main` (or `#[command(flatten)]` it into a larger CLI) and inject the
+/// results into the builder (e.g.
+/// [`with_groot_file`](crate::AroraBuilder::with_groot_file)). The library
+/// never parses argv — a command line is a binary's concern, and only a
+/// native binary has one.
+#[cfg(feature = "native")]
+#[derive(Debug, Default, clap::Parser)]
+pub struct DeviceCli {
+    /// Groot behavior-tree file to install as the device's behavior.
+    pub groot: Option<std::path::PathBuf>,
+}
 
 /// Run the default device: in-process fake HAL, default bridge.
 #[cfg(feature = "native")]
@@ -105,12 +110,11 @@ pub(crate) async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
 /// Run an arora device with the given HAL, bridge, and data store.
 ///
 /// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
-/// natively) around the injected HAL + bridge over `store`, installs an optional
-/// Groot tree given as the first CLI argument, then drives the step loop. There
-/// is no bridge factory — the caller builds the bridge endpoint (awaiting any
-/// async construction on its own runtime) and hands it in here **by value**:
-/// the device owns it, and takes its inbound stream at build. The bridge and
-/// HAL own any async internally.
+/// natively) around the injected HAL + bridge over `store`, then drives the
+/// step loop. There is no bridge factory — the caller builds the bridge
+/// endpoint (awaiting any async construction on its own runtime) and hands it
+/// in here **by value**: the device owns it, and takes its inbound stream at
+/// build. The bridge and HAL own any async internally.
 ///
 /// Pass `Box::new(SimpleDataStore::new())` for a self-contained device, or a
 /// clone onto shared storage (any [`DataStore`] — e.g. a `NamespacedStore`
@@ -156,9 +160,8 @@ pub async fn run_with_frontend(
 
 /// The run loop over a fully-assembled [`AroraBuilder`] — the funnel every
 /// entry point (and [`AroraBuilder::run`]) goes through. Expects at least one
-/// bridge to be injected already; every other unset part gets its default
-/// (the store here — so the Groot tree below loads against the same store the
-/// device ticks — the rest at `build()`).
+/// bridge to be injected already; every other unset part gets its default at
+/// `build()`.
 #[cfg(feature = "native")]
 pub(crate) async fn run_builder_with_frontend(
     mut builder: crate::AroraBuilder,
@@ -167,10 +170,6 @@ pub(crate) async fn run_builder_with_frontend(
     let Frontend {
         operator, on_ready, ..
     } = frontend;
-
-    if builder.store.is_none() {
-        builder.store = Some(Box::new(SimpleDataStore::new()));
-    }
 
     // Query the bridge's control plane before the device takes ownership of the
     // endpoint: the identity/info the front end shows, and the access-request
@@ -184,27 +183,6 @@ pub(crate) async fn run_builder_with_frontend(
     let device_id = bridge.device_id().await;
     let access_requests = bridge.access_requests().await;
 
-    // If the first CLI argument is a Groot file, construct an empty
-    // behavior-tree interpreter, load that tree into it against the same store
-    // the device ticks, and inject it at build — construct-empty → load →
-    // inject. With no argument the builder's default (an empty, idle
-    // interpreter) stands. Either way the interpreter is set once here, not
-    // swapped later.
-    if let Some(path) = std::env::args().nth(1) {
-        let xml = std::fs::read_to_string(&path)
-            .with_context(|| format!("could not read Groot file {path}"))?;
-        // run.rs registers no modules, so the interpreter's function index is
-        // empty: the tree's nodes are the natively-hosted control nodes.
-        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        interpreter
-            .load_groot(
-                &xml,
-                builder.store.as_deref().expect("store defaulted above"),
-            )
-            .map_err(|e| anyhow!("failed to install behavior tree from {path}: {e:?}"))?;
-        builder = builder.with_behavior_interpreter(Box::new(interpreter));
-        info!("installed behavior tree from {path}");
-    }
     let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device exists: a

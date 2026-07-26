@@ -33,6 +33,9 @@ native = [
     "dep:env_logger",
     # The operator interface (`arora::operator`) is an async trait.
     "dep:async-trait",
+    # The helper CLI (`DeviceCli`) a device binary parses; the library itself
+    # never reads argv.
+    "dep:clap",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -82,6 +85,7 @@ arora-studio-bridge-client = { version = "6", optional = true }
 # studio-bridge/headless, the runner this is ported from.
 crypto_secretbox = { version = "0.1.1", optional = true }
 dirs = { version = "6", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
 env_logger = { version = "0.11", optional = true }
 log = "0.4"
 rustls = { version = "0.23.27", default-features = false, features = ["ring"], optional = true }
