@@ -6,7 +6,11 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::stream::unfold;
 use futures::StreamExt;
 use log::{debug, error, info, trace, warn};
-use ros2_client::{Name, Node, NodeOptions, DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
+#[cfg(feature = "zenoh")]
+use ros2_client::QosProfile;
+use ros2_client::{Name, Node, NodeOptions};
+#[cfg(feature = "dds")]
+use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 
 use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult, UpdatesStream};
 use arora_types::data::{Key, State, StateChange};
@@ -20,8 +24,20 @@ use crate::conversions::{
     message_to_state_change, ConvertingStateChangePublisher, FromStateChange, StateChangePublisher,
     ToStateChange,
 };
+use crate::msgs::{self, RosMessage};
 use crate::ros2_error::ROS2RobotError;
-use crate::{msgs, msgs::MessageType};
+
+/// Whether a config `message_type` string names the ROS message type `T`.
+///
+/// The configs store the short `package/Type` form; [`package_and_type`] resolves
+/// both it and the REP-2016 `package/msg/Type` form back to `(package, type)`,
+/// which we match against `T`'s compile-time identity — the typed replacement for
+/// the old stringly-typed `MESSAGE_TYPE_STR` comparison.
+///
+/// [`package_and_type`]: arora_msgs_ros2::package_and_type
+fn is_type<T: RosMessage>(message_type: &str) -> bool {
+    arora_msgs_ros2::package_and_type(message_type) == Some((T::PACKAGE, T::TYPE_NAME))
+}
 
 /// A stream of state changes converted from the messages of one subscribed topic.
 type StateChangeStream =
@@ -137,15 +153,30 @@ impl Ros2Hal {
             .map_err(|e| ROS2RobotError::InitializationError(format!("{e:?}")))?;
         let node_name = ros2_client::NodeName::new("/", "arora")
             .map_err(|e| ROS2RobotError::ConfigError(format!("Invalid node name: {}", e)))?;
+        // The DDS backend's `new_node` returns a `Result` and its `NodeOptions`
+        // carries the rosout toggle; the Zenoh backend's is infallible and has
+        // neither.
+        #[cfg(feature = "dds")]
         let mut node = ctx
             .new_node(node_name, NodeOptions::new().enable_rosout(true))
             .map_err(|e| ROS2RobotError::InitializationError(format!("{e:?}")))?;
+        #[cfg(feature = "zenoh")]
+        let mut node = ctx.new_node(node_name, NodeOptions::new());
 
-        // Start the node spinner in a background task (required when waiting for subscriptions)
-        let spinner = node
-            .spinner()
-            .map_err(|e| ROS2RobotError::InitializationError(format!("{e:?}")))?;
-        let spinner_abort_handle = tokio::spawn(spinner.spin()).abort_handle();
+        // The DDS backend needs a background spinner so discovery, subscriptions
+        // and publishers make progress (and `wait_for_subscription` can resolve);
+        // the Zenoh backend drives them on its own async session, so there is
+        // nothing to spin — a no-op task stands in to keep one abort handle and
+        // one `Drop` path across both backends.
+        #[cfg(feature = "dds")]
+        let spinner_abort_handle = {
+            let spinner = node
+                .spinner()
+                .map_err(|e| ROS2RobotError::InitializationError(format!("{e:?}")))?;
+            tokio::spawn(spinner.spin()).abort_handle()
+        };
+        #[cfg(feature = "zenoh")]
+        let spinner_abort_handle = tokio::spawn(async {}).abort_handle();
 
         let joint_ids = Arc::new(joint_ros_names_to_ids);
         let mut subscription_streams = Vec::new();
@@ -289,37 +320,37 @@ impl Ros2Hal {
     ) -> Result<StateChangeStream, ROS2RobotError> {
         debug!("Setting up subscriber for topic: {}", topic.name);
 
-        let state_change_stream = match topic.message_type.as_str() {
-            msgs::JointState::MESSAGE_TYPE_STR => Self::setup_typed_subscriber::<msgs::JointState>(
+        let message_type = topic.message_type.as_str();
+        let state_change_stream = if is_type::<msgs::JointState>(message_type) {
+            Self::setup_typed_subscriber::<msgs::JointState>(
                 node,
                 &topic.name,
                 topic.mapping,
                 joint_ids,
-            ),
-            msgs::Float64MultiArray::MESSAGE_TYPE_STR => {
-                Self::setup_typed_subscriber::<msgs::Float64MultiArray>(
-                    node,
-                    &topic.name,
-                    topic.mapping,
-                    joint_ids,
-                )
-            }
-            msgs::String::MESSAGE_TYPE_STR => Self::setup_typed_subscriber::<msgs::String>(
+            )
+        } else if is_type::<msgs::Float64MultiArray>(message_type) {
+            Self::setup_typed_subscriber::<msgs::Float64MultiArray>(
                 node,
                 &topic.name,
                 topic.mapping,
                 joint_ids,
-            ),
-            // Add more message types as needed
-            _ => {
-                error!(
-                    "Unsupported message type for subscriber: {}",
-                    topic.message_type
-                );
-                return Err(ROS2RobotError::UnsupportedMessageType(
-                    topic.message_type.clone(),
-                ));
-            }
+            )
+        } else if is_type::<msgs::String>(message_type) {
+            Self::setup_typed_subscriber::<msgs::String>(
+                node,
+                &topic.name,
+                topic.mapping,
+                joint_ids,
+            )
+        // Add more message types as needed
+        } else {
+            error!(
+                "Unsupported message type for subscriber: {}",
+                topic.message_type
+            );
+            return Err(ROS2RobotError::UnsupportedMessageType(
+                topic.message_type.clone(),
+            ));
         }?;
 
         info!("Successfully set up subscriber for topic: {}", topic.name);
@@ -330,7 +361,15 @@ impl Ros2Hal {
     ///
     /// Creates a subscriber on the node and wraps it into a stream that
     /// converts received messages into state changes.
-    fn setup_typed_subscriber<T: MessageType + ToStateChange + 'static + std::fmt::Debug>(
+    fn setup_typed_subscriber<
+        T: RosMessage
+            + ToStateChange
+            + serde::de::DeserializeOwned
+            + std::fmt::Debug
+            + Send
+            + Sync
+            + 'static,
+    >(
         node: &mut Node,
         topic_name: &str,
         topic_mapping: TopicMapping,
@@ -342,16 +381,22 @@ impl Ros2Hal {
             ROS2RobotError::ConfigError(format!("Invalid topic name '{}': {}", topic_name, e))
         })?;
 
+        let type_name = ros2_client::MessageTypeName::new(T::PACKAGE, T::TYPE_NAME);
+        // The DDS backend's `create_topic` returns a `Result` and takes a
+        // `QosPolicies`; the Zenoh backend's is infallible and takes a `QosProfile`.
+        #[cfg(feature = "dds")]
         let topic = node
-            .create_topic(
-                &ros_topic_name,
-                T::message_type_name(),
-                &DEFAULT_SUBSCRIPTION_QOS,
-            )
+            .create_topic(&ros_topic_name, type_name, &DEFAULT_SUBSCRIPTION_QOS)
             .map_err(|e| ROS2RobotError::SubscriberError {
                 topic: topic_name.to_owned(),
                 reason: format!("{e:?}"),
             })?;
+        #[cfg(feature = "zenoh")]
+        let topic = node.create_topic(
+            &ros_topic_name,
+            type_name,
+            &QosProfile::subscription_default(),
+        );
 
         let subscription = node.create_subscription::<T>(&topic, None).map_err(|e| {
             ROS2RobotError::SubscriberError {
@@ -404,31 +449,22 @@ impl Ros2Hal {
     ) -> Result<(), ROS2RobotError> {
         debug!("Setting up publisher for topic: {}", topic_name);
 
-        match msg_type {
-            msgs::JointState::MESSAGE_TYPE_STR => {
-                Self::setup_typed_publisher::<msgs::JointState>(node, publishers, topic_name)?;
-            }
-            msgs::Float64MultiArray::MESSAGE_TYPE_STR => {
-                Self::setup_typed_publisher::<msgs::Float64MultiArray>(
-                    node, publishers, topic_name,
-                )?;
-            }
-            msgs::JointAnglesWithSpeed::MESSAGE_TYPE_STR => {
-                Self::setup_typed_publisher::<msgs::JointAnglesWithSpeed>(
-                    node, publishers, topic_name,
-                )?;
-            }
-            msgs::JointTrajectory::MESSAGE_TYPE_STR => {
-                Self::setup_typed_publisher::<msgs::JointTrajectory>(node, publishers, topic_name)?;
-            }
-            msgs::String::MESSAGE_TYPE_STR => {
-                Self::setup_typed_publisher::<msgs::String>(node, publishers, topic_name)?;
-            }
-            // Add more message types as needed
-            _ => {
-                error!("Unsupported message type for publisher: {}", msg_type);
-                return Err(ROS2RobotError::UnsupportedMessageType(msg_type.to_owned()));
-            }
+        if is_type::<msgs::JointState>(msg_type) {
+            Self::setup_typed_publisher::<msgs::JointState>(node, publishers, topic_name)?;
+        } else if is_type::<msgs::Float64MultiArray>(msg_type) {
+            Self::setup_typed_publisher::<msgs::Float64MultiArray>(node, publishers, topic_name)?;
+        } else if is_type::<msgs::JointAnglesWithSpeed>(msg_type) {
+            Self::setup_typed_publisher::<msgs::JointAnglesWithSpeed>(
+                node, publishers, topic_name,
+            )?;
+        } else if is_type::<msgs::JointTrajectory>(msg_type) {
+            Self::setup_typed_publisher::<msgs::JointTrajectory>(node, publishers, topic_name)?;
+        } else if is_type::<msgs::String>(msg_type) {
+            Self::setup_typed_publisher::<msgs::String>(node, publishers, topic_name)?;
+        // Add more message types as needed
+        } else {
+            error!("Unsupported message type for publisher: {}", msg_type);
+            return Err(ROS2RobotError::UnsupportedMessageType(msg_type.to_owned()));
         }
 
         info!("Successfully set up publisher for topic: {}", topic_name);
@@ -438,7 +474,9 @@ impl Ros2Hal {
     /// Sets up a type-specific publisher for a given topic.
     ///
     /// Creates a native ros2_client publisher wrapped in a converting publisher.
-    fn setup_typed_publisher<T: MessageType + FromStateChange + serde::Serialize + 'static>(
+    fn setup_typed_publisher<
+        T: RosMessage + FromStateChange + serde::Serialize + std::fmt::Debug + Send + Sync + 'static,
+    >(
         node: &mut Node,
         publishers: &mut HashMap<String, Box<dyn StateChangePublisher>>,
         topic_name: &str,
@@ -449,23 +487,41 @@ impl Ros2Hal {
             ROS2RobotError::ConfigError(format!("Invalid topic name '{}': {}", topic_name, e))
         })?;
 
-        let topic = node
-            .create_topic(
-                &ros_topic_name,
-                T::message_type_name(),
-                &DEFAULT_PUBLISHER_QOS,
-            )
-            .map_err(|e| ROS2RobotError::PublisherError {
-                topic: topic_name.to_owned(),
-                reason: format!("{e:?}"),
-            })?;
-
-        let publisher = node.create_publisher::<T>(&topic, None).map_err(|e| {
-            ROS2RobotError::PublisherError {
-                topic: topic_name.to_owned(),
-                reason: format!("{e:?}"),
-            }
-        })?;
+        let type_name = ros2_client::MessageTypeName::new(T::PACKAGE, T::TYPE_NAME);
+        // DDS: infallible-to-fallible `create_topic`/`create_publisher` on a
+        // `QosPolicies`. Zenoh: infallible `create_topic` on a `QosProfile`, then
+        // a publisher keyed with the message's real REP-2016 type hash so native
+        // (C++) `rmw_zenoh` subscribers match it.
+        #[cfg(feature = "dds")]
+        let publisher = {
+            let topic = node
+                .create_topic(&ros_topic_name, type_name, &DEFAULT_PUBLISHER_QOS)
+                .map_err(|e| ROS2RobotError::PublisherError {
+                    topic: topic_name.to_owned(),
+                    reason: format!("{e:?}"),
+                })?;
+            node.create_publisher::<T>(&topic, None).map_err(|e| {
+                ROS2RobotError::PublisherError {
+                    topic: topic_name.to_owned(),
+                    reason: format!("{e:?}"),
+                }
+            })?
+        };
+        #[cfg(feature = "zenoh")]
+        let publisher = {
+            let topic =
+                node.create_topic(&ros_topic_name, type_name, &QosProfile::publisher_default());
+            let type_hash =
+                arora_msgs_ros2::type_hash::<T>().map_err(|e| ROS2RobotError::PublisherError {
+                    topic: topic_name.to_owned(),
+                    reason: format!("{e:?}"),
+                })?;
+            node.create_publisher_with_type_hash::<T>(&topic, None, &type_hash)
+                .map_err(|e| ROS2RobotError::PublisherError {
+                    topic: topic_name.to_owned(),
+                    reason: format!("{e:?}"),
+                })?
+        };
 
         let typed_publisher = ConvertingStateChangePublisher::new(publisher, topic_name.to_owned());
 
@@ -699,6 +755,7 @@ impl Drop for Ros2Hal {
 mod tests {
     use super::*;
     use crate::{configs::nao, JointStateConversion};
+    #[cfg(feature = "dds")]
     use futures::FutureExt;
 
     /// A DDS domain id that is unique across the tests in this binary, for
@@ -708,6 +765,7 @@ mod tests {
     /// process-wide counter once with a random base — so parallel `cargo test`
     /// binaries and any locally-running ROS graph rarely overlap — then hand out
     /// strictly-increasing ids, so no two tests here ever share a domain.
+    #[cfg(feature = "dds")]
     fn unique_test_domain() -> u16 {
         use std::sync::atomic::{AtomicU16, Ordering};
         use std::sync::OnceLock;
@@ -719,6 +777,7 @@ mod tests {
     }
 
     /// Drain everything the feed has already buffered, without blocking.
+    #[cfg(feature = "dds")]
     fn drain(feed: &mut UpdatesStream) -> Vec<StateChange> {
         let mut out = Vec::new();
         while let Some(Some(change)) = feed.next().now_or_never() {
@@ -858,6 +917,9 @@ mod tests {
                   has no unicast-peer/interface config); these run on Linux CI. To run locally, \
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
+    // Builds a second DDS node with the DDS-only surface (spinner, `QosPolicies`);
+    // the Zenoh backend's live path is exercised elsewhere.
+    #[cfg(feature = "dds")]
     async fn test_hal_updates_with_fake_ros() {
         use crate::get_now;
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
@@ -910,7 +972,10 @@ mod tests {
         let pub_topic = pub_node
             .create_topic(
                 &topic_name,
-                msgs::JointState::message_type_name(),
+                ros2_client::MessageTypeName::new(
+                    msgs::JointState::PACKAGE,
+                    msgs::JointState::TYPE_NAME,
+                ),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create publisher topic");
@@ -998,6 +1063,7 @@ mod tests {
                   has no unicast-peer/interface config); these run on Linux CI. To run locally, \
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
+    #[cfg(feature = "dds")]
     async fn test_hal_publish_via_write() {
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
@@ -1042,7 +1108,10 @@ mod tests {
         let sub_topic = sub_node
             .create_topic(
                 &topic_name,
-                msgs::JointState::message_type_name(),
+                ros2_client::MessageTypeName::new(
+                    msgs::JointState::PACKAGE,
+                    msgs::JointState::TYPE_NAME,
+                ),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create subscriber topic");
@@ -1139,6 +1208,7 @@ mod tests {
                   has no unicast-peer/interface config); these run on Linux CI. To run locally, \
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
+    #[cfg(feature = "dds")]
     async fn test_hal_subscribe_string_topic() {
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
@@ -1190,7 +1260,7 @@ mod tests {
         let pub_topic = pub_node
             .create_topic(
                 &topic_name,
-                msgs::String::message_type_name(),
+                ros2_client::MessageTypeName::new(msgs::String::PACKAGE, msgs::String::TYPE_NAME),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create publisher topic");
@@ -1255,6 +1325,7 @@ mod tests {
                   has no unicast-peer/interface config); these run on Linux CI. To run locally, \
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
+    #[cfg(feature = "dds")]
     async fn test_hal_publish_string_via_write() {
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
@@ -1300,7 +1371,7 @@ mod tests {
         let sub_topic = sub_node
             .create_topic(
                 &topic_name,
-                msgs::String::message_type_name(),
+                ros2_client::MessageTypeName::new(msgs::String::PACKAGE, msgs::String::TYPE_NAME),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create subscriber topic");
@@ -1366,6 +1437,7 @@ mod tests {
                   has no unicast-peer/interface config); these run on Linux CI. To run locally, \
                   ensure an active multicast-capable interface and use `--ignored`."
     )]
+    #[cfg(feature = "dds")]
     async fn test_hal_publish_string_via_try_send() {
         use ros2_client::{Name as RosName, NodeName as RosNodeName, DEFAULT_PUBLISHER_QOS};
         use std::time::Duration;
@@ -1411,7 +1483,7 @@ mod tests {
         let sub_topic = sub_node
             .create_topic(
                 &topic_name,
-                msgs::String::message_type_name(),
+                ros2_client::MessageTypeName::new(msgs::String::PACKAGE, msgs::String::TYPE_NAME),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create subscriber topic");

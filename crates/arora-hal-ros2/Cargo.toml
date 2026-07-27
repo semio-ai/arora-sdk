@@ -16,6 +16,13 @@ path = "src/bin/arora-ros2.rs"
 required-features = ["runner"]
 
 [features]
+# Middleware backend selection, forwarded to ros2-client (which requires exactly
+# one of `dds`/`zenoh`) and to arora-msgs-ros2 (whose REP-2016 type-hash needs the
+# same backend). DDS is the default; build the Zenoh backend with
+# `--no-default-features --features zenoh`.
+default = ["dds"]
+dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
+zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 # The arora-ros2 binary: pulls the full arora runtime with the Semio Studio
 # connection. The library (the HAL itself) stays lean without it.
 runner = ["dep:arora", "dep:anyhow"]
@@ -24,13 +31,22 @@ runner = ["dep:arora", "dep:anyhow"]
 anyhow = { version = "1", optional = true }
 arora-hal = { path = "../arora-hal", version = "3" }
 arora-types = { path = "../arora-types", version = "2" }
+# The bundled ROS 2 message types (typed serde structs + REP-2016 identity),
+# shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
+# a Zenoh publisher keys on. Core only here — a backend is selected via [features].
+arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "0.1", default-features = false }
 arora = { path = "../arora", version = "9", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
 futures = "0.3"
 log = "0.4"
-ros2-client = { version = "0.8", default-features = false }
+# The semio-ai ros2-client fork, published as `ros2-client-multi-rmw` (upstream
+# owns `ros2-client` on crates.io); the library is still imported as `ros2_client`.
+# It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
+# compatible), chosen by this crate's `dds` / `zenoh` features; `jazzy` selects
+# the ROS 2 distro wire format and is always on.
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.10", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

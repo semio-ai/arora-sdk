@@ -13,7 +13,7 @@ use ros2_client::{Node, Publisher};
 use crate::{
     config::TopicMapping,
     conversions::{self, FromStateChange},
-    msgs::MessageType,
+    msgs::RosMessage,
     ros2_error::ROS2RobotError,
 };
 
@@ -37,14 +37,21 @@ pub(crate) trait StateChangePublisher: Send + Sync {
 }
 
 /// A typed publisher that converts StateChange to a specific message type before publishing.
+///
+/// The `RosMessage` bound alone does not carry the `Serialize`/`Send`/`Sync`/
+/// `'static` a live `Publisher<T>` and the `async_trait` object need, so they are
+/// spelled out; the generated message structs satisfy them all.
 pub(crate) struct ConvertingStateChangePublisher<
-    T: MessageType + FromStateChange + serde::Serialize,
+    T: RosMessage + FromStateChange + serde::Serialize + std::fmt::Debug + Send + Sync + 'static,
 > {
     publisher: Publisher<T>,
     topic_name: String,
 }
 
-impl<T: MessageType + FromStateChange + serde::Serialize> ConvertingStateChangePublisher<T> {
+impl<
+        T: RosMessage + FromStateChange + serde::Serialize + std::fmt::Debug + Send + Sync + 'static,
+    > ConvertingStateChangePublisher<T>
+{
     /// Create a new ConvertingStateChangePublisher.
     pub fn new(publisher: Publisher<T>, topic_name: String) -> Self {
         Self {
@@ -55,8 +62,9 @@ impl<T: MessageType + FromStateChange + serde::Serialize> ConvertingStateChangeP
 }
 
 #[async_trait]
-impl<T: MessageType + FromStateChange + serde::Serialize> StateChangePublisher
-    for ConvertingStateChangePublisher<T>
+impl<
+        T: RosMessage + FromStateChange + serde::Serialize + std::fmt::Debug + Send + Sync + 'static,
+    > StateChangePublisher for ConvertingStateChangePublisher<T>
 {
     async fn publish_state_change(
         &self,
@@ -103,6 +111,18 @@ impl<T: MessageType + FromStateChange + serde::Serialize> StateChangePublisher
         &self,
         node: &Node,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
-        Box::pin(self.publisher.wait_for_subscription(node))
+        // The DDS publisher gates a first publish on a matched subscription
+        // (discovery can lag). The Zenoh backend exposes no publisher-side match
+        // gate — publishing does not block on discovery — so there is nothing to
+        // await there.
+        #[cfg(feature = "dds")]
+        {
+            Box::pin(self.publisher.wait_for_subscription(node))
+        }
+        #[cfg(feature = "zenoh")]
+        {
+            let _ = node;
+            Box::pin(async {})
+        }
     }
 }

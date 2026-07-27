@@ -61,7 +61,9 @@ pub fn create_config() -> ROS2RobotConfig {
     }
 }
 
-#[cfg(test)]
+// The live round-trip builds a second DDS node (spinner, `QosPolicies`), so it is
+// compiled only on the DDS backend; the Zenoh backend has no matching surface.
+#[cfg(all(test, feature = "dds"))]
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -77,7 +79,7 @@ mod tests {
     use crate::config::{
         JointIdMapping, ROS2RobotConfig, TopicConfig, TopicDirection, TopicMapping,
     };
-    use crate::msgs::{self, MessageType};
+    use crate::msgs::{self, RosMessage};
     use crate::ros2_hal::Ros2Hal;
 
     /// Test that writing state changes with joint IDs via the HAL
@@ -130,7 +132,10 @@ mod tests {
         let sub_topic = sub_node
             .create_topic(
                 &topic_name,
-                msgs::JointAnglesWithSpeed::message_type_name(),
+                ros2_client::MessageTypeName::new(
+                    msgs::JointAnglesWithSpeed::PACKAGE,
+                    msgs::JointAnglesWithSpeed::TYPE_NAME,
+                ),
                 &DEFAULT_PUBLISHER_QOS,
             )
             .expect("create subscriber topic");

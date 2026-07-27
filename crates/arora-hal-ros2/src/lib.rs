@@ -22,14 +22,14 @@ pub use ros2_error::ROS2RobotError;
 mod ros2_hal;
 pub use ros2_hal::Ros2Hal;
 
-mod ros2_msgs;
-pub mod msgs {
-    pub use super::ros2_msgs::*;
-}
+pub mod msgs;
 
-pub fn get_now() -> ros2_client::builtin_interfaces::Time {
+pub fn get_now() -> arora_msgs_ros2::builtin_interfaces::Time {
     let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap(); // Dead old devices are not supported
-    ros2_client::builtin_interfaces::Time::from_nanos(nanos)
+    arora_msgs_ros2::builtin_interfaces::Time {
+        sec: (nanos / 1_000_000_000) as i32,
+        nanosec: (nanos % 1_000_000_000) as u32,
+    }
 }
 
 #[cfg(test)]
