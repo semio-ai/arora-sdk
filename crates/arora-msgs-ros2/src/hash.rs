@@ -11,9 +11,10 @@
 //! The type and every type it nests must carry its ROS-qualified name
 //! (`geometry_msgs/msg/PointStamped`, `builtin_interfaces/msg/Time`, …) in
 //! [`low::Type::name`], because REP-2016 hashes those names alongside the fields.
-//! Only structures of scalars, strings and nested structures are supported so
-//! far — the same shape the CDR codec ([`crate::cdr`]) carries; arrays/sequences
-//! and maps are rejected until the walk-hash mapping grows them.
+//! Structures of scalars, strings, nested structures and homogeneous arrays
+//! (ROS sequences `T[]` and fixed arrays `T[N]`) are supported — the same shape
+//! the CDR codec ([`crate::cdr`]) carries. Maps have no ROS 2 form and are
+//! rejected.
 
 use std::collections::HashSet;
 
@@ -60,25 +61,68 @@ fn individual(ty: &low::Type, registry: &TypeRegistry) -> Result<IndividualTypeD
     Ok(IndividualTypeDescription::new(ros_name(ty)?, fields))
 }
 
-/// The REP-2016 `FieldType` for one field's arora type reference: a base scalar,
-/// or a nested (named) type resolved through the registry.
+/// The array shape of a field: a single value, a fixed `[N]`, or an unbounded
+/// `[]` sequence.
+enum Shape {
+    Unit,
+    Fixed(u64),
+    Unbounded,
+}
+
+/// The REP-2016 `FieldType` for one field's arora type reference: a base scalar
+/// or a nested (named) type, in its array shape.
 fn field_type(type_ref: &TypeRef, registry: &TypeRegistry) -> Result<FieldType, Error> {
-    match type_ref {
-        TypeRef::Scalar { id } => {
-            if let Some(tid) = rep2016_scalar(id) {
-                Ok(FieldType::scalar(tid))
-            } else if let Some(nested) = registry.get(id) {
-                Ok(FieldType::nested(ros_name(nested)?))
-            } else {
-                Err(Error(format!(
-                    "type id {id} is neither a known scalar nor in the registry"
-                )))
-            }
+    let (id, shape) = match type_ref {
+        TypeRef::Scalar { id } => (id, Shape::Unit),
+        TypeRef::Array { id } => (id, Shape::Unbounded),
+        TypeRef::FixedArray { id, len } => (id, Shape::Fixed(*len as u64)),
+        TypeRef::Map { .. } => {
+            return Err(Error("key/value maps have no REP-2016 field type".into()))
         }
-        // Arrays/sequences and maps have REP-2016 encodings, but the arora
-        // walk-to-hash mapping does not carry them yet (see the arrays
-        // follow-up); reject explicitly rather than mis-hash.
-        other => Err(Error(format!("unsupported field type {other:?}"))),
+    };
+    if let Some(base) = rep2016_scalar(id) {
+        Ok(scalar_field(base, shape))
+    } else if let Some(nested) = registry.get(id) {
+        Ok(nested_field(ros_name(nested)?, shape))
+    } else {
+        Err(Error(format!(
+            "type id {id} is neither a known scalar nor in the registry"
+        )))
+    }
+}
+
+/// A scalar base in its array shape. REP-2016 encodes the shape as an offset on
+/// the base type id: `+ARRAY_OFFSET` for a fixed array, `+UNBOUNDED_SEQUENCE_OFFSET`
+/// for a sequence.
+fn scalar_field(base: u8, shape: Shape) -> FieldType {
+    match shape {
+        Shape::Unit => FieldType::scalar(base),
+        Shape::Fixed(capacity) => FieldType::array(base, capacity),
+        Shape::Unbounded => FieldType {
+            type_id: base + rid::UNBOUNDED_SEQUENCE_OFFSET,
+            capacity: 0,
+            string_capacity: 0,
+            nested_type_name: String::new(),
+        },
+    }
+}
+
+/// A nested (named) type in its array shape.
+fn nested_field(name: String, shape: Shape) -> FieldType {
+    match shape {
+        Shape::Unit => FieldType::nested(name),
+        Shape::Fixed(capacity) => FieldType {
+            type_id: rid::NESTED_TYPE + rid::ARRAY_OFFSET,
+            capacity,
+            string_capacity: 0,
+            nested_type_name: name,
+        },
+        Shape::Unbounded => FieldType {
+            type_id: rid::NESTED_TYPE + rid::UNBOUNDED_SEQUENCE_OFFSET,
+            capacity: 0,
+            string_capacity: 0,
+            nested_type_name: name,
+        },
     }
 }
 
@@ -95,14 +139,16 @@ fn collect_referenced(
         return Ok(());
     };
     for field in structure.fields.values() {
-        let TypeRef::Scalar { id } = &field.type_ref else {
-            continue;
+        // The element type of a scalar, sequence or fixed array; a map has none.
+        let id = match &field.type_ref {
+            TypeRef::Scalar { id } | TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => *id,
+            TypeRef::Map { .. } => continue,
         };
-        if rep2016_scalar(id).is_some() || !seen.insert(*id) {
+        if rep2016_scalar(&id).is_some() || !seen.insert(id) {
             continue;
         }
         let nested = registry
-            .get(id)
+            .get(&id)
             .ok_or_else(|| Error(format!("nested type id {id} not in the registry")))?;
         out.push(individual(nested, registry)?);
         collect_referenced(nested, registry, out, seen)?;
@@ -272,6 +318,79 @@ mod tests {
             "arora-derived hash must match the direct one"
         );
         assert!(from_arora.starts_with("RIHS01_") && from_arora.len() == 71);
+    }
+
+    fn unbounded(base: u8) -> FieldType {
+        FieldType {
+            type_id: base + rid::UNBOUNDED_SEQUENCE_OFFSET,
+            capacity: 0,
+            string_capacity: 0,
+            nested_type_name: String::new(),
+        }
+    }
+
+    // A scalar sequence, a fixed array, and a sequence of a nested type: the
+    // arora-derived hash matches the direct REP-2016 construction, proving the
+    // offset math (`+48` fixed array, `+144` unbounded sequence) is right.
+    #[test]
+    fn array_fields_hash_like_the_direct_type_description() {
+        let point = message(
+            "geometry_msgs/msg/Point",
+            id(0x33),
+            vec![
+                (id(0x331), field("x", *ty::F64_ID)),
+                (id(0x332), field("y", *ty::F64_ID)),
+                (id(0x333), field("z", *ty::F64_ID)),
+            ],
+        );
+        let array_field = |name: &str, type_ref| {
+            low::StructureField {
+                name: name.to_string(),
+                type_ref,
+            }
+        };
+        let shape = low::Type {
+            name: "my_msgs/msg/Shape".to_string(),
+            id: id(0x55),
+            description: String::new(),
+            kind: low::TypeKind::Structure(low::Structure::from_fields(vec![
+                (id(0x551), array_field("weights", TypeRef::Array { id: *ty::F64_ID })),
+                (
+                    id(0x552),
+                    array_field("matrix", TypeRef::FixedArray { id: *ty::F64_ID, len: 9 }),
+                ),
+                (id(0x553), array_field("points", TypeRef::Array { id: id(0x33) })),
+            ])),
+        };
+        let mut registry = TypeRegistry::new();
+        registry.insert(point.id, point);
+        registry.insert(shape.id, shape.clone());
+        let from_arora = rihs01(&shape, &registry).unwrap();
+
+        let point_desc = IndividualTypeDescription::new(
+            "geometry_msgs/msg/Point",
+            vec![
+                Field::new("x", FieldType::scalar(rid::DOUBLE)),
+                Field::new("y", FieldType::scalar(rid::DOUBLE)),
+                Field::new("z", FieldType::scalar(rid::DOUBLE)),
+            ],
+        );
+        let nested_sequence = FieldType {
+            type_id: rid::NESTED_TYPE + rid::UNBOUNDED_SEQUENCE_OFFSET,
+            capacity: 0,
+            string_capacity: 0,
+            nested_type_name: "geometry_msgs/msg/Point".into(),
+        };
+        let top = IndividualTypeDescription::new(
+            "my_msgs/msg/Shape",
+            vec![
+                Field::new("weights", unbounded(rid::DOUBLE)),
+                Field::new("matrix", FieldType::array(rid::DOUBLE, 9)),
+                Field::new("points", nested_sequence),
+            ],
+        );
+        let direct = TypeDescription::new(top, vec![point_desc]).rihs01();
+        assert_eq!(from_arora, direct);
     }
 
     #[test]

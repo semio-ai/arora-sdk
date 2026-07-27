@@ -213,7 +213,14 @@ fn use_case_5_define_a_type_on_the_fly_and_save_it() {
 #[test]
 fn a_bundled_type_has_a_rep2016_hash() {
     let registry = arora_msgs_ros2::registry();
-    let point = registry.get_by_name("geometry_msgs/Point").unwrap();
-    let hash = arora_msgs_ros2::rihs01(point, registry.types()).unwrap();
-    assert!(hash.starts_with("RIHS01_") && hash.len() == 71);
+    for name in ["geometry_msgs/Point", "sensor_msgs/Imu", "hri_msgs/Skeleton2D"] {
+        let ty = registry.get_by_name(name).unwrap();
+        // Imu nests structs and a float64[9]; Skeleton2D has a nested sequence —
+        // both hash through the array-aware REP-2016 mapping.
+        let hash = arora_msgs_ros2::rihs01(ty, registry.types()).unwrap();
+        assert!(
+            hash.starts_with("RIHS01_") && hash.len() == 71,
+            "unexpected hash for {name}: {hash}"
+        );
+    }
 }
