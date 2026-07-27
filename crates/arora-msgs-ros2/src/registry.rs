@@ -13,8 +13,11 @@
 
 use std::collections::HashMap;
 
+use arora_types::module::low::TypeRef;
 use arora_types::ty::{low, TypeRegistry};
 use arora_types::Uuid;
+
+use crate::schema::{Arr, Base, MessageSpec, Primitive};
 
 /// The ROS 2 message types known to a running Arora, keyed by type id and
 /// indexed by ROS name.
@@ -70,6 +73,31 @@ impl Ros2Registry {
     pub fn define_from_json(&mut self, json: &str) -> Result<Vec<Uuid>, serde_json::Error> {
         let types: Vec<low::Type> = serde_json::from_str(json)?;
         Ok(types.into_iter().map(|ty| self.insert(ty)).collect())
+    }
+
+    /// Register a type known at compile time — a generated message struct, or
+    /// any `#[derive(AroraType)]` type — together with the types it nests. This
+    /// is what the generated per-package `register` functions call.
+    pub fn register_arora<T: arora_types::AroraType>(&mut self) {
+        let mut deps = TypeRegistry::new();
+        T::register_types(&mut deps);
+        self.extend(deps);
+    }
+
+    /// Define a type from the text of a `.msg` for `package/name`, returning its
+    /// id. This is the path a ROS developer uses for a type that never entered
+    /// the crate: the type joins the registry with exactly the id it would have
+    /// as a bundled message (the ROS name hashed), so it is immediately
+    /// encodable, hashable and — with a ROS bridge enabled — speakable to ROS
+    /// clients. Types it nests (e.g. `std_msgs/Header`) must already be present.
+    pub fn define_from_msg(
+        &mut self,
+        package: &str,
+        name: &str,
+        text: &str,
+    ) -> Result<Uuid, String> {
+        let spec = crate::schema::parse_msg(package, name, text)?;
+        Ok(self.insert(message_spec_to_low_type(&spec)))
     }
 
     /// The type with this id, if known.
@@ -144,6 +172,68 @@ fn name_aliases(name: &str) -> Vec<String> {
         aliases.push(format!("{package}/{ty}"));
     }
     aliases
+}
+
+/// Build the arora [`low::Type`] for a parsed message. The type id and field ids
+/// are `gen_uuid_from_str` of the ROS-qualified name and the field names — the
+/// exact scheme the generated `#[derive(AroraType)]` structs use — so a message
+/// defined from a `.msg` at runtime carries the same ids as the bundled one, and
+/// both stay stable across builds (the id is a pure function of the name).
+pub fn message_spec_to_low_type(spec: &MessageSpec) -> low::Type {
+    let name = spec.rep2016_name();
+    let fields = spec.fields.iter().map(|field| {
+        (
+            arora_types::gen_uuid_from_str(&field.name),
+            low::StructureField {
+                name: field.name.clone(),
+                type_ref: message_type_ref(&field.ty.base, field.ty.arr),
+            },
+        )
+    });
+    low::Type {
+        id: arora_types::gen_uuid_from_str(&name),
+        name,
+        description: String::new(),
+        kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
+    }
+}
+
+/// The [`TypeRef`] for a message field: its element id (a well-known primitive,
+/// or the nested message's name hashed) wrapped by its array shape.
+fn message_type_ref(base: &Base, arr: Arr) -> TypeRef {
+    let element_id = match base {
+        Base::Primitive(primitive) => primitive_id(*primitive),
+        Base::Named { package, name } => {
+            arora_types::gen_uuid_from_str(&format!("{package}/msg/{name}"))
+        }
+    };
+    match arr {
+        Arr::Unit => TypeRef::Scalar { id: element_id },
+        Arr::Unbounded => TypeRef::Array { id: element_id },
+        Arr::Fixed(len) => TypeRef::FixedArray {
+            id: element_id,
+            len,
+        },
+    }
+}
+
+/// The well-known arora id a ROS primitive maps to.
+fn primitive_id(primitive: Primitive) -> Uuid {
+    use arora_types::ty;
+    match primitive {
+        Primitive::Bool => *ty::BOOLEAN_ID,
+        Primitive::I8 => *ty::I8_ID,
+        Primitive::I16 => *ty::I16_ID,
+        Primitive::I32 => *ty::I32_ID,
+        Primitive::I64 => *ty::I64_ID,
+        Primitive::U8 => *ty::U8_ID,
+        Primitive::U16 => *ty::U16_ID,
+        Primitive::U32 => *ty::U32_ID,
+        Primitive::U64 => *ty::U64_ID,
+        Primitive::F32 => *ty::F32_ID,
+        Primitive::F64 => *ty::F64_ID,
+        Primitive::String => *ty::STRING_ID,
+    }
 }
 
 #[cfg(test)]

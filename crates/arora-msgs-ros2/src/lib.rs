@@ -48,6 +48,7 @@
 pub mod cdr;
 pub mod registry;
 pub mod representable;
+pub mod schema;
 
 #[cfg(feature = "interop")]
 pub mod hash;
@@ -58,3 +59,8 @@ pub use representable::{ros2_representable, NotRepresentable};
 
 #[cfg(feature = "interop")]
 pub use hash::rihs01;
+
+// The bundled ROS 2 message types, generated from `msgs/**/*.msg` by `build.rs`:
+// one module per package (so `arora_msgs_ros2::geometry_msgs::Point` is the
+// generated struct) plus `registry()`, every bundled type at once.
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));

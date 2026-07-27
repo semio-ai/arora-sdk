@@ -17,6 +17,10 @@ name = "arora_msgs_ros2"
 arora-types = { path = "../arora-types", version = "2", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# serde implements its traits for arrays only up to length 32; the generated
+# messages with a larger fixed array (geometry/sensor `float64[36]` covariance)
+# use this for those fields.
+serde-big-array = "0.5"
 thiserror = "2"
 
 # Only the REP-2016 type-hash (`hash` module) needs ros2-client — for its
@@ -34,6 +38,12 @@ default = []
 interop = ["dep:ros2-client", "ros2-client/jazzy"]
 dds = ["interop", "ros2-client/dds"]
 zenoh = ["interop", "ros2-client/zenoh"]
+
+# The build script parses the vendored `.msg` files (via the std-only
+# `src/schema.rs`) and emits the message structs with `quote`.
+[build-dependencies]
+quote = "1"
+proc-macro2 = "1"
 
 [dev-dependencies]
 serde_yaml = "0.8"
