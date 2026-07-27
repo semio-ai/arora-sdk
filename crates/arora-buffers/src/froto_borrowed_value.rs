@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use crate::{
-    read::BufferReader, write::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32,
-    TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16,
-    TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
+    reader::BufferReader, writer::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION,
+    TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE,
+    TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
