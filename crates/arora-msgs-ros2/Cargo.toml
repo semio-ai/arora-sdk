@@ -1,0 +1,39 @@
+[package]
+name = "arora-msgs-ros2"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ROS 2 message types for Arora: the std/geometry/sensor/hri messages as arora types, a runtime type registry, and the CDR codec — shared by arora-bridge-ros2 and arora-hal-ros2."
+repository = "https://github.com/semio-ai/arora-sdk"
+
+[lib]
+name = "arora_msgs_ros2"
+
+[dependencies]
+# The arora type vocabulary this crate speaks: `Value`, `ty::low::Type`, the
+# `TypeRegistry`, and the `value_serde` walk the CDR codec is a backend of. The
+# `derive` feature is on because the generated message structs are the schema
+# source of truth via `#[derive(AroraType)]`.
+arora-types = { path = "../arora-types", version = "2", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Only the REP-2016 type-hash (`hash` module) needs ros2-client — for its
+# `type_description` REP-2016 reproduction. The core (codec, registry, types,
+# predicate) is ros2-client-free, so a modeling consumer (the node editor, a
+# wasm build) pulls none of the DDS/Zenoh stack, which is why `interop` is
+# opt-in. 0.10.1 is the first release carrying `type_description` (used here) and
+# the `publish_raw`/`take_raw` runtime-typed pub/sub the bridge drives.
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.10.1", default-features = false, optional = true }
+
+[features]
+default = []
+# The REP-2016 hash + live-ROS interop surface. Not usable on its own —
+# ros2-client requires exactly one backend, so enable it through `dds`/`zenoh`.
+interop = ["dep:ros2-client", "ros2-client/jazzy"]
+dds = ["interop", "ros2-client/dds"]
+zenoh = ["interop", "ros2-client/zenoh"]
+
+[dev-dependencies]
+serde_yaml = "0.8"

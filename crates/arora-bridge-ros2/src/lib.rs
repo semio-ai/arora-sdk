@@ -37,9 +37,12 @@
 //! ```
 
 pub mod bridge;
-pub mod cdr;
 pub mod conversions;
 pub mod msg_types;
+
+// The CDR codec now lives in `arora-msgs-ros2`, shared with `arora-hal-ros2`.
+// Re-exported so `arora_bridge_ros2::cdr` stays a stable path for consumers.
+pub use arora_msgs_ros2::cdr;
 
 pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
 
