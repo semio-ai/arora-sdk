@@ -11,7 +11,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -73,39 +72,25 @@ impl Arora {
     /// default. A step that overruns the period shifts the next tick out rather
     /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
     /// **actual** measured time since the previous step, not `period`.
+    ///
+    /// To **stop** a run, drop its future (e.g. lose a `select!` against a
+    /// stop signal): each `step` runs inside a single poll, so cancellation
+    /// only ever lands between steps — the device stays consistent, and
+    /// `&mut self` is the caller's again to resume, inspect, or drop.
     pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
-        self.run_until(period, futures::future::pending()).await
-    }
-
-    /// Like [`run`](Arora::run), but returns `Ok(())` when `shutdown` resolves —
-    /// the seam for a host that stops the device on its own signal, to rebuild
-    /// it with a new configuration or to end an embedding application cleanly.
-    /// The shutdown is checked between steps: a step in progress finishes, the
-    /// device stays consistent, and `&mut self` is the caller's again to
-    /// resume, inspect, or drop.
-    pub async fn run_until(
-        &mut self,
-        period: Duration,
-        shutdown: impl Future<Output = ()>,
-    ) -> Result<(), RuntimeError> {
         let mut metronome = Metronome::new(period);
-        let shutdown = shutdown.fuse();
-        futures::pin_mut!(shutdown);
         // Wall-clock delta between steps, fed to `step` as the frame `dt`.
         let mut last_step = Instant::now();
         loop {
             // Wait out the period, buffering what the seams deliver meanwhile —
             // in arrival order per seam, applied by the next step. The select
-            // polls the shutdown, then the tick (biased): stopping beats
-            // stepping, and an event flood on the seams cannot starve either.
-            // The seams' `next()` futures are fused, so an ended stream's
-            // branch is simply never taken again.
+            // polls the tick first (biased); the seams' `next()` futures are
+            // fused, so an ended stream's branch is simply never taken again.
             {
                 let tick = metronome.tick().fuse();
                 futures::pin_mut!(tick);
                 loop {
                     futures::select_biased! {
-                        _ = shutdown => return Ok(()),
                         _ = tick => break,
                         reading = self.hal_feed.next() => {
                             if let Some(reading) = reading {
@@ -904,25 +889,24 @@ mod tests {
         }
     }
 
-    /// `run_until` is the one way out of a healthy run: the shutdown resolving
-    /// returns `Ok(())`, with the device intact — steps made before it fired
-    /// are visible, and the caller can keep using the device.
+    /// Stopping a healthy run is dropping its future: after losing a select,
+    /// the device is intact — steps made before the drop are visible, and the
+    /// caller can keep using it.
     #[tokio::test]
-    async fn run_until_returns_when_the_shutdown_resolves() {
+    async fn dropping_the_run_future_stops_the_device_cleanly() {
         let ticks = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let mut arora = build_with(
             Box::new(FakeBridge::new()),
             Box::new(CountTicks(ticks.clone())),
         );
-        arora
-            .run_until(
-                Duration::from_millis(1),
-                tokio::time::sleep(Duration::from_millis(50)),
-            )
-            .await
-            .expect("a shutdown is a clean return");
+        tokio::select! {
+            result = arora.run(Duration::from_millis(1)) => {
+                panic!("a healthy run does not return: {result:?}")
+            }
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
         let stepped = ticks.load(std::sync::atomic::Ordering::SeqCst);
-        assert!(stepped > 0, "the device ran until the shutdown");
+        assert!(stepped > 0, "the device ran until the drop");
         arora.step(Duration::from_millis(1)).expect("still usable");
     }
 

@@ -42,6 +42,8 @@ use arora_types::data::DataStore;
 #[cfg(feature = "native")]
 use arora_types::data::StateChange;
 #[cfg(feature = "native")]
+use futures::FutureExt;
+#[cfg(feature = "native")]
 use log::info;
 
 #[cfg(feature = "native")]
@@ -236,10 +238,6 @@ pub(crate) async fn run_builder_with_frontend(
     let device_id = bridge.device_id().await;
     let access_requests = bridge.access_requests().await;
 
-    let shutdown = builder
-        .shutdown
-        .take()
-        .unwrap_or_else(|| Box::pin(futures::future::pending()));
     let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device exists: a
@@ -248,21 +246,24 @@ pub(crate) async fn run_builder_with_frontend(
 
     info!("engine started; native behavior-tree control nodes ready");
 
-    // Serve remote clients' access requests through the chosen operator, one at
-    // a time, for as long as the bridge yields them. (The data plane is driven
-    // by `arora.run()`; access requests are the operator's own concern.)
-    let serving = tokio::spawn(serve_access_requests(access_requests, operator));
+    // Serve remote clients' access requests through the chosen operator, one
+    // at a time, for as long as the bridge yields them, concurrently with the
+    // step loop — in this same future, not on a spawned task: everything the
+    // run holds (the front end via the operator, the device, its bridges)
+    // lives in this scope, so dropping the returned future is a complete,
+    // synchronous teardown. That is the stop story — see [`AroraBuilder::run`].
+    let serving = serve_access_requests(access_requests, operator).fuse();
+    futures::pin_mut!(serving);
     info!("running — Ctrl-C to stop");
-    let result = arora
-        .run_until(Arora::DEFAULT_STEP_PERIOD, shutdown)
-        .await
-        .map_err(|e| anyhow!("runtime error: {e}"));
-    // The serving task holds the operator — the front end's lifetime. End it
-    // (and wait it out) so a front end that took something over (the terminal
-    // UI) releases it before the run returns.
-    serving.abort();
-    let _ = serving.await;
-    result
+    let run = arora.run(Arora::DEFAULT_STEP_PERIOD).fuse();
+    futures::pin_mut!(run);
+    loop {
+        futures::select_biased! {
+            result = run => return result.map_err(|e| anyhow!("runtime error: {e}")),
+            // The access-request stream ending does not end the device.
+            _ = serving => {}
+        }
+    }
 }
 
 /// Pick the front end for this process: the terminal operator UI when the `tui`
