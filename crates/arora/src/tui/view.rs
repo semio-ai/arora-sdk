@@ -127,13 +127,15 @@ fn prompt(state: &State) -> Paragraph<'_> {
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let cursor = Style::default().add_modifier(Modifier::REVERSED);
     match state.prompts.front() {
-        Some(Prompt::Text { label, .. }) => Paragraph::new(vec![
-            Line::from(Span::styled(label.clone(), bold)),
-            Line::from(vec![
-                Span::raw(format!("> {}", state.input)),
-                Span::styled(" ", cursor),
-            ]),
-        ]),
+        Some(Prompt::Text { label, .. }) | Some(Prompt::Command { label, .. }) => {
+            Paragraph::new(vec![
+                Line::from(Span::styled(label.clone(), bold)),
+                Line::from(vec![
+                    Span::raw(format!("> {}", state.input)),
+                    Span::styled(" ", cursor),
+                ]),
+            ])
+        }
         Some(Prompt::Decision {
             message,
             options,

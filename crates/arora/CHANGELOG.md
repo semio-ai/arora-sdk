@@ -4,6 +4,35 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.0] - 2026-07-27
+
+### Added
+
+- `Arora::run_until(period, shutdown)`: `run`, with a clean return when the
+  shutdown future resolves — the device stays consistent and usable.
+- `AroraBuilder::with_shutdown(future)`: carries that shutdown through the
+  standard operator flow (`AroraBuilder::run`).
+- `AroraBuilder::with_frontend(frontend)`: inject the operator front end
+  instead of the standard terminal-detection pick.
+- Application commands in the terminal UI: `tui::commands_frontend(commands)`
+  builds the standard front end with key-driven commands (footer label,
+  optional text prompt) delivered on a channel — `tui::TuiCommand`,
+  `tui::TuiCommandEvent`.
+
+## [9.4.0] - 2026-07-27
+
+### Added
+
+- `DeviceCli`: the standard device binary's command line as a clap helper
+  (native-only); the Groot argument moves there.
+
+### Fixed
+
+- The library no longer reads argv: `run`/`run_with`/`run_with_hal` and the
+  run funnel took the process' first argument as a Groot file, which broke
+  any embedding binary with its own CLI. The `arora` binary parses
+  `DeviceCli` and composes the behavior-tree load itself.
+
 ## [9.3.0] - 2026-07-24
 
 ### Changed

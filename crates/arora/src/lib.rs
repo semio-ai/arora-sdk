@@ -268,6 +268,10 @@ pub struct AroraBuilder {
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<(Header, Box<[u8]>)>,
+    #[cfg(feature = "native")]
+    frontend: Option<operator::Frontend>,
+    #[cfg(feature = "native")]
+    shutdown: Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
 }
 
 impl AroraBuilder {
@@ -358,13 +362,39 @@ impl AroraBuilder {
         self
     }
 
+    /// Use `frontend` as the operator front end for [`run`](AroraBuilder::run)
+    /// instead of the standard pick (terminal UI on an interactive terminal,
+    /// headless otherwise) — the seam for an application that brings its own
+    /// UI, or for the terminal UI extended with application commands
+    /// ([`tui::commands_frontend`]).
+    #[cfg(feature = "native")]
+    pub fn with_frontend(mut self, frontend: operator::Frontend) -> Self {
+        self.frontend = Some(frontend);
+        self
+    }
+
+    /// Stop [`run`](AroraBuilder::run) when `shutdown` resolves: it returns
+    /// `Ok(())` instead of driving the device forever — the seam for a host
+    /// that rebuilds its device with a new configuration, or ends an embedding
+    /// application cleanly. Sugar for [`Arora::run_until`]'s shutdown, carried
+    /// through the operator flow.
+    #[cfg(feature = "native")]
+    pub fn with_shutdown(
+        mut self,
+        shutdown: impl std::future::Future<Output = ()> + 'static,
+    ) -> Self {
+        self.shutdown = Some(Box::pin(shutdown));
+        self
+    }
+
     /// Run the assembled device to completion with the standard operator flow:
-    /// pick the front end (terminal UI or headless), fill the default bridge
+    /// pick the front end (the injected one, else terminal UI or headless by
+    /// terminal detection), fill the default bridge
     /// when none was injected — Semio Studio under the `studio-bridge` feature
     /// (operator prompt, local-bridge fallback when declined), the open local
     /// bridge otherwise — default any other unset seam (a private
     /// `SimpleDataStore`, the fake HAL, an empty interpreter), and drive the
-    /// step loop.
+    /// step loop, until the injected shutdown resolves (if any).
     ///
     /// This is the run entrypoint for composed devices: features only pick the
     /// *defaults*, never what you can inject — e.g. a device whose blackboard
@@ -372,9 +402,12 @@ impl AroraBuilder {
     /// `Arora::builder().with_hal(hal).with_data_store(store).run()`.
     #[cfg(feature = "native")]
     pub async fn run(mut self) -> Result<()> {
-        // The front end is picked first: building it installs the matching log
+        // The front end comes first: building it installs the matching log
         // sink, so everything after (including bridge resolution) is captured.
-        let frontend = run::select_frontend();
+        let frontend = match self.frontend.take() {
+            Some(frontend) => frontend,
+            None => run::select_frontend(),
+        };
         if self.bridges.is_empty() {
             #[cfg(feature = "studio-bridge")]
             {

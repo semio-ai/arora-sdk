@@ -5,12 +5,15 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant, SystemTime};
 
+use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 use arora_behavior::built_in;
 use arora_types::data::{Key, Subscription};
 use arora_types::value::Value;
+
+use super::{TuiCommand, TuiCommandEvent};
 
 /// How many log lines the pane remembers.
 pub(crate) const LOG_CAPACITY: usize = 4000;
@@ -53,6 +56,10 @@ pub(crate) enum Prompt {
         deadline: Option<(Instant, usize)>,
         tx: Option<oneshot::Sender<usize>>,
     },
+    /// An application command's text prompt ([`TuiCommand::prompt`]); fires
+    /// the command through the state's command channel on a non-empty answer,
+    /// and cancels it on an empty one.
+    Command { key: char, label: String },
 }
 
 impl Prompt {
@@ -97,6 +104,11 @@ pub(crate) struct State {
     pub hint: Option<String>,
     /// Set when the operator asked to quit (Ctrl-C, or `q` outside a prompt).
     pub quit_requested: bool,
+    /// The embedding application's key commands, advertised in the footer and
+    /// fired from the no-prompt key handling.
+    pub commands: Vec<TuiCommand>,
+    /// Where fired commands go; `None` for the plain device UI.
+    pub command_tx: Option<UnboundedSender<TuiCommandEvent>>,
 }
 
 impl State {
@@ -113,6 +125,8 @@ impl State {
             input: String::new(),
             hint: None,
             quit_requested: false,
+            commands: Vec::new(),
+            command_tx: None,
         }
     }
 
@@ -168,6 +182,13 @@ impl State {
         self.prompts.pop_front();
         self.input.clear();
         self.hint = None;
+    }
+
+    /// Deliver a fired command to the embedding application.
+    fn fire_command(&mut self, key: char, input: Option<String>) {
+        if let Some(tx) = &self.command_tx {
+            let _ = tx.unbounded_send(TuiCommandEvent { key, input });
+        }
     }
 
     /// Take what the device published since the last read and update the
@@ -232,8 +253,19 @@ impl State {
     fn handle_prompt_key(&mut self, key: KeyEvent) {
         match self.prompts.front_mut() {
             None => {
+                // `q` first: it stays the quit shortcut even if an application
+                // registers it as a command key.
                 if key.code == KeyCode::Char('q') {
                     self.quit_requested = true;
+                } else if let KeyCode::Char(c) = key.code {
+                    let command = self.commands.iter().find(|command| command.key == c);
+                    match command.map(|command| command.prompt.clone()) {
+                        Some(Some(label)) => {
+                            self.prompts.push_back(Prompt::Command { key: c, label })
+                        }
+                        Some(None) => self.fire_command(c, None),
+                        None => {}
+                    }
                 }
             }
             Some(Prompt::Text { required, .. }) => {
@@ -258,6 +290,26 @@ impl State {
                                 .resolve_text(answer);
                             self.finish_front_prompt();
                         }
+                    }
+                    _ => {}
+                }
+            }
+            Some(Prompt::Command { key: trigger, .. }) => {
+                let trigger = *trigger;
+                match key.code {
+                    KeyCode::Char(c) => {
+                        self.input.push(c);
+                        self.hint = None;
+                    }
+                    KeyCode::Backspace => {
+                        self.input.pop();
+                    }
+                    KeyCode::Enter => {
+                        let answer = self.input.trim().to_string();
+                        if !answer.is_empty() {
+                            self.fire_command(trigger, Some(answer));
+                        }
+                        self.finish_front_prompt();
                     }
                     _ => {}
                 }
@@ -311,13 +363,23 @@ impl State {
             return format!("! {hint}");
         }
         match self.prompts.front() {
-            None => "wheel/PgUp/PgDn: scroll logs · End: follow · q / Ctrl-C: quit".to_string(),
+            None => {
+                let mut line = String::new();
+                for command in &self.commands {
+                    line.push_str(&format!("{}: {} · ", command.key, command.label));
+                }
+                line.push_str("wheel/PgUp/PgDn: scroll logs · End: follow · q / Ctrl-C: quit");
+                line
+            }
             Some(Prompt::Text { required, .. }) => {
                 if *required {
                     "type the answer · Enter: submit".to_string()
                 } else {
                     "type the answer · Enter: submit (empty: skip)".to_string()
                 }
+            }
+            Some(Prompt::Command { .. }) => {
+                "type the answer · Enter: submit (empty: cancel)".to_string()
             }
             Some(Prompt::Decision {
                 deadline, options, ..
@@ -497,5 +559,98 @@ mod tests {
         assert_eq!(rx1.try_recv().unwrap(), Some(Some("a".into())));
         assert!(rx2.try_recv().unwrap().is_none(), "second still pending");
         assert_eq!(state.prompts.len(), 1);
+    }
+
+    /// A state wired with application commands, and the receiving end.
+    fn command_state(
+        commands: Vec<(char, &str, Option<&str>)>,
+    ) -> (
+        State,
+        futures::channel::mpsc::UnboundedReceiver<TuiCommandEvent>,
+    ) {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        let mut state = State::new();
+        state.commands = commands
+            .into_iter()
+            .map(|(key, label, prompt)| TuiCommand {
+                key,
+                label: label.into(),
+                prompt: prompt.map(str::to_string),
+            })
+            .collect();
+        state.command_tx = Some(tx);
+        (state, rx)
+    }
+
+    #[test]
+    fn promptless_command_fires_immediately() {
+        let (mut state, mut rx) = command_state(vec![('r', "reset", None)]);
+        state.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(
+            rx.try_next().unwrap().unwrap(),
+            TuiCommandEvent {
+                key: 'r',
+                input: None
+            }
+        );
+        assert!(state.prompts.is_empty());
+    }
+
+    #[test]
+    fn prompted_command_fires_with_the_typed_answer() {
+        let (mut state, mut rx) = command_state(vec![('g', "load GLB", Some("GLB path"))]);
+        state.handle_key(key(KeyCode::Char('g')));
+        assert!(rx.try_next().is_err(), "nothing fired yet");
+        for c in "face.glb".chars() {
+            state.handle_key(key(KeyCode::Char(c)));
+        }
+        state.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            rx.try_next().unwrap().unwrap(),
+            TuiCommandEvent {
+                key: 'g',
+                input: Some("face.glb".into())
+            }
+        );
+        assert!(state.prompts.is_empty());
+    }
+
+    #[test]
+    fn prompted_command_cancels_on_empty_enter() {
+        let (mut state, mut rx) = command_state(vec![('g', "load GLB", Some("GLB path"))]);
+        state.handle_key(key(KeyCode::Char('g')));
+        state.handle_key(key(KeyCode::Enter));
+        assert!(rx.try_next().is_err(), "cancelled: nothing fired");
+        assert!(state.prompts.is_empty());
+    }
+
+    #[test]
+    fn command_keys_type_into_an_active_prompt() {
+        let (mut state, mut rx) = command_state(vec![('g', "load GLB", Some("GLB path"))]);
+        let (prompt, _rx) = text_prompt("Device name".into(), true);
+        state.prompts.push_back(prompt);
+        state.handle_key(key(KeyCode::Char('g')));
+        assert_eq!(state.input, "g", "the key typed into the prompt");
+        assert!(rx.try_next().is_err(), "no command fired");
+        assert_eq!(state.prompts.len(), 1);
+    }
+
+    #[test]
+    fn q_stays_quit_even_when_registered_as_a_command() {
+        let (mut state, mut rx) = command_state(vec![('q', "quirk", None)]);
+        state.handle_key(key(KeyCode::Char('q')));
+        assert!(state.quit_requested);
+        assert!(rx.try_next().is_err(), "no command fired");
+    }
+
+    #[test]
+    fn the_footer_advertises_commands() {
+        let (state, _rx) = command_state(vec![
+            ('g', "load GLB", Some("GLB path")),
+            ('b', "background", Some("RRGGBB")),
+        ]);
+        let footer = state.shortcuts(Instant::now());
+        assert!(footer.starts_with("g: load GLB · b: background · "));
+        assert!(footer.ends_with("q / Ctrl-C: quit"));
     }
 }
