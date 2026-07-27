@@ -10,8 +10,8 @@
 use arora_types::value_serde::{Error, Result, ValueReader, ValueWriter};
 use uuid::Uuid;
 
-use crate::read::BufferReader;
-use crate::write::BufferWriter;
+use crate::reader::BufferReader;
+use crate::writer::BufferWriter;
 use crate::{
     TYPE_ARRAY, TYPE_BOOLEAN, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8,
     TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,

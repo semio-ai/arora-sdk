@@ -4,7 +4,7 @@
 //! `T ↔ Value`.
 //!
 //! The two backends encode identically: [`to_bytes`] produces exactly the
-//! bytes [`crate::serde_uuid::serialize`] produces for
+//! bytes [`crate::froto_value::serialize`] produces for
 //! [`value_serde::to_value`] of the same data (a test pins it), so a payload
 //! written by one side can be read by the other, or inspected as a `Value`
 //! mid-way when introspection is worth the allocation. The mapping is the
@@ -25,9 +25,9 @@ use serde::de::{
 };
 use serde::ser::{self, Serialize};
 
-use crate::read::BufferReader;
-use crate::serde_uuid::{deserialize_from_reader, serialize_to_writer};
-use crate::write::BufferWriter;
+use crate::froto_value::{deserialize_from_reader, serialize_to_writer};
+use crate::reader::BufferReader;
+use crate::writer::BufferWriter;
 use crate::{
     TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64,
     TYPE_I8, TYPE_MAP, TYPE_OPTION, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64,
@@ -856,7 +856,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::serde_uuid;
+    use crate::froto_value;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -907,7 +907,7 @@ mod tests {
         // The direct path and the Value path are the same wire format: a
         // payload written by one side reads on the other.
         let via_value =
-            serde_uuid::serialize(&arora_types::value_serde::to_value(&sample()).unwrap());
+            froto_value::serialize(&arora_types::value_serde::to_value(&sample()).unwrap());
         let direct = to_bytes(&sample()).unwrap();
         assert_eq!(via_value, direct);
 
@@ -918,7 +918,7 @@ mod tests {
     #[test]
     fn reads_values_written_by_hand() {
         // A typed f32 array (raw bulk elements) decodes as a plain sequence.
-        let bytes = serde_uuid::serialize(&arora_types::value::Value::ArrayF32(vec![1.0, 2.0]));
+        let bytes = froto_value::serialize(&arora_types::value::Value::ArrayF32(vec![1.0, 2.0]));
         let back: Vec<f32> = from_bytes(&bytes).unwrap();
         assert_eq!(back, vec![1.0, 2.0]);
     }
