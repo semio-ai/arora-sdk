@@ -112,18 +112,18 @@ of the same bytes `froto_value` writes; a test pins the two equal.
 
 The reader, writer and allocator are exposed as a stable `#[no_mangle] extern "C"`
 surface — the common interop point across binary formats, so a native C++ guest
-(`arora-sdk/libs`) and a WASM guest can both drive the same buffers. The buffer
-allocator (for WASM linear memory) is in [`alloc`](src/alloc.rs); the reader and
-writer entry points live alongside [`BufferWriter`](src/writer.rs) /
-[`BufferReader`](src/reader.rs).
+(`arora-sdk/libs`) and a WASM guest can both drive the same buffers. The
+reader/writer entry points are in [`ffi`](src/ffi/); the buffer allocator (for
+WASM linear memory) is in [`alloc`](src/alloc.rs). The safe Rust API they wrap is
+[`BufferWriter`](src/writer.rs) / [`BufferReader`](src/reader.rs).
 
 ## Modules
 
 - [`format`](src/format.rs) — the type tags, alignment and size-prefix constants
   (the spec above, in code).
 - [`writer`](src/writer.rs) / [`reader`](src/reader.rs) — the low-level
-  `BufferWriter` / `BufferReader`, and the `extern "C"` C ABI over them.
-- [`alloc`](src/alloc.rs) — buffer alloc/free for WASM guests.
+  `BufferWriter` / `BufferReader` cursor.
+- [`ffi`](src/ffi/) / [`alloc`](src/alloc.rs) — the C ABI over them.
 - [`froto_value`](src/froto_value.rs) / [`froto_borrowed_value`](src/froto_borrowed_value.rs) /
   [`froto_serde`](src/froto_serde.rs) / [`froto_checked_value`](src/froto_checked_value.rs) —
   the four (de)serializers above.
