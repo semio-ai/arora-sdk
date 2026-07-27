@@ -5,7 +5,7 @@ use std::io::{BufReader, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 
-use crate::msgs::MessageType;
+use crate::msgs::RosMessage;
 use crate::ros2_error::ROS2RobotError;
 
 /// Represents the complete configuration for a ROS2 robot.
@@ -99,14 +99,16 @@ pub struct TopicConfig {
 }
 
 impl TopicConfig {
-    pub fn new<T: MessageType>(
+    pub fn new<T: RosMessage>(
         name: &str,
         direction: TopicDirection,
         mapping: TopicMapping,
     ) -> Self {
         TopicConfig {
             name: name.to_string(),
-            message_type: T::MESSAGE_TYPE_STR.to_owned(),
+            // The short `package/Type` form the configs use; `package_and_type`
+            // resolves it back to `T` for the typed dispatch in `ros2_hal`.
+            message_type: format!("{}/{}", T::PACKAGE, T::TYPE_NAME),
             direction,
             mapping,
         }
