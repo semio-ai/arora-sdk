@@ -270,8 +270,6 @@ pub struct AroraBuilder {
     modules: Vec<(Header, Box<[u8]>)>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
-    #[cfg(feature = "native")]
-    shutdown: Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
 }
 
 impl AroraBuilder {
@@ -373,20 +371,6 @@ impl AroraBuilder {
         self
     }
 
-    /// Stop [`run`](AroraBuilder::run) when `shutdown` resolves: it returns
-    /// `Ok(())` instead of driving the device forever — the seam for a host
-    /// that rebuilds its device with a new configuration, or ends an embedding
-    /// application cleanly. Sugar for [`Arora::run_until`]'s shutdown, carried
-    /// through the operator flow.
-    #[cfg(feature = "native")]
-    pub fn with_shutdown(
-        mut self,
-        shutdown: impl std::future::Future<Output = ()> + 'static,
-    ) -> Self {
-        self.shutdown = Some(Box::pin(shutdown));
-        self
-    }
-
     /// Run the assembled device to completion with the standard operator flow:
     /// pick the front end (the injected one, else terminal UI or headless by
     /// terminal detection), fill the default bridge
@@ -394,7 +378,13 @@ impl AroraBuilder {
     /// (operator prompt, local-bridge fallback when declined), the open local
     /// bridge otherwise — default any other unset seam (a private
     /// `SimpleDataStore`, the fake HAL, an empty interpreter), and drive the
-    /// step loop, until the injected shutdown resolves (if any).
+    /// step loop.
+    ///
+    /// **Stopping is dropping**: everything the run holds — the front end (and
+    /// its terminal takeover), the device, its bridges and their servers —
+    /// lives inside the returned future, so dropping it (e.g. losing a
+    /// `select!` against your own stop signal) is a complete, synchronous
+    /// teardown, after which a host can build and run a fresh device.
     ///
     /// This is the run entrypoint for composed devices: features only pick the
     /// *defaults*, never what you can inject — e.g. a device whose blackboard

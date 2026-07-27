@@ -8,16 +8,20 @@ All notable changes to `arora`. The format follows
 
 ### Added
 
-- `Arora::run_until(period, shutdown)`: `run`, with a clean return when the
-  shutdown future resolves — the device stays consistent and usable.
-- `AroraBuilder::with_shutdown(future)`: carries that shutdown through the
-  standard operator flow (`AroraBuilder::run`).
 - `AroraBuilder::with_frontend(frontend)`: inject the operator front end
   instead of the standard terminal-detection pick.
 - Application commands in the terminal UI: `tui::commands_frontend(commands)`
   builds the standard front end with key-driven commands (footer label,
   optional text prompt) delivered on a channel — `tui::TuiCommand`,
   `tui::TuiCommandEvent`.
+
+### Changed
+
+- Stopping a run is dropping its future, now as a documented, complete
+  teardown: the operator flow polls the access-request serving in its own
+  scope (no detached task), so dropping `AroraBuilder::run`'s future
+  synchronously releases the front end (the terminal), the device, and its
+  bridges; `Arora::run` documents drop-between-steps cancellation.
 
 ## [9.4.0] - 2026-07-27
 
