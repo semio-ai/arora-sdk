@@ -85,7 +85,12 @@ pub fn serialize_to_writer(v: &Value, writer: &mut BufferWriter) {
         Value::ArrayString(v) => {
             writer.add_array_primitive(TYPE_STRING, v.len() as u32);
             for s in v {
-                writer.add_string(s);
+                // Untagged: the element type is `TYPE_STRING` from the array
+                // head, so each element is a bare length-prefixed string. The
+                // reader (and typed.rs `StringSeq`) reads it with `get_string`,
+                // which expects no per-element tag — `add_string` would double
+                // the tag and never round-trip.
+                writer.add_string_raw(s);
             }
         }
         Value::ArrayStructure { id, elements } => {
@@ -337,6 +342,24 @@ mod tests {
             Value::F64(0.5),
             Value::F64(-2.5e300),
             Value::ArrayF64(vec![1.0, -2.0, 3.5]),
+        ] {
+            let bytes = serialize(&value);
+            assert_eq!(deserialize(&bytes), value, "round-trip of {value:?}");
+        }
+    }
+
+    /// String arrays used to double-tag on the wire (`add_string` wrote a
+    /// per-element `TYPE_STRING` tag the reader never expected), so they never
+    /// round-tripped. Pinned here alongside empty and multi-length cases.
+    #[test]
+    fn string_arrays_round_trip() {
+        for value in [
+            Value::ArrayString(vec![]),
+            Value::ArrayString(vec![
+                String::new(),
+                "odom".to_string(),
+                "a longer frame id".to_string(),
+            ]),
         ] {
             let bytes = serialize(&value);
             assert_eq!(deserialize(&bytes), value, "round-trip of {value:?}");
