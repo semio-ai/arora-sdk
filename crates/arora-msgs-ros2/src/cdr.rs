@@ -122,6 +122,38 @@ macro_rules! cdr_read_arrays {
     };
 }
 
+/// The `write_*_fixed_array` methods: a ROS 2 `T[N]` is the elements back to
+/// back, each self-aligned by its scalar op, with **no** length header — the
+/// count is fixed by the type.
+macro_rules! cdr_write_fixed_arrays {
+    ($($method:ident($elem:ty) => $write:ident;)*) => {
+        $(
+            fn $method(&mut self, v: &[$elem]) -> Result<()> {
+                for item in v {
+                    self.$write(*item)?;
+                }
+                Ok(())
+            }
+        )*
+    };
+}
+
+/// The read counterpart of [`cdr_write_fixed_arrays`]: read exactly `len`
+/// elements (the count comes from the type, not the wire).
+macro_rules! cdr_read_fixed_arrays {
+    ($($method:ident($elem:ty) => $read:ident;)*) => {
+        $(
+            fn $method(&mut self, len: usize) -> Result<Vec<$elem>> {
+                let mut items = Vec::with_capacity(len);
+                for _ in 0..len {
+                    items.push(self.$read()?);
+                }
+                Ok(items)
+            }
+        )*
+    };
+}
+
 impl ValueWriter for CdrWriter {
     fn write_unit(&mut self) -> Result<()> {
         Ok(())
@@ -223,6 +255,31 @@ impl ValueWriter for CdrWriter {
     }
     fn begin_struct_element(&mut self, _field_count: usize) -> Result<()> {
         // Positional: the element's fields follow directly, with no header.
+        Ok(())
+    }
+    // Fixed arrays (ROS 2 `T[N]`): the elements back to back, each self-aligned,
+    // with no length header — the count is fixed by the type.
+    cdr_write_fixed_arrays! {
+        write_bool_fixed_array(bool) => write_bool;
+        write_u8_fixed_array(u8) => write_u8;
+        write_u16_fixed_array(u16) => write_u16;
+        write_u32_fixed_array(u32) => write_u32;
+        write_u64_fixed_array(u64) => write_u64;
+        write_i8_fixed_array(i8) => write_i8;
+        write_i16_fixed_array(i16) => write_i16;
+        write_i32_fixed_array(i32) => write_i32;
+        write_i64_fixed_array(i64) => write_i64;
+        write_f32_fixed_array(f32) => write_f32;
+        write_f64_fixed_array(f64) => write_f64;
+    }
+    fn write_string_fixed_array(&mut self, v: &[String]) -> Result<()> {
+        for item in v {
+            self.write_string(item)?;
+        }
+        Ok(())
+    }
+    fn begin_fixed_struct_array(&mut self, _element_id: Uuid, _len: usize) -> Result<()> {
+        // Fixed: no sequence-length header; the struct elements follow positionally.
         Ok(())
     }
 }
@@ -354,6 +411,31 @@ impl ValueReader for CdrReader<'_> {
     }
     fn enter_struct_element(&mut self, _field_count: usize) -> Result<()> {
         // Positional: the element's fields follow directly, no header.
+        Ok(())
+    }
+    // Fixed arrays: read exactly `len` elements, no count on the wire.
+    cdr_read_fixed_arrays! {
+        read_bool_fixed_array(bool) => read_bool;
+        read_u8_fixed_array(u8) => read_u8;
+        read_u16_fixed_array(u16) => read_u16;
+        read_u32_fixed_array(u32) => read_u32;
+        read_u64_fixed_array(u64) => read_u64;
+        read_i8_fixed_array(i8) => read_i8;
+        read_i16_fixed_array(i16) => read_i16;
+        read_i32_fixed_array(i32) => read_i32;
+        read_i64_fixed_array(i64) => read_i64;
+        read_f32_fixed_array(f32) => read_f32;
+        read_f64_fixed_array(f64) => read_f64;
+    }
+    fn read_string_fixed_array(&mut self, len: usize) -> Result<Vec<String>> {
+        let mut items = Vec::with_capacity(len);
+        for _ in 0..len {
+            items.push(self.read_string()?);
+        }
+        Ok(items)
+    }
+    fn enter_fixed_struct_array(&mut self, _element_id: Uuid, _len: usize) -> Result<()> {
+        // Fixed: no count on the wire; the struct elements follow positionally.
         Ok(())
     }
 }
@@ -696,6 +778,87 @@ mod tests {
             ],
         });
 
+        let bytes = encode(&ty, &registry, &value).unwrap();
+        assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
+    }
+
+    /// A bare `float64[3]` fixed array against the hand-computed CDR wire form:
+    /// unlike a sequence, a fixed array carries **no** length prefix — the count
+    /// is fixed by the type, so the doubles start immediately (offset 0 is
+    /// already 8-aligned after the encapsulation header).
+    #[test]
+    fn fixed_scalar_array_matches_golden_cdr() {
+        let ty = low::Type {
+            name: String::new(),
+            id: id(0x70),
+            description: String::new(),
+            kind: low::TypeKind::Primitive(TypeRef::FixedArray {
+                id: *ty::F64_ID,
+                len: 3,
+            }),
+        };
+        let registry = TypeRegistry::new();
+        let value = Value::ArrayF64(vec![1.0, 2.0, 3.0]);
+        let bytes = encode(&ty, &registry, &value).unwrap();
+
+        #[rustfmt::skip]
+        let golden: Vec<u8> = vec![
+            0x00, 0x01, 0x00, 0x00,                         // encapsulation: CDR_LE
+            // no length prefix — the count is fixed by the type
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F, // 1.0 (f64 LE)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, // 2.0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x40, // 3.0
+        ];
+        assert_eq!(bytes, golden, "fixed array must omit the sequence length");
+        assert_eq!(decode(&ty, &registry, &golden).unwrap(), value);
+    }
+
+    #[test]
+    fn fixed_array_wrong_length_is_rejected() {
+        let ty = low::Type {
+            name: String::new(),
+            id: id(0x70),
+            description: String::new(),
+            kind: low::TypeKind::Primitive(TypeRef::FixedArray {
+                id: *ty::F64_ID,
+                len: 3,
+            }),
+        };
+        let registry = TypeRegistry::new();
+        // Two elements for a [f64; 3] — the length is part of the type.
+        assert!(encode(&ty, &registry, &Value::ArrayF64(vec![1.0, 2.0])).is_err());
+    }
+
+    /// `#[derive(AroraType)]` turns a `[f64; N]` field into a `FixedArray`, and
+    /// `#[arora(name = "…")]` carries the ROS-qualified name (which the default
+    /// type id then hashes) — the derive, the fixed-array walk and CDR composing.
+    #[test]
+    fn a_derived_fixed_array_type_round_trips_and_carries_its_ros_name() {
+        use arora_types::AroraType;
+
+        #[derive(arora_types::AroraType)]
+        #[arora(name = "sensor_msgs/msg/TinyImu")]
+        #[allow(dead_code)]
+        struct TinyImu {
+            orientation_covariance: [f64; 4],
+        }
+
+        let (ty, registry) = TinyImu::arora_type_with_registry();
+        assert_eq!(ty.name, "sensor_msgs/msg/TinyImu");
+        assert_eq!(
+            ty.id,
+            arora_types::gen_uuid_from_str("sensor_msgs/msg/TinyImu"),
+            "the default id hashes the ROS name, not the Rust ident"
+        );
+
+        let g = arora_types::gen_uuid_from_str;
+        let value = Value::Structure(Structure {
+            id: TinyImu::arora_type_id(),
+            fields: vec![StructureField {
+                id: g("orientation_covariance"),
+                value: Box::new(Value::ArrayF64(vec![1.0, 2.0, 3.0, 4.0])),
+            }],
+        });
         let bytes = encode(&ty, &registry, &value).unwrap();
         assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
     }

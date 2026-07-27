@@ -62,8 +62,10 @@ fn check_ref(
 ) -> Result<(), NotRepresentable> {
     match type_ref {
         TypeRef::Scalar { id } => check_element(id, registry, seen),
-        // A ROS sequence: its element is a scalar or a nested message.
+        // A ROS sequence (`T[]`) or fixed array (`T[N]`): its element is a scalar
+        // or a nested message.
         TypeRef::Array { id } => check_element(id, registry, seen),
+        TypeRef::FixedArray { id, .. } => check_element(id, registry, seen),
         TypeRef::Map { .. } => Err(no("key/value maps have no ROS 2 CDR encoding")),
     }
 }
