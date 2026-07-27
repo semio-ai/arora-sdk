@@ -16,7 +16,15 @@ pub struct Executor {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TypeRef {
   Scalar { id: Uuid },
+  /// A variable-length homogeneous array (a ROS 2 *sequence*): any number of
+  /// elements of type `id`.
   Array { id: Uuid },
+  /// A fixed-length homogeneous array of exactly `len` elements of type `id` (a
+  /// ROS 2 `T[N]`). The element count is part of the type, not the value, so a
+  /// non-self-describing wire form (CDR) writes the elements without a length
+  /// prefix — the reader knows to expect `len` of them.
+  #[serde(rename = "fixedarray")]
+  FixedArray { id: Uuid, len: usize },
   Map { key_id: Uuid, value_id: Uuid },
 }
 
@@ -26,6 +34,7 @@ impl TypeRef {
     match self {
       TypeRef::Scalar { id } => deps.insert(*id),
       TypeRef::Array { id } => deps.insert(*id),
+      TypeRef::FixedArray { id, .. } => deps.insert(*id),
       TypeRef::Map { key_id, value_id } => {
         deps.insert(*key_id);
         deps.insert(*value_id)

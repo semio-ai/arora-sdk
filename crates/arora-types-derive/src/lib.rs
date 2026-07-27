@@ -45,14 +45,21 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     ));
   };
 
-  let type_id_expr = id_expr(arora_id_attr(&input.attrs)?, &name_str)?;
+  let meta = parse_arora_meta(&input.attrs)?;
+  // The arora type name: an `#[arora(name = "…")]` override (the ROS-qualified
+  // name for generated messages), else the Rust type's own name.
+  let type_name = meta.name.clone().unwrap_or_else(|| name_str.clone());
+  let type_id_expr = id_expr(meta.id, &type_name)?;
 
   let mut field_entries = Vec::new();
   let mut register_calls = Vec::new();
   for field in &named.named {
     let fname = field.ident.as_ref().expect("a named field has an ident");
-    let fname_str = fname.to_string();
-    let field_id_expr = id_expr(arora_id_attr(&field.attrs)?, &fname_str)?;
+    // A raw identifier (`r#type`, for a field whose ROS name is a Rust keyword)
+    // names the plain word in arora, so its name and id match the ROS field.
+    let fname_raw = fname.to_string();
+    let fname_str = fname_raw.strip_prefix("r#").unwrap_or(&fname_raw).to_string();
+    let field_id_expr = id_expr(parse_arora_meta(&field.attrs)?.id, &fname_str)?;
     let (type_ref_expr, nested) = type_ref_for(&field.ty)?;
     field_entries.push(quote! {
       (
@@ -78,9 +85,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
 
       fn arora_type() -> arora_types::ty::low::Type {
         arora_types::ty::low::Type {
-          name: #name_str.to_string(),
+          name: #type_name.to_string(),
           id: <Self as arora_types::AroraType>::arora_type_id(),
-          description: String::new(),
+          // Fully qualified: a derived type may live in a module that shadows
+          // `String` (e.g. the generated `std_msgs::String` message).
+          description: ::std::string::String::new(),
           kind: arora_types::ty::low::TypeKind::Structure(
             arora_types::ty::low::Structure::from_fields([
               #(#field_entries),*
@@ -112,9 +121,21 @@ fn id_expr(explicit: Option<(String, Span)>, name: &str) -> syn::Result<TokenStr
   }
 }
 
-/// Parse a single `#[arora(id = "…")]` from an attribute list, if present.
-fn arora_id_attr(attrs: &[Attribute]) -> syn::Result<Option<(String, Span)>> {
-  let mut found = None;
+/// A parsed `#[arora(…)]` attribute: an explicit `id`, an explicit `name`, or
+/// both.
+#[derive(Default)]
+struct AroraMeta {
+  id: Option<(String, Span)>,
+  name: Option<String>,
+}
+
+/// Parse `#[arora(id = "…", name = "…")]` from an attribute list. `id` pins the
+/// type/field id (otherwise it is a hash of the name). `name` overrides the
+/// arora type name — used to carry the ROS-qualified name
+/// (`geometry_msgs/msg/Point`) — and, when no `id` is given, is what the default
+/// id hashes, so a generated type and the same type defined at runtime agree.
+fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
+  let mut parsed = AroraMeta::default();
   for attr in attrs {
     if !attr.path().is_ident("arora") {
       continue;
@@ -122,14 +143,18 @@ fn arora_id_attr(attrs: &[Attribute]) -> syn::Result<Option<(String, Span)>> {
     attr.parse_nested_meta(|meta| {
       if meta.path.is_ident("id") {
         let lit: syn::LitStr = meta.value()?.parse()?;
-        found = Some((lit.value(), lit.span()));
+        parsed.id = Some((lit.value(), lit.span()));
+        Ok(())
+      } else if meta.path.is_ident("name") {
+        let lit: syn::LitStr = meta.value()?.parse()?;
+        parsed.name = Some(lit.value());
         Ok(())
       } else {
-        Err(meta.error("unknown `arora` attribute (expected `id = \"…\"`)"))
+        Err(meta.error("unknown `arora` attribute (expected `id = \"…\"` or `name = \"…\"`)"))
       }
     })?;
   }
-  Ok(found)
+  Ok(parsed)
 }
 
 /// Validate a UUID literal at macro time and emit it as a `Uuid::from_bytes`.
@@ -143,6 +168,16 @@ fn uuid_bytes_expr(literal: &str, span: Span) -> syn::Result<TokenStream2> {
 /// The `TypeRef` a field of type `ty` is referenced by, and — for a nested
 /// user-defined type — that type, so its definition is registered too.
 fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
+  // `[T; N]` -> a fixed-length homogeneous array of `N` elements of type `T`.
+  if let Type::Array(array) = ty {
+    let (element_id, nested) = element_id_for(&array.elem)?;
+    let len = &array.len;
+    let expr = quote! {
+      arora_types::module::low::TypeRef::FixedArray { id: #element_id, len: (#len) as usize }
+    };
+    return Ok((expr, nested));
+  }
+
   let Type::Path(type_path) = ty else {
     return Err(syn::Error::new(
       ty.span(),

@@ -37,6 +37,35 @@ fn err<T>(message: impl Into<String>) -> Result<T> {
   Err(Error::new(message))
 }
 
+/// Generate the default fixed-length array writers: each defers to the
+/// variable-length writer of the same element type. A self-describing backend
+/// (arora-buffers) carries the element count on the wire either way, so fixed
+/// and variable are the same bytes there; a positional backend (CDR) overrides
+/// these to omit the count, which the reader recovers from the type instead.
+macro_rules! default_fixed_array_writers {
+  ($($fixed:ident => $variable:ident ( $elem:ty );)*) => {
+    $(
+      fn $fixed(&mut self, v: &[$elem]) -> Result<()> {
+        self.$variable(v)
+      }
+    )*
+  };
+}
+
+/// The read counterpart: each defers to the variable-length reader, ignoring the
+/// type-declared `len` (the self-describing count on the wire drives it). A
+/// positional backend (CDR) overrides these to read exactly `len` elements.
+macro_rules! default_fixed_array_readers {
+  ($($fixed:ident => $variable:ident ( $elem:ty );)*) => {
+    $(
+      fn $fixed(&mut self, len: usize) -> Result<Vec<$elem>> {
+        let _ = len;
+        self.$variable()
+      }
+    )*
+  };
+}
+
 /// A format a [`Value`] is written to, one datum at a time. Struct framing is
 /// explicit so a non-self-describing format (CDR) can emit length/alignment and
 /// a self-describing one (arora-buffers) can emit type tags.
@@ -90,6 +119,31 @@ pub trait ValueWriter {
   /// element's type is already fixed by the array head, so no id is written: a
   /// self-describing format emits only the field count, a positional one nothing.
   fn begin_struct_element(&mut self, field_count: usize) -> Result<()>;
+
+  // Fixed-length arrays (ROS 2 `T[N]`): the element count is part of the type,
+  // not the value. A self-describing backend frames them exactly like a variable
+  // array, so these default to the variable writers; a positional backend (CDR)
+  // overrides them to drop the count.
+  default_fixed_array_writers! {
+    write_bool_fixed_array => write_bool_array(bool);
+    write_u8_fixed_array => write_u8_array(u8);
+    write_u16_fixed_array => write_u16_array(u16);
+    write_u32_fixed_array => write_u32_array(u32);
+    write_u64_fixed_array => write_u64_array(u64);
+    write_i8_fixed_array => write_i8_array(i8);
+    write_i16_fixed_array => write_i16_array(i16);
+    write_i32_fixed_array => write_i32_array(i32);
+    write_i64_fixed_array => write_i64_array(i64);
+    write_f32_fixed_array => write_f32_array(f32);
+    write_f64_fixed_array => write_f64_array(f64);
+    write_string_fixed_array => write_string_array(String);
+  }
+
+  /// Begin a fixed array of `len` structures of type `element_id`. Defaults to
+  /// the variable struct-array framing (which carries the count); CDR omits it.
+  fn begin_fixed_struct_array(&mut self, element_id: Uuid, len: usize) -> Result<()> {
+    self.begin_struct_array(element_id, len)
+  }
 }
 
 /// A format a [`Value`] is read from, type-directed by the walk. A
@@ -146,6 +200,37 @@ pub trait ValueReader {
   /// format reads and validates the on-wire field count; a positional one takes
   /// it from the type and reads nothing.
   fn enter_struct_element(&mut self, field_count: usize) -> Result<()>;
+
+  // Fixed-length array readers — counterpart of the writers above. They default
+  // to the variable readers (whose wire count the self-describing backend
+  // carries); CDR overrides them to read exactly the type-declared `len`.
+  default_fixed_array_readers! {
+    read_bool_fixed_array => read_bool_array(bool);
+    read_u8_fixed_array => read_u8_array(u8);
+    read_u16_fixed_array => read_u16_array(u16);
+    read_u32_fixed_array => read_u32_array(u32);
+    read_u64_fixed_array => read_u64_array(u64);
+    read_i8_fixed_array => read_i8_array(i8);
+    read_i16_fixed_array => read_i16_array(i16);
+    read_i32_fixed_array => read_i32_array(i32);
+    read_i64_fixed_array => read_i64_array(i64);
+    read_f32_fixed_array => read_f32_array(f32);
+    read_f64_fixed_array => read_f64_array(f64);
+    read_string_fixed_array => read_string_array(String);
+  }
+
+  /// Enter a fixed array of `len` structures of type `element_id`. The count is
+  /// known from the type; the default still consumes and checks the
+  /// self-describing count, while CDR reads nothing here.
+  fn enter_fixed_struct_array(&mut self, element_id: Uuid, len: usize) -> Result<()> {
+    let n = self.enter_struct_array(element_id)?;
+    if n != len {
+      return Err(Error::new(format!(
+        "fixed struct array: type declares {len} elements, wire carries {n}"
+      )));
+    }
+    Ok(())
+  }
 }
 
 /// Serialize `value` against `ty` into `writer`. Errors if `value` does not
@@ -311,6 +396,7 @@ fn write_by_ref<W: ValueWriter>(
       }
     }
     TypeRef::Array { id } => write_array(*id, registry, value, writer),
+    TypeRef::FixedArray { id, len } => write_fixed_array(*id, *len, registry, value, writer),
     TypeRef::Map { .. } => err("map types are not supported yet"),
   }
 }
@@ -332,6 +418,7 @@ fn read_by_ref<R: ValueReader>(
       }
     }
     TypeRef::Array { id } => read_array(*id, registry, reader),
+    TypeRef::FixedArray { id, len } => read_fixed_array(*id, *len, registry, reader),
     TypeRef::Map { .. } => err("map types are not supported yet"),
   }
 }
@@ -427,6 +514,112 @@ fn write_scalar_array<W: ValueWriter>(
   }
 }
 
+/// Write a fixed-length array (ROS 2 `T[N]`): like [`write_array`], but the
+/// element count is fixed by the type and the value must match it exactly.
+fn write_fixed_array<W: ValueWriter>(
+  element_id: Uuid,
+  len: usize,
+  registry: &TypeRegistry,
+  value: &Value,
+  writer: &mut W,
+) -> Result<()> {
+  match registry.get(&element_id) {
+    Some(element_ty) => {
+      let low::TypeKind::Structure(structure) = &element_ty.kind else {
+        return err(format!(
+          "array element type {element_id} is not a structure"
+        ));
+      };
+      let (id, elements) = match value {
+        Value::ArrayStructure { id, elements } => (*id, elements),
+        other => return err(format!("expected an array of structures, got {other}")),
+      };
+      if id != element_id {
+        return err(format!(
+          "array-of-structure element id {id} does not match type element id {element_id}"
+        ));
+      }
+      if elements.len() != len {
+        return err(format!(
+          "fixed array declares {len} elements, value has {}",
+          elements.len()
+        ));
+      }
+      writer.begin_fixed_struct_array(element_id, len)?;
+      for element in elements {
+        check_field_count(structure, &element.fields)?;
+        writer.begin_struct_element(structure.fields.len())?;
+        write_fields(structure, registry, &element.fields, writer)?;
+      }
+      Ok(())
+    }
+    None => write_fixed_scalar_array(element_id, len, value, writer),
+  }
+}
+
+/// Write a fixed-length scalar array (the counterpart of [`write_scalar_array`]),
+/// checking the value's length against the type's `len`.
+fn write_fixed_scalar_array<W: ValueWriter>(
+  element_id: Uuid,
+  len: usize,
+  value: &Value,
+  writer: &mut W,
+) -> Result<()> {
+  macro_rules! write_fixed_of {
+    ($variant:ident, $write:ident) => {{
+      match value {
+        Value::$variant(items) => {
+          if items.len() != len {
+            return err(format!(
+              concat!(
+                "fixed array of ",
+                stringify!($variant),
+                " declares {} elements, value has {}"
+              ),
+              len,
+              items.len()
+            ));
+          }
+          writer.$write(items)
+        }
+        other => err(format!(
+          concat!("expected ", stringify!($variant), ", got {}"),
+          other
+        )),
+      }
+    }};
+  }
+  if element_id == *ty::BOOLEAN_ID {
+    write_fixed_of!(ArrayBoolean, write_bool_fixed_array)
+  } else if element_id == *ty::U8_ID {
+    write_fixed_of!(ArrayU8, write_u8_fixed_array)
+  } else if element_id == *ty::U16_ID {
+    write_fixed_of!(ArrayU16, write_u16_fixed_array)
+  } else if element_id == *ty::U32_ID {
+    write_fixed_of!(ArrayU32, write_u32_fixed_array)
+  } else if element_id == *ty::U64_ID {
+    write_fixed_of!(ArrayU64, write_u64_fixed_array)
+  } else if element_id == *ty::I8_ID {
+    write_fixed_of!(ArrayI8, write_i8_fixed_array)
+  } else if element_id == *ty::I16_ID {
+    write_fixed_of!(ArrayI16, write_i16_fixed_array)
+  } else if element_id == *ty::I32_ID {
+    write_fixed_of!(ArrayI32, write_i32_fixed_array)
+  } else if element_id == *ty::I64_ID {
+    write_fixed_of!(ArrayI64, write_i64_fixed_array)
+  } else if element_id == *ty::F32_ID {
+    write_fixed_of!(ArrayF32, write_f32_fixed_array)
+  } else if element_id == *ty::F64_ID {
+    write_fixed_of!(ArrayF64, write_f64_fixed_array)
+  } else if element_id == *ty::STRING_ID {
+    write_fixed_of!(ArrayString, write_string_fixed_array)
+  } else {
+    err(format!(
+      "array element type {element_id} is neither a registered type nor a supported scalar"
+    ))
+  }
+}
+
 /// Read an array whose element type is `element_id` (the counterpart of
 /// [`write_array`]).
 fn read_array<R: ValueReader>(
@@ -490,6 +683,80 @@ fn read_scalar_array<R: ValueReader>(element_id: Uuid, reader: &mut R) -> Result
     read_array_of!(ArrayF64, read_f64_array)
   } else if element_id == *ty::STRING_ID {
     read_array_of!(ArrayString, read_string_array)
+  } else {
+    return err(format!(
+      "array element type {element_id} is neither a registered type nor a supported scalar"
+    ));
+  })
+}
+
+/// Read a fixed-length array (the counterpart of [`read_array`]): the element
+/// count comes from the type, not the wire.
+fn read_fixed_array<R: ValueReader>(
+  element_id: Uuid,
+  len: usize,
+  registry: &TypeRegistry,
+  reader: &mut R,
+) -> Result<Value> {
+  match registry.get(&element_id) {
+    Some(element_ty) => {
+      let low::TypeKind::Structure(structure) = &element_ty.kind else {
+        return err(format!(
+          "array element type {element_id} is not a structure"
+        ));
+      };
+      reader.enter_fixed_struct_array(element_id, len)?;
+      let mut elements = Vec::with_capacity(len);
+      for _ in 0..len {
+        reader.enter_struct_element(structure.fields.len())?;
+        elements.push(StructureWithoutId {
+          fields: read_fields(structure, registry, reader)?,
+        });
+      }
+      Ok(Value::ArrayStructure {
+        id: element_id,
+        elements,
+      })
+    }
+    None => read_fixed_scalar_array(element_id, len, reader),
+  }
+}
+
+/// Read a fixed-length scalar array of exactly `len` elements.
+fn read_fixed_scalar_array<R: ValueReader>(
+  element_id: Uuid,
+  len: usize,
+  reader: &mut R,
+) -> Result<Value> {
+  macro_rules! read_fixed_of {
+    ($variant:ident, $read:ident) => {{
+      Value::$variant(reader.$read(len)?)
+    }};
+  }
+  Ok(if element_id == *ty::BOOLEAN_ID {
+    read_fixed_of!(ArrayBoolean, read_bool_fixed_array)
+  } else if element_id == *ty::U8_ID {
+    read_fixed_of!(ArrayU8, read_u8_fixed_array)
+  } else if element_id == *ty::U16_ID {
+    read_fixed_of!(ArrayU16, read_u16_fixed_array)
+  } else if element_id == *ty::U32_ID {
+    read_fixed_of!(ArrayU32, read_u32_fixed_array)
+  } else if element_id == *ty::U64_ID {
+    read_fixed_of!(ArrayU64, read_u64_fixed_array)
+  } else if element_id == *ty::I8_ID {
+    read_fixed_of!(ArrayI8, read_i8_fixed_array)
+  } else if element_id == *ty::I16_ID {
+    read_fixed_of!(ArrayI16, read_i16_fixed_array)
+  } else if element_id == *ty::I32_ID {
+    read_fixed_of!(ArrayI32, read_i32_fixed_array)
+  } else if element_id == *ty::I64_ID {
+    read_fixed_of!(ArrayI64, read_i64_fixed_array)
+  } else if element_id == *ty::F32_ID {
+    read_fixed_of!(ArrayF32, read_f32_fixed_array)
+  } else if element_id == *ty::F64_ID {
+    read_fixed_of!(ArrayF64, read_f64_fixed_array)
+  } else if element_id == *ty::STRING_ID {
+    read_fixed_of!(ArrayString, read_string_fixed_array)
   } else {
     return err(format!(
       "array element type {element_id} is neither a registered type nor a supported scalar"

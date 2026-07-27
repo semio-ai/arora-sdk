@@ -206,7 +206,44 @@ fn default_value_for_type_ref(type_ref: &TypeRef) -> Value {
   match type_ref {
     TypeRef::Scalar { id } => default_value_for_scalar_type_id(*id),
     TypeRef::Array { id } => default_value_for_array_element_type_id(*id),
+    TypeRef::FixedArray { id, len } => default_value_for_fixed_array(*id, *len),
     TypeRef::Map { .. } => Value::KeyValue(KeyValue::default()),
+  }
+}
+
+/// A fixed array's schema-aligned default: `len` copies of the element's
+/// default. (A struct-element fixed array falls back to an empty array, like the
+/// variable-length default — the note on [`default_value`] applies.)
+fn default_value_for_fixed_array(id: Uuid, len: usize) -> Value {
+  if id == *ty::BOOLEAN_ID {
+    Value::ArrayBoolean(vec![false; len])
+  } else if id == *ty::U8_ID {
+    Value::ArrayU8(vec![0; len])
+  } else if id == *ty::U16_ID {
+    Value::ArrayU16(vec![0; len])
+  } else if id == *ty::U32_ID {
+    Value::ArrayU32(vec![0; len])
+  } else if id == *ty::U64_ID {
+    Value::ArrayU64(vec![0; len])
+  } else if id == *ty::I8_ID {
+    Value::ArrayI8(vec![0; len])
+  } else if id == *ty::I16_ID {
+    Value::ArrayI16(vec![0; len])
+  } else if id == *ty::I32_ID {
+    Value::ArrayI32(vec![0; len])
+  } else if id == *ty::I64_ID {
+    Value::ArrayI64(vec![0; len])
+  } else if id == *ty::F32_ID {
+    Value::ArrayF32(vec![0.0; len])
+  } else if id == *ty::F64_ID {
+    Value::ArrayF64(vec![0.0; len])
+  } else if id == *ty::STRING_ID {
+    Value::ArrayString(vec![String::new(); len])
+  } else {
+    Value::ArrayStructure {
+      id,
+      elements: vec![],
+    }
   }
 }
 
@@ -313,6 +350,7 @@ fn validate_type_ref(value: &Value, type_ref: &TypeRef) -> Result<(), Conversion
   match type_ref {
     TypeRef::Scalar { id } => validate_scalar_type_id(value, *id),
     TypeRef::Array { id } => validate_array_element_type_id(value, *id),
+    TypeRef::FixedArray { id, len } => validate_fixed_array(value, *id, *len),
     TypeRef::Map { .. } => {
       if matches!(value, Value::KeyValue(_)) {
         Ok(())
@@ -321,6 +359,41 @@ fn validate_type_ref(value: &Value, type_ref: &TypeRef) -> Result<(), Conversion
       }
     }
   }
+}
+
+/// A fixed array validates like a variable one, plus an exact length check — the
+/// element count is part of the type.
+fn validate_fixed_array(value: &Value, id: Uuid, len: usize) -> Result<(), ConversionError> {
+  validate_array_element_type_id(value, id)?;
+  match array_len(value) {
+    Some(actual) if actual == len => Ok(()),
+    Some(actual) => Err(validation_error(&format!(
+      "fixed array expected {len} elements, got {actual}"
+    ))),
+    None => Err(validation_error("expected an array value for a fixed array")),
+  }
+}
+
+/// The element count of any array-shaped [`Value`], or `None` if it is not one.
+fn array_len(value: &Value) -> Option<usize> {
+  Some(match value {
+    Value::ArrayBoolean(v) => v.len(),
+    Value::ArrayU8(v) => v.len(),
+    Value::ArrayU16(v) => v.len(),
+    Value::ArrayU32(v) => v.len(),
+    Value::ArrayU64(v) => v.len(),
+    Value::ArrayI8(v) => v.len(),
+    Value::ArrayI16(v) => v.len(),
+    Value::ArrayI32(v) => v.len(),
+    Value::ArrayI64(v) => v.len(),
+    Value::ArrayF32(v) => v.len(),
+    Value::ArrayF64(v) => v.len(),
+    Value::ArrayString(v) => v.len(),
+    Value::ArrayValue(v) => v.len(),
+    Value::ArrayStructure { elements, .. } => elements.len(),
+    Value::ArrayEnumeration { elements, .. } => elements.len(),
+    _ => return None,
+  })
 }
 
 fn validate_scalar_type_id(value: &Value, id: Uuid) -> Result<(), ConversionError> {
