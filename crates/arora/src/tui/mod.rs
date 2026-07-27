@@ -34,6 +34,8 @@ use sysinfo::{ProcessesToUpdate, System};
 
 use arora_bridge::{AccessDecision, DeviceInfo};
 
+use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
 use crate::operator::{
     AccessRequestSummary, AccessRuling, Frontend, Operator, DEFAULT_ACCESS_GRACE,
 };
@@ -43,6 +45,50 @@ use state::{DeviceIdentity, State};
 /// The shared UI state: the render thread, the input handling, the log capture,
 /// and the operator prompts all touch this one instance.
 type SharedState = Arc<Mutex<State>>;
+
+/// A key-driven command an embedding application adds to the terminal UI
+/// (via [`commands_frontend`]): the footer advertises it, and pressing its key
+/// outside a prompt fires it.
+pub struct TuiCommand {
+    /// The key that triggers the command. `q` is the quit shortcut and cannot
+    /// trigger a command.
+    pub key: char,
+    /// What the footer shows next to the key, e.g. `load GLB`.
+    pub label: String,
+    /// When set, the key opens a text prompt with this label and the command
+    /// fires with what the operator types (an empty answer cancels it). When
+    /// `None`, the command fires immediately.
+    pub prompt: Option<String>,
+}
+
+/// A fired [`TuiCommand`]: its trigger key, and the prompt answer (`None` for
+/// a prompt-less command).
+#[derive(Debug, PartialEq, Eq)]
+pub struct TuiCommandEvent {
+    pub key: char,
+    pub input: Option<String>,
+}
+
+/// Pick the standard front end — the terminal UI on an interactive terminal,
+/// the headless front end otherwise — with `commands` installed when the
+/// terminal UI is the pick. The receiver yields one event per fired command;
+/// on the headless front end it never yields (its sender side is dropped —
+/// nobody types where nobody watches).
+pub fn commands_frontend(
+    commands: Vec<TuiCommand>,
+) -> (Frontend, UnboundedReceiver<TuiCommandEvent>) {
+    let (tx, rx) = mpsc::unbounded();
+    {
+        use std::io::IsTerminal;
+        if io::stdout().is_terminal() {
+            match tui_frontend_with_commands(commands, Some(tx)) {
+                Ok(frontend) => return (frontend, rx),
+                Err(e) => eprintln!("arora: terminal UI unavailable ({e}); running headless"),
+            }
+        }
+    }
+    (crate::operator::default_frontend(), rx)
+}
 
 /// A live terminal operator UI. It owns the render thread and restores the
 /// terminal when dropped; as an [`Operator`] it renders questions in the
@@ -56,9 +102,16 @@ pub struct Tui {
 
 impl Tui {
     /// Take over the terminal: install the log capture, enter the alternate
-    /// screen, and spawn the render/input thread.
-    fn start() -> anyhow::Result<Self> {
-        let state: SharedState = Arc::new(Mutex::new(State::new()));
+    /// screen, and spawn the render/input thread. `commands` (with their event
+    /// sender) are the embedding application's — empty for the plain device UI.
+    fn start(
+        commands: Vec<TuiCommand>,
+        command_tx: Option<UnboundedSender<TuiCommandEvent>>,
+    ) -> anyhow::Result<Self> {
+        let mut initial = State::new();
+        initial.commands = commands;
+        initial.command_tx = command_tx;
+        let state: SharedState = Arc::new(Mutex::new(initial));
         install_logger(state.clone());
         let terminal = setup_terminal()?;
         let running = Arc::new(AtomicBool::new(true));
@@ -139,7 +192,16 @@ impl Drop for Tui {
 /// operator's questions, and the ready hook feeds it the live telemetry handle
 /// and the device identity once the runtime and bridge are up.
 pub(crate) fn tui_frontend() -> anyhow::Result<Frontend> {
-    let tui = Arc::new(Tui::start()?);
+    tui_frontend_with_commands(Vec::new(), None)
+}
+
+/// [`tui_frontend`] with an embedding application's commands installed — the
+/// terminal-UI arm of [`commands_frontend`].
+fn tui_frontend_with_commands(
+    commands: Vec<TuiCommand>,
+    command_tx: Option<UnboundedSender<TuiCommandEvent>>,
+) -> anyhow::Result<Frontend> {
+    let tui = Arc::new(Tui::start(commands, command_tx)?);
     let state = tui.state.clone();
     let operator: Arc<dyn Operator> = tui.clone();
     let on_ready = Box::new(

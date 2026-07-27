@@ -183,6 +183,10 @@ pub(crate) async fn run_builder_with_frontend(
     let device_id = bridge.device_id().await;
     let access_requests = bridge.access_requests().await;
 
+    let shutdown = builder
+        .shutdown
+        .take()
+        .unwrap_or_else(|| Box::pin(futures::future::pending()));
     let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device exists: a
@@ -197,7 +201,7 @@ pub(crate) async fn run_builder_with_frontend(
     tokio::spawn(serve_access_requests(access_requests, operator));
     info!("running — Ctrl-C to stop");
     arora
-        .run(Arora::DEFAULT_STEP_PERIOD)
+        .run_until(Arora::DEFAULT_STEP_PERIOD, shutdown)
         .await
         .map_err(|e| anyhow!("runtime error: {e}"))
 }
