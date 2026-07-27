@@ -1,3 +1,18 @@
+//! `Value` ⇄ buffer bytes, **borrowing and zero-copy** — the counterpart of
+//! [`crate::froto_value`] for callers that want to read without copying.
+//!
+//! Its `Value<'a>` is a *local, slimmer* mirror of `arora_types::Value`: ids stay
+//! raw `Cow<[u8]>` (never parsed to `Uuid`), and numeric arrays / strings borrow
+//! straight out of the buffer (`Cow<[f64]>` via the zero-copy bulk readers)
+//! instead of copying. That borrowing read is the whole reason to reach for it —
+//! e.g. handing an `f64[]` to a GPU consumer. It carries *less* than the
+//! canonical `Value`: no option, map, uuid, error or mixed-type array.
+//!
+//! It also derives `serde`, so the same `Value<'a>` round-trips through YAML/JSON
+//! — a separate hat from the buffer path, independent of it (that coverage also
+//! lives on the canonical `arora_types::Value`). See the crate README for how it
+//! sits next to `froto_value` / `froto_serde` / `froto_checked_value`.
+
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
