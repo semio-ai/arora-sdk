@@ -4,18 +4,27 @@ use crate::ALIGNMENT;
 
 pub struct BufferReader<'a> {
     backing: &'a [u8],
+    /// Total buffer length, including the 4-byte size prefix — the origin the
+    /// writer aligns against, so [`align`](Self::align) can mirror it.
+    buffer_len: usize,
 }
 
 impl<'a> BufferReader<'a> {
     pub fn new(buffer: &'a [u8]) -> Self {
         Self {
+            buffer_len: buffer.len(),
             backing: &buffer[4..], // skip the first 4 bytes announcing the size
         }
     }
 
     pub fn align(&mut self) {
-        let remainder = self.backing.len() % ALIGNMENT;
-        self.backing = &self.backing[remainder..];
+        // The writer pads against its backing length, which *includes* the
+        // 4-byte size prefix (see `BufferWriter::align`). Mirror that absolute
+        // offset from the buffer start; measuring against the remaining length
+        // instead only agrees when the whole buffer is a multiple of ALIGNMENT.
+        let absolute_offset = self.buffer_len - self.backing.len();
+        let pad = ALIGNMENT - absolute_offset % ALIGNMENT;
+        self.backing = &self.backing[pad..];
     }
 
     pub fn next_type(&mut self) -> Option<u8> {
@@ -189,6 +198,13 @@ impl<'a> BufferReader<'a> {
         ret
     }
 
+    /// Reads an array header: the element type tag and the element count. For a
+    /// `TYPE_STRUCTURE` or `TYPE_ENUMERATION` element tag the 16-byte element
+    /// type id follows and must be read next (e.g. with [`get_uuid`](Self::get_uuid));
+    /// primitive and string element tags carry no id. The elements themselves
+    /// follow after that: numeric elements are a single [`align`](Self::align)
+    /// then raw little-endian payloads; string, structure and enumeration
+    /// elements are self-describing entries read one by one.
     pub fn get_array(&mut self) -> (u8, u32) {
         (self.backing.get_u8(), self.backing.get_u32_le())
     }
