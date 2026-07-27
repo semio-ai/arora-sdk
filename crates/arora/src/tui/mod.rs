@@ -296,6 +296,13 @@ fn run_ui(
     }
 }
 
+/// The pane the global logger currently feeds. The `log` crate's logger can
+/// only ever be set once per process, so the logger itself is a fixed shim
+/// over this slot — each terminal UI (a host may run several in sequence,
+/// rebuilding its device) retargets the slot to its own state.
+static PANE: std::sync::RwLock<Option<(SharedState, env_filter::Filter)>> =
+    std::sync::RwLock::new(None);
+
 /// Capture the `log` crate into the pane, filtered the `env_logger` way
 /// (`RUST_LOG`, defaulting to `info`).
 fn install_logger(state: SharedState) {
@@ -310,30 +317,34 @@ fn install_logger(state: SharedState) {
     }
     let filter = builder.build();
     log::set_max_level(filter.filter());
-    let _ = log::set_boxed_logger(Box::new(TuiLogger { state, filter }));
+    if let Ok(mut pane) = PANE.write() {
+        *pane = Some((state, filter));
+    }
+    let _ = log::set_boxed_logger(Box::new(TuiLogger));
 }
 
-/// A `log::Log` that appends matching records to the pane's state.
-struct TuiLogger {
-    state: SharedState,
-    filter: env_filter::Filter,
-}
+/// A `log::Log` that appends matching records to the active pane's state.
+struct TuiLogger;
 
 impl log::Log for TuiLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        self.filter.enabled(metadata)
+        let pane = PANE.read().expect("pane lock");
+        matches!(&*pane, Some((_, filter)) if filter.enabled(metadata))
     }
 
     fn log(&self, record: &log::Record) {
-        if !self.filter.matches(record) {
-            return;
-        }
-        if let Ok(mut state) = self.state.lock() {
-            state.push_log(
-                record.level(),
-                record.target().to_string(),
-                record.args().to_string(),
-            );
+        let Ok(pane) = PANE.read() else { return };
+        if let Some((state, filter)) = &*pane {
+            if !filter.matches(record) {
+                return;
+            }
+            if let Ok(mut state) = state.lock() {
+                state.push_log(
+                    record.level(),
+                    record.target().to_string(),
+                    record.args().to_string(),
+                );
+            }
         }
     }
 
