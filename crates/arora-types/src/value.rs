@@ -494,6 +494,29 @@ mod tests {
     );
   }
 
+  // Value ⇄ YAML: the coverage `arora-buffers::serde_raw_id` used to duplicate
+  // now lives here, on the canonical `Value` (which is broader — it has option,
+  // map, uuid). A nested value exercises struct + array + string together.
+  #[test]
+  fn value_round_trips_through_yaml() {
+    let value = Value::Structure(Structure {
+      id: Uuid::from_u128(0x10),
+      fields: vec![
+        StructureField {
+          id: Uuid::from_u128(0x01),
+          value: Box::new(Value::ArrayF64(vec![1.0, -2.0, 3.5])),
+        },
+        StructureField {
+          id: Uuid::from_u128(0x02),
+          value: Box::new(Value::String("hi".to_string())),
+        },
+      ],
+    });
+    let yaml = serde_yaml::to_string(&value).unwrap();
+    let back: Value = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(value, back, "Value did not round-trip through YAML");
+  }
+
   #[test]
   fn test_type_serialization() {
     // Test all variants of Type enum

@@ -37,13 +37,23 @@ impl<'a> BufferReader<'a> {
 
     pub fn get_unit(&mut self) {}
 
+    /// Aligns, then takes `bytes` raw bytes and advances past them. The returned
+    /// slice borrows the buffer in place — the backbone of the bulk readers, and
+    /// the reason a bulk read leaves the cursor after the array (like every other
+    /// `get_*`), so a following field reads from the right place.
+    fn take_aligned_bytes(&mut self, bytes: usize) -> &'a [u8] {
+        self.align();
+        let block = &self.backing[0..bytes];
+        self.backing = &self.backing[bytes..];
+        block
+    }
+
     pub fn get_boolean(&mut self) -> bool {
         self.backing.get_u8() != 0
     }
 
     pub unsafe fn get_boolean_bulk(&mut self, count: usize) -> &'a [bool] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count])
+        std::mem::transmute(self.take_aligned_bytes(count))
     }
 
     pub fn get_u8(&mut self) -> u8 {
@@ -51,8 +61,7 @@ impl<'a> BufferReader<'a> {
     }
 
     pub fn get_u8_bulk(&mut self, count: usize) -> &'a [u8] {
-        self.align();
-        &self.backing[0..count]
+        self.take_aligned_bytes(count)
     }
 
     pub fn get_u16(&mut self) -> u16 {
@@ -60,8 +69,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_u16_bulk(&mut self, count: usize) -> &'a [u16] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 2])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 2).as_ptr() as *const u16,
+            count,
+        )
     }
 
     pub fn get_u32(&mut self) -> u32 {
@@ -69,8 +80,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_u32_bulk(&mut self, count: usize) -> &'a [u32] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 4])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 4).as_ptr() as *const u32,
+            count,
+        )
     }
 
     pub fn get_u64(&mut self) -> u64 {
@@ -78,8 +91,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_u64_bulk(&mut self, count: usize) -> &'a [u64] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 8])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 8).as_ptr() as *const u64,
+            count,
+        )
     }
 
     pub fn get_i8(&mut self) -> i8 {
@@ -87,8 +102,7 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_i8_bulk(&mut self, count: usize) -> &'a [i8] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count])
+        std::mem::transmute(self.take_aligned_bytes(count))
     }
 
     pub fn get_i16(&mut self) -> i16 {
@@ -96,8 +110,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_i16_bulk(&mut self, count: usize) -> &'a [i16] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 2])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 2).as_ptr() as *const i16,
+            count,
+        )
     }
 
     pub fn get_i32(&mut self) -> i32 {
@@ -105,8 +121,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_i32_bulk(&mut self, count: usize) -> &'a [i32] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 4])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 4).as_ptr() as *const i32,
+            count,
+        )
     }
 
     pub fn get_i64(&mut self) -> i64 {
@@ -114,8 +132,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_i64_bulk(&mut self, count: usize) -> &'a [i64] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 8])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 8).as_ptr() as *const i64,
+            count,
+        )
     }
 
     pub fn get_f32(&mut self) -> f32 {
@@ -123,8 +143,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_f32_bulk(&mut self, count: usize) -> &'a [f32] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 4])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 4).as_ptr() as *const f32,
+            count,
+        )
     }
 
     pub fn get_f64(&mut self) -> f64 {
@@ -132,8 +154,10 @@ impl<'a> BufferReader<'a> {
     }
 
     pub unsafe fn get_f64_bulk(&mut self, count: usize) -> &'a [f64] {
-        self.align();
-        std::mem::transmute(&self.backing[0..count * 8])
+        std::slice::from_raw_parts(
+            self.take_aligned_bytes(count * 8).as_ptr() as *const f64,
+            count,
+        )
     }
 
     pub fn get_string(&mut self) -> &'a str {

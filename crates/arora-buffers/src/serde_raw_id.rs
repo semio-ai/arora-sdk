@@ -4,44 +4,44 @@ use std::borrow::Cow;
 use crate::{
     read::BufferReader, write::BufferWriter, TYPE_ARRAY, TYPE_BOOLEAN, TYPE_ENUMERATION, TYPE_F32,
     TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16,
-    TYPE_U32, TYPE_U64, TYPE_U8,
+    TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StructureField<'a> {
     pub id: Cow<'a, [u8]>,
     pub value: Value<'a>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Structure<'a> {
     pub id: Cow<'a, [u8]>,
     pub fields: Vec<StructureField<'a>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StructureRaw<'a> {
     pub fields: Vec<StructureField<'a>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Enumeration<'a> {
     pub id: Cow<'a, [u8]>,
     pub variant_id: Cow<'a, [u8]>,
     pub value: Box<Value<'a>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EnumerationRaw<'a> {
     pub variant_id: Cow<'a, [u8]>,
     pub value: Box<Value<'a>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Value<'a> {
     #[serde(rename = "unit")]
     Unit,
-    #[serde(rename = "book")]
+    #[serde(rename = "bool")]
     Boolean(bool),
     #[serde(rename = "u8")]
     U8(u8),
@@ -102,6 +102,8 @@ pub enum Value<'a> {
 impl<'a> Value<'a> {
     unsafe fn deserialize_reader(reader: &mut BufferReader<'a>) -> Value<'a> {
         match reader.next_type() {
+            Some(TYPE_UNIT) => Value::Unit,
+            Some(TYPE_BOOLEAN) => Value::Boolean(reader.get_boolean()),
             Some(TYPE_U8) => Value::U8(reader.get_u8()),
             Some(TYPE_U16) => Value::U16(reader.get_u16()),
             Some(TYPE_U32) => Value::U32(reader.get_u32()),
@@ -270,7 +272,10 @@ impl<'a> Value<'a> {
             Value::ArrayString(v) => {
                 writer.add_array_primitive(TYPE_STRING, v.len() as u32);
                 for s in v {
-                    writer.add_string(s);
+                    // Untagged: the element type is `TYPE_STRING` from the array
+                    // head, and the reader reads bare strings (no per-element
+                    // tag). `add_string` would double the tag and never round-trip.
+                    writer.add_string_raw(s);
                 }
             }
             Value::ArrayStructure(id, v) => {
@@ -306,6 +311,7 @@ impl<'a> Value<'a> {
 mod tests {
     use super::*;
     use anyhow::{bail, Result};
+    use std::borrow::Cow;
 
     #[test]
     pub fn u8_yaml() -> Result<()> {
@@ -331,6 +337,108 @@ mod tests {
             bail!("parsed value was not an array of f32");
         }
         Ok(())
+    }
+
+    // --- buffer round-trip: froto_borrowed_value's actual job -----------------
+
+    fn id16(n: u8) -> Cow<'static, [u8]> {
+        Cow::Owned(vec![n; 16])
+    }
+
+    fn round_trip(value: Value) {
+        let bytes = value.serialize();
+        let back = unsafe { Value::deserialize(&bytes) };
+        assert_eq!(back, value, "buffer round-trip mismatch");
+    }
+
+    #[test]
+    fn scalars_round_trip_through_the_buffer() {
+        for value in [
+            Value::Unit,
+            Value::Boolean(true),
+            Value::Boolean(false),
+            Value::U8(42),
+            Value::I32(-7),
+            Value::F64(2.5),
+            Value::String(Cow::Borrowed("hello")),
+        ] {
+            round_trip(value);
+        }
+    }
+
+    #[test]
+    fn arrays_round_trip_through_the_buffer() {
+        for value in [
+            Value::ArrayF64(Cow::Owned(vec![1.0, -2.0, 3.5])),
+            Value::ArrayU8(Cow::Owned(vec![1, 2, 3, 4, 5])),
+            Value::ArrayBoolean(Cow::Owned(vec![true, false, true])),
+            Value::ArrayString(vec![
+                Cow::Borrowed("a"),
+                Cow::Borrowed(""),
+                Cow::Borrowed("cee"),
+            ]),
+        ] {
+            round_trip(value);
+        }
+    }
+
+    #[test]
+    fn structure_round_trips_through_the_buffer() {
+        round_trip(Value::Structure(Structure {
+            id: id16(0x10),
+            fields: vec![
+                StructureField {
+                    id: id16(0x01),
+                    value: Value::I32(7),
+                },
+                StructureField {
+                    id: id16(0x02),
+                    value: Value::String(Cow::Borrowed("field")),
+                },
+            ],
+        }));
+    }
+
+    #[test]
+    fn structure_array_round_trips_through_the_buffer() {
+        let element = |x| StructureRaw {
+            fields: vec![StructureField {
+                id: id16(0x01),
+                value: Value::F64(x),
+            }],
+        };
+        round_trip(Value::ArrayStructure(
+            id16(0x20),
+            vec![element(1.0), element(2.0)],
+        ));
+    }
+
+    #[test]
+    fn enumeration_round_trips_through_the_buffer() {
+        round_trip(Value::Enumeration(Enumeration {
+            id: id16(0x30),
+            variant_id: id16(0x31),
+            value: Box::new(Value::U32(99)),
+        }));
+    }
+
+    #[test]
+    fn array_inside_a_struct_round_trips() {
+        // A numeric-array field followed by another field: proves the bulk read
+        // advances the cursor, so the trailing field reads from the right place.
+        round_trip(Value::Structure(Structure {
+            id: id16(0x40),
+            fields: vec![
+                StructureField {
+                    id: id16(0x01),
+                    value: Value::ArrayF64(Cow::Owned(vec![1.0, 2.0, 3.0])),
+                },
+                StructureField {
+                    id: id16(0x02),
+                    value: Value::U32(7),
+                },
+            ],
+        }));
     }
 
     pub const U8_YAML: &str = "\
