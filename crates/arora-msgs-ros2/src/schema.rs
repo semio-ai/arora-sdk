@@ -77,7 +77,10 @@ impl Primitive {
 pub enum Base {
     Primitive(Primitive),
     /// A nested message type, ROS-qualified as `package` + `name`.
-    Named { package: String, name: String },
+    Named {
+        package: String,
+        name: String,
+    },
 }
 
 /// A field's array shape.
@@ -258,7 +261,10 @@ geometry_msgs/Point point
         assert_eq!(spec.constants[1].value, "16");
 
         let names: Vec<&str> = spec.fields.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, ["header", "x", "w", "covariance", "skeleton", "point"]);
+        assert_eq!(
+            names,
+            ["header", "x", "w", "covariance", "skeleton", "point"]
+        );
 
         // `Header` resolves to std_msgs/Header.
         assert_eq!(

@@ -151,7 +151,10 @@ mod tests {
             "geometry_msgs/msg/Polyline",
             id(2),
             vec![
-                (id(21), field("frame", TypeRef::Scalar { id: *ty::STRING_ID })),
+                (
+                    id(21),
+                    field("frame", TypeRef::Scalar { id: *ty::STRING_ID }),
+                ),
                 (id(22), field("stamp", TypeRef::Scalar { id: *ty::U32_ID })),
                 (id(23), field("points", TypeRef::Array { id: id(1) })),
             ],

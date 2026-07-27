@@ -58,7 +58,10 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     // A raw identifier (`r#type`, for a field whose ROS name is a Rust keyword)
     // names the plain word in arora, so its name and id match the ROS field.
     let fname_raw = fname.to_string();
-    let fname_str = fname_raw.strip_prefix("r#").unwrap_or(&fname_raw).to_string();
+    let fname_str = fname_raw
+      .strip_prefix("r#")
+      .unwrap_or(&fname_raw)
+      .to_string();
     let field_id_expr = id_expr(parse_arora_meta(&field.attrs)?.id, &fname_str)?;
     let (type_ref_expr, nested) = type_ref_for(&field.ty)?;
     field_entries.push(quote! {

@@ -370,7 +370,9 @@ fn validate_fixed_array(value: &Value, id: Uuid, len: usize) -> Result<(), Conve
     Some(actual) => Err(validation_error(&format!(
       "fixed array expected {len} elements, got {actual}"
     ))),
-    None => Err(validation_error("expected an array value for a fixed array")),
+    None => Err(validation_error(
+      "expected an array value for a fixed array",
+    )),
   }
 }
 

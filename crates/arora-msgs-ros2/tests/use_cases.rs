@@ -58,7 +58,11 @@ fn use_case_2_define_a_new_type_at_runtime() {
 
     // A brand-new message that reuses the bundled std_msgs/Header — no recompile.
     let id = registry
-        .define_from_msg("my_msgs", "Reading", "std_msgs/Header header\nfloat64 value\n")
+        .define_from_msg(
+            "my_msgs",
+            "Reading",
+            "std_msgs/Header header\nfloat64 value\n",
+        )
         .unwrap();
     assert_eq!(registry.id_of("my_msgs/Reading"), Some(id));
 
@@ -74,7 +78,10 @@ fn use_case_2_define_a_new_type_at_runtime() {
     let ty = registry.get(&id).unwrap().clone();
     let value = Value::Structure(ValueStructure {
         id,
-        fields: vec![field("header", header_value), field("value", Value::F64(9.5))],
+        fields: vec![
+            field("header", header_value),
+            field("value", Value::F64(9.5)),
+        ],
     });
     let bytes = cdr::encode(&ty, registry.types(), &value).unwrap();
     assert_eq!(cdr::decode(&ty, registry.types(), &bytes).unwrap(), value);
@@ -201,7 +208,10 @@ fn use_case_5_define_a_type_on_the_fly_and_save_it() {
     // to real ROS clients.
     let value = Value::Structure(ValueStructure {
         id: ty.id,
-        fields: vec![field("a", Value::F64(2.5)), field("b", Value::String("hi".into()))],
+        fields: vec![
+            field("a", Value::F64(2.5)),
+            field("b", Value::String("hi".into())),
+        ],
     });
     let bytes = cdr::encode(&ty, registry.types(), &value).unwrap();
     assert_eq!(cdr::decode(&ty, registry.types(), &bytes).unwrap(), value);
@@ -213,7 +223,11 @@ fn use_case_5_define_a_type_on_the_fly_and_save_it() {
 #[test]
 fn a_bundled_type_has_a_rep2016_hash() {
     let registry = arora_msgs_ros2::registry();
-    for name in ["geometry_msgs/Point", "sensor_msgs/Imu", "hri_msgs/Skeleton2D"] {
+    for name in [
+        "geometry_msgs/Point",
+        "sensor_msgs/Imu",
+        "hri_msgs/Skeleton2D",
+    ] {
         let ty = registry.get_by_name(name).unwrap();
         // Imu nests structs and a float64[9]; Skeleton2D has a nested sequence —
         // both hash through the array-aware REP-2016 mapping.

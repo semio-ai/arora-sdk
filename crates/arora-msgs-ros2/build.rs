@@ -81,9 +81,11 @@ fn emit_package(specs: &[MessageSpec]) -> String {
     let type_idents: Vec<_> = specs.iter().map(|s| format_ident!("{}", s.name)).collect();
     // The serde-big-array trait, imported only for a package that has a fixed
     // array longer than 32 (so no unused import elsewhere).
-    let has_big_array = specs
-        .iter()
-        .any(|s| s.fields.iter().any(|f| matches!(f.ty.arr, Arr::Fixed(n) if n > 32)));
+    let has_big_array = specs.iter().any(|s| {
+        s.fields
+            .iter()
+            .any(|f| matches!(f.ty.arr, Arr::Fixed(n) if n > 32))
+    });
     let big_array_use = if has_big_array {
         quote! { use serde_big_array::BigArray; }
     } else {
