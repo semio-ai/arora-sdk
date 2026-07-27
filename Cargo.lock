@@ -195,7 +195,7 @@ dependencies = [
  "log",
  "ratatui",
  "rustls 0.23.41",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "sysinfo",
  "test-rust-wasm",
  "tokio",
@@ -230,7 +230,7 @@ dependencies = [
  "quick-xml",
  "semver",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
 ]
@@ -243,7 +243,7 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "uuid",
 ]
 
@@ -254,7 +254,7 @@ dependencies = [
  "arora-behavior-tree-types",
  "arora-registry",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
 ]
@@ -277,6 +277,7 @@ name = "arora-bridge-ros2"
 version = "3.1.0"
 dependencies = [
  "arora-bridge",
+ "arora-msgs-ros2",
  "arora-types",
  "async-trait",
  "env_logger",
@@ -316,7 +317,7 @@ dependencies = [
  "bytes",
  "cbindgen 0.20.0",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "uuid",
 ]
 
@@ -336,7 +337,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "url",
  "uuid",
@@ -362,7 +363,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tempfile",
  "test-rust-wasm",
  "uuid",
@@ -440,7 +441,7 @@ dependencies = [
  "arora-cli",
  "arora-engine",
  "arora-types",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "test-behavior-tree-nodes",
  "test-cpp",
  "test-cpp-2",
@@ -465,7 +466,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "url",
  "uuid",
@@ -484,7 +485,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
 ]
@@ -504,7 +505,7 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
 ]
@@ -530,9 +531,21 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "arora-msgs-ros2"
+version = "0.1.0"
+dependencies = [
+ "arora-types",
+ "ros2-client-multi-rmw",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.8.26",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -557,7 +570,7 @@ dependencies = [
  "derive_more 2.1.1",
  "semver",
  "serde",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "url",
  "uuid",
@@ -578,7 +591,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "tokio",
  "url",
  "uuid",
@@ -638,7 +651,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -686,7 +699,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "test-rust-wasm",
  "tokio",
  "uuid",
@@ -2610,7 +2623,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2741,7 +2754,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4160,6 +4173,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "linked-hash-map"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4518,7 +4537,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5054,7 +5073,7 @@ dependencies = [
  "derive_more 2.1.1",
  "lazy_static",
  "rand 0.10.1",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "soloud",
  "test-behavior-tree-nodes",
  "tokio",
@@ -5741,9 +5760,9 @@ dependencies = [
 
 [[package]]
 name = "ros2-client-multi-rmw"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f47619bfa11de20638db4075ddbc35d9da492d928346ae3d409bd414fda5dc7c"
+checksum = "03956b245d11777d1bd8c9cfe007a34b1bf6bfed0ff132cb5d26fc728d8fbfd2"
 dependencies = [
  "async-channel",
  "bstr",
@@ -5933,7 +5952,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6035,7 +6054,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6056,7 +6075,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6441,6 +6460,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.8.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
+dependencies = [
+ "indexmap 1.9.3",
+ "ryu",
+ "serde",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -6980,7 +7011,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7601,7 +7632,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.4",
  "static_assertions",
 ]
 
@@ -8585,7 +8616,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9134,6 +9165,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
 
 [[package]]
+name = "yaml-rust"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
+dependencies = [
+ "linked-hash-map",
+]
+
+[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9266,7 +9306,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "serde_yaml",
+ "serde_yaml 0.9.34+deprecated",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "uhlc",

@@ -12,6 +12,10 @@ name = "arora_bridge_ros2"
 [dependencies]
 arora-types = { path = "../arora-types", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "4" }
+# The ROS 2 message types + the shared CDR codec (re-exported as this crate's
+# `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
+# where the bridge creates hash-keyed publishers.
+arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "0.1" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"

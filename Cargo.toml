@@ -31,6 +31,7 @@ members = [
   "crates/arora-vfs",
   "crates/arora-bridge-ws",
   "crates/arora-bridge-ros2",
+  "crates/arora-msgs-ros2",
   "crates/wasi-sdk",
   "modules/test-rust-wasm",
   "modules/test-rust-component",
@@ -65,6 +66,7 @@ default-members = [
   "crates/arora-vfs",
   "crates/arora-bridge-ws",
   "crates/arora-bridge-ros2",
+  "crates/arora-msgs-ros2",
   "crates/wasi-sdk",
   "tests",
 ]
