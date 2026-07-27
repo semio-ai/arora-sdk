@@ -34,11 +34,13 @@ use std::sync::Arc;
 #[cfg(feature = "native")]
 use anyhow::{anyhow, Context, Result};
 #[cfg(feature = "native")]
-use arora_bridge::Bridge;
+use arora_bridge::{AccessRequestStream, Bridge, BridgeResult, DeviceInfo, InboundStream};
 #[cfg(feature = "native")]
 use arora_hal::Hal;
 #[cfg(feature = "native")]
 use arora_types::data::DataStore;
+#[cfg(feature = "native")]
+use arora_types::data::StateChange;
 #[cfg(feature = "native")]
 use log::info;
 
@@ -95,16 +97,67 @@ pub(crate) async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
         .bind()
         .await
         .map_err(|e| anyhow!("local bridge: {e}"))?;
-    tokio::spawn(async move {
-        if let Err(e) = server
-            .run_on(listener, arora_bridge_ws::CancellationToken::new())
-            .await
-        {
-            log::error!("local bridge server stopped: {e:?}");
+    let cancel = arora_bridge_ws::CancellationToken::new();
+    tokio::spawn({
+        let cancel = cancel.clone();
+        async move {
+            if let Err(e) = server.run_on(listener, cancel).await {
+                log::error!("local bridge server stopped: {e:?}");
+            }
         }
     });
     info!("serving the local bridge on ws://127.0.0.1:9000");
-    Ok(Box::new(bridge))
+    Ok(Box::new(LocalBridge {
+        inner: bridge,
+        server: cancel,
+    }))
+}
+
+/// The open local bridge with its server's lifetime attached: dropping the
+/// bridge — the device that owned it ending its run — cancels the serving
+/// task, so the port is free for the next device in the same process.
+#[cfg(feature = "native")]
+struct LocalBridge {
+    inner: arora_bridge_ws::bridge::WsBridge,
+    server: arora_bridge_ws::CancellationToken,
+}
+
+#[cfg(feature = "native")]
+impl Drop for LocalBridge {
+    fn drop(&mut self) {
+        self.server.cancel();
+    }
+}
+
+#[cfg(feature = "native")]
+#[async_trait::async_trait]
+impl Bridge for LocalBridge {
+    fn take_inbound(&mut self) -> InboundStream {
+        self.inner.take_inbound()
+    }
+
+    fn try_send(&mut self, change: &StateChange) {
+        self.inner.try_send(change)
+    }
+
+    async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
+        self.inner.get_device_info().await
+    }
+
+    async fn update_device_info(
+        &self,
+        info: Option<DeviceInfo>,
+    ) -> BridgeResult<Option<DeviceInfo>> {
+        self.inner.update_device_info(info).await
+    }
+
+    async fn device_id(&self) -> Option<String> {
+        self.inner.device_id().await
+    }
+
+    async fn access_requests(&self) -> AccessRequestStream {
+        self.inner.access_requests().await
+    }
 }
 
 /// Run an arora device with the given HAL, bridge, and data store.
@@ -198,12 +251,18 @@ pub(crate) async fn run_builder_with_frontend(
     // Serve remote clients' access requests through the chosen operator, one at
     // a time, for as long as the bridge yields them. (The data plane is driven
     // by `arora.run()`; access requests are the operator's own concern.)
-    tokio::spawn(serve_access_requests(access_requests, operator));
+    let serving = tokio::spawn(serve_access_requests(access_requests, operator));
     info!("running — Ctrl-C to stop");
-    arora
+    let result = arora
         .run_until(Arora::DEFAULT_STEP_PERIOD, shutdown)
         .await
-        .map_err(|e| anyhow!("runtime error: {e}"))
+        .map_err(|e| anyhow!("runtime error: {e}"));
+    // The serving task holds the operator — the front end's lifetime. End it
+    // (and wait it out) so a front end that took something over (the terminal
+    // UI) releases it before the run returns.
+    serving.abort();
+    let _ = serving.await;
+    result
 }
 
 /// Pick the front end for this process: the terminal operator UI when the `tui`
