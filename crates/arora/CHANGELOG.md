@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.6.0] - 2026-07-27
+
+### Added
+
+- `arora::local_ws_bridge()`: the open local bridge constructor, now public.
+  `AroraBuilder::run` still attaches it for you when you inject no bridge; a host
+  that composes its own bridge set (the open local bridge *and* a ROS 2 or Studio
+  bridge) attaches it explicitly with `with_bridge(local_ws_bridge().await?)`,
+  the same way `studio::connect()` is composed.
+
 ## [9.5.0] - 2026-07-27
 
 ### Added
