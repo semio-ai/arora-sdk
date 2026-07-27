@@ -8,6 +8,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 pub mod alloc;
+pub mod ffi;
 pub mod format;
 pub mod froto_borrowed_value;
 pub mod froto_checked_value;
