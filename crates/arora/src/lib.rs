@@ -32,7 +32,7 @@ pub mod studio;
 pub mod tui;
 
 #[cfg(feature = "native")]
-pub use run::{run, run_with, run_with_frontend, run_with_hal, DeviceCli};
+pub use run::{local_ws_bridge, run, run_with, run_with_frontend, run_with_hal, DeviceCli};
 pub use runtime::RuntimeError;
 
 /// Re-exported so embedders can construct the default behavior executor — an

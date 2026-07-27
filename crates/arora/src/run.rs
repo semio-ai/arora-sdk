@@ -87,8 +87,24 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 /// accounts. This is the default-build bridge; the `studio-bridge` build also
 /// falls back to it when the operator declines a Studio connection, so a device
 /// without an owner still exposes a local bridge (just no Semio Studio).
+///
+/// [`AroraBuilder::run`](crate::AroraBuilder::run) attaches this bridge for you
+/// when you inject none. A host that composes its own bridge set — say the open
+/// local bridge *and* a ROS 2 bridge — attaches it explicitly instead, the same
+/// way [`studio::connect`](crate::studio::connect) is composed:
+///
+/// ```ignore
+/// let device = arora::Arora::builder()
+///     .with_bridge(arora::local_ws_bridge().await?)
+///     .with_bridge(ros2_bridge)
+///     .run()
+///     .await?;
+/// ```
+///
+/// The server it starts is cancelled when the returned bridge is dropped, so the
+/// port frees for the next device in the same process.
 #[cfg(feature = "native")]
-pub(crate) async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
+pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
     let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
         arora_bridge_ws::ServerConfig::default(),
     ));
