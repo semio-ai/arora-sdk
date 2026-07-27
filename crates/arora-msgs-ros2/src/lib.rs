@@ -46,6 +46,7 @@
 //! [`arora-hal-ros2`]: https://github.com/semio-ai/arora-sdk
 
 pub mod cdr;
+pub mod message;
 pub mod registry;
 pub mod representable;
 pub mod schema;
@@ -54,11 +55,14 @@ pub mod schema;
 pub mod hash;
 
 pub use cdr::{decode, encode};
+pub use message::RosMessage;
 pub use registry::{package_and_type, Ros2Registry};
 pub use representable::{ros2_representable, NotRepresentable};
 
 #[cfg(feature = "interop")]
 pub use hash::rihs01;
+#[cfg(feature = "interop")]
+pub use message::type_hash;
 
 // The bundled ROS 2 message types, generated from `msgs/**/*.msg` by `build.rs`:
 // one module per package (so `arora_msgs_ros2::geometry_msgs::Point` is the

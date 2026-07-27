@@ -13,6 +13,7 @@
 //! defined from the same `.msg` at runtime, and stable across builds. No id is
 //! baked per build.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::{env, fs};
 
@@ -24,7 +25,7 @@ use quote::{format_ident, quote};
 #[path = "src/schema.rs"]
 mod schema;
 
-use schema::{Arr, Base, MessageSpec, Primitive};
+use schema::{Arr, Base, Field, MessageSpec, Primitive};
 
 fn main() {
     println!("cargo:rerun-if-changed=msgs");
@@ -44,9 +45,16 @@ fn main() {
         .collect();
     packages.sort();
 
-    for package in &packages {
-        let specs = parse_package(&msgs_dir.join(package), package);
-        let source = emit_package(&specs);
+    // Parse every package before emitting: `Default`-ability crosses packages
+    // (a message nests types from others), so it is computed over the whole set.
+    let parsed: Vec<Vec<MessageSpec>> = packages
+        .iter()
+        .map(|package| parse_package(&msgs_dir.join(package), package))
+        .collect();
+    let default_able = compute_default_able(&parsed);
+
+    for (package, specs) in packages.iter().zip(&parsed) {
+        let source = emit_package(specs, &default_able);
         fs::write(Path::new(&out_dir).join(format!("{package}.rs")), source).unwrap();
     }
 
@@ -76,8 +84,8 @@ fn parse_package(dir: &Path, package: &str) -> Vec<MessageSpec> {
 }
 
 /// The source for one package: its structs, their constants, and a `register`.
-fn emit_package(specs: &[MessageSpec]) -> String {
-    let structs = specs.iter().map(emit_struct);
+fn emit_package(specs: &[MessageSpec], default_able: &HashSet<String>) -> String {
+    let structs = specs.iter().map(|spec| emit_struct(spec, default_able));
     let type_idents: Vec<_> = specs.iter().map(|s| format_ident!("{}", s.name)).collect();
     // The serde-big-array trait, imported only for a package that has a fixed
     // array longer than 32 (so no unused import elsewhere).
@@ -107,7 +115,7 @@ fn emit_package(specs: &[MessageSpec]) -> String {
 
 /// One message struct: `#[derive(AroraType, serde…)] #[arora(name = "pkg/msg/Type")]`
 /// with its fields, plus its `.msg` constants as associated `const`s.
-fn emit_struct(spec: &MessageSpec) -> TokenStream {
+fn emit_struct(spec: &MessageSpec, default_able: &HashSet<String>) -> TokenStream {
     let struct_ident = format_ident!("{}", spec.name);
     let rep_name = spec.rep2016_name();
 
@@ -124,11 +132,16 @@ fn emit_struct(spec: &MessageSpec) -> TokenStream {
         quote! { #serde_attr pub #fname: #fty, }
     });
 
-    // No `Default` derive: `[T; N]` is not `Default` for N > 32, which would
-    // propagate to every message nesting such a type; messages are built field by
-    // field. (Honouring `.msg` field defaults is a follow-up.)
+    // Derive `Default` unless the type (transitively) holds a fixed array longer
+    // than 32 — those are the only shapes that are not `Default`. (Honouring
+    // `.msg` field default *values*, e.g. Quaternion w=1, is a separate follow-up.)
+    let default_derive = if default_able.contains(&rep_name) {
+        quote! { Default, }
+    } else {
+        quote! {}
+    };
     let derives = quote! {
-        #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, arora_types::AroraType)]
+        #[derive(Debug, Clone, #default_derive PartialEq, serde::Serialize, serde::Deserialize, arora_types::AroraType)]
     };
 
     let consts = spec.constants.iter().map(|c| {
@@ -150,6 +163,11 @@ fn emit_struct(spec: &MessageSpec) -> TokenStream {
         quote! { impl #struct_ident { #(#consts)* } }
     };
 
+    // Compile-time ROS identity (RosMessage) so consumers build a MessageTypeName
+    // and match a topic's type without stringly-typed lookups.
+    let package = spec.package.as_str();
+    let type_name = spec.name.as_str();
+
     quote! {
         #derives
         #[arora(name = #rep_name)]
@@ -157,6 +175,52 @@ fn emit_struct(spec: &MessageSpec) -> TokenStream {
             #(#fields)*
         }
         #const_impl
+        impl crate::RosMessage for #struct_ident {
+            const ROS_TYPE_NAME: &'static str = #rep_name;
+            const PACKAGE: &'static str = #package;
+            const TYPE_NAME: &'static str = #type_name;
+        }
+    }
+}
+
+/// The set of REP-2016 names whose message types can derive `Default`. A message
+/// cannot iff it has a fixed array longer than 32 (`[T; N>32]` is not `Default`),
+/// or a single/fixed-array field of a non-`Default` type. `Vec<_>` fields never
+/// block it (they default to empty). Computed as a fixpoint because
+/// Default-ability propagates through nested-message fields.
+fn compute_default_able(parsed: &[Vec<MessageSpec>]) -> HashSet<String> {
+    let mut ok: HashSet<String> = parsed
+        .iter()
+        .flat_map(|specs| specs.iter().map(|s| s.rep2016_name()))
+        .collect();
+    loop {
+        let mut changed = false;
+        for specs in parsed {
+            for spec in specs {
+                let name = spec.rep2016_name();
+                if ok.contains(&name) && !spec.fields.iter().all(|f| field_default_able(f, &ok)) {
+                    ok.remove(&name);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    ok
+}
+
+/// Whether one field leaves its message `Default`-able.
+fn field_default_able(field: &Field, ok: &HashSet<String>) -> bool {
+    let element_default_able = match &field.ty.base {
+        Base::Primitive(_) => true,
+        Base::Named { package, name } => ok.contains(&format!("{package}/msg/{name}")),
+    };
+    match field.ty.arr {
+        Arr::Unbounded => true, // Vec<_> defaults to empty regardless of element
+        Arr::Unit => element_default_able,
+        Arr::Fixed(n) => n <= 32 && element_default_able,
     }
 }
 
