@@ -343,23 +343,33 @@ mod tests {
                 (id(0x333), field("z", *ty::F64_ID)),
             ],
         );
-        let array_field = |name: &str, type_ref| {
-            low::StructureField {
-                name: name.to_string(),
-                type_ref,
-            }
+        let array_field = |name: &str, type_ref| low::StructureField {
+            name: name.to_string(),
+            type_ref,
         };
         let shape = low::Type {
             name: "my_msgs/msg/Shape".to_string(),
             id: id(0x55),
             description: String::new(),
             kind: low::TypeKind::Structure(low::Structure::from_fields(vec![
-                (id(0x551), array_field("weights", TypeRef::Array { id: *ty::F64_ID })),
+                (
+                    id(0x551),
+                    array_field("weights", TypeRef::Array { id: *ty::F64_ID }),
+                ),
                 (
                     id(0x552),
-                    array_field("matrix", TypeRef::FixedArray { id: *ty::F64_ID, len: 9 }),
+                    array_field(
+                        "matrix",
+                        TypeRef::FixedArray {
+                            id: *ty::F64_ID,
+                            len: 9,
+                        },
+                    ),
                 ),
-                (id(0x553), array_field("points", TypeRef::Array { id: id(0x33) })),
+                (
+                    id(0x553),
+                    array_field("points", TypeRef::Array { id: id(0x33) }),
+                ),
             ])),
         };
         let mut registry = TypeRegistry::new();
