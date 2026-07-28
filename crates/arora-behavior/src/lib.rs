@@ -34,14 +34,16 @@
 //! the store under the [`built_in`] keys before it ticks, so an interpreter that
 //! needs `dt` or elapsed time reads it from the store like any other slot.
 
-use arora_types::call::CallBridge;
+use arora_types::call::{Call, CallBridge};
 use arora_types::data::DataStore;
 
 pub mod built_in;
 pub mod graph;
 pub mod interpreter_module;
+pub mod task;
 
 pub use graph::{Graph, GraphDiff};
+pub use task::{RunPolicy, TaskHandle, TaskId};
 
 /// Whether an interpreter wants to be ticked again — and, when it does not, how
 /// it ended.
@@ -153,5 +155,59 @@ pub trait BehaviorInterpreter {
         Err(BehaviorError {
             message: "this interpreter does not support loading a graph".to_string(),
         })
+    }
+
+    /// Spawn `call` as a concurrent task run under `policy`, returning a
+    /// [`TaskHandle`] to follow and stop it. Non-blocking: the run advances with
+    /// the normal [`tick`](Self::tick), and its lifecycle surfaces on the
+    /// handle's keys.
+    ///
+    /// The default rejects spawning — override it in interpreters that host
+    /// concurrent runs (a run is realised however the interpreter hosts
+    /// behavior: a parallel behavior-tree subtree, a node-graph subgraph). A
+    /// hand-coded interpreter can leave this as-is.
+    fn spawn(&mut self, call: Call, policy: RunPolicy) -> Result<TaskHandle, BehaviorError> {
+        let _ = (call, policy);
+        Err(BehaviorError {
+            message: "this interpreter does not support spawning task runs".to_string(),
+        })
+    }
+
+    /// Halt the run identified by `task` (idempotent): a clean stop that may run
+    /// compensation, not a hard kill. On reaching a terminal state the run is
+    /// dropped and its status key reflects the outcome.
+    ///
+    /// The default rejects halting — override it alongside [`spawn`](Self::spawn).
+    fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {
+        let _ = task;
+        Err(BehaviorError {
+            message: "this interpreter does not support halting task runs".to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A minimal interpreter that only ticks, so it keeps the default `spawn`
+    /// and `halt` — the ones under test.
+    struct Idle;
+    impl BehaviorInterpreter for Idle {
+        fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
+            Ok(BehaviorStatus::Running)
+        }
+    }
+
+    #[test]
+    fn spawn_and_halt_reject_by_default() {
+        let mut idle = Idle;
+        let call = Call {
+            module_id: None,
+            id: uuid::Uuid::nil(),
+            args: Vec::new(),
+        };
+        assert!(idle.spawn(call, RunPolicy::Concurrent).is_err());
+        assert!(idle.halt(TaskId(uuid::Uuid::nil())).is_err());
     }
 }
