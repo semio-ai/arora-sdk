@@ -147,7 +147,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 message: format!("behavior tree: {e:?}"),
             },
         )?;
-        Ok(BehaviorStatus::Done)
+        Ok(BehaviorStatus::Done(Ok(())))
     }
 
     fn apply(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
