@@ -42,4 +42,8 @@ zenoh = ["ros2-client/zenoh"]
 [dev-dependencies]
 rand = "0.9"
 env_logger = "0.11"
+# Serialize the live-DDS integration tests: run concurrently, their DDS
+# participants overwhelm the discovery writers (WouldBlock), so discovery fails
+# and the tests flake. `#[serial]` runs them one at a time.
+serial_test = "3"
 tokio = { version = "1", features = ["full"] }
