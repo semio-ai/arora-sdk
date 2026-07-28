@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use arora_behavior::{built_in, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
 use arora_behavior_tree::ModuleFunction;
-use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound};
+use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound, MethodSignature};
 use arora_hal::Hal;
 use arora_types::call::{CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
@@ -284,6 +284,9 @@ fn apply_events(
 
 /// Handle one command from the remote against the store / function index, then
 /// reply on its channel.
+// `ListMethods` is deprecated in favour of `DescribeMethods`, but this handler
+// still serves it so existing callers keep working.
+#[allow(deprecated)]
 fn apply_command(
     store: &dyn DataStore,
     function_index: &HashMap<Uuid, ModuleFunction>,
@@ -343,6 +346,38 @@ fn apply_command(
                 ret: Value::ArrayValue(names.into_iter().map(Value::String).collect()),
                 mutated: Vec::new(),
             })
+        }
+        BridgeOp::DescribeMethods { prefix } => {
+            // Introspection with full signatures: each registered method's
+            // parameters (name, type, order) and return type, filtered by name
+            // prefix and sorted for a deterministic reply. Encoded as JSON over
+            // the value plane (a `Value::String`) so a remote can deserialise the
+            // `FrozenTy`s and build a typed call — or, like arora-bridge-ros2,
+            // synthesise a typed service from them.
+            let mut signatures: Vec<MethodSignature> = function_index
+                .values()
+                .filter(|f| {
+                    prefix
+                        .as_ref()
+                        .is_none_or(|p| f.function_name.starts_with(p.as_str()))
+                })
+                .map(|f| MethodSignature {
+                    module_id: f.module_id,
+                    id: f.function_id,
+                    name: f.function_name.clone(),
+                    function: f.function.clone(),
+                })
+                .collect();
+            signatures.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+            // Encode over the value plane with Arora's own type system (each
+            // signature becomes a `Value::Structure`), not an ad-hoc format.
+            match arora_types::value_serde::to_value(&signatures) {
+                Ok(ret) => Ok(CallResult {
+                    ret,
+                    mutated: Vec::new(),
+                }),
+                Err(e) => Err(format!("describe_methods: encode failed: {e}")),
+            }
         }
     };
     cmd.reply(result);
@@ -1120,6 +1155,8 @@ mod tests {
         );
     }
 
+    // Exercises `ListMethods` (deprecated) alongside `ListKeys`/`DescribeMethods`.
+    #[allow(deprecated)]
     #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
         let mut arora = build(Box::new(UnregisterBridge));
@@ -1181,6 +1218,23 @@ mod tests {
             matches!(methods.ret, Value::ArrayValue(_)),
             "list_methods returns an array"
         );
+
+        // DescribeMethods returns the same set with full signatures, encoded as
+        // JSON over the value plane — a `Value::String` that deserialises to a
+        // `Vec<MethodSignature>` (empty here: this device registers no host
+        // module functions).
+        let (tx, rx) = oneshot::channel();
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(BridgeOp::DescribeMethods { prefix: None }, tx),
+        )
+        .unwrap();
+        let described = rx.await.unwrap().expect("describe_methods ok");
+        let signatures: Vec<MethodSignature> = arora_types::value_serde::from_value(described.ret)
+            .expect("describe_methods reply deserializes to Vec<MethodSignature>");
+        assert_eq!(signatures.len(), arora.function_index.len());
     }
 
     /// A behavior that writes one key/value and is then `Done` — the minimal

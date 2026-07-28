@@ -17,6 +17,7 @@ async-trait = "0.1"
 futures-channel = "0.3"
 futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 futures = "0.3"
