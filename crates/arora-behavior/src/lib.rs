@@ -43,13 +43,33 @@ pub mod interpreter_module;
 
 pub use graph::{Graph, GraphDiff};
 
-/// Whether an interpreter wants to be ticked again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether an interpreter wants to be ticked again — and, when it does not, how
+/// it ended.
+///
+/// Liveness is one bit: [`Running`](Self::Running) or terminal
+/// ([`Done`](Self::Done)). The terminal case carries a `Result` — `Ok(())` for a
+/// clean stop, `Err` for a fault the run could not recover from.
+///
+/// This is the interpreter's *scheduling* status, not an application outcome. A
+/// behavior does not *return* a value — it writes its outputs to store keys — so
+/// the terminal `Ok` is `()`, never a payload. A run's success / failure / errno
+/// is likewise an application value on its status key, not here: one [`tick`] may
+/// drive many runs, so a single return cannot speak for each. What the runtime
+/// must act on is only liveness and, at termination, whether the run stopped
+/// cleanly or faulted.
+///
+/// [`tick`]: BehaviorInterpreter::tick
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BehaviorStatus {
-    /// Tick me again next step (a node graph; a tree still running).
+    /// Not terminal: tick me again next step (a node graph; a tree still
+    /// running).
     Running,
-    /// I reached a terminal state; the runtime may drop me.
-    Done,
+    /// Terminal: I reached a terminal state and the runtime drops me. `Ok(())`
+    /// is a clean stop; `Err(_)` is a fault the run could not recover from — its
+    /// reason is surfaced (like an `Err` from [`tick`](BehaviorInterpreter::tick))
+    /// but, unlike a transient `Err`, a run that ends `Done(Err(_))` is dropped,
+    /// *not* retried.
+    Done(Result<(), BehaviorError>),
 }
 
 /// What a [`BehaviorInterpreter`] receives each
@@ -92,7 +112,14 @@ impl std::error::Error for BehaviorError {}
 /// Not `Send`: the runtime is a single-owner, single-thread step loop.
 pub trait BehaviorInterpreter {
     /// Advance one step. Return [`BehaviorStatus::Running`] to be ticked again,
-    /// or [`BehaviorStatus::Done`] to be dropped.
+    /// or [`BehaviorStatus::Done`] to be dropped — `Done(Ok(()))` for a clean
+    /// stop, `Done(Err(e))` for a terminal fault whose reason `e` is surfaced.
+    ///
+    /// An `Err` from `tick` is different from `Ok(Done(Err(..)))`: an `Err` is a
+    /// *transient* failure — the runtime keeps the interpreter installed and
+    /// ticks it again next step (a momentary lowering or call-bridge hiccup),
+    /// only raising the reason on the standing error watch. `Done(Err(..))` is
+    /// *terminal*: the run has ended and will not be retried.
     fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError>;
 
     /// Edit the running behavior by applying a [`GraphDiff`](graph::GraphDiff):

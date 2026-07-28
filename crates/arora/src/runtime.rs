@@ -420,14 +420,16 @@ pub(crate) fn with_interpreter(
 /// against the shared store, **last**: its writes win the frame, and it ticks
 /// over everything the frame already applied (clock, sensors, remote updates).
 /// A no-op when none is installed. When the interpreter reports
-/// [`BehaviorStatus::Done`] it is dropped (back to `None`); while it is
-/// [`BehaviorStatus::Running`] it stays for the next step.
+/// [`BehaviorStatus::Done`] — `Ok(())` (clean) or `Err(_)` (a terminal fault) —
+/// it is dropped (back to `None`); while it is [`BehaviorStatus::Running`] it
+/// stays for the next step.
 ///
-/// A failing tick does not stop the device: the behavior stays installed and
-/// ticks again next step, and the rest of the pipeline — HAL writes included —
-/// goes on. The failure is sent once per distinct message on the standing
-/// error watch (received through [`Arora::behavior_error`]) and logged;
-/// the next successful tick clears it.
+/// A *transient* failing tick (an `Err`) does not stop the device: the behavior
+/// stays installed and ticks again next step, and the rest of the pipeline — HAL
+/// writes included — goes on. A terminal `Done(Err(_))` fault drops it instead:
+/// dropped, not retried. Either way the reason is sent once per distinct message
+/// on the standing error watch (received through [`Arora::behavior_error`]) and
+/// logged; the next successful tick clears it.
 fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
@@ -441,22 +443,39 @@ fn tick_behavior(
         store,
         call_bridge: engine,
     };
-    match behavior.tick(&mut ctx) {
-        Ok(status) => {
-            if standing_error.borrow().is_some() {
-                standing_error.send_replace(None);
-            }
-            if status == BehaviorStatus::Done {
-                *interpreter = None;
-            }
-        }
-        Err(error) => {
-            let message = error.to_string();
-            if standing_error.borrow().as_deref() != Some(message.as_str()) {
+    // Raise a fault on the standing watch, deduplicated by message; `retried`
+    // only changes the log line (the interpreter's fate is decided by the caller).
+    let raise = |message: String, retried: bool| {
+        if standing_error.borrow().as_deref() != Some(message.as_str()) {
+            if retried {
                 log::warn!("the behavior failed and will be retried: {message}");
-                standing_error.send_replace(Some(message));
+            } else {
+                log::warn!("the behavior errored and was dropped: {message}");
             }
+            standing_error.send_replace(Some(message));
         }
+    };
+    let clear = || {
+        if standing_error.borrow().is_some() {
+            standing_error.send_replace(None);
+        }
+    };
+    match behavior.tick(&mut ctx) {
+        // Still running: this tick was clean, so clear any standing fault.
+        Ok(BehaviorStatus::Running) => clear(),
+        // Terminal, clean: clear the fault and drop the interpreter.
+        Ok(BehaviorStatus::Done(Ok(()))) => {
+            clear();
+            *interpreter = None;
+        }
+        // Terminal, faulted: surface the reason and drop the interpreter — a
+        // terminal error is not retried (unlike the transient `Err` below).
+        Ok(BehaviorStatus::Done(Err(error))) => {
+            raise(error.to_string(), false);
+            *interpreter = None;
+        }
+        // Transient failure: keep the interpreter installed and retry next step.
+        Err(error) => raise(error.to_string(), true),
     }
 }
 
@@ -1126,7 +1145,7 @@ mod tests {
                 .map_err(|e| arora_behavior::BehaviorError {
                     message: e.to_string(),
                 })?;
-            Ok(BehaviorStatus::Done)
+            Ok(BehaviorStatus::Done(Ok(())))
         }
     }
 
@@ -1255,7 +1274,7 @@ mod tests {
                 .map_err(|e| arora_behavior::BehaviorError {
                     message: e.to_string(),
                 })?;
-            Ok(BehaviorStatus::Done)
+            Ok(BehaviorStatus::Done(Ok(())))
         }
     }
 
