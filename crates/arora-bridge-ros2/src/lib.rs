@@ -40,11 +40,8 @@ pub mod bridge;
 pub mod conversions;
 pub mod msg_types;
 // The method-service plane: synthesising a ROS 2 service per module method and
-// (de)serialising it against `arora-msgs-ros2`. Its helpers are consumed by
-// `run_node`'s service loop, which lands once the raw-service transport is a
-// published dependency (the `RawServer` on this stack's `ros2-client` fork);
-// until then only the (tested) synthesis core exists, unused by non-test code.
-#[allow(dead_code)]
+// (de)serialising it against `arora-msgs-ros2`. Driven by `run_node`'s service
+// loop; the synthesis core is unit-tested against the real codec + registry.
 mod services;
 
 // The CDR codec now lives in `arora-msgs-ros2`, shared with `arora-hal-ros2`.
