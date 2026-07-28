@@ -44,6 +44,33 @@ use futures_core::Stream;
 
 use arora_types::call::{Call, CallError, CallResult};
 use arora_types::data::{Key, StateChange};
+use arora_types::record::module::frozen::Function;
+use arora_types::Uuid;
+use serde::{Deserialize, Serialize};
+
+/// The full, self-describing signature of one callable module method — one entry
+/// of what [`BridgeOp::DescribeMethods`] returns, superseding the name-only
+/// [`BridgeOp::ListMethods`].
+///
+/// `function` carries the frozen parameter list (each parameter's name, type and
+/// declared order) and the return type, so a remote can build a typed call — or,
+/// like `arora-bridge-ros2`, synthesise a matching typed service from it —
+/// without a second round-trip. A type appears as a `FrozenTy`: either a
+/// primitive, or a version-pinned `FrozenReference { id, version }` whose `id` a
+/// remote resolves against its own type registry. For ROS types that `id` is the
+/// stable `pkg/msg/Type` UUID, so a bridge holding the ROS type registry maps a
+/// signature straight onto ROS message types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MethodSignature {
+    /// The module that exports this method — the `module_id` a [`Call`] targets.
+    pub module_id: Uuid,
+    /// The method's function id — the `id` a [`Call`] targets.
+    pub id: Uuid,
+    /// The method's name.
+    pub name: String,
+    /// The frozen signature: parameters (name, type, order) and return type.
+    pub function: Function,
+}
 
 /// Neutral device metadata the bridge syncs with the remote. The bridge-flavored
 /// wire form (studio-bridge's `PartialDeviceInfo`) is converted to/from this by
@@ -75,11 +102,32 @@ pub enum BridgeOp {
         /// Only keys whose path starts with this prefix; `None` lists all.
         prefix: Option<String>,
     },
-    /// Enumerate callable module methods under an optional name prefix. Replies
-    /// with a [`CallResult`] whose `ret` is an `ArrayValue` of method names as
-    /// `String`s.
+    /// Enumerate callable module method **names** under an optional prefix.
+    /// Replies with a [`CallResult`] whose `ret` is an `ArrayValue` of method
+    /// names as `String`s.
+    ///
+    /// Superseded by [`DescribeMethods`](Self::DescribeMethods), which returns
+    /// the full signature of each method (parameter and return types), not just
+    /// its name; kept working so existing callers do not break.
+    #[deprecated(
+        note = "use DescribeMethods for full signatures; ListMethods returns names only"
+    )]
     ListMethods {
         /// Only methods whose name starts with this prefix; `None` lists all.
+        prefix: Option<String>,
+    },
+    /// Describe callable module methods under an optional name prefix, with their
+    /// **full signatures**. Supersedes [`ListMethods`](Self::ListMethods).
+    ///
+    /// Replies with a [`CallResult`] whose `ret` encodes
+    /// `Vec<`[`MethodSignature`]`>` over the value plane using Arora's own type
+    /// system — each entry a `Value::Structure` (decode with
+    /// `arora_types::value_serde::from_value`), not an ad-hoc text format. Types
+    /// are referenced by id; a remote that lacks a definition can resolve it
+    /// against its own type registry (for ROS types the id is the stable
+    /// `pkg/msg/Type` UUID).
+    DescribeMethods {
+        /// Only methods whose name starts with this prefix; `None` describes all.
         prefix: Option<String>,
     },
 }
