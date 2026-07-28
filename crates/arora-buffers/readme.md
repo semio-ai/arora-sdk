@@ -101,12 +101,21 @@ same data they all produce **byte-identical** output.
 |---|---|---|---|---|
 | [`froto_value`](src/froto_value.rs) | `arora_types::Value` ⇄ bytes | owned | `Uuid` | you hold a runtime `Value` and want it on the wire — the canonical path |
 | [`froto_borrowed_value`](src/froto_borrowed_value.rs) | a borrowing `Value<'a>` ⇄ bytes | **borrowed / zero-copy** | raw `[u8]` | you want zero-copy reads (`Cow<[f64]>` straight from the buffer), or to (de)serialize a value from YAML/JSON (it derives `serde`) |
-| [`froto_serde`](src/froto_serde.rs) | any `serde` type `T` ⇄ bytes | owned | `Uuid` (name-hashed) | you have a concrete Rust type and want it on the wire without building a `Value` |
-| [`froto_checked_value`](src/froto_checked_value.rs) | `arora_types::Value` ⇄ bytes, **type-directed** | owned | `Uuid` | you want the encoding *validated* against a runtime `ty::low::Type`, sharing the `arora_types::value_serde` walk with other backends (e.g. ROS 2 CDR) |
+| [`froto_serde`](src/froto_serde.rs) | any `serde` type `T` ⇄ bytes | owned | **names, not ids** | you have a concrete Rust type and want it on the wire without building a `Value` — with no declared type, an id-less struct is written as a **keyvalue** (its field names), not a structure |
+| [`froto_checked_value`](src/froto_checked_value.rs) | `arora_types::Value` ⇄ bytes, **type-directed** | owned | `Uuid` (declared) | you want the encoding *validated* against a runtime `ty::low::Type`, sharing the `arora_types::value_serde` walk with other backends (e.g. ROS 2 CDR) |
 
 (`froto` = *from/to*: each converts one in-memory shape to and from the bytes.)
 `froto_checked_value` does not change the format — it adds a type contract on top
 of the same bytes `froto_value` writes; a test pins the two equal.
+
+**Untyped vs. typed — keyvalue vs. structure.** `froto_serde` has no declared
+type, so an id-less struct is written as a **keyvalue** (the map form above, keyed
+by field name), exactly as `arora_types::value_serde` produces a `Value::KeyValue`
+for the same struct. Minting ids by hashing names would be a false identity that
+breaks the moment a field or struct is renamed. The **structure** form — real
+type and field ids — is what the *typed* path writes: `froto_checked_value`,
+driven by a declared `ty::low::Type` whose ids come from `#[derive(AroraType)]`.
+Same rule as the value layer: **no ids ⇒ keyvalue; declared ids ⇒ structure.**
 
 ## C ABI
 

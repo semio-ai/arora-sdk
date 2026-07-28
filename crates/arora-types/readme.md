@@ -76,19 +76,55 @@ describe `default_value`s for function parameters.
 ## Serializing a `Value` (`value_serde`)
 
 [`value_serde`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/value_serde/mod.rs)
-converts a [`Value`](#value) to and from other representations, in three layers:
+converts a [`Value`](#value) to and from other representations. One distinction
+runs through all of it: **does the data carry real type identity (explicit
+UUIDs), or only field names?** That is the difference between a `Structure` and a
+`KeyValue`, and it decides which layer you are in.
 
-- **the serde bridge** — any Rust `Serialize`/`Deserialize` type converts to and
-  from a `Value` (`to_value`/`from_value`), with `Value` as the data model. Ids
-  are derived by hashing field and type names.
-- **the seeded bridge** — the same conversion, but a declared
-  [`ty::low::Type`](#type-ty) supplies the ids (`to_value_seeded` /
-  `from_value_seeded`), so the resulting `Value` carries the type's real ids
-  rather than name hashes. (A `Type` can be generated straight from a Rust type
-  with `#[derive(AroraType)]`.)
+- **the basic serde bridge — no declared type.** Any Rust `Serialize` /
+  `Deserialize` type converts to and from a `Value` with `to_value` /
+  `from_value`. With no type to supply ids, a struct becomes a **`KeyValue`**: a
+  *name-keyed* map that carries each field's name — **not** a `Structure`. This
+  is deliberate. Minting an id by hashing a field or type name would be a *false*
+  identity: it collides, and it silently changes the moment the field or struct
+  is renamed. So when there are no real ids, the honest form keeps the names.
+  (Rust maps become `KeyValue`s the same way; an enum keeps its variant tag as an
+  `Enumeration` whose payload is a `KeyValue`.)
+- **the seeded / id-based bridge — a declared type supplies the ids.** The same
+  conversion, but a declared [`ty::low::Type`](#type-ty) supplies the real ids,
+  so the struct becomes a **`Structure`** carrying the type's and fields'
+  declared UUIDs (`to_value_seeded` / `from_value_seeded`). The `Type` is
+  normally generated straight from the Rust type with `#[derive(AroraType)]` —
+  which **requires** an explicit `#[arora(id = "…")]` on the type and each field,
+  precisely so the ids are stable rather than name hashes. Use this whenever
+  identity must survive a rename or cross the wire.
 - **the type-directed walk** — a `Value` to and from a **wire format** (the
   arora binary buffers, or ROS 2 CDR), driven by a runtime `ty::low::Type` and a
   `TypeRegistry` that resolves the types nested fields reference.
+
+In one line: **no ids ⇒ `KeyValue` (the names are the key); declared ids ⇒
+`Structure` (the UUIDs are the key).**
+
+```rust
+use arora_types::{value_serde, value::Value, AroraType};
+
+// Basic serde — no type, so a name-keyed KeyValue.
+#[derive(serde::Serialize)]
+struct Point { x: f64, y: f64 }
+let kv = value_serde::to_value(&Point { x: 1.0, y: 2.0 }).unwrap();
+assert!(matches!(kv, Value::KeyValue(_)));
+
+// Id-based — declared UUIDs, so a Structure keyed by those ids.
+#[derive(serde::Serialize, AroraType)]
+#[arora(id = "0a0a0a0a-0000-4000-8000-000000000001")]
+struct TypedPoint {
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")] x: f64,
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000003")] y: f64,
+}
+let (ty, registry) = TypedPoint::arora_type_with_registry();
+let s = value_serde::to_value_seeded(&TypedPoint { x: 1.0, y: 2.0 }, &ty, &registry).unwrap();
+assert!(matches!(s, Value::Structure(_)));
+```
 
 ### Writing a new wire format
 
