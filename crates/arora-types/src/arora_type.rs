@@ -52,13 +52,17 @@ mod tests {
   use crate::AroraType;
   use crate::{gen_uuid_from_str, ty};
 
+  // Name-mode (opts into name-hashing) so these fixtures need no explicit ids
+  // and their ids stay the `gen_uuid_from_str` values the assertions expect.
   #[derive(AroraType)]
+  #[arora(name = "Inner")]
   struct Inner {
     a: i32,
     b: f32,
   }
 
   #[derive(AroraType)]
+  #[arora(name = "Outer")]
   struct Outer {
     inner: Inner,
     name: String,

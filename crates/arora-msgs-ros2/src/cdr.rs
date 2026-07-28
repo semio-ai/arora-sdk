@@ -737,6 +737,7 @@ mod tests {
 
         // Fields are read by the derive at compile time, not at run time.
         #[derive(arora_types::AroraType)]
+        #[arora(name = "Point3")]
         #[allow(dead_code)]
         struct Point3 {
             x: f64,
@@ -744,6 +745,7 @@ mod tests {
             z: f64,
         }
         #[derive(arora_types::AroraType)]
+        #[arora(name = "Poly")]
         #[allow(dead_code)]
         struct Poly {
             weights: Vec<f64>,

@@ -982,12 +982,16 @@ mod tests {
       // An explicit id no name-hash would produce.
       #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")]
       x: f64,
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000003")]
       y: f64,
     }
 
     #[derive(Serialize, Deserialize, AroraType, Debug, PartialEq)]
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000010")]
     struct Line {
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000011")]
       from: Point,
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000012")]
       to: Point,
     }
 
