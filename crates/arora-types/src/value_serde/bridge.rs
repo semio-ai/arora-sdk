@@ -124,19 +124,6 @@ struct ValueSerializer<'a> {
   seed: Option<Seed<'a>>,
 }
 
-fn structure_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
-  Value::Structure(Structure {
-    id,
-    fields: fields
-      .into_iter()
-      .map(|(name, value)| StructureField {
-        id: gen_uuid_from_str(&name),
-        value: Box::new(value),
-      })
-      .collect(),
-  })
-}
-
 fn keyvalue_from(id: Uuid, fields: Vec<(String, Value)>) -> Value {
   let mut kv = KeyValue::new_with_id(id);
   for (name, value) in fields {
@@ -467,7 +454,11 @@ impl ser::SerializeStruct for StructSerializer<'_> {
           fields,
         }))
       }
-      None => Ok(structure_from(
+      // No declared type: a struct with no reliable ids travels as a KeyValue,
+      // carrying its field names — not a Structure, which would claim a type id
+      // it does not have (and a name-hash id changes the moment a field or the
+      // struct is renamed).
+      None => Ok(keyvalue_from(
         gen_uuid_from_str(self.type_name),
         self.fields,
       )),
@@ -496,7 +487,9 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    let inner = structure_from(gen_uuid_from_str(self.variant), self.fields);
+    // The variant's payload is an id-less struct, so it too travels as a
+    // KeyValue (the enum still carries its variant tag as an Enumeration).
+    let inner = keyvalue_from(gen_uuid_from_str(self.variant), self.fields);
     Ok(enumeration_from(self.type_name, self.variant, inner))
   }
 }
@@ -913,9 +906,10 @@ mod tests {
   #[test]
   fn round_trips_a_nested_struct() {
     let value = to_value(&sample()).unwrap();
-    // Structs travel as Structure — ids derive from the declared names, and
-    // deserialization resolves them against the candidates serde provides.
-    assert!(matches!(value, Value::Structure(_)));
+    // With no declared type, a struct travels as a KeyValue: its field names
+    // ride along (there are no reliable ids to hash), and deserialization
+    // matches them by name.
+    assert!(matches!(value, Value::KeyValue(_)));
     let back: Sample = from_value(value).unwrap();
     assert_eq!(back, sample());
   }
