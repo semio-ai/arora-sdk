@@ -4,10 +4,12 @@
 //!
 //! The generated impl produces the type's own `ty::low::Type`, the id it is
 //! referenced by, and a `TypeRegistry` carrying it and its transitive
-//! dependencies. Field and type ids default to a hash of the name (matching
-//! `arora_types::gen_uuid_from_str`, so a derived type agrees with the
-//! name-hashing serde bridge); annotate the struct or a field with
-//! `#[arora(id = "…uuid…")]` to pin an explicit id.
+//! dependencies. Type and field ids must be pinned with
+//! `#[arora(id = "…uuid…")]`: a name-hash id silently changes when a type or
+//! field is renamed, so it is not a reliable identity. A ROS type may instead
+//! set `#[arora(name = "pkg/msg/Name")]` on the struct to opt into name-hashing
+//! its qualified name (a ROS name is the stable spec identity) — that also
+//! name-hashes the struct's fields.
 //!
 //! First cut mirrors the type-directed walk it feeds: named-field structs whose
 //! fields are primitive scalars, `String`, other `#[derive(AroraType)]` types,
@@ -49,7 +51,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
   // The arora type name: an `#[arora(name = "…")]` override (the ROS-qualified
   // name for generated messages), else the Rust type's own name.
   let type_name = meta.name.clone().unwrap_or_else(|| name_str.clone());
-  let type_id_expr = id_expr(meta.id, &type_name)?;
+  // Name-hash mode: a type opts in with `#[arora(name = "…")]` (ROS types, whose
+  // qualified name is the stable identity). Then it and its fields may name-hash;
+  // otherwise every id must be pinned explicitly.
+  let name_hash_mode = meta.name.is_some();
+  let type_id_expr = id_expr(meta.id, &type_name, name_hash_mode, Span::call_site())?;
 
   let mut field_entries = Vec::new();
   let mut register_calls = Vec::new();
@@ -62,7 +68,12 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
       .strip_prefix("r#")
       .unwrap_or(&fname_raw)
       .to_string();
-    let field_id_expr = id_expr(parse_arora_meta(&field.attrs)?.id, &fname_str)?;
+    let field_id_expr = id_expr(
+      parse_arora_meta(&field.attrs)?.id,
+      &fname_str,
+      name_hash_mode,
+      field.span(),
+    )?;
     let (type_ref_expr, nested) = type_ref_for(&field.ty)?;
     field_entries.push(quote! {
       (
@@ -115,12 +126,28 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
   })
 }
 
-/// The id expression for a struct or field: an explicit `#[arora(id = "…")]`
-/// emitted as its raw bytes, or a name hash by default.
-fn id_expr(explicit: Option<(String, Span)>, name: &str) -> syn::Result<TokenStream2> {
+/// The id expression for a struct or field. An explicit `#[arora(id = "…")]`
+/// wins. Otherwise a name hash is emitted **only** in name-hash mode — a type
+/// that opted in with `#[arora(name = "…")]` (the ROS case, where the qualified
+/// name is the stable identity). In strict mode an explicit id is required: a
+/// name hash silently changes when a type or field is renamed, so it is not a
+/// reliable identity.
+fn id_expr(
+  explicit: Option<(String, Span)>,
+  name: &str,
+  name_hash_mode: bool,
+  err_span: Span,
+) -> syn::Result<TokenStream2> {
   match explicit {
     Some((uuid, span)) => uuid_bytes_expr(&uuid, span),
-    None => Ok(quote! { arora_types::gen_uuid_from_str(#name) }),
+    None if name_hash_mode => Ok(quote! { arora_types::gen_uuid_from_str(#name) }),
+    None => Err(syn::Error::new(
+      err_span,
+      "AroraType requires an explicit `#[arora(id = \"<uuid>\")]` here — a name-hash \
+       id changes when the type or field is renamed, so it is not a reliable \
+       identity. A ROS type may set `#[arora(name = \"<pkg/msg/Name>\")]` on the \
+       struct to opt into name-hashing its qualified name instead.",
+    )),
   }
 }
 

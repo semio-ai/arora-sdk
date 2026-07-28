@@ -507,11 +507,13 @@ mod tests {
         use arora_types::AroraType;
 
         #[derive(arora_types::AroraType)]
+        #[arora(name = "Inner")]
         struct Inner {
             a: i32,
             b: f32,
         }
         #[derive(arora_types::AroraType)]
+        #[arora(name = "Outer")]
         struct Outer {
             inner: Inner,
             name: String,
