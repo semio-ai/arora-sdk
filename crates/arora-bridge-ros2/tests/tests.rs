@@ -3,11 +3,7 @@
 //! These create real ROS 2 nodes over DDS and verify end-to-end behaviour:
 //! an inbound topic message surfaces as a `BridgeOp::Update` command, and an
 //! outbound `try_send` reaches a topic subscriber. Each test uses a random DDS
-//! domain to isolate itself, and the tests are serialized (`#[serial]`): run
-//! concurrently, their DDS participants overwhelm the discovery writers
-//! (`WouldBlock`), discovery fails, and they flake. Each test also waits for the
-//! peer to be discovered before exchanging data, so delivery is a barrier rather
-//! than a race against a timeout.
+//! domain to isolate itself.
 //!
 //! They are ignored on macOS for the same reason as `arora-hal-ros2`'s live
 //! tests: DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds
@@ -32,7 +28,6 @@ use ros2_client::{
     Context, ContextOptions, Name, NodeName, NodeOptions, DEFAULT_PUBLISHER_QOS,
     DEFAULT_SUBSCRIPTION_QOS,
 };
-use serial_test::serial;
 
 /// Allocate a random DDS domain ID to isolate tests from each other and from
 /// any locally-running ROS 2 graph.
@@ -55,7 +50,6 @@ fn create_test_node(domain_id: u16, name_suffix: &str) -> (Context, ros2_client:
 /// Publishing a Float64 to an input key's topic surfaces as a
 /// `BridgeOp::Update` command carrying `Value::F64`.
 #[tokio::test]
-#[serial]
 #[cfg_attr(
     target_os = "macos",
     ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
@@ -123,7 +117,6 @@ async fn inbound_topic_becomes_update_command() {
 /// `try_send` publishes a changed key to its topic, where a separate node
 /// subscribed to that topic receives it.
 #[tokio::test]
-#[serial]
 #[cfg_attr(
     target_os = "macos",
     ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
@@ -165,13 +158,7 @@ async fn send_data_reaches_topic_subscriber() {
 
     let received = tokio::select! {
         _ = &mut publisher => unreachable!("publisher loop never returns"),
-        msg = async {
-            // Wait for the bridge's publisher (created on the first `try_send`) to
-            // be discovered before timing the delivery — a barrier, not a race
-            // against the timeout while discovery is still in flight.
-            subscription.wait_for_publisher(&sub_node).await;
-            tokio::time::timeout(Duration::from_secs(10), subscription.async_take()).await
-        } => msg,
+        msg = tokio::time::timeout(Duration::from_secs(10), subscription.async_take()) => msg,
     };
 
     let (msg, _info) = received
