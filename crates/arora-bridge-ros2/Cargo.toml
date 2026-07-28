@@ -24,7 +24,7 @@ log = "0.4"
 # It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
 # compatible), chosen by this crate's `dds` / `zenoh` features (see [features]);
 # `jazzy` selects the ROS 2 distro wire format and is always on.
-ros2-client = { package = "ros2-client-multi-rmw", version = "0.10", default-features = false, features = ["jazzy"] }
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.10.2", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }

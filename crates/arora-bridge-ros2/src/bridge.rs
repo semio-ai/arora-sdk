@@ -17,21 +17,28 @@
 //! lock; the async lives entirely inside that task.
 
 use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use arora_bridge::{
     Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
+    MethodSignature,
 };
+use arora_msgs_ros2::Ros2Registry;
 use arora_types::data::StateChange;
 use arora_types::value::Type;
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use log::warn;
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
+#[cfg(feature = "dds")]
+use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::conversions::{setup_key_subscriber, topic_name, KeyPublisher, StateChangeStream};
+use crate::services;
 
 /// An input key exposed as an inbound ROS 2 topic: a message received on
 /// `/{namespace}/keys/{path}` becomes a [`BridgeOp::Update`] for `path`. The
@@ -232,6 +239,19 @@ async fn run_node(
     }
     let mut inbound = futures::stream::select_all(sub_streams);
 
+    // Expose every ROS-representable module method as a service under
+    // `/{namespace}/methods/{name}`. Discovered from the runtime — like outbound
+    // topics, a device's methods are its own surface, so nothing is declared.
+    let registry = Arc::new(arora_msgs_ros2::registry());
+    let discovered = discover_services(&cmd_tx, &namespace, &registry).await;
+    let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
+    for service in discovered {
+        if let Some(stream) = service_stream(&mut node, service, registry.clone(), cmd_tx.clone()) {
+            service_streams.push(stream);
+        }
+    }
+    let mut service_requests = futures::stream::select_all(service_streams);
+
     // Publishers are created lazily from the first value written to each key.
     let mut publishers: HashMap<String, KeyPublisher> = HashMap::new();
 
@@ -257,11 +277,161 @@ async fn run_node(
                     break;
                 }
             }
+            // A method service received a request; it is decoded, dispatched as a
+            // `Call`, and answered inside its own stream — nothing to do here but
+            // keep driving the services.
+            Some(()) = service_requests.next() => {}
         }
     }
 
     if let Some(task) = spinner_task {
         task.abort();
+    }
+}
+
+/// Ask the runtime for every callable method's signature and resolve the ones
+/// ROS 2 can carry to services. Methods whose types aren't representable are
+/// logged and skipped (never silently dropped). Empty if the runtime never
+/// answers (e.g. it stopped) — the bridge then serves no methods.
+async fn discover_services(
+    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+    namespace: &str,
+    registry: &Ros2Registry,
+) -> Vec<services::MethodService> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if cmd_tx
+        .unbounded_send(BridgeCommand::new(
+            BridgeOp::DescribeMethods { prefix: None },
+            reply_tx,
+        ))
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let signatures: Vec<MethodSignature> = match reply_rx.await {
+        Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
+            warn!("Ros2Bridge could not decode method signatures: {e}");
+            Vec::new()
+        }),
+        Ok(Err(e)) => {
+            warn!("Ros2Bridge describe-methods failed: {e}");
+            Vec::new()
+        }
+        Err(_) => Vec::new(),
+    };
+    let (resolved, skipped) = services::resolve(namespace, &signatures, registry);
+    if !skipped.is_empty() {
+        warn!(
+            "Ros2Bridge skips methods whose types are not ROS 2-representable: {}",
+            skipped.join(", ")
+        );
+    }
+    resolved
+}
+
+/// Create the ROS 2 service for one method and return a stream that serves its
+/// requests. Each request is decoded, dispatched as a [`BridgeOp::Call`], and
+/// answered **inside** the stream, so the caller only drives it. `None` if the
+/// service could not be created.
+fn service_stream(
+    node: &mut Node,
+    service: services::MethodService,
+    registry: Arc<Ros2Registry>,
+    cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
+) -> Option<Pin<Box<dyn Stream<Item = ()> + Send>>> {
+    let ros_name = match services::parse_name(&service.name) {
+        Ok(name) => name,
+        Err(e) => {
+            warn!("Ros2Bridge {e}");
+            return None;
+        }
+    };
+    #[cfg(feature = "dds")]
+    let server = node.create_raw_server(
+        &ros_name,
+        &service.service_type,
+        DEFAULT_SUBSCRIPTION_QOS.clone(),
+        DEFAULT_PUBLISHER_QOS.clone(),
+    );
+    #[cfg(feature = "zenoh")]
+    let server = node.create_raw_server(&ros_name, &service.service_type);
+    let server = match server {
+        Ok(server) => server,
+        Err(e) => {
+            warn!(
+                "Ros2Bridge could not create service '{}': {e:?}",
+                service.name
+            );
+            return None;
+        }
+    };
+    let stream = futures::stream::unfold(
+        (server, service, registry, cmd_tx),
+        |(server, service, registry, cmd_tx)| async move {
+            match server.async_receive_request().await {
+                Ok((request_id, request)) => {
+                    if let Some(response) =
+                        build_response(&service, &registry, &cmd_tx, &request).await
+                    {
+                        let _ = server.send_response(request_id, &response);
+                    }
+                    Some(((), (server, service, registry, cmd_tx)))
+                }
+                Err(e) => {
+                    warn!(
+                        "Ros2Bridge service '{}' stopped receiving: {e:?}",
+                        service.name
+                    );
+                    None
+                }
+            }
+        },
+    );
+    Some(Box::pin(stream))
+}
+
+/// Turn one raw request into its raw response: decode to a value, dispatch it as
+/// a [`BridgeOp::Call`] to the runtime, and encode the returned value. `None`
+/// (no response sent) if any step fails — a decode error, a call error, or the
+/// runtime dropping the reply.
+async fn build_response(
+    service: &services::MethodService,
+    registry: &Ros2Registry,
+    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+    request: &[u8],
+) -> Option<Vec<u8>> {
+    let value = match services::decode_request(service, request, registry) {
+        Ok(value) => value,
+        Err(e) => {
+            warn!("Ros2Bridge {e}");
+            return None;
+        }
+    };
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if cmd_tx
+        .unbounded_send(BridgeCommand::new(
+            BridgeOp::Call(services::call_of(service, value)),
+            reply_tx,
+        ))
+        .is_err()
+    {
+        return None;
+    }
+    let result = match reply_rx.await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            warn!("Ros2Bridge method '{}' call failed: {e}", service.name);
+            return None;
+        }
+        Err(_) => return None,
+    };
+    let response = services::response_value(service, result);
+    match services::encode_response(service, &response, registry) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            warn!("Ros2Bridge {e}");
+            None
+        }
     }
 }
 
