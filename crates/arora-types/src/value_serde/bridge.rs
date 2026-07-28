@@ -2,24 +2,27 @@
 //! from an arora [`Value`], no code generation involved — the
 //! [`serde_json::to_value`]-style bridge, with `Value` as the data model.
 //!
-//! It runs in two modes:
+//! It runs in two modes, differing in one thing: whether real type ids are
+//! available.
 //!
-//! - **un-seeded** ([`to_value`]/[`from_value`]) — no type is supplied, so
-//!   struct/enum ids are derived by hashing field, type and variant names via
-//!   [`gen_uuid_from_str`]. The names are not stored; deserialization matches
-//!   the stored ids against the hashes of the candidate names serde provides.
+//! - **un-seeded** ([`to_value`]/[`from_value`]) — no type is supplied, so there
+//!   are no reliable ids. A struct becomes a [`KeyValue`] carrying its field
+//!   *names*, **not** a [`Value::Structure`]: inventing an id by hashing a name
+//!   would be a false identity, one that changes the moment the field or struct
+//!   is renamed. Deserialization matches the stored names. (An enum keeps its
+//!   variant tag as a [`Value::Enumeration`] whose payload is a `KeyValue`; the
+//!   variant and type ids there are still name-hashed, pending a typed enum
+//!   path.)
 //! - **seeded** ([`to_value_seeded`]/[`from_value_seeded`]) — a declared
 //!   [`low::Type`] is threaded through the (de)serializer, so struct ids come
 //!   from the *type* rather than from names. serde supplies the structure; the
-//!   type supplies the ids. The result is a [`Value`] carrying the type's
-//!   declared ids, and such a value reads back the same way — which the
-//!   un-seeded reader cannot, as it only recognises name-hash ids.
+//!   type supplies the ids. The result is a [`Value::Structure`] carrying the
+//!   type's declared ids, and it reads back the same way — which the un-seeded
+//!   reader cannot, as it only knows the field names.
 //!
 //! Maps map to [`KeyValue`] (they carry their keys by name), sequences and
 //! tuples to [`Value::ArrayValue`], primitives to their `Value` twins, `Option`
-//! to [`Value::Option`], unit to [`Value::Unit`]. Only structs are affected by
-//! the seed; enums and sequences are still name-hashed / untyped (seeded enum
-//! and array support extends the same seams).
+//! to [`Value::Option`], unit to [`Value::Unit`].
 
 use std::collections::HashMap;
 
