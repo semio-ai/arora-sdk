@@ -30,7 +30,7 @@ pub trait Module {
     fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError>;
 }
 
-/// One function of a [`FunctionModule`]: the decoded [`Call`] in, the
+/// One function of a [`HostModule`]: the decoded [`Call`] in, the
 /// [`CallResult`] out. The buffer codec is the module's job, not the
 /// function's.
 pub type ModuleFn = Box<dyn FnMut(Call) -> Result<CallResult, CallError>>;
@@ -41,19 +41,19 @@ pub type ModuleFn = Box<dyn FnMut(Call) -> Result<CallResult, CallError>>;
 /// [`Engine::register_module`](crate::engine::Engine::register_module); its
 /// functions are then reachable through `arora_call` exactly like a loaded
 /// module's, buffers and all.
-pub struct FunctionModule {
+pub struct HostModule {
     id: Uuid,
     functions: HashMap<Uuid, ModuleFn>,
 }
 
-impl FunctionModule {
+impl HostModule {
     /// The module id this was built for (the id to register it under).
     pub fn id(&self) -> Uuid {
         self.id
     }
 }
 
-impl Module for FunctionModule {
+impl Module for HostModule {
     fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
         let function = self
             .functions
@@ -71,7 +71,7 @@ impl Module for FunctionModule {
     }
 }
 
-/// Assembles a [`FunctionModule`]: a generic module with an id, and arbitrary
+/// Assembles a [`HostModule`]: a generic module with an id, and arbitrary
 /// functions attached to it — each under its own function id.
 ///
 /// ```ignore
@@ -107,8 +107,8 @@ impl ModuleBuilder {
     }
 
     /// The finished module.
-    pub fn build(self) -> FunctionModule {
-        FunctionModule {
+    pub fn build(self) -> HostModule {
+        HostModule {
             id: self.id,
             functions: self.functions,
         }

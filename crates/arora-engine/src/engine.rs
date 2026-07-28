@@ -136,7 +136,7 @@ impl Engine {
     /// loaded module's. Where [`load_module`](Self::load_module) instantiates a
     /// module from a definition through an [`Executor`], this hands one over
     /// directly — how host-side modules (e.g. a
-    /// [`FunctionModule`](crate::module::FunctionModule) built from closures)
+    /// [`HostModule`](crate::module::HostModule) built from closures)
     /// enter the same dispatch as guest code. Registering an id that is
     /// already present replaces the module.
     pub fn register_module(&mut self, id: Uuid, module: Box<dyn Module>) {

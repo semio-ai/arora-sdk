@@ -39,8 +39,8 @@ pub use runtime::RuntimeError;
 /// empty, ready [`BehaviorTreeInterpreter`] — and load a behavior into it before
 /// injecting it with [`AroraBuilder::with_behavior_interpreter`].
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
-/// Re-exported so an embedder can name the host-function type that
-/// [`AroraBuilder::with_host_module`] accepts.
+/// Re-exported so a behavior-tree embedder can name the host-function metadata
+/// type a Groot tree binds its action/condition nodes to.
 pub use arora_behavior_tree::ModuleFunction;
 
 use crate::runtime::EndpointInbound;
@@ -54,7 +54,10 @@ use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
 use arora_engine::load::load_module_from_parts;
-use arora_engine::module::ModuleBuilder;
+/// Re-exported so an embedder can assemble a host-side module — a set of
+/// in-process functions under a module id — and inject it with
+/// [`AroraBuilder::with_host_module`].
+pub use arora_engine::module::{HostModule, ModuleBuilder};
 use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
@@ -93,10 +96,11 @@ pub struct Arora {
     // lives inside the implementation, the device owns its view.
     pub(crate) store: Box<dyn DataStore>,
     pub(crate) engine: PinnedEngine,
-    /// Module functions referenced by behavior-tree nodes, keyed by function
-    /// UUID. The basic control nodes are dispatched natively and are not in this
-    /// index; it holds only the functions of modules registered through
-    /// [`AroraBuilder::with_host_module`].
+    /// Host-function metadata a behavior-tree Groot tree binds its action and
+    /// condition nodes to, keyed by function UUID. The basic control nodes are
+    /// dispatched natively and are not in this index. A host module registered
+    /// through [`AroraBuilder::with_host_module`] dispatches through the engine
+    /// directly, so it does not appear here.
     pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     /// The one behavior interpreter, ticked each step — an executor injected once
     /// at [`build`](AroraBuilder::build), not swapped afterwards. It defaults to
@@ -268,6 +272,7 @@ pub struct AroraBuilder {
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<(Header, Box<[u8]>)>,
+    host_modules: Vec<HostModule>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
 }
@@ -343,20 +348,26 @@ impl AroraBuilder {
         self
     }
 
-    /// Register natively-hosted module functions so behaviors may call them.
-    /// Repeatable — each call adds one module's functions to the
-    /// `function_index`, keyed by function UUID.
+    /// Add a host-side module: a set of in-process functions under a module id,
+    /// assembled with [`ModuleBuilder`] and finished with
+    /// [`ModuleBuilder::build`]. Repeatable — each call adds one module.
     ///
-    /// This is the host-side counterpart to [`with_module`](Self::with_module):
-    /// where `with_module` loads a guest executable, this registers functions
-    /// the engine already dispatches in-process. A behavior-tree node bound to
-    /// one of these functions builds its call from the frozen `Function` record
-    /// carried here. A [`ModuleFunction`] carries no executable, so these must
-    /// be functions the engine can already dispatch (natively-hosted).
-    pub fn with_host_module(mut self, functions: impl IntoIterator<Item = ModuleFunction>) -> Self {
-        for function in functions {
-            self.functions.insert(function.function_id, function);
-        }
+    /// The host-side counterpart to [`with_module`](Self::with_module): where
+    /// `with_module` loads a guest executable the engine runs through an
+    /// executor, this registers a module whose functions are plain host code
+    /// (Rust closures). Either way its functions dispatch through the engine's
+    /// `CallBridge` — reachable from a behavior (a graph `ExternalFunction`
+    /// node), an in-process caller, or a remote — under the module id and the
+    /// function ids it was built with. Loaded at [`build`](Self::build).
+    ///
+    /// ```ignore
+    /// let module = arora::ModuleBuilder::new(module_id)
+    ///     .function(step_id, move |call| { /* ... */ })
+    ///     .build();
+    /// let device = Arora::builder().with_host_module(module).build()?;
+    /// ```
+    pub fn with_host_module(mut self, module: HostModule) -> Self {
+        self.host_modules.push(module);
         self
     }
 
@@ -427,6 +438,12 @@ impl AroraBuilder {
         for (header, executable) in self.modules {
             load_module_from_parts(&mut engine, header, executable)
                 .map_err(|e| anyhow::anyhow!("failed to load module: {e}"))?;
+        }
+
+        // Register each host-side module so its functions dispatch through the
+        // engine's `CallBridge`, exactly like a loaded guest module's.
+        for module in self.host_modules {
+            engine.register_module(module.id(), Box::new(module));
         }
 
         let store = self
@@ -586,6 +603,49 @@ mod module_loading_tests {
             })
             .expect("call succeed() on the loaded module");
         assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// `with_host_module` registers a host-side module built from
+    /// [`ModuleBuilder`], and its functions dispatch through [`Arora::call`]
+    /// like a loaded module's — the in-process counterpart to `with_module`.
+    #[test]
+    fn with_host_module_registers_a_native_module_reachable_through_call() {
+        use arora_types::call::CallResult;
+        use arora_types::value::StructureField;
+
+        let module_id = Uuid::from_u128(0xA11CE);
+        let echo = Uuid::from_u128(0xEC40);
+        // A host module whose one function echoes its first argument back.
+        let module = ModuleBuilder::new(module_id)
+            .function(echo, |call| {
+                let ret = call
+                    .args
+                    .into_iter()
+                    .next()
+                    .map(|field| *field.value)
+                    .unwrap_or(Value::Unit);
+                Ok(CallResult {
+                    ret,
+                    mutated: Vec::new(),
+                })
+            })
+            .build();
+        let mut arora = Arora::builder()
+            .with_host_module(module)
+            .build()
+            .expect("build a device with a host module");
+
+        let result = arora
+            .call(Call {
+                module_id: Some(module_id),
+                id: echo,
+                args: vec![StructureField {
+                    id: Uuid::from_u128(1),
+                    value: Box::new(Value::U32(42)),
+                }],
+            })
+            .expect("call echo() on the host module");
+        assert_eq!(result.ret, Value::U32(42));
     }
 
     /// Dispatch is always module-scoped: a call naming no module is refused.
