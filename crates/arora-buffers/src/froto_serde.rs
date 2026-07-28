@@ -8,10 +8,11 @@
 //! [`value_serde::to_value`] of the same data (a test pins it), so a payload
 //! written by one side can be read by the other, or inspected as a `Value`
 //! mid-way when introspection is worth the allocation. The mapping is the
-//! same: structs are structures (type and field ids hashed from the declared
-//! names, resolved back against the candidates serde provides), enums are
-//! enumerations, maps are keyvalues (sorted, under [`value_serde::map_id`]),
-//! sequences are value arrays.
+//! same: structs and maps are keyvalues (sorted by key — a struct under the
+//! hash of its type name, a map under [`value_serde::map_id`]), their fields
+//! carrying their names, since an id-less struct has no honest type id to claim
+//! (a name hash would change the moment a field or the struct is renamed);
+//! enums are enumerations, sequences are value arrays.
 //!
 //! [`Value`]: arora_types::value::Value
 
@@ -243,10 +244,13 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
         })
     }
     fn serialize_struct(self, name: &'static str, len: usize) -> Result<StructBytes<'w>, Error> {
-        self.writer
-            .begin_structure(gen_uuid_from_str(name).as_bytes(), len as u32);
+        // An id-less struct travels as a keyvalue under the hash of its type
+        // name, its fields carrying their names — not a structure, whose ids
+        // come from a declared type.
         Ok(StructBytes {
             writer: self.writer,
+            id: gen_uuid_from_str(name),
+            fields: Vec::with_capacity(len),
         })
     }
     fn serialize_struct_variant(
@@ -256,14 +260,16 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
         variant: &'static str,
         len: usize,
     ) -> Result<StructBytes<'w>, Error> {
+        // The enumeration carries the variant tag; its payload is an id-less
+        // struct, so it travels as a keyvalue under the hash of the variant name.
         self.writer.add_enumeration_value(
             gen_uuid_from_str(name).as_bytes(),
             gen_uuid_from_str(variant).as_bytes(),
         );
-        self.writer
-            .begin_structure(gen_uuid_from_str(variant).as_bytes(), len as u32);
         Ok(StructBytes {
             writer: self.writer,
+            id: gen_uuid_from_str(variant),
+            fields: Vec::with_capacity(len),
         })
     }
 }
@@ -318,6 +324,24 @@ impl ser::SerializeTupleVariant for SeqBytes<'_> {
     }
 }
 
+/// Write `fields` as a keyvalue under `id`: a name-keyed map on the wire, its
+/// entries sorted by key so the encoding is deterministic (matching the `Value`
+/// backend). Each field carries its name and a name-hash field id — the name is
+/// the authoritative key.
+fn write_keyvalue(
+    writer: &mut BufferWriter,
+    id: uuid::Uuid,
+    mut fields: Vec<(String, arora_types::value::Value)>,
+) {
+    fields.sort_by(|a, b| a.0.cmp(&b.0));
+    writer.begin_map(id.as_bytes(), fields.len() as u32);
+    for (key, value) in &fields {
+        writer.add_map_field_key(key);
+        writer.add_uuid_raw(gen_uuid_from_str(key).as_bytes());
+        serialize_to_writer(value, writer);
+    }
+}
+
 struct MapBytes<'w> {
     writer: &'w mut BufferWriter,
     key: Option<String>,
@@ -347,21 +371,16 @@ impl ser::SerializeMap for MapBytes<'_> {
         self.fields.push((key, value));
         Ok(())
     }
-    fn end(mut self) -> Result<(), Error> {
-        self.fields.sort_by(|a, b| a.0.cmp(&b.0));
-        self.writer
-            .begin_map(value_serde::map_id().as_bytes(), self.fields.len() as u32);
-        for (key, value) in &self.fields {
-            self.writer.add_map_field_key(key);
-            self.writer.add_uuid_raw(gen_uuid_from_str(key).as_bytes());
-            serialize_to_writer(value, self.writer);
-        }
+    fn end(self) -> Result<(), Error> {
+        write_keyvalue(self.writer, value_serde::map_id(), self.fields);
         Ok(())
     }
 }
 
 struct StructBytes<'w> {
     writer: &'w mut BufferWriter,
+    id: uuid::Uuid,
+    fields: Vec<(String, arora_types::value::Value)>,
 }
 
 impl ser::SerializeStruct for StructBytes<'_> {
@@ -372,13 +391,14 @@ impl ser::SerializeStruct for StructBytes<'_> {
         key: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        self.writer
-            .add_structure_field(gen_uuid_from_str(key).as_bytes());
-        value.serialize(BytesSerializer {
-            writer: self.writer,
-        })
+        // Fields buffer as Values so they can sort by key at the end — the
+        // deterministic keyvalue encoding both backends share.
+        let value = value_serde::to_value(value).map_err(|e| ser::Error::custom(e.to_string()))?;
+        self.fields.push((key.to_string(), value));
+        Ok(())
     }
     fn end(self) -> Result<(), Error> {
+        write_keyvalue(self.writer, self.id, self.fields);
         Ok(())
     }
 }
@@ -394,7 +414,7 @@ impl ser::SerializeStructVariant for StructBytes<'_> {
         ser::SerializeStruct::serialize_field(self, key, value)
     }
     fn end(self) -> Result<(), Error> {
-        Ok(())
+        ser::SerializeStruct::end(self)
     }
 }
 
@@ -837,6 +857,17 @@ impl<'de> VariantAccess<'de> for VariantBytesAccess<'de, '_> {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.reader.next_type() {
+            // The variant's payload is an id-less struct: a keyvalue matched by
+            // name. A hand-written structure whose field ids are name hashes is
+            // still accepted.
+            Some(TYPE_MAP) => {
+                let (_id, count) = self.reader.get_map();
+                visitor.visit_map(MapBytesAccess {
+                    reader: self.reader,
+                    remaining: count as usize,
+                    pending_value: false,
+                })
+            }
             Some(TYPE_STRUCTURE) => {
                 let (_id, count) = self.reader.get_structure();
                 visitor.visit_map(StructBytesAccess {
@@ -900,6 +931,19 @@ mod tests {
         let bytes = to_bytes(&sample()).unwrap();
         let back: Sample = from_bytes(&bytes).unwrap();
         assert_eq!(back, sample());
+    }
+
+    #[test]
+    fn a_struct_writes_a_keyvalue() {
+        // An id-less struct carries its field names, so it travels as a
+        // keyvalue — a name-hash type id would be a false identity the moment a
+        // field or the struct is renamed. Inspecting the bytes as a `Value`
+        // confirms the wire form.
+        let bytes = to_bytes(&sample()).unwrap();
+        assert!(matches!(
+            froto_value::deserialize(&bytes),
+            arora_types::value::Value::KeyValue(_)
+        ));
     }
 
     #[test]
