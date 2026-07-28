@@ -5,7 +5,7 @@
 from a Rust `struct`, so the Rust definition is the single source of truth for the
 type's schema instead of a hand-authored YAML record.
 
-It is re-exported from [`arora-types`](../arora-types/README.md) under the `derive`
+It is re-exported from [`arora-types`](../arora-types/readme.md) under the `derive`
 feature, so you write `use arora_types::AroraType;`.
 
 ## What it generates
@@ -21,7 +21,7 @@ For a derived struct the macro implements the `AroraType` trait:
 
 With that `Type` in hand, `arora_types::value_serde::to_value_seeded` turns a value
 into a **`Structure`** carrying the declared ids — the *id-based* path (see the
-[`value_serde` section](../arora-types/README.md#serializing-a-value-value_serde)).
+[`value_serde` section](../arora-types/readme.md#serializing-a-value-value_serde)).
 Plain serde, with no type, produces a name-keyed **`KeyValue`** instead. That is
 the whole point of deriving `AroraType`: to give a type real, stable identity.
 
