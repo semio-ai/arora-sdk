@@ -1055,15 +1055,16 @@ mod tests {
         use arora_types::Uuid;
         // The interpreter module's SPAWN/HALT functions dispatch to the
         // interpreter's spawn/halt through the engine. The default tree
-        // interpreter does not host task runs (both default-reject), so the calls
-        // fail with that refusal — proving the wiring reaches those methods rather
-        // than returning "function not found".
+        // interpreter hosts task runs, so SPAWN returns a TaskHandle and HALT
+        // (via that handle's stop call) succeeds — proving the wiring reaches
+        // those methods. Spawn only registers the run; it is not ticked here, so
+        // the placeholder call target is never dispatched.
         let mut arora = build(Box::new(UnregisterBridge));
 
         let (tx, rx) = oneshot::channel();
         let spawn = interpreter_module::encode_spawn(
             &Call {
-                module_id: None,
+                module_id: Some(Uuid::from_u128(0xB0)),
                 id: Uuid::from_u128(1),
                 args: vec![],
             },
@@ -1076,26 +1077,145 @@ mod tests {
             BridgeCommand::new(BridgeOp::Call(spawn), tx),
         )
         .unwrap();
-        let err = rx
+        let result = rx
             .await
             .expect("reply")
-            .expect_err("the default interpreter rejects spawn");
-        assert!(err.contains("task runs"), "{err}");
+            .expect("the default tree interpreter accepts spawn");
+        let handle = interpreter_module::decode_spawn_result(&result.ret)
+            .expect("SPAWN returns a TaskHandle");
+        assert!(
+            handle.status.path.starts_with("arora/tasks/"),
+            "{}",
+            handle.status.path
+        );
 
+        // Halt the run just spawned, through its own stop call.
         let (tx, rx) = oneshot::channel();
-        let halt = interpreter_module::encode_halt(arora_behavior::TaskId(Uuid::from_u128(2)));
         apply_command(
             &*arora.store,
             &arora.function_index,
             &mut arora.engine,
-            BridgeCommand::new(BridgeOp::Call(halt), tx),
+            BridgeCommand::new(BridgeOp::Call(handle.stop.clone()), tx),
         )
         .unwrap();
-        let err = rx
-            .await
-            .expect("reply")
-            .expect_err("the default interpreter rejects halt");
-        assert!(err.contains("task runs"), "{err}");
+        let halted = rx.await.expect("reply").expect("halt succeeds");
+        assert_eq!(halted.ret, Value::Unit);
+    }
+
+    /// A close-to-real-world task run driven through the whole device: a
+    /// `look_at` host function — the LookAt action-behavior in miniature — is
+    /// spawned as a run, and stepping the device advances it. Each step it drives
+    /// its gaze actuation key and publishes `Running` to its status key (LookAt
+    /// tracks indefinitely, never succeeding on its own), until a halt ends it and
+    /// the next step publishes the terminal status. This is the engine-side (A)
+    /// half of a ROS 2 action, exercised end to end without ROS.
+    #[tokio::test]
+    async fn a_look_at_run_advances_and_halts_through_the_device() {
+        use arora_behavior_tree::arora_generated::behavior_tree::status::Status;
+        use arora_types::call::Call;
+        use arora_types::Uuid;
+
+        // The store the look_at function and the test share (a SimpleDataStore
+        // clone shares its storage), so the run's writes are observable here.
+        let store = SimpleDataStore::new();
+
+        let module_id = Uuid::from_u128(0x704A);
+        let look_at = Uuid::from_u128(0x6A2E);
+        let module = crate::ModuleBuilder::new(module_id)
+            .function(look_at, {
+                let store = store.clone();
+                move |_call| {
+                    // Drive the gaze toward the target and keep tracking.
+                    store
+                        .write(StateChange::set("gaze/target", Value::F64(1.0)))
+                        .map_err(|e| arora_types::call::CallError::Generic {
+                            message: e.to_string(),
+                        })?;
+                    let running: Value = Status::Running.into();
+                    Ok(arora_types::call::CallResult {
+                        ret: running,
+                        mutated: Vec::new(),
+                    })
+                }
+            })
+            .build();
+
+        let mut arora = Arora::builder()
+            .with_hal(Box::new(FakeHal::new()))
+            .with_bridge(Box::new(UnregisterBridge))
+            .with_data_store(Box::new(store.clone()))
+            .with_host_module(module)
+            .build()
+            .expect("arora builds");
+
+        // Spawn the look_at run through the interpreter module (as a bridge does
+        // for a SendGoal).
+        let (tx, rx) = oneshot::channel();
+        let spawn = interpreter_module::encode_spawn(
+            &Call {
+                module_id: Some(module_id),
+                id: look_at,
+                args: vec![],
+            },
+            arora_behavior::RunPolicy::Concurrent,
+        );
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(BridgeOp::Call(spawn), tx),
+        )
+        .unwrap();
+        let handle = interpreter_module::decode_spawn_result(
+            &rx.await.expect("reply").expect("spawn ok").ret,
+        )
+        .expect("a TaskHandle");
+
+        // Before stepping, spawn has only registered the run: nothing written.
+        assert_eq!(
+            store.read(std::slice::from_ref(&Key::from("gaze/target"))),
+            vec![None]
+        );
+
+        // One step advances the run: it drives gaze and publishes Running.
+        arora.step(FRAME).expect("step");
+        assert_eq!(
+            store.read(std::slice::from_ref(&Key::from("gaze/target"))),
+            vec![Some(Value::F64(1.0))],
+            "the run drove its actuation key"
+        );
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
+
+        // It tracks indefinitely: another step keeps it Running.
+        arora.step(FRAME).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
+
+        // Halt (the cancel path): the stop call ends the run, and the next step
+        // publishes the terminal status.
+        let (tx, rx) = oneshot::channel();
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(BridgeOp::Call(handle.stop.clone()), tx),
+        )
+        .unwrap();
+        rx.await.expect("reply").expect("halt ok");
+        arora.step(FRAME).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(failure)],
+            "a halted run ends terminal"
+        );
     }
 
     #[test]
