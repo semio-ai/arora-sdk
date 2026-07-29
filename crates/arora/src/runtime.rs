@@ -401,17 +401,29 @@ pub(crate) fn with_interpreter(
     cell: &InterpreterCell,
     operation: impl FnOnce(&mut dyn BehaviorInterpreter) -> Result<(), arora_behavior::BehaviorError>,
 ) -> Result<CallResult, CallError> {
+    with_interpreter_value(cell, |interpreter| {
+        operation(interpreter).map(|()| Value::Unit)
+    })
+}
+
+/// Like [`with_interpreter`], but the operation produces the call's return
+/// [`Value`] instead of the unit result — for a function whose result carries
+/// data back, e.g. SPAWN returning a [`TaskHandle`](arora_behavior::TaskHandle).
+pub(crate) fn with_interpreter_value(
+    cell: &InterpreterCell,
+    operation: impl FnOnce(&mut dyn BehaviorInterpreter) -> Result<Value, arora_behavior::BehaviorError>,
+) -> Result<CallResult, CallError> {
     let mut slot = cell.try_borrow_mut().map_err(|_| CallError::Generic {
         message: "the behavior is being ticked; call between steps".to_string(),
     })?;
     let interpreter = slot.as_mut().ok_or_else(|| CallError::Generic {
         message: "no behavior interpreter is installed".to_string(),
     })?;
-    operation(interpreter.as_mut()).map_err(|e| CallError::Guest {
+    let ret = operation(interpreter.as_mut()).map_err(|e| CallError::Guest {
         message: e.to_string(),
     })?;
     Ok(CallResult {
-        ret: Value::Unit,
+        ret,
         mutated: Vec::new(),
     })
 }
@@ -1035,6 +1047,55 @@ mod tests {
         .unwrap();
         let result = rx.await.expect("reply").expect("the load call succeeds");
         assert_eq!(result.ret, Value::Unit);
+    }
+
+    #[tokio::test]
+    async fn calls_reach_spawn_and_halt_through_the_engine() {
+        use arora_types::call::Call;
+        use arora_types::Uuid;
+        // The interpreter module's SPAWN/HALT functions dispatch to the
+        // interpreter's spawn/halt through the engine. The default tree
+        // interpreter does not host task runs (both default-reject), so the calls
+        // fail with that refusal — proving the wiring reaches those methods rather
+        // than returning "function not found".
+        let mut arora = build(Box::new(UnregisterBridge));
+
+        let (tx, rx) = oneshot::channel();
+        let spawn = interpreter_module::encode_spawn(
+            &Call {
+                module_id: None,
+                id: Uuid::from_u128(1),
+                args: vec![],
+            },
+            arora_behavior::RunPolicy::Concurrent,
+        );
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(BridgeOp::Call(spawn), tx),
+        )
+        .unwrap();
+        let err = rx
+            .await
+            .expect("reply")
+            .expect_err("the default interpreter rejects spawn");
+        assert!(err.contains("task runs"), "{err}");
+
+        let (tx, rx) = oneshot::channel();
+        let halt = interpreter_module::encode_halt(arora_behavior::TaskId(Uuid::from_u128(2)));
+        apply_command(
+            &*arora.store,
+            &arora.function_index,
+            &mut arora.engine,
+            BridgeCommand::new(BridgeOp::Call(halt), tx),
+        )
+        .unwrap();
+        let err = rx
+            .await
+            .expect("reply")
+            .expect_err("the default interpreter rejects halt");
+        assert!(err.contains("task runs"), "{err}");
     }
 
     #[test]
