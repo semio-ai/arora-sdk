@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 description = "The Arora Bridge trait: the connection between an Arora runtime and a remote (e.g. Semio Studio), modelled on studio-bridge's device-client."
 license = "MIT"
