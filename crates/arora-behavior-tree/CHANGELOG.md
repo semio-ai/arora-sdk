@@ -4,6 +4,20 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.4.0] - 2026-07-29
+
+### Added
+
+- The interpreter hosts **task runs**: `BehaviorInterpreter::spawn`/`halt` are
+  implemented (previously the trait's default-reject). A run is a `Call` invoked
+  once per `tick` alongside the main tree; the value it returns is its `Status`,
+  redirected to the run's own status key (the status decorator). Keys live under
+  `arora/tasks/<module>/<function>/<run_id>/…`, so concurrent runs never collide.
+  A live run keeps the interpreter installed (reporting `Running`) without
+  disturbing a loaded main tree's run-once semantics; `halt` ends a run on the
+  next tick (idempotent). This is the engine-side half of the ROS 2 action
+  mapping (`RunPolicy::Concurrent` only for now).
+
 ## [6.2.0] - 2026-07-24
 
 ### Added

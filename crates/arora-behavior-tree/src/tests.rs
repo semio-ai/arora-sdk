@@ -436,3 +436,220 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
     let status = interpreter.tick(&mut ctx).expect("an empty graph idles");
     assert_eq!(status, BehaviorStatus::Running);
 }
+
+/// Task runs: `spawn`/`halt` on the interpreter, and how a run advances
+/// alongside the main tree. Each run invokes a scripted leaf (through
+/// [`TestBridge`]) whose returned status the test drives between ticks — a
+/// stand-in for a real action-behavior whose status decorator publishes its
+/// outcome to the run's status key.
+mod task_runs {
+    use super::{build, LeafStatuses, LeafTicks, TestBridge};
+    use crate::arora_generated::behavior_tree::status::Status;
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::nodes;
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter, BehaviorStatus, RunPolicy, TaskId};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::call::Call;
+    use arora_types::data::DataStore;
+    use arora_types::value::Value;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    /// A [`TestBridge`] whose one scripted leaf `leaf` returns `status`, plus the
+    /// shared cells to drive it (`statuses`) and observe invocations (`ticks`).
+    fn scripted(leaf: Uuid, status: Status) -> (TestBridge, LeafStatuses, LeafTicks) {
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([(leaf, status)])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        (
+            TestBridge::new(statuses.clone(), ticks.clone()),
+            statuses,
+            ticks,
+        )
+    }
+
+    /// A [`Call`] a run invokes: `module`/`leaf` identify the scripted leaf.
+    fn call_to(module: u128, leaf: Uuid) -> Call {
+        Call {
+            module_id: Some(Uuid::from_u128(module)),
+            id: leaf,
+            args: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_spawned_run_advances_and_writes_its_status_key() {
+        let leaf = Uuid::from_u128(0xA1);
+        let (mut bridge, statuses, ticks) = scripted(leaf, Status::Running);
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+
+        // The default-reject is overridden: a handle comes back, its keys
+        // namespaced under the run id.
+        let handle = interp
+            .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
+            .expect("the tree interpreter hosts runs");
+        assert!(
+            handle.status.path.starts_with("arora/tasks/"),
+            "{}",
+            handle.status.path
+        );
+        assert!(
+            handle.status.path.ends_with("/status"),
+            "{}",
+            handle.status.path
+        );
+
+        let mut ctx = BehaviorContext {
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        // Spawn does not tick: nothing is written until the next tick.
+        assert_eq!(store.read(std::slice::from_ref(&handle.status)), vec![None]);
+
+        // First tick invokes the run once and publishes Running.
+        assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)],
+            "the run's status key holds Running"
+        );
+        assert_eq!(*ticks.borrow().get(&leaf).unwrap(), 1);
+
+        // The run reaches Success: the interpreter publishes it, drops the run,
+        // and — no runs, no tree — idles rather than being dropped.
+        statuses.borrow_mut().insert(leaf, Status::Success);
+        assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
+        let success: Value = Status::Success.into();
+        assert_eq!(store.read(std::slice::from_ref(&handle.status)), vec![Some(success)]);
+
+        // A finished run is not ticked again.
+        let before = *ticks.borrow().get(&leaf).unwrap();
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(
+            *ticks.borrow().get(&leaf).unwrap(),
+            before,
+            "a finished run is not re-ticked"
+        );
+    }
+
+    #[test]
+    fn halting_a_run_terminates_it_next_tick() {
+        let leaf = Uuid::from_u128(0xC2);
+        let (mut bridge, _statuses, ticks) = scripted(leaf, Status::Running);
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+
+        let handle = interp
+            .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
+            .unwrap();
+        let mut ctx = BehaviorContext {
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+
+        // Runs indefinitely: after a tick it is still Running.
+        assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
+        let running: Value = Status::Running.into();
+        assert_eq!(store.read(std::slice::from_ref(&handle.status)), vec![Some(running)]);
+
+        // Halt: the next tick ends the run (Failure) without invoking it again.
+        interp.halt(handle.id).unwrap();
+        let ticks_before = *ticks.borrow().get(&leaf).unwrap();
+        assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(failure)],
+            "a halted run ends Failure"
+        );
+        assert_eq!(
+            *ticks.borrow().get(&leaf).unwrap(),
+            ticks_before,
+            "a halted run is not invoked"
+        );
+
+        // Idempotent: halting the finished run, or an unknown run, is a clean
+        // no-op.
+        interp
+            .halt(handle.id)
+            .expect("halting a finished run is a no-op");
+        interp
+            .halt(TaskId(Uuid::from_u128(0xDEAD)))
+            .expect("halting an unknown run is a no-op");
+    }
+
+    #[test]
+    fn a_run_keeps_a_run_once_main_tree_installed() {
+        // A main tree that would run-once-then-Done stays installed while a run
+        // is live, and it is not re-run each tick — the run keeps the
+        // interpreter alive without disturbing the tree's run-once semantics.
+        let leaf = Uuid::from_u128(0xE3);
+        let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Running);
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp.load(build(nodes::succeed()));
+        interp
+            .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
+            .unwrap();
+
+        let mut ctx = BehaviorContext {
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        for _ in 0..3 {
+            assert_eq!(
+                interp.tick(&mut ctx).unwrap(),
+                BehaviorStatus::Running,
+                "a live run keeps the interpreter installed (never Done)"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_runs_get_independent_status_keys() {
+        let a = Uuid::from_u128(0xAA);
+        let b = Uuid::from_u128(0xBB);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (a, Status::Running),
+            (b, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+
+        let ha = interp.spawn(call_to(0xB0, a), RunPolicy::Concurrent).unwrap();
+        let hb = interp.spawn(call_to(0xB0, b), RunPolicy::Concurrent).unwrap();
+        assert_ne!(
+            ha.status.path, hb.status.path,
+            "each run gets its own status key"
+        );
+
+        let mut ctx = BehaviorContext {
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+        let running: Value = Status::Running.into();
+        assert_eq!(store.read(std::slice::from_ref(&ha.status)), vec![Some(running.clone())]);
+        assert_eq!(store.read(std::slice::from_ref(&hb.status)), vec![Some(running.clone())]);
+
+        // Halt A only; B keeps running independently.
+        interp.halt(ha.id).unwrap();
+        interp.tick(&mut ctx).unwrap();
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&ha.status)),
+            vec![Some(failure)],
+            "the halted run ended"
+        );
+        assert_eq!(
+            store.read(std::slice::from_ref(&hb.status)),
+            vec![Some(running)],
+            "the other run is unaffected"
+        );
+    }
+}
