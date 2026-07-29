@@ -11,9 +11,10 @@
 //! its qualified name (a ROS name is the stable spec identity) — that also
 //! name-hashes the struct's fields.
 //!
-//! First cut mirrors the type-directed walk it feeds: named-field structs whose
-//! fields are primitive scalars, `String`, other `#[derive(AroraType)]` types,
-//! or a `Vec<T>` of any of those (a homogeneous array). Options, maps and enums
+//! Mirrors the type-directed walk it feeds: named-field structs whose fields are
+//! primitive scalars, `String`, `Uuid`, other `#[derive(AroraType)]` types, a
+//! `Vec<T>` of any of those (a homogeneous array), an `Option<T>`, or a
+//! `#[arora(keyvalue)]` field carrying dynamically-typed values. Maps and enums
 //! are rejected pending a `ty::low` model extension.
 
 use proc_macro::TokenStream;
@@ -327,7 +328,10 @@ fn single_type_arg<'a>(segment: &'a syn::PathSegment, container: &str) -> syn::R
     _ => None,
   });
   let element = elements.next().ok_or_else(|| {
-    syn::Error::new(segment.ident.span(), format!("`{container}` needs a type argument"))
+    syn::Error::new(
+      segment.ident.span(),
+      format!("`{container}` needs a type argument"),
+    )
   })?;
   if elements.next().is_some() {
     return Err(syn::Error::new(
