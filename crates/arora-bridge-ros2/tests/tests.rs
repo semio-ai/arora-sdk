@@ -264,6 +264,33 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         })
     }
 
+    /// A plain method signature (`speak(text) -> f64`) the fake runtime also
+    /// describes: it exercises the method-service plane in the same run — a
+    /// discriminator between "raw services don't work live" and "the action
+    /// assembly is at fault".
+    fn speak_signature() -> MethodSignature {
+        let text = gen_uuid_from_str("text");
+        let mut parameters = std::collections::HashMap::new();
+        parameters.insert(
+            text,
+            Parameter {
+                name: "text".to_string(),
+                ty: FrozenTy::from(PrimitiveKind::String),
+                mutable: false,
+            },
+        );
+        MethodSignature {
+            module_id: gen_uuid_from_str("gaze-module"),
+            id: gen_uuid_from_str("speak"),
+            name: "speak".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering: vec![text],
+                return_ty: FrozenTy::from(PrimitiveKind::F64),
+            },
+        }
+    }
+
     /// The `look_at` task-run signature the fake runtime describes: params
     /// (policy, x), returning the behavior-tree `Status` (the action marker).
     fn look_at_signature() -> MethodSignature {
@@ -298,7 +325,10 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         }
     }
 
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = env_logger::builder()
+        .parse_filters("warn")
+        .is_test(true)
+        .try_init();
     let domain_id = random_domain_id();
     let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
     let mut inbound = bridge.take_inbound();
@@ -352,7 +382,7 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
             match &cmd.op {
                 BridgeOp::DescribeMethods { .. } => {
                     eprintln!("[runtime] answering DescribeMethods");
-                    let signatures = vec![look_at_signature()];
+                    let signatures = vec![look_at_signature(), speak_signature()];
                     cmd.reply(Ok(CallResult {
                         ret: value_serde::to_value(&signatures).expect("signatures encode"),
                         mutated: Vec::new(),
@@ -365,6 +395,13 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
                     eprintln!("[runtime] SPAWN accepted");
                     cmd.reply(Ok(CallResult {
                         ret: interpreter_module::encode_spawn_result(&handle),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::Call(call) if call.id == gen_uuid_from_str("speak") => {
+                    eprintln!("[runtime] speak called");
+                    cmd.reply(Ok(CallResult {
+                        ret: Value::F64(1.0),
                         mutated: Vec::new(),
                     }));
                 }
@@ -404,7 +441,7 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
             result_service: service_qos.clone(),
             cancel_service: service_qos.clone(),
             feedback_subscription: service_qos.clone(),
-            status_subscription: service_qos,
+            status_subscription: service_qos.clone(),
         };
         let client = node
             .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
@@ -414,6 +451,54 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
                 qos,
             )
             .expect("action client creates");
+
+        // Probe the method-service plane first: a typed client on
+        // /robot/methods/speak. If this cannot round-trip, raw dds services
+        // are broken live in general — not the action assembly.
+        #[derive(Serialize, Deserialize, Clone)]
+        struct SpeakRequest {
+            text: String,
+        }
+        impl Message for SpeakRequest {}
+        #[derive(Serialize, Deserialize, Debug)]
+        struct SpeakResponse {
+            result: f64,
+        }
+        impl Message for SpeakResponse {}
+        let speak_client = node
+            .create_client::<ros2_client::AService<SpeakRequest, SpeakResponse>>(
+                ServiceMapping::Enhanced,
+                &Name::parse("/robot/methods/speak").expect("valid service name"),
+                &ros2_client::ServiceTypeName::new("arora", "speak"),
+                service_qos.clone(),
+                service_qos.clone(),
+            )
+            .expect("speak client creates");
+        eprintln!("[client] probing the method service");
+        loop {
+            let sent = speak_client.async_send_request(SpeakRequest {
+                text: "hello".to_string(),
+            });
+            match tokio::time::timeout(Duration::from_secs(2), sent).await {
+                Ok(Ok(req_id)) => {
+                    match tokio::time::timeout(
+                        Duration::from_secs(2),
+                        speak_client.async_receive_response(req_id),
+                    )
+                    .await
+                    {
+                        Ok(Ok(response)) => {
+                            assert!((response.result - 1.0).abs() < f64::EPSILON);
+                            eprintln!("[client] method service OK");
+                            break;
+                        }
+                        other => eprintln!("[client] speak response attempt: {other:?}"),
+                    }
+                }
+                other => eprintln!("[client] speak send attempt: {other:?}"),
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
 
         // Send the goal until the graph connects and the server accepts.
         let goal = LookAtGoal {
