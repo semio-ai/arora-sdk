@@ -492,11 +492,11 @@ impl AroraBuilder {
             .interpreter
             .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
 
-        // The interpreter as a module: a function module under
-        // `interpreter_module::ID` whose `LOAD`/`EDIT` functions run on the
-        // same cell the step loop ticks. A Call to those ids — from a remote
-        // or from a behavior — reaches the interpreter through the engine's
-        // normal dispatch, like any module function.
+        // The interpreter as a module: a host module under
+        // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`HALT` functions
+        // run on the same cell the step loop ticks. A Call to those ids — from a
+        // remote or from a behavior — reaches the interpreter through the
+        // engine's normal dispatch, like any module function.
         let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
         let module = ModuleBuilder::new(interpreter_module::ID)
             .function(interpreter_module::LOAD, {
@@ -513,6 +513,26 @@ impl AroraBuilder {
                     let diff = interpreter_module::decode_edit(&call)
                         .map_err(|message| CallError::Guest { message })?;
                     runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))
+                }
+            })
+            .function(interpreter_module::SPAWN, {
+                let cell = interpreter.clone();
+                move |call| {
+                    let (spawned, policy) = interpreter_module::decode_spawn(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter
+                            .spawn(spawned, policy)
+                            .map(|handle| interpreter_module::encode_spawn_result(&handle))
+                    })
+                }
+            })
+            .function(interpreter_module::HALT, {
+                let cell = interpreter.clone();
+                move |call| {
+                    let task = interpreter_module::decode_halt(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter(&cell, |interpreter| interpreter.halt(task))
                 }
             })
             .build();
