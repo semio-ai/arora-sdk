@@ -874,11 +874,12 @@ mod tests {
     }
 
     /// Construct an empty behavior-tree interpreter (no module functions) with a
-    /// Groot tree loaded into it against `store` — the construct-empty → load →
-    /// inject flow, ready to hand to [`build_in_with`].
-    fn groot_interpreter(xml: &str, store: &dyn DataStore) -> Box<dyn BehaviorInterpreter> {
+    /// Groot tree loaded into it — the construct-empty → load → inject flow,
+    /// ready to hand to [`build_in_with`]. The tree binds to the device's store
+    /// at its first tick (the scaffold lowers against the tick's context).
+    fn groot_interpreter(xml: &str) -> Box<dyn BehaviorInterpreter> {
         let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        interpreter.load_groot(xml, store).expect("tree loads");
+        interpreter.load_groot(xml).expect("tree loads");
         Box::new(interpreter)
     }
 
@@ -1258,7 +1259,7 @@ mod tests {
         // build. The clone shares the same storage, so the tree's slots and the
         // device resolve against one data storage.
         let store = SimpleDataStore::new();
-        let interpreter = groot_interpreter(xml, &store);
+        let interpreter = groot_interpreter(xml);
         let mut arora = build_in_with(
             Box::new(UnregisterBridge),
             Box::new(store.clone()),

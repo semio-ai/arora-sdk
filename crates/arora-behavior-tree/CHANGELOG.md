@@ -4,19 +4,39 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [6.4.0] - 2026-07-29
+## [7.0.0] - 2026-07-29
+
+### Changed
+
+- **The runner scaffold**: the interpreter permanently hosts one graph — a
+  parallel *runner* root — and everything it executes is grafted under it as
+  tree structure. Loading a behavior grafts it as the runner's main child;
+  spawning a task run grafts a two-node fragment (a run-status decorator, its
+  status key predetermined, over a run-call leaf carrying the spawned `Call` as
+  literal link data); halting prunes it. Runs, policies, and the loaded
+  behavior are introspectable through `graph()` as ordinary graph data — not
+  hidden interpreter state.
+- **Reactive tick semantics**: one arora runtime tick is one behavior-tree
+  tick. The lowered tree persists across ticks (rebuilt on graph edits,
+  unregistering the previous lowering's engine callables — fixing a callable
+  leak); `Running` spans ticks instead of spinning the device; a terminal main
+  behavior is re-evaluated next tick (a tree is a continuously re-evaluated
+  policy); a terminal run latches until pruned. The interpreter is a standing
+  policy: it reports `BehaviorStatus::Running` and is never dropped.
+- **Breaking**: `graph()` returns `&Graph` (the scaffold always exists);
+  `load_groot` takes only the XML (the tree binds to the store at its first
+  tick); the raw `load(BehaviorTree)` and `load_graph(Graph, &dyn DataStore)`
+  inherent methods are removed — load through the `BehaviorInterpreter` trait.
 
 ### Added
 
-- The interpreter hosts **task runs**: `BehaviorInterpreter::spawn`/`halt` are
-  implemented (previously the trait's default-reject). A run is a `Call` invoked
-  once per `tick` alongside the main tree; the value it returns is its `Status`,
-  redirected to the run's own status key (the status decorator). Keys live under
-  `arora/tasks/<module>/<function>/<run_id>/…`, so concurrent runs never collide.
-  A live run keeps the interpreter installed (reporting `Running`) without
-  disturbing a loaded main tree's run-once semantics; `halt` ends a run on the
-  next tick (idempotent). This is the engine-side half of the ROS 2 action
-  mapping (`RunPolicy::Concurrent` only for now).
+- Native task-run scaffolding nodes: `RUN_CALL_FUNCTION_ID` (a leaf carrying a
+  full `Call` as one literal parameter, dispatched through the caller — no
+  function-index entry needed) and `RUN_STATUS_FUNCTION_ID` (a decorator
+  forwarding its child's status onto a bound status output, latching at
+  terminal).
+- `LoweredTree`/`lower_behavior_tree`: a persistent lowering with callable
+  cleanup; `run_behavior_tree` remains as the drain-to-terminal convenience.
 
 ## [6.2.0] - 2026-07-24
 
