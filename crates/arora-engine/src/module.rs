@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use arora_types::call::{Call, CallError, CallResult};
+use arora_types::record::module::frozen::Function;
 use derive_more::{Display, Error};
 use uuid::Uuid;
 
@@ -35,6 +36,20 @@ pub trait Module {
 /// function's.
 pub type ModuleFn = Box<dyn FnMut(Call) -> Result<CallResult, CallError>>;
 
+/// The declared signature of one [`HostModule`] function — what a device
+/// publishes for it over method introspection (`DescribeMethods`), the way a
+/// guest module's header declares its exports. A function without one still
+/// dispatches; it is just not discoverable.
+#[derive(Debug, Clone)]
+pub struct FunctionDescription {
+    /// The function id calls target.
+    pub id: Uuid,
+    /// The method name introspection lists.
+    pub name: String,
+    /// The frozen signature: parameters (name, type, order) and return type.
+    pub function: Function,
+}
+
 /// A [`Module`] assembled from plain functions — how host-side code enters
 /// the engine's dispatch without a guest executor. Build one with
 /// [`ModuleBuilder`] and hand it to
@@ -44,12 +59,19 @@ pub type ModuleFn = Box<dyn FnMut(Call) -> Result<CallResult, CallError>>;
 pub struct HostModule {
     id: Uuid,
     functions: HashMap<Uuid, ModuleFn>,
+    descriptions: Vec<FunctionDescription>,
 }
 
 impl HostModule {
     /// The module id this was built for (the id to register it under).
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    /// The declared signatures of this module's described functions — what a
+    /// host feeds its method index so the functions are discoverable.
+    pub fn descriptions(&self) -> &[FunctionDescription] {
+        &self.descriptions
     }
 }
 
@@ -84,6 +106,7 @@ impl Module for HostModule {
 pub struct ModuleBuilder {
     id: Uuid,
     functions: HashMap<Uuid, ModuleFn>,
+    descriptions: Vec<FunctionDescription>,
 }
 
 impl ModuleBuilder {
@@ -92,11 +115,18 @@ impl ModuleBuilder {
         Self {
             id,
             functions: HashMap::new(),
+            descriptions: Vec::new(),
         }
     }
 
     /// Attach `function` under `function_id`. Attaching to an id that is
     /// already taken replaces the function.
+    ///
+    /// The function dispatches but is not discoverable: method introspection
+    /// only lists functions attached with
+    /// [`described_function`](Self::described_function). Fit for internal
+    /// entry points (an interpreter's LOAD/EDIT); anything a remote should
+    /// find and call deserves a description.
     pub fn function(
         mut self,
         function_id: Uuid,
@@ -106,11 +136,32 @@ impl ModuleBuilder {
         self
     }
 
+    /// Attach `function` under `function_id` with its declared signature, so
+    /// method introspection (`DescribeMethods`) lists it — the host-side
+    /// equivalent of a guest header's export. `name` is the method name
+    /// introspection lists; `signature` freezes the parameters and return
+    /// type a caller builds a typed call from.
+    pub fn described_function(
+        mut self,
+        function_id: Uuid,
+        name: impl Into<String>,
+        signature: Function,
+        function: impl FnMut(Call) -> Result<CallResult, CallError> + 'static,
+    ) -> Self {
+        self.descriptions.push(FunctionDescription {
+            id: function_id,
+            name: name.into(),
+            function: signature,
+        });
+        self.function(function_id, function)
+    }
+
     /// The finished module.
     pub fn build(self) -> HostModule {
         HostModule {
             id: self.id,
             functions: self.functions,
+            descriptions: self.descriptions,
         }
     }
 }

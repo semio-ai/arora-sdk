@@ -4,6 +4,15 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-07-29
+
+### Added
+
+- `ModuleBuilder::described_function` attaches a function together with its
+  declared, frozen signature; `HostModule::descriptions` hands the set back
+  (`FunctionDescription`). How a host module's functions become discoverable —
+  the host-side equivalent of a guest header's exports.
+
 ## [3.0.0] - 2026-07-20
 
 ### Breaking

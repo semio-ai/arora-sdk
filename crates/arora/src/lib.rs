@@ -57,7 +57,7 @@ use arora_engine::load::load_module_from_parts;
 /// Re-exported so an embedder can assemble a host-side module — a set of
 /// in-process functions under a module id — and inject it with
 /// [`AroraBuilder::with_host_module`].
-pub use arora_engine::module::{HostModule, ModuleBuilder};
+pub use arora_engine::module::{FunctionDescription, HostModule, ModuleBuilder};
 use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
@@ -441,8 +441,22 @@ impl AroraBuilder {
         }
 
         // Register each host-side module so its functions dispatch through the
-        // engine's `CallBridge`, exactly like a loaded guest module's.
+        // engine's `CallBridge`, exactly like a loaded guest module's. Its
+        // described functions join the method index, so introspection
+        // (`DescribeMethods`) lists them with their signatures.
+        let mut functions = self.functions;
         for module in self.host_modules {
+            for description in module.descriptions() {
+                functions.insert(
+                    description.id,
+                    ModuleFunction {
+                        module_id: module.id(),
+                        function_id: description.id,
+                        function_name: description.name.clone(),
+                        function: description.function.clone(),
+                    },
+                );
+            }
             engine.register_module(module.id(), Box::new(module));
         }
 
@@ -483,7 +497,7 @@ impl AroraBuilder {
         inbound.push(caller_rx.map(|event| (None, event)).boxed());
 
         let endpoints = bridges.len();
-        let function_index = Rc::new(self.functions);
+        let function_index = Rc::new(functions);
         // Default executor: an empty, ready behavior-tree interpreter over the
         // assembled function index. It is injected once here (never swapped); a
         // behavior is loaded into it as a separate step. With none loaded it
@@ -666,6 +680,59 @@ mod module_loading_tests {
             })
             .expect("call echo() on the host module");
         assert_eq!(result.ret, Value::U32(42));
+    }
+
+    /// A described host function joins the method index with its signature —
+    /// what introspection (`DescribeMethods`) serves — while an undescribed
+    /// one dispatches but stays out of the index.
+    #[test]
+    fn described_host_functions_join_the_method_index() {
+        use arora_types::call::CallResult;
+        use arora_types::record::module::frozen::{Function, Parameter};
+        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+        use std::collections::HashMap;
+
+        let module_id = Uuid::from_u128(0x6761);
+        let described = Uuid::from_u128(0x6c61);
+        let undescribed = Uuid::from_u128(0x6c62);
+        let param = Uuid::from_u128(0x7801);
+
+        let signature = Function {
+            parameters: HashMap::from([(
+                param,
+                Parameter {
+                    name: "x".to_string(),
+                    ty: FrozenTy::from(PrimitiveKind::F64),
+                    mutable: false,
+                },
+            )]),
+            parameter_ordering: vec![param],
+            return_ty: FrozenTy::from(PrimitiveKind::Unit),
+        };
+        let unit = |_call: Call| {
+            Ok(CallResult {
+                ret: Value::Unit,
+                mutated: Vec::new(),
+            })
+        };
+        let module = ModuleBuilder::new(module_id)
+            .described_function(described, "look_at", signature.clone(), unit)
+            .function(undescribed, unit)
+            .build();
+
+        let arora = Arora::builder()
+            .with_host_module(module)
+            .build()
+            .expect("build a device with a described host module");
+
+        let entry = arora
+            .function_index
+            .get(&described)
+            .expect("the described function is indexed");
+        assert_eq!(entry.module_id, module_id);
+        assert_eq!(entry.function_name, "look_at");
+        assert_eq!(entry.function, signature);
+        assert!(arora.function_index.get(&undescribed).is_none());
     }
 
     /// Dispatch is always module-scoped: a call naming no module is refused.

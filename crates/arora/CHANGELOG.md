@@ -4,6 +4,22 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.10.0] - 2026-07-29
+
+### Added
+
+- Host modules become discoverable: the described functions of every
+  `with_host_module` module join the device's method index, so introspection
+  (`DescribeMethods`) lists them with their signatures — including the
+  action-shaped ones the ROS 2 bridge turns into actions. Declare them with
+  `ModuleBuilder::described_function`; an undescribed function still
+  dispatches, it is just not listed.
+
+### Fixed
+
+- The method index was never populated: `DescribeMethods` answered with an
+  empty list on every built device, whatever modules it loaded.
+
 ## [9.9.0] - 2026-07-29
 
 ### Changed
