@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 # package` (publish verification) without pulling the browser host into a host
 # link.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-arora-engine = { path = "../arora-engine", version = "3", default-features = false }
+arora-engine = { path = "../arora-engine", version = "4", default-features = false }
 arora-types = { path = "../arora-types", version = "2" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates

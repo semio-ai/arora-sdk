@@ -57,7 +57,7 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "3", default-features = false }
+arora-engine = { path = "../arora-engine", version = "4", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "6" }
 arora-behavior = { path = "../arora-behavior", version = "8" }
 arora-types = { path = "../arora-types", version = "2" }
