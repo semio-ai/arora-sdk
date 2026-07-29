@@ -10,7 +10,8 @@
 //!   *names*, **not** a [`Value::Structure`]: inventing an id by hashing a name
 //!   would be a false identity, one that changes the moment the field or struct
 //!   is renamed. Deserialization matches the stored names. (An enum keeps its
-//!   variant tag as a [`Value::Enumeration`] whose payload is a `KeyValue`; the
+//!   variant tag by **name** — a unit variant as its bare name string, any
+//!   other as one `KeyValue` entry keyed by the variant name; the
 //!   variant and type ids there are still name-hashed, pending a typed enum
 //!   path.)
 //! - **seeded** ([`to_value_seeded`]/[`from_value_seeded`]) — a declared
@@ -38,7 +39,7 @@ use crate::gen_uuid_from_str;
 use crate::keyvalue::{KeyValue, KeyValueField};
 use crate::module::low::TypeRef;
 use crate::ty::{self, low, TypeRegistry};
-use crate::value::{Enumeration, Structure, StructureField, Value};
+use crate::value::{Structure, StructureField, Value};
 
 /// Convert any `Serialize` type into a [`Value`], deriving ids from names.
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
@@ -148,12 +149,16 @@ pub fn map_id() -> Uuid {
   gen_uuid_from_str("map")
 }
 
-fn enumeration_from(type_name: &str, variant: &str, value: Value) -> Value {
-  Value::Enumeration(Enumeration {
-    id: gen_uuid_from_str(type_name),
-    variant_id: gen_uuid_from_str(variant),
-    value: Box::new(value),
-  })
+/// The unseeded enum wire form: one KeyValue entry keyed by the **variant
+/// name**. Names, not name-hashes — an unseeded reader can only match what it
+/// can name (a hash is irreversible), and serde's tagged-enum representations
+/// route the tag through `deserialize_any`, where a hash cannot be recognised
+/// at all. Unit variants travel as the bare variant-name string.
+fn variant_keyvalue(type_name: &str, variant: &str, value: Value) -> Value {
+  keyvalue_from(
+    gen_uuid_from_str(type_name),
+    vec![(variant.to_string(), value)],
+  )
 }
 
 impl<'a> ser::Serializer for ValueSerializer<'a> {
@@ -226,11 +231,14 @@ impl<'a> ser::Serializer for ValueSerializer<'a> {
   }
   fn serialize_unit_variant(
     self,
-    name: &'static str,
+    _name: &'static str,
     _index: u32,
     variant: &'static str,
   ) -> Result<Value, Error> {
-    Ok(enumeration_from(name, variant, Value::Unit))
+    // A bare string names a unit variant, as in serde's self-describing
+    // formats — and it survives `deserialize_any`, which serde's tagged-enum
+    // representations use for the tag.
+    Ok(Value::String(variant.to_string()))
   }
   fn serialize_newtype_struct<T: Serialize + ?Sized>(
     self,
@@ -247,7 +255,7 @@ impl<'a> ser::Serializer for ValueSerializer<'a> {
     variant: &'static str,
     value: &T,
   ) -> Result<Value, Error> {
-    Ok(enumeration_from(
+    Ok(variant_keyvalue(
       name,
       variant,
       value.serialize(ValueSerializer { seed: None })?,
@@ -361,7 +369,7 @@ impl ser::SerializeTupleVariant for VariantSeqSerializer {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    Ok(enumeration_from(
+    Ok(variant_keyvalue(
       self.type_name,
       self.variant,
       Value::ArrayValue(self.items),
@@ -490,10 +498,10 @@ impl ser::SerializeStructVariant for VariantStructSerializer {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    // The variant's payload is an id-less struct, so it too travels as a
-    // KeyValue (the enum still carries its variant tag as an Enumeration).
+    // The variant's payload is an id-less struct, so it travels as a KeyValue
+    // inside the variant-named entry.
     let inner = keyvalue_from(gen_uuid_from_str(self.variant), self.fields);
-    Ok(enumeration_from(self.type_name, self.variant, inner))
+    Ok(variant_keyvalue(self.type_name, self.variant, inner))
   }
 }
 
@@ -576,6 +584,29 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer<'_> {
     visitor: V,
   ) -> Result<V::Value, Error> {
     match self.value {
+      // The unseeded wire form: one entry, keyed by the variant name.
+      Value::KeyValue(kv) => {
+        if kv.fields.len() != 1 {
+          return Err(de::Error::custom(format!(
+            "an enum KeyValue carries exactly one variant entry, got {}",
+            kv.fields.len()
+          )));
+        }
+        let (name, field) = kv.fields.into_iter().next().expect("one entry");
+        let variant = variants
+          .iter()
+          .find(|candidate| **candidate == name)
+          .ok_or_else(|| {
+            de::Error::custom(format!("variant `{name}` matches none of {variants:?}"))
+          })?;
+        visitor.visit_enum(EnumDeserializer {
+          variant,
+          value: field.value.map(|value| *value).unwrap_or(Value::Unit),
+        })
+      }
+      // Values written before the name-carrying form: the variant tag as an
+      // Enumeration whose ids hash the names — recognisable here, where the
+      // candidate names are known to hash against.
       Value::Enumeration(e) => {
         let variant = variants
           .iter()
@@ -940,12 +971,56 @@ mod tests {
       },
     ] {
       let value = to_value(&shape).unwrap();
-      // Enums travel as Enumeration; the variant id derives from the name and
-      // deserialization matches it against the candidates serde provides.
-      assert!(matches!(value, Value::Enumeration(_)));
+      // Enums travel name-carrying: a unit variant as its bare name, the rest
+      // as one KeyValue entry keyed by the variant name — names survive
+      // `deserialize_any`, which serde's tagged representations route the tag
+      // through (a name-hash cannot be recognised there).
+      match &shape {
+        Shape::Empty => assert!(matches!(value, Value::String(_))),
+        _ => assert!(matches!(value, Value::KeyValue(_))),
+      }
       let back: Shape = from_value(value).unwrap();
       assert_eq!(back, shape);
     }
+  }
+
+  /// The regression behind the name-carrying form: a **tagged** enum (serde's
+  /// adjacently-tagged representation, as `FrozenTy` uses) deserializes its
+  /// tag through `deserialize_any` — with the old hash-Enumeration tag this
+  /// failed, breaking e.g. `DescribeMethods`' `Vec<MethodSignature>` round
+  /// trip the moment a device had any method to describe.
+  #[test]
+  fn round_trips_a_tagged_enum() {
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    #[serde(tag = "type", content = "value", rename_all = "camelCase")]
+    enum Frozenish {
+      Primitive(String),
+      Reference { id: u32, version: String },
+    }
+
+    for ty in [
+      Frozenish::Primitive("f64".to_string()),
+      Frozenish::Reference {
+        id: 7,
+        version: "1.0.0".to_string(),
+      },
+    ] {
+      let value = to_value(&ty).unwrap();
+      let back: Frozenish = from_value(value).unwrap();
+      assert_eq!(back, ty);
+    }
+  }
+
+  /// Values written before the name-carrying form — the variant tag as a
+  /// hash-Enumeration — still decode where the enum type is known.
+  #[test]
+  fn decodes_the_legacy_enumeration_form() {
+    let value = Value::Enumeration(crate::value::Enumeration {
+      id: gen_uuid_from_str("Shape"),
+      variant_id: gen_uuid_from_str("Circle"),
+      value: Box::new(Value::F64(1.5)),
+    });
+    assert_eq!(from_value::<Shape>(value).unwrap(), Shape::Circle(1.5));
   }
 
   #[test]
@@ -956,7 +1031,7 @@ mod tests {
 
   #[test]
   fn an_unknown_variant_id_is_an_error() {
-    let value = Value::Enumeration(Enumeration {
+    let value = Value::Enumeration(crate::value::Enumeration {
       id: gen_uuid_from_str("Shape"),
       variant_id: gen_uuid_from_str("NotAVariant"),
       value: Box::new(Value::Unit),
