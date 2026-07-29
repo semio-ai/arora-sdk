@@ -28,6 +28,7 @@ use ros2_client::{
     Context, ContextOptions, Name, NodeName, NodeOptions, DEFAULT_PUBLISHER_QOS,
     DEFAULT_SUBSCRIPTION_QOS,
 };
+use serial_test::serial;
 
 /// Allocate a random DDS domain ID to isolate tests from each other and from
 /// any locally-running ROS 2 graph.
@@ -50,6 +51,7 @@ fn create_test_node(domain_id: u16, name_suffix: &str) -> (Context, ros2_client:
 /// Publishing a Float64 to an input key's topic surfaces as a
 /// `BridgeOp::Update` command carrying `Value::F64`.
 #[tokio::test]
+#[serial]
 #[cfg_attr(
     target_os = "macos",
     ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
@@ -125,6 +127,7 @@ async fn inbound_topic_becomes_update_command() {
 /// `try_send` publishes a changed key to its topic, where a separate node
 /// subscribed to that topic receives it.
 #[tokio::test]
+#[serial]
 #[cfg_attr(
     target_os = "macos",
     ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
@@ -137,6 +140,15 @@ async fn send_data_reaches_topic_subscriber() {
     let namespace = format!("test_out_{domain_id}");
 
     let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
+
+    // The bridge's startup service discovery (`run_node` awaits `discover_services`)
+    // sends a `DescribeMethods` command and blocks on its reply *before* it begins
+    // publishing. A caller must consume the inbound command stream; draining it
+    // here resolves that reply (the command, and with it the reply channel, is
+    // taken) so the bridge proceeds to publish. Without this the bridge never
+    // publishes and there is nothing for the subscriber to discover.
+    let mut inbound = bridge.take_inbound();
+    tokio::spawn(async move { while inbound.next().await.is_some() {} });
 
     // Subscribe on a separate node to the key's topic.
     let (_ctx, mut sub_node) = create_test_node(domain_id, &format!("sub_{domain_id}"));
