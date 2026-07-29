@@ -202,8 +202,9 @@ pub(crate) fn parse_name(name: &str) -> Result<Name, String> {
 /// The [`TypeRef`] for a frozen type: primitives map to the well-known ids,
 /// record references keep their id (the version is not part of the low-level
 /// type graph). Mirrors module authoring's private lifting of a frozen type into
-/// a module header.
-fn type_ref_of(ty: &FrozenTy) -> TypeRef {
+/// a module header. Shared with the action plane, which lifts goal parameters
+/// the same way.
+pub(crate) fn type_ref_of(ty: &FrozenTy) -> TypeRef {
     match ty {
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => TypeRef::Scalar { id: *ty::UNIT_ID },

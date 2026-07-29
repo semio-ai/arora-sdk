@@ -197,3 +197,248 @@ async fn send_data_reaches_topic_subscriber() {
         .expect("subscription take failed");
     assert!((msg.data - 0.42).abs() < f64::EPSILON, "got {}", msg.data);
 }
+
+// =============================================================================
+// The action plane, live over DDS.
+// =============================================================================
+
+/// The LookAt lifecycle end to end over real DDS: a typed ROS 2 action client
+/// against the bridge's raw action server, with the runtime side played by a
+/// scripted command handler (DescribeMethods → a `look_at` task-run signature;
+/// SPAWN → a task handle; the stop call → halt). The "device" re-writes its
+/// run's status/feedback keys every tick like a real interpreter, the client
+/// sees EXECUTING + feedback, cancels, and reads the CANCELED result carrying
+/// the errno the run wrote.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config); these run on Linux CI. To run locally, \
+              ensure an active multicast-capable interface and use --ignored."
+)]
+async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
+    use arora_behavior::interpreter_module;
+    use arora_behavior::{TaskHandle, TaskId};
+    use arora_behavior_tree_types::{
+        STATUS_ENUMERATION_ID, STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID,
+    };
+    use arora_bridge::MethodSignature;
+    use arora_types::call::CallResult;
+    use arora_types::data::{Key, StateChange};
+    use arora_types::record::module::frozen::{Function, Parameter};
+    use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
+    use arora_types::record::{FrozenReference, Version};
+    use arora_types::value::Enumeration;
+    use arora_types::{gen_uuid_from_str, value_serde, Uuid};
+    use futures::StreamExt;
+    use ros2_client::action_msgs::GoalStatusEnum;
+    use ros2_client::{Message, ServiceMapping};
+    use serde::{Deserialize, Serialize};
+
+    // The typed client's view of the action.
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtGoal {
+        policy: String,
+        x: f64,
+    }
+    impl Message for LookAtGoal {}
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtResult {
+        errno: i32,
+    }
+    impl Message for LookAtResult {}
+    #[derive(Serialize, Deserialize)]
+    struct LookAtFeedback {
+        gaze_error: f32,
+    }
+    impl Message for LookAtFeedback {}
+
+    const ECANCELED: i32 = -125;
+
+    fn status_value(variant: Uuid) -> Value {
+        Value::Enumeration(Enumeration {
+            id: STATUS_ENUMERATION_ID,
+            variant_id: variant,
+            value: Box::new(Value::Unit),
+        })
+    }
+
+    /// The `look_at` task-run signature the fake runtime describes: params
+    /// (policy, x), returning the behavior-tree `Status` (the action marker).
+    fn look_at_signature() -> MethodSignature {
+        let mut parameters = std::collections::HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for (name, kind) in [("policy", PrimitiveKind::String), ("x", PrimitiveKind::F64)] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(kind),
+                    mutable: false,
+                },
+            );
+        }
+        MethodSignature {
+            module_id: gen_uuid_from_str("gaze-module"),
+            id: gen_uuid_from_str("look_at"),
+            name: "look_at".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: FrozenTy::FrozenScalar(FrozenScalar {
+                    reference: FrozenReference {
+                        id: STATUS_ENUMERATION_ID,
+                        version: Version::parse("1.0.0").unwrap(),
+                    },
+                }),
+            },
+        }
+    }
+
+    let domain_id = random_domain_id();
+    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
+    let mut inbound = bridge.take_inbound();
+
+    // The scripted runtime + per-tick device writes, driven from one task like
+    // the real step loop. It answers discovery and the SPAWN/halt calls, and —
+    // once a run is live — re-writes the run's keys every tick (Running +
+    // feedback until halted; then the errno result + the terminal Failure).
+    let runtime = async move {
+        let prefix = "arora/tasks/gaze/look_at/run1";
+        let handle = TaskHandle {
+            id: TaskId(Uuid::from_u128(0x51)),
+            stop: interpreter_module::encode_halt(TaskId(Uuid::from_u128(0x51))),
+            status: Key::from(format!("{prefix}/status")),
+            feedback: vec![Key::from(format!("{prefix}/feedback"))],
+            result: vec![Key::from(format!("{prefix}/result"))],
+            update: vec![Key::from(format!("{prefix}/update"))],
+        };
+        let mut running = false;
+        let mut halted = false;
+        loop {
+            let event = tokio::select! {
+                event = inbound.next() => event,
+                _ = tokio::time::sleep(Duration::from_millis(100)), if running => {
+                    // A device tick: the run re-writes its keys.
+                    let mut change = StateChange::set(
+                        handle.status.clone(),
+                        status_value(if halted {
+                            STATUS_FAILURE_VARIANT_ID
+                        } else {
+                            STATUS_RUNNING_VARIANT_ID
+                        }),
+                    );
+                    if halted {
+                        change
+                            .set
+                            .insert(handle.result[0].clone(), Some(Value::I32(ECANCELED)));
+                    } else {
+                        change
+                            .set
+                            .insert(handle.feedback[0].clone(), Some(Value::F32(0.25)));
+                    }
+                    bridge.try_send(&change);
+                    continue;
+                }
+            };
+            let Some(event) = event else { break };
+            let Inbound::Command(cmd) = event else {
+                continue; // DataRequested etc.
+            };
+            match &cmd.op {
+                BridgeOp::DescribeMethods { .. } => {
+                    let signatures = vec![look_at_signature()];
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&signatures).expect("signatures encode"),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
+                    let (inner, _policy) = interpreter_module::decode_spawn(call).unwrap();
+                    assert_eq!(inner.id, gen_uuid_from_str("look_at"));
+                    running = true;
+                    cmd.reply(Ok(CallResult {
+                        ret: interpreter_module::encode_spawn_result(&handle),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::Call(call) if interpreter_module::decode_halt(call).is_ok() => {
+                    halted = true;
+                    cmd.reply(Ok(CallResult {
+                        ret: Value::Unit,
+                        mutated: Vec::new(),
+                    }));
+                }
+                other => panic!("unexpected runtime command: {other:?}"),
+            }
+        }
+    };
+    tokio::pin!(runtime);
+
+    // The typed ROS 2 action client.
+    let client_flow = async {
+        let (_ctx, mut node) = create_test_node(domain_id, "action_client");
+        let action_type = ros2_client::ActionTypeName::new("arora", "look_at");
+        let action_name = Name::parse("/robot/actions/look_at").expect("valid action name");
+        let qos = ros2_client::action::ActionClientQosPolicies {
+            goal_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            result_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            cancel_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            feedback_subscription: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            status_subscription: DEFAULT_SUBSCRIPTION_QOS.clone(),
+        };
+        let client = node
+            .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
+                ServiceMapping::Enhanced,
+                &action_name,
+                &action_type,
+                qos,
+            )
+            .expect("action client creates");
+
+        // Send the goal until the graph connects and the server accepts.
+        let goal = LookAtGoal {
+            policy: "track".to_string(),
+            x: 1.5,
+        };
+        let goal_id = loop {
+            match tokio::time::timeout(Duration::from_secs(2), client.async_send_goal(goal.clone()))
+                .await
+            {
+                Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
+                _ => tokio::time::sleep(Duration::from_millis(200)).await,
+            }
+        };
+
+        // Feedback flows while the run tracks.
+        loop {
+            if let Ok(Some(feedback)) = client.receive_feedback(goal_id) {
+                assert!((feedback.gaze_error - 0.25).abs() < f32::EPSILON);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // Cancel; the run halts and the result carries the errno.
+        client
+            .async_cancel_goal(goal_id, ros2_client::builtin_interfaces::Time::ZERO)
+            .await
+            .expect("cancel round-trips");
+        let (status, result) = client
+            .async_request_result(goal_id)
+            .await
+            .expect("result arrives");
+        assert_eq!(status, GoalStatusEnum::Canceled);
+        assert_eq!(result.errno, ECANCELED);
+    };
+
+    tokio::select! {
+        _ = &mut runtime => panic!("the scripted runtime ended early"),
+        result = tokio::time::timeout(Duration::from_secs(60), client_flow) => {
+            result.expect("the action lifecycle timed out");
+        }
+    }
+}

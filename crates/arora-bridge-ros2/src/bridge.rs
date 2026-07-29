@@ -37,6 +37,7 @@ use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::actions;
 use crate::conversions::{setup_key_subscriber, topic_name, KeyPublisher, StateChangeStream};
 use crate::services;
 
@@ -240,10 +241,13 @@ async fn run_node(
     let mut inbound = futures::stream::select_all(sub_streams);
 
     // Expose every ROS-representable module method as a service under
-    // `/{namespace}/methods/{name}`. Discovered from the runtime — like outbound
-    // topics, a device's methods are its own surface, so nothing is declared.
+    // `/{namespace}/methods/{name}` — and every *task-run* method (one
+    // returning the behavior-tree `Status`) as an action under
+    // `/{namespace}/actions/{name}`. Discovered from the runtime — like
+    // outbound topics, a device's methods are its own surface, so nothing is
+    // declared.
     let registry = Arc::new(arora_msgs_ros2::registry());
-    let discovered = discover_services(&cmd_tx, &namespace, &registry).await;
+    let (discovered, discovered_actions) = discover(&cmd_tx, &namespace, &registry).await;
     let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
     for service in discovered {
         if let Some(stream) = service_stream(&mut node, service, registry.clone(), cmd_tx.clone()) {
@@ -251,6 +255,27 @@ async fn run_node(
         }
     }
     let mut service_requests = futures::stream::select_all(service_streams);
+
+    // One task per action, each owning its endpoints and goal book; the node
+    // task forwards every outbound state change so the tasks can watch their
+    // runs' status/feedback/result keys.
+    let mut action_change_txs: Vec<tmpsc::UnboundedSender<StateChange>> = Vec::new();
+    for action in discovered_actions {
+        match create_raw_action_server(&mut node, &action) {
+            Ok(server) => {
+                let (change_tx, change_rx) = tmpsc::unbounded_channel();
+                action_change_txs.push(change_tx);
+                tokio::spawn(actions::action_task(
+                    server,
+                    action,
+                    registry.clone(),
+                    cmd_tx.clone(),
+                    change_rx,
+                ));
+            }
+            Err(e) => warn!("Ros2Bridge could not create action '{}': {e}", action.name),
+        }
+    }
 
     // Publishers are created lazily from the first value written to each key.
     let mut publishers: HashMap<String, KeyPublisher> = HashMap::new();
@@ -261,6 +286,11 @@ async fn run_node(
             maybe_change = outbound_rx.recv() => {
                 match maybe_change {
                     Some(change) => {
+                        // The action tasks watch their runs' keys on the same
+                        // outbound stream the topics mirror.
+                        for tx in &action_change_txs {
+                            let _ = tx.send(change.clone());
+                        }
                         publish_change(&mut node, &namespace, &mut publishers, &change).await;
                     }
                     // All senders dropped (the bridge was dropped).
@@ -289,15 +319,17 @@ async fn run_node(
     }
 }
 
-/// Ask the runtime for every callable method's signature and resolve the ones
-/// ROS 2 can carry to services. Methods whose types aren't representable are
-/// logged and skipped (never silently dropped). Empty if the runtime never
-/// answers (e.g. it stopped) — the bridge then serves no methods.
-async fn discover_services(
+/// Ask the runtime for every callable method's signature and resolve both
+/// planes: the ROS 2-representable methods to services, and the task-run
+/// (behavior-tree-`Status`-returning) methods to actions. Methods whose types
+/// aren't representable on their plane are logged and skipped (never silently
+/// dropped). Empty if the runtime never answers (e.g. it stopped) — the bridge
+/// then serves no methods.
+async fn discover(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     namespace: &str,
     registry: &Ros2Registry,
-) -> Vec<services::MethodService> {
+) -> (Vec<services::MethodService>, Vec<actions::MethodAction>) {
     let (reply_tx, reply_rx) = oneshot::channel();
     if cmd_tx
         .unbounded_send(BridgeCommand::new(
@@ -306,7 +338,7 @@ async fn discover_services(
         ))
         .is_err()
     {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let signatures: Vec<MethodSignature> = match reply_rx.await {
         Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
@@ -326,7 +358,50 @@ async fn discover_services(
             skipped.join(", ")
         );
     }
-    resolved
+    let (resolved_actions, skipped_actions) = actions::resolve(namespace, &signatures, registry);
+    if !skipped_actions.is_empty() {
+        warn!(
+            "Ros2Bridge skips task-run methods whose goal types are not ROS 2-representable: {}",
+            skipped_actions.join(", ")
+        );
+    }
+    (resolved, resolved_actions)
+}
+
+/// Create the five ROS 2 endpoints for one action, per backend. The status
+/// topic is transient-local with a history of one (late-joining clients read
+/// the current goal states, per the ROS actions design); the services and the
+/// feedback topic ride the default QoS the method services use.
+fn create_raw_action_server(
+    node: &mut Node,
+    action: &actions::MethodAction,
+) -> Result<ros2_client::RawActionServer, String> {
+    let name = services::parse_name(&action.name)?;
+    #[cfg(feature = "dds")]
+    {
+        use ros2_client::ros2::{policy, QosPolicyBuilder};
+        let status_qos = QosPolicyBuilder::new()
+            .durability(policy::Durability::TransientLocal)
+            .history(policy::History::KeepLast { depth: 1 })
+            .reliability(policy::Reliability::Reliable {
+                max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
+            })
+            .build();
+        let qos = ros2_client::action::ActionServerQosPolicies {
+            goal_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            result_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            cancel_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            feedback_publisher: DEFAULT_PUBLISHER_QOS.clone(),
+            status_publisher: status_qos,
+        };
+        node.create_raw_action_server(&name, &action.action_type, qos)
+            .map_err(|e| format!("{e:?}"))
+    }
+    #[cfg(feature = "zenoh")]
+    {
+        node.create_raw_action_server(&name, &action.action_type)
+            .map_err(|e| format!("{e:?}"))
+    }
 }
 
 /// Create the ROS 2 service for one method and return a stream that serves its

@@ -36,6 +36,11 @@
 //! # }
 //! ```
 
+// The method-action plane: exposing task-run (Status-returning) methods as ROS
+// 2 actions — synthesised goal/feedback/result messages over the raw
+// endpoints, the goal lifecycle in a bridge-side book. Sibling of `services`,
+// one notch up.
+mod actions;
 pub mod bridge;
 pub mod conversions;
 pub mod msg_types;
