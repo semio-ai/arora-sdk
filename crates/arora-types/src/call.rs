@@ -22,7 +22,10 @@ pub struct Call {
   /// Arguments to call the function with. Their arora types are not known
   /// statically — each argument names a field id and carries a value of any
   /// type — so on the schema this is an opaque key/value bag.
-  #[cfg_attr(feature = "derive", arora(id = "7852eaaf-23e9-4762-a206-cc4b9c9984a7", keyvalue))]
+  #[cfg_attr(
+    feature = "derive",
+    arora(id = "7852eaaf-23e9-4762-a206-cc4b9c9984a7", keyvalue)
+  )]
   #[serde(default)]
   pub args: Vec<StructureField>,
 }
@@ -163,7 +166,11 @@ mod tests {
     let TypeKind::Structure(structure) = &ty.kind else {
       panic!("Call is a structure type");
     };
-    let field = |id: &str| structure.fields[&Uuid::from_str(id).unwrap()].type_ref.clone();
+    let field = |id: &str| {
+      structure.fields[&Uuid::from_str(id).unwrap()]
+        .type_ref
+        .clone()
+    };
     // module_id: an optional uuid.
     assert!(matches!(
       field("8c4633be-578a-405e-9c58-75c3bbf194be"),
