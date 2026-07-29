@@ -109,9 +109,7 @@ pub enum BridgeOp {
     /// Superseded by [`DescribeMethods`](Self::DescribeMethods), which returns
     /// the full signature of each method (parameter and return types), not just
     /// its name; kept working so existing callers do not break.
-    #[deprecated(
-        note = "use DescribeMethods for full signatures; ListMethods returns names only"
-    )]
+    #[deprecated(note = "use DescribeMethods for full signatures; ListMethods returns names only")]
     ListMethods {
         /// Only methods whose name starts with this prefix; `None` lists all.
         prefix: Option<String>,
