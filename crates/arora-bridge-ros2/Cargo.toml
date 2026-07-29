@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "3.1.0"
+version = "3.2.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -12,6 +12,10 @@ name = "arora_bridge_ros2"
 [dependencies]
 arora-types = { path = "../arora-types", version = "2" }
 arora-bridge = { path = "../arora-bridge", version = "4" }
+# The behavior-tree Status enumeration's well-known ids: the action plane
+# discovers action-shaped methods by their Status return type and maps the
+# status-key values a run writes onto the ROS goal statuses.
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "1" }
 # The ROS 2 message types + the shared CDR codec (re-exported as this crate's
 # `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
 # where the bridge creates hash-keyed publishers.
@@ -24,7 +28,7 @@ log = "0.4"
 # It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
 # compatible), chosen by this crate's `dds` / `zenoh` features (see [features]);
 # `jazzy` selects the ROS 2 distro wire format and is always on.
-ros2-client = { package = "ros2-client-multi-rmw", version = "0.10.2", default-features = false, features = ["jazzy"] }
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.11.0", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
@@ -40,6 +44,10 @@ dds = ["ros2-client/dds"]
 zenoh = ["ros2-client/zenoh"]
 
 [dev-dependencies]
+# The crate that DEFINES the interpreter-module SPAWN ABI the action plane
+# speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
+# the bridge's ids and encodings match, without a runtime engine dependency.
+arora-behavior = { path = "../arora-behavior", version = "8" }
 rand = "0.9"
 env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile
