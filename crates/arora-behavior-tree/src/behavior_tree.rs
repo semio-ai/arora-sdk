@@ -29,8 +29,10 @@ use crate::arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
 use crate::nodes::{
-    FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID,
-    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID,
+    RUN_CALL_PARAM_ID, RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID,
+    RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+    SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
 };
 
 // Runtime.
@@ -59,6 +61,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
         caller: &'a mut dyn CallBridge,
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
+        let mut callables = Vec::new();
         let tick = setup_tick_function(
             tree.root.clone(),
             &tree.node_index,
@@ -71,6 +74,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
             } else {
                 TraceTick::No
             },
+            &mut callables,
         )?;
         Ok(Self { caller, tick })
     }
@@ -80,7 +84,77 @@ impl<'a> BehaviorTreeRuntime<'a> {
     }
 }
 
+/// A behavior tree lowered onto a caller: every node's tick function registered
+/// as an engine callable, ready to tick — **one tick at a time** (one arora
+/// runtime tick is one behavior-tree tick). Holds the tree (its variable cells
+/// back the registered ticks) and the callable ids, so the registration can be
+/// [`unregister`](Self::unregister)ed when the lowering is replaced — without
+/// it, every re-lowering would leak its callables in the engine.
+pub struct LoweredTree {
+    root: TickId,
+    callables: Vec<CallableId>,
+    /// Keeps the tree's shared cells alive for the registered tick functions.
+    tree: BehaviorTree,
+}
+
+/// Lower `tree` onto `caller`: register every node's tick function and return
+/// the ready-to-tick [`LoweredTree`].
+pub fn lower_behavior_tree(
+    tree: BehaviorTree,
+    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    caller: &mut dyn CallBridge,
+    trace: bool,
+) -> Result<LoweredTree, BehaviorTreeError> {
+    let mut callables = Vec::new();
+    let root = setup_tick_function(
+        tree.root.clone(),
+        &tree.node_index,
+        function_index,
+        tree.variables.clone(),
+        tree.node_arg_variables.clone(),
+        caller,
+        if trace {
+            TraceTick::YesAll
+        } else {
+            TraceTick::No
+        },
+        &mut callables,
+    )?;
+    Ok(LoweredTree {
+        root,
+        callables,
+        tree,
+    })
+}
+
+impl LoweredTree {
+    /// Tick the tree **once**: every reactive pass drills through the ready
+    /// children and returns the root's status — [`Status::Running`] means "see
+    /// you next tick", never "spin".
+    pub fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
+        self.root.tick(caller)
+    }
+
+    /// The lowered tree, for callers that inspect its cells.
+    pub fn tree(&self) -> &BehaviorTree {
+        &self.tree
+    }
+
+    /// Unregister every callable this lowering registered. Call when replacing
+    /// the lowering (an edit re-lowers); the engine forgets the old ticks.
+    pub fn unregister(&self, caller: &mut dyn CallBridge) {
+        for callable in &self.callables {
+            caller.arora_unregister_callable(callable);
+        }
+    }
+}
+
 /// Runs a behavior tree until it reaches the status success or failure.
+///
+/// A convenience for trees that terminate (tests, scripts): the reactive model
+/// is one tick per runtime tick ([`LoweredTree::tick`]); this drains ticks
+/// back-to-back instead, so a tree waiting on outside state (e.g. the `run`
+/// builtin) would spin forever here.
 pub fn run_behavior_tree(
     behavior: &BehaviorTree,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
@@ -101,6 +175,7 @@ enum TraceTick {
     No,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn setup_tick_function(
     node: Rc<Node>,
     node_index: &HashMap<Uuid, Rc<Node>>,
@@ -109,6 +184,9 @@ fn setup_tick_function(
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
+    // Every callable registered on behalf of this (sub)tree, collected so the
+    // registration can be undone when the lowering is replaced.
+    callables: &mut Vec<CallableId>,
 ) -> Result<TickId, BehaviorTreeError> {
     let nof_children = node
         .children
@@ -133,6 +211,7 @@ fn setup_tick_function(
                 node_arg_variables.clone(),
                 caller,
                 trace,
+                callables,
             )?;
             children_ticks.push(tick_function_with_id);
         }
@@ -146,9 +225,11 @@ fn setup_tick_function(
         trace,
     });
     let callable_id = caller.arora_register_callable(tick_function);
-    Ok(TickId {
+    let tick = TickId {
         callable_id: callable_id.id,
-    })
+    };
+    callables.push(callable_id);
+    Ok(tick)
 }
 
 /// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
@@ -228,6 +309,66 @@ fn tick_builtin(
             } else {
                 Status::Running
             }
+        }
+        RUN_CALL_FUNCTION_ID => {
+            // A task-run call leaf: the full [`Call`] travels as one literal
+            // parameter — introspectable data in the graph — and dispatches
+            // straight through the caller, so any callable target runs (no
+            // function-index entry required).
+            let call_variable = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: RUN_CALL_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?;
+            let call: Call = arora_types::value_serde::from_value(call_variable.get_or_unit())
+                .map_err(|e| BehaviorTreeError::InconsistentTreeError {
+                    message: format!("run-call node {}: malformed call: {e}", node.id),
+                })?;
+            let result = caller
+                .arora_call(call)
+                .map_err(BehaviorTreeError::CallError)?;
+            // A non-status return is a clean success: the call ran and produced
+            // a value, and there is nothing to keep ticking for.
+            result.ret.try_into().unwrap_or(Status::Success)
+        }
+        RUN_STATUS_FUNCTION_ID => {
+            // The task-run status decorator: forwards its one child's status,
+            // mirroring it onto the bound status output — a store key under the
+            // Direct convention, where a run's observers watch it. Latches at
+            // terminal: a finished run is inert (never re-invoked) until its
+            // fragment is pruned.
+            let latch = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: RUN_STATUS_LATCH_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?;
+            if let Ok(latched) = Status::try_from(latch.get_or_unit()) {
+                if latched != Status::Running {
+                    return Ok(Some(latched));
+                }
+            }
+            let child = child_tick_ids
+                .first()
+                .ok_or(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("run-status decorator {} needs one child", node.id),
+                })?;
+            let status = child.tick(caller)?;
+            let out = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: RUN_STATUS_OUT_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?;
+            out.set(status.clone().into());
+            if status != Status::Running {
+                latch.set(status.clone().into());
+            }
+            status
         }
         SEQ_STAR_FUNCTION_ID => {
             // The current index persists in the node's parameter variable, so

@@ -408,8 +408,9 @@ fn seq_star_resumes_and_resets() {
     );
 }
 
-/// A fresh interpreter is editable before anything is loaded — loading IS
-/// applying a diff onto an empty graph — and an empty graph ticks as idle.
+/// A fresh interpreter hosts the runner scaffold from the start: it accepts
+/// edits before anything is loaded, and with nothing grafted the runner ticks
+/// no children — the interpreter idles, always `Running`.
 #[test]
 fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
     use crate::behavior::BehaviorTreeInterpreter;
@@ -419,13 +420,16 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
 
     let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
 
-    // The empty (no-op) edit is valid: it starts an empty graph.
+    // The scaffold is there before anything is loaded: one runner node.
+    assert!(interpreter.graph().root.is_some(), "the runner is the root");
+    assert_eq!(interpreter.graph().nodes.len(), 1, "just the runner");
+
+    // The empty (no-op) edit is valid.
     interpreter
         .apply(GraphDiff::default())
         .expect("a fresh interpreter accepts a diff");
-    assert!(interpreter.graph().is_some(), "the edit started a graph");
 
-    // The re-lowering tick sees an empty graph: idle, stay installed.
+    // The re-lowering tick sees the bare runner: idle, stay installed.
     let store = SimpleDataStore::new();
     let (statuses, ticks) = (LeafStatuses::default(), LeafTicks::default());
     let mut bridge = TestBridge::new(statuses, ticks);
@@ -433,7 +437,7 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
         store: &store,
         call_bridge: &mut bridge,
     };
-    let status = interpreter.tick(&mut ctx).expect("an empty graph idles");
+    let status = interpreter.tick(&mut ctx).expect("the bare scaffold idles");
     assert_eq!(status, BehaviorStatus::Running);
 }
 
@@ -587,31 +591,130 @@ mod task_runs {
             .expect("halting an unknown run is a no-op");
     }
 
+    /// A loaded behavior and a spawned run coexist under the runner and both
+    /// advance each tick — the main behavior reactively re-evaluated, the run
+    /// invoked once per tick — and the interpreter is a standing policy: it
+    /// reports `Running` every tick, never `Done`.
     #[test]
-    fn a_run_keeps_a_run_once_main_tree_installed() {
-        // A main tree that would run-once-then-Done stays installed while a run
-        // is live, and it is not re-run each tick — the run keeps the
-        // interpreter alive without disturbing the tree's run-once semantics.
-        let leaf = Uuid::from_u128(0xE3);
-        let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Running);
+    fn a_loaded_behavior_and_a_run_tick_together() {
+        use arora_behavior::graph::{Graph, Node as GraphNode};
+
+        let main_leaf = Uuid::from_u128(0xE3);
+        let run_leaf = Uuid::from_u128(0xE4);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (main_leaf, Status::Success),
+            (run_leaf, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
         let store = SimpleDataStore::new();
         let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        interp.load(build(nodes::succeed()));
+
+        // The main behavior: a single run-call leaf graph invoking the
+        // scripted main_leaf (dispatched through arora_call, like a module
+        // action node would be).
+        let main_node = Uuid::from_u128(0x111);
+        let mut main = Graph::empty();
+        main.root = Some(main_node);
+        main.nodes.insert(
+            main_node,
+            GraphNode {
+                id: main_node,
+                function: crate::nodes::RUN_CALL_FUNCTION_ID,
+                inputs: vec![arora_behavior::graph::Io::new(
+                    crate::nodes::RUN_CALL_PARAM_ID,
+                )],
+                ..GraphNode::default()
+            },
+        );
+        main.links.push(arora_behavior::graph::Link::new(
+            arora_behavior::graph::Port::new(main_node, crate::nodes::RUN_CALL_PARAM_ID),
+            arora_behavior::graph::LinkSource::Literal(
+                arora_types::value_serde::to_value(&call_to(0xB0, main_leaf)).unwrap(),
+            ),
+        ));
+        interp.load(main).expect("the behavior loads");
         interp
-            .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
+            .spawn(call_to(0xB0, run_leaf), RunPolicy::Concurrent)
             .unwrap();
 
         let mut ctx = BehaviorContext {
             store: &store,
             call_bridge: &mut bridge,
         };
-        for _ in 0..3 {
+        for round in 1..=3u32 {
             assert_eq!(
                 interp.tick(&mut ctx).unwrap(),
                 BehaviorStatus::Running,
-                "a live run keeps the interpreter installed (never Done)"
+                "the interpreter is a standing policy (never Done)"
+            );
+            assert_eq!(
+                *ticks.borrow().get(&main_leaf).unwrap(),
+                round,
+                "the main behavior re-evaluates every tick"
+            );
+            assert_eq!(
+                *ticks.borrow().get(&run_leaf).unwrap(),
+                round,
+                "the run advances every tick"
             );
         }
+    }
+
+    /// The scaffold is introspectable the behavior tree's way: a spawned run is
+    /// two graph nodes under the runner (a run-status decorator, its status key
+    /// predetermined, over a run-call leaf carrying the call as literal data) —
+    /// and a halted run's fragment is pruned again.
+    #[test]
+    fn a_spawned_run_is_visible_in_the_graph_until_halted() {
+        let leaf = Uuid::from_u128(0xE5);
+        let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Running);
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+
+        let handle = interp
+            .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
+            .unwrap();
+        let graph = interp.graph();
+        let decorator = graph
+            .nodes
+            .values()
+            .find(|n| n.function == crate::nodes::RUN_STATUS_FUNCTION_ID)
+            .expect("the run's status decorator is in the graph");
+        assert_eq!(
+            decorator.outputs[0].predetermined_key.as_deref(),
+            Some(handle.status.path.as_str()),
+            "the decorator's status output is predetermined to the run's key"
+        );
+        let call_node = decorator.children.as_ref().unwrap()[0];
+        assert_eq!(
+            graph.nodes[&call_node].function,
+            crate::nodes::RUN_CALL_FUNCTION_ID,
+            "the decorator wraps the run-call leaf"
+        );
+        let root = graph.root.expect("the runner roots the scaffold");
+        assert!(
+            graph.nodes[&root]
+                .children
+                .as_ref()
+                .unwrap()
+                .contains(&decorator.id),
+            "the fragment hangs off the runner"
+        );
+
+        // Halt: the next tick prunes the fragment from the graph.
+        let mut ctx = BehaviorContext {
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+        interp.halt(handle.id).unwrap();
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(
+            interp.graph().nodes.len(),
+            1,
+            "only the runner remains after the halt pruned the fragment"
+        );
     }
 
     #[test]

@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
             .with_context(|| format!("could not read Groot file {}", path.display()))?;
         let store = SimpleDataStore::new();
         let mut tree = arora::BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        tree.load_groot(&xml, &store).map_err(|e| {
+        tree.load_groot(&xml).map_err(|e| {
             anyhow::anyhow!(
                 "failed to install behavior tree from {}: {e:?}",
                 path.display()

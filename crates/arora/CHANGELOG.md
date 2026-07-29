@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.9.0] - 2026-07-29
+
+### Changed
+
+- Re-pinned to `arora-behavior-tree` 7 — the runner-scaffold interpreter with
+  reactive tick semantics (one runtime tick is one behavior-tree tick). Task
+  runs and the loaded behavior are now tree structure under a parallel runner,
+  introspectable through the interpreter's graph; the interpreter is a standing
+  policy (always `Running`, never dropped). The binary's Groot flow loads with
+  `load_groot(xml)` — the tree binds to the device's store at its first tick.
+
 ## [9.6.0] - 2026-07-27
 
 ### Added

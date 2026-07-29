@@ -57,7 +57,8 @@ use crate::Arora;
 ///
 /// The Groot argument is a behavior-tree option: it loads into a
 /// [`BehaviorTreeInterpreter`](crate::BehaviorTreeInterpreter)
-/// (`load_groot`, against the store the device will tick) injected via
+/// (`load_groot`; the tree binds to the device's store at its first tick)
+/// injected via
 /// [`with_behavior_interpreter`](crate::AroraBuilder::with_behavior_interpreter)
 /// — the `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
