@@ -16,6 +16,7 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
+mod module_discovery;
 #[cfg(feature = "native")]
 pub mod operator;
 mod run;
@@ -62,7 +63,7 @@ use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Subscription};
-use arora_types::module::low::Header;
+use arora_types::module::low::{self, Header};
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
@@ -432,10 +433,42 @@ impl AroraBuilder {
     pub fn build(self) -> Result<Arora> {
         let mut engine = build_engine()?;
 
+        // The device's method index — what `DescribeMethods` serves. Both the
+        // loaded guest modules and the host modules fold their functions in.
+        let mut functions = self.functions;
+
         // Load each guest module into the engine so its exported functions
         // dispatch through the engine's `CallBridge`. Done before the store and
         // seams are wired: a module that fails to load fails the whole build.
+        // Its exports whose parameters and return are all primitives also join
+        // the method index, so `DescribeMethods` lists them — a guest header
+        // carries no type versions, so a non-primitive signature (which needs a
+        // registry to pin versions) dispatches but stays undiscoverable.
         for (header, executable) in self.modules {
+            let module_id = header.id;
+            for export in &header.exports {
+                let low::ExportSymbol::Function(function) = export;
+                match module_discovery::guest_function_signature(function) {
+                    Some(signature) => {
+                        functions.insert(
+                            function.id,
+                            ModuleFunction {
+                                module_id,
+                                function_id: function.id,
+                                function_name: function.name.clone(),
+                                function: signature,
+                            },
+                        );
+                    }
+                    None => log::warn!(
+                        "guest module {module_id} export '{}' ({}) has non-primitive parameter \
+                         or return types; it dispatches but is not discoverable via \
+                         DescribeMethods (no type registry to pin versions)",
+                        function.name,
+                        function.id
+                    ),
+                }
+            }
             load_module_from_parts(&mut engine, header, executable)
                 .map_err(|e| anyhow::anyhow!("failed to load module: {e}"))?;
         }
@@ -444,7 +477,6 @@ impl AroraBuilder {
         // engine's `CallBridge`, exactly like a loaded guest module's. Its
         // described functions join the method index, so introspection
         // (`DescribeMethods`) lists them with their signatures.
-        let mut functions = self.functions;
         for module in self.host_modules {
             for description in module.descriptions() {
                 functions.insert(
@@ -637,6 +669,51 @@ mod module_loading_tests {
             })
             .expect("call succeed() on the loaded module");
         assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A loaded guest module's primitive-typed exports join the method index
+    /// with frozen signatures, so `DescribeMethods` lists them — the guest
+    /// counterpart of `described_host_functions_join_the_method_index`
+    /// (ARORA-83). The test module exports only primitives, so all of them are
+    /// discoverable.
+    #[test]
+    fn guest_module_primitive_exports_join_the_method_index() {
+        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+
+        let header = test_module_header();
+        let module_id = header.id;
+        let arora = Arora::builder()
+            .with_module(header, WASM.to_vec())
+            .build()
+            .expect("build a device with a loaded wasm module");
+
+        let by_name = |name: &str| {
+            arora
+                .function_index
+                .values()
+                .find(|f| f.function_name == name)
+        };
+
+        // `cos(angle: f32) -> f32`: one f32 parameter, f32 return.
+        let cos = by_name("cos").expect("cos joined the method index");
+        assert_eq!(cos.module_id, module_id);
+        assert_eq!(cos.function.parameter_ordering.len(), 1);
+        let angle = &cos.function.parameters[&cos.function.parameter_ordering[0]];
+        assert_eq!(angle.name, "angle");
+        assert_eq!(angle.ty, FrozenTy::from(PrimitiveKind::F32));
+        assert_eq!(cos.function.return_ty, FrozenTy::from(PrimitiveKind::F32));
+
+        // `succeed() -> bool`: no parameters, boolean return.
+        let succeed = by_name("succeed").expect("succeed joined the method index");
+        assert!(succeed.function.parameter_ordering.is_empty());
+        assert_eq!(
+            succeed.function.return_ty,
+            FrozenTy::from(PrimitiveKind::Boolean)
+        );
+
+        // `add(a: f32, b: f32) -> f32`: two f32 parameters in order.
+        let add = by_name("add").expect("add joined the method index");
+        assert_eq!(add.function.parameter_ordering.len(), 2);
     }
 
     /// `with_host_module` registers a host-side module built from
