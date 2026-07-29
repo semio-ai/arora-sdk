@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "8.2.0"
+version = "8.3.0"
 dependencies = [
  "arora-types",
  "serde",
