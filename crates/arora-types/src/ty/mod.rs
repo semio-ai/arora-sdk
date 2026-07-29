@@ -102,6 +102,7 @@ lazy_static::lazy_static! {
     insert_scalar_id(&F32_ID);
     insert_scalar_id(&F64_ID);
     insert_scalar_id(&STRING_ID); // Technically not a scalar, but a primitive type at least.
+    insert_scalar_id(&UUID_ID); // Carried as a scalar; not (yet) walkable on the typed wire.
     types
   };
 
@@ -129,6 +130,7 @@ lazy_static::lazy_static! {
     insert_primitive_type(&F32_ID, "f32", "32-bit floating point decimal, a.k.a. \"float\"");
     insert_primitive_type(&F64_ID, "f64", "64-bit floating point decimal, a.k.a. \"double\"");
     insert_primitive_type(&STRING_ID, "str", "a string of u8 characters");
+    insert_primitive_type(&UUID_ID, "uuid", "a 128-bit universally unique identifier");
     types
   };
 }

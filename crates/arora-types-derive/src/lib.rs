@@ -68,13 +68,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
       .strip_prefix("r#")
       .unwrap_or(&fname_raw)
       .to_string();
-    let field_id_expr = id_expr(
-      parse_arora_meta(&field.attrs)?.id,
-      &fname_str,
-      name_hash_mode,
-      field.span(),
-    )?;
-    let (type_ref_expr, nested) = type_ref_for(&field.ty)?;
+    let field_meta = parse_arora_meta(&field.attrs)?;
+    let field_id_expr = id_expr(field_meta.id, &fname_str, name_hash_mode, field.span())?;
+    // A `#[arora(keyvalue)]` field is an opaque bag of dynamically-typed arora
+    // values: it references the well-known KeyValue type by id and has no nested
+    // user type to register, whatever its Rust type happens to be.
+    let (type_ref_expr, nested) = if field_meta.keyvalue {
+      (
+        quote! { arora_types::module::low::TypeRef::Scalar { id: *arora_types::ty::KEY_VALUE_ID } },
+        None,
+      )
+    } else {
+      type_ref_for(&field.ty)?
+    };
     field_entries.push(quote! {
       (
         #field_id_expr,
@@ -151,12 +157,16 @@ fn id_expr(
   }
 }
 
-/// A parsed `#[arora(…)]` attribute: an explicit `id`, an explicit `name`, or
-/// both.
+/// A parsed `#[arora(…)]` attribute: an explicit `id`, an explicit `name`, a
+/// `keyvalue` marker, or a combination.
 #[derive(Default)]
 struct AroraMeta {
   id: Option<(String, Span)>,
   name: Option<String>,
+  /// A `#[arora(keyvalue)]` field: its schema is the well-known KeyValue type,
+  /// its contents dynamically typed. Used for a field that carries arbitrary
+  /// arora values whose types are not known statically (e.g. a call's args).
+  keyvalue: bool,
 }
 
 /// Parse `#[arora(id = "…", name = "…")]` from an attribute list. `id` pins the
@@ -179,8 +189,13 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
         let lit: syn::LitStr = meta.value()?.parse()?;
         parsed.name = Some(lit.value());
         Ok(())
+      } else if meta.path.is_ident("keyvalue") {
+        parsed.keyvalue = true;
+        Ok(())
       } else {
-        Err(meta.error("unknown `arora` attribute (expected `id = \"…\"` or `name = \"…\"`)"))
+        Err(meta.error(
+          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, or `keyvalue`)",
+        ))
       }
     })?;
   }

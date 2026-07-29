@@ -386,7 +386,11 @@ fn write_by_ref<W: ValueWriter>(
 ) -> Result<()> {
   match type_ref {
     TypeRef::Scalar { id } => {
-      if ty::PRIMITIVE_IDS.contains(id) {
+      if *id == *ty::UUID_ID {
+        // A uuid is a well-known scalar the schema can name, but the writer trait
+        // has no uuid primitive yet — so a uuid value has no typed wire form.
+        err("uuid values are not supported by the typed wire walk yet")
+      } else if ty::PRIMITIVE_IDS.contains(id) {
         write_scalar(*id, value, writer)
       } else {
         let nested = registry
@@ -409,7 +413,10 @@ fn read_by_ref<R: ValueReader>(
 ) -> Result<Value> {
   match type_ref {
     TypeRef::Scalar { id } => {
-      if ty::PRIMITIVE_IDS.contains(id) {
+      if *id == *ty::UUID_ID {
+        // Symmetric with the writer: no uuid primitive on the reader trait yet.
+        err("uuid values are not supported by the typed wire walk yet")
+      } else if ty::PRIMITIVE_IDS.contains(id) {
         read_scalar(*id, reader)
       } else {
         let nested = registry

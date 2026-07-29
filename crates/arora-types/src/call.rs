@@ -8,14 +8,21 @@ use crate::value::{StructureField, Value};
 
 /// A call is described like a structure in arora engine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "derive", derive(crate::AroraType))]
+#[cfg_attr(feature = "derive", arora(id = "9fe95b4c-08f9-48cf-8c10-99686e7b2afd"))]
 pub struct Call {
   /// The ID of the module where to find the function ID.
   /// If absent, look for it locally.
+  #[cfg_attr(feature = "derive", arora(id = "8c4633be-578a-405e-9c58-75c3bbf194be"))]
   #[serde(default)]
   pub module_id: Option<Uuid>,
   /// The function ID to call.
+  #[cfg_attr(feature = "derive", arora(id = "1bd7f3de-6413-45b2-8813-8a2f415dd29d"))]
   pub id: Uuid,
-  /// Arguments to call the functions with.
+  /// Arguments to call the function with. Their arora types are not known
+  /// statically — each argument names a field id and carries a value of any
+  /// type — so on the schema this is an opaque key/value bag.
+  #[cfg_attr(feature = "derive", arora(id = "7852eaaf-23e9-4762-a206-cc4b9c9984a7", keyvalue))]
   #[serde(default)]
   pub args: Vec<StructureField>,
 }
@@ -140,6 +147,38 @@ mod tests {
       Uuid::from_str("b213a552-77ad-465a-a26d-352e8eccfd63").unwrap()
     );
     assert_eq!(call.args.len(), 2);
+  }
+
+  /// A `Call` describes itself as an arora structure: its module/function ids
+  /// are uuids, and its args are an opaque key/value bag (arg values are
+  /// dynamically typed, so they carry no static schema).
+  #[cfg(feature = "derive")]
+  #[test]
+  fn call_arora_type_shapes_its_fields() {
+    use crate::module::low::TypeRef;
+    use crate::ty::low::TypeKind;
+    use crate::AroraType;
+
+    let ty = Call::arora_type();
+    let TypeKind::Structure(structure) = &ty.kind else {
+      panic!("Call is a structure type");
+    };
+    let field = |id: &str| structure.fields[&Uuid::from_str(id).unwrap()].type_ref.clone();
+    // module_id: an optional uuid.
+    assert!(matches!(
+      field("8c4633be-578a-405e-9c58-75c3bbf194be"),
+      TypeRef::Option { id } if id == *crate::ty::UUID_ID
+    ));
+    // id: a scalar uuid.
+    assert!(matches!(
+      field("1bd7f3de-6413-45b2-8813-8a2f415dd29d"),
+      TypeRef::Scalar { id } if id == *crate::ty::UUID_ID
+    ));
+    // args: an opaque key/value bag.
+    assert!(matches!(
+      field("7852eaaf-23e9-4762-a206-cc4b9c9984a7"),
+      TypeRef::Scalar { id } if id == *crate::ty::KEY_VALUE_ID
+    ));
   }
 
   /// Proves the call-bridge interface stands on its own: a module-shaped
