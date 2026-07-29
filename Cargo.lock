@@ -287,7 +287,7 @@ dependencies = [
  "futures",
  "log",
  "rand 0.9.4",
- "ros2-client-multi-rmw 0.11.0",
+ "ros2-client-multi-rmw",
  "serde",
  "serde_json",
  "serial_test",
@@ -428,7 +428,7 @@ dependencies = [
  "log",
  "rand 0.9.4",
  "reqwest",
- "ros2-client-multi-rmw 0.10.2",
+ "ros2-client-multi-rmw",
  "rustls 0.23.41",
  "serde",
  "serde_json",
@@ -548,7 +548,7 @@ dependencies = [
  "arora-types",
  "proc-macro2",
  "quote",
- "ros2-client-multi-rmw 0.10.2",
+ "ros2-client-multi-rmw",
  "serde",
  "serde-big-array",
  "serde_json",
@@ -5251,7 +5251,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -5739,43 +5739,9 @@ dependencies = [
 
 [[package]]
 name = "ros2-client-multi-rmw"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5814da32f7252ff0d69e8dd5cafd1dfef3651466a0b93e7a2320560c12c8ea2"
-dependencies = [
- "async-channel",
- "bstr",
- "byteorder",
- "bytes",
- "cdr-encoding 0.10.2",
- "cdr-encoding-size",
- "chrono",
- "clap 4.6.1",
- "futures",
- "itertools 0.14.0",
- "lazy_static",
- "libc",
- "log",
- "mio 0.6.23",
- "mio-extras",
- "nom 8.0.0",
- "pin-utils",
- "rustdds",
- "serde",
- "serde_repr",
- "sha2 0.10.9",
- "tracing",
- "uuid",
- "widestring",
- "xxhash-rust",
- "zenoh",
- "zenoh-ext",
-]
-
-[[package]]
-name = "ros2-client-multi-rmw"
 version = "0.11.0"
-source = "git+https://github.com/semio-ai/ros2-client.git?branch=feat%2Fraw-action-server#fe05e3f38ceb897eca7dbc3b49f2b30625029c66"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd046a2d7fabf807d119dc2315e020e9d4e5a69e827a6c71990f6ebfb5751adc"
 dependencies = [
  "async-channel",
  "bstr",

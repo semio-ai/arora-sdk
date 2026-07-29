@@ -29,7 +29,7 @@ thiserror = "2"
 # wasm build) pulls none of the DDS/Zenoh stack, which is why `interop` is
 # opt-in. 0.10.1 is the first release carrying `type_description` (used here) and
 # the `publish_raw`/`take_raw` runtime-typed pub/sub the bridge drives.
-ros2-client = { package = "ros2-client-multi-rmw", version = "0.10.1", default-features = false, optional = true }
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.11.0", default-features = false, optional = true }
 
 [features]
 default = []

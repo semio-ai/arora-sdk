@@ -84,8 +84,4 @@ debug = 1
 [patch.crates-io]
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
-# TEMPORARY: the raw action server (semio-ai/ros2-client#36) until it merges and
-# release.yml auto-publishes 0.11.0 — then drop this patch and let the
-# `arora-bridge-ros2` pin resolve from crates.io.
-ros2-client-multi-rmw = { git = "https://github.com/semio-ai/ros2-client.git", branch = "feat/raw-action-server" }
 
