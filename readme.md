@@ -63,6 +63,18 @@ arora-types ───────────────────── the 
 
 The key seam is the **`CallBridge`** (in `arora-types`): the engine *implements* it (it can call any loaded module function), and the behavior tree *consumes* it (it calls functions without knowing or caring who provides them). That decoupling is why `arora-behavior-tree` can be used on its own, against any `CallBridge`.
 
+### ROS 2 & ROS4HRI
+
+ROS 2 plugs in at either side of the device — as a bridge (the remote) or as a HAL (the device's own hardware):
+
+| Crate | Seam | What it is |
+|---|---|---|
+| [`arora-bridge-ros2`](crates/arora-bridge-ros2/README.md) | bridge | ROS 2 as the remote: device keys as topics, methods as ROS 2 services, task runs as ROS 2 actions. |
+| [`arora-hal-ros2`](crates/arora-hal-ros2) | HAL | ROS 2 as the device's own hardware. |
+| [`arora-msgs-ros2`](crates/arora-msgs-ros2/README.md) | — | The ROS 2 message vocabulary: generated types, a registry, a schema-driven CDR codec, and REP-2016 type hashes — including the `hri_msgs` / ROS4HRI family. |
+
+[ROS4HRI](https://wiki.ros.org/hri), the human-robot-interaction message standard, rides these: `arora-msgs-ros2` carries the `hri_msgs` types and `arora-bridge-ros2` is where a device exposes them. Vizij builds its face standard on this vocabulary — see [vizij-rs's ROS4HRI docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md). (Typed `hri_msgs`-topic exposure with a `ros4hri` naming profile is planned; today the bridge's key topics are `std_msgs` scalars.)
+
 ## Getting started
 
 ```sh
