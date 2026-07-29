@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.11.0] - 2026-07-30
+
+### Added
+
+- Loaded guest (wasm) modules become discoverable: each export whose parameters
+  and return are all primitives joins the device's method index with a frozen
+  signature, so `DescribeMethods` lists it — the guest counterpart of 9.10's
+  host-module discoverability. A guest header carries no type versions, so an
+  export with a non-primitive type dispatches but stays undiscoverable (it
+  needs a registry to pin versions); it is logged at build.
+
 ## [9.10.0] - 2026-07-29
 
 ### Added
