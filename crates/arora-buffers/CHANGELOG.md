@@ -4,6 +4,16 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-07-29
+
+### Fixed
+
+- `froto_serde`: unseeded enums write the name-carrying form (a unit variant
+  as its bare name string; any other as one keyvalue entry keyed by the
+  variant name), in lockstep with `arora-types`' `value_serde` — the two
+  backends stay byte-identical. Bytes written in the old wire-enumeration form
+  still decode where the enum type is known.
+
 ## [2.0.0] - 2026-07-20
 
 ### Breaking

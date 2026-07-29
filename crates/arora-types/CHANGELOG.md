@@ -4,6 +4,20 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.4.0] - 2026-07-29
+
+### Fixed
+
+- `value_serde`: unseeded enums now travel **name-carrying** — a unit variant
+  as its bare name string, any other variant as one `KeyValue` entry keyed by
+  the variant name (completing what ARORA-80 ③ did for structs). The old form
+  hashed the names into an `Enumeration`, which serde's tagged-enum
+  representations (e.g. `FrozenTy`'s adjacent tagging) could not decode: the
+  tag routes through `deserialize_any`, where a hash is unrecognisable — so
+  `DescribeMethods`' `Vec<MethodSignature>` failed to round-trip the moment a
+  device had any method to describe. Values written in the old form still
+  decode where the enum type is known.
+
 ## [2.1.0] - 2026-07-24
 
 ### Added

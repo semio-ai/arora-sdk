@@ -88,10 +88,10 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
     type SerializeSeq = SeqBytes<'w>;
     type SerializeTuple = SeqBytes<'w>;
     type SerializeTupleStruct = SeqBytes<'w>;
-    type SerializeTupleVariant = SeqBytes<'w>;
+    type SerializeTupleVariant = VariantBytes<'w>;
     type SerializeMap = MapBytes<'w>;
     type SerializeStruct = StructBytes<'w>;
-    type SerializeStructVariant = StructBytes<'w>;
+    type SerializeStructVariant = VariantStructBytes<'w>;
 
     fn serialize_bool(self, v: bool) -> Result<(), Error> {
         self.writer.add_boolean(v);
@@ -170,15 +170,15 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
     }
     fn serialize_unit_variant(
         self,
-        name: &'static str,
+        _name: &'static str,
         _index: u32,
         variant: &'static str,
     ) -> Result<(), Error> {
-        self.writer.add_enumeration_value(
-            gen_uuid_from_str(name).as_bytes(),
-            gen_uuid_from_str(variant).as_bytes(),
-        );
-        self.writer.add_unit();
+        // A bare string names a unit variant — the name-carrying form an
+        // unseeded reader (and serde's tagged-enum representations, which
+        // route the tag through `deserialize_any`) can recognise; a name-hash
+        // cannot be inverted there.
+        self.writer.add_string(variant);
         Ok(())
     }
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
@@ -195,13 +195,15 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
         variant: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        self.writer.add_enumeration_value(
-            gen_uuid_from_str(name).as_bytes(),
-            gen_uuid_from_str(variant).as_bytes(),
+        // One keyvalue entry, keyed by the variant name, carrying the payload.
+        let payload =
+            value_serde::to_value(value).map_err(|e| ser::Error::custom(e.to_string()))?;
+        write_keyvalue(
+            self.writer,
+            gen_uuid_from_str(name),
+            vec![(variant.to_string(), payload)],
         );
-        value.serialize(BytesSerializer {
-            writer: self.writer,
-        })
+        Ok(())
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<SeqBytes<'w>, Error> {
         let len =
@@ -227,12 +229,13 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
         _index: u32,
         variant: &'static str,
         len: usize,
-    ) -> Result<SeqBytes<'w>, Error> {
-        self.writer.add_enumeration_value(
-            gen_uuid_from_str(name).as_bytes(),
-            gen_uuid_from_str(variant).as_bytes(),
-        );
-        self.serialize_seq(Some(len))
+    ) -> Result<VariantBytes<'w>, Error> {
+        Ok(VariantBytes {
+            writer: self.writer,
+            type_name: name,
+            variant,
+            items: Vec::with_capacity(len),
+        })
     }
     fn serialize_map(self, _len: Option<usize>) -> Result<MapBytes<'w>, Error> {
         // Entries buffer as Values so they can sort by key — the deterministic
@@ -259,16 +262,11 @@ impl<'w> ser::Serializer for BytesSerializer<'w> {
         _index: u32,
         variant: &'static str,
         len: usize,
-    ) -> Result<StructBytes<'w>, Error> {
-        // The enumeration carries the variant tag; its payload is an id-less
-        // struct, so it travels as a keyvalue under the hash of the variant name.
-        self.writer.add_enumeration_value(
-            gen_uuid_from_str(name).as_bytes(),
-            gen_uuid_from_str(variant).as_bytes(),
-        );
-        Ok(StructBytes {
+    ) -> Result<VariantStructBytes<'w>, Error> {
+        Ok(VariantStructBytes {
             writer: self.writer,
-            id: gen_uuid_from_str(variant),
+            type_name: name,
+            variant,
             fields: Vec::with_capacity(len),
         })
     }
@@ -403,7 +401,46 @@ impl ser::SerializeStruct for StructBytes<'_> {
     }
 }
 
-impl ser::SerializeStructVariant for StructBytes<'_> {
+/// A tuple variant's items, buffered as `Value`s: the payload travels as one
+/// value array inside the variant-named keyvalue entry.
+struct VariantBytes<'w> {
+    writer: &'w mut BufferWriter,
+    type_name: &'static str,
+    variant: &'static str,
+    items: Vec<arora_types::value::Value>,
+}
+
+impl ser::SerializeTupleVariant for VariantBytes<'_> {
+    type Ok = ();
+    type Error = Error;
+    fn serialize_field<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
+        self.items
+            .push(value_serde::to_value(value).map_err(|e| ser::Error::custom(e.to_string()))?);
+        Ok(())
+    }
+    fn end(self) -> Result<(), Error> {
+        write_keyvalue(
+            self.writer,
+            gen_uuid_from_str(self.type_name),
+            vec![(
+                self.variant.to_string(),
+                arora_types::value::Value::ArrayValue(self.items),
+            )],
+        );
+        Ok(())
+    }
+}
+
+/// A struct variant's fields, buffered as `Value`s: the payload travels as an
+/// inner keyvalue inside the variant-named entry.
+struct VariantStructBytes<'w> {
+    writer: &'w mut BufferWriter,
+    type_name: &'static str,
+    variant: &'static str,
+    fields: Vec<(String, arora_types::value::Value)>,
+}
+
+impl ser::SerializeStructVariant for VariantStructBytes<'_> {
     type Ok = ();
     type Error = Error;
     fn serialize_field<T: Serialize + ?Sized>(
@@ -411,10 +448,30 @@ impl ser::SerializeStructVariant for StructBytes<'_> {
         key: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        ser::SerializeStruct::serialize_field(self, key, value)
+        self.fields.push((
+            key.to_string(),
+            value_serde::to_value(value).map_err(|e| ser::Error::custom(e.to_string()))?,
+        ));
+        Ok(())
     }
     fn end(self) -> Result<(), Error> {
-        ser::SerializeStruct::end(self)
+        let mut inner =
+            arora_types::keyvalue::KeyValue::new_with_id(gen_uuid_from_str(self.variant));
+        for (name, value) in self.fields {
+            let id = gen_uuid_from_str(&name);
+            inner.set_field(
+                arora_types::keyvalue::KeyValueField::new_with_id_and_option(name, id, Some(value)),
+            );
+        }
+        write_keyvalue(
+            self.writer,
+            gen_uuid_from_str(self.type_name),
+            vec![(
+                self.variant.to_string(),
+                arora_types::value::Value::KeyValue(inner),
+            )],
+        );
+        Ok(())
     }
 }
 
@@ -556,6 +613,40 @@ impl<'de> de::Deserializer<'de> for BytesDeserializer<'de, '_> {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.reader.next_type() {
+            // The name-carrying forms: a bare string names a unit variant; a
+            // single-entry keyvalue keys the payload by the variant name.
+            Some(TYPE_STRING) => {
+                let name = self.reader.get_string();
+                let variant = variants
+                    .iter()
+                    .find(|candidate| **candidate == name)
+                    .ok_or_else(|| {
+                        de::Error::custom(format!("variant `{name}` matches none of {variants:?}"))
+                    })?;
+                visitor.visit_enum(de::value::StrDeserializer::new(variant))
+            }
+            Some(TYPE_MAP) => {
+                let (_id, count) = self.reader.get_map();
+                if count != 1 {
+                    return Err(de::Error::custom(format!(
+                        "an enum keyvalue carries exactly one variant entry, got {count}"
+                    )));
+                }
+                let name = self.reader.get_map_field_key();
+                let _field_id = self.reader.get_uuid();
+                let variant = variants
+                    .iter()
+                    .find(|candidate| **candidate == name)
+                    .ok_or_else(|| {
+                        de::Error::custom(format!("variant `{name}` matches none of {variants:?}"))
+                    })?;
+                visitor.visit_enum(EnumBytesAccess {
+                    variant,
+                    reader: self.reader,
+                })
+            }
+            // Bytes written before the name-carrying form: the variant tag as
+            // a wire enumeration whose ids hash the names.
             Some(TYPE_ENUMERATION) => {
                 let _type_id = self.reader.get_structure_field();
                 let variant_id = self.reader.get_enumeration_value_raw();
