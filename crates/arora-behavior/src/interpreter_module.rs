@@ -2,7 +2,7 @@
 //! conventions under which the runtime exposes its one
 //! [`BehaviorInterpreter`](crate::BehaviorInterpreter) on the engine.
 //!
-//! The runtime assembles a function module under [`ID`] (the engine's generic
+//! The runtime assembles a host module under [`ID`] (the engine's generic
 //! module builder) with functions attached to the interpreter's entry points:
 //!
 //! - [`LOAD`] → [`BehaviorInterpreter::load`](crate::BehaviorInterpreter::load):
