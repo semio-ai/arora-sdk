@@ -78,7 +78,12 @@ async fn inbound_topic_becomes_update_command() {
     let publisher = pub_node
         .create_publisher::<msg_types::Float64>(&pub_topic, None)
         .expect("create publisher");
-    publisher.wait_for_subscription(&pub_node).await;
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the test publisher");
 
     tokio::spawn(async move {
         loop {
@@ -89,29 +94,32 @@ async fn inbound_topic_becomes_update_command() {
         }
     });
 
-    // Await the Update command on the endpoint's inbound stream, skipping the
-    // initial `DataRequested(true)` signal, within a timeout.
-    let command = tokio::time::timeout(Duration::from_secs(10), async {
+    // Await the Update on the inbound stream. The stream also carries the
+    // bridge's startup `DescribeMethods` command (from service discovery) and
+    // the initial `DataRequested(true)` signal, in a timing-dependent order — so
+    // skip everything that is not the Update we published, rather than assuming
+    // the Update is the first command to arrive.
+    let change = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             match inbound.next().await {
-                Some(Inbound::Command(cmd)) => break cmd,
-                Some(_) => {}
-                None => panic!("the inbound stream ended before a command arrived"),
+                Some(Inbound::Command(cmd)) => {
+                    if let BridgeOp::Update(change) = cmd.op {
+                        break change;
+                    }
+                    // A non-Update command (e.g. DescribeMethods) — keep waiting.
+                }
+                Some(_) => {} // DataRequested and other non-command signals
+                None => panic!("the inbound stream ended before an Update arrived"),
             }
         }
     })
     .await
-    .expect("timed out waiting for a command");
+    .expect("timed out waiting for an Update command");
 
-    match &command.op {
-        BridgeOp::Update(change) => {
-            assert_eq!(
-                change.set.get("face/mouth/open"),
-                Some(&Some(Value::F64(0.75)))
-            );
-        }
-        other => panic!("expected Update, got {other:?}"),
-    }
+    assert_eq!(
+        change.set.get("face/mouth/open"),
+        Some(&Some(Value::F64(0.75)))
+    );
 }
 
 /// `try_send` publishes a changed key to its topic, where a separate node
@@ -158,7 +166,18 @@ async fn send_data_reaches_topic_subscriber() {
 
     let received = tokio::select! {
         _ = &mut publisher => unreachable!("publisher loop never returns"),
-        msg = tokio::time::timeout(Duration::from_secs(10), subscription.async_take()) => msg,
+        result = async {
+            // Wait for the subscriber to discover the bridge's publisher (created
+            // on the first `try_send`, driven by the loop above) before timing the
+            // delivery — bounded, so a discovery failure fails fast, never hangs.
+            tokio::time::timeout(
+                Duration::from_secs(30),
+                subscription.wait_for_publisher(&sub_node),
+            )
+            .await
+            .expect("timed out waiting for the subscriber to discover the bridge publisher");
+            tokio::time::timeout(Duration::from_secs(10), subscription.async_take()).await
+        } => result,
     };
 
     let (msg, _info) = received
