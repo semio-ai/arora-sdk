@@ -11,14 +11,16 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use arora_msgs_ros2::{cdr, package_and_type, Ros2Registry};
 use arora_types::data::{Key, StateChange};
+use arora_types::ty::low;
 use arora_types::value::{Type, Value};
 use futures::stream::unfold;
 use futures::Stream;
 use log::warn;
 #[cfg(feature = "zenoh")]
 use ros2_client::QosProfile;
-use ros2_client::{Name, Node, Publisher};
+use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher};
 #[cfg(feature = "dds")]
 use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::time::{sleep, Duration};
@@ -263,6 +265,97 @@ fn make_publisher<M: MessageType>(
         .map_err(|e| format!("failed to create publisher for {topic_name}: {e:?}"))
 }
 
+/// A runtime-typed key publisher: publishes a key's value as a **registered ROS
+/// message** (e.g. `hri_msgs/Expression`) rather than a `std_msgs` scalar.
+///
+/// The message type is not a compile-time struct — it is looked up by ROS name
+/// in the shared registry, so any registered message works. Each value is
+/// encoded against that message's runtime `low::Type` through the same CDR
+/// codec the service and action planes use ([`arora_msgs_ros2::cdr`]) and
+/// written to a raw publisher. This is how a device key rides a typed ROS4HRI
+/// message end to end.
+pub struct TypedKeyPublisher {
+    publisher: RawPublisher,
+    /// The message's runtime type description; the value is encoded against it.
+    message_type: low::Type,
+    /// The registry holding the message type's dependency graph, needed to
+    /// encode nested types.
+    registry: Arc<Ros2Registry>,
+    /// The ROS message name, for diagnostics.
+    ros_type: String,
+}
+
+impl TypedKeyPublisher {
+    /// Encode `value` as this publisher's ROS message and publish it. A value
+    /// that does not fit the message's type is logged and dropped — the same
+    /// non-fatal contract as [`KeyPublisher::publish`].
+    pub async fn publish(&self, value: &Value) {
+        match cdr::encode(&self.message_type, self.registry.types(), value) {
+            Ok(bytes) => {
+                let _ = self.publisher.async_publish(&bytes).await;
+            }
+            Err(e) => warn!(
+                "could not encode a value as '{}' ({} bytes of type description): {e}",
+                self.ros_type,
+                self.message_type.name.len()
+            ),
+        }
+    }
+}
+
+/// Create a raw publisher for `ros_type` (a registered ROS message name, e.g.
+/// `hri_msgs/Expression`) on `topic_name`. The topic name is used verbatim, so
+/// a caller may pass an absolute ROS name (e.g. `/robot_face/expression`) to
+/// escape the `/{namespace}/keys/…` convention.
+fn make_typed_publisher(
+    node: &mut Node,
+    topic_name: &str,
+    ros_type: &str,
+    registry: Arc<Ros2Registry>,
+) -> Result<TypedKeyPublisher, String> {
+    let message_type = registry
+        .get_by_name(ros_type)
+        .ok_or_else(|| format!("unknown ROS message type '{ros_type}'"))?
+        .clone();
+    let (package, type_name) = package_and_type(ros_type)
+        .ok_or_else(|| format!("malformed ROS message name '{ros_type}'"))?;
+    let ros_name =
+        Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
+    let message_type_name = MessageTypeName::new(package, type_name);
+    #[cfg(feature = "dds")]
+    let topic = node
+        .create_topic(&ros_name, message_type_name, &DEFAULT_PUBLISHER_QOS)
+        .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
+    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
+    #[cfg(feature = "zenoh")]
+    let topic = node.create_topic(
+        &ros_name,
+        message_type_name,
+        &QosProfile::publisher_default(),
+    );
+    let publisher = node
+        .create_raw_publisher(&topic, None)
+        .map_err(|e| format!("failed to create raw publisher for {topic_name}: {e:?}"))?;
+    Ok(TypedKeyPublisher {
+        publisher,
+        message_type,
+        registry,
+        ros_type: ros_type.to_string(),
+    })
+}
+
+/// Create a [`TypedKeyPublisher`] for a key's declared ROS message type. `topic`
+/// is the topic name (an absolute ROS name, or the `/{namespace}/keys/{path}`
+/// default the caller resolves) and `ros_type` the registered message name.
+pub fn setup_typed_key_publisher(
+    node: &mut Node,
+    topic: &str,
+    ros_type: &str,
+    registry: Arc<Ros2Registry>,
+) -> Result<TypedKeyPublisher, String> {
+    make_typed_publisher(node, topic, ros_type, registry)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +400,41 @@ mod tests {
         let json = serde_json::to_string(&value).unwrap();
         let back: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value, back);
+    }
+
+    /// A typed output resolves its ROS message from the same registry the
+    /// bridge builds and encodes a device value against it — the publisher's
+    /// path. Proven here on `hri_msgs/Expression`: an Expression value encodes
+    /// and decodes byte-for-byte through the shared codec, so a key declared
+    /// `hri_msgs/Expression` rides a real ROS4HRI message.
+    #[test]
+    fn a_typed_output_value_round_trips_as_its_ros_message() {
+        use arora_msgs_ros2::{builtin_interfaces, hri_msgs, std_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let message_type = registry
+            .get_by_name("hri_msgs/Expression")
+            .expect("hri_msgs/Expression is registered")
+            .clone();
+
+        let expression = hri_msgs::Expression {
+            header: std_msgs::Header {
+                stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                frame_id: "face".into(),
+            },
+            expression: "happy".into(),
+            valence: 0.8,
+            arousal: 0.2,
+            confidence: 1.0,
+        };
+        let (expr_ty, expr_reg) = <hri_msgs::Expression as AroraType>::arora_type_with_registry();
+        let value = to_value_seeded(&expression, &expr_ty, &expr_reg).expect("expression to value");
+
+        let bytes =
+            cdr::encode(&message_type, registry.types(), &value).expect("encode as Expression");
+        let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+        assert_eq!(decoded, value);
     }
 }

@@ -4,6 +4,21 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.3.0] - 2026-07-30
+
+### Added
+
+- Typed output topics (ARORA-85): a device key can be declared to publish as a
+  registered ROS message rather than a `std_msgs` scalar —
+  `Ros2BridgeConfig::with_typed_output(path, ros_type)` (and
+  `with_typed_output_on(path, ros_type, topic)` for an absolute topic name).
+  The key's value is encoded against the message's runtime type through the
+  shared CDR codec and written to a raw publisher, so a key can ride a typed
+  ROS4HRI message such as `hri_msgs/Expression`. A key not declared typed still
+  publishes on the untyped `std_msgs` path. Outbound + DDS; inbound-typed and
+  native-zenoh interop are follow-ups (they need `create_raw_subscription` and
+  a type-hash raw publisher in ros2-client).
+
 ## [3.2.0] - 2026-07-29
 
 ### Added
