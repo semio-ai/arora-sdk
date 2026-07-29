@@ -53,5 +53,47 @@ Tokio runtime. Dropping the bridge stops the task.
 - `get_device_info` / `device_info_updated` / `update_device_info` → stubs; ROS 2
   has no device-registration concept.
 
-Method invocation (`BridgeOp::Call`) and introspection (`ListKeys` /
-`ListMethods`) are not wired yet — see the design notes in the crate docs.
+## Methods as services
+
+Where the topic plane mirrors a device's *keys*, the method plane mirrors its
+*methods*. The bridge asks the runtime for every method's signature
+(`BridgeOp::DescribeMethods`) and, for each one whose parameter and return types
+are representable in ROS 2, stands up a service at `/{namespace}/methods/{name}`.
+Discovery is automatic — a device's methods are its own surface, so nothing is
+declared.
+
+A method maps onto a `.srv` the way ROS already models one: the parameter list is
+the **request** (one field per parameter), the return value is the **response**.
+Both messages are synthesised as runtime types and driven through the shared CDR
+codec (`arora_msgs_ros2::cdr`) against the registry — real ROS 2 message types on
+the wire, no ad-hoc encoding. Signatures ROS 2 cannot represent are skipped and
+reported, not silently dropped.
+
+## Task runs as actions
+
+Task-run methods — those whose return type is the behavior-tree `Status`
+enumeration, i.e. tickable, long-running, cancellable work — are mirrored as ROS
+2 **actions** instead. That enum is also the one return type the service plane
+cannot carry, so actions claim exactly the methods services skip; the two planes
+never overlap. A goal spawns the run (through `BridgeOp::Call` to the
+interpreter's `SPAWN`), feedback and result are typed from what the run writes,
+and cancel/status ride ros2-client's `RawActionServer`. The goal lifecycle lives
+in a `GoalBook`.
+
+Introspection over the bridge (`ListKeys` / `ListMethods`) and `BridgeOp::Call`
+over topics remain unwired — services and actions are the method surface.
+
+## ROS4HRI
+
+This bridge is where a device meets a ROS 2 graph, so it is the natural home for
+[ROS4HRI](https://wiki.ros.org/hri) interop. The ROS4HRI message vocabulary
+(`hri_msgs/Expression`, `FacialActionUnits`, `Gaze`, …) is available as typed ROS
+2 messages in [`arora-msgs-ros2`](../arora-msgs-ros2/README.md), and the Vizij
+face standard consumes it (see [vizij-rs's ROS4HRI
+docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
+
+Today the **key** topic plane carries values as `std_msgs` scalars (non-scalars
+as JSON `std_msgs/String`); publishing/subscribing device keys as **typed
+`hri_msgs` topics** under a ROS4HRI naming profile (glob include + prefix
+rewrite, a `ros4hri` preset) is planned, not yet implemented. Until then a
+ROS4HRI face is driven by writing the `standard/ros4hri/*` keys directly.
