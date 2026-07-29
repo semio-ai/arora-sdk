@@ -120,6 +120,27 @@ pub struct Key {
   pub path: String,
 }
 
+/// `Key` travels on the arora value plane as its bare path string: it is
+/// `#[serde(transparent)]` over `String`, so its arora type is the well-known
+/// string primitive. The distinct Rust type conveys that a value *is* a key
+/// while carrying no schema of its own.
+impl crate::AroraType for Key {
+  fn arora_type_id() -> crate::Uuid {
+    *crate::ty::STRING_ID
+  }
+
+  fn arora_type() -> crate::ty::low::Type {
+    crate::ty::PRIMITIVE_TYPES
+      .get(&*crate::ty::STRING_ID)
+      .expect("the string primitive is always registered")
+      .clone()
+  }
+
+  fn register_types(_registry: &mut crate::ty::TypeRegistry) {
+    // A string is a well-known primitive, resolved without the registry.
+  }
+}
+
 impl Key {
   pub fn new<S: Into<String>>(path: S) -> Self {
     Key { path: path.into() }

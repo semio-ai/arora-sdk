@@ -79,6 +79,9 @@ fn field_type(type_ref: &TypeRef, registry: &TypeRegistry) -> Result<FieldType, 
         TypeRef::Map { .. } => {
             return Err(Error("key/value maps have no REP-2016 field type".into()))
         }
+        TypeRef::Option { .. } => {
+            return Err(Error("optional values have no REP-2016 field type".into()))
+        }
     };
     if let Some(base) = rep2016_scalar(id) {
         Ok(scalar_field(base, shape))
@@ -142,7 +145,8 @@ fn collect_referenced(
         // The element type of a scalar, sequence or fixed array; a map has none.
         let id = match &field.type_ref {
             TypeRef::Scalar { id } | TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => *id,
-            TypeRef::Map { .. } => continue,
+            // Maps and options have no ROS field form, so they are not walked.
+            TypeRef::Map { .. } | TypeRef::Option { .. } => continue,
         };
         if rep2016_scalar(&id).is_some() || !seen.insert(id) {
             continue;
