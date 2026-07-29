@@ -223,7 +223,7 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
 
   // `Vec<T>` -> a homogeneous array whose element type is `T`.
   if ident == "Vec" {
-    let element = vec_element(segment)?;
+    let element = single_type_arg(segment, "Vec")?;
     let (element_id, nested) = element_id_for(element)?;
     let expr = quote! {
       arora_types::module::low::TypeRef::Array { id: #element_id }
@@ -231,13 +231,21 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     return Ok((expr, nested));
   }
 
-  // The remaining containers still need a `ty::low` model extension — there is
-  // no Option/Map `TypeRef`, and an array carries a single element id only (so
-  // no nested arrays) — so reject rather than mis-encode.
-  if matches!(
-    ident.as_str(),
-    "Option" | "HashMap" | "BTreeMap" | "HashSet" | "Box"
-  ) {
+  // `Option<T>` -> an optional value of element type `T`.
+  if ident == "Option" {
+    let element = single_type_arg(segment, "Option")?;
+    let (element_id, nested) = element_id_for(element)?;
+    let expr = quote! {
+      arora_types::module::low::TypeRef::Option { id: #element_id }
+    };
+    return Ok((expr, nested));
+  }
+
+  // The remaining containers still need a `ty::low` model extension — a `Map`
+  // `TypeRef` exists but the derive does not emit it yet, and an array carries a
+  // single element id only (so no nested arrays) — so reject rather than
+  // mis-encode.
+  if matches!(ident.as_str(), "HashMap" | "BTreeMap" | "HashSet" | "Box") {
     return Err(syn::Error::new(
       ty.span(),
       format!("`{ident}` fields are not supported by #[derive(AroraType)] yet"),
@@ -290,25 +298,26 @@ fn element_id_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
   }
 }
 
-/// The single element type `T` of a `Vec<T>` path segment.
-fn vec_element(segment: &syn::PathSegment) -> syn::Result<&Type> {
+/// The single type argument `T` of a `Container<T>` path segment (a `Vec<T>` or
+/// an `Option<T>`); `container` names it for the error messages.
+fn single_type_arg<'a>(segment: &'a syn::PathSegment, container: &str) -> syn::Result<&'a Type> {
   let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
     return Err(syn::Error::new(
       segment.ident.span(),
-      "`Vec` needs a single type argument",
+      format!("`{container}` needs a single type argument"),
     ));
   };
   let mut elements = args.args.iter().filter_map(|arg| match arg {
     syn::GenericArgument::Type(ty) => Some(ty),
     _ => None,
   });
-  let element = elements
-    .next()
-    .ok_or_else(|| syn::Error::new(segment.ident.span(), "`Vec` needs a type argument"))?;
+  let element = elements.next().ok_or_else(|| {
+    syn::Error::new(segment.ident.span(), format!("`{container}` needs a type argument"))
+  })?;
   if elements.next().is_some() {
     return Err(syn::Error::new(
       segment.ident.span(),
-      "`Vec` must have exactly one type argument",
+      format!("`{container}` must have exactly one type argument"),
     ));
   }
   Ok(element)
@@ -330,6 +339,7 @@ fn primitive_id_ident(ident: &str) -> Option<&'static str> {
     "f32" => "F32_ID",
     "f64" => "F64_ID",
     "String" => "STRING_ID",
+    "Uuid" => "UUID_ID",
     _ => return None,
   })
 }

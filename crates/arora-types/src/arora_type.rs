@@ -123,4 +123,31 @@ mod tests {
     };
     assert_eq!(structure.fields.keys().next().copied(), Some(field_id));
   }
+
+  #[test]
+  fn uuid_and_option_fields() {
+    #[derive(AroraType)]
+    #[arora(id = "33333333-3333-4333-8333-333333333333")]
+    struct Ref {
+      #[arora(id = "44444444-4444-4444-8444-444444444444")]
+      id: crate::Uuid,
+      #[arora(id = "55555555-5555-4555-8555-555555555555")]
+      maybe: Option<crate::Uuid>,
+    }
+
+    let TypeKind::Structure(structure) = &Ref::arora_type().kind else {
+      panic!("expected a structure type");
+    };
+    let g = |s: &str| crate::Uuid::parse_str(s).unwrap();
+    // A `Uuid` field is a scalar of the well-known UUID primitive.
+    assert!(matches!(
+      structure.fields[&g("44444444-4444-4444-8444-444444444444")].type_ref,
+      TypeRef::Scalar { id } if id == *ty::UUID_ID
+    ));
+    // An `Option<Uuid>` field is the new optional-of-uuid type ref.
+    assert!(matches!(
+      structure.fields[&g("55555555-5555-4555-8555-555555555555")].type_ref,
+      TypeRef::Option { id } if id == *ty::UUID_ID
+    ));
+  }
 }

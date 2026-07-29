@@ -398,6 +398,7 @@ fn write_by_ref<W: ValueWriter>(
     TypeRef::Array { id } => write_array(*id, registry, value, writer),
     TypeRef::FixedArray { id, len } => write_fixed_array(*id, *len, registry, value, writer),
     TypeRef::Map { .. } => err("map types are not supported yet"),
+    TypeRef::Option { .. } => err("optional types are not supported by the typed wire walk yet"),
   }
 }
 
@@ -420,6 +421,7 @@ fn read_by_ref<R: ValueReader>(
     TypeRef::Array { id } => read_array(*id, registry, reader),
     TypeRef::FixedArray { id, len } => read_fixed_array(*id, *len, registry, reader),
     TypeRef::Map { .. } => err("map types are not supported yet"),
+    TypeRef::Option { .. } => err("optional types are not supported by the typed wire walk yet"),
   }
 }
 

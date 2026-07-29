@@ -36,6 +36,12 @@ pub enum TypeRef {
     key_id: Uuid,
     value_id: Uuid,
   },
+  /// An optional value of element type `id`: present or absent, mirroring
+  /// [`Value::Option`](crate::value::Value::Option). A `None` carries no element;
+  /// a `Some` carries one value of type `id`.
+  Option {
+    id: Uuid,
+  },
 }
 
 impl TypeRef {
@@ -49,6 +55,7 @@ impl TypeRef {
         deps.insert(*key_id);
         deps.insert(*value_id)
       }
+      TypeRef::Option { id } => deps.insert(*id),
     };
     deps
   }
