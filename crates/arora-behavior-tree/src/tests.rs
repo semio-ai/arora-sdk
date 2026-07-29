@@ -523,7 +523,10 @@ mod task_runs {
         statuses.borrow_mut().insert(leaf, Status::Success);
         assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
         let success: Value = Status::Success.into();
-        assert_eq!(store.read(std::slice::from_ref(&handle.status)), vec![Some(success)]);
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(success)]
+        );
 
         // A finished run is not ticked again.
         let before = *ticks.borrow().get(&leaf).unwrap();
@@ -553,7 +556,10 @@ mod task_runs {
         // Runs indefinitely: after a tick it is still Running.
         assert_eq!(interp.tick(&mut ctx).unwrap(), BehaviorStatus::Running);
         let running: Value = Status::Running.into();
-        assert_eq!(store.read(std::slice::from_ref(&handle.status)), vec![Some(running)]);
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
 
         // Halt: the next tick ends the run (Failure) without invoking it again.
         interp.halt(handle.id).unwrap();
@@ -621,8 +627,12 @@ mod task_runs {
         let store = SimpleDataStore::new();
         let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
 
-        let ha = interp.spawn(call_to(0xB0, a), RunPolicy::Concurrent).unwrap();
-        let hb = interp.spawn(call_to(0xB0, b), RunPolicy::Concurrent).unwrap();
+        let ha = interp
+            .spawn(call_to(0xB0, a), RunPolicy::Concurrent)
+            .unwrap();
+        let hb = interp
+            .spawn(call_to(0xB0, b), RunPolicy::Concurrent)
+            .unwrap();
         assert_ne!(
             ha.status.path, hb.status.path,
             "each run gets its own status key"
@@ -634,8 +644,14 @@ mod task_runs {
         };
         interp.tick(&mut ctx).unwrap();
         let running: Value = Status::Running.into();
-        assert_eq!(store.read(std::slice::from_ref(&ha.status)), vec![Some(running.clone())]);
-        assert_eq!(store.read(std::slice::from_ref(&hb.status)), vec![Some(running.clone())]);
+        assert_eq!(
+            store.read(std::slice::from_ref(&ha.status)),
+            vec![Some(running.clone())]
+        );
+        assert_eq!(
+            store.read(std::slice::from_ref(&hb.status)),
+            vec![Some(running.clone())]
+        );
 
         // Halt A only; B keeps running independently.
         interp.halt(ha.id).unwrap();
