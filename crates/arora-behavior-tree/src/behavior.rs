@@ -178,12 +178,12 @@ impl BehaviorTreeInterpreter {
             let status = if run.halt_requested {
                 Status::Failure
             } else {
-                let result = ctx
-                    .call_bridge
-                    .arora_call(run.call.clone())
-                    .map_err(|e| BehaviorError {
-                        message: format!("task run {}: {e:?}", id.0),
-                    })?;
+                let result =
+                    ctx.call_bridge
+                        .arora_call(run.call.clone())
+                        .map_err(|e| BehaviorError {
+                            message: format!("task run {}: {e:?}", id.0),
+                        })?;
                 // A run that returns a non-status value is treated as a clean
                 // success — it ran and produced something, but nothing to keep
                 // ticking for.
