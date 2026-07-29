@@ -36,7 +36,10 @@ use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::actions;
-use crate::conversions::{setup_key_subscriber, topic_name, KeyPublisher, StateChangeStream};
+use crate::conversions::{
+    setup_key_subscriber, setup_typed_key_publisher, topic_name, KeyPublisher, StateChangeStream,
+    TypedKeyPublisher,
+};
 use crate::services;
 
 /// An input key exposed as an inbound ROS 2 topic: a message received on
@@ -59,6 +62,24 @@ impl InputKey {
     }
 }
 
+/// An output key published as a **typed** ROS 2 message rather than a
+/// `std_msgs` scalar: the key's value is encoded as `ros_type` (a registered
+/// ROS message name, e.g. `hri_msgs/Expression`) and published on `topic`.
+///
+/// A key without such a declaration still publishes on the untyped path (a
+/// `std_msgs` scalar, or a JSON `std_msgs/String` for composites) — this is the
+/// opt-in that lets a device key ride a ROS4HRI message.
+#[derive(Debug, Clone)]
+pub struct TypedOutput {
+    pub path: String,
+    /// The registered ROS message name, e.g. `hri_msgs/Expression`.
+    pub ros_type: String,
+    /// The topic name. `None` uses the `/{namespace}/keys/{path}` convention;
+    /// `Some` is used verbatim, so an absolute ROS name (e.g.
+    /// `/robot_face/expression`) escapes the namespace prefix.
+    pub topic: Option<String>,
+}
+
 /// How to attach to the ROS 2 graph: a `namespace` for the topics, a DDS
 /// `domain_id`, and the input keys to subscribe to. Output keys need no
 /// declaration — [`send_data`](Bridge::send_data) creates a publisher from each
@@ -68,6 +89,9 @@ pub struct Ros2BridgeConfig {
     pub namespace: String,
     pub domain_id: u16,
     pub inputs: Vec<InputKey>,
+    /// Output keys published as typed ROS messages (see [`TypedOutput`]); a key
+    /// not listed here publishes on the untyped `std_msgs` path.
+    pub outputs: Vec<TypedOutput>,
 }
 
 impl Ros2BridgeConfig {
@@ -77,12 +101,47 @@ impl Ros2BridgeConfig {
             namespace: namespace.into(),
             domain_id,
             inputs: Vec::new(),
+            outputs: Vec::new(),
         }
     }
 
     /// Add an input key to subscribe to.
     pub fn with_input<S: Into<String>>(mut self, path: S, value_type: Type) -> Self {
         self.inputs.push(InputKey::new(path, value_type));
+        self
+    }
+
+    /// Publish an output key as a typed ROS message `ros_type` (a registered ROS
+    /// message name, e.g. `hri_msgs/Expression`) on the default
+    /// `/{namespace}/keys/{path}` topic. The key's value must be a structure
+    /// matching that message's type.
+    pub fn with_typed_output<P: Into<String>, T: Into<String>>(
+        mut self,
+        path: P,
+        ros_type: T,
+    ) -> Self {
+        self.outputs.push(TypedOutput {
+            path: path.into(),
+            ros_type: ros_type.into(),
+            topic: None,
+        });
+        self
+    }
+
+    /// Publish an output key as a typed ROS message on an explicit `topic` name
+    /// — an absolute ROS name (e.g. `/robot_face/expression`) escapes the
+    /// `/{namespace}/keys/…` convention, as a ROS4HRI binding needs.
+    pub fn with_typed_output_on<P: Into<String>, T: Into<String>, N: Into<String>>(
+        mut self,
+        path: P,
+        ros_type: T,
+        topic: N,
+    ) -> Self {
+        self.outputs.push(TypedOutput {
+            path: path.into(),
+            ros_type: ros_type.into(),
+            topic: Some(topic.into()),
+        });
         self
     }
 }
@@ -200,6 +259,7 @@ async fn run_node(
         namespace,
         domain_id,
         inputs,
+        outputs,
     } = config;
 
     let mut node = match build_node(&namespace, domain_id) {
@@ -277,6 +337,11 @@ async fn run_node(
 
     // Publishers are created lazily from the first value written to each key.
     let mut publishers: HashMap<String, KeyPublisher> = HashMap::new();
+    // Output keys the caller declared as typed ROS messages, indexed by path,
+    // with their own lazily-created raw publishers.
+    let typed_outputs: HashMap<String, TypedOutput> =
+        outputs.into_iter().map(|o| (o.path.clone(), o)).collect();
+    let mut typed_publishers: HashMap<String, TypedKeyPublisher> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -289,7 +354,16 @@ async fn run_node(
                         for tx in &action_change_txs {
                             let _ = tx.send(change.clone());
                         }
-                        publish_change(&mut node, &namespace, &mut publishers, &change).await;
+                        publish_change(
+                            &mut node,
+                            &namespace,
+                            &mut publishers,
+                            &typed_outputs,
+                            &mut typed_publishers,
+                            &registry,
+                            &change,
+                        )
+                        .await;
                     }
                     // All senders dropped (the bridge was dropped).
                     None => break,
@@ -525,15 +599,50 @@ async fn build_response(
 }
 
 /// Publish each set key of a change to its topic, creating a publisher on first
-/// use. `unset` keys have no ROS 2 representation and are ignored.
+/// use. A key declared in `typed_outputs` rides a typed ROS message (its value
+/// encoded against that message's runtime type); every other key takes the
+/// untyped `std_msgs` path. `unset` keys have no ROS 2 representation and are
+/// ignored.
+#[allow(clippy::too_many_arguments)]
 async fn publish_change(
     node: &mut Node,
     namespace: &str,
     publishers: &mut HashMap<String, KeyPublisher>,
+    typed_outputs: &HashMap<String, TypedOutput>,
+    typed_publishers: &mut HashMap<String, TypedKeyPublisher>,
+    registry: &Arc<Ros2Registry>,
     change: &StateChange,
 ) {
     for (key, maybe_value) in &change.set {
         let Some(value) = maybe_value else { continue };
+
+        // A typed output rides its declared ROS message; its publisher is
+        // created lazily like the untyped one.
+        if let Some(binding) = typed_outputs.get(&key.path) {
+            if !typed_publishers.contains_key(&key.path) {
+                let topic = binding
+                    .topic
+                    .clone()
+                    .unwrap_or_else(|| topic_name(namespace, &key.path));
+                match setup_typed_key_publisher(node, &topic, &binding.ros_type, registry.clone()) {
+                    Ok(publisher) => {
+                        typed_publishers.insert(key.path.clone(), publisher);
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Ros2Bridge could not create a typed publisher for key '{}': {e}",
+                            key.path
+                        );
+                        continue;
+                    }
+                }
+            }
+            if let Some(publisher) = typed_publishers.get(&key.path) {
+                publisher.publish(value).await;
+            }
+            continue;
+        }
+
         if !publishers.contains_key(&key.path) {
             let topic = topic_name(namespace, &key.path);
             match KeyPublisher::create(node, &topic, value) {
