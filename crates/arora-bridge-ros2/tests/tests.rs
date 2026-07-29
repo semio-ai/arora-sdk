@@ -298,6 +298,7 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         }
     }
 
+    let _ = env_logger::builder().is_test(true).try_init();
     let domain_id = random_domain_id();
     let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
     let mut inbound = bridge.take_inbound();
@@ -350,6 +351,7 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
             };
             match &cmd.op {
                 BridgeOp::DescribeMethods { .. } => {
+                    eprintln!("[runtime] answering DescribeMethods");
                     let signatures = vec![look_at_signature()];
                     cmd.reply(Ok(CallResult {
                         ret: value_serde::to_value(&signatures).expect("signatures encode"),
@@ -360,12 +362,14 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
                     let (inner, _policy) = interpreter_module::decode_spawn(call).unwrap();
                     assert_eq!(inner.id, gen_uuid_from_str("look_at"));
                     running = true;
+                    eprintln!("[runtime] SPAWN accepted");
                     cmd.reply(Ok(CallResult {
                         ret: interpreter_module::encode_spawn_result(&handle),
                         mutated: Vec::new(),
                     }));
                 }
                 BridgeOp::Call(call) if interpreter_module::decode_halt(call).is_ok() => {
+                    eprintln!("[runtime] halt received");
                     halted = true;
                     cmd.reply(Ok(CallResult {
                         ret: Value::Unit,
@@ -383,12 +387,24 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         let (_ctx, mut node) = create_test_node(domain_id, "action_client");
         let action_type = ros2_client::ActionTypeName::new("arora", "look_at");
         let action_name = Name::parse("/robot/actions/look_at").expect("valid action name");
+        // The reliable service profile ros2-client's own action examples use —
+        // the best-effort DEFAULT_SUBSCRIPTION_QOS drops service requests.
+        let service_qos = {
+            use ros2_client::ros2::{policy, QosPolicyBuilder};
+            QosPolicyBuilder::new()
+                .reliability(policy::Reliability::Reliable {
+                    max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
+                })
+                .history(policy::History::KeepLast { depth: 4 })
+                .durability(policy::Durability::TransientLocal)
+                .build()
+        };
         let qos = ros2_client::action::ActionClientQosPolicies {
-            goal_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            result_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            cancel_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            feedback_subscription: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            status_subscription: DEFAULT_SUBSCRIPTION_QOS.clone(),
+            goal_service: service_qos.clone(),
+            result_service: service_qos.clone(),
+            cancel_service: service_qos.clone(),
+            feedback_subscription: service_qos.clone(),
+            status_subscription: service_qos,
         };
         let client = node
             .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
@@ -404,18 +420,24 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
             policy: "track".to_string(),
             x: 1.5,
         };
+        eprintln!("[client] sending goal");
         let goal_id = loop {
             match tokio::time::timeout(Duration::from_secs(2), client.async_send_goal(goal.clone()))
                 .await
             {
                 Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
-                _ => tokio::time::sleep(Duration::from_millis(200)).await,
+                other => {
+                    eprintln!("[client] send_goal attempt: {other:?}");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
             }
         };
+        eprintln!("[client] goal accepted");
 
         // Feedback flows while the run tracks.
         loop {
             if let Ok(Some(feedback)) = client.receive_feedback(goal_id) {
+                eprintln!("[client] feedback received");
                 assert!((feedback.gaze_error - 0.25).abs() < f32::EPSILON);
                 break;
             }
@@ -423,10 +445,12 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         }
 
         // Cancel; the run halts and the result carries the errno.
+        eprintln!("[client] canceling");
         client
             .async_cancel_goal(goal_id, ros2_client::builtin_interfaces::Time::ZERO)
             .await
             .expect("cancel round-trips");
+        eprintln!("[client] cancel answered; requesting result");
         let (status, result) = client
             .async_request_result(goal_id)
             .await

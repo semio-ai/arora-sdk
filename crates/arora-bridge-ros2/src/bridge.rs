@@ -32,8 +32,6 @@ use futures::channel::{mpsc as fmpsc, oneshot};
 use futures::{Stream, StreamExt};
 use log::warn;
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
-#[cfg(feature = "dds")]
-use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -368,10 +366,26 @@ async fn discover(
     (resolved, resolved_actions)
 }
 
+/// The QoS every bridge-served ROS 2 service endpoint uses: reliable,
+/// transient-local, a short history — the profile ros2-client's own service and
+/// action examples run (`DEFAULT_SUBSCRIPTION_QOS` is best-effort, which drops
+/// service requests with no redelivery).
+#[cfg(feature = "dds")]
+fn service_qos() -> ros2_client::ros2::QosPolicies {
+    use ros2_client::ros2::{policy, QosPolicyBuilder};
+    QosPolicyBuilder::new()
+        .reliability(policy::Reliability::Reliable {
+            max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
+        })
+        .history(policy::History::KeepLast { depth: 4 })
+        .durability(policy::Durability::TransientLocal)
+        .build()
+}
+
 /// Create the five ROS 2 endpoints for one action, per backend. The status
 /// topic is transient-local with a history of one (late-joining clients read
 /// the current goal states, per the ROS actions design); the services and the
-/// feedback topic ride the default QoS the method services use.
+/// feedback topic ride the reliable [`service_qos`].
 fn create_raw_action_server(
     node: &mut Node,
     action: &actions::MethodAction,
@@ -388,10 +402,10 @@ fn create_raw_action_server(
             })
             .build();
         let qos = ros2_client::action::ActionServerQosPolicies {
-            goal_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            result_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            cancel_service: DEFAULT_SUBSCRIPTION_QOS.clone(),
-            feedback_publisher: DEFAULT_PUBLISHER_QOS.clone(),
+            goal_service: service_qos(),
+            result_service: service_qos(),
+            cancel_service: service_qos(),
+            feedback_publisher: service_qos(),
             status_publisher: status_qos,
         };
         node.create_raw_action_server(&name, &action.action_type, qos)
@@ -425,8 +439,8 @@ fn service_stream(
     let server = node.create_raw_server(
         &ros_name,
         &service.service_type,
-        DEFAULT_SUBSCRIPTION_QOS.clone(),
-        DEFAULT_PUBLISHER_QOS.clone(),
+        service_qos(),
+        service_qos(),
     );
     #[cfg(feature = "zenoh")]
     let server = node.create_raw_server(&ros_name, &service.service_type);
