@@ -9,13 +9,14 @@
 
 use arora_types::call::Call;
 use arora_types::data::Key;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Identity of a live task run.
 ///
 /// Unique per run. It is also the namespacing root for the run's keys, which
 /// live under `arora/tasks/<module>/<function>/<run_id>/…`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskId(pub Uuid);
 
 /// A [`TaskId`] travels on the value plane as a bare scalar uuid — its arora
@@ -45,7 +46,7 @@ impl arora_types::AroraType for TaskId {
 /// (preempt, queue, blend, reject) can be added later without a breaking change.
 /// Arbitration, when those land, is the interpreter's — it is the only thing
 /// that sees every run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RunPolicy {
     /// Run alongside every other run. Overlapping actuation writes are
@@ -60,7 +61,7 @@ pub enum RunPolicy {
 /// allocated by the interpreter under the run's [`id`](Self::id), so concurrent
 /// runs demux. A run's *actuation* writes are deliberately not here — those go
 /// to the shared standard keys, where overlapping runs are last-write-wins.
-#[derive(Debug, Clone, PartialEq, arora_types::AroraType)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, arora_types::AroraType)]
 #[arora(id = "d1f79433-a751-4fe3-9e6f-561cea873293")]
 pub struct TaskHandle {
     /// The run's identity.
