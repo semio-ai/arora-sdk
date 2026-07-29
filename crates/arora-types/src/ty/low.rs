@@ -208,6 +208,8 @@ fn default_value_for_type_ref(type_ref: &TypeRef) -> Value {
     TypeRef::Array { id } => default_value_for_array_element_type_id(*id),
     TypeRef::FixedArray { id, len } => default_value_for_fixed_array(*id, *len),
     TypeRef::Map { .. } => Value::KeyValue(KeyValue::default()),
+    // An optional value defaults to absent.
+    TypeRef::Option { .. } => Value::Option(None),
   }
 }
 
@@ -358,6 +360,12 @@ fn validate_type_ref(value: &Value, type_ref: &TypeRef) -> Result<(), Conversion
         Err(validation_error("expected key/value map value"))
       }
     }
+    // An optional value is either absent or a present value of the element type.
+    TypeRef::Option { id } => match value {
+      Value::Option(None) => Ok(()),
+      Value::Option(Some(inner)) => validate_scalar_type_id(inner.as_ref(), *id),
+      _ => Err(validation_error("expected an optional value")),
+    },
   }
 }
 

@@ -67,6 +67,7 @@ fn check_ref(
         TypeRef::Array { id } => check_element(id, registry, seen),
         TypeRef::FixedArray { id, .. } => check_element(id, registry, seen),
         TypeRef::Map { .. } => Err(no("key/value maps have no ROS 2 CDR encoding")),
+        TypeRef::Option { .. } => Err(no("optional values have no ROS 2 CDR encoding")),
     }
 }
 
