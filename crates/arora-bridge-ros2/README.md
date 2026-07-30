@@ -86,7 +86,7 @@ over topics remain unwired — services and actions are the method surface.
 ## ROS4HRI
 
 This bridge is where a device meets a ROS 2 graph, so it is the natural home for
-[ROS4HRI](https://wiki.ros.org/hri) interop. The ROS4HRI message vocabulary
+[ROS4HRI](https://ros.org/reps/rep-0155.html) interop. The ROS4HRI message vocabulary
 (`hri_msgs/Expression`, `FacialActionUnits`, `Gaze`, …) is available as typed ROS
 2 messages in [`arora-msgs-ros2`](../arora-msgs-ros2/README.md), and the Vizij
 face standard consumes it (see [vizij-rs's ROS4HRI

@@ -40,7 +40,7 @@ arora_msgs_ros2::hri_msgs::LiveSpeech
 `.msg` constants become associated `const`s (`sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_FULL`).
 `arora_msgs_ros2::registry()` returns a `Ros2Registry` with every bundled type.
 
-The `hri_msgs` package is [ROS4HRI](https://wiki.ros.org/hri)'s human-robot-interaction
+The `hri_msgs` package is [ROS4HRI](https://ros.org/reps/rep-0155.html)'s human-robot-interaction
 vocabulary — `Expression`, `FacialActionUnits`, `Gaze`, `LiveSpeech`, and the
 rest — the message layer Vizij's face standard is built on (see
 [vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
