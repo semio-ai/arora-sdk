@@ -2,7 +2,7 @@
 
 A package manager for Arora.
 The registry is meant to be a server provided
-by [the project `semio-db`](https://github.com/semio-ai/semio-db).
+by the project `semio-db`.
 This crate is the local, publishable core: a [`LocalRegistry`](src/local/mod.rs)
 implements both the [`ReadableRegistry` and `EditableRegistry`](src/lib.rs)
 traits, supports the addition of `Structure`, `Enumeration` and `Module`
