@@ -13,7 +13,7 @@ use arora_registry_remote::{config::check_and_update_config, remote_cached::Remo
 use arora_types::module::low::Header;
 use arora_types::record::module::frozen::ExportKind;
 use arora_types::record::Resolver;
-use clap::{Error, ErrorKind, Parser};
+use clap::{error::ErrorKind, Error, Parser};
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
     Client,

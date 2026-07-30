@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 
 [build-dependencies]
-cbindgen = "0.20"
+cbindgen = "0.29"
 
 [dev-dependencies]
 anyhow = "1"

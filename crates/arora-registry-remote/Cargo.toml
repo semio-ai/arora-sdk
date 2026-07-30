@@ -10,7 +10,7 @@ arora-registry = { path = "../arora-registry" }
 arora-types = { path = "../arora-types", version = "2" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 semio-record = { git = "https://github.com/semio-ai/semio-record.git", branch = "main" }
-anyhow = "*"
+anyhow = "1"
 async-trait = "0.1"
 derive_more = "2"
 reqwest = "0.13"
