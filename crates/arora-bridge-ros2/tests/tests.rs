@@ -124,6 +124,92 @@ async fn inbound_topic_becomes_update_command() {
     );
 }
 
+/// A typed ROS 2 publisher sending an `hri_msgs/Expression` lands the device's
+/// key as a structured value — the ROS4HRI inbound acceptance criterion
+/// (ARORA-85). The bridge subscribes raw and decodes the CDR against the
+/// message's runtime type; the decoded value is byte-exact with the same
+/// Expression built through the seeded bridge.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback; runs on Linux CI. \
+              To run locally, ensure a multicast-capable interface and use `--ignored`."
+)]
+async fn a_typed_hri_expression_publisher_lands_the_device_key() {
+    use arora_msgs_ros2::{builtin_interfaces, hri_msgs, std_msgs};
+    use arora_types::value_serde::bridge::to_value_seeded;
+    use arora_types::AroraType;
+
+    let _ = env_logger::try_init();
+    let domain_id = random_domain_id();
+    let namespace = format!("test_hri_in_{domain_id}");
+
+    let make_expr = || hri_msgs::Expression {
+        header: std_msgs::Header {
+            stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+            frame_id: "face".into(),
+        },
+        expression: "happy".into(),
+        valence: 0.8,
+        arousal: 0.2,
+        confidence: 1.0,
+    };
+
+    let config = Ros2BridgeConfig::new(&namespace, domain_id)
+        .with_typed_input("expression", "hri_msgs/Expression");
+    let mut bridge = Ros2Bridge::new(config).await;
+    let mut inbound = bridge.take_inbound();
+
+    let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
+    let topic = Name::parse(&topic_name(&namespace, "expression")).expect("valid topic name");
+    let pub_topic = pub_node
+        .create_topic(
+            &topic,
+            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create topic");
+    let publisher = pub_node
+        .create_publisher::<hri_msgs::Expression>(&pub_topic, None)
+        .expect("create publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the test publisher");
+
+    tokio::spawn(async move {
+        loop {
+            let _ = publisher.async_publish(make_expr()).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    let change = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match inbound.next().await {
+                Some(Inbound::Command(cmd)) => {
+                    if let BridgeOp::Update(change) = cmd.op {
+                        if change.set.contains_key("expression") {
+                            break change;
+                        }
+                    }
+                }
+                Some(_) => {}
+                None => panic!("the inbound stream ended before an Update arrived"),
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the expression Update command");
+
+    let (ty, reg) = <hri_msgs::Expression as AroraType>::arora_type_with_registry();
+    let expected = to_value_seeded(&make_expr(), &ty, &reg).expect("expression to value");
+    assert_eq!(change.set.get("expression"), Some(&Some(expected)));
+}
+
 /// `try_send` publishes a changed key to its topic, where a separate node
 /// subscribed to that topic receives it.
 #[tokio::test]

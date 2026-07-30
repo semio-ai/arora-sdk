@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-ros2"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "arora",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "arora-msgs-ros2"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arora-types",
  "proc-macro2",
@@ -2633,7 +2633,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2764,7 +2764,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4547,7 +4547,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5741,9 +5741,9 @@ dependencies = [
 
 [[package]]
 name = "ros2-client-multi-rmw"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd046a2d7fabf807d119dc2315e020e9d4e5a69e827a6c71990f6ebfb5751adc"
+checksum = "c7c88980573e47852ffc5f152dbb1cc63ba7536f19f3da4dac9931f416bbba55"
 dependencies = [
  "async-channel",
  "bstr",
@@ -5896,7 +5896,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5998,7 +5998,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6019,7 +6019,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6989,7 +6989,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7610,7 +7610,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.4",
  "static_assertions",
 ]
 
@@ -8594,7 +8594,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

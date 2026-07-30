@@ -37,8 +37,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::actions;
 use crate::conversions::{
-    setup_key_subscriber, setup_typed_key_publisher, topic_name, KeyPublisher, StateChangeStream,
-    TypedKeyPublisher,
+    setup_key_subscriber, setup_typed_key_publisher, setup_typed_key_subscriber, topic_name,
+    KeyPublisher, StateChangeStream, TypedKeyPublisher,
 };
 use crate::services;
 
@@ -80,6 +80,21 @@ pub struct TypedOutput {
     pub topic: Option<String>,
 }
 
+/// An input key subscribed as a **typed** ROS 2 message rather than a
+/// `std_msgs` scalar: each message on `topic` is decoded as `ros_type` (a
+/// registered ROS message name, e.g. `hri_msgs/Expression`) against its runtime
+/// type and lands on `path` as a [`BridgeOp::Update`]. The counterpart of
+/// [`TypedOutput`] — how a device key receives a real ROS4HRI message.
+#[derive(Debug, Clone)]
+pub struct TypedInput {
+    pub path: String,
+    /// The registered ROS message name, e.g. `hri_msgs/Expression`.
+    pub ros_type: String,
+    /// The topic name. `None` uses the `/{namespace}/keys/{path}` convention;
+    /// `Some` is used verbatim (an absolute ROS name escapes the namespace).
+    pub topic: Option<String>,
+}
+
 /// How to attach to the ROS 2 graph: a `namespace` for the topics, a DDS
 /// `domain_id`, and the input keys to subscribe to. Output keys need no
 /// declaration — [`send_data`](Bridge::send_data) creates a publisher from each
@@ -89,6 +104,9 @@ pub struct Ros2BridgeConfig {
     pub namespace: String,
     pub domain_id: u16,
     pub inputs: Vec<InputKey>,
+    /// Input keys subscribed as typed ROS messages (see [`TypedInput`]); a key
+    /// not listed here subscribes on the untyped `std_msgs` path.
+    pub typed_inputs: Vec<TypedInput>,
     /// Output keys published as typed ROS messages (see [`TypedOutput`]); a key
     /// not listed here publishes on the untyped `std_msgs` path.
     pub outputs: Vec<TypedOutput>,
@@ -101,6 +119,7 @@ impl Ros2BridgeConfig {
             namespace: namespace.into(),
             domain_id,
             inputs: Vec::new(),
+            typed_inputs: Vec::new(),
             outputs: Vec::new(),
         }
     }
@@ -108,6 +127,40 @@ impl Ros2BridgeConfig {
     /// Add an input key to subscribe to.
     pub fn with_input<S: Into<String>>(mut self, path: S, value_type: Type) -> Self {
         self.inputs.push(InputKey::new(path, value_type));
+        self
+    }
+
+    /// Subscribe an input key as a typed ROS message `ros_type` (a registered
+    /// ROS message name, e.g. `hri_msgs/Expression`) on the default
+    /// `/{namespace}/keys/{path}` topic. Each received message is decoded
+    /// against that type and lands on `path`.
+    pub fn with_typed_input<P: Into<String>, T: Into<String>>(
+        mut self,
+        path: P,
+        ros_type: T,
+    ) -> Self {
+        self.typed_inputs.push(TypedInput {
+            path: path.into(),
+            ros_type: ros_type.into(),
+            topic: None,
+        });
+        self
+    }
+
+    /// Subscribe an input key as a typed ROS message on an explicit `topic` name
+    /// — an absolute ROS name (e.g. `/robot_face/expression`) escapes the
+    /// `/{namespace}/keys/…` convention, as a ROS4HRI binding needs.
+    pub fn with_typed_input_on<P: Into<String>, T: Into<String>, N: Into<String>>(
+        mut self,
+        path: P,
+        ros_type: T,
+        topic: N,
+    ) -> Self {
+        self.typed_inputs.push(TypedInput {
+            path: path.into(),
+            ros_type: ros_type.into(),
+            topic: Some(topic.into()),
+        });
         self
     }
 
@@ -259,6 +312,7 @@ async fn run_node(
         namespace,
         domain_id,
         inputs,
+        typed_inputs,
         outputs,
     } = config;
 
@@ -284,6 +338,10 @@ async fn run_node(
     #[cfg(feature = "zenoh")]
     let spinner_task: Option<tokio::task::JoinHandle<()>> = None;
 
+    // The registry of ROS message types, shared by the typed topic, service,
+    // and action planes.
+    let registry = Arc::new(arora_msgs_ros2::registry());
+
     // Subscribe to every declared input key; each yields single-key state
     // changes we turn into `Update` commands.
     let mut sub_streams: Vec<StateChangeStream> = Vec::new();
@@ -296,6 +354,28 @@ async fn run_node(
             ),
         }
     }
+    // Typed input keys subscribe as a registered ROS message, decoded against
+    // its runtime type into a single-key change — how a device key receives a
+    // real ROS4HRI message.
+    for input in &typed_inputs {
+        let topic = input
+            .topic
+            .clone()
+            .unwrap_or_else(|| topic_name(&namespace, &input.path));
+        match setup_typed_key_subscriber(
+            &mut node,
+            &topic,
+            &input.ros_type,
+            input.path.clone(),
+            registry.clone(),
+        ) {
+            Ok(stream) => sub_streams.push(stream),
+            Err(e) => warn!(
+                "Ros2Bridge could not subscribe to typed key '{}': {e}",
+                input.path
+            ),
+        }
+    }
     let mut inbound = futures::stream::select_all(sub_streams);
 
     // Expose every ROS-representable module method as a service under
@@ -304,7 +384,6 @@ async fn run_node(
     // `/{namespace}/actions/{name}`. Discovered from the runtime — like
     // outbound topics, a device's methods are its own surface, so nothing is
     // declared.
-    let registry = Arc::new(arora_msgs_ros2::registry());
     let (discovered, discovered_actions) = discover(&cmd_tx, &namespace, &registry).await;
     let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
     for service in discovered {

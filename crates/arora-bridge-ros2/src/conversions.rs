@@ -20,7 +20,7 @@ use futures::Stream;
 use log::warn;
 #[cfg(feature = "zenoh")]
 use ros2_client::QosProfile;
-use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher};
+use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher, RawSubscription};
 #[cfg(feature = "dds")]
 use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::time::{sleep, Duration};
@@ -171,6 +171,110 @@ fn setup_typed<M: MessageType>(
                         let shift = (errors - 1).min(62) as u64;
                         let delay = Duration::from_millis(100u64.saturating_mul(1u64 << shift));
                         warn!("subscription for key '{path}' errored: {e:?}; retrying");
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(Box::pin(stream))
+}
+
+/// Await the next raw CDR message from a [`RawSubscription`], uniform across the
+/// two backends (DDS `async_take` / Zenoh `take_raw`), as full standalone CDR
+/// bytes. Any receive error is stringified so the caller handles both backends'
+/// error types the same way.
+#[cfg(feature = "dds")]
+async fn raw_take(sub: &RawSubscription) -> Result<Vec<u8>, String> {
+    sub.async_take()
+        .await
+        .map(|(bytes, _info)| bytes)
+        .map_err(|e| format!("{e:?}"))
+}
+#[cfg(feature = "zenoh")]
+async fn raw_take(sub: &RawSubscription) -> Result<Vec<u8>, String> {
+    sub.take_raw()
+        .await
+        .map(|(bytes, _info)| bytes)
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// Create a **raw** subscription for a key declared with a ROS message type, and
+/// return a stream that decodes each received message against that type into a
+/// single-key [`StateChange`] — the typed-inbound counterpart of
+/// [`setup_typed`], and the sibling of [`setup_typed_key_publisher`]. A device
+/// key thereby receives a real typed ROS message (e.g. `hri_msgs/Expression`)
+/// rather than a `std_msgs` scalar.
+///
+/// `topic` is the topic name (an absolute ROS name, or the
+/// `/{namespace}/keys/{path}` default the caller resolves) and `ros_type` the
+/// registered message name; `path` is the store key the decoded value lands on.
+pub fn setup_typed_key_subscriber(
+    node: &mut Node,
+    topic: &str,
+    ros_type: &str,
+    path: String,
+    registry: Arc<Ros2Registry>,
+) -> Result<StateChangeStream, String> {
+    let message_type = registry
+        .get_by_name(ros_type)
+        .ok_or_else(|| format!("unknown ROS message type '{ros_type}'"))?
+        .clone();
+    let (package, type_name) = package_and_type(ros_type)
+        .ok_or_else(|| format!("malformed ROS message name '{ros_type}'"))?;
+    let ros_name = Name::parse(topic).map_err(|e| format!("invalid topic name '{topic}': {e}"))?;
+    let message_type_name = MessageTypeName::new(package, type_name);
+    #[cfg(feature = "dds")]
+    let ros_topic = node
+        .create_topic(&ros_name, message_type_name, &DEFAULT_SUBSCRIPTION_QOS)
+        .map_err(|e| format!("failed to create topic {topic}: {e:?}"))?;
+    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
+    #[cfg(feature = "zenoh")]
+    let ros_topic = node.create_topic(
+        &ros_name,
+        message_type_name,
+        &QosProfile::subscription_default(),
+    );
+    let subscription = node
+        .create_raw_subscription(&ros_topic, None)
+        .map_err(|e| format!("failed to subscribe to {topic}: {e:?}"))?;
+
+    let ros_type = ros_type.to_string();
+    let stream = unfold((subscription, 0u32), move |(sub, errors)| {
+        let path = path.clone();
+        let ros_type = ros_type.clone();
+        let message_type = message_type.clone();
+        let registry = registry.clone();
+        async move {
+            let mut errors = errors;
+            loop {
+                match raw_take(&sub).await {
+                    Ok(bytes) => match cdr::decode(&message_type, registry.types(), &bytes) {
+                        Ok(value) => {
+                            let mut change = StateChange::new();
+                            change.set.insert(Key::from(path.clone()), Some(value));
+                            return Some((change, (sub, 0)));
+                        }
+                        // A message that does not decode against its declared
+                        // type is dropped (not a receive failure); wait for the
+                        // next one rather than terminating the stream.
+                        Err(e) => {
+                            warn!("key '{path}': failed to decode a '{ros_type}' message: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        errors += 1;
+                        if errors >= MAX_CONSECUTIVE_ERRORS {
+                            warn!(
+                                "subscription for key '{path}' failed {MAX_CONSECUTIVE_ERRORS} \
+                                 consecutive times, terminating stream"
+                            );
+                            return None;
+                        }
+                        let shift = (errors - 1).min(62) as u64;
+                        let delay = Duration::from_millis(100u64.saturating_mul(1u64 << shift));
+                        warn!("subscription for key '{path}' errored: {e}; retrying");
                         sleep(delay).await;
                     }
                 }

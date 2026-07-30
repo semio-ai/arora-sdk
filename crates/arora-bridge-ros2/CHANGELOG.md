@@ -4,6 +4,24 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.4.0] - 2026-07-30
+
+### Added
+
+- Typed input topics (ARORA-85 inbound): a device key can subscribe to a
+  registered ROS message rather than a `std_msgs` scalar —
+  `Ros2BridgeConfig::with_typed_input(path, ros_type)` (and
+  `with_typed_input_on(path, ros_type, topic)` for an absolute topic name). The
+  bridge subscribes raw (ros2-client `create_raw_subscription`, 0.12) and
+  decodes each message against its runtime type through the shared CDR codec
+  into a single-key change — so a native ROS4HRI publisher of e.g.
+  `hri_msgs/Expression` lands the device key. Completes the typed topic plane
+  (outbound shipped in 3.3.0).
+
+### Changed
+
+- ros2-client re-pinned to 0.12 (adds `RawSubscription`).
+
 ## [3.3.0] - 2026-07-30
 
 ### Added
