@@ -4,6 +4,11 @@ A study of what it would take to support genuinely asynchronous module
 functions, anchored on the one real long-running function we ship today:
 `polly::say`.
 
+> For the normative contract — how to *write* a long-running function today and
+> keep it working across the substrate stages below — see
+> [`async-functions.md`](async-functions.md). This page is the assessment; that
+> one is the "how".
+
 ## How `say` works today
 
 `modules/polly` is a **host cdylib** (native executor). Its `say` function
