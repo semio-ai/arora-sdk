@@ -189,7 +189,7 @@ The one decision a new format makes is whether it is **self-describing** or
 **positional**, illustrated by the two backends already in the tree:
 
 - **self-describing** — the arora buffers backend
-  ([`arora-buffers`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-buffers/src/value_io.rs))
+  ([`arora-buffers`](https://github.com/semio-ai/arora-sdk/tree/main/crates/arora-buffers))
   writes a type tag before each datum; on read it consumes that tag and
   **validates** it against the type the walk asked for. `begin_struct` /
   `begin_field` emit the id and count; `enter_struct` / `enter_field` read and
