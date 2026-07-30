@@ -69,7 +69,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use rand::Rng;
+    use rand::RngExt;
     use ros2_client::{NodeName as RosNodeName, NodeOptions, DEFAULT_PUBLISHER_QOS};
 
     use arora_hal::Hal;
