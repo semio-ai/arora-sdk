@@ -90,6 +90,81 @@ the host's job.* The path to letting the guest itself do this (async host
 imports on wasip2, async guests on wasip3) is the study's subject and does not
 change this contract — `Running` still means pending.
 
+## Building for wasm
+
+The poll *mechanism* is wasm-safe: a hand-written `Future` or a `step` that
+returns `Status` is synchronous Rust and compiles to `wasm32` unchanged. What
+does *not* survive the port is the **body**.
+
+`polly::say` is the worked example. Its `Cargo.toml` pulls `tokio` (`full`),
+`aws-sdk-polly`, `aws-config`, and `soloud` — threads, a native HTTP stack, a
+native C audio library — and it declares `imports: []`, doing all the work
+itself. None of those build for `wasm32`, which is exactly why polly is
+`executor: native` and browser-absent. A `Future::poll` refactor that keeps
+those dependencies is still native-only.
+
+To build the same function for wasm you remove them and route the two things a
+guest cannot do — background work and I/O — through **non-blocking host
+capabilities** the guest polls: a `synth` import (text → audio frames + a viseme
+timeline) and an `audio` import (playback + playhead). The guest future then
+holds no `tokio`/`aws`/`soloud`; it is pure coordination — poll the `synth`
+channel, hand frames to `audio`, report `Status`. Because each host call is a
+*non-blocking start/poll* and the async lives host-side, the guest never
+suspends, so this works even on wasip1's synchronous, non-suspending ABI.
+
+## Open question: how does a wasm module make a request?
+
+polly needs the network (AWS Polly). A wasm guest **cannot open a socket** — and
+today the arora browser build gives it nothing to reach for. `crates/arora-web`
+builds on `arora` with default features off (its own words: *"a Tokio-free
+synchronous runtime"*), pins `tokio` to `features = ["sync"]` (no `net`, no
+`rt`), and carries no HTTP client and no `fetch` binding. So there is no path
+from the guest to the wire.
+
+The first thing to settle is what a request is *not*: it is **not a wasm
+module**. A module runs in the sandbox precisely so it *cannot* touch the
+outside; giving one network access would defeat the point. The request is always
+a **host capability** — the abstraction lives host-side, and the guest only
+calls it. Given that, the options:
+
+- **An arora host capability (available now).** The host exposes a function the
+  guest imports and the browser host implements over `fetch` (native: `reqwest`
+  / the platform stack). Two grains:
+  - a **generic `http` capability** — `request(url, headers, body)` — the
+    reusable hook: *any* module that needs the network uses the one seam, and
+    polly keeps its own request framing. Cost: `aws-sdk-polly`'s connector still
+    will not build for wasm, so you either plug the SDK's `HttpClient` with a
+    capability-backed connector or hand-build the signed REST call over `http`.
+  - a **specific `synth` capability** — the host does the whole TTS request and
+    streams frames back. Simplest for the browser (the SDK runs natively on the
+    host), and it is exactly what `vizij-standalone` already does: `fetchVisemeData`
+    is a JS `fetch`, the wasm side only consumes audio + visemes.
+
+  Either way, expose it **non-blocking** (`start → handle`, `poll → Option`) so
+  it composes with the poll-on-tick contract and does not block the engine on
+  wasip1's synchronous host calls.
+
+- **The standard `wasi:http` interface (the destination).** Rather than an
+  arora-specific hook, a component imports `wasi:http/outgoing-handler`; the host
+  provides it — wasmtime natively, the browser via a `fetch` shim (jco-style
+  transpilation). Shaping the arora capability after `wasi:http` keeps it
+  forward-compatible.
+
+- **How wasip3 does it.** WASI 0.3 makes these interfaces **async**: `wasi:http`
+  functions become `async func` over `future`/`stream`, so the guest simply
+  `.await`s the request and **suspends natively** while the host drives it —
+  wasmtime on the host, the browser via JSPI (Chrome yes, Firefox not yet). No
+  custom hook and no manual poll: the request is an ordinary awaited call on a
+  standard interface, and `Running`/pending becomes the language's own
+  suspension. That is the end state; until the p3 toolchain and JSPI mature
+  (study Stage 2), the non-blocking host capability above is the way, and it is
+  the same shape one rung lower.
+
+Recommendation: a **generic, non-blocking `http` host capability**, shaped after
+`wasi:http`, is the reusable "built-in hook" — it unblocks polly-in-wasm and
+every other module that needs the network, and graduates to real `wasi:http`
+(host-async on p2 components, guest-async on p3) as the toolchain allows.
+
 ## The two ways to write the poll
 
 You can write the state machine by hand — a plain synchronous function that,
