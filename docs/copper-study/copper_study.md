@@ -172,7 +172,7 @@ sequenceDiagram
 
 The former Arora engine was a **dynamic module runtime** that could load and compose
 modules at runtime. Its type system is defined in
-[arora-types](https://github.com/semio-ai/arora-types/):
+[arora-types](https://github.com/semio-ai/arora-sdk/tree/main/crates/arora-types):
 
 ```text
 arora-types

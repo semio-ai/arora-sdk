@@ -13,7 +13,7 @@ The modules may depend on other modules or types,
 which can be provided locally as a folder to `--include`,
 or as a remote registry, reachable given the right `--config` file.
 See [Semio Client](https://github.com/semio-ai/semio-client)
-and [`semio-cli`](https://github.com/semio-ai/semio-cli)
+and `semio-cli`
 for information about client configuration files.
 
 Then, a function can be called by providing a `--call` description in YAML.
@@ -38,7 +38,7 @@ args:
 ```
 
 To connect to a remote registry,
-you can use [`semio-cli`](https://github.com/semio-ai/semio-cli).
+you can use `semio-cli`.
 As you login or signup,
 a configuration file will be created under `~/.semio/cli.yaml`.
 You can then pass it to `arora-cli` with the `--config` option.
