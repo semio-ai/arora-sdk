@@ -23,7 +23,7 @@ use arora_bridge_ros2::conversions::topic_name;
 use arora_bridge_ros2::msg_types::{self, MessageType};
 use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type, Value};
 use futures::StreamExt;
-use rand::Rng;
+use rand::RngExt;
 use ros2_client::{
     Context, ContextOptions, Name, NodeName, NodeOptions, DEFAULT_PUBLISHER_QOS,
     DEFAULT_SUBSCRIPTION_QOS,
