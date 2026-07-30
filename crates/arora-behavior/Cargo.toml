@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior"
-version = "8.3.0"
+version = "8.4.0"
 edition = "2021"
 description = "The Behavior abstraction the Arora runtime ticks: a behavior tree, a node graph, or any interpreter, against the shared data store — plus the shared behavior graph model."
 license = "MIT"
@@ -10,3 +10,4 @@ readme = "readme.md"
 arora-types = { path = "../arora-types", version = "2.3" }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde"] }
+semver = "1"

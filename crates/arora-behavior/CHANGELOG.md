@@ -97,3 +97,14 @@ All notable changes to `arora-behavior`. The format follows
 
 - A Behavior the runtime ticks, in an arora-behavior crate (VIZ-33)
 
+## [8.4.0] - 2026-07-30
+
+### Added
+
+- `Status` — the cross-interpreter run-status enum (`Success`/`Failure`/
+  `Running`) — now lives here (ARORA-82), beside `BehaviorStatus`/`TaskHandle`,
+  defined via `#[derive(AroraType)]` with pinned ids plus the value-plane
+  conversions and `declare_status_enumeration`. It moved out of
+  `arora-behavior-tree-types` (which re-exports it for compatibility): the node
+  graph and the behavior tree both speak `Status`, so neither interpreter's
+  crate should own it. Wire form (ids, `Value::Enumeration`) is unchanged.

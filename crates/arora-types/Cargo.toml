@@ -1,6 +1,6 @@
 [package]
 name = "arora-types"
-version = "2.4.0"
+version = "2.5.0"
 edition = "2021"
 description = "Shared type definitions for the Semio Arora framework"
 license = "MIT"
@@ -40,7 +40,7 @@ semver = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 lazy_static = "1"
 indexmap = { version = "2", features = ["serde"] }
-arora-types-derive = { path = "../arora-types-derive", version = "1.1", optional = true }
+arora-types-derive = { path = "../arora-types-derive", version = "1.2", optional = true }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 uuid = { version = "1", features = ["js", "serde", "v4"] }

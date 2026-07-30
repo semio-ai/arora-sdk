@@ -14,8 +14,10 @@
 //! Mirrors the type-directed walk it feeds: named-field structs whose fields are
 //! primitive scalars, `String`, `Uuid`, other `#[derive(AroraType)]` types, a
 //! `Vec<T>` of any of those (a homogeneous array), an `Option<T>`, or a
-//! `#[arora(keyvalue)]` field carrying dynamically-typed values. Maps and enums
-//! are rejected pending a `ty::low` model extension.
+//! `#[arora(keyvalue)]` field carrying dynamically-typed values; and enums with
+//! **unit variants** (a `ty::low` enumeration, each variant id pinned like a
+//! field). Maps and payload-carrying enum variants are rejected pending a
+//! `ty::low` model extension.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -32,21 +34,28 @@ pub fn derive_arora_type(input: TokenStream) -> TokenStream {
 }
 
 fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
+  match &input.data {
+    Data::Struct(syn::DataStruct {
+      fields: Fields::Named(named),
+      ..
+    }) => expand_struct(&input, named),
+    Data::Enum(data) => expand_enum(&input, data),
+    Data::Struct(_) => Err(syn::Error::new_spanned(
+      &input,
+      "AroraType requires a struct with named fields",
+    )),
+    Data::Union(_) => Err(syn::Error::new(
+      Span::call_site(),
+      "AroraType cannot be derived for a union",
+    )),
+  }
+}
+
+/// Derive `AroraType` for a named-field struct: a `ty::low` structure whose
+/// fields are the struct's fields, each referenced by its pinned id.
+fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<TokenStream2> {
   let name = &input.ident;
   let name_str = name.to_string();
-
-  let Data::Struct(data) = &input.data else {
-    return Err(syn::Error::new(
-      Span::call_site(),
-      "AroraType can only be derived for structs",
-    ));
-  };
-  let Fields::Named(named) = &data.fields else {
-    return Err(syn::Error::new_spanned(
-      &data.fields,
-      "AroraType requires a struct with named fields",
-    ));
-  };
 
   let meta = parse_arora_meta(&input.attrs)?;
   // The arora type name: an `#[arora(name = "…")]` override (the ROS-qualified
@@ -128,6 +137,78 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
         #(#register_calls)*
+      }
+    }
+  })
+}
+
+/// Derive `AroraType` for an enum: a `ty::low` enumeration whose values are the
+/// variants, each referenced by its pinned id. Only **unit** variants are
+/// supported (a payload-carrying variant needs a `ty::low` reference for its
+/// data, pending a model extension) — enough for the value-plane enums Arora
+/// exchanges (e.g. the behavior `Status`). The enum id and each variant id pin
+/// with `#[arora(id = "…")]`, exactly like a struct and its fields; the produced
+/// `Value::Enumeration { id, variant_id, value: Unit }` form is what the value
+/// plane already speaks.
+fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenStream2> {
+  let name = &input.ident;
+  let name_str = name.to_string();
+
+  let meta = parse_arora_meta(&input.attrs)?;
+  let type_name = meta.name.clone().unwrap_or_else(|| name_str.clone());
+  let name_hash_mode = meta.name.is_some();
+  let type_id_expr = id_expr(meta.id, &type_name, name_hash_mode, Span::call_site())?;
+
+  let mut value_entries = Vec::new();
+  for variant in &data.variants {
+    if !matches!(variant.fields, Fields::Unit) {
+      return Err(syn::Error::new_spanned(
+        &variant.fields,
+        "AroraType enums support only unit variants (a variant payload needs a \
+         `ty::low` reference, pending a model extension)",
+      ));
+    }
+    let vname = variant.ident.to_string();
+    let variant_meta = parse_arora_meta(&variant.attrs)?;
+    let variant_id_expr = id_expr(variant_meta.id, &vname, name_hash_mode, variant.span())?;
+    value_entries.push(quote! {
+      (
+        #variant_id_expr,
+        arora_types::ty::low::EnumerationValue {
+          name: #vname.to_string(),
+          // A unit variant carries no payload: it references the unit primitive,
+          // so the value form is `Value::Enumeration { id, variant_id, Unit }`.
+          type_ref: arora_types::module::low::TypeRef::Scalar { id: *arora_types::ty::UNIT_ID },
+        },
+      )
+    });
+  }
+
+  Ok(quote! {
+    impl arora_types::AroraType for #name {
+      fn arora_type_id() -> arora_types::Uuid {
+        #type_id_expr
+      }
+
+      fn arora_type() -> arora_types::ty::low::Type {
+        arora_types::ty::low::Type {
+          name: #type_name.to_string(),
+          id: <Self as arora_types::AroraType>::arora_type_id(),
+          description: ::std::string::String::new(),
+          kind: arora_types::ty::low::TypeKind::Enumeration(
+            arora_types::ty::low::Enumeration {
+              values: [ #(#value_entries),* ].into_iter().collect(),
+            },
+          ),
+        }
+      }
+
+      fn register_types(registry: &mut arora_types::ty::TypeRegistry) {
+        let id = <Self as arora_types::AroraType>::arora_type_id();
+        if registry.contains_key(&id) {
+          return;
+        }
+        registry.insert(id, <Self as arora_types::AroraType>::arora_type());
       }
     }
   })

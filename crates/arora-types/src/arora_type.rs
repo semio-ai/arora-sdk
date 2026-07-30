@@ -125,6 +125,53 @@ mod tests {
   }
 
   #[test]
+  fn derive_reproduces_an_enumeration_with_pinned_variant_ids() {
+    // A unit-variant enum with pinned type and variant ids — the value-plane
+    // `Status` shape: the derive must reproduce the enumeration id and each
+    // variant id exactly, so the wire form is stable.
+    #[derive(AroraType)]
+    #[arora(id = "325a5767-e344-4532-860e-0749bcf2e428")]
+    enum Status {
+      #[arora(id = "766e9e9a-446d-4e46-83e6-14b7ca101169")]
+      Success,
+      #[arora(id = "2468f46c-bb60-425c-9a4d-9ad326ccc7e2")]
+      Failure,
+      #[arora(id = "acd79ec6-0c44-401a-82f8-5da5422d3eec")]
+      Running,
+    }
+
+    let parse = |s| crate::Uuid::parse_str(s).unwrap();
+    assert_eq!(
+      Status::arora_type_id(),
+      parse("325a5767-e344-4532-860e-0749bcf2e428")
+    );
+    let ty = Status::arora_type();
+    assert_eq!(ty.name, "Status");
+    let TypeKind::Enumeration(enumeration) = &ty.kind else {
+      panic!("expected an enumeration type");
+    };
+    // Variants keep declared order, each keyed by its pinned id, each a unit
+    // payload.
+    let keys: Vec<_> = enumeration.values.keys().copied().collect();
+    assert_eq!(
+      keys,
+      vec![
+        parse("766e9e9a-446d-4e46-83e6-14b7ca101169"),
+        parse("2468f46c-bb60-425c-9a4d-9ad326ccc7e2"),
+        parse("acd79ec6-0c44-401a-82f8-5da5422d3eec"),
+      ]
+    );
+    assert_eq!(
+      enumeration.values[&parse("766e9e9a-446d-4e46-83e6-14b7ca101169")].name,
+      "Success"
+    );
+    assert!(matches!(
+      &enumeration.values[&parse("acd79ec6-0c44-401a-82f8-5da5422d3eec")].type_ref,
+      TypeRef::Scalar { id } if *id == *ty::UNIT_ID
+    ));
+  }
+
+  #[test]
   fn uuid_and_option_fields() {
     #[derive(AroraType)]
     #[arora(id = "33333333-3333-4333-8333-333333333333")]
