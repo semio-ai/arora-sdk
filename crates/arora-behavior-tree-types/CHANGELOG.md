@@ -4,6 +4,15 @@ All notable changes to `arora-behavior-tree-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-07-30
+
+### Changed
+
+- `Status` (the enum, its value conversions, the id constants, and
+  `declare_status_enumeration`) moved to `arora-behavior` (ARORA-82) and is
+  re-exported here unchanged, so existing consumers keep compiling; new code
+  links `arora-behavior`. Same ids, same wire form.
+
 ## [1.0.0] - 2026-07-20
 
 ### Breaking

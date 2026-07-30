@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree-types"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Type records the Arora behavior tree declares (Status, TickId, folder)."
 license = "MIT"
@@ -9,6 +9,8 @@ license = "MIT"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "2" }
+# Status moved here (ARORA-82); re-exported for existing consumers.
+arora-behavior = { path = "../arora-behavior", version = "8.4" }
 lazy_static = "1"
 semver = "1"
 uuid = "1"

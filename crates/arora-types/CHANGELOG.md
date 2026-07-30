@@ -4,6 +4,13 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.5.0] - 2026-07-30
+
+### Changed
+
+- `#[derive(AroraType)]` now supports unit-variant enums (arora-types-derive
+  1.2).
+
 ## [2.4.0] - 2026-07-29
 
 ### Fixed

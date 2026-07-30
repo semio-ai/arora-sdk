@@ -40,9 +40,14 @@ use arora_types::data::DataStore;
 pub mod built_in;
 pub mod graph;
 pub mod interpreter_module;
+pub mod status;
 pub mod task;
 
 pub use graph::{Graph, GraphDiff};
+pub use status::{
+    declare_status_enumeration, Status, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION,
+    STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
+};
 pub use task::{RunPolicy, TaskHandle, TaskId};
 
 /// Whether an interpreter wants to be ticked again — and, when it does not, how
