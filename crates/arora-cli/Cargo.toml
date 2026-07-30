@@ -13,8 +13,8 @@ arora-module-core = { path = "../arora-module-authoring/core" }
 arora-registry = { path = "../arora-registry" }
 arora-registry-remote = { path = "../arora-registry-remote" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
-anyhow = "*"
-clap = { version = "3", features = ["derive"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 reqwest = "0.13"
 serde = { version = "1", features = ["derive"] }

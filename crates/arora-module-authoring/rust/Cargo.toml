@@ -14,7 +14,7 @@ arora-types = { path = "../../arora-types", version = "2" }
 arora-vfs = { path = "../../arora-vfs", version = "0.1" }
 anyhow = "1"
 async-recursion = "1"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 convert_case = "0.11"
 derive_more = "2"
 itertools = "0.14"

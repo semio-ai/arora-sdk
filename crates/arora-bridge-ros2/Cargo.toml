@@ -48,7 +48,7 @@ zenoh = ["ros2-client/zenoh"]
 # speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
 # the bridge's ids and encodings match, without a runtime engine dependency.
 arora-behavior = { path = "../arora-behavior", version = "8" }
-rand = "0.9"
+rand = "0.10"
 env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile
 # discovery traffic onto the writers (WouldBlock), slowing discovery. `#[serial]`

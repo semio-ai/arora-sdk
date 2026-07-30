@@ -14,4 +14,4 @@ crate-type = ["staticlib", "rlib"]
 uuid = { version = "1", features = ["serde"] }
 
 [build-dependencies]
-cbindgen = "0.20"
+cbindgen = "0.29"

@@ -10,8 +10,8 @@ arora-module-core = { path = "../core" }
 arora-registry = { path = "../../arora-registry" }
 arora-types = { path = "../../arora-types", version = "2" }
 arora-vfs = { path = "../../arora-vfs" }
-anyhow = "*"
-clap = { version = "3", features = ["derive"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 convert_case = "0.11"
 derive_more = { version = "2", features = ["from"] }
 lazy_static = "*"
