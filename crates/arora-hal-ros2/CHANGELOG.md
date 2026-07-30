@@ -4,6 +4,12 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-07-30
+
+### Changed
+
+- ros2-client re-pinned to 0.12.
+
 ## [2.0.0] - 2026-07-20
 
 ### Breaking
