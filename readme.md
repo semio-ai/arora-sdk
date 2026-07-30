@@ -73,7 +73,7 @@ ROS 2 plugs in at either side of the device — as a bridge (the remote) or as a
 | [`arora-hal-ros2`](crates/arora-hal-ros2) | HAL | ROS 2 as the device's own hardware. |
 | [`arora-msgs-ros2`](crates/arora-msgs-ros2/README.md) | — | The ROS 2 message vocabulary: generated types, a registry, a schema-driven CDR codec, and REP-2016 type hashes — including the `hri_msgs` / ROS4HRI family. |
 
-[ROS4HRI](https://wiki.ros.org/hri), the human-robot-interaction message standard, rides these: `arora-msgs-ros2` carries the `hri_msgs` types and `arora-bridge-ros2` is where a device exposes them. Vizij builds its face standard on this vocabulary — see [vizij-rs's ROS4HRI docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md). (Typed `hri_msgs`-topic exposure with a `ros4hri` naming profile is planned; today the bridge's key topics are `std_msgs` scalars.)
+[ROS4HRI](https://ros.org/reps/rep-0155.html), the human-robot-interaction message standard, rides these: `arora-msgs-ros2` carries the `hri_msgs` types and `arora-bridge-ros2` is where a device exposes them. Vizij builds its face standard on this vocabulary — see [vizij-rs's ROS4HRI docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md). (Typed `hri_msgs`-topic exposure with a `ros4hri` naming profile is planned; today the bridge's key topics are `std_msgs` scalars.)
 
 ## Getting started
 
