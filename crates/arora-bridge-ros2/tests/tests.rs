@@ -777,3 +777,387 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         }
     }
 }
+
+/// The ros4hri profile's `/skill/look_at` binding end to end over real DDS: a
+/// typed `interaction_skills/LookAt` client against the bound action server.
+/// The runtime side is scripted (DescribeMethods → the `(policy, target,
+/// frame)` task-run signature; SPAWN → a task handle per goal; halt → the
+/// run fails on its next tick) — the throwaway stand-in for the real gaze
+/// fragment. The client sees the goal become the routed spawn call, feedback
+/// on `data_float`, a cancel answered `ROS_ECANCELED`, a preemption by a
+/// higher `Meta.priority` answered `ROS_EINTR`, and a lower-priority goal
+/// rejected outright.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config); these run on Linux CI. To run locally, \
+              ensure an active multicast-capable interface and use --ignored."
+)]
+async fn the_bound_look_at_skill_serves_the_standard_contract() {
+    use arora_behavior::interpreter_module;
+    use arora_behavior::{TaskHandle, TaskId};
+    use arora_behavior_tree_types::{
+        STATUS_ENUMERATION_ID, STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID,
+    };
+    use arora_bridge::MethodSignature;
+    use arora_bridge_ros2::ExposureProfile;
+    use arora_types::call::CallResult;
+    use arora_types::data::{Key, StateChange};
+    use arora_types::record::module::frozen::{Function, Parameter};
+    use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
+    use arora_types::record::{FrozenReference, Version};
+    use arora_types::value::Enumeration;
+    use arora_types::{gen_uuid_from_str, value_serde, Uuid};
+    use futures::StreamExt;
+    use ros2_client::action_msgs::GoalStatusEnum;
+    use ros2_client::{Message, ServiceMapping};
+    use serde::{Deserialize, Serialize};
+
+    // The typed client's view of `interaction_skills/LookAt` — local mirrors
+    // of the vendored messages (`ros2_client::Message` is a foreign marker,
+    // so the generated structs cannot carry it).
+    #[derive(Serialize, Deserialize, Clone)]
+    struct Meta {
+        caller: String,
+        priority: u8,
+    }
+    #[derive(Serialize, Deserialize, Clone)]
+    struct Header {
+        stamp: ros2_client::builtin_interfaces::Time,
+        frame_id: String,
+    }
+    #[derive(Serialize, Deserialize, Clone)]
+    struct Point {
+        x: f64,
+        y: f64,
+        z: f64,
+    }
+    #[derive(Serialize, Deserialize, Clone)]
+    struct PointStamped {
+        header: Header,
+        point: Point,
+    }
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtGoal {
+        meta: Meta,
+        policy: String,
+        target: PointStamped,
+    }
+    impl Message for LookAtGoal {}
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    struct SkillResult {
+        error_code: u8,
+        error_msg: String,
+    }
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    struct LookAtResult {
+        result: SkillResult,
+    }
+    impl Message for LookAtResult {}
+    #[derive(Serialize, Deserialize, Clone)]
+    struct SkillFeedback {
+        data_bool: bool,
+        data_int: u16,
+        data_float: f32,
+        data_str: String,
+    }
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtFeedback {
+        feedback: SkillFeedback,
+    }
+    impl Message for LookAtFeedback {}
+
+    const ROS_EINTR: u8 = 4;
+    const ROS_ECANCELED: u8 = 125;
+
+    fn status_value(variant: Uuid) -> Value {
+        Value::Enumeration(Enumeration {
+            id: STATUS_ENUMERATION_ID,
+            variant_id: variant,
+            value: Box::new(Value::Unit),
+        })
+    }
+
+    /// The `(policy, target, frame)` task-run signature the ros4hri binding
+    /// routes onto.
+    fn look_at_signature() -> MethodSignature {
+        let mut parameters = std::collections::HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for (name, kind) in [
+            ("policy", PrimitiveKind::String),
+            ("target", PrimitiveKind::ArrayF32),
+            ("frame", PrimitiveKind::String),
+        ] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(kind),
+                    mutable: false,
+                },
+            );
+        }
+        MethodSignature {
+            module_id: gen_uuid_from_str("gaze-module"),
+            id: gen_uuid_from_str("look_at"),
+            name: "look_at".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: FrozenTy::FrozenScalar(FrozenScalar {
+                    reference: FrozenReference {
+                        id: STATUS_ENUMERATION_ID,
+                        version: Version::parse("1.0.0").unwrap(),
+                    },
+                }),
+            },
+        }
+    }
+
+    let _ = env_logger::builder()
+        .parse_filters("warn")
+        .is_test(true)
+        .try_init();
+    let domain_id = random_domain_id();
+    let config = Ros2BridgeConfig::new("robot", domain_id).with_profile(ExposureProfile::ros4hri());
+    let mut bridge = Ros2Bridge::new(config).await;
+    let mut inbound = bridge.take_inbound();
+
+    // The scripted runtime: one task handle per spawned goal, halted runs
+    // fail on their next tick (the halt path of a real interpreter), live
+    // ones re-write Running + feedback. The first spawn call is asserted to
+    // be the routed goal — policy, the coerced vec3 target, the frame.
+    let runtime = async move {
+        struct Run {
+            handle: TaskHandle,
+            halted: bool,
+        }
+        let mut runs: Vec<Run> = Vec::new();
+        let mut spawned = 0u128;
+        loop {
+            let event = tokio::select! {
+                event = inbound.next() => event,
+                _ = tokio::time::sleep(Duration::from_millis(100)), if !runs.is_empty() => {
+                    let mut change = StateChange::new();
+                    for run in &runs {
+                        change.set.insert(
+                            run.handle.status.clone(),
+                            Some(status_value(if run.halted {
+                                STATUS_FAILURE_VARIANT_ID
+                            } else {
+                                STATUS_RUNNING_VARIANT_ID
+                            })),
+                        );
+                        if !run.halted {
+                            change
+                                .set
+                                .insert(run.handle.feedback[0].clone(), Some(Value::F32(0.25)));
+                        }
+                    }
+                    bridge.try_send(&change);
+                    continue;
+                }
+            };
+            let Some(event) = event else { break };
+            let Inbound::Command(cmd) = event else {
+                continue; // DataRequested etc.
+            };
+            match &cmd.op {
+                BridgeOp::DescribeMethods { .. } => {
+                    eprintln!("[runtime] answering DescribeMethods");
+                    let signatures = vec![look_at_signature()];
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&signatures).expect("signatures encode"),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
+                    let (inner, _policy) = interpreter_module::decode_spawn(call).unwrap();
+                    assert_eq!(inner.id, gen_uuid_from_str("look_at"));
+                    if spawned == 0 {
+                        let arg = |name: &str| {
+                            inner
+                                .args
+                                .iter()
+                                .find(|arg| arg.id == gen_uuid_from_str(name))
+                                .map(|arg| arg.value.as_ref().clone())
+                        };
+                        assert_eq!(arg("policy"), Some(Value::String(String::new())));
+                        assert_eq!(arg("target"), Some(Value::ArrayF32(vec![0.5, -0.25, 1.0])));
+                        assert_eq!(arg("frame"), Some(Value::String("sellion_link".into())));
+                    }
+                    let task = TaskId(Uuid::from_u128(0x60 + spawned));
+                    let prefix = format!("arora/tasks/gaze/look_at/run{spawned}");
+                    spawned += 1;
+                    let handle = TaskHandle {
+                        id: task,
+                        stop: interpreter_module::encode_halt(task),
+                        status: Key::from(format!("{prefix}/status")),
+                        feedback: vec![Key::from(format!("{prefix}/feedback"))],
+                        result: vec![Key::from(format!("{prefix}/result"))],
+                        update: vec![Key::from(format!("{prefix}/update"))],
+                    };
+                    eprintln!("[runtime] SPAWN accepted ({prefix})");
+                    cmd.reply(Ok(CallResult {
+                        ret: interpreter_module::encode_spawn_result(&handle),
+                        mutated: Vec::new(),
+                    }));
+                    runs.push(Run {
+                        handle,
+                        halted: false,
+                    });
+                }
+                BridgeOp::Call(call) if interpreter_module::decode_halt(call).is_ok() => {
+                    let task = interpreter_module::decode_halt(call).unwrap();
+                    eprintln!("[runtime] halt received for {task:?}");
+                    if let Some(run) = runs.iter_mut().find(|run| run.handle.id == task) {
+                        run.halted = true;
+                    }
+                    cmd.reply(Ok(CallResult {
+                        ret: Value::Unit,
+                        mutated: Vec::new(),
+                    }));
+                }
+                other => panic!("unexpected runtime command: {other:?}"),
+            }
+        }
+    };
+    tokio::pin!(runtime);
+
+    let client_flow = async {
+        let (_ctx, mut node) = create_test_node(domain_id, "skill_client");
+        let action_type = ros2_client::ActionTypeName::new("interaction_skills", "LookAt");
+        let action_name = Name::parse("/skill/look_at").expect("valid action name");
+        let service_qos = {
+            use ros2_client::ros2::{policy, QosPolicyBuilder};
+            QosPolicyBuilder::new()
+                .reliability(policy::Reliability::Reliable {
+                    max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
+                })
+                .history(policy::History::KeepLast { depth: 4 })
+                .durability(policy::Durability::TransientLocal)
+                .build()
+        };
+        let qos = ros2_client::action::ActionClientQosPolicies {
+            goal_service: service_qos.clone(),
+            result_service: service_qos.clone(),
+            cancel_service: service_qos.clone(),
+            feedback_subscription: service_qos.clone(),
+            status_subscription: service_qos.clone(),
+        };
+        let client = node
+            .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
+                ServiceMapping::Enhanced,
+                &action_name,
+                &action_type,
+                qos,
+            )
+            .expect("action client creates");
+
+        let goal = |priority: u8| LookAtGoal {
+            meta: Meta {
+                caller: "test".to_string(),
+                priority,
+            },
+            policy: String::new(),
+            target: PointStamped {
+                header: Header {
+                    stamp: ros2_client::builtin_interfaces::Time::ZERO,
+                    frame_id: "sellion_link".to_string(),
+                },
+                point: Point {
+                    x: 0.5,
+                    y: -0.25,
+                    z: 1.0,
+                },
+            },
+        };
+
+        // Goal A: retried until the graph connects and the server accepts.
+        eprintln!("[client] sending goal A");
+        let goal_a = loop {
+            match tokio::time::timeout(Duration::from_secs(2), client.async_send_goal(goal(128)))
+                .await
+            {
+                Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
+                other => {
+                    eprintln!("[client] send_goal attempt: {other:?}");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        };
+        eprintln!("[client] goal A accepted");
+
+        // Feedback rides std_skills/Feedback's data_float.
+        loop {
+            if let Ok(Some(feedback)) = client.receive_feedback(goal_a) {
+                eprintln!("[client] feedback received");
+                assert!((feedback.feedback.data_float - 0.25).abs() < f32::EPSILON);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // Cancel A: the halt lands as the run's Failure, answered Canceled
+        // with the ROS_ECANCELED errno in the standard Result message.
+        eprintln!("[client] canceling goal A");
+        client
+            .async_cancel_goal(goal_a, ros2_client::builtin_interfaces::Time::ZERO)
+            .await
+            .expect("cancel round-trips");
+        let (status, result) = client
+            .async_request_result(goal_a)
+            .await
+            .expect("result A arrives");
+        assert_eq!(status, GoalStatusEnum::Canceled);
+        assert_eq!(result.result.error_code, ROS_ECANCELED);
+        eprintln!("[client] goal A canceled with ECANCELED");
+
+        // Goal B at normal priority, then goal C above it: B is preempted —
+        // Aborted, with the ROS_EINTR errno.
+        let goal_b = loop {
+            match tokio::time::timeout(Duration::from_secs(2), client.async_send_goal(goal(128)))
+                .await
+            {
+                Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
+                other => {
+                    eprintln!("[client] send_goal B attempt: {other:?}");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        };
+        eprintln!("[client] goal B accepted");
+        let (_goal_c, response) = client
+            .async_send_goal(goal(200))
+            .await
+            .expect("goal C sends");
+        assert!(
+            response.accepted,
+            "an equal-or-higher priority goal replaces"
+        );
+        eprintln!("[client] goal C accepted (preempting B)");
+        let (status, result) = client
+            .async_request_result(goal_b)
+            .await
+            .expect("result B arrives");
+        assert_eq!(status, GoalStatusEnum::Aborted);
+        assert_eq!(result.result.error_code, ROS_EINTR);
+        eprintln!("[client] goal B preempted with EINTR");
+
+        // A lower-priority goal is rejected while C runs.
+        let (_goal_d, response) = client.async_send_goal(goal(1)).await.expect("goal D sends");
+        assert!(!response.accepted, "a lower-priority goal is rejected");
+        eprintln!("[client] goal D rejected");
+    };
+
+    tokio::select! {
+        _ = &mut runtime => panic!("the scripted runtime ended early"),
+        result = tokio::time::timeout(Duration::from_secs(60), client_flow) => {
+            result.expect("the skill lifecycle timed out");
+        }
+    }
+}

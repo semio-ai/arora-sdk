@@ -55,6 +55,6 @@ mod services;
 pub use arora_msgs_ros2::cdr;
 
 pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
-pub use profile::ExposureProfile;
+pub use profile::{ActionBinding, ExposureProfile};
 
 pub use arora_types::value::{Type, Value};

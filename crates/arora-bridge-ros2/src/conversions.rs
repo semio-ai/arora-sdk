@@ -212,7 +212,7 @@ async fn raw_take(sub: &RawSubscription) -> Result<Vec<u8>, String> {
 /// registered message name; `path` is the store key the decoded value lands on.
 /// The element type behind any [`TypeRef`](arora_types::module::low::TypeRef)
 /// variant — the id a field walk descends into.
-fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora_types::Uuid {
+pub(crate) fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora_types::Uuid {
     use arora_types::module::low::TypeRef;
     match type_ref {
         TypeRef::Scalar { id }
@@ -231,7 +231,7 @@ fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora_types::Uui
 /// A geometry point/vector — a structure of exactly `x`, `y`, `z` numeric
 /// fields — coerces to [`Value::ArrayF32`], the store's vec3 form, so a
 /// `PointStamped.point` lands directly on a `gaze/target`-style key.
-fn extract_route(
+pub(crate) fn extract_route(
     value: &Value,
     ty: &arora_types::ty::low::Type,
     registry: &arora_types::ty::TypeRegistry,
@@ -272,19 +272,26 @@ fn extract_route(
         .unwrap_or_else(|| current_value.clone()))
 }
 
-/// The vec3 form of an `x`/`y`/`z` numeric structure, `None` for any other
-/// shape.
-fn coerce_xyz(value: &Value, ty: &arora_types::ty::low::Type) -> Option<Value> {
+/// Whether a type is a geometry point/vector — a structure of exactly `x`,
+/// `y`, `z` fields — the shape [`extract_route`] coerces to the store's vec3
+/// form ([`Value::ArrayF32`]).
+pub(crate) fn xyz_structure(ty: &arora_types::ty::low::Type) -> bool {
     use arora_types::ty::low::TypeKind;
     let TypeKind::Structure(structure) = &ty.kind else {
-        return None;
+        return false;
     };
     let names: Vec<&str> = structure
         .fields
         .values()
         .map(|field| field.name.as_str())
         .collect();
-    if names != ["x", "y", "z"] {
+    names == ["x", "y", "z"]
+}
+
+/// The vec3 form of an `x`/`y`/`z` numeric structure, `None` for any other
+/// shape.
+fn coerce_xyz(value: &Value, ty: &arora_types::ty::low::Type) -> Option<Value> {
+    if !xyz_structure(ty) {
         return None;
     }
     let Value::Structure(value_structure) = value else {
