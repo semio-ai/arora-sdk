@@ -68,17 +68,22 @@ fn parse_package(dir: &Path, package: &str) -> Vec<MessageSpec> {
         .expect("package directory")
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "msg"))
+        .filter(|p| p.extension().is_some_and(|x| x == "msg" || x == "action"))
         .collect();
     files.sort();
 
     files
         .iter()
-        .map(|path| {
+        .flat_map(|path| {
             let name = path.file_stem().unwrap().to_string_lossy();
             let text = fs::read_to_string(path).unwrap();
-            schema::parse_msg(package, &name, &text)
-                .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))
+            if path.extension().is_some_and(|x| x == "action") {
+                schema::parse_action(package, &name, &text)
+                    .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))
+            } else {
+                vec![schema::parse_msg(package, &name, &text)
+                    .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))]
+            }
         })
         .collect()
 }
@@ -118,6 +123,13 @@ fn emit_package(specs: &[MessageSpec], default_able: &HashSet<String>) -> String
 fn emit_struct(spec: &MessageSpec, default_able: &HashSet<String>) -> TokenStream {
     let struct_ident = format_ident!("{}", spec.name);
     let rep_name = spec.rep2016_name();
+    // Action sub-messages keep their REP-2016 `Name_Goal` form as the Rust
+    // ident too, so the code reads like the wire.
+    let case_allowance = if spec.name.contains('_') {
+        quote! { #[allow(non_camel_case_types)] }
+    } else {
+        quote! {}
+    };
 
     let fields = spec.fields.iter().map(|field| {
         let fname = field_ident(&field.name);
@@ -171,6 +183,7 @@ fn emit_struct(spec: &MessageSpec, default_able: &HashSet<String>) -> TokenStrea
     quote! {
         #derives
         #[arora(name = #rep_name)]
+        #case_allowance
         pub struct #struct_ident {
             #(#fields)*
         }
