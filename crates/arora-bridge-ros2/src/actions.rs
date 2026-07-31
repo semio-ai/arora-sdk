@@ -39,13 +39,28 @@
 //! `SPAWN`), advance by observing the run's per-goal status key on the
 //! outbound state stream, cancel through the handle's stop call, and resolve
 //! `GetResult` at terminal. The book is pure state — the node task drives it.
+//!
+//! # Bound actions: the skill plane
+//!
+//! A profile's [`profile::ActionBinding`] serves the same lifecycle under a
+//! **standard** `.action` contract instead of the synthesised one: the goal,
+//! result and feedback are registry message types (e.g.
+//! `interaction_skills/LookAt`), the action lives on its own absolute name
+//! (`/skill/look_at`), and the binding is checked at startup against the
+//! device's described methods ([`resolve_bound`]) — the exterior contract
+//! systematically associated with the behavior that implements it. Bound
+//! actions serve **one goal at a time**: `std_skills/Meta.priority`
+//! arbitrates, an equal-or-higher replacement preempting the active run (it
+//! reports `ROS_EINTR`) and a lower one being rejected. The terminal answer
+//! is the bound Result message carrying the `std_skills` errno of the goal's
+//! lifecycle — unless the run wrote the Result (or an errno) itself.
 
 use arora_behavior_tree_types::{
     STATUS_ENUMERATION_ID, STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID,
     STATUS_SUCCESS_VARIANT_ID,
 };
 use arora_bridge::{BridgeCommand, BridgeOp, MethodSignature};
-use arora_msgs_ros2::{cdr, ros2_representable, Ros2Registry};
+use arora_msgs_ros2::{cdr, ros2_representable, std_skills, Ros2Registry};
 use arora_types::call::{Call, CallResult};
 use arora_types::data::{Key, StateChange};
 use arora_types::gen_uuid_from_str;
@@ -67,6 +82,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc as tmpsc;
 
+use crate::conversions::{extract_route, type_ref_id, xyz_structure};
+use crate::profile;
 use crate::services::type_ref_of;
 
 // =============================================================================
@@ -139,17 +156,70 @@ pub(crate) fn is_action_shaped(signature: &MethodSignature) -> bool {
 /// [`GoalBook`].
 #[derive(Clone)]
 pub(crate) struct MethodAction {
-    /// `/{namespace}/actions/{method}` — the action name on the ROS graph.
+    /// The action name on the ROS graph: `/{namespace}/actions/{method}` for
+    /// a discovered method, the binding's absolute name for a bound one.
     pub name: String,
-    /// The nominal action type, `arora/{method}`. Like the service plane's
-    /// types these are the device's own methods, not standard `.action` files,
-    /// so the type names the action; the messages are the synthesised types
-    /// here.
+    /// The action type: nominal `arora/{method}` for a discovered method
+    /// (the device's own, not a standard `.action`), the bound registry type
+    /// (e.g. `interaction_skills/LookAt`) for a binding.
     pub action_type: ActionTypeName,
-    /// The SendGoal request: `goal_id` + one field per method parameter.
+    /// The SendGoal request: `goal_id` + one field per method parameter
+    /// (synthesised), or `goal_id` + the registry goal message (bound).
     pub send_goal_request_type: low::Type,
     pub module_id: Uuid,
     pub function_id: Uuid,
+    /// How the goal, result and feedback are typed on the wire.
+    pub wire: Wire,
+}
+
+/// The wire typing of an action's goal, result and feedback messages.
+#[derive(Clone)]
+pub(crate) enum Wire {
+    /// Synthesised from the method signature: flat goal fields, lazily-typed
+    /// result and feedback — the discovery plane under
+    /// `/{namespace}/actions/…`.
+    Synthesised,
+    /// Bound to registry message types by a profile's
+    /// [`profile::ActionBinding`] — a skill endpoint serving a standard
+    /// `.action` contract.
+    Bound(Box<Bound>),
+}
+
+/// The registry-typed wire of a bound action, resolved once at startup by
+/// [`resolve_bound`].
+#[derive(Clone)]
+pub(crate) struct Bound {
+    /// The goal message type (`<pkg>/action/<Name>_Goal`).
+    pub goal_type: low::Type,
+    /// The Result message type (`<pkg>/action/<Name>_Result`).
+    pub result_type: low::Type,
+    /// The GetResult response wire type: `status: int8` + `result` of
+    /// [`Self::result_type`].
+    pub result_response_type: low::Type,
+    /// The Feedback message and its wire wrapper, when the action declares
+    /// a feedback message.
+    pub feedback: Option<BoundFeedback>,
+    /// The goal routes, each resolved to the parameter it feeds.
+    pub routes: Vec<BoundRoute>,
+}
+
+/// The feedback wire of a bound action.
+#[derive(Clone)]
+pub(crate) struct BoundFeedback {
+    /// The Feedback message type (`<pkg>/action/<Name>_Feedback`).
+    pub message: low::Type,
+    /// The wire type: `goal_id: uint8[16]` + `feedback` of the message type.
+    pub wire: low::Type,
+}
+
+/// One goal field routed onto one parameter of the bound function.
+#[derive(Clone)]
+pub(crate) struct BoundRoute {
+    /// Dotted path into the goal message (see
+    /// [`profile::FieldRoute::field`]).
+    pub field: String,
+    /// The routed parameter's id — the spawn call's argument id.
+    pub parameter: Uuid,
 }
 
 /// Field id of the `goal_id` field in the synthesised SendGoal/GetResult
@@ -185,9 +255,176 @@ pub(crate) fn resolve(
             send_goal_request_type,
             module_id: signature.module_id,
             function_id: signature.id,
+            wire: Wire::Synthesised,
         });
     }
     (actions, skipped)
+}
+
+/// Resolve every profile-declared [`profile::ActionBinding`] against the
+/// device's described methods and the message registry — the startup check
+/// that a skill's exterior contract is actually implemented. Returns the
+/// resolved actions plus one error per binding that does not hold (an
+/// unregistered type, a missing or mis-shaped function, an unroutable goal
+/// field), so the caller can refuse the binding loudly.
+pub(crate) fn resolve_bound(
+    bindings: &[profile::ActionBinding],
+    signatures: &[MethodSignature],
+    registry: &Ros2Registry,
+) -> (Vec<MethodAction>, Vec<String>) {
+    let mut actions = Vec::new();
+    let mut errors = Vec::new();
+    for binding in bindings {
+        match resolve_binding(binding, signatures, registry) {
+            Ok(action) => actions.push(action),
+            Err(e) => errors.push(format!("skill action '{}': {e}", binding.action)),
+        }
+    }
+    (actions, errors)
+}
+
+/// Resolve one binding, or say precisely why it does not hold.
+fn resolve_binding(
+    binding: &profile::ActionBinding,
+    signatures: &[MethodSignature],
+    registry: &Ros2Registry,
+) -> Result<MethodAction, String> {
+    let (package, name) = arora_msgs_ros2::package_and_type(&binding.ros_type)
+        .ok_or_else(|| format!("malformed action type '{}'", binding.ros_type))?;
+    let named = |suffix: &str| -> Result<low::Type, String> {
+        let type_name = format!("{package}/{name}_{suffix}");
+        registry
+            .get_by_name(&type_name)
+            .cloned()
+            .ok_or_else(|| format!("unregistered message '{type_name}'"))
+    };
+    let goal_type = named("Goal")?;
+    let result_type = named("Result")?;
+    let feedback = named("Feedback").ok().map(|message| BoundFeedback {
+        wire: bound_feedback_wire_type(&message),
+        message,
+    });
+
+    let signature = signatures
+        .iter()
+        .find(|signature| signature.name == binding.function)
+        .ok_or_else(|| format!("the device describes no method '{}'", binding.function))?;
+    if !is_action_shaped(signature) {
+        return Err(format!(
+            "method '{}' is not a task run (it does not return the behavior-tree Status)",
+            binding.function
+        ));
+    }
+
+    // Every routed field must resolve in the goal message and land on a
+    // parameter of a compatible type — and every parameter must be routed,
+    // or the spawn call would miss arguments.
+    let function = &signature.function;
+    let mut routes = Vec::new();
+    for route in &binding.goal_routes {
+        let field_ref = resolve_field_ref(&goal_type, registry.types(), &route.field)?;
+        let (parameter_id, parameter) = function
+            .parameter_ordering
+            .iter()
+            .filter_map(|id| Some((*id, function.parameters.get(id)?)))
+            .find(|(_, parameter)| parameter.name == route.key)
+            .ok_or_else(|| {
+                format!(
+                    "method '{}' has no parameter '{}'",
+                    binding.function, route.key
+                )
+            })?;
+        if !route_compatible(&field_ref, &parameter.ty, registry) {
+            return Err(format!(
+                "goal field '{}' does not fit parameter '{}'",
+                route.field, route.key
+            ));
+        }
+        routes.push(BoundRoute {
+            field: route.field.clone(),
+            parameter: parameter_id,
+        });
+    }
+    let unrouted: Vec<&str> = function
+        .parameter_ordering
+        .iter()
+        .filter_map(|id| function.parameters.get(id))
+        .map(|parameter| parameter.name.as_str())
+        .filter(|name| !binding.goal_routes.iter().any(|route| route.key == *name))
+        .collect();
+    if !unrouted.is_empty() {
+        return Err(format!(
+            "parameters not routed from the goal: {}",
+            unrouted.join(", ")
+        ));
+    }
+
+    let send_goal_request_type = bound_send_goal_request_type(&binding.action, &goal_type);
+    ros2_representable(&send_goal_request_type, registry.types())
+        .map_err(|e| format!("the goal is not ROS 2-representable: {e}"))?;
+    Ok(MethodAction {
+        name: binding.action.clone(),
+        action_type: ActionTypeName::new(package, name),
+        send_goal_request_type,
+        module_id: signature.module_id,
+        function_id: signature.id,
+        wire: Wire::Bound(Box::new(Bound {
+            result_response_type: bound_result_response_type(&binding.action, &result_type),
+            goal_type,
+            result_type,
+            feedback,
+            routes,
+        })),
+    })
+}
+
+/// Resolve a dotted field path against a message type alone — the startup
+/// counterpart of [`extract_route`]'s value walk. Empty routes the whole
+/// message.
+fn resolve_field_ref(
+    ty: &low::Type,
+    registry: &ty::TypeRegistry,
+    dotted: &str,
+) -> Result<TypeRef, String> {
+    let mut current_ref = TypeRef::Scalar { id: ty.id };
+    let mut current_ty = Some(ty);
+    if !dotted.is_empty() {
+        for segment in dotted.split('.') {
+            let Some(low::TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
+                return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
+            };
+            let field = structure
+                .fields
+                .values()
+                .find(|field| field.name == segment)
+                .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
+            current_ref = field.type_ref.clone();
+            current_ty = registry.get(&type_ref_id(&field.type_ref));
+        }
+    }
+    Ok(current_ref)
+}
+
+/// Whether a goal field can feed a parameter: their type references agree, or
+/// the field is an `x`/`y`/`z` structure and the parameter the vec3 array it
+/// coerces to (see [`extract_route`]).
+fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Registry) -> bool {
+    let parameter_ref = type_ref_of(parameter);
+    let same = match (field, &parameter_ref) {
+        (TypeRef::Scalar { id: a }, TypeRef::Scalar { id: b })
+        | (TypeRef::Array { id: a }, TypeRef::Array { id: b })
+        | (TypeRef::Option { id: a }, TypeRef::Option { id: b }) => a == b,
+        (TypeRef::FixedArray { id: a, len: la }, TypeRef::FixedArray { id: b, len: lb }) => {
+            a == b && la == lb
+        }
+        _ => false,
+    };
+    if same {
+        return true;
+    }
+    matches!(parameter_ref, TypeRef::Array { id } if id == *ty::F32_ID)
+        && matches!(field, TypeRef::Scalar { id }
+            if registry.get(id).is_some_and(xyz_structure))
 }
 
 /// The `goal_id: uint8[16]` field every synthesised request leads with (a
@@ -354,6 +591,430 @@ pub(crate) fn type_ref_of_value(value: &Value) -> Option<TypeRef> {
     }
 }
 
+// =============================================================================
+// The bound wire: registry-typed goal, result and feedback.
+// =============================================================================
+
+/// The SendGoal request type of a bound action: `goal_id: uint8[16]` + the
+/// registry goal message in one `goal` field — CDR-identical to ROS's nested
+/// SendGoal request.
+fn bound_send_goal_request_type(action: &str, goal_type: &low::Type) -> low::Type {
+    let fields = [
+        goal_id_low_field(),
+        (
+            gen_uuid_from_str("action/goal"),
+            low::StructureField {
+                name: "goal".to_string(),
+                type_ref: TypeRef::Scalar { id: goal_type.id },
+            },
+        ),
+    ];
+    let name = format!("{action}/SendGoal_Request");
+    low::Type {
+        id: gen_uuid_from_str(&name),
+        name,
+        description: String::new(),
+        kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
+    }
+}
+
+/// The GetResult response wire type of a bound action: `status: int8` + the
+/// registry Result message in one `result` field.
+fn bound_result_response_type(action: &str, result_type: &low::Type) -> low::Type {
+    let fields = [
+        (
+            gen_uuid_from_str("action/status"),
+            low::StructureField {
+                name: "status".to_string(),
+                type_ref: TypeRef::Scalar { id: *ty::I8_ID },
+            },
+        ),
+        (
+            gen_uuid_from_str("action/result"),
+            low::StructureField {
+                name: "result".to_string(),
+                type_ref: TypeRef::Scalar { id: result_type.id },
+            },
+        ),
+    ];
+    let name = format!("{action}/GetResult_Response");
+    low::Type {
+        id: gen_uuid_from_str(&name),
+        name,
+        description: String::new(),
+        kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
+    }
+}
+
+/// The Feedback wire type of a bound action: `goal_id: uint8[16]` + the
+/// registry Feedback message in one `feedback` field.
+fn bound_feedback_wire_type(feedback_type: &low::Type) -> low::Type {
+    let fields = [
+        goal_id_low_field(),
+        (
+            gen_uuid_from_str("action/feedback"),
+            low::StructureField {
+                name: "feedback".to_string(),
+                type_ref: TypeRef::Scalar {
+                    id: feedback_type.id,
+                },
+            },
+        ),
+    ];
+    let name = format!("{}/FeedbackMessage", feedback_type.name);
+    low::Type {
+        id: gen_uuid_from_str(&name),
+        name,
+        description: String::new(),
+        kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
+    }
+}
+
+/// Split a decoded bound SendGoal request into the goal id, the call's
+/// priority (`meta.priority` per the `std_skills/Meta` convention,
+/// `NORMAL_PRIORITY` when the goal carries none), and the spawn call with the
+/// routed goal fields as arguments.
+fn bound_goal_call_of(
+    action: &MethodAction,
+    bound: &Bound,
+    registry: &Ros2Registry,
+    request: Value,
+) -> Result<([u8; 16], u8, Call), String> {
+    let Value::Structure(Structure { fields, .. }) = request else {
+        return Err("the SendGoal request is not a structure".to_string());
+    };
+    let mut goal_id = None;
+    let mut goal = None;
+    for field in fields {
+        if field.id == goal_id_field() {
+            if let Value::ArrayU8(bytes) = field.value.as_ref() {
+                goal_id = <[u8; 16]>::try_from(bytes.as_slice()).ok();
+            }
+        } else if field.id == gen_uuid_from_str("action/goal") {
+            goal = Some(*field.value);
+        }
+    }
+    let goal_id = goal_id.ok_or("the SendGoal request carries no goal id")?;
+    let goal = goal.ok_or("the SendGoal request carries no goal")?;
+    let priority = match extract_route(&goal, &bound.goal_type, registry.types(), "meta.priority") {
+        Ok(Value::U8(priority)) => priority,
+        _ => std_skills::Meta::NORMAL_PRIORITY,
+    };
+    let mut args = Vec::with_capacity(bound.routes.len());
+    for route in &bound.routes {
+        let value = extract_route(&goal, &bound.goal_type, registry.types(), &route.field)
+            .map_err(|e| format!("goal field {e}"))?;
+        args.push(StructureField {
+            id: route.parameter,
+            value: Box::new(value),
+        });
+    }
+    Ok((
+        goal_id,
+        priority,
+        Call {
+            module_id: Some(action.module_id),
+            id: action.function_id,
+            args,
+        },
+    ))
+}
+
+/// A zero value of a registry message type: every field defaulted,
+/// recursively — what a bound result or feedback message starts from before
+/// the meaningful fields are set. `Err` on shapes ROS messages do not use.
+fn default_value(ty: &low::Type, registry: &ty::TypeRegistry) -> Result<Value, String> {
+    let low::TypeKind::Structure(structure) = &ty.kind else {
+        return Err(format!("'{}' is not a structure", ty.name));
+    };
+    let mut fields = Vec::with_capacity(structure.fields.len());
+    for (id, field) in &structure.fields {
+        let value = default_of_ref(&field.type_ref, registry)
+            .map_err(|e| format!("'{}': {e}", field.name))?;
+        fields.push(StructureField {
+            id: *id,
+            value: Box::new(value),
+        });
+    }
+    Ok(Value::Structure(Structure { id: ty.id, fields }))
+}
+
+/// The zero value behind one field reference.
+fn default_of_ref(type_ref: &TypeRef, registry: &ty::TypeRegistry) -> Result<Value, String> {
+    match type_ref {
+        TypeRef::Scalar { id } => default_scalar(id, registry),
+        TypeRef::Array { id } => default_array(id, 0),
+        TypeRef::FixedArray { id, len } => default_array(id, *len),
+        other => Err(format!("no default for a {other:?} field")),
+    }
+}
+
+/// The zero value of a scalar field: the primitive's zero, or a nested
+/// message's default.
+fn default_scalar(id: &Uuid, registry: &ty::TypeRegistry) -> Result<Value, String> {
+    let id = *id;
+    if id == *ty::BOOLEAN_ID {
+        Ok(Value::Boolean(false))
+    } else if id == *ty::U8_ID {
+        Ok(Value::U8(0))
+    } else if id == *ty::U16_ID {
+        Ok(Value::U16(0))
+    } else if id == *ty::U32_ID {
+        Ok(Value::U32(0))
+    } else if id == *ty::U64_ID {
+        Ok(Value::U64(0))
+    } else if id == *ty::I8_ID {
+        Ok(Value::I8(0))
+    } else if id == *ty::I16_ID {
+        Ok(Value::I16(0))
+    } else if id == *ty::I32_ID {
+        Ok(Value::I32(0))
+    } else if id == *ty::I64_ID {
+        Ok(Value::I64(0))
+    } else if id == *ty::F32_ID {
+        Ok(Value::F32(0.0))
+    } else if id == *ty::F64_ID {
+        Ok(Value::F64(0.0))
+    } else if id == *ty::STRING_ID {
+        Ok(Value::String(String::new()))
+    } else if let Some(nested) = registry.get(&id) {
+        default_value(nested, registry)
+    } else {
+        Err(format!("unregistered type {id}"))
+    }
+}
+
+/// The zero value of an array field (`len` zeros for a fixed array).
+fn default_array(id: &Uuid, len: usize) -> Result<Value, String> {
+    let id = *id;
+    if id == *ty::BOOLEAN_ID {
+        Ok(Value::ArrayBoolean(vec![false; len]))
+    } else if id == *ty::U8_ID {
+        Ok(Value::ArrayU8(vec![0; len]))
+    } else if id == *ty::U16_ID {
+        Ok(Value::ArrayU16(vec![0; len]))
+    } else if id == *ty::U32_ID {
+        Ok(Value::ArrayU32(vec![0; len]))
+    } else if id == *ty::U64_ID {
+        Ok(Value::ArrayU64(vec![0; len]))
+    } else if id == *ty::I8_ID {
+        Ok(Value::ArrayI8(vec![0; len]))
+    } else if id == *ty::I16_ID {
+        Ok(Value::ArrayI16(vec![0; len]))
+    } else if id == *ty::I32_ID {
+        Ok(Value::ArrayI32(vec![0; len]))
+    } else if id == *ty::I64_ID {
+        Ok(Value::ArrayI64(vec![0; len]))
+    } else if id == *ty::F32_ID {
+        Ok(Value::ArrayF32(vec![0.0; len]))
+    } else if id == *ty::F64_ID {
+        Ok(Value::ArrayF64(vec![0.0; len]))
+    } else if id == *ty::STRING_ID {
+        Ok(Value::ArrayString(vec![String::new(); len]))
+    } else {
+        Err(format!("no default for an array of type {id}"))
+    }
+}
+
+/// Set the first field named `name` (depth-first, declared order) in a
+/// message value to `new`, coercing scalars into the field's primitive.
+/// `false` when no such field takes the value.
+fn set_named_field(
+    value: &mut Value,
+    ty: &low::Type,
+    registry: &ty::TypeRegistry,
+    name: &str,
+    new: &Value,
+) -> bool {
+    let low::TypeKind::Structure(structure) = &ty.kind else {
+        return false;
+    };
+    let Value::Structure(value_structure) = value else {
+        return false;
+    };
+    for (id, field) in &structure.fields {
+        let Some(slot) = value_structure
+            .fields
+            .iter_mut()
+            .find(|value_field| value_field.id == *id)
+        else {
+            continue;
+        };
+        if let TypeRef::Scalar { id } = &field.type_ref {
+            if field.name == name {
+                if let Some(coerced) = coerce_scalar(new, id) {
+                    *slot.value = coerced;
+                    return true;
+                }
+                // A same-named field of an incompatible kind does not take
+                // the value; keep looking deeper.
+            }
+            if let Some(nested) = registry.get(id) {
+                if set_named_field(slot.value.as_mut(), nested, registry, name, new) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// `value` as the primitive `target` names, when the conversion preserves the
+/// kind (any integer feeds an integer field, either float a float field).
+fn coerce_scalar(value: &Value, target: &Uuid) -> Option<Value> {
+    let int = |value: &Value| -> Option<i128> {
+        Some(match value {
+            Value::U8(v) => *v as i128,
+            Value::U16(v) => *v as i128,
+            Value::U32(v) => *v as i128,
+            Value::U64(v) => *v as i128,
+            Value::I8(v) => *v as i128,
+            Value::I16(v) => *v as i128,
+            Value::I32(v) => *v as i128,
+            Value::I64(v) => *v as i128,
+            _ => return None,
+        })
+    };
+    let float = |value: &Value| -> Option<f64> {
+        Some(match value {
+            Value::F32(v) => *v as f64,
+            Value::F64(v) => *v,
+            _ => return None,
+        })
+    };
+    let target = *target;
+    if target == *ty::BOOLEAN_ID {
+        matches!(value, Value::Boolean(_)).then(|| value.clone())
+    } else if target == *ty::STRING_ID {
+        matches!(value, Value::String(_)).then(|| value.clone())
+    } else if target == *ty::U8_ID {
+        int(value).map(|v| Value::U8(v as u8))
+    } else if target == *ty::U16_ID {
+        int(value).map(|v| Value::U16(v as u16))
+    } else if target == *ty::U32_ID {
+        int(value).map(|v| Value::U32(v as u32))
+    } else if target == *ty::U64_ID {
+        int(value).map(|v| Value::U64(v as u64))
+    } else if target == *ty::I8_ID {
+        int(value).map(|v| Value::I8(v as i8))
+    } else if target == *ty::I16_ID {
+        int(value).map(|v| Value::I16(v as i16))
+    } else if target == *ty::I32_ID {
+        int(value).map(|v| Value::I32(v as i32))
+    } else if target == *ty::I64_ID {
+        int(value).map(|v| Value::I64(v as i64))
+    } else if target == *ty::F32_ID {
+        float(value).map(|v| Value::F32(v as f32))
+    } else if target == *ty::F64_ID {
+        float(value).map(Value::F64)
+    } else {
+        None
+    }
+}
+
+/// The `std_skills` errno of a terminal goal, when the run wrote none
+/// itself: success is `ROS_ENOERR`, a caller cancel `ROS_ECANCELED`, a
+/// preemption `ROS_EINTR`, a spontaneous failure `ROS_EOTHER`.
+fn errno_of(status: GoalStatusEnum, cause: Option<HaltCause>) -> u8 {
+    match status {
+        GoalStatusEnum::Succeeded => std_skills::Result::ROS_ENOERR,
+        GoalStatusEnum::Canceled => std_skills::Result::ROS_ECANCELED,
+        _ => match cause {
+            Some(HaltCause::Preempt) => std_skills::Result::ROS_EINTR,
+            _ => std_skills::Result::ROS_EOTHER,
+        },
+    }
+}
+
+/// The bound Result message of a terminal goal. A run that wrote the Result
+/// message itself (a structure of the bound type) answers verbatim; a run
+/// that wrote an integer answers it as the errno; otherwise the errno
+/// reflects the goal's lifecycle ([`errno_of`]), set on the message's
+/// `error_code` field per the `std_skills/Result` convention.
+fn bound_result_value(
+    bound: &Bound,
+    registry: &ty::TypeRegistry,
+    status: GoalStatusEnum,
+    cause: Option<HaltCause>,
+    run_result: Option<Value>,
+) -> Result<Value, String> {
+    match run_result {
+        Some(Value::Structure(structure)) if structure.id == bound.result_type.id => {
+            Ok(Value::Structure(structure))
+        }
+        other => {
+            let errno = match other.as_ref().and_then(|v| coerce_scalar(v, &ty::U8_ID)) {
+                Some(Value::U8(errno)) => errno,
+                _ => errno_of(status, cause),
+            };
+            let mut message = default_value(&bound.result_type, registry)?;
+            if !set_named_field(
+                &mut message,
+                &bound.result_type,
+                registry,
+                "error_code",
+                &Value::U8(errno),
+            ) {
+                warn!(
+                    "'{}' has no error_code field; answering its default",
+                    bound.result_type.name
+                );
+            }
+            Ok(message)
+        }
+    }
+}
+
+/// The bound Feedback wire message for one run-written feedback value: the
+/// value lands on the `std_skills/Feedback` field matching its kind
+/// (`data_bool`/`data_int`/`data_float`/`data_str`) — or, when the run wrote
+/// the Feedback message itself, verbatim. `None` when the bound feedback
+/// cannot carry the value.
+fn bound_feedback_value(
+    feedback: &BoundFeedback,
+    registry: &ty::TypeRegistry,
+    goal_id: [u8; 16],
+    value: Value,
+) -> Option<Value> {
+    let message = match value {
+        Value::Structure(structure) if structure.id == feedback.message.id => {
+            Value::Structure(structure)
+        }
+        value => {
+            let field = match &value {
+                Value::Boolean(_) => "data_bool",
+                Value::U8(_)
+                | Value::U16(_)
+                | Value::U32(_)
+                | Value::U64(_)
+                | Value::I8(_)
+                | Value::I16(_)
+                | Value::I32(_)
+                | Value::I64(_) => "data_int",
+                Value::F32(_) | Value::F64(_) => "data_float",
+                Value::String(_) => "data_str",
+                _ => return None,
+            };
+            let mut message = default_value(&feedback.message, registry).ok()?;
+            set_named_field(&mut message, &feedback.message, registry, field, &value)
+                .then_some(message)?
+        }
+    };
+    Some(Value::Structure(Structure {
+        id: feedback.wire.id,
+        fields: vec![
+            StructureField {
+                id: goal_id_field(),
+                value: Box::new(Value::ArrayU8(goal_id.to_vec())),
+            },
+            StructureField {
+                id: gen_uuid_from_str("action/feedback"),
+                value: Box::new(message),
+            },
+        ],
+    }))
+}
+
 /// The spawned run's handle, decoded off the **value plane**: the interpreter
 /// module's SPAWN returns the engine's `TaskHandle` as a serde-encoded
 /// [`Value`], and this mirror deserialises it by field name — the bridge needs
@@ -427,11 +1088,26 @@ pub(crate) enum GoalEvent {
     Feedback { goal_id: [u8; 16], value: Value },
 }
 
+/// Why a run was halted from this side — it distinguishes the caller's
+/// cancel from a preemption when the halt lands as the run's terminal
+/// `Failure`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HaltCause {
+    /// The ROS caller cancelled the goal (`ROS_ECANCELED`).
+    Cancel,
+    /// An equal-or-higher-priority goal replaced the run (`ROS_EINTR`) —
+    /// bound actions serve one goal at a time.
+    Preempt,
+}
+
 /// One accepted goal: the ROS-side view of a task run.
 pub(crate) struct Goal {
     /// The acceptance stamp, for the status array and the cancel policy's
     /// accepted-at-or-before matching.
     pub accepted: Time,
+    /// The goal's call priority (`std_skills/Meta`), the replace/reject
+    /// arbiter on a bound action.
+    pub priority: u8,
     /// The run's per-goal keys, from the spawn's `TaskHandle`.
     pub status_key: Key,
     pub feedback_keys: Vec<Key>,
@@ -442,6 +1118,9 @@ pub(crate) struct Goal {
     /// next device step); `Canceling` once a cancel was accepted; terminal once
     /// the run's status key reports it.
     pub status: GoalStatusEnum,
+    /// Set once this side halted the run, so its terminal `Failure` reads as
+    /// the cancel or the preemption rather than a spontaneous abort.
+    pub halt_cause: Option<HaltCause>,
     /// The last value seen on a result key, cached from the state stream so
     /// the terminal result needs no read-back round-trip (the run writes its
     /// result at or before the step that ends it, and the step's changes
@@ -486,6 +1165,7 @@ impl GoalBook {
         &mut self,
         goal_id: [u8; 16],
         accepted: Time,
+        priority: u8,
         status_key: Key,
         feedback_keys: Vec<Key>,
         result_keys: Vec<Key>,
@@ -498,15 +1178,36 @@ impl GoalBook {
             goal_id,
             Goal {
                 accepted,
+                priority,
                 status_key,
                 feedback_keys,
                 result_keys,
                 stop,
                 status: GoalStatusEnum::Executing,
+                halt_cause: None,
                 result: None,
             },
         );
         true
+    }
+
+    /// The goal currently owning a bound action's run — non-terminal and not
+    /// already halted from this side — with its priority. Bound actions serve
+    /// one goal at a time; this is the goal a replacement arbitrates against.
+    pub fn active(&self) -> Option<([u8; 16], u8)> {
+        self.goals
+            .iter()
+            .find(|(_, goal)| !goal.terminal() && goal.halt_cause.is_none())
+            .map(|(id, goal)| (*id, goal.priority))
+    }
+
+    /// Mark `goal_id` preempted by a replacing goal, returning the stop call
+    /// to issue. The run's terminal `Failure` then reads `Aborted` with the
+    /// `ROS_EINTR` errno.
+    pub fn preempt(&mut self, goal_id: [u8; 16]) -> Option<Call> {
+        let goal = self.goals.get_mut(&goal_id)?;
+        goal.halt_cause = Some(HaltCause::Preempt);
+        Some(goal.stop.clone())
     }
 
     /// Observe one goal — the tests' window into the book.
@@ -529,20 +1230,27 @@ impl GoalBook {
     }
 
     /// Drain every queued GetResult request whose goal has reached a terminal
-    /// state: `(request, terminal status, cached result value)`. Requests for
-    /// unknown goals resolve too — as `Unknown` with no result — rather than
-    /// dangling forever.
-    pub fn take_ready_results(&mut self) -> Vec<(RmwRequestId, GoalStatusEnum, Option<Value>)> {
+    /// state: `(request, terminal status, halt cause, cached result value)`.
+    /// Requests for unknown goals resolve too — as `Unknown` with no result —
+    /// rather than dangling forever.
+    pub fn take_ready_results(
+        &mut self,
+    ) -> Vec<(
+        RmwRequestId,
+        GoalStatusEnum,
+        Option<HaltCause>,
+        Option<Value>,
+    )> {
         let mut ready = Vec::new();
         self.pending_results
             .retain(|(goal_id, request)| match self.goals.get(goal_id) {
                 Some(goal) if goal.terminal() => {
-                    ready.push((*request, goal.status, goal.result.clone()));
+                    ready.push((*request, goal.status, goal.halt_cause, goal.result.clone()));
                     false
                 }
                 Some(_) => true,
                 None => {
-                    ready.push((*request, GoalStatusEnum::Unknown, None));
+                    ready.push((*request, GoalStatusEnum::Unknown, None, None));
                     false
                 }
             });
@@ -553,8 +1261,9 @@ impl GoalBook {
     /// touches. A write to a run's status key maps onto the ROS status —
     /// `Running` keeps `Executing`; `Success` → `Succeeded`; `Failure` →
     /// `Aborted`, or `Canceled` when a cancel was accepted for the goal (the
-    /// halt path ends the run with `Failure`; the cancel authority is this
-    /// side, so it reports the cancel). Result-key writes are cached; a
+    /// halt path ends the run with `Failure`; the halt authority is this
+    /// side, so it reports its cause — a preemption stays `Aborted`, its
+    /// `ROS_EINTR` travelling in the result). Result-key writes are cached; a
     /// feedback-key write yields a feedback event.
     pub fn observe(&mut self, change: &StateChange) -> Vec<GoalEvent> {
         let mut events = Vec::new();
@@ -579,10 +1288,9 @@ impl GoalBook {
                                 goal.status = GoalStatusEnum::Succeeded;
                             }
                             RunStatus::Failure => {
-                                goal.status = if goal.status == GoalStatusEnum::Canceling {
-                                    GoalStatusEnum::Canceled
-                                } else {
-                                    GoalStatusEnum::Aborted
+                                goal.status = match goal.halt_cause {
+                                    Some(HaltCause::Cancel) => GoalStatusEnum::Canceled,
+                                    _ => GoalStatusEnum::Aborted,
                                 };
                             }
                         }
@@ -626,6 +1334,9 @@ impl GoalBook {
             };
             if matches {
                 goal.status = GoalStatusEnum::Canceling;
+                // A goal this side already halted (a preemption) keeps its
+                // first cause; its errno stays the preemption's.
+                goal.halt_cause.get_or_insert(HaltCause::Cancel);
                 selected.push((*id, goal.accepted, goal.stop.clone()));
             }
         }
@@ -729,7 +1440,7 @@ async fn runtime_call(
 
 /// A SendGoal request: decode the goal, spawn its run, accept — or reject when
 /// anything on that path fails (a malformed request, a refused spawn, a
-/// duplicate goal id).
+/// duplicate goal id, a bound action already serving a higher-priority goal).
 async fn handle_goal(
     server: &RawActionServer,
     action: &MethodAction,
@@ -747,9 +1458,38 @@ async fn handle_goal(
         Ok(value) => value,
         Err(e) => return reject(format!("malformed SendGoal request: {e}")),
     };
-    let Some((goal_id, call)) = goal_call_of(action, decoded) else {
-        return reject("the SendGoal request carries no goal id".to_string());
+    let (goal_id, priority, call) = match &action.wire {
+        Wire::Synthesised => match goal_call_of(action, decoded) {
+            Some((goal_id, call)) => (goal_id, std_skills::Meta::NORMAL_PRIORITY, call),
+            None => return reject("the SendGoal request carries no goal id".to_string()),
+        },
+        Wire::Bound(bound) => match bound_goal_call_of(action, bound, registry, decoded) {
+            Ok(parts) => parts,
+            Err(e) => return reject(e),
+        },
     };
+    // A bound action serves one goal at a time: `Meta.priority` arbitrates.
+    // An equal-or-higher replacement preempts the active run (it will report
+    // `ROS_EINTR`); a lower one is rejected.
+    if matches!(action.wire, Wire::Bound(_)) {
+        if let Some((active_id, active_priority)) = book.active() {
+            if priority >= active_priority {
+                if let Some(stop) = book.preempt(active_id) {
+                    if let Err(e) = runtime_call(cmd_tx, stop).await {
+                        warn!(
+                            "action '{}': preempting goal {} failed: {e}",
+                            action.name,
+                            Uuid::from_bytes(active_id)
+                        );
+                    }
+                }
+            } else {
+                return reject(format!(
+                    "a goal with priority {active_priority} is active (requested: {priority})"
+                ));
+            }
+        }
+    }
     let run = match runtime_call(cmd_tx, spawn_call(&call)).await {
         Ok(result) => match spawned_run_of(result.ret) {
             Ok(run) => run,
@@ -761,6 +1501,7 @@ async fn handle_goal(
     if !book.accept(
         goal_id,
         stamp,
+        priority,
         run.status,
         run.feedback,
         run.result,
@@ -845,8 +1586,9 @@ fn observe_change(
     }
 }
 
-/// Publish one feedback value, lazily typed. A value ROS cannot carry is
-/// logged and dropped (no silent cap).
+/// Publish one feedback value — lazily typed on the synthesised wire, mapped
+/// onto the bound Feedback message on a skill endpoint. A value the wire
+/// cannot carry is logged and dropped (no silent cap).
 fn publish_feedback(
     server: &RawActionServer,
     action: &MethodAction,
@@ -854,14 +1596,33 @@ fn publish_feedback(
     goal_id: [u8; 16],
     value: Value,
 ) {
-    let Some(message_type) = feedback_message_type(&value) else {
-        warn!(
-            "action '{}': a feedback value has no ROS 2 field type; not published",
-            action.name
-        );
-        return;
+    let (message_type, message) = match &action.wire {
+        Wire::Synthesised => {
+            let Some(message_type) = feedback_message_type(&value) else {
+                warn!(
+                    "action '{}': a feedback value has no ROS 2 field type; not published",
+                    action.name
+                );
+                return;
+            };
+            (message_type, feedback_message_value(goal_id, value))
+        }
+        Wire::Bound(bound) => {
+            // An action whose contract declares no feedback publishes none.
+            let Some(feedback) = &bound.feedback else {
+                return;
+            };
+            let Some(message) = bound_feedback_value(feedback, registry.types(), goal_id, value)
+            else {
+                warn!(
+                    "action '{}': the feedback value does not fit '{}'; not published",
+                    action.name, feedback.message.name
+                );
+                return;
+            };
+            (feedback.wire.clone(), message)
+        }
     };
-    let message = feedback_message_value(goal_id, value);
     match cdr::encode(&message_type, registry.types(), &message) {
         Ok(bytes) => {
             if server.publish_feedback_raw(&bytes).is_err() {
@@ -896,28 +1657,57 @@ fn publish_statuses(server: &RawActionServer, action: &MethodAction, book: &Goal
     }
 }
 
-/// Answer every queued GetResult request whose goal is terminal: `status:
-/// int8` + the result the run wrote, lazily typed (status alone when the run
-/// wrote none, or wrote a value ROS cannot carry — logged).
+/// Answer every queued GetResult request whose goal is terminal. On the
+/// synthesised wire: `status: int8` + the result the run wrote, lazily typed
+/// (status alone when the run wrote none, or wrote a value ROS cannot carry —
+/// logged). On a bound wire: `status` + the bound Result message carrying the
+/// errno ([`bound_result_value`]).
 fn flush_ready_results(
     server: &RawActionServer,
     action: &MethodAction,
     registry: &Ros2Registry,
     book: &mut GoalBook,
 ) {
-    for (request, status, result) in book.take_ready_results() {
-        let (response_type, value) = match get_result_response_type(result.as_ref()) {
-            Some(ty) => (ty, get_result_response_value(status, result)),
-            None => {
-                warn!(
-                    "action '{}': a result value has no ROS 2 field type; answering with the \
-                     status alone",
-                    action.name
-                );
-                (
-                    get_result_response_type(None).expect("the status-only response synthesises"),
-                    get_result_response_value(status, None),
-                )
+    for (request, status, cause, result) in book.take_ready_results() {
+        let (response_type, value) = match &action.wire {
+            Wire::Synthesised => match get_result_response_type(result.as_ref()) {
+                Some(ty) => (ty, get_result_response_value(status, result)),
+                None => {
+                    warn!(
+                        "action '{}': a result value has no ROS 2 field type; answering with the \
+                         status alone",
+                        action.name
+                    );
+                    (
+                        get_result_response_type(None)
+                            .expect("the status-only response synthesises"),
+                        get_result_response_value(status, None),
+                    )
+                }
+            },
+            Wire::Bound(bound) => {
+                match bound_result_value(bound, registry.types(), status, cause, result) {
+                    Ok(message) => (
+                        bound.result_response_type.clone(),
+                        Value::Structure(Structure {
+                            id: bound.result_response_type.id,
+                            fields: vec![
+                                StructureField {
+                                    id: gen_uuid_from_str("action/status"),
+                                    value: Box::new(Value::I8(status as i8)),
+                                },
+                                StructureField {
+                                    id: gen_uuid_from_str("action/result"),
+                                    value: Box::new(message),
+                                },
+                            ],
+                        }),
+                    ),
+                    Err(e) => {
+                        warn!("action '{}': building a result: {e}", action.name);
+                        continue;
+                    }
+                }
             }
         };
         match cdr::encode(&response_type, registry.types(), &value) {
@@ -1191,7 +1981,15 @@ mod tests {
 
     fn accept(book: &mut GoalBook, goal_id: [u8; 16], accepted: Time, prefix: &str) {
         let (status, feedback, result) = keys(prefix);
-        assert!(book.accept(goal_id, accepted, status, feedback, result, stop_call()));
+        assert!(book.accept(
+            goal_id,
+            accepted,
+            std_skills::Meta::NORMAL_PRIORITY,
+            status,
+            feedback,
+            result,
+            stop_call()
+        ));
     }
 
     #[test]
@@ -1370,10 +2168,352 @@ mod tests {
         assert!(!book.accept(
             [5u8; 16],
             Time::from_nanos(11),
+            std_skills::Meta::NORMAL_PRIORITY,
             status,
             feedback,
             result,
             stop_call()
         ));
+    }
+
+    // =========================================================================
+    // Bound actions: the skill plane.
+    // =========================================================================
+
+    /// The device-side signature the ros4hri `/skill/look_at` binding routes
+    /// onto: `(policy, target, frame)`, returning the behavior-tree `Status`.
+    fn bound_look_at_signature() -> MethodSignature {
+        let mut parameters = HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for (name, kind) in [
+            ("policy", PrimitiveKind::String),
+            ("target", PrimitiveKind::ArrayF32),
+            ("frame", PrimitiveKind::String),
+        ] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(kind),
+                    mutable: false,
+                },
+            );
+        }
+        MethodSignature {
+            module_id: gen_uuid_from_str("gaze-module"),
+            id: gen_uuid_from_str("look_at"),
+            name: "look_at".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: status_return(),
+            },
+        }
+    }
+
+    /// The ros4hri preset's LookAt binding resolves against the registry and
+    /// a matching signature — and every way the contract can fail is refused
+    /// with a reason, never served broken.
+    #[test]
+    fn a_profile_binding_resolves_or_is_refused_with_a_reason() {
+        let registry = arora_msgs_ros2::registry();
+        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+
+        let (actions, errors) = resolve_bound(&bindings, &[bound_look_at_signature()], &registry);
+        assert!(errors.is_empty(), "{errors:?}");
+        let action = &actions[0];
+        assert_eq!(action.name, "/skill/look_at");
+        assert_eq!(action.module_id, gen_uuid_from_str("gaze-module"));
+        let Wire::Bound(bound) = &action.wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        assert_eq!(bound.routes.len(), 3);
+        assert!(bound.feedback.is_some(), "LookAt declares feedback");
+
+        // No such method described.
+        let (none, errors) = resolve_bound(&bindings, &[], &registry);
+        assert!(none.is_empty());
+        assert!(errors[0].contains("no method 'look_at'"), "{errors:?}");
+
+        // The method is not a task run.
+        let mut plain = bound_look_at_signature();
+        plain.function.return_ty = FrozenTy::from(PrimitiveKind::F64);
+        let (none, errors) = resolve_bound(&bindings, &[plain], &registry);
+        assert!(none.is_empty());
+        assert!(errors[0].contains("not a task run"), "{errors:?}");
+
+        // A parameter the goal does not route.
+        let mut extra = bound_look_at_signature();
+        let id = gen_uuid_from_str("speed");
+        extra.function.parameter_ordering.push(id);
+        extra.function.parameters.insert(
+            id,
+            Parameter {
+                name: "speed".to_string(),
+                ty: FrozenTy::from(PrimitiveKind::F64),
+                mutable: false,
+            },
+        );
+        let (none, errors) = resolve_bound(&bindings, &[extra], &registry);
+        assert!(none.is_empty());
+        assert!(errors[0].contains("speed"), "{errors:?}");
+
+        // A route into a field the goal does not have.
+        let mut bad = bindings.clone();
+        bad[0].goal_routes[0].field = "nonexistent".to_string();
+        let (none, errors) = resolve_bound(&bad, &[bound_look_at_signature()], &registry);
+        assert!(none.is_empty());
+        assert!(errors[0].contains("nonexistent"), "{errors:?}");
+
+        // A route whose kinds do not fit (u8 goal field → String parameter).
+        let mut mismatched = bindings.clone();
+        mismatched[0].goal_routes[0].field = "meta.priority".to_string();
+        let (none, errors) = resolve_bound(&mismatched, &[bound_look_at_signature()], &registry);
+        assert!(none.is_empty());
+        assert!(errors[0].contains("does not fit"), "{errors:?}");
+    }
+
+    /// A real `interaction_skills/LookAt` goal round-trips through the codec
+    /// and lands as the spawn call — priority read off `meta`, the point
+    /// coerced to the store's vec3 form, the frame routed by name.
+    #[test]
+    fn a_bound_goal_becomes_the_prioritised_spawn_call() {
+        use arora_msgs_ros2::{builtin_interfaces, geometry_msgs, interaction_skills, std_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        let (actions, _) = resolve_bound(&bindings, &[bound_look_at_signature()], &registry);
+        let action = &actions[0];
+        let Wire::Bound(bound) = &action.wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+
+        let goal = interaction_skills::LookAt_Goal {
+            meta: std_skills::Meta {
+                caller: "test".to_string(),
+                priority: 200,
+            },
+            policy: String::new(),
+            target: geometry_msgs::PointStamped {
+                header: std_msgs::Header {
+                    stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                    frame_id: "sellion_link".to_string(),
+                },
+                point: geometry_msgs::Point {
+                    x: 0.5,
+                    y: -0.25,
+                    z: 1.0,
+                },
+            },
+        };
+        let (goal_ty, goal_registry) =
+            <interaction_skills::LookAt_Goal as AroraType>::arora_type_with_registry();
+        let goal_value = to_value_seeded(&goal, &goal_ty, &goal_registry).expect("goal to value");
+
+        let goal_id = [9u8; 16];
+        let request = Value::Structure(Structure {
+            id: action.send_goal_request_type.id,
+            fields: vec![
+                StructureField {
+                    id: goal_id_field(),
+                    value: Box::new(Value::ArrayU8(goal_id.to_vec())),
+                },
+                StructureField {
+                    id: gen_uuid_from_str("action/goal"),
+                    value: Box::new(goal_value),
+                },
+            ],
+        });
+        let bytes = cdr::encode(&action.send_goal_request_type, registry.types(), &request)
+            .expect("encode SendGoal request");
+        let decoded = cdr::decode(&action.send_goal_request_type, registry.types(), &bytes)
+            .expect("decode SendGoal request");
+
+        let (decoded_id, priority, call) =
+            bound_goal_call_of(action, bound, &registry, decoded).expect("goal call");
+        assert_eq!(decoded_id, goal_id);
+        assert_eq!(priority, 200);
+        assert_eq!(call.module_id, Some(gen_uuid_from_str("gaze-module")));
+        assert_eq!(call.id, gen_uuid_from_str("look_at"));
+        let arg = |name: &str| {
+            call.args
+                .iter()
+                .find(|arg| arg.id == gen_uuid_from_str(name))
+                .map(|arg| arg.value.as_ref().clone())
+        };
+        assert_eq!(arg("policy"), Some(Value::String(String::new())));
+        assert_eq!(arg("target"), Some(Value::ArrayF32(vec![0.5, -0.25, 1.0])));
+        assert_eq!(
+            arg("frame"),
+            Some(Value::String("sellion_link".to_string()))
+        );
+    }
+
+    /// The bound result carries the `std_skills` errno of the goal's
+    /// lifecycle — or the errno the run wrote — and round-trips through the
+    /// codec as the registry Result message.
+    #[test]
+    fn bound_results_carry_the_std_skills_errno() {
+        let registry = arora_msgs_ros2::registry();
+        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        let (actions, _) = resolve_bound(&bindings, &[bound_look_at_signature()], &registry);
+        let Wire::Bound(bound) = &actions[0].wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+
+        let errno_in = |message: &Value| -> u8 {
+            let errno = extract_route(
+                message,
+                &bound.result_type,
+                registry.types(),
+                "result.error_code",
+            )
+            .expect("the Result carries error_code");
+            let Value::U8(errno) = errno else {
+                panic!("error_code is a u8, got {errno:?}");
+            };
+            errno
+        };
+
+        for (status, cause, expected) in [
+            (
+                GoalStatusEnum::Succeeded,
+                None,
+                std_skills::Result::ROS_ENOERR,
+            ),
+            (
+                GoalStatusEnum::Canceled,
+                Some(HaltCause::Cancel),
+                std_skills::Result::ROS_ECANCELED,
+            ),
+            (
+                GoalStatusEnum::Aborted,
+                Some(HaltCause::Preempt),
+                std_skills::Result::ROS_EINTR,
+            ),
+            (
+                GoalStatusEnum::Aborted,
+                None,
+                std_skills::Result::ROS_EOTHER,
+            ),
+        ] {
+            let message =
+                bound_result_value(bound, registry.types(), status, cause, None).expect("result");
+            assert_eq!(errno_in(&message), expected, "{status:?} / {cause:?}");
+        }
+
+        // A run-written integer is the errno verbatim (how a behavior says
+        // ROS_ENOTSUP for a policy it does not implement).
+        let message = bound_result_value(
+            bound,
+            registry.types(),
+            GoalStatusEnum::Aborted,
+            None,
+            Some(Value::I32(std_skills::Result::ROS_ENOTSUP as i32)),
+        )
+        .expect("result");
+        assert_eq!(errno_in(&message), std_skills::Result::ROS_ENOTSUP);
+
+        // The full GetResult response round-trips through the codec.
+        let response = Value::Structure(Structure {
+            id: bound.result_response_type.id,
+            fields: vec![
+                StructureField {
+                    id: gen_uuid_from_str("action/status"),
+                    value: Box::new(Value::I8(GoalStatusEnum::Aborted as i8)),
+                },
+                StructureField {
+                    id: gen_uuid_from_str("action/result"),
+                    value: Box::new(message),
+                },
+            ],
+        });
+        let bytes = cdr::encode(&bound.result_response_type, registry.types(), &response)
+            .expect("encode GetResult response");
+        assert_eq!(
+            cdr::decode(&bound.result_response_type, registry.types(), &bytes).unwrap(),
+            response
+        );
+    }
+
+    /// A run-written scalar lands on the matching `std_skills/Feedback`
+    /// field; a value no field carries is declined, not mis-published.
+    #[test]
+    fn bound_feedback_maps_scalars_onto_std_skills_feedback() {
+        let registry = arora_msgs_ros2::registry();
+        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        let (actions, _) = resolve_bound(&bindings, &[bound_look_at_signature()], &registry);
+        let Wire::Bound(bound) = &actions[0].wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        let feedback = bound.feedback.as_ref().expect("LookAt declares feedback");
+
+        let message = bound_feedback_value(feedback, registry.types(), [3u8; 16], Value::F32(0.25))
+            .expect("an f32 fits data_float");
+        let carried = extract_route(
+            &message,
+            &feedback.wire,
+            registry.types(),
+            "feedback.feedback.data_float",
+        )
+        .expect("data_float resolves");
+        assert_eq!(carried, Value::F32(0.25));
+        let bytes = cdr::encode(&feedback.wire, registry.types(), &message)
+            .expect("encode feedback message");
+        assert_eq!(
+            cdr::decode(&feedback.wire, registry.types(), &bytes).unwrap(),
+            message
+        );
+
+        assert!(
+            bound_feedback_value(
+                feedback,
+                registry.types(),
+                [3u8; 16],
+                Value::ArrayF64(vec![])
+            )
+            .is_none(),
+            "an array fits no std_skills field"
+        );
+    }
+
+    /// The priority arbitration bookkeeping: a preempted goal stops owning
+    /// the run and its halt-driven `Failure` reads `Aborted` with
+    /// `ROS_EINTR`, where a caller cancel reads `Canceled` with
+    /// `ROS_ECANCELED`.
+    #[test]
+    fn a_preempted_goal_reads_aborted_with_eintr() {
+        let mut book = GoalBook::default();
+        let (status, feedback, result) = keys("arora/tasks/m/f/a");
+        assert!(book.accept(
+            [1u8; 16],
+            Time::from_nanos(10),
+            128,
+            status,
+            feedback,
+            result,
+            stop_call()
+        ));
+        assert_eq!(book.active(), Some(([1u8; 16], 128)));
+
+        let stop = book.preempt([1u8; 16]).expect("the stop call comes back");
+        assert_eq!(stop, stop_call());
+        assert!(book.active().is_none(), "a preempted goal owns nothing");
+
+        let change = StateChange::set(
+            "arora/tasks/m/f/a/status",
+            status_value(STATUS_FAILURE_VARIANT_ID),
+        );
+        book.observe(&change);
+        let goal = book.get(&[1u8; 16]).unwrap();
+        assert_eq!(goal.status, GoalStatusEnum::Aborted);
+        assert_eq!(
+            errno_of(goal.status, goal.halt_cause),
+            std_skills::Result::ROS_EINTR
+        );
     }
 }

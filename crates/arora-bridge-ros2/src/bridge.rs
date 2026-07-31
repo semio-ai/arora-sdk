@@ -118,6 +118,11 @@ pub struct Ros2BridgeConfig {
     /// publish under its rewritten absolute topic instead of the
     /// `/{namespace}/keys/{path}` convention (see [`profile::Include`]).
     pub includes: Vec<profile::Include>,
+    /// Skill endpoints: profile-declared ROS 2 actions bound to the device's
+    /// task-run methods (see [`profile::ActionBinding`]). Each is checked at
+    /// startup against the described methods and refused loudly when the
+    /// contract does not hold.
+    pub action_bindings: Vec<profile::ActionBinding>,
 }
 
 impl Ros2BridgeConfig {
@@ -130,6 +135,7 @@ impl Ros2BridgeConfig {
             typed_inputs: Vec::new(),
             includes: Vec::new(),
             outputs: Vec::new(),
+            action_bindings: Vec::new(),
         }
     }
 
@@ -211,9 +217,10 @@ impl Ros2BridgeConfig {
 
     /// Expose the device through a named [`profile::ExposureProfile`]: each
     /// endpoint becomes a typed binding on its absolute topic with its field
-    /// fan-out, and the profile's includes join the scalar plane's rewrite
-    /// set. Outbound endpoints route the whole message from their first
-    /// route's key (field fan-in is not implemented).
+    /// fan-out, the profile's includes join the scalar plane's rewrite set,
+    /// and its action bindings join the skill plane. Outbound endpoints route
+    /// the whole message from their first route's key (field fan-in is not
+    /// implemented).
     pub fn with_profile(mut self, profile: profile::ExposureProfile) -> Self {
         for endpoint in profile.endpoints {
             match endpoint.flow {
@@ -238,6 +245,7 @@ impl Ros2BridgeConfig {
             }
         }
         self.includes.extend(profile.includes);
+        self.action_bindings.extend(profile.actions);
         self
     }
 }
@@ -358,6 +366,7 @@ async fn run_node(
         typed_inputs,
         outputs,
         includes,
+        action_bindings,
     } = config;
 
     let mut node = match build_node(&namespace, domain_id) {
@@ -428,8 +437,10 @@ async fn run_node(
     // returning the behavior-tree `Status`) as an action under
     // `/{namespace}/actions/{name}`. Discovered from the runtime — like
     // outbound topics, a device's methods are its own surface, so nothing is
-    // declared.
-    let (discovered, discovered_actions) = discover(&cmd_tx, &namespace, &registry).await;
+    // declared. Profile-declared skill endpoints join the same action plane,
+    // checked against the discovered signatures.
+    let (discovered, discovered_actions) =
+        discover(&cmd_tx, &namespace, &registry, &action_bindings).await;
     let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
     for service in discovered {
         if let Some(stream) = service_stream(&mut node, service, registry.clone(), cmd_tx.clone()) {
@@ -518,14 +529,17 @@ async fn run_node(
 
 /// Ask the runtime for every callable method's signature and resolve both
 /// planes: the ROS 2-representable methods to services, and the task-run
-/// (behavior-tree-`Status`-returning) methods to actions. Methods whose types
-/// aren't representable on their plane are logged and skipped (never silently
-/// dropped). Empty if the runtime never answers (e.g. it stopped) — the bridge
-/// then serves no methods.
+/// (behavior-tree-`Status`-returning) methods to actions — the profile's
+/// skill bindings joining the latter, each checked against the described
+/// signatures. Methods whose types aren't representable on their plane, and
+/// bindings whose contract does not hold, are logged and skipped (never
+/// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
+/// the bridge then serves no methods.
 async fn discover(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     namespace: &str,
     registry: &Ros2Registry,
+    action_bindings: &[profile::ActionBinding],
 ) -> (Vec<services::MethodService>, Vec<actions::MethodAction>) {
     let (reply_tx, reply_rx) = oneshot::channel();
     if cmd_tx
@@ -555,13 +569,19 @@ async fn discover(
             skipped.join(", ")
         );
     }
-    let (resolved_actions, skipped_actions) = actions::resolve(namespace, &signatures, registry);
+    let (mut resolved_actions, skipped_actions) =
+        actions::resolve(namespace, &signatures, registry);
     if !skipped_actions.is_empty() {
         warn!(
             "Ros2Bridge skips task-run methods whose goal types are not ROS 2-representable: {}",
             skipped_actions.join(", ")
         );
     }
+    let (bound_actions, refused) = actions::resolve_bound(action_bindings, &signatures, registry);
+    for error in refused {
+        warn!("Ros2Bridge refuses a {error}");
+    }
+    resolved_actions.extend(bound_actions);
     (resolved, resolved_actions)
 }
 
