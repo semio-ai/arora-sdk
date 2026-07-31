@@ -62,8 +62,23 @@ clears it.
 
 Process-global state is the first thing to get wrong: two live invocations of
 the same function (two nodes, two trees) would then interleave through one
-slot and one would win. Key the state by the callable/run id. A task run's
-namespaced keys (see the task-runs design) give exactly this identity.
+slot and one would win. Key the state by the callable/run id.
+
+**Where that id comes from.** When the function is spawned as a behavior, the
+identity is the **behavior-tree node** — each node has a stable id, so
+re-ticking the same node is the same run and a different node is a different
+run. That is the honest per-run identity; a content hash (what `polly::say` uses
+today) is only a stand-in, and it still collides when two callers say the same
+thing. The proper fix hands the module its run id: the tree already injects
+well-known parameters a node does not declare literally (`children` for a
+control node, `_ret` for a non-`Status` return), and a run id would ride the
+same reserved-parameter path — the module reads it and keys its state by it.
+Better still, the state belongs to the *run*, not the module: a behavior's
+progress should live in its bound run (as a task run's namespaced keys do, or as
+an ordinary bound variable does — see the `concurrent_runs_advance_independently`
+test in `arora-behavior-tree`), so two spawns never share a slot in the first place.
+Until that lands, key by content and treat the collision as the open ABI
+question.
 
 ## Spawn is a host power
 
