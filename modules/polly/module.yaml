@@ -1,6 +1,6 @@
 id: a1a6bb9a-334f-4617-a764-9a55817039d8
 author: Semio
-description: AWS Polly support module
+description: Text-to-speech module — speaks text and streams the current viseme; uses the Vizij TTS provider (AWS Polly behind the demo cloud function)
 license: Proprietary
 name: polly
 version:
@@ -26,6 +26,20 @@ exports:
         type:
           kind: scalar
           id: str
+      - id: 1f6b2c40-9d3e-4a71-8b52-6e0f9c4a2d10
+        name: voice
+        type:
+          kind: scalar
+          id: str
+      # Mutable = an out-parameter. Each tick `say` writes the viseme code at the
+      # audio playhead here (the AWS Polly viseme set). The module only *produces*
+      # the current viseme; mapping it to face poses is the caller's job.
+      - id: 2a7c3d51-0e4f-4b82-9c63-7f1a0d5b3e21
+        name: viseme
+        type:
+          kind: scalar
+          id: str
+        mutable: true
     ret:
       kind: scalar
       id: behavior_tree.Status
