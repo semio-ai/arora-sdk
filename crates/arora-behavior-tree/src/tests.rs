@@ -337,6 +337,53 @@ fn parallel_mixed_running_is_running() {
     assert_eq!(tick_once(&tree), Status::Running);
 }
 
+/// Poll-on-tick with per-run identity: two long-running leaves run concurrently
+/// under `parallel`, each carrying its own status. The tree is re-ticked while
+/// either is `Running` (that re-tick *is* the poll-on-tick contract — see
+/// docs/async-functions.md), and completing one leaves the other running: each
+/// run advances on its own identity, not a shared slot. This is the state model a
+/// spawned `say` action needs — here the two runs are distinct scripted leaves,
+/// no module and no network. (`polly::say` keys its runs by content only because
+/// the module ABI hands it no per-invocation id; a run spawned as a behavior gets
+/// that identity from the node, per the reserved-parameter note in the doc.)
+#[test]
+fn concurrent_runs_advance_independently() {
+    let a = Uuid::from_u128(0xA);
+    let b = Uuid::from_u128(0xB);
+
+    let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+        (a, Status::Running),
+        (b, Status::Running),
+    ])));
+    let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+    let function_index = Rc::new(HashMap::from([
+        (a, scripted_leaf_function(a)),
+        (b, scripted_leaf_function(b)),
+    ]));
+    let tree = build(nodes::parallel(vec![scripted_leaf(a), scripted_leaf(b)]));
+    let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
+
+    // Both runs pending → the tree keeps being re-ticked (Running).
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
+        .expect("setup");
+    assert_eq!(runtime.tick().expect("tick"), Status::Running);
+    let _ = runtime;
+
+    // Complete run A only. Its status is its own, so B is untouched and the tree
+    // is still Running — the two runs never shared a slot.
+    statuses.borrow_mut().insert(a, Status::Success);
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
+        .expect("setup");
+    assert_eq!(runtime.tick().expect("tick"), Status::Running);
+    let _ = runtime;
+
+    // Complete run B. Both terminal → the tree succeeds.
+    statuses.borrow_mut().insert(b, Status::Success);
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, function_index.clone(), &mut bridge, false)
+        .expect("setup");
+    assert_eq!(runtime.tick().expect("tick"), Status::Success);
+}
+
 // seq_star
 //----------------------------------------------------------------
 #[test]
