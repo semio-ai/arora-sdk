@@ -210,11 +210,103 @@ async fn raw_take(sub: &RawSubscription) -> Result<Vec<u8>, String> {
 /// `topic` is the topic name (an absolute ROS name, or the
 /// `/{namespace}/keys/{path}` default the caller resolves) and `ros_type` the
 /// registered message name; `path` is the store key the decoded value lands on.
+/// The element type behind any [`TypeRef`](arora_types::module::low::TypeRef)
+/// variant — the id a field walk descends into.
+fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora_types::Uuid {
+    use arora_types::module::low::TypeRef;
+    match type_ref {
+        TypeRef::Scalar { id }
+        | TypeRef::Array { id }
+        | TypeRef::FixedArray { id, .. }
+        | TypeRef::Option { id } => *id,
+        TypeRef::Map { value_id, .. } => *value_id,
+    }
+}
+
+/// Resolve a dotted field path (`"header.frame_id"`; empty = the whole
+/// message) against a decoded value and its runtime type: each segment looks
+/// the field up **by name** in the structure type, then descends type and
+/// value together.
+///
+/// A geometry point/vector — a structure of exactly `x`, `y`, `z` numeric
+/// fields — coerces to [`Value::ArrayF32`], the store's vec3 form, so a
+/// `PointStamped.point` lands directly on a `gaze/target`-style key.
+fn extract_route(
+    value: &Value,
+    ty: &arora_types::ty::low::Type,
+    registry: &arora_types::ty::TypeRegistry,
+    dotted: &str,
+) -> Result<Value, String> {
+    use arora_types::ty::low::TypeKind;
+    let mut current_value = value;
+    // The current position's type — `None` past a primitive (well-known ids
+    // are not registry entries), which only matters for further descent or
+    // the vec3 coercion, neither of which applies to a primitive.
+    let mut current_ty = Some(ty);
+    if !dotted.is_empty() {
+        for segment in dotted.split('.') {
+            let Some(TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
+                return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
+            };
+            let (field_id, field) = structure
+                .fields
+                .iter()
+                .find(|(_, field)| field.name == segment)
+                .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
+            let Value::Structure(value_structure) = current_value else {
+                return Err(format!(
+                    "'{dotted}': value at '{segment}' is not a structure"
+                ));
+            };
+            current_value = value_structure
+                .fields
+                .iter()
+                .find(|value_field| value_field.id == *field_id)
+                .map(|value_field| value_field.value.as_ref())
+                .ok_or_else(|| format!("'{dotted}': decoded value misses '{segment}'"))?;
+            current_ty = registry.get(&type_ref_id(&field.type_ref));
+        }
+    }
+    Ok(current_ty
+        .and_then(|ty| coerce_xyz(current_value, ty))
+        .unwrap_or_else(|| current_value.clone()))
+}
+
+/// The vec3 form of an `x`/`y`/`z` numeric structure, `None` for any other
+/// shape.
+fn coerce_xyz(value: &Value, ty: &arora_types::ty::low::Type) -> Option<Value> {
+    use arora_types::ty::low::TypeKind;
+    let TypeKind::Structure(structure) = &ty.kind else {
+        return None;
+    };
+    let names: Vec<&str> = structure
+        .fields
+        .values()
+        .map(|field| field.name.as_str())
+        .collect();
+    if names != ["x", "y", "z"] {
+        return None;
+    }
+    let Value::Structure(value_structure) = value else {
+        return None;
+    };
+    let mut components = Vec::with_capacity(3);
+    for field in &value_structure.fields {
+        match field.value.as_ref() {
+            Value::F32(v) => components.push(*v),
+            Value::F64(v) => components.push(*v as f32),
+            _ => return None,
+        }
+    }
+    (components.len() == 3).then_some(Value::ArrayF32(components))
+}
+
 pub fn setup_typed_key_subscriber(
     node: &mut Node,
     topic: &str,
     ros_type: &str,
     path: String,
+    routes: Vec<crate::profile::FieldRoute>,
     registry: Arc<Ros2Registry>,
 ) -> Result<StateChangeStream, String> {
     let message_type = registry
@@ -246,6 +338,7 @@ pub fn setup_typed_key_subscriber(
         let ros_type = ros_type.clone();
         let message_type = message_type.clone();
         let registry = registry.clone();
+        let routes = routes.clone();
         async move {
             let mut errors = errors;
             loop {
@@ -253,7 +346,34 @@ pub fn setup_typed_key_subscriber(
                     Ok(bytes) => match cdr::decode(&message_type, registry.types(), &bytes) {
                         Ok(value) => {
                             let mut change = StateChange::new();
-                            change.set.insert(Key::from(path.clone()), Some(value));
+                            if routes.is_empty() {
+                                change.set.insert(Key::from(path.clone()), Some(value));
+                            } else {
+                                // All routed fields of one message land in one
+                                // atomic change; a field that fails to resolve
+                                // is logged and skipped, the rest still land.
+                                for route in &routes {
+                                    match extract_route(
+                                        &value,
+                                        &message_type,
+                                        registry.types(),
+                                        &route.field,
+                                    ) {
+                                        Ok(extracted) => {
+                                            change.set.insert(
+                                                Key::from(route.key.clone()),
+                                                Some(extracted),
+                                            );
+                                        }
+                                        Err(e) => {
+                                            warn!("key '{}': {e}", route.key);
+                                        }
+                                    }
+                                }
+                                if change.set.is_empty() {
+                                    continue;
+                                }
+                            }
                             return Some((change, (sub, 0)));
                         }
                         // A message that does not decode against its declared
@@ -540,5 +660,48 @@ mod tests {
             cdr::encode(&message_type, registry.types(), &value).expect("encode as Expression");
         let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
         assert_eq!(decoded, value);
+    }
+
+    /// The profile fan-out resolves dotted field paths by name against the
+    /// runtime type, and an x/y/z structure coerces to the store's vec3 form.
+    #[test]
+    fn routes_extract_fields_and_coerce_points() {
+        use arora_msgs_ros2::{builtin_interfaces, geometry_msgs, std_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let message_type = registry
+            .get_by_name("geometry_msgs/PointStamped")
+            .expect("geometry_msgs/PointStamped is registered")
+            .clone();
+        let stamped = geometry_msgs::PointStamped {
+            header: std_msgs::Header {
+                stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                frame_id: "sellion_link".into(),
+            },
+            point: geometry_msgs::Point {
+                x: 0.5,
+                y: -0.25,
+                z: 1.0,
+            },
+        };
+        let (ty, reg) = <geometry_msgs::PointStamped as AroraType>::arora_type_with_registry();
+        let value = to_value_seeded(&stamped, &ty, &reg).expect("stamped to value");
+        let bytes = cdr::encode(&message_type, registry.types(), &value).expect("encode");
+        let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+
+        let target = extract_route(&decoded, &message_type, registry.types(), "point")
+            .expect("extract point");
+        assert_eq!(target, Value::ArrayF32(vec![0.5, -0.25, 1.0]));
+        let frame = extract_route(&decoded, &message_type, registry.types(), "header.frame_id")
+            .expect("extract frame_id");
+        assert_eq!(frame, Value::String("sellion_link".into()));
+        // The empty path is the whole message, untouched.
+        let whole =
+            extract_route(&decoded, &message_type, registry.types(), "").expect("whole message");
+        assert_eq!(whole, decoded);
+        // A missing field reports, not panics.
+        assert!(extract_route(&decoded, &message_type, registry.types(), "nope").is_err());
     }
 }

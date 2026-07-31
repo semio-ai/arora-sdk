@@ -210,6 +210,146 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
     assert_eq!(change.set.get("expression"), Some(&Some(expected)));
 }
 
+/// Enabling the `ros4hri` exposure profile is all the wiring a face device
+/// needs (ARORA-86): a typed publisher on an absolute incumbent topic — here
+/// the PAL expression alias and the IIIA look_at alias — fans out onto the
+/// `standard/ros4hri/*` keys the face standard reads, fields routed by name
+/// and the gaze point coerced to the store's vec3 form.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback; runs on Linux CI. \
+              To run locally, ensure a multicast-capable interface and use `--ignored`."
+)]
+async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
+    use arora_bridge_ros2::ExposureProfile;
+    use arora_msgs_ros2::{builtin_interfaces, geometry_msgs, hri_msgs, std_msgs};
+
+    let _ = env_logger::try_init();
+    let domain_id = random_domain_id();
+    let namespace = format!("test_profile_{domain_id}");
+
+    let config =
+        Ros2BridgeConfig::new(&namespace, domain_id).with_profile(ExposureProfile::ros4hri());
+    let mut bridge = Ros2Bridge::new(config).await;
+    let mut inbound = bridge.take_inbound();
+
+    let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
+
+    let expr_topic = pub_node
+        .create_topic(
+            &Name::parse("/robot_face/expression").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create expression topic");
+    let expr_publisher = pub_node
+        .create_publisher::<hri_msgs::Expression>(&expr_topic, None)
+        .expect("create expression publisher");
+    let gaze_topic = pub_node
+        .create_topic(
+            &Name::parse("/expressive_face/look_at").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("geometry_msgs", "PointStamped"),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create look_at topic");
+    let gaze_publisher = pub_node
+        .create_publisher::<geometry_msgs::PointStamped>(&gaze_topic, None)
+        .expect("create look_at publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expr_publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the expression publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        gaze_publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the look_at publisher");
+
+    tokio::spawn(async move {
+        loop {
+            let _ = expr_publisher
+                .async_publish(hri_msgs::Expression {
+                    header: std_msgs::Header {
+                        stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                        frame_id: "face".into(),
+                    },
+                    expression: "happy".into(),
+                    valence: 0.8,
+                    arousal: 0.2,
+                    confidence: 1.0,
+                })
+                .await;
+            let _ = gaze_publisher
+                .async_publish(geometry_msgs::PointStamped {
+                    header: std_msgs::Header {
+                        stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                        frame_id: "sellion_link".into(),
+                    },
+                    point: geometry_msgs::Point {
+                        x: 0.5,
+                        y: -0.25,
+                        z: 1.0,
+                    },
+                })
+                .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    // One expression message fans out atomically; the look_at lands on its
+    // own change. Collect until both surfaces arrived.
+    let mut expression_change = None;
+    let mut gaze_change = None;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while expression_change.is_none() || gaze_change.is_none() {
+            match inbound.next().await {
+                Some(Inbound::Command(cmd)) => {
+                    if let BridgeOp::Update(change) = cmd.op {
+                        if change.set.contains_key("standard/ros4hri/expression/name") {
+                            expression_change = Some(change);
+                        } else if change.set.contains_key("standard/ros4hri/gaze/target") {
+                            gaze_change = Some(change);
+                        }
+                    }
+                }
+                Some(_) => {}
+                None => panic!("the inbound stream ended before both surfaces arrived"),
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the profile's fan-out");
+
+    let expression = expression_change.expect("expression change");
+    assert_eq!(
+        expression.set.get("standard/ros4hri/expression/name"),
+        Some(&Some(Value::String("happy".into()))),
+    );
+    assert_eq!(
+        expression.set.get("standard/ros4hri/expression/valence"),
+        Some(&Some(Value::F32(0.8))),
+    );
+    assert_eq!(
+        expression.set.get("standard/ros4hri/expression/arousal"),
+        Some(&Some(Value::F32(0.2))),
+    );
+
+    let gaze = gaze_change.expect("gaze change");
+    assert_eq!(
+        gaze.set.get("standard/ros4hri/gaze/target"),
+        Some(&Some(Value::ArrayF32(vec![0.5, -0.25, 1.0]))),
+    );
+    assert_eq!(
+        gaze.set.get("standard/ros4hri/gaze/frame"),
+        Some(&Some(Value::String("sellion_link".into()))),
+    );
+}
+
 /// `try_send` publishes a changed key to its topic, where a separate node
 /// subscribed to that topic receives it.
 #[tokio::test]

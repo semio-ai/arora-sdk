@@ -44,6 +44,7 @@ mod actions;
 pub mod bridge;
 pub mod conversions;
 pub mod msg_types;
+pub mod profile;
 // The method-service plane: synthesising a ROS 2 service per module method and
 // (de)serialising it against `arora-msgs-ros2`. Driven by `run_node`'s service
 // loop; the synthesis core is unit-tested against the real codec + registry.
@@ -54,5 +55,6 @@ mod services;
 pub use arora_msgs_ros2::cdr;
 
 pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
+pub use profile::ExposureProfile;
 
 pub use arora_types::value::{Type, Value};
