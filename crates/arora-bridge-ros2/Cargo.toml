@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "3.5.0"
+version = "4.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -19,7 +19,7 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "
 # The ROS 2 message types + the shared CDR codec (re-exported as this crate's
 # `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
 # where the bridge creates hash-keyed publishers.
-arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "0.1" }
+arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "1" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
