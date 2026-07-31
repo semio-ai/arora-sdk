@@ -31,7 +31,7 @@ tick 1:  say("hello") -> Running     // still going
 tick N:  say("hello") -> Success     // done; the run is dropped
 ```
 
-## Why polling, and not `await`
+## Why the loop drives the poll, not `await` inside the call
 
 The step loop is synchronous, single-owner (one writer of the store, no locks in
 the control path), and deterministic. Two things you might reach for both break
@@ -43,14 +43,28 @@ it, and polling avoids both:
   stack switching — a guest function *cannot* suspend mid-call regardless. A
   synchronous `poll` driven from the loop is precisely how you advance async
   work *from* a synchronous, non-suspending substrate.
-- **Slicing the computation into per-tick chunks.** A model forward pass has no
-  natural yield points; cutting it into tick-sized pieces is fiction. Don't. The
-  work runs elsewhere (below); the poll only *observes* it.
+- **Forcing *indivisible* work into per-tick chunks.** Some work has no natural
+  yield point — a model forward pass runs start to finish with no partial state
+  to observe between ticks. Carving *that* into tick-sized slices is fiction:
+  there is nothing to advance. It runs elsewhere (below); the poll observes only
+  whether it has finished.
 
-Polling a readiness signal each tick is not false decomposition — the tick is
-the caller's clock, and "is it ready yet?" is a legitimate per-tick query. What
-would be false is doing the *work* in slices. The distinction is **where the
-work runs**, not whether you poll.
+None of this is an argument against decomposition — decomposition *is* the idea.
+Polling is not a lesser substitute for `async`; it is how `async` works. A
+`Future` makes progress only by being polled, and awaiting an HTTP response is,
+underneath, a non-blocking socket polled for readiness one `poll` at a time. Any
+work built from real yield points — a network request, a socket read, waiting on
+a device or a subscription — decomposes cleanly into "poll: ready or not," and a
+tick loop is a natural executor for it. Writing such work as a per-tick query is
+not a workaround; it is the grain of the problem, and the right way to express it
+here.
+
+The line, then, is not *whether* to poll — you always poll — but whether the work
+itself yields. Work with yield points you decompose into polls directly; work
+without them (a long inference) you cannot slice honestly, so you run it off the
+tick and poll for completion. Same mechanism either way — `Running` until ready —
+only the thing polled differs: incremental readiness in one case, a done signal
+in the other.
 
 ## Per-invocation state, behind a handle
 
