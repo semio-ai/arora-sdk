@@ -617,12 +617,23 @@ fn build_engine() -> Result<PinnedEngine> {
         .build())
 }
 
-#[cfg(not(feature = "native"))]
+#[cfg(all(not(feature = "native"), target_arch = "wasm32"))]
 fn build_engine() -> Result<PinnedEngine> {
     use arora_engine::executor::browser::BrowserExecutor;
     Ok(EngineBuilder::new()
         .add_executor(BrowserExecutor::new())
         .build())
+}
+
+/// Without the `native` feature on a native target, the engine carries no
+/// executor at all: host modules enter dispatch directly
+/// (`Engine::register_module`), so a device that loads no guest executables
+/// needs no wasm runtime. This is the slice that builds on every target —
+/// including the 32-bit Android ABIs, where wasmtime has no backend. Loading
+/// a guest module on it fails at load, loudly.
+#[cfg(all(not(feature = "native"), not(target_arch = "wasm32")))]
+fn build_engine() -> Result<PinnedEngine> {
+    Ok(EngineBuilder::new().build())
 }
 
 /// Loading a guest wasm module through the builder and dispatching it. Needs
@@ -714,102 +725,6 @@ mod module_loading_tests {
         // `add(a: f32, b: f32) -> f32`: two f32 parameters in order.
         let add = by_name("add").expect("add joined the method index");
         assert_eq!(add.function.parameter_ordering.len(), 2);
-    }
-
-    /// `with_host_module` registers a host-side module built from
-    /// [`ModuleBuilder`], and its functions dispatch through [`Arora::call`]
-    /// like a loaded module's — the in-process counterpart to `with_module`.
-    #[test]
-    fn with_host_module_registers_a_native_module_reachable_through_call() {
-        use arora_types::call::CallResult;
-        use arora_types::value::StructureField;
-
-        let module_id = Uuid::from_u128(0xA11CE);
-        let echo = Uuid::from_u128(0xEC40);
-        // A host module whose one function echoes its first argument back.
-        let module = ModuleBuilder::new(module_id)
-            .function(echo, |call| {
-                let ret = call
-                    .args
-                    .into_iter()
-                    .next()
-                    .map(|field| *field.value)
-                    .unwrap_or(Value::Unit);
-                Ok(CallResult {
-                    ret,
-                    mutated: Vec::new(),
-                })
-            })
-            .build();
-        let mut arora = Arora::builder()
-            .with_host_module(module)
-            .build()
-            .expect("build a device with a host module");
-
-        let result = arora
-            .call(Call {
-                module_id: Some(module_id),
-                id: echo,
-                args: vec![StructureField {
-                    id: Uuid::from_u128(1),
-                    value: Box::new(Value::U32(42)),
-                }],
-            })
-            .expect("call echo() on the host module");
-        assert_eq!(result.ret, Value::U32(42));
-    }
-
-    /// A described host function joins the method index with its signature —
-    /// what introspection (`DescribeMethods`) serves — while an undescribed
-    /// one dispatches but stays out of the index.
-    #[test]
-    fn described_host_functions_join_the_method_index() {
-        use arora_types::call::CallResult;
-        use arora_types::record::module::frozen::{Function, Parameter};
-        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
-        use std::collections::HashMap;
-
-        let module_id = Uuid::from_u128(0x6761);
-        let described = Uuid::from_u128(0x6c61);
-        let undescribed = Uuid::from_u128(0x6c62);
-        let param = Uuid::from_u128(0x7801);
-
-        let signature = Function {
-            parameters: HashMap::from([(
-                param,
-                Parameter {
-                    name: "x".to_string(),
-                    ty: FrozenTy::from(PrimitiveKind::F64),
-                    mutable: false,
-                },
-            )]),
-            parameter_ordering: vec![param],
-            return_ty: FrozenTy::from(PrimitiveKind::Unit),
-        };
-        let unit = |_call: Call| {
-            Ok(CallResult {
-                ret: Value::Unit,
-                mutated: Vec::new(),
-            })
-        };
-        let module = ModuleBuilder::new(module_id)
-            .described_function(described, "look_at", signature.clone(), unit)
-            .function(undescribed, unit)
-            .build();
-
-        let arora = Arora::builder()
-            .with_host_module(module)
-            .build()
-            .expect("build a device with a described host module");
-
-        let entry = arora
-            .function_index
-            .get(&described)
-            .expect("the described function is indexed");
-        assert_eq!(entry.module_id, module_id);
-        assert_eq!(entry.function_name, "look_at");
-        assert_eq!(entry.function, signature);
-        assert!(arora.function_index.get(&undescribed).is_none());
     }
 
     /// Dispatch is always module-scoped: a call naming no module is refused.
@@ -1011,5 +926,111 @@ mod module_loading_tests {
             result.is_err(),
             "build must fail when a module's executable cannot load"
         );
+    }
+}
+
+/// Host modules enter dispatch directly (no executor), so these hold under
+/// every feature slice — including the no-executor engine of a
+/// `--no-default-features` native build.
+#[cfg(test)]
+mod host_module_tests {
+    use super::*;
+    use arora_types::call::{Call, CallBridge};
+    use arora_types::value::Value;
+
+    /// `with_host_module` registers a host-side module built from
+    /// [`ModuleBuilder`], and its functions dispatch through [`Arora::call`]
+    /// like a loaded module's — the in-process counterpart to `with_module`.
+    #[test]
+    fn with_host_module_registers_a_native_module_reachable_through_call() {
+        use arora_types::call::CallResult;
+        use arora_types::value::StructureField;
+
+        let module_id = Uuid::from_u128(0xA11CE);
+        let echo = Uuid::from_u128(0xEC40);
+        // A host module whose one function echoes its first argument back.
+        let module = ModuleBuilder::new(module_id)
+            .function(echo, |call| {
+                let ret = call
+                    .args
+                    .into_iter()
+                    .next()
+                    .map(|field| *field.value)
+                    .unwrap_or(Value::Unit);
+                Ok(CallResult {
+                    ret,
+                    mutated: Vec::new(),
+                })
+            })
+            .build();
+        let mut arora = Arora::builder()
+            .with_host_module(module)
+            .build()
+            .expect("build a device with a host module");
+
+        let result = arora
+            .call(Call {
+                module_id: Some(module_id),
+                id: echo,
+                args: vec![StructureField {
+                    id: Uuid::from_u128(1),
+                    value: Box::new(Value::U32(42)),
+                }],
+            })
+            .expect("call echo() on the host module");
+        assert_eq!(result.ret, Value::U32(42));
+    }
+
+    /// A described host function joins the method index with its signature —
+    /// what introspection (`DescribeMethods`) serves — while an undescribed
+    /// one dispatches but stays out of the index.
+    #[test]
+    fn described_host_functions_join_the_method_index() {
+        use arora_types::call::CallResult;
+        use arora_types::record::module::frozen::{Function, Parameter};
+        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+        use std::collections::HashMap;
+
+        let module_id = Uuid::from_u128(0x6761);
+        let described = Uuid::from_u128(0x6c61);
+        let undescribed = Uuid::from_u128(0x6c62);
+        let param = Uuid::from_u128(0x7801);
+
+        let signature = Function {
+            parameters: HashMap::from([(
+                param,
+                Parameter {
+                    name: "x".to_string(),
+                    ty: FrozenTy::from(PrimitiveKind::F64),
+                    mutable: false,
+                },
+            )]),
+            parameter_ordering: vec![param],
+            return_ty: FrozenTy::from(PrimitiveKind::Unit),
+        };
+        let unit = |_call: Call| {
+            Ok(CallResult {
+                ret: Value::Unit,
+                mutated: Vec::new(),
+            })
+        };
+        let module = ModuleBuilder::new(module_id)
+            .described_function(described, "look_at", signature.clone(), unit)
+            .function(undescribed, unit)
+            .build();
+
+        let arora = Arora::builder()
+            .with_host_module(module)
+            .build()
+            .expect("build a device with a described host module");
+
+        let entry = arora
+            .function_index
+            .get(&described)
+            .expect("the described function is indexed");
+        assert_eq!(entry.module_id, module_id);
+        assert_eq!(entry.function_name, "look_at");
+        assert_eq!(entry.function, signature);
+        assert!(arora.function_index.get(&undescribed).is_none());
     }
 }
