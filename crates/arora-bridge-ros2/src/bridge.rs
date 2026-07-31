@@ -40,6 +40,7 @@ use crate::conversions::{
     setup_key_subscriber, setup_typed_key_publisher, setup_typed_key_subscriber, topic_name,
     KeyPublisher, StateChangeStream, TypedKeyPublisher,
 };
+use crate::profile;
 use crate::services;
 
 /// An input key exposed as an inbound ROS 2 topic: a message received on
@@ -93,6 +94,9 @@ pub struct TypedInput {
     /// The topic name. `None` uses the `/{namespace}/keys/{path}` convention;
     /// `Some` is used verbatim (an absolute ROS name escapes the namespace).
     pub topic: Option<String>,
+    /// Field fan-out over device keys (see [`profile::FieldRoute`]). Empty
+    /// lands the whole decoded message on `path`.
+    pub routes: Vec<profile::FieldRoute>,
 }
 
 /// How to attach to the ROS 2 graph: a `namespace` for the topics, a DDS
@@ -110,6 +114,10 @@ pub struct Ros2BridgeConfig {
     /// Output keys published as typed ROS messages (see [`TypedOutput`]); a key
     /// not listed here publishes on the untyped `std_msgs` path.
     pub outputs: Vec<TypedOutput>,
+    /// Bulk-key exposure on the scalar plane: keys matching an include's glob
+    /// publish under its rewritten absolute topic instead of the
+    /// `/{namespace}/keys/{path}` convention (see [`profile::Include`]).
+    pub includes: Vec<profile::Include>,
 }
 
 impl Ros2BridgeConfig {
@@ -120,6 +128,7 @@ impl Ros2BridgeConfig {
             domain_id,
             inputs: Vec::new(),
             typed_inputs: Vec::new(),
+            includes: Vec::new(),
             outputs: Vec::new(),
         }
     }
@@ -140,6 +149,7 @@ impl Ros2BridgeConfig {
         ros_type: T,
     ) -> Self {
         self.typed_inputs.push(TypedInput {
+            routes: Vec::new(),
             path: path.into(),
             ros_type: ros_type.into(),
             topic: None,
@@ -157,6 +167,7 @@ impl Ros2BridgeConfig {
         topic: N,
     ) -> Self {
         self.typed_inputs.push(TypedInput {
+            routes: Vec::new(),
             path: path.into(),
             ros_type: ros_type.into(),
             topic: Some(topic.into()),
@@ -195,6 +206,38 @@ impl Ros2BridgeConfig {
             ros_type: ros_type.into(),
             topic: Some(topic.into()),
         });
+        self
+    }
+
+    /// Expose the device through a named [`profile::ExposureProfile`]: each
+    /// endpoint becomes a typed binding on its absolute topic with its field
+    /// fan-out, and the profile's includes join the scalar plane's rewrite
+    /// set. Outbound endpoints route the whole message from their first
+    /// route's key (field fan-in is not implemented).
+    pub fn with_profile(mut self, profile: profile::ExposureProfile) -> Self {
+        for endpoint in profile.endpoints {
+            match endpoint.flow {
+                profile::Flow::In => self.typed_inputs.push(TypedInput {
+                    // The path names the binding in logs; routed fields land
+                    // on their own keys.
+                    path: endpoint.topic.clone(),
+                    ros_type: endpoint.ros_type,
+                    topic: Some(endpoint.topic),
+                    routes: endpoint.routes,
+                }),
+                profile::Flow::Out => {
+                    let Some(route) = endpoint.routes.first() else {
+                        continue;
+                    };
+                    self.outputs.push(TypedOutput {
+                        path: route.key.clone(),
+                        ros_type: endpoint.ros_type,
+                        topic: Some(endpoint.topic),
+                    });
+                }
+            }
+        }
+        self.includes.extend(profile.includes);
         self
     }
 }
@@ -314,6 +357,7 @@ async fn run_node(
         inputs,
         typed_inputs,
         outputs,
+        includes,
     } = config;
 
     let mut node = match build_node(&namespace, domain_id) {
@@ -367,6 +411,7 @@ async fn run_node(
             &topic,
             &input.ros_type,
             input.path.clone(),
+            input.routes.clone(),
             registry.clone(),
         ) {
             Ok(stream) => sub_streams.push(stream),
@@ -439,6 +484,7 @@ async fn run_node(
                             &mut publishers,
                             &typed_outputs,
                             &mut typed_publishers,
+                            &includes,
                             &registry,
                             &change,
                         )
@@ -689,6 +735,7 @@ async fn publish_change(
     publishers: &mut HashMap<String, KeyPublisher>,
     typed_outputs: &HashMap<String, TypedOutput>,
     typed_publishers: &mut HashMap<String, TypedKeyPublisher>,
+    includes: &[profile::Include],
     registry: &Arc<Ros2Registry>,
     change: &StateChange,
 ) {
@@ -723,7 +770,13 @@ async fn publish_change(
         }
 
         if !publishers.contains_key(&key.path) {
-            let topic = topic_name(namespace, &key.path);
+            // An include's rewrite (first match wins) puts the key on its
+            // absolute profile topic instead of the namespace convention.
+            let topic = includes
+                .iter()
+                .filter(|include| include.flow == profile::Flow::Out)
+                .find_map(|include| include.rewrite(&key.path))
+                .unwrap_or_else(|| topic_name(namespace, &key.path));
             match KeyPublisher::create(node, &topic, value) {
                 Ok(publisher) => {
                     publishers.insert(key.path.clone(), publisher);

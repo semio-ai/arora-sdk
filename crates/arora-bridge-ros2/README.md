@@ -92,8 +92,25 @@ This bridge is where a device meets a ROS 2 graph, so it is the natural home for
 face standard consumes it (see [vizij-rs's ROS4HRI
 docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
 
-Today the **key** topic plane carries values as `std_msgs` scalars (non-scalars
-as JSON `std_msgs/String`); publishing/subscribing device keys as **typed
-`hri_msgs` topics** under a ROS4HRI naming profile (glob include + prefix
-rewrite, a `ros4hri` preset) is planned, not yet implemented. Until then a
-ROS4HRI face is driven by writing the `standard/ros4hri/*` keys directly.
+Typed topics bind per endpoint: `with_typed_input`/`with_typed_output` (and
+their `_on` variants for absolute topic names) subscribe or publish a device
+key as a registered ROS message, decoded and encoded against its runtime type.
+
+**Exposure profiles** (`profile` module) bundle a whole surface: an
+[`ExposureProfile`] holds typed endpoints on absolute topics with per-field
+fan-out over device keys, plus glob includes (`*` one segment, `**` the rest)
+whose prefix rewrites expose bulk keys on the scalar plane under absolute
+names. `ExposureProfile::ros4hri()` ships the ROS4HRI face surface for both
+incumbent name sets — PAL (`/robot_face/*`) and IIIA (`/expressive_face/*`):
+expression commands fan out to `standard/ros4hri/expression/*`, `look_at`
+points land as the gaze target (vec3) and frame, speech text feeds the
+lipsync key. Enabling it is one call:
+
+```rust
+let config = Ros2BridgeConfig::new("robot", 0)
+    .with_profile(ExposureProfile::ros4hri());
+```
+
+`ExposureProfile::coverage` reports which of the profile's keys a device does
+not serve, so a deployment checks a face against its profile up front instead
+of discovering holes topic by topic.
