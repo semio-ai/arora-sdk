@@ -12,10 +12,13 @@ use aws_sdk_polly::{
 use bytes::Buf;
 use soloud::*;
 use std::collections::HashMap;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
+use std::pin::Pin;
 use std::sync::Mutex;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 lazy_static::lazy_static! {
   // Reuse the caller's runtime if one is active (e.g. arora-cli), otherwise
@@ -23,13 +26,15 @@ lazy_static::lazy_static! {
   static ref TOKIO_HANDLE: tokio::runtime::Handle = tokio::runtime::Handle::try_current()
     .unwrap_or_else(|_| Box::leak(Box::new(tokio::runtime::Runtime::new().unwrap())).handle().clone());
   // Live utterances, keyed so concurrent `say`s do not share a slot. Each run is
-  // the terminal-status channel of a synthesis+playback task spawned on the Tokio
-  // runtime. `say` polls the channel each tick — that poll *is* the poll-on-tick
-  // contract (see docs/async-functions.md): channel empty = Running (Pending),
-  // a delivered status = terminal. Replaces the old process-global TTS_TASK /
-  // TTS_STATUS singletons, whose one slot let two utterances overwrite each other
-  // and whose "report the status next call" hand-off was racy.
-  static ref RUNS: Mutex<HashMap<u64, oneshot::Receiver<Status>>> = Mutex::new(HashMap::new());
+  // the `JoinHandle` of a synthesis+playback task spawned on the Tokio runtime. A
+  // `JoinHandle` is itself a `Future`, so `say` drives the poll-on-tick contract
+  // (see docs/async-functions.md) by polling it directly each tick with a no-op
+  // waker: `Poll::Pending` = Running, `Poll::Ready` = terminal. The Tokio runtime
+  // owns the reactor that advances the task off the tick thread; the tick only
+  // samples its readiness. Replaces the old process-global TTS_TASK / TTS_STATUS
+  // singletons, whose one slot let two utterances overwrite each other and whose
+  // "report the status next call" hand-off was racy.
+  static ref RUNS: Mutex<HashMap<u64, JoinHandle<Status>>> = Mutex::new(HashMap::new());
 }
 
 fn hello_world() -> Status {
@@ -64,18 +69,22 @@ fn say(text: Option<String>) -> Status {
         runs.insert(key, spawn_say(text));
     }
 
-    // Poll the run (scoped so the borrow ends before we may remove it).
-    let outcome = runs.get_mut(&key).expect("just inserted").try_recv();
-    match outcome {
+    // Poll the run's `JoinHandle` — the `Future` — once. This call is one `poll`:
+    // the tick loop is the executor, and a no-op waker suffices because the runtime
+    // re-ticks us every step regardless of any wake-up. A completed `JoinHandle`
+    // must never be polled again, so a terminal result drops the run.
+    let mut cx = Context::from_waker(Waker::noop());
+    let handle = runs.get_mut(&key).expect("just inserted");
+    match Future::poll(Pin::new(handle), &mut cx) {
         // Still speaking — the runtime re-ticks me next step.
-        Err(oneshot::error::TryRecvError::Empty) => Status::Running,
+        Poll::Pending => Status::Running,
         // Terminal — drop the run so a later re-trigger of the same text respawns.
-        Ok(status) => {
+        Poll::Ready(Ok(status)) => {
             runs.remove(&key);
             status
         }
-        // The task ended without sending (panicked/aborted): terminal failure.
-        Err(oneshot::error::TryRecvError::Closed) => {
+        // The task panicked or was aborted: terminal failure.
+        Poll::Ready(Err(_join_error)) => {
             runs.remove(&key);
             Status::Failure
         }
@@ -83,10 +92,10 @@ fn say(text: Option<String>) -> Status {
 }
 
 /// Spawn the AWS Polly synthesis + playback on the Tokio runtime (which owns the
-/// reactor) and hand the terminal status back through a channel `say` polls. The
-/// heavy work never runs on the tick thread; the tick only observes the channel.
-fn spawn_say(text: String) -> oneshot::Receiver<Status> {
-    let (tx, rx) = oneshot::channel();
+/// reactor) and return its `JoinHandle` — the `Future` `say` polls each tick. The
+/// heavy work never runs on the tick thread; the tick only samples the handle. The
+/// task resolves to the terminal `Status`, so the join value *is* the outcome.
+fn spawn_say(text: String) -> JoinHandle<Status> {
     TOKIO_HANDLE.spawn(async move {
         let region_provider = RegionProviderChain::default_provider().or_else("eu-west-3");
         let config = aws_config::defaults(BehaviorVersion::latest())
@@ -94,15 +103,11 @@ fn spawn_say(text: String) -> oneshot::Receiver<Status> {
             .load()
             .await;
         let client = Client::new(&config);
-        let status = match synthesize(&client, text).await {
+        match synthesize(&client, text).await {
             Ok(_) => Status::Success,
             Err(_) => Status::Failure,
-        };
-        // The receiver is gone if the caller stopped ticking before we finished;
-        // that is expected, not an error.
-        let _ = tx.send(status);
-    });
-    rx
+        }
+    })
 }
 
 async fn synthesize(client: &Client, content: String) -> Result<(), Error> {

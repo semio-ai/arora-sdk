@@ -87,7 +87,9 @@ does **not** run inside the function's tick. It runs **off the step thread**,
 and the function only polls a channel to it:
 
 - **Native:** a thread or a blocking pool started on the io side; the function
-  polls an `mpsc`/`oneshot` (a non-blocking `try_recv`).
+  polls a readiness signal — the task's `JoinHandle` (itself a `Future`, polled
+  directly with a no-op waker, which is what `polly::say` does), or a non-blocking
+  `try_recv` on an `mpsc`/`oneshot` when the work streams results back in pieces.
 - **Browser (wasm):** a **Web Worker** running the work; messages posted back
   land on a channel the function polls.
 
