@@ -1,6 +1,6 @@
 [package]
 name = "arora-msgs-ros2"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 message types for Arora: the std/geometry/sensor/hri messages as arora types, a runtime type registry, and the CDR codec — shared by arora-bridge-ros2 and arora-hal-ros2."

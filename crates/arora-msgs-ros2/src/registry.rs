@@ -158,6 +158,9 @@ pub fn package_and_type(name: &str) -> Option<(&str, &str)> {
     if let Some((package, rest)) = name.split_once("/msg/") {
         return Some((package, rest));
     }
+    if let Some((package, rest)) = name.split_once("/action/") {
+        return Some((package, rest));
+    }
     name.rsplit_once('/')
 }
 
@@ -169,6 +172,9 @@ fn name_aliases(name: &str) -> Vec<String> {
     }
     let mut aliases = vec![name.to_string()];
     if let Some((package, ty)) = name.split_once("/msg/") {
+        aliases.push(format!("{package}/{ty}"));
+    }
+    if let Some((package, ty)) = name.split_once("/action/") {
         aliases.push(format!("{package}/{ty}"));
     }
     aliases

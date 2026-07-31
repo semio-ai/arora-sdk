@@ -238,3 +238,63 @@ fn a_bundled_type_has_a_rep2016_hash() {
         );
     }
 }
+
+/// The ROS4HRI skill surface is registered: the `interaction_skills` action
+/// sub-messages resolve under both name forms, and a LookAt goal survives a
+/// CDR round trip — the wire form a `/skill/look_at` server decodes.
+#[test]
+fn skill_action_types_register_and_round_trip() {
+    use arora_msgs_ros2::{
+        builtin_interfaces, geometry_msgs, interaction_skills, std_msgs, std_skills,
+    };
+    use arora_types::value_serde::bridge::to_value_seeded;
+    use arora_types::AroraType;
+
+    let registry = arora_msgs_ros2::registry();
+    for name in [
+        "interaction_skills/action/LookAt_Goal",
+        "interaction_skills/LookAt_Goal",
+        "interaction_skills/action/LookAt_Result",
+        "interaction_skills/action/LookAt_Feedback",
+        "interaction_skills/SetExpression",
+        "std_skills/Meta",
+        "std_skills/Result",
+    ] {
+        assert!(registry.get_by_name(name).is_some(), "missing {name}");
+    }
+    // The errno vocabulary rides as constants on the generated struct.
+    assert_eq!(std_skills::Result::ROS_EINTR, 4);
+    assert_eq!(std_skills::Result::ROS_ECANCELED, 125);
+    assert_eq!(std_skills::Result::ROS_ENOTSUP, 134);
+    assert_eq!(interaction_skills::LookAt_Goal::GLANCE, "glance");
+
+    let goal = interaction_skills::LookAt_Goal {
+        meta: std_skills::Meta {
+            caller: "test".into(),
+            priority: std_skills::Meta::NORMAL_PRIORITY,
+        },
+        policy: "".into(),
+        target: geometry_msgs::PointStamped {
+            header: std_msgs::Header {
+                stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                frame_id: "sellion_link".into(),
+            },
+            point: geometry_msgs::Point {
+                x: 0.4,
+                y: 0.0,
+                z: 1.2,
+            },
+        },
+    };
+    let message_type = registry
+        .get_by_name("interaction_skills/LookAt_Goal")
+        .unwrap()
+        .clone();
+    let (ty, reg) = <interaction_skills::LookAt_Goal as AroraType>::arora_type_with_registry();
+    let value = to_value_seeded(&goal, &ty, &reg).expect("goal to value");
+    let bytes =
+        arora_msgs_ros2::cdr::encode(&message_type, registry.types(), &value).expect("encode");
+    let back =
+        arora_msgs_ros2::cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+    assert_eq!(back, value);
+}

@@ -1,0 +1,37 @@
+std_skills/Meta meta
+
+## POLICIES
+
+# randomly look around, with short fixations
+string RANDOM="random"
+
+# the robot will look around for faces, with fixations on detected faces
+string SOCIAL="social"
+
+# the robot will briefly look at the target, then go back to
+# the previous gaze policy. If target is empty, the action goal
+# will be rejected.
+string GLANCE="glance"
+
+# automatic gaze policy, implementation-dependent.
+# On PAL interactive robots, equivalent to 'social'
+string AUTO="auto"
+
+# reset the gaze of the robot to looking straight
+string RESET="reset"
+
+##################################
+
+# if non-empty, the gaze policy to adopt
+string policy
+
+# if 'policy' is empty, the robot will start tracking 'target'.
+# To stop tracking target, either call the skill
+# with policy=RESET
+geometry_msgs/PointStamped target
+
+---
+std_skills/Result result
+
+---
+std_skills/Feedback feedback

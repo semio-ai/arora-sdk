@@ -113,7 +113,8 @@ pub struct Field {
 pub struct Constant {
     pub ty: Primitive,
     pub name: String,
-    /// The literal value, verbatim from the `.msg` (e.g. `0`, `-2`).
+    /// The literal value from the `.msg` (e.g. `0`, `-2`), string quotes
+    /// stripped.
     pub value: String,
 }
 
@@ -123,15 +124,19 @@ pub struct Constant {
 pub struct MessageSpec {
     pub package: String,
     pub name: String,
+    /// The REP-2016 namespace segment: `msg` for a plain message, `action`
+    /// for an action's `_Goal`/`_Result`/`_Feedback` sub-messages.
+    pub namespace: String,
     pub fields: Vec<Field>,
     pub constants: Vec<Constant>,
 }
 
 impl MessageSpec {
-    /// The REP-2016 qualified name, `package/msg/Name` — what a message carries
-    /// in its arora `low::Type.name` and what the type hash uses.
+    /// The REP-2016 qualified name, `package/msg/Name` (or
+    /// `package/action/Name`) — what a message carries in its arora
+    /// `low::Type.name` and what the type hash uses.
     pub fn rep2016_name(&self) -> String {
-        format!("{}/msg/{}", self.package, self.name)
+        format!("{}/{}/{}", self.package, self.namespace, self.name)
     }
 }
 
@@ -161,10 +166,20 @@ pub fn parse_msg(package: &str, name: &str, text: &str) -> Result<MessageSpec, S
             let const_name = it.next().ok_or_else(|| at("constant without a name"))?;
             let ty = Primitive::from_token(type_tok)
                 .ok_or_else(|| at(&format!("constant of non-primitive type `{type_tok}`")))?;
+            // String constants may be quoted (`string GLANCE="glance"`);
+            // per the ROS 2 interface rules the quotes delimit, they are not
+            // part of the value.
+            let mut value = value.trim();
+            for quote in ['"', '\''] {
+                if value.len() >= 2 && value.starts_with(quote) && value.ends_with(quote) {
+                    value = &value[1..value.len() - 1];
+                    break;
+                }
+            }
             constants.push(Constant {
                 ty,
                 name: const_name.to_string(),
-                value: value.trim().to_string(),
+                value: value.to_string(),
             });
             continue;
         }
@@ -181,6 +196,7 @@ pub fn parse_msg(package: &str, name: &str, text: &str) -> Result<MessageSpec, S
     }
 
     Ok(MessageSpec {
+        namespace: "msg".into(),
         package: package.to_string(),
         name: name.to_string(),
         fields,
@@ -300,4 +316,38 @@ geometry_msgs/Point point
             }
         );
     }
+}
+
+/// Parse the text of a `.action` for the action `package/name`: three
+/// `---`-separated `.msg` sections — goal, result, feedback — becoming the
+/// REP-2016 sub-messages `package/action/{name}_Goal`, `_Result` and
+/// `_Feedback`. (The SendGoal/GetResult service wrappers are wire-level
+/// conventions the action machinery composes; only the three payload types
+/// are real message definitions.)
+pub fn parse_action(package: &str, name: &str, text: &str) -> Result<Vec<MessageSpec>, String> {
+    let mut sections: Vec<String> = vec![String::new()];
+    for line in text.lines() {
+        if line.trim() == "---" {
+            sections.push(String::new());
+        } else {
+            let section = sections.last_mut().expect("at least one section");
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    if sections.len() != 3 {
+        return Err(format!(
+            "an action defines goal, result and feedback; {package}/{name} has {} sections",
+            sections.len()
+        ));
+    }
+    ["Goal", "Result", "Feedback"]
+        .iter()
+        .zip(&sections)
+        .map(|(suffix, section)| {
+            let mut spec = parse_msg(package, &format!("{name}_{suffix}"), section)?;
+            spec.namespace = "action".into();
+            Ok(spec)
+        })
+        .collect()
 }
