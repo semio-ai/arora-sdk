@@ -4,6 +4,19 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.5.1] - 2026-08-31
+
+### Fixed
+
+- `to_value_seeded` now gives sequences their declared array form: a field
+  declared as an array of a scalar packs into the typed array
+  (`Value::ArrayU8`/`…`, what the typed walk and the ROS 2 CDR codec read),
+  and an array of a registered type becomes a `Value::ArrayStructure` whose
+  elements carry that type's ids. Before, every sequence became a
+  `Value::ArrayValue` of scalars, so a seeded message with a `uint8[]` field
+  (`sensor_msgs/Image`) could not be encoded. `from_value_seeded` reads both
+  forms back, including `ArrayStructure` elements.
+
 ## [2.5.0] - 2026-07-30
 
 ### Changed
