@@ -22,7 +22,9 @@
 //!   reader cannot, as it only knows the field names.
 //!
 //! Maps map to [`KeyValue`] (they carry their keys by name), sequences and
-//! tuples to [`Value::ArrayValue`], primitives to their `Value` twins, `Option`
+//! tuples to [`Value::ArrayValue`] (seeded by a declared array: the typed
+//! `Value::ArrayU8`/`…` or [`Value::ArrayStructure`] form the typed walk reads),
+//! primitives to their `Value` twins, `Option`
 //! to [`Value::Option`], unit to [`Value::Unit`].
 
 use std::collections::HashMap;
@@ -39,7 +41,7 @@ use crate::gen_uuid_from_str;
 use crate::keyvalue::{KeyValue, KeyValueField};
 use crate::module::low::TypeRef;
 use crate::ty::{self, low, TypeRegistry};
-use crate::value::{Structure, StructureField, Value};
+use crate::value::{Structure, StructureField, StructureWithoutId, Value};
 
 /// Convert any `Serialize` type into a [`Value`], deriving ids from names.
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
@@ -59,7 +61,7 @@ pub fn to_value_seeded<T: Serialize + ?Sized>(
   registry: &TypeRegistry,
 ) -> Result<Value, Error> {
   value.serialize(ValueSerializer {
-    seed: Some(Seed { ty, registry }),
+    seed: Some(Seed::Type { ty, registry }),
   })
 }
 
@@ -71,41 +73,87 @@ pub fn from_value_seeded<T: DeserializeOwned>(
 ) -> Result<T, Error> {
   T::deserialize(ValueDeserializer {
     value,
-    seed: Some(Seed { ty, registry }),
+    seed: Some(Seed::Type { ty, registry }),
   })
 }
 
 // ---- the type seed ---------------------------------------------------------
 
-/// A declared type threaded through (de)serialization so a struct's ids come
-/// from the type instead of from hashed names.
+/// What a position's declaration expects, threaded through (de)serialization
+/// so the value takes the declared form instead of the name-derived one.
 #[derive(Clone, Copy)]
-struct Seed<'a> {
-  ty: &'a low::Type,
-  registry: &'a TypeRegistry,
+enum Seed<'a> {
+  /// A declared type: a structure (or enumeration) whose ids the value
+  /// carries — or a top-level array type (`Primitive(TypeRef::Array)`).
+  Type {
+    ty: &'a low::Type,
+    registry: &'a TypeRegistry,
+  },
+  /// A declared array of `element`: a well-known scalar id packs the items
+  /// into the typed array (`Value::ArrayU8`/`…`); a registered type makes an
+  /// array of structures carrying that type's ids.
+  Array {
+    element: Uuid,
+    registry: &'a TypeRegistry,
+  },
 }
 
 impl<'a> Seed<'a> {
   /// This seed's type as a structure, if it is one.
   fn as_structure(&self) -> Option<&'a low::Structure> {
-    match &self.ty.kind {
-      low::TypeKind::Structure(structure) => Some(structure),
+    match self {
+      Seed::Type { ty, .. } => match &ty.kind {
+        low::TypeKind::Structure(structure) => Some(structure),
+        _ => None,
+      },
+      Seed::Array { .. } => None,
+    }
+  }
+
+  /// The element declaration when this seed is an array — declared as a field
+  /// (`Seed::Array`) or as a top-level array type.
+  fn array_element(&self) -> Option<(Uuid, &'a TypeRegistry)> {
+    match self {
+      Seed::Array { element, registry } => Some((*element, registry)),
+      Seed::Type { ty, registry } => match &ty.kind {
+        low::TypeKind::Primitive(TypeRef::Array { id })
+        | low::TypeKind::Primitive(TypeRef::FixedArray { id, .. }) => Some((*id, registry)),
+        _ => None,
+      },
+    }
+  }
+
+  /// The seed for the elements of this array seed: a registered element type
+  /// seeds each element; a scalar element needs none.
+  fn element_seed(&self) -> Option<Seed<'a>> {
+    let (element, registry) = self.array_element()?;
+    registry.get(&element).map(|ty| Seed::Type { ty, registry })
+  }
+
+  /// The seed for a struct field of type `type_ref`: a nested user-defined type
+  /// resolves to its [`low::Type`]; an array carries its element; well-known
+  /// primitives (and, for now, maps) carry no seed.
+  fn child(&self, type_ref: &TypeRef) -> Option<Seed<'a>> {
+    let registry = match self {
+      Seed::Type { registry, .. } | Seed::Array { registry, .. } => *registry,
+    };
+    match type_ref {
+      TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {
+        registry.get(id).map(|ty| Seed::Type { ty, registry })
+      }
+      TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => Some(Seed::Array {
+        element: *id,
+        registry,
+      }),
       _ => None,
     }
   }
 
-  /// The seed for a struct field of type `type_ref`: a nested user-defined type
-  /// resolves to its [`low::Type`]; well-known primitives (and, for now,
-  /// arrays/maps) carry no seed.
-  fn child(&self, type_ref: &TypeRef) -> Option<Seed<'a>> {
-    match type_ref {
-      TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {
-        self.registry.get(id).map(|ty| Seed {
-          ty,
-          registry: self.registry,
-        })
-      }
-      _ => None,
+  /// The declaration's name, for messages.
+  fn name(&self) -> String {
+    match self {
+      Seed::Type { ty, .. } => ty.name.clone(),
+      Seed::Array { element, .. } => format!("array of {element}"),
     }
   }
 }
@@ -164,9 +212,9 @@ fn variant_keyvalue(type_name: &str, variant: &str, value: Value) -> Value {
 impl<'a> ser::Serializer for ValueSerializer<'a> {
   type Ok = Value;
   type Error = Error;
-  type SerializeSeq = SeqSerializer;
-  type SerializeTuple = SeqSerializer;
-  type SerializeTupleStruct = SeqSerializer;
+  type SerializeSeq = SeqSerializer<'a>;
+  type SerializeTuple = SeqSerializer<'a>;
+  type SerializeTupleStruct = SeqSerializer<'a>;
   type SerializeTupleVariant = VariantSeqSerializer;
   type SerializeMap = MapSerializer;
   type SerializeStruct = StructSerializer<'a>;
@@ -261,15 +309,20 @@ impl<'a> ser::Serializer for ValueSerializer<'a> {
       value.serialize(ValueSerializer { seed: None })?,
     ))
   }
-  fn serialize_seq(self, len: Option<usize>) -> Result<SeqSerializer, Error> {
+  fn serialize_seq(self, len: Option<usize>) -> Result<SeqSerializer<'a>, Error> {
     Ok(SeqSerializer {
+      seed: self.seed,
       items: Vec::with_capacity(len.unwrap_or(0)),
     })
   }
-  fn serialize_tuple(self, len: usize) -> Result<SeqSerializer, Error> {
+  fn serialize_tuple(self, len: usize) -> Result<SeqSerializer<'a>, Error> {
     self.serialize_seq(Some(len))
   }
-  fn serialize_tuple_struct(self, _name: &'static str, len: usize) -> Result<SeqSerializer, Error> {
+  fn serialize_tuple_struct(
+    self,
+    _name: &'static str,
+    len: usize,
+  ) -> Result<SeqSerializer<'a>, Error> {
     self.serialize_seq(Some(len))
   }
   fn serialize_tuple_variant(
@@ -313,25 +366,108 @@ impl<'a> ser::Serializer for ValueSerializer<'a> {
   }
 }
 
-struct SeqSerializer {
+struct SeqSerializer<'a> {
+  /// The sequence's own seed: an array declaration decides the array form.
+  seed: Option<Seed<'a>>,
   items: Vec<Value>,
 }
 
-impl ser::SerializeSeq for SeqSerializer {
+impl ser::SerializeSeq for SeqSerializer<'_> {
   type Ok = Value;
   type Error = Error;
   fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
+    let element = self.seed.and_then(|seed| seed.element_seed());
     self
       .items
-      .push(value.serialize(ValueSerializer { seed: None })?);
+      .push(value.serialize(ValueSerializer { seed: element })?);
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    Ok(Value::ArrayValue(self.items))
+    match self.seed.and_then(|seed| seed.array_element()) {
+      Some((element, registry)) => declared_array(element, registry, self.items),
+      None => Ok(Value::ArrayValue(self.items)),
+    }
   }
 }
 
-impl ser::SerializeTuple for SeqSerializer {
+/// The items of a sequence declared as an array of `element`, in the form the
+/// typed walk reads: a registered element type makes a [`Value::ArrayStructure`]
+/// of the items' fields; a well-known scalar packs the items into its typed
+/// array; any other element (unit, option, …) has no packed form and stays a
+/// [`Value::ArrayValue`].
+fn declared_array(
+  element: Uuid,
+  registry: &TypeRegistry,
+  items: Vec<Value>,
+) -> Result<Value, Error> {
+  if registry.get(&element).is_some() {
+    let mut elements = Vec::with_capacity(items.len());
+    for item in items {
+      match item {
+        Value::Structure(structure) if structure.id == element => {
+          elements.push(StructureWithoutId {
+            fields: structure.fields,
+          });
+        }
+        other => {
+          return Err(ser::Error::custom(format!(
+            "an array of {element} holds a {other:?}"
+          )))
+        }
+      }
+    }
+    return Ok(Value::ArrayStructure {
+      id: element,
+      elements,
+    });
+  }
+  macro_rules! packed {
+    ($array:ident, $item:ident) => {{
+      let mut packed = Vec::with_capacity(items.len());
+      for item in items {
+        match item {
+          Value::$item(v) => packed.push(v),
+          other => {
+            return Err(ser::Error::custom(format!(
+              concat!("an array of ", stringify!($item), " holds a {:?}"),
+              other
+            )))
+          }
+        }
+      }
+      Ok(Value::$array(packed))
+    }};
+  }
+  if element == *ty::BOOLEAN_ID {
+    packed!(ArrayBoolean, Boolean)
+  } else if element == *ty::U8_ID {
+    packed!(ArrayU8, U8)
+  } else if element == *ty::U16_ID {
+    packed!(ArrayU16, U16)
+  } else if element == *ty::U32_ID {
+    packed!(ArrayU32, U32)
+  } else if element == *ty::U64_ID {
+    packed!(ArrayU64, U64)
+  } else if element == *ty::I8_ID {
+    packed!(ArrayI8, I8)
+  } else if element == *ty::I16_ID {
+    packed!(ArrayI16, I16)
+  } else if element == *ty::I32_ID {
+    packed!(ArrayI32, I32)
+  } else if element == *ty::I64_ID {
+    packed!(ArrayI64, I64)
+  } else if element == *ty::F32_ID {
+    packed!(ArrayF32, F32)
+  } else if element == *ty::F64_ID {
+    packed!(ArrayF64, F64)
+  } else if element == *ty::STRING_ID {
+    packed!(ArrayString, String)
+  } else {
+    Ok(Value::ArrayValue(items))
+  }
+}
+
+impl ser::SerializeTuple for SeqSerializer<'_> {
   type Ok = Value;
   type Error = Error;
   fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
@@ -342,7 +478,7 @@ impl ser::SerializeTuple for SeqSerializer {
   }
 }
 
-impl ser::SerializeTupleStruct for SeqSerializer {
+impl ser::SerializeTupleStruct for SeqSerializer<'_> {
   type Ok = Value;
   type Error = Error;
   fn serialize_field<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
@@ -444,15 +580,18 @@ impl ser::SerializeStruct for StructSerializer<'_> {
   fn end(self) -> Result<Value, Error> {
     match self.seed {
       Some(seed) => {
-        let structure = seed.as_structure().ok_or_else(|| {
-          ser::Error::custom(format!("seeded type {} is not a structure", seed.ty.name))
-        })?;
+        let (Seed::Type { ty, .. }, Some(structure)) = (seed, seed.as_structure()) else {
+          return Err(ser::Error::custom(format!(
+            "seeded type {} is not a structure",
+            seed.name()
+          )));
+        };
         let mut fields = Vec::with_capacity(self.fields.len());
         for (name, value) in self.fields {
           let (id, _) = declared_field(structure, &name).ok_or_else(|| {
             ser::Error::custom(format!(
               "field `{name}` is not declared in type {}",
-              seed.ty.name
+              ty.name
             ))
           })?;
           fields.push(StructureField {
@@ -460,10 +599,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
             value: Box::new(value),
           });
         }
-        Ok(Value::Structure(Structure {
-          id: seed.ty.id,
-          fields,
-        }))
+        Ok(Value::Structure(Structure { id: ty.id, fields }))
       }
       // No declared type: a struct with no reliable ids travels as a KeyValue,
       // carrying its field names — not a Structure, which would claim a type id
@@ -516,6 +652,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer<'_> {
   type Error = Error;
 
   fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    // Elements of a declared array of a registered type read with that type.
+    let element = self.seed.and_then(|seed| seed.element_seed());
     match self.value {
       Value::Unit => visitor.visit_unit(),
       Value::Boolean(v) => visitor.visit_bool(v),
@@ -535,31 +673,63 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer<'_> {
         value: *v,
         seed: self.seed,
       }),
-      Value::ArrayValue(items) => visit_seq(items, visitor),
-      Value::ArrayBoolean(items) => {
-        visit_seq(items.into_iter().map(Value::Boolean).collect(), visitor)
+      Value::ArrayValue(items) => visit_seq(items, element, visitor),
+      Value::ArrayStructure { id, elements } => visit_seq(
+        elements
+          .into_iter()
+          .map(|structure| {
+            Value::Structure(Structure {
+              id,
+              fields: structure.fields,
+            })
+          })
+          .collect(),
+        element,
+        visitor,
+      ),
+      Value::ArrayBoolean(items) => visit_seq(
+        items.into_iter().map(Value::Boolean).collect(),
+        None,
+        visitor,
+      ),
+      Value::ArrayU8(items) => visit_seq(items.into_iter().map(Value::U8).collect(), None, visitor),
+      Value::ArrayU16(items) => {
+        visit_seq(items.into_iter().map(Value::U16).collect(), None, visitor)
       }
-      Value::ArrayU8(items) => visit_seq(items.into_iter().map(Value::U8).collect(), visitor),
-      Value::ArrayU16(items) => visit_seq(items.into_iter().map(Value::U16).collect(), visitor),
-      Value::ArrayU32(items) => visit_seq(items.into_iter().map(Value::U32).collect(), visitor),
-      Value::ArrayU64(items) => visit_seq(items.into_iter().map(Value::U64).collect(), visitor),
-      Value::ArrayI8(items) => visit_seq(items.into_iter().map(Value::I8).collect(), visitor),
-      Value::ArrayI16(items) => visit_seq(items.into_iter().map(Value::I16).collect(), visitor),
-      Value::ArrayI32(items) => visit_seq(items.into_iter().map(Value::I32).collect(), visitor),
-      Value::ArrayI64(items) => visit_seq(items.into_iter().map(Value::I64).collect(), visitor),
-      Value::ArrayF32(items) => visit_seq(items.into_iter().map(Value::F32).collect(), visitor),
-      Value::ArrayF64(items) => visit_seq(items.into_iter().map(Value::F64).collect(), visitor),
-      Value::ArrayString(items) => {
-        visit_seq(items.into_iter().map(Value::String).collect(), visitor)
+      Value::ArrayU32(items) => {
+        visit_seq(items.into_iter().map(Value::U32).collect(), None, visitor)
       }
+      Value::ArrayU64(items) => {
+        visit_seq(items.into_iter().map(Value::U64).collect(), None, visitor)
+      }
+      Value::ArrayI8(items) => visit_seq(items.into_iter().map(Value::I8).collect(), None, visitor),
+      Value::ArrayI16(items) => {
+        visit_seq(items.into_iter().map(Value::I16).collect(), None, visitor)
+      }
+      Value::ArrayI32(items) => {
+        visit_seq(items.into_iter().map(Value::I32).collect(), None, visitor)
+      }
+      Value::ArrayI64(items) => {
+        visit_seq(items.into_iter().map(Value::I64).collect(), None, visitor)
+      }
+      Value::ArrayF32(items) => {
+        visit_seq(items.into_iter().map(Value::F32).collect(), None, visitor)
+      }
+      Value::ArrayF64(items) => {
+        visit_seq(items.into_iter().map(Value::F64).collect(), None, visitor)
+      }
+      Value::ArrayString(items) => visit_seq(
+        items.into_iter().map(Value::String).collect(),
+        None,
+        visitor,
+      ),
       Value::KeyValue(kv) => visit_keyvalue(kv, visitor),
       Value::Uuid(v) => visitor.visit_string(v.to_string()),
-      other @ (Value::Structure(_)
-      | Value::Enumeration(_)
-      | Value::ArrayStructure { .. }
-      | Value::ArrayEnumeration { .. }) => Err(de::Error::custom(format!(
-        "cannot deserialize from {other:?} without its type declaration"
-      ))),
+      other @ (Value::Structure(_) | Value::Enumeration(_) | Value::ArrayEnumeration { .. }) => {
+        Err(de::Error::custom(format!(
+          "cannot deserialize from {other:?} without its type declaration"
+        )))
+      }
     }
   }
 
@@ -673,9 +843,14 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer<'_> {
   }
 }
 
-fn visit_seq<'de, V: Visitor<'de>>(items: Vec<Value>, visitor: V) -> Result<V::Value, Error> {
+fn visit_seq<'de, 'a, V: Visitor<'de>>(
+  items: Vec<Value>,
+  element: Option<Seed<'a>>,
+  visitor: V,
+) -> Result<V::Value, Error> {
   visitor.visit_seq(SeqDeserializer {
     iter: items.into_iter(),
+    element,
   })
 }
 
@@ -736,11 +911,12 @@ fn visit_keyvalue<'de, V: Visitor<'de>>(kv: KeyValue, visitor: V) -> Result<V::V
   })
 }
 
-struct SeqDeserializer {
+struct SeqDeserializer<'a> {
   iter: std::vec::IntoIter<Value>,
+  element: Option<Seed<'a>>,
 }
 
-impl<'de> SeqAccess<'de> for SeqDeserializer {
+impl<'de> SeqAccess<'de> for SeqDeserializer<'_> {
   type Error = Error;
   fn next_element_seed<T: DeserializeSeed<'de>>(
     &mut self,
@@ -748,7 +924,10 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
   ) -> Result<Option<T::Value>, Error> {
     match self.iter.next() {
       Some(value) => seed
-        .deserialize(ValueDeserializer { value, seed: None })
+        .deserialize(ValueDeserializer {
+          value,
+          seed: self.element,
+        })
         .map(Some),
       None => Ok(None),
     }
@@ -875,7 +1054,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
   }
   fn tuple_variant<V: Visitor<'de>>(self, _len: usize, visitor: V) -> Result<V::Value, Error> {
     match self.value {
-      Value::ArrayValue(items) => visit_seq(items, visitor),
+      Value::ArrayValue(items) => visit_seq(items, None, visitor),
       other => Err(de::Error::custom(format!(
         "expected a tuple variant payload, got {other:?}"
       ))),
@@ -1067,6 +1246,95 @@ mod tests {
       to: Point,
     }
 
+    #[derive(Serialize, Deserialize, AroraType, Debug, PartialEq)]
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000020")]
+    struct Polyline {
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000021")]
+      points: Vec<Point>,
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000022")]
+      weights: Vec<f64>,
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000023")]
+      bytes: Vec<u8>,
+      #[arora(id = "0a0a0a0a-0000-4000-8000-000000000024")]
+      origin: [f64; 2],
+    }
+    fn polyline() -> Polyline {
+      Polyline {
+        points: vec![Point { x: 1.0, y: 2.0 }, Point { x: 3.0, y: 4.0 }],
+        weights: vec![0.5, 0.25],
+        bytes: vec![1, 2, 3],
+        origin: [9.0, 8.0],
+      }
+    }
+    fn field_value<'a>(value: &'a Value, id: &str) -> &'a Value {
+      let Value::Structure(structure) = value else {
+        panic!("not a structure: {value:?}");
+      };
+      let id = Uuid::parse_str(id).unwrap();
+      let field = structure
+        .fields
+        .iter()
+        .find(|field| field.id == id)
+        .expect("a declared field");
+      &field.value
+    }
+    #[test]
+    fn declared_scalar_arrays_seed_packed() {
+      let (ty, registry) = Polyline::arora_type_with_registry();
+      let value = to_value_seeded(&polyline(), &ty, &registry).unwrap();
+      assert_eq!(
+        field_value(&value, "0a0a0a0a-0000-4000-8000-000000000022"),
+        &Value::ArrayF64(vec![0.5, 0.25])
+      );
+      assert_eq!(
+        field_value(&value, "0a0a0a0a-0000-4000-8000-000000000023"),
+        &Value::ArrayU8(vec![1, 2, 3])
+      );
+      assert_eq!(
+        field_value(&value, "0a0a0a0a-0000-4000-8000-000000000024"),
+        &Value::ArrayF64(vec![9.0, 8.0])
+      );
+      assert_eq!(
+        from_value_seeded::<Polyline>(value, &ty, &registry).unwrap(),
+        polyline()
+      );
+    }
+    #[test]
+    fn declared_struct_arrays_seed_their_elements() {
+      let (ty, registry) = Polyline::arora_type_with_registry();
+      let value = to_value_seeded(&polyline(), &ty, &registry).unwrap();
+      let Value::ArrayStructure { id, elements } =
+        field_value(&value, "0a0a0a0a-0000-4000-8000-000000000021")
+      else {
+        panic!("points is not an array of structures");
+      };
+      assert_eq!(id, &Uuid::parse_str(POINT_ID).unwrap());
+      assert_eq!(elements.len(), 2);
+      assert_eq!(
+        elements[0].fields[0].id,
+        Uuid::parse_str(POINT_X_ID).unwrap()
+      );
+      assert_eq!(
+        from_value_seeded::<Polyline>(value, &ty, &registry).unwrap(),
+        polyline()
+      );
+    }
+    #[test]
+    fn a_top_level_declared_array_seeds_packed() {
+      let ty = low::Type {
+        name: "bytes".into(),
+        id: Uuid::parse_str("0a0a0a0a-0000-4000-8000-000000000030").unwrap(),
+        description: String::new(),
+        kind: low::TypeKind::Primitive(TypeRef::Array { id: *ty::U8_ID }),
+      };
+      let registry = TypeRegistry::new();
+      let value = to_value_seeded(&vec![7u8, 8], &ty, &registry).unwrap();
+      assert_eq!(value, Value::ArrayU8(vec![7, 8]));
+      assert_eq!(
+        from_value_seeded::<Vec<u8>>(value, &ty, &registry).unwrap(),
+        vec![7, 8]
+      );
+    }
     #[test]
     fn seeded_value_carries_the_types_declared_ids() {
       let (ty, registry) = Point::arora_type_with_registry();

@@ -864,4 +864,50 @@ mod tests {
         let bytes = encode(&ty, &registry, &value).unwrap();
         assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
     }
+
+    /// A generated message with byte, scalar and structure arrays, seeded from
+    /// its Rust struct, encodes and decodes through the bundled registry — the
+    /// path a typed publisher takes for a store value built from the struct.
+    #[test]
+    fn seeded_generated_messages_with_arrays_round_trip() {
+        use crate::sensor_msgs::Image;
+        use crate::trajectory_msgs::{JointTrajectory, JointTrajectoryPoint};
+        use arora_types::value_serde::bridge::{from_value_seeded, to_value_seeded};
+
+        let registry = crate::registry();
+        let types = registry.types();
+
+        let image = Image {
+            height: 1,
+            width: 2,
+            encoding: "rgba8".into(),
+            step: 8,
+            data: vec![1, 2, 3, 255, 4, 5, 6, 255],
+            ..Default::default()
+        };
+        let ty = registry.get_by_name("sensor_msgs/Image").unwrap();
+        let value = to_value_seeded(&image, ty, types).unwrap();
+        let bytes = encode(ty, types, &value).unwrap();
+        assert_eq!(decode(ty, types, &bytes).unwrap(), value);
+        assert_eq!(from_value_seeded::<Image>(value, ty, types).unwrap(), image);
+
+        let trajectory = JointTrajectory {
+            joint_names: vec!["head_yaw".into()],
+            points: vec![JointTrajectoryPoint {
+                positions: vec![1.0, 2.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ty = registry
+            .get_by_name("trajectory_msgs/JointTrajectory")
+            .unwrap();
+        let value = to_value_seeded(&trajectory, ty, types).unwrap();
+        let bytes = encode(ty, types, &value).unwrap();
+        assert_eq!(decode(ty, types, &bytes).unwrap(), value);
+        assert_eq!(
+            from_value_seeded::<JointTrajectory>(value, ty, types).unwrap(),
+            trajectory
+        );
+    }
 }
