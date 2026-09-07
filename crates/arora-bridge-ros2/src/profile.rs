@@ -23,6 +23,8 @@
 
 use std::fmt::Write as _;
 
+use crate::qos::Qos;
+
 /// The direction of an exposed surface, from the device's point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flow {
@@ -54,6 +56,8 @@ pub struct Endpoint {
     /// Field fan-out. To route the whole message onto one key, declare one
     /// route with an empty `field`.
     pub routes: Vec<FieldRoute>,
+    /// Delivery profile; `None` takes [`Qos::default_for`] this flow.
+    pub qos: Option<Qos>,
 }
 
 /// A glob of device keys exposed on the scalar plane, with its prefix
@@ -68,6 +72,9 @@ pub struct Include {
     /// The topic prefix put in its place, e.g. `/robot_face/state/`.
     pub prefix: String,
     pub flow: Flow,
+    /// Delivery profile for every key this include rewrites; `None` takes
+    /// [`Qos::default_for`] this flow.
+    pub qos: Option<Qos>,
 }
 
 /// A profile-declared ROS 2 action bound to a device task-run method: the
@@ -149,11 +156,15 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
+        // Every ROS4HRI endpoint is a command surface, so all of them take the
+        // inbound default (reliable): an expression or a line of speech that is
+        // dropped is an instruction the face never carries out.
         let endpoint = |topic: &str, ros_type: &str, routes: &Vec<FieldRoute>| Endpoint {
             topic: topic.into(),
             ros_type: ros_type.into(),
             flow: Flow::In,
             routes: routes.clone(),
+            qos: None,
         };
         Self {
             name: "ros4hri".into(),
@@ -298,6 +309,7 @@ mod tests {
     #[test]
     fn includes_rewrite_prefixes() {
         let include = Include {
+            qos: None,
             glob: "standard/ros4hri/viseme/**".into(),
             strip: "standard/ros4hri/".into(),
             prefix: "/robot_face/state/".into(),

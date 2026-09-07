@@ -10,15 +10,17 @@
 //! [`take_inbound`](Bridge::take_inbound)), which the runtime applies to its
 //! store.
 //!
-//! A background task owns the ROS 2 [`Node`](ros2_client::Node): it spins DDS,
-//! drives the input subscriptions, and creates publishers on demand. The bridge
-//! communicates with it over channels — the inbound channel's receiver *is*
-//! the stream the runtime polls, so there is no intermediate buffer and no
-//! lock; the async lives entirely inside that task.
+//! A background task owns the ROS 2 [`Node`](ros2_client::Node): it spins the
+//! middleware, drives the input subscriptions, and creates publishers on
+//! demand, and the async lives entirely inside it. The bridge reaches it two
+//! ways. Inbound, the command channel's receiver *is* the stream the runtime
+//! polls, so nothing buffers in between. Outbound, [`try_send`](Bridge::try_send)
+//! merges into a latest-value-per-key map the task drains — see [`Outbound`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use arora_bridge::{
     Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
@@ -30,7 +32,7 @@ use arora_types::value::Type;
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
 use futures::{Stream, StreamExt};
-use log::warn;
+use log::{debug, warn};
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
 use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
@@ -38,9 +40,10 @@ use tokio_util::sync::CancellationToken;
 use crate::actions;
 use crate::conversions::{
     setup_key_subscriber, setup_typed_key_publisher, setup_typed_key_subscriber, topic_name,
-    KeyPublisher, StateChangeStream, TypedKeyPublisher,
+    KeyPublisher, StateChangeStream, TypedKeyPublisher, OVERSIZED_JSON_BYTES,
 };
 use crate::profile;
+use crate::qos::Qos;
 use crate::services;
 
 /// An input key exposed as an inbound ROS 2 topic: a message received on
@@ -52,6 +55,9 @@ use crate::services;
 pub struct InputKey {
     pub path: String,
     pub value_type: Type,
+    /// Delivery profile; `None` takes [`Qos::default_for`] an inbound flow
+    /// (reliable — an input topic carries instructions).
+    pub qos: Option<Qos>,
 }
 
 impl InputKey {
@@ -59,6 +65,7 @@ impl InputKey {
         Self {
             path: path.into(),
             value_type,
+            qos: None,
         }
     }
 }
@@ -79,6 +86,9 @@ pub struct TypedOutput {
     /// `Some` is used verbatim, so an absolute ROS name (e.g.
     /// `/robot_face/expression`) escapes the namespace prefix.
     pub topic: Option<String>,
+    /// Delivery profile; `None` takes [`Qos::default_for`] an outbound flow
+    /// (sensor data — an output topic carries state).
+    pub qos: Option<Qos>,
 }
 
 /// An input key subscribed as a **typed** ROS 2 message rather than a
@@ -97,6 +107,8 @@ pub struct TypedInput {
     /// Field fan-out over device keys (see [`profile::FieldRoute`]). Empty
     /// lands the whole decoded message on `path`.
     pub routes: Vec<profile::FieldRoute>,
+    /// Delivery profile; `None` takes [`Qos::default_for`] an inbound flow.
+    pub qos: Option<Qos>,
 }
 
 /// How to attach to the ROS 2 graph: a `namespace` for the topics, a DDS
@@ -159,6 +171,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: None,
+            qos: None,
         });
         self
     }
@@ -177,6 +190,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: Some(topic.into()),
+            qos: None,
         });
         self
     }
@@ -194,6 +208,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: None,
+            qos: None,
         });
         self
     }
@@ -211,6 +226,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: Some(topic.into()),
+            qos: None,
         });
         self
     }
@@ -231,6 +247,7 @@ impl Ros2BridgeConfig {
                     ros_type: endpoint.ros_type,
                     topic: Some(endpoint.topic),
                     routes: endpoint.routes,
+                    qos: endpoint.qos,
                 }),
                 profile::Flow::Out => {
                     let Some(route) = endpoint.routes.first() else {
@@ -240,6 +257,7 @@ impl Ros2BridgeConfig {
                         path: route.key.clone(),
                         ros_type: endpoint.ros_type,
                         topic: Some(endpoint.topic),
+                        qos: endpoint.qos,
                     });
                 }
             }
@@ -250,11 +268,75 @@ impl Ros2BridgeConfig {
     }
 }
 
+/// The outbound seam: the newest value of every key that changed since the node
+/// task last drained it.
+///
+/// What crosses this seam is **state, not events** — the runtime hands the
+/// bridge one coalesced [`StateChange`] per step, and for a given key only the
+/// newest value is worth publishing. So the buffer is a map, not a queue: a key
+/// written again before the drain replaces its pending value instead of queuing
+/// behind it. Memory is therefore bounded by the device's key count however far
+/// behind the ROS graph falls, and what does get published is always the
+/// freshest value.
+///
+/// This is `History::KeepLast` applied one layer above DDS. QoS bounds the
+/// writer's history — the samples that reached a publisher; nothing but this
+/// bounds the samples that have not, and a publish path slower than the step
+/// rate (a congested link, a reader that went away, a large value on the JSON
+/// fallback) is exactly when they pile up.
+#[derive(Default)]
+struct Outbound {
+    /// The pending change, merged in place. A `std` mutex: every holder does a
+    /// handful of map operations and none of them awaits.
+    pending: Mutex<StateChange>,
+    /// Whether a value has ever been replaced before it was published — the
+    /// moment the ROS graph fell behind the device, reported once.
+    fell_behind: AtomicBool,
+}
+
+impl Outbound {
+    /// Merge a step's change in, later wins: a set overrides an earlier unset
+    /// of the same key, and an unset overrides an earlier set — the same rule
+    /// the runtime coalesces its own step with.
+    fn merge(&self, change: &StateChange) {
+        let mut superseded = false;
+        {
+            let mut pending = self.pending.lock().unwrap();
+            for (key, value) in &change.set {
+                pending.unset.remove(key);
+                superseded |= pending.set.insert(key.clone(), value.clone()).is_some();
+            }
+            for key in &change.unset {
+                pending.set.remove(key);
+                superseded |= !pending.unset.insert(key.clone());
+            }
+        }
+        // A value replaced before it was published means the ROS graph is not
+        // keeping up with the device. Said once, outside the lock: from there
+        // on it is the steady state, and this runs on the device's step.
+        if superseded && !self.fell_behind.swap(true, Ordering::Relaxed) {
+            debug!(
+                "the ROS 2 graph is draining slower than this device writes; from here on only \
+                 the newest value of each key is published"
+            );
+        }
+    }
+
+    /// Take everything pending, leaving the buffer empty.
+    fn take(&self) -> StateChange {
+        std::mem::replace(&mut self.pending.lock().unwrap(), StateChange::new())
+    }
+}
+
 /// A ROS 2 graph as an Arora [`Bridge`].
 pub struct Ros2Bridge {
     namespace: String,
-    /// Outbound state changes to publish, sent to the node task.
-    outbound: tmpsc::UnboundedSender<StateChange>,
+    /// The newest value of every key waiting to be published, shared with the
+    /// node task.
+    outbound: Arc<Outbound>,
+    /// Wakes the node task when [`Outbound`] has something. Capacity one: a
+    /// full channel already says "there is work", so a failed send is success.
+    wake: tmpsc::Sender<()>,
     /// The inbound command receiver, moved out (once) by [`take_inbound`].
     commands: Option<fmpsc::UnboundedReceiver<BridgeCommand>>,
     /// Stops the node task on drop.
@@ -269,15 +351,23 @@ impl Ros2Bridge {
     /// bridge inert (no commands, dropped data) rather than failing here.
     pub async fn new(config: Ros2BridgeConfig) -> Self {
         let (cmd_tx, cmd_rx) = fmpsc::unbounded::<BridgeCommand>();
-        let (out_tx, out_rx) = tmpsc::unbounded_channel::<StateChange>();
+        let (wake_tx, wake_rx) = tmpsc::channel::<()>(1);
+        let outbound = Arc::new(Outbound::default());
         let cancel = CancellationToken::new();
         let namespace = config.namespace.clone();
 
-        tokio::spawn(run_node(config, cmd_tx, out_rx, cancel.clone()));
+        tokio::spawn(run_node(
+            config,
+            cmd_tx,
+            outbound.clone(),
+            wake_rx,
+            cancel.clone(),
+        ));
 
         Self {
             namespace,
-            outbound: out_tx,
+            outbound,
+            wake: wake_tx,
             commands: Some(cmd_rx),
             cancel,
         }
@@ -312,11 +402,14 @@ impl Bridge for Ros2Bridge {
     }
 
     fn try_send(&mut self, change: &StateChange) {
-        // Hand the change to the node task, which publishes each changed key to
-        // its topic. `unset` keys have no ROS 2 representation and are ignored.
-        // A failed send means the node task stopped; drop it (the drop of the
-        // bridge cancels the task).
-        let _ = self.outbound.send(change.clone());
+        // Merge the change into the pending map and nudge the node task, which
+        // publishes each changed key to its topic. Never blocks and never
+        // grows: a key written faster than ROS drains it keeps its newest
+        // value only. A failed wake means either that the task already has
+        // work queued or that it stopped — neither needs handling here (the
+        // drop of the bridge cancels the task).
+        self.outbound.merge(change);
+        let _ = self.wake.try_send(());
     }
 
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
@@ -356,7 +449,8 @@ fn build_node(namespace: &str, domain_id: u16) -> Result<Node, String> {
 async fn run_node(
     config: Ros2BridgeConfig,
     cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
-    mut outbound_rx: tmpsc::UnboundedReceiver<StateChange>,
+    outbound: Arc<Outbound>,
+    mut wake_rx: tmpsc::Receiver<()>,
     cancel: CancellationToken,
 ) {
     let Ros2BridgeConfig {
@@ -398,8 +492,18 @@ async fn run_node(
     // Subscribe to every declared input key; each yields single-key state
     // changes we turn into `Update` commands.
     let mut sub_streams: Vec<StateChangeStream> = Vec::new();
+    // Every topic this bridge subscribes to. Publishing on one would hand the
+    // device its own command back: the sample re-enters as an inbound update,
+    // is written to the store, comes out again on the next step, and circulates
+    // for as long as the graph is up — reviving stale values whenever a real
+    // writer and the echo cross. (DDS delivers a participant's own writes to
+    // its own readers, and the Zenoh backend declares its subscribers with no
+    // origin filter, so neither middleware saves us from it.)
+    let mut subscribed: HashSet<String> = HashSet::new();
     for input in &inputs {
-        match setup_key_subscriber(&mut node, &namespace, &input.path, &input.value_type) {
+        subscribed.insert(topic_name(&namespace, &input.path));
+        let qos = input.qos.unwrap_or(Qos::default_for(profile::Flow::In));
+        match setup_key_subscriber(&mut node, &namespace, &input.path, &input.value_type, qos) {
             Ok(stream) => sub_streams.push(stream),
             Err(e) => warn!(
                 "Ros2Bridge could not subscribe to key '{}': {e}",
@@ -415,6 +519,7 @@ async fn run_node(
             .topic
             .clone()
             .unwrap_or_else(|| topic_name(&namespace, &input.path));
+        subscribed.insert(topic.clone());
         match setup_typed_key_subscriber(
             &mut node,
             &topic,
@@ -422,6 +527,7 @@ async fn run_node(
             input.path.clone(),
             input.routes.clone(),
             registry.clone(),
+            input.qos.unwrap_or(Qos::default_for(profile::Flow::In)),
         ) {
             Ok(stream) => sub_streams.push(stream),
             Err(e) => warn!(
@@ -477,33 +583,46 @@ async fn run_node(
     let typed_outputs: HashMap<String, TypedOutput> =
         outputs.into_iter().map(|o| (o.path.clone(), o)).collect();
     let mut typed_publishers: HashMap<String, TypedKeyPublisher> = HashMap::new();
+    // Keys whose outbound topic turned out to be one we subscribe to, remembered
+    // so the decision is made (and logged) once per key.
+    let mut echoed: HashSet<String> = HashSet::new();
+    // Keys already reported for publishing image-sized JSON, so a face that
+    // renders every frame onto the scalar plane says it once, not 15 times a
+    // second.
+    let mut oversized: HashSet<String> = HashSet::new();
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
-            maybe_change = outbound_rx.recv() => {
-                match maybe_change {
-                    Some(change) => {
-                        // The action tasks watch their runs' keys on the same
-                        // outbound stream the topics mirror.
-                        for tx in &action_change_txs {
-                            let _ = tx.send(change.clone());
-                        }
-                        publish_change(
-                            &mut node,
-                            &namespace,
-                            &mut publishers,
-                            &typed_outputs,
-                            &mut typed_publishers,
-                            &includes,
-                            &registry,
-                            &change,
-                        )
-                        .await;
-                    }
-                    // All senders dropped (the bridge was dropped).
-                    None => break,
+            woken = wake_rx.recv() => {
+                // The bridge was dropped along with its wake channel; `cancel`
+                // normally gets here first.
+                if woken.is_none() {
+                    break;
                 }
+                let change = outbound.take();
+                if change.is_empty() {
+                    continue;
+                }
+                // The action tasks watch their runs' keys on the same outbound
+                // state the topics mirror.
+                for tx in &action_change_txs {
+                    let _ = tx.send(change.clone());
+                }
+                publish_change(
+                    &mut node,
+                    &namespace,
+                    &mut publishers,
+                    &typed_outputs,
+                    &mut typed_publishers,
+                    &includes,
+                    &registry,
+                    &subscribed,
+                    &mut echoed,
+                    &mut oversized,
+                    &change,
+                )
+                .await;
             }
             Some(change) = inbound.next() => {
                 let (reply_tx, _reply_rx) = oneshot::channel();
@@ -757,10 +876,19 @@ async fn publish_change(
     typed_publishers: &mut HashMap<String, TypedKeyPublisher>,
     includes: &[profile::Include],
     registry: &Arc<Ros2Registry>,
+    subscribed: &HashSet<String>,
+    echoed: &mut HashSet<String>,
+    oversized: &mut HashSet<String>,
     change: &StateChange,
 ) {
+    // Resolving a key's topic costs a format and a glob walk, so the answer is
+    // cached: after the first sight of a key it is either in one of the
+    // publisher maps or in `echoed`.
     for (key, maybe_value) in &change.set {
         let Some(value) = maybe_value else { continue };
+        if echoed.contains(&key.path) {
+            continue;
+        }
 
         // A typed output rides its declared ROS message; its publisher is
         // created lazily like the untyped one.
@@ -770,7 +898,23 @@ async fn publish_change(
                     .topic
                     .clone()
                     .unwrap_or_else(|| topic_name(namespace, &key.path));
-                match setup_typed_key_publisher(node, &topic, &binding.ros_type, registry.clone()) {
+                if subscribed.contains(&topic) {
+                    warn!(
+                        "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this \
+                         bridge subscribes to, and echoing it back would feed the device its own \
+                         commands",
+                        key.path
+                    );
+                    echoed.insert(key.path.clone());
+                    continue;
+                }
+                match setup_typed_key_publisher(
+                    node,
+                    &topic,
+                    &binding.ros_type,
+                    registry.clone(),
+                    binding.qos.unwrap_or(Qos::default_for(profile::Flow::Out)),
+                ) {
                     Ok(publisher) => {
                         typed_publishers.insert(key.path.clone(), publisher);
                     }
@@ -791,13 +935,27 @@ async fn publish_change(
 
         if !publishers.contains_key(&key.path) {
             // An include's rewrite (first match wins) puts the key on its
-            // absolute profile topic instead of the namespace convention.
-            let topic = includes
+            // absolute profile topic instead of the namespace convention, and
+            // its delivery profile with it.
+            let matched = includes
                 .iter()
                 .filter(|include| include.flow == profile::Flow::Out)
-                .find_map(|include| include.rewrite(&key.path))
-                .unwrap_or_else(|| topic_name(namespace, &key.path));
-            match KeyPublisher::create(node, &topic, value) {
+                .find_map(|include| Some((include.rewrite(&key.path)?, include.qos)));
+            let (topic, qos) = match matched {
+                Some((topic, qos)) => (topic, qos),
+                None => (topic_name(namespace, &key.path), None),
+            };
+            if subscribed.contains(&topic) {
+                warn!(
+                    "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this bridge \
+                     subscribes to, and echoing it back would feed the device its own commands",
+                    key.path
+                );
+                echoed.insert(key.path.clone());
+                continue;
+            }
+            let qos = qos.unwrap_or(Qos::default_for(profile::Flow::Out));
+            match KeyPublisher::create(node, &topic, value, qos) {
                 Ok(publisher) => {
                     publishers.insert(key.path.clone(), publisher);
                 }
@@ -811,7 +969,85 @@ async fn publish_change(
             }
         }
         if let Some(publisher) = publishers.get(&key.path) {
-            publisher.publish(value).await;
+            // The value still ships — dropping a key the device exposes would be
+            // worse — but an image-sized JSON sample is a configuration mistake
+            // that costs memory per sample in the middleware, so say so.
+            let json_bytes = publisher.publish(value).await;
+            if json_bytes > OVERSIZED_JSON_BYTES && oversized.insert(key.path.clone()) {
+                warn!(
+                    "key '{}' publishes {json_bytes} bytes of JSON on the scalar plane, far past \
+                     what a ROS 2 topic should carry: it fragments in the middleware and costs \
+                     memory per sample. Declare it as a typed output — an image belongs on \
+                     sensor_msgs/CompressedImage.",
+                    key.path
+                );
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arora_types::data::Key;
+    use arora_types::value::Value;
+
+    fn set(key: &str, value: f64) -> StateChange {
+        StateChange::set(Key::from(key), Value::F64(value))
+    }
+
+    /// The seam keeps state, not history: a key written twice before the node
+    /// task drains publishes once, at its newest value. This is what bounds the
+    /// bridge's memory by the device's key count.
+    #[test]
+    fn a_key_written_twice_before_the_drain_keeps_only_the_newest_value() {
+        let outbound = Outbound::default();
+        outbound.merge(&set("rig/jaw", 0.1));
+        outbound.merge(&set("rig/jaw", 0.2));
+        outbound.merge(&set("rig/brow", 0.9));
+
+        let drained = outbound.take();
+        assert_eq!(drained.set.len(), 2, "one entry per key, not per write");
+        assert_eq!(
+            drained.set[&Key::from("rig/jaw")],
+            Some(Value::F64(0.2)),
+            "the later write wins"
+        );
+        assert_eq!(drained.set[&Key::from("rig/brow")], Some(Value::F64(0.9)));
+    }
+
+    /// Later wins across the two halves too, so a key cannot come out of the
+    /// seam both set and unset.
+    #[test]
+    fn a_set_and_an_unset_of_one_key_resolve_to_whichever_came_last() {
+        let unset = |key: &str| {
+            let mut change = StateChange::new();
+            change.unset.insert(Key::from(key));
+            change
+        };
+
+        let outbound = Outbound::default();
+        outbound.merge(&set("rig/jaw", 0.1));
+        outbound.merge(&unset("rig/jaw"));
+        let drained = outbound.take();
+        assert!(drained.set.is_empty(), "the unset erased the pending set");
+        assert!(drained.unset.contains(&Key::from("rig/jaw")));
+
+        let outbound = Outbound::default();
+        outbound.merge(&unset("rig/jaw"));
+        outbound.merge(&set("rig/jaw", 0.3));
+        let drained = outbound.take();
+        assert!(drained.unset.is_empty(), "the set erased the pending unset");
+        assert_eq!(drained.set[&Key::from("rig/jaw")], Some(Value::F64(0.3)));
+    }
+
+    /// Draining empties the seam: what has been published is not published
+    /// again on the next wake.
+    #[test]
+    fn taking_the_pending_change_leaves_the_seam_empty() {
+        let outbound = Outbound::default();
+        outbound.merge(&set("rig/jaw", 0.1));
+        assert!(!outbound.take().is_empty());
+        assert!(outbound.take().is_empty());
     }
 }

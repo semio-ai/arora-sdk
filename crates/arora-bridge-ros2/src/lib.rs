@@ -15,7 +15,11 @@
 //!
 //! - [`try_send`](arora_bridge::Bridge::try_send) publishes each changed key
 //!   to its topic; the `std_msgs` message type is chosen from the value's type,
-//!   with a JSON `std_msgs/String` fallback for non-scalar values.
+//!   with a JSON `std_msgs/String` fallback for non-scalar values. It hands the
+//!   change to the node task through a **latest-value-per-key** buffer, so a
+//!   device that writes faster than ROS drains publishes fewer, fresher samples
+//!   rather than accumulating stale ones — see [`Qos`] for the same rule one
+//!   layer down.
 //! - the inbound stream ([`take_inbound`](arora_bridge::Bridge::take_inbound))
 //!   carries each message received on a configured input topic as a
 //!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) command for the Arora
@@ -45,6 +49,9 @@ pub mod bridge;
 pub mod conversions;
 pub mod msg_types;
 pub mod profile;
+/// The delivery profile an endpoint runs under (`History::KeepLast` and the
+/// reliability that goes with it), mapped onto each backend's own QoS type.
+pub mod qos;
 // The method-service plane: synthesising a ROS 2 service per module method and
 // (de)serialising it against `arora-msgs-ros2`. Driven by `run_node`'s service
 // loop; the synthesis core is unit-tested against the real codec + registry.
@@ -56,5 +63,6 @@ pub use arora_msgs_ros2::cdr;
 
 pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
 pub use profile::{ActionBinding, ExposureProfile};
+pub use qos::Qos;
 
 pub use arora_types::value::{Type, Value};

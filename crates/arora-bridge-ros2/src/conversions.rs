@@ -18,12 +18,10 @@ use arora_types::value::{Type, Value};
 use futures::stream::unfold;
 use futures::Stream;
 use log::warn;
-#[cfg(feature = "zenoh")]
-use ros2_client::QosProfile;
 use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher, RawSubscription};
-#[cfg(feature = "dds")]
-use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 use tokio::time::{sleep, Duration};
+
+use crate::qos::{self, Qos};
 
 use crate::msg_types::{
     Bool, Float32, Float64, Int32, Int64, MessageType, String as RosString, UInt32, UInt64,
@@ -35,6 +33,33 @@ pub type StateChangeStream = Pin<Box<dyn Stream<Item = StateChange> + Send>>;
 /// The ROS 2 topic name a key is exposed on: `/{namespace}/keys/{path}`.
 pub fn topic_name(namespace: &str, path: &str) -> String {
     format!("/{namespace}/keys/{path}")
+}
+
+/// The topic handle each backend hands back (`rustdds`' own on `dds`, the
+/// Zenoh backend's on `zenoh`) — named once so [`topic_for`] has a return type.
+#[cfg(feature = "dds")]
+type Topic = ros2_client::rustdds::Topic;
+#[cfg(feature = "zenoh")]
+type Topic = ros2_client::Topic;
+
+/// Create the ROS 2 topic `name` of type `message_type` under `qos`, uniform
+/// across the two backends — the DDS one takes `rustdds` policies and can
+/// fail, the Zenoh one takes the neutral profile and cannot.
+fn topic_for(
+    node: &mut Node,
+    name: &Name,
+    message_type: MessageTypeName,
+    qos: Qos,
+) -> Result<Topic, String> {
+    #[cfg(feature = "dds")]
+    {
+        node.create_topic(name, message_type, &qos::dds(qos))
+            .map_err(|e| format!("{e:?}"))
+    }
+    #[cfg(feature = "zenoh")]
+    {
+        Ok(node.create_topic(name, message_type, &qos::zenoh(qos)))
+    }
 }
 
 /// Which `std_msgs` message type a [`Value`] is published as. Scalars map to
@@ -54,6 +79,18 @@ pub enum RosMsgKind {
     /// A `std_msgs/String` carrying a JSON encoding of the value.
     Json,
 }
+
+/// The JSON size above which a value is too big for the scalar plane.
+///
+/// RustDDS fragments anything over 1 KB, and a middleware that has to fragment
+/// a sample is where large values go wrong: a vizij face publishing its
+/// rendered frame as JSON (a ~70 KB PNG becomes ~300 KB of text) grew the
+/// process by ~120 MB in twenty seconds, all of it inside the DDS writer, and
+/// the same traffic below the threshold cost nothing. The scalar plane is for
+/// scalars; anything image-sized belongs on a declared typed output
+/// (`sensor_msgs/CompressedImage`), and even there it is worth knowing that it
+/// fragments.
+pub(crate) const OVERSIZED_JSON_BYTES: usize = 64 * 1024;
 
 /// Pick the ROS 2 message type for a value.
 pub fn ros_msg_kind(value: &Value) -> RosMsgKind {
@@ -88,25 +125,28 @@ pub fn setup_key_subscriber(
     namespace: &str,
     path: &str,
     value_type: &Type,
+    qos: Qos,
 ) -> Result<StateChangeStream, String> {
     let topic = topic_name(namespace, path);
     let path = path.to_string();
 
     match value_type {
-        Type::F64 => setup_typed::<Float64>(node, &topic, path, |m| Value::F64(m.data)),
-        Type::F32 => setup_typed::<Float32>(node, &topic, path, |m| Value::F32(m.data)),
-        Type::I64 => setup_typed::<Int64>(node, &topic, path, |m| Value::I64(m.data)),
-        Type::I32 => setup_typed::<Int32>(node, &topic, path, |m| Value::I32(m.data)),
-        Type::U64 => setup_typed::<UInt64>(node, &topic, path, |m| Value::U64(m.data)),
-        Type::U32 => setup_typed::<UInt32>(node, &topic, path, |m| Value::U32(m.data)),
-        Type::Boolean => setup_typed::<Bool>(node, &topic, path, |m| Value::Boolean(m.data)),
-        Type::String => setup_typed::<RosString>(node, &topic, path, |m| Value::String(m.data)),
+        Type::F64 => setup_typed::<Float64>(node, &topic, path, qos, |m| Value::F64(m.data)),
+        Type::F32 => setup_typed::<Float32>(node, &topic, path, qos, |m| Value::F32(m.data)),
+        Type::I64 => setup_typed::<Int64>(node, &topic, path, qos, |m| Value::I64(m.data)),
+        Type::I32 => setup_typed::<Int32>(node, &topic, path, qos, |m| Value::I32(m.data)),
+        Type::U64 => setup_typed::<UInt64>(node, &topic, path, qos, |m| Value::U64(m.data)),
+        Type::U32 => setup_typed::<UInt32>(node, &topic, path, qos, |m| Value::U32(m.data)),
+        Type::Boolean => setup_typed::<Bool>(node, &topic, path, qos, |m| Value::Boolean(m.data)),
+        Type::String => {
+            setup_typed::<RosString>(node, &topic, path, qos, |m| Value::String(m.data))
+        }
         other => {
             warn!(
                 "key '{path}' has unsupported type {other:?}, falling back to a JSON \
                  std_msgs/String topic"
             );
-            setup_typed::<RosString>(node, &topic, path, |m| {
+            setup_typed::<RosString>(node, &topic, path, qos, |m| {
                 serde_json::from_str::<Value>(&m.data).unwrap_or_else(|e| {
                     warn!("failed to parse JSON value from topic: {e}");
                     Value::String(m.data)
@@ -122,22 +162,13 @@ fn setup_typed<M: MessageType>(
     node: &mut Node,
     topic_name: &str,
     path: String,
+    qos: Qos,
     convert: impl Fn(M) -> Value + Send + Sync + 'static,
 ) -> Result<StateChangeStream, String> {
     let ros_name =
         Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
-
-    #[cfg(feature = "dds")]
-    let topic = node
-        .create_topic(&ros_name, M::message_type_name(), &DEFAULT_SUBSCRIPTION_QOS)
-        .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
-    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
-    #[cfg(feature = "zenoh")]
-    let topic = node.create_topic(
-        &ros_name,
-        M::message_type_name(),
-        &QosProfile::subscription_default(),
-    );
+    let topic = topic_for(node, &ros_name, M::message_type_name(), qos)
+        .map_err(|e| format!("failed to create topic {topic_name}: {e}"))?;
 
     let subscription = node
         .create_subscription::<M>(&topic, None)
@@ -315,6 +346,7 @@ pub fn setup_typed_key_subscriber(
     path: String,
     routes: Vec<crate::profile::FieldRoute>,
     registry: Arc<Ros2Registry>,
+    qos: Qos,
 ) -> Result<StateChangeStream, String> {
     let message_type = registry
         .get_by_name(ros_type)
@@ -324,17 +356,8 @@ pub fn setup_typed_key_subscriber(
         .ok_or_else(|| format!("malformed ROS message name '{ros_type}'"))?;
     let ros_name = Name::parse(topic).map_err(|e| format!("invalid topic name '{topic}': {e}"))?;
     let message_type_name = MessageTypeName::new(package, type_name);
-    #[cfg(feature = "dds")]
-    let ros_topic = node
-        .create_topic(&ros_name, message_type_name, &DEFAULT_SUBSCRIPTION_QOS)
-        .map_err(|e| format!("failed to create topic {topic}: {e:?}"))?;
-    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
-    #[cfg(feature = "zenoh")]
-    let ros_topic = node.create_topic(
-        &ros_name,
-        message_type_name,
-        &QosProfile::subscription_default(),
-    );
+    let ros_topic = topic_for(node, &ros_name, message_type_name, qos)
+        .map_err(|e| format!("failed to create topic {topic}: {e}"))?;
     let subscription = node
         .create_raw_subscription(&ros_topic, None)
         .map_err(|e| format!("failed to subscribe to {topic}: {e:?}"))?;
@@ -435,23 +458,32 @@ pub enum KeyPublisher {
 impl KeyPublisher {
     /// Create a publisher on the key's topic, choosing the message type from a
     /// sample value.
-    pub fn create(node: &mut Node, topic_name: &str, sample: &Value) -> Result<Self, String> {
+    pub fn create(
+        node: &mut Node,
+        topic_name: &str,
+        sample: &Value,
+        qos: Qos,
+    ) -> Result<Self, String> {
         Ok(match ros_msg_kind(sample) {
-            RosMsgKind::F64 => Self::F64(make_publisher::<Float64>(node, topic_name)?),
-            RosMsgKind::F32 => Self::F32(make_publisher::<Float32>(node, topic_name)?),
-            RosMsgKind::I64 => Self::I64(make_publisher::<Int64>(node, topic_name)?),
-            RosMsgKind::I32 => Self::I32(make_publisher::<Int32>(node, topic_name)?),
-            RosMsgKind::U64 => Self::U64(make_publisher::<UInt64>(node, topic_name)?),
-            RosMsgKind::U32 => Self::U32(make_publisher::<UInt32>(node, topic_name)?),
-            RosMsgKind::Bool => Self::Bool(make_publisher::<Bool>(node, topic_name)?),
-            RosMsgKind::Str => Self::Str(make_publisher::<RosString>(node, topic_name)?),
-            RosMsgKind::Json => Self::Json(make_publisher::<RosString>(node, topic_name)?),
+            RosMsgKind::F64 => Self::F64(make_publisher::<Float64>(node, topic_name, qos)?),
+            RosMsgKind::F32 => Self::F32(make_publisher::<Float32>(node, topic_name, qos)?),
+            RosMsgKind::I64 => Self::I64(make_publisher::<Int64>(node, topic_name, qos)?),
+            RosMsgKind::I32 => Self::I32(make_publisher::<Int32>(node, topic_name, qos)?),
+            RosMsgKind::U64 => Self::U64(make_publisher::<UInt64>(node, topic_name, qos)?),
+            RosMsgKind::U32 => Self::U32(make_publisher::<UInt32>(node, topic_name, qos)?),
+            RosMsgKind::Bool => Self::Bool(make_publisher::<Bool>(node, topic_name, qos)?),
+            RosMsgKind::Str => Self::Str(make_publisher::<RosString>(node, topic_name, qos)?),
+            RosMsgKind::Json => Self::Json(make_publisher::<RosString>(node, topic_name, qos)?),
         })
     }
 
     /// Publish a value. A value whose type no longer matches this publisher's
     /// (the key changed type after the first publish) is logged and dropped.
-    pub async fn publish(&self, value: &Value) {
+    ///
+    /// Returns the size of the JSON encoding when the value took the JSON
+    /// fallback, and 0 on every other arm — a `std_msgs` scalar has nothing to
+    /// inflate. Past [`OVERSIZED_JSON_BYTES`] that size is a problem in itself.
+    pub async fn publish(&self, value: &Value) -> usize {
         match (self, value) {
             (Self::F64(p), Value::F64(v)) => drop(p.async_publish(Float64 { data: *v }).await),
             (Self::F32(p), Value::F32(v)) => drop(p.async_publish(Float32 { data: *v }).await),
@@ -465,12 +497,15 @@ impl KeyPublisher {
             }
             (Self::Json(p), value) => {
                 let data = serde_json::to_string(value).unwrap_or_default();
+                let size = data.len();
                 drop(p.async_publish(RosString { data }).await);
+                return size;
             }
             (_, value) => warn!(
                 "value {value:?} does not match this key's established ROS 2 topic type; dropping"
             ),
         }
+        0
     }
 }
 
@@ -478,20 +513,12 @@ impl KeyPublisher {
 fn make_publisher<M: MessageType>(
     node: &mut Node,
     topic_name: &str,
+    qos: Qos,
 ) -> Result<Publisher<M>, String> {
     let ros_name =
         Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
-    #[cfg(feature = "dds")]
-    let topic = node
-        .create_topic(&ros_name, M::message_type_name(), &DEFAULT_PUBLISHER_QOS)
-        .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
-    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
-    #[cfg(feature = "zenoh")]
-    let topic = node.create_topic(
-        &ros_name,
-        M::message_type_name(),
-        &QosProfile::publisher_default(),
-    );
+    let topic = topic_for(node, &ros_name, M::message_type_name(), qos)
+        .map_err(|e| format!("failed to create topic {topic_name}: {e}"))?;
     node.create_publisher::<M>(&topic, None)
         .map_err(|e| format!("failed to create publisher for {topic_name}: {e:?}"))
 }
@@ -543,6 +570,7 @@ fn make_typed_publisher(
     topic_name: &str,
     ros_type: &str,
     registry: Arc<Ros2Registry>,
+    qos: Qos,
 ) -> Result<TypedKeyPublisher, String> {
     let message_type = registry
         .get_by_name(ros_type)
@@ -553,17 +581,8 @@ fn make_typed_publisher(
     let ros_name =
         Name::parse(topic_name).map_err(|e| format!("invalid topic name '{topic_name}': {e}"))?;
     let message_type_name = MessageTypeName::new(package, type_name);
-    #[cfg(feature = "dds")]
-    let topic = node
-        .create_topic(&ros_name, message_type_name, &DEFAULT_PUBLISHER_QOS)
-        .map_err(|e| format!("failed to create topic {topic_name}: {e:?}"))?;
-    // The Zenoh backend's `create_topic` is infallible (returns `Topic`).
-    #[cfg(feature = "zenoh")]
-    let topic = node.create_topic(
-        &ros_name,
-        message_type_name,
-        &QosProfile::publisher_default(),
-    );
+    let topic = topic_for(node, &ros_name, message_type_name, qos)
+        .map_err(|e| format!("failed to create topic {topic_name}: {e}"))?;
     let publisher = node
         .create_raw_publisher(&topic, None)
         .map_err(|e| format!("failed to create raw publisher for {topic_name}: {e:?}"))?;
@@ -583,8 +602,9 @@ pub fn setup_typed_key_publisher(
     topic: &str,
     ros_type: &str,
     registry: Arc<Ros2Registry>,
+    qos: Qos,
 ) -> Result<TypedKeyPublisher, String> {
-    make_typed_publisher(node, topic, ros_type, registry)
+    make_typed_publisher(node, topic, ros_type, registry, qos)
 }
 
 #[cfg(test)]
