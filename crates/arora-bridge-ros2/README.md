@@ -26,6 +26,44 @@ typed, and the subscription is created before any message arrives. Output keys
 need no declaration — a publisher is created from each changed value's type on
 first use.
 
+## Delivery: only the latest value, twice over
+
+The bridge publishes **state, not events**, and it says so at both layers.
+
+*Above ROS.* The runtime hands the bridge one coalesced `StateChange` per step;
+those go into a **latest-value-per-key** buffer that the node task drains. A key
+written again before the drain replaces its pending value instead of queuing
+behind it, so the memory the bridge holds is bounded by the device's key count
+however far behind the ROS graph falls — and what it publishes is always the
+freshest value, never a backlog of stale ones. A device that renders or steps
+faster than ROS drains therefore publishes *fewer* samples, not later ones. The
+count of values replaced before they were published is logged at `debug`.
+
+*In ROS.* Each endpoint runs under a `Qos` profile, and the default follows the
+flow:
+
+| Flow | Default | Policy |
+| --- | --- | --- |
+| out (state: rig values, the face image) | `Qos::SensorData` | best-effort, volatile, keep-last-1 |
+| in (commands: speech text, an expression) | `Qos::Reliable` | reliable, volatile, keep-last-1 |
+
+State is only interesting at its newest value and a slow reader must not stall
+the writer; a command is an instruction and dropping one loses it. Override per
+endpoint with the `qos` field on `Endpoint`, `Include`, `InputKey`,
+`TypedInput` and `TypedOutput`.
+
+**Large values.** The scalar plane's JSON fallback will carry anything, but a
+ROS 2 topic should not: RustDDS fragments samples over 1 KB, and an image-sized
+one costs memory per sample inside the writer (see the 6.0.0 changelog). A value
+serializing past 64 KB of JSON is warned about once per key. Declare such a key
+as a typed output — an image belongs on `sensor_msgs/CompressedImage`.
+
+**The trade on the outbound plane:** a best-effort writer does not match a
+reliable reader. A subscriber left on the rclcpp/rclpy default (reliable) sees
+nothing on a `Qos::SensorData` topic until it asks for best-effort — the same
+bargain `image_transport` strikes for camera streams. `ros2 topic echo` needs
+`--qos-reliability best_effort` on those topics.
+
 ## Configuration
 
 ```rust,no_run

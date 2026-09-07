@@ -4,6 +4,127 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-09-07
+
+### Fixed
+
+- **The outbound seam no longer queues without bound.** `try_send` fed a `tokio`
+  *unbounded* channel drained by one awaited publish per changed key, so a
+  publish path slower than the device's step rate grew it for as long as that
+  lasted. It is now a **latest-value-per-key** buffer: what crosses this seam is
+  state, not events, and a key written again before the node task drains
+  replaces its pending value instead of queuing behind it. Memory is bounded by
+  the device's key count however far behind the ROS graph falls, what is
+  published is always the freshest value, and samples can no longer be emitted
+  out of order under load. The first time a value is superseded before
+  publication — the moment the ROS graph falls behind the device — is reported
+  once at `debug`.
+- **The bridge no longer publishes on topics it subscribes to.** An input key
+  was republished from the store on its own topic and re-ingested as a new
+  inbound update, so every input key the device ever received circulated through
+  the ROS graph indefinitely — converging on a single writer, but reviving stale
+  values whenever a real command and the echo crossed (a released control
+  re-asserting itself seconds later). Neither middleware filters this for us:
+  DDS delivers a participant's own writes to its own readers, and the Zenoh
+  backend declares subscribers with no origin filter. Keys whose outbound topic
+  is one of the bridge's own subscriptions are now skipped, with a warning
+  naming the key.
+
+### Added
+
+- **Per-endpoint delivery profiles** (`Qos`), defaulting by flow: state flowing
+  out is `Qos::SensorData` (best-effort, volatile, keep-last-1 — ROS's
+  sensor-data profile), commands flowing in are `Qos::Reliable`. Set the `qos`
+  field on `Endpoint`, `Include`, `InputKey`, `TypedInput` or `TypedOutput` to
+  override. Both backends map it onto their own profile type.
+- A warning, once per key, when a value serializes to more than 64 KB of JSON on
+  the scalar plane — a topic carrying an image-sized sample is a configuration
+  mistake, and it is expensive in a way that is otherwise invisible (see below).
+
+### Changed — BREAKING
+
+- `Endpoint`, `Include`, `InputKey`, `TypedInput` and `TypedOutput` each gained
+  a `qos: Option<Qos>` field, so literal construction must name it.
+- Outbound key topics are **best-effort** by default, where they were reliable.
+  A best-effort writer does not match a reliable reader: a subscriber on the
+  rclcpp/rclpy default sees nothing on the data plane until it asks for
+  best-effort (`ros2 topic echo --qos-reliability best_effort`). Declare
+  `Qos::Reliable` on the endpoint to keep the old behaviour.
+- `conversions::setup_key_subscriber`, `setup_typed_key_subscriber`,
+  `setup_typed_key_publisher` and `KeyPublisher::create` take a `Qos`, and
+  `KeyPublisher::publish` returns the size of the JSON it published (0 on every
+  other arm).
+
+### Known issue — not fixed here
+
+Publishing **large samples over the DDS backend retains memory per sample**,
+inside RustDDS rather than in this crate. Measured with a vizij face publishing
+its rendered frame on the scalar plane (a ~70 KB PNG becomes ~300 KB of JSON):
+the process grew ~120 MB in twenty seconds and never gave it back. Bisected by
+holding the code path fixed and varying only the payload — a 200-byte sample at
+the same rate on the same publisher costs nothing, and encoding the full sample
+without handing it to the writer costs nothing either. RustDDS fragments
+anything over its 1 KB `data_max_size_serialized`, so image-sized values are the
+shape that triggers it.
+
+Neither the latest-value buffer nor the QoS default addresses this: the samples
+had already reached a publisher. Until it is understood upstream, keep
+image-sized values off DDS topics — hence the size warning above.
+
+## [5.0.0] - 2026-07-31
+
+### Added
+
+- **The skill plane**: an `ExposureProfile` carries `ActionBinding`s — a
+  standard ROS 2 action (a registry `.action` type on an absolute name such as
+  `/skill/look_at`) bound to a device task-run method, checked at startup
+  against `DescribeMethods` and refused loudly when the contract does not hold.
+  Bound actions ride the existing goal-lifecycle machinery with registry
+  message types instead of synthesised ones, serve one goal at a time under
+  `std_skills/Meta.priority` (equal-or-higher replaces, reporting `ROS_EINTR`;
+  lower is rejected), and answer the standard Result message with the
+  `std_skills` errno of the goal's lifecycle — unless the run wrote the Result,
+  or an errno, itself. Scalar feedback lands on the matching
+  `std_skills/Feedback` field.
+- The `ros4hri` preset binds `interaction_skills/LookAt` on `/skill/look_at` to
+  a `(policy, target, frame)` `look_at` method, the goal's point coerced to the
+  store's vec3 form. `coverage()` reports the skill plane alongside the others.
+
+### Changed — BREAKING
+
+- `ExposureProfile` and `Ros2BridgeConfig` gained public fields, and
+  `coverage()` gained a `functions` parameter.
+
+## [4.0.0] - 2026-07-31
+
+### Changed — BREAKING
+
+- Re-pinned to `arora-msgs-ros2` 1.0.0, whose constant-quote fix changes
+  generated constant values. Those types are part of this crate's public
+  surface, so the bump travels with it (`arora-hal-ros2` 3.0.0 in the same
+  lockstep).
+
+## [3.5.0] - 2026-07-31
+
+### Added
+
+- **Exposure profiles**: one profile bundles the whole surface a deployment
+  exposes. Typed `Endpoint`s bind absolute topics to registered message types
+  and fan their fields out over device keys by dotted name (a structured
+  message maps to several keys — no string rewrite could express that), and
+  glob `Include`s (`*` one segment, `**` the rest; regex was rejected) rewrite
+  bulk keys' prefixes onto absolute names on the scalar plane.
+  `ExposureProfile::coverage` reports what a device does not serve, so a face
+  is checked against its profile up front rather than topic by topic.
+- `ExposureProfile::ros4hri()`: the ROS4HRI face surface for both incumbent
+  name sets — PAL (`/robot_face/*`) and IIIA (`/expressive_face/*`).
+  Expression commands fan out to `standard/ros4hri/expression/*`, `look_at`
+  points land as the gaze target (an `x`/`y`/`z` structure coerces to the
+  store's vec3 form) and frame, speech text feeds the lipsync key. Enabling the
+  profile is the only wiring a face device needs.
+- Field routes resolve by name against the message's runtime type and land
+  atomically: all routed fields of one message arrive in one `StateChange`.
+
 ## [3.4.0] - 2026-07-30
 
 ### Added
