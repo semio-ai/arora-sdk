@@ -4,6 +4,25 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-09-09
+
+### Fixed
+
+- **Typed publishers reach native `rmw_zenoh` subscribers.** `rmw_zenoh` keys
+  every publisher on its message's REP-2016 type hash, and a native subscriber
+  listens on that exact key. A typed key publisher announced the all-zero
+  placeholder — the value `ros2-client` uses for a type its hash table does not
+  know — so a `sensor_msgs/CompressedImage` (or any typed output beyond the
+  `std_msgs` scalars) was listed by `ros2 topic list`, described correctly by
+  `ros2 topic info -v`, and never received by `ros2 topic echo`, `rqt_image_view`
+  or anything else on the Zenoh RMW. The bridge holds each message's full type
+  description in its registry, which is all the hash needs, so it now computes
+  the hash there and keys the publisher on it (`ros2-client-multi-rmw` 0.12.1's
+  `create_raw_publisher_with_type_hash`). A type the hasher cannot describe
+  still publishes, reaching only other `ros2-client` peers, and says so once.
+  Inbound was never affected: subscriptions match on a wildcard. DDS is
+  unaffected either way — its discovery carries no such hash.
+
 ## [6.0.0] - 2026-09-07
 
 ### Fixed

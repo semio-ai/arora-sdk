@@ -42,6 +42,11 @@ jobs:
       # CARGO_CDYLIB_FILE_* env vars (see tests/build.rs). No separate guest build step is needed.
       - name: Test (native + wasm modules via wasmtime)
         run: cargo test --release
+      # The ROS 2 bridge's Zenoh backend is off by default and exclusive with
+      # DDS, so the workspace run never builds it. Its unit tests need no ROS;
+      # the live one against a real subscriber is `#[ignore]`d and documented.
+      - name: Test the ROS 2 bridge on the Zenoh backend
+        run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
       # Lint in this job rather than a parallel one: the test build above has
       # already fetched every dependency and run the build scripts that emit
