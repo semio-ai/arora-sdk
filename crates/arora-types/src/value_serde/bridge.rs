@@ -108,25 +108,26 @@ struct Seed<'a> {
   registry: &'a TypeRegistry,
 }
 
-/// What a seed's position is declared to hold.
+/// What a seed's position is declared to hold, in the two forms the type model
+/// itself is built on — [`low::TypeKind`] is a structure, an enumeration, or a
+/// [`TypeRef`] a type is made of.
 ///
-/// A type is held resolved and an element only as an id. The asymmetry is the
-/// registry's: a type is a [`low::Type`] the caller already holds — the seeded
-/// entry points take one, and it need not be registered — while an element is
-/// only ever an id inside a [`TypeRef`], and a well-known scalar (`u8`, `f64`,
-/// …) has no [`low::Type`] to resolve to at all: it *is* an id
-/// ([`ty::PRIMITIVE_IDS`]), and that id is what picks the typed array form.
-/// [`Seed::element_seed`] resolves the elements that do name a registered type.
+/// The walk resolves what it can: a field naming a declared type descends as
+/// that type. A reference stays a reference only where there is no type to
+/// resolve it to — `T[]` and `T[N]` are written inline in the declaring type
+/// ([`TypeRef::Array`]/[`TypeRef::FixedArray`]), never declared as a type of
+/// their own, so an array position *is* its reference, and the element it
+/// names is what picks the array's form.
 #[derive(Clone, Copy)]
 enum Declaration<'a> {
   /// A declared type: the structure (or enumeration) whose ids the value
-  /// carries — or an array type (`Primitive(TypeRef::Array)`), a position
-  /// declared as one bare sequence.
+  /// carries — or a type that is itself an array ([`low::TypeKind::Primitive`]).
   Type(&'a low::Type),
-  /// The element of a declared array: a well-known scalar id packs the items
-  /// into its typed array (`Value::ArrayU8`/`…`); a registered type id makes
-  /// an array of structures carrying that type's ids.
-  ArrayElement(Uuid),
+  /// An array written inline in a declaration. Its element decides the form
+  /// the items take: a well-known scalar packs them into the typed array
+  /// (`Value::ArrayU8`/`…`); a declared type makes an array of structures
+  /// carrying that type's ids.
+  Array(&'a TypeRef),
 }
 
 impl<'a> Seed<'a> {
@@ -146,25 +147,28 @@ impl<'a> Seed<'a> {
         low::TypeKind::Structure(structure) => Some(structure),
         _ => None,
       },
-      Declaration::ArrayElement(_) => None,
+      Declaration::Array(_) => None,
     }
   }
 
-  /// The element id when this position is an array — reached as a field
-  /// ([`Declaration::ArrayElement`]) or declared as an array type.
+  /// The id of the element when this position is an array — one written in a
+  /// declaration, or a type that is itself an array.
   fn array_element(&self) -> Option<Uuid> {
-    match self.declares {
-      Declaration::ArrayElement(element) => Some(element),
+    let type_ref = match self.declares {
+      Declaration::Array(type_ref) => type_ref,
       Declaration::Type(ty) => match &ty.kind {
-        low::TypeKind::Primitive(TypeRef::Array { id })
-        | low::TypeKind::Primitive(TypeRef::FixedArray { id, .. }) => Some(*id),
-        _ => None,
+        low::TypeKind::Primitive(type_ref) => type_ref,
+        _ => return None,
       },
+    };
+    match type_ref {
+      TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => Some(*id),
+      _ => None,
     }
   }
 
-  /// The seed each element of this array carries: a registered element type
-  /// seeds every element; a scalar element needs none.
+  /// The seed each element of this array carries: a declared element type
+  /// seeds every element; a well-known scalar element needs none.
   fn element_seed(&self) -> Option<Seed<'a>> {
     let element = self.array_element()?;
     self
@@ -173,16 +177,17 @@ impl<'a> Seed<'a> {
       .map(|ty| Seed::of(ty, self.registry))
   }
 
-  /// The seed for a struct field of type `type_ref`: a nested user-defined type
-  /// resolves to its [`low::Type`]; an array carries its element; well-known
-  /// primitives (and, for now, maps) carry no seed.
-  fn child(&self, type_ref: &TypeRef) -> Option<Seed<'a>> {
+  /// The seed for a position declared as `type_ref`: a nested user-defined type
+  /// resolves to its [`low::Type`]; an array carries its declaration; a
+  /// well-known primitive (and, for now, a map or an option) has nothing to
+  /// hand down.
+  fn child(&self, type_ref: &'a TypeRef) -> Option<Seed<'a>> {
     match type_ref {
       TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {
         self.registry.get(id).map(|ty| Seed::of(ty, self.registry))
       }
-      TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => Some(Seed {
-        declares: Declaration::ArrayElement(*id),
+      TypeRef::Array { .. } | TypeRef::FixedArray { .. } => Some(Seed {
+        declares: Declaration::Array(type_ref),
         registry: self.registry,
       }),
       _ => None,
@@ -193,7 +198,10 @@ impl<'a> Seed<'a> {
   fn name(&self) -> String {
     match self.declares {
       Declaration::Type(ty) => ty.name.clone(),
-      Declaration::ArrayElement(element) => format!("array of {element}"),
+      Declaration::Array(type_ref) => match type_ref {
+        TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => format!("array of {id}"),
+        other => format!("{other:?}"),
+      },
     }
   }
 }
