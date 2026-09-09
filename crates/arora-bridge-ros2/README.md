@@ -64,6 +64,17 @@ nothing on a `Qos::SensorData` topic until it asks for best-effort — the same
 bargain `image_transport` strikes for camera streams. `ros2 topic echo` needs
 `--qos-reliability best_effort` on those topics.
 
+**Type hashes on the Zenoh backend.** `rmw_zenoh` keys every publisher on its
+message's REP-2016 type hash, and a native subscriber listens on that exact key,
+so a publisher announcing the wrong hash is listed by `ros2 topic list`,
+described by `ros2 topic info -v`, and never heard. A typed output is keyed on
+the hash the bridge computes from the message's registry description — the same
+value ROS 2 ships in the type's `.json` — so `ros2 topic echo`, `rqt_image_view`
+and any rclcpp/rclpy node receive it. A message the hasher cannot describe still
+publishes, but reaches only other `ros2-client` peers; that is warned about once
+per key. Subscriptions match on a wildcard, so the inbound plane never depended
+on the hash; DDS discovery carries none and is unaffected either way.
+
 ## Configuration
 
 ```rust,no_run

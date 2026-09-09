@@ -583,9 +583,25 @@ fn make_typed_publisher(
     let message_type_name = MessageTypeName::new(package, type_name);
     let topic = topic_for(node, &ros_name, message_type_name, qos)
         .map_err(|e| format!("failed to create topic {topic_name}: {e}"))?;
-    let publisher = node
-        .create_raw_publisher(&topic, None)
-        .map_err(|e| format!("failed to create raw publisher for {topic_name}: {e:?}"))?;
+    // The publisher is keyed on the message's REP-2016 hash. `rmw_zenoh` puts
+    // that hash in the data key, and a native subscriber listens on the exact
+    // key, so a publisher without the real hash is discoverable and never
+    // heard. The registry holds the full type description, which is all the
+    // hash needs; a type it cannot hash still publishes, reaching only other
+    // `ros2-client` peers, and says so once.
+    let publisher = match arora_msgs_ros2::rihs01(&message_type, registry.types()) {
+        Ok(hash) => node
+            .create_raw_publisher_with_type_hash(&topic, None, &hash)
+            .map_err(|e| format!("failed to create raw publisher for {topic_name}: {e:?}"))?,
+        Err(e) => {
+            warn!(
+                "'{ros_type}' has no REP-2016 hash ({e}); {topic_name} publishes with a \
+                 placeholder that native rmw_zenoh subscribers do not match"
+            );
+            node.create_raw_publisher(&topic, None)
+                .map_err(|e| format!("failed to create raw publisher for {topic_name}: {e:?}"))?
+        }
+    };
     Ok(TypedKeyPublisher {
         publisher,
         message_type,
