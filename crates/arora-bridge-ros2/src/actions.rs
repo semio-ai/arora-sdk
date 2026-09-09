@@ -345,6 +345,13 @@ fn resolve_binding(
             parameter: parameter_id,
         });
     }
+    // A standard contract carries what the standard says, which need not be
+    // every parameter the implementing method takes — ROS4HRI's `Say` goal has
+    // no field for a voice, say. Such a parameter is left out of the spawn
+    // call and keeps the method's own default, announced here so the gap is
+    // legible in the log rather than surprising at the first goal. A route
+    // naming a field the goal lacks, or a parameter the method lacks, is still
+    // refused above: a typo is not an omission.
     let unrouted: Vec<&str> = function
         .parameter_ordering
         .iter()
@@ -353,10 +360,13 @@ fn resolve_binding(
         .filter(|name| !binding.goal_routes.iter().any(|route| route.key == *name))
         .collect();
     if !unrouted.is_empty() {
-        return Err(format!(
-            "parameters not routed from the goal: {}",
-            unrouted.join(", ")
-        ));
+        log::info!(
+            "{}: the goal carries no {} — '{}' runs on its own default{}",
+            binding.action,
+            unrouted.join(", "),
+            binding.function,
+            if unrouted.len() > 1 { "s" } else { "" }
+        );
     }
 
     let send_goal_request_type = bound_send_goal_request_type(&binding.action, &goal_type);
@@ -2213,6 +2223,35 @@ mod tests {
         }
     }
 
+    /// A device serving the speech skill: `say(text, voice) -> Status`. The
+    /// goal has no field for the voice, which is the point.
+    fn bound_say_signature() -> MethodSignature {
+        let mut parameters = HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for name in ["text", "voice"] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(PrimitiveKind::String),
+                    mutable: false,
+                },
+            );
+        }
+        MethodSignature {
+            module_id: gen_uuid_from_str("tts-module"),
+            id: gen_uuid_from_str("say"),
+            name: "say".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: status_return(),
+            },
+        }
+    }
+
     /// The ros4hri preset's LookAt binding resolves against the registry and
     /// a matching signature — and every way the contract can fail is refused
     /// with a reason, never served broken.
@@ -2221,7 +2260,8 @@ mod tests {
         let registry = arora_msgs_ros2::registry();
         let bindings = crate::profile::ExposureProfile::ros4hri().actions;
 
-        let (actions, errors) = resolve_bound(&bindings, &[bound_look_at_signature()], &registry);
+        let signatures = [bound_look_at_signature(), bound_say_signature()];
+        let (actions, errors) = resolve_bound(&bindings, &signatures, &registry);
         assert!(errors.is_empty(), "{errors:?}");
         let action = &actions[0];
         assert_eq!(action.name, "/skill/look_at");
@@ -2231,6 +2271,16 @@ mod tests {
         };
         assert_eq!(bound.routes.len(), 3);
         assert!(bound.feedback.is_some(), "LookAt declares feedback");
+
+        // The speech skill: one routed field, the voice left to the method,
+        // and the feedback wire the viseme stream rides.
+        let say = &actions[1];
+        assert_eq!(say.name, "/skill/say");
+        let Wire::Bound(bound) = &say.wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        assert_eq!(bound.routes.len(), 1);
+        assert!(bound.feedback.is_some(), "Say declares feedback");
 
         // No such method described.
         let (none, errors) = resolve_bound(&bindings, &[], &registry);
@@ -2244,7 +2294,9 @@ mod tests {
         assert!(none.is_empty());
         assert!(errors[0].contains("not a task run"), "{errors:?}");
 
-        // A parameter the goal does not route.
+        // A parameter the goal does not route is served anyway, on the
+        // method's own default — the standard contract need not name every
+        // parameter the implementation takes.
         let mut extra = bound_look_at_signature();
         let id = gen_uuid_from_str("speed");
         extra.function.parameter_ordering.push(id);
@@ -2256,9 +2308,11 @@ mod tests {
                 mutable: false,
             },
         );
-        let (none, errors) = resolve_bound(&bindings, &[extra], &registry);
-        assert!(none.is_empty());
-        assert!(errors[0].contains("speed"), "{errors:?}");
+        let (served, _) = resolve_bound(&bindings, &[extra], &registry);
+        let Wire::Bound(bound) = &served[0].wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        assert_eq!(bound.routes.len(), 3, "the unrouted parameter is not one");
 
         // A route into a field the goal does not have.
         let mut bad = bindings.clone();

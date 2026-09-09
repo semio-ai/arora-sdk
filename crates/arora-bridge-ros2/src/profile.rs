@@ -188,25 +188,39 @@ impl ExposureProfile {
                 endpoint("/expressive_face/speech", "std_msgs/String", &speech_routes),
             ],
             includes: Vec::new(),
-            actions: vec![ActionBinding {
-                action: "/skill/look_at".into(),
-                ros_type: "interaction_skills/LookAt".into(),
-                function: "look_at".into(),
-                goal_routes: vec![
-                    FieldRoute {
-                        field: "policy".into(),
-                        key: "policy".into(),
-                    },
-                    FieldRoute {
-                        field: "target.point".into(),
-                        key: "target".into(),
-                    },
-                    FieldRoute {
-                        field: "target.header.frame_id".into(),
-                        key: "frame".into(),
-                    },
-                ],
-            }],
+            actions: vec![
+                ActionBinding {
+                    action: "/skill/look_at".into(),
+                    ros_type: "interaction_skills/LookAt".into(),
+                    function: "look_at".into(),
+                    goal_routes: vec![
+                        FieldRoute {
+                            field: "policy".into(),
+                            key: "policy".into(),
+                        },
+                        FieldRoute {
+                            field: "target.point".into(),
+                            key: "target".into(),
+                        },
+                        FieldRoute {
+                            field: "target.header.frame_id".into(),
+                            key: "frame".into(),
+                        },
+                    ],
+                },
+                // The speech skill. `person_id` and `group_id` address an
+                // audience a face device has no notion of, and the goal
+                // carries no voice, so the method's own default speaks.
+                ActionBinding {
+                    action: "/skill/say".into(),
+                    ros_type: "communication_skills/Say".into(),
+                    function: "say".into(),
+                    goal_routes: vec![FieldRoute {
+                        field: "input".into(),
+                        key: "text".into(),
+                    }],
+                },
+            ],
         }
     }
 
@@ -339,22 +353,29 @@ mod tests {
     }
 
     #[test]
-    fn ros4hri_preset_binds_the_look_at_skill() {
+    fn ros4hri_preset_binds_the_standard_skills() {
         let profile = ExposureProfile::ros4hri();
-        let [binding] = profile.actions.as_slice() else {
-            panic!("one skill binding, got {:?}", profile.actions);
+        let [look_at, say] = profile.actions.as_slice() else {
+            panic!("the gaze and speech skills, got {:?}", profile.actions);
         };
-        assert_eq!(binding.action, "/skill/look_at");
-        assert_eq!(binding.ros_type, "interaction_skills/LookAt");
-        assert_eq!(binding.function, "look_at");
-        let params: Vec<&str> = binding.goal_routes.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(look_at.action, "/skill/look_at");
+        assert_eq!(look_at.ros_type, "interaction_skills/LookAt");
+        assert_eq!(look_at.function, "look_at");
+        let params: Vec<&str> = look_at.goal_routes.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(params, ["policy", "target", "frame"]);
+
+        assert_eq!(say.action, "/skill/say");
+        assert_eq!(say.ros_type, "communication_skills/Say");
+        assert_eq!(say.function, "say");
+        // The utterance is the one field a face device reads from the goal.
+        let params: Vec<&str> = say.goal_routes.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(params, ["text"]);
     }
 
     #[test]
     fn coverage_reports_unserved_surfaces() {
         let profile = ExposureProfile::ros4hri();
-        // A face serving every route key and the look_at method covers the
+        // A face serving every route key and both skill methods covers the
         // preset fully.
         let keys: Vec<String> = profile
             .endpoints
@@ -362,7 +383,7 @@ mod tests {
             .flat_map(|e| e.routes.iter().map(|r| r.key.clone()))
             .collect();
         assert!(profile
-            .coverage(keys.iter().map(String::as_str), ["look_at"])
+            .coverage(keys.iter().map(String::as_str), ["look_at", "say"])
             .is_empty());
         // Dropping the gaze target surfaces exactly the look_at holes.
         let partial: Vec<&str> = keys
@@ -370,12 +391,13 @@ mod tests {
             .map(String::as_str)
             .filter(|k| !k.ends_with("gaze/target"))
             .collect();
-        let missing = profile.coverage(partial, ["look_at"]);
+        let missing = profile.coverage(partial, ["look_at", "say"]);
         assert_eq!(missing.len(), 2, "{missing:?}");
         assert!(missing.iter().all(|m| m.contains("gaze/target")));
-        // A device without the look_at method misses the skill plane.
+        // A device serving neither skill method misses the whole skill plane.
         let missing = profile.coverage(keys.iter().map(String::as_str), []);
-        assert_eq!(missing.len(), 1, "{missing:?}");
-        assert!(missing[0].contains("/skill/look_at"));
+        assert_eq!(missing.len(), 2, "{missing:?}");
+        assert!(missing.iter().any(|m| m.contains("/skill/look_at")));
+        assert!(missing.iter().any(|m| m.contains("/skill/say")));
     }
 }
