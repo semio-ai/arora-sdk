@@ -24,3 +24,40 @@ pub fn type_hash<T: RosMessage>() -> Result<String, crate::hash::Error> {
     let (ty, registry) = <T as arora_types::AroraType>::arora_type_with_registry();
     crate::hash::rihs01(&ty, &registry)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RosMessage;
+    use crate::sensor_msgs::Image;
+    use crate::trajectory_msgs::JointTrajectory;
+    use arora_types::AroraType;
+
+    /// The strings the generated identity is made of, pinned once: every other
+    /// caller reaches a message's type through `T::ROS_TYPE_NAME` (or its id)
+    /// rather than repeating a name, so this is where a change of form —
+    /// `sensor_msgs/msg/Image` against `sensor_msgs/Image` — would show.
+    #[test]
+    fn generated_messages_carry_their_ros_name() {
+        assert_eq!(Image::ROS_TYPE_NAME, "sensor_msgs/msg/Image");
+        assert_eq!(Image::PACKAGE, "sensor_msgs");
+        assert_eq!(Image::TYPE_NAME, "Image");
+        assert_eq!(
+            JointTrajectory::ROS_TYPE_NAME,
+            "trajectory_msgs/msg/JointTrajectory"
+        );
+    }
+
+    /// The name and the id name the same type: the registry finds a message by
+    /// the identity its own struct carries, in either ROS spelling, and that is
+    /// the type whose ids `AroraType` derives.
+    #[test]
+    fn the_registry_finds_a_message_by_its_own_identity() {
+        let registry = crate::registry();
+        let by_name = registry.get_by_name(Image::ROS_TYPE_NAME).unwrap();
+        assert_eq!(by_name.id, Image::arora_type_id());
+        assert_eq!(
+            registry.id_of("sensor_msgs/Image"),
+            Some(Image::arora_type_id())
+        );
+    }
+}

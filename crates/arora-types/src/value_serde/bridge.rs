@@ -61,7 +61,7 @@ pub fn to_value_seeded<T: Serialize + ?Sized>(
   registry: &TypeRegistry,
 ) -> Result<Value, Error> {
   value.serialize(ValueSerializer {
-    seed: Some(Seed::Type { ty, registry }),
+    seed: Some(Seed::of(ty, registry)),
   })
 }
 
@@ -73,77 +73,117 @@ pub fn from_value_seeded<T: DeserializeOwned>(
 ) -> Result<T, Error> {
   T::deserialize(ValueDeserializer {
     value,
-    seed: Some(Seed::Type { ty, registry }),
+    seed: Some(Seed::of(ty, registry)),
   })
 }
 
 // ---- the type seed ---------------------------------------------------------
 
-/// What a position's declaration expects, threaded through (de)serialization
-/// so the value takes the declared form instead of the name-derived one.
+/// The declaration standing at the current position of the walk, carried
+/// alongside serde's own traversal.
+///
+/// serde knows the Rust shape — this struct has these fields, this is a
+/// sequence of these items — and nothing of arora's declared types. The seed
+/// is the other half: what the caller says this position holds, plus the
+/// registry the rest of the declaration resolves through. It descends as serde
+/// descends — a structure's seed hands each field that field's declaration
+/// ([`Seed::child`]), an array's seed hands each item its element declaration
+/// ([`Seed::element_seed`]) — so every position of the value is converted
+/// against its own declaration.
+///
+/// That decides the two things a name-derived conversion gets wrong: the ids a
+/// [`Value::Structure`] carries (the declared ones, not hashed field names)
+/// and the form a sequence takes (`Value::ArrayU8`/`…` or
+/// [`Value::ArrayStructure`], the forms the typed walk and the ROS 2 CDR codec
+/// read, not a [`Value::ArrayValue`] of scalars).
+///
+/// Where no declaration reaches — the un-seeded entry points, a map's values,
+/// an enum's payload — the seed is `None` and the conversion falls back to
+/// names.
 #[derive(Clone, Copy)]
-enum Seed<'a> {
-  /// A declared type: a structure (or enumeration) whose ids the value
-  /// carries — or a top-level array type (`Primitive(TypeRef::Array)`).
-  Type {
-    ty: &'a low::Type,
-    registry: &'a TypeRegistry,
-  },
-  /// A declared array of `element`: a well-known scalar id packs the items
-  /// into the typed array (`Value::ArrayU8`/`…`); a registered type makes an
-  /// array of structures carrying that type's ids.
-  Array {
-    element: Uuid,
-    registry: &'a TypeRegistry,
-  },
+struct Seed<'a> {
+  declares: Declaration<'a>,
+  /// Resolves what the declaration refers to by id: nested types, array
+  /// elements.
+  registry: &'a TypeRegistry,
+}
+
+/// What a seed's position is declared to hold.
+///
+/// A type is held resolved and an element only as an id. The asymmetry is the
+/// registry's: a type is a [`low::Type`] the caller already holds — the seeded
+/// entry points take one, and it need not be registered — while an element is
+/// only ever an id inside a [`TypeRef`], and a well-known scalar (`u8`, `f64`,
+/// …) has no [`low::Type`] to resolve to at all: it *is* an id
+/// ([`ty::PRIMITIVE_IDS`]), and that id is what picks the typed array form.
+/// [`Seed::element_seed`] resolves the elements that do name a registered type.
+#[derive(Clone, Copy)]
+enum Declaration<'a> {
+  /// A declared type: the structure (or enumeration) whose ids the value
+  /// carries — or an array type (`Primitive(TypeRef::Array)`), a position
+  /// declared as one bare sequence.
+  Type(&'a low::Type),
+  /// The element of a declared array: a well-known scalar id packs the items
+  /// into its typed array (`Value::ArrayU8`/`…`); a registered type id makes
+  /// an array of structures carrying that type's ids.
+  ArrayElement(Uuid),
 }
 
 impl<'a> Seed<'a> {
-  /// This seed's type as a structure, if it is one.
+  /// The seed a declared type stands for — where a seeded walk starts, and
+  /// what every resolved nested type becomes.
+  fn of(ty: &'a low::Type, registry: &'a TypeRegistry) -> Self {
+    Seed {
+      declares: Declaration::Type(ty),
+      registry,
+    }
+  }
+
+  /// This position's type as a structure, if it is one.
   fn as_structure(&self) -> Option<&'a low::Structure> {
-    match self {
-      Seed::Type { ty, .. } => match &ty.kind {
+    match self.declares {
+      Declaration::Type(ty) => match &ty.kind {
         low::TypeKind::Structure(structure) => Some(structure),
         _ => None,
       },
-      Seed::Array { .. } => None,
+      Declaration::ArrayElement(_) => None,
     }
   }
 
-  /// The element declaration when this seed is an array — declared as a field
-  /// (`Seed::Array`) or as a top-level array type.
-  fn array_element(&self) -> Option<(Uuid, &'a TypeRegistry)> {
-    match self {
-      Seed::Array { element, registry } => Some((*element, registry)),
-      Seed::Type { ty, registry } => match &ty.kind {
+  /// The element id when this position is an array — reached as a field
+  /// ([`Declaration::ArrayElement`]) or declared as an array type.
+  fn array_element(&self) -> Option<Uuid> {
+    match self.declares {
+      Declaration::ArrayElement(element) => Some(element),
+      Declaration::Type(ty) => match &ty.kind {
         low::TypeKind::Primitive(TypeRef::Array { id })
-        | low::TypeKind::Primitive(TypeRef::FixedArray { id, .. }) => Some((*id, registry)),
+        | low::TypeKind::Primitive(TypeRef::FixedArray { id, .. }) => Some(*id),
         _ => None,
       },
     }
   }
 
-  /// The seed for the elements of this array seed: a registered element type
-  /// seeds each element; a scalar element needs none.
+  /// The seed each element of this array carries: a registered element type
+  /// seeds every element; a scalar element needs none.
   fn element_seed(&self) -> Option<Seed<'a>> {
-    let (element, registry) = self.array_element()?;
-    registry.get(&element).map(|ty| Seed::Type { ty, registry })
+    let element = self.array_element()?;
+    self
+      .registry
+      .get(&element)
+      .map(|ty| Seed::of(ty, self.registry))
   }
 
   /// The seed for a struct field of type `type_ref`: a nested user-defined type
   /// resolves to its [`low::Type`]; an array carries its element; well-known
   /// primitives (and, for now, maps) carry no seed.
   fn child(&self, type_ref: &TypeRef) -> Option<Seed<'a>> {
-    let registry = match self {
-      Seed::Type { registry, .. } | Seed::Array { registry, .. } => *registry,
-    };
     match type_ref {
       TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {
-        registry.get(id).map(|ty| Seed::Type { ty, registry })
+        self.registry.get(id).map(|ty| Seed::of(ty, self.registry))
       }
-      TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => Some(Seed::Array {
-        element: *id,
-        registry,
+      TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => Some(Seed {
+        declares: Declaration::ArrayElement(*id),
+        registry: self.registry,
       }),
       _ => None,
     }
@@ -151,9 +191,9 @@ impl<'a> Seed<'a> {
 
   /// The declaration's name, for messages.
   fn name(&self) -> String {
-    match self {
-      Seed::Type { ty, .. } => ty.name.clone(),
-      Seed::Array { element, .. } => format!("array of {element}"),
+    match self.declares {
+      Declaration::Type(ty) => ty.name.clone(),
+      Declaration::ArrayElement(element) => format!("array of {element}"),
     }
   }
 }
@@ -383,7 +423,10 @@ impl ser::SerializeSeq for SeqSerializer<'_> {
     Ok(())
   }
   fn end(self) -> Result<Value, Error> {
-    match self.seed.and_then(|seed| seed.array_element()) {
+    let declared = self
+      .seed
+      .and_then(|seed| Some((seed.array_element()?, seed.registry)));
+    match declared {
       Some((element, registry)) => declared_array(element, registry, self.items),
       None => Ok(Value::ArrayValue(self.items)),
     }
@@ -580,7 +623,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
   fn end(self) -> Result<Value, Error> {
     match self.seed {
       Some(seed) => {
-        let (Seed::Type { ty, .. }, Some(structure)) = (seed, seed.as_structure()) else {
+        let (Declaration::Type(ty), Some(structure)) = (seed.declares, seed.as_structure()) else {
           return Err(ser::Error::custom(format!(
             "seeded type {} is not a structure",
             seed.name()

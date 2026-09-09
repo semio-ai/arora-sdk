@@ -872,6 +872,7 @@ mod tests {
     fn seeded_generated_messages_with_arrays_round_trip() {
         use crate::sensor_msgs::Image;
         use crate::trajectory_msgs::{JointTrajectory, JointTrajectoryPoint};
+        use crate::RosMessage;
         use arora_types::value_serde::bridge::{from_value_seeded, to_value_seeded};
 
         let registry = crate::registry();
@@ -885,7 +886,7 @@ mod tests {
             data: vec![1, 2, 3, 255, 4, 5, 6, 255],
             ..Default::default()
         };
-        let ty = registry.get_by_name("sensor_msgs/Image").unwrap();
+        let ty = registry.get_by_name(Image::ROS_TYPE_NAME).unwrap();
         let value = to_value_seeded(&image, ty, types).unwrap();
         let bytes = encode(ty, types, &value).unwrap();
         assert_eq!(decode(ty, types, &bytes).unwrap(), value);
@@ -900,7 +901,7 @@ mod tests {
             ..Default::default()
         };
         let ty = registry
-            .get_by_name("trajectory_msgs/JointTrajectory")
+            .get_by_name(JointTrajectory::ROS_TYPE_NAME)
             .unwrap();
         let value = to_value_seeded(&trajectory, ty, types).unwrap();
         let bytes = encode(ty, types, &value).unwrap();
