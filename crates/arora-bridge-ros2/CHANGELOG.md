@@ -6,6 +6,23 @@ All notable changes to `arora-bridge-ros2`. The format follows
 
 ## [6.1.0] - 2026-09-09
 
+### Added
+
+- **The ROS4HRI preset serves the speech skill**: `/skill/say`
+  (`communication_skills/Say`) bound to a device's `say` method, the goal's
+  `input` carrying the utterance. What the run feeds back rides
+  `std_skills/Feedback` — for a face, the viseme at the audio playhead, so a
+  ROS client watching the goal sees the lipsync stream.
+
+### Changed
+
+- **A bound action may leave a method parameter unrouted**, and it then runs on
+  the method's own default. A standard contract carries what the standard says,
+  which need not be every parameter the implementation takes — `Say` has no
+  field for a voice. The gap is logged when the binding resolves. A route
+  naming a field the goal lacks, or a parameter the method lacks, is still
+  refused: a typo is not an omission.
+
 ### Fixed
 
 - **Bound actions and raw services reach native `rmw_zenoh` clients.** A

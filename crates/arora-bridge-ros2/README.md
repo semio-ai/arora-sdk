@@ -154,9 +154,11 @@ standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
 the ROS4HRI face surface for both incumbent name sets — PAL (`/robot_face/*`)
 and IIIA (`/expressive_face/*`): expression commands fan out to
 `standard/ros4hri/expression/*`, `look_at` points land as the gaze target
-(vec3) and frame, speech text feeds the lipsync key, and the
-`interaction_skills/LookAt` action on `/skill/look_at` spawns the device's
-`look_at` task run. Enabling it is one call:
+(vec3) and frame, speech text feeds the lipsync key, and the two standard
+skills spawn the device's task runs — `interaction_skills/LookAt` on
+`/skill/look_at`, and `communication_skills/Say` on `/skill/say`, whose goal
+`input` is the utterance and whose feedback carries what the run reports (for
+a face, the viseme at the audio playhead). Enabling it is one call:
 
 ```rust
 let config = Ros2BridgeConfig::new("robot", 0)
@@ -166,7 +168,9 @@ let config = Ros2BridgeConfig::new("robot", 0)
 An action binding is the exterior contract of a skill: at startup the bridge
 checks it against the device's described methods (the function exists, is a
 task run, and every goal field routes onto a parameter of a compatible type)
-and refuses it loudly otherwise. A bound action serves one goal at a time —
+and refuses it loudly otherwise. A parameter the goal does not name is left to
+the method's own default and logged — a standard contract carries what the
+standard says, not every parameter an implementation happens to take. A bound action serves one goal at a time —
 `std_skills/Meta.priority` arbitrates, an equal-or-higher replacement
 preempting the active run (its result reports `ROS_EINTR`) and a lower one
 being rejected — and answers with the standard Result message carrying the

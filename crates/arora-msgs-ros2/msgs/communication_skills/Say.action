@@ -1,0 +1,24 @@
+# Multi-modal communication through utterance and potentially expressions, gestures, etc. .
+
+std_skills/Meta meta
+
+# The ID of the person to interact with.
+# If empty, any user can be interacted with.
+string person_id
+
+# The ID of the group of persons to interact with.
+# If empty, any group of persons can be interacted with.
+# If not empty, the 'person_id' field should be ignored.
+string group_id
+
+# The text to be uttered.
+# It might contains additional markup for multi-modal communication.
+# See the documentation at
+# https://gitlab.pal-robotics.com/interaction/communication_hub/-/blob/main/doc/multi_modal_expression_markup_language.md
+string input
+
+---
+std_skills/Result result
+
+---
+std_skills/Feedback feedback
