@@ -8,6 +8,20 @@ All notable changes to `arora-bridge-ros2`. The format follows
 
 ### Fixed
 
+- **Bound actions and raw services reach native `rmw_zenoh` clients.** A
+  service is keyed like a topic — `<domain>/<name>/<type>/<type_hash>` — and a
+  native client addresses a server by the hash its generated type computes;
+  the bridge's servers announced the placeholder, so `/skill/look_at` and
+  `/skill/say` were listed, described, and never reached (the request went to
+  a key nobody served). A bound action's `_SendGoal`, `_GetResult` and
+  `_FeedbackMessage` are now keyed on the hashes computed from its registry
+  goal, result and feedback (`arora_msgs_ros2::action_hashes`, matching
+  `rosidl` byte for byte), and a synthesized service on
+  `arora_msgs_ros2::service_rihs01` of its request and response
+  (`ros2-client-multi-rmw` 0.13.0's `_with_type_hash` constructors). A
+  synthesized action keeps the placeholder: its result and feedback are typed
+  from what the run writes, unknown when the server is made. A type the hasher
+  cannot describe keeps the placeholder and says so once. DDS is unaffected.
 - **Typed publishers reach native `rmw_zenoh` subscribers.** `rmw_zenoh` keys
   every publisher on its message's REP-2016 type hash, and a native subscriber
   listens on that exact key. A typed key publisher announced the all-zero
