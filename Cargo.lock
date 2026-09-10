@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "6.1.0"
+version = "6.2.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "arora-msgs-ros2"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "arora-types",
  "proc-macro2",

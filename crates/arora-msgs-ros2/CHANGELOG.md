@@ -2,6 +2,18 @@
 
 All notable changes.
 
+## [1.2.0] - 2026-09-10
+
+### Added
+
+- **`communication_skills/Say`**, ROS4HRI's speech skill, vendored from the
+  standard: goal `meta` + `person_id` + `group_id` + `input`, with the
+  `std_skills` result and feedback the other skills use. A device serving a
+  `say` method can now be bound to `/skill/say`. Its feedback carries Vizij's
+  extension to the standard — `string viseme`, `float32 intensity` — after the
+  standard's own field; the README's "Departures from upstream" table is the
+  record of it.
+
 ## [1.1.0] - 2026-09-10
 
 ### Added
@@ -13,13 +25,6 @@ All notable changes.
   (`unique_identifier_msgs/UUID`, `builtin_interfaces/Time`,
   `service_msgs/ServiceEventInfo`, the `_Event` messages). These are the keys
   a native `rmw_zenoh` client addresses a server by.
-- **`communication_skills/Say`**, ROS4HRI's speech skill, vendored from the
-  standard: goal `meta` + `person_id` + `group_id` + `input`, with the
-  `std_skills` result and feedback the other skills use. A device serving a
-  `say` method can now be bound to `/skill/say`. Its feedback carries Vizij's
-  extension to the standard — `string viseme`, `float32 intensity` — after the
-  standard's own field; the README's "Departures from upstream" table is the
-  record of it.
 
 ## [0.1.1] - 2026-07-30
 

@@ -4,7 +4,7 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [6.1.0] - 2026-09-09
+## [6.2.0] - 2026-09-10
 
 ### Added
 
@@ -26,6 +26,8 @@ All notable changes to `arora-bridge-ros2`. The format follows
   field for a voice. The gap is logged when the binding resolves. A route
   naming a field the goal lacks, or a parameter the method lacks, is still
   refused: a typo is not an omission.
+
+## [6.1.0] - 2026-09-09
 
 ### Fixed
 
