@@ -22,3 +22,14 @@ std_skills/Result result
 
 ---
 std_skills/Feedback feedback
+
+# Vizij's extension to the standard, proposed to ROS4HRI (see the
+# "Departures from upstream" table in arora-msgs-ros2's README): the mouth
+# shape the utterance is making as it plays, for a client that mirrors the
+# lips or captions the speech. One of the 15 industry viseme shapes
+# (sil PP FF TH DD kk CH SS nn RR aa E ih oh ou), `sil` when the mouth is at
+# rest. Streamed as each viseme is reached, never ahead of the audio.
+string viseme
+
+# How strongly the shape is driven, [0, 1] — 0 with `sil`.
+float32 intensity

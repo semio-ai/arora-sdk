@@ -16,7 +16,10 @@ All notable changes.
 - **`communication_skills/Say`**, ROS4HRI's speech skill, vendored from the
   standard: goal `meta` + `person_id` + `group_id` + `input`, with the
   `std_skills` result and feedback the other skills use. A device serving a
-  `say` method can now be bound to `/skill/say`.
+  `say` method can now be bound to `/skill/say`. Its feedback carries Vizij's
+  extension to the standard — `string viseme`, `float32 intensity` — after the
+  standard's own field; the README's "Departures from upstream" table is the
+  record of it.
 
 ## [0.1.1] - 2026-07-30
 
