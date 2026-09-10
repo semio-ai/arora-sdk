@@ -1084,6 +1084,40 @@ mod tests {
         StateChange::set(Key::from(key), Value::F64(value))
     }
 
+    /// The preset's image pair reaches the config as the typed outputs the
+    /// publish path keys on: the device key, the message, the absolute topic.
+    /// The command surfaces stay inbound, so nothing else is on that plane.
+    #[test]
+    fn the_ros4hri_profile_declares_the_face_image_as_typed_outputs() {
+        let config =
+            Ros2BridgeConfig::new("robot", 0).with_profile(profile::ExposureProfile::ros4hri());
+        let mut outputs: Vec<(&str, &str, Option<&str>)> = config
+            .outputs
+            .iter()
+            .map(|o| (o.path.as_str(), o.ros_type.as_str(), o.topic.as_deref()))
+            .collect();
+        outputs.sort();
+        assert_eq!(
+            outputs,
+            [
+                (
+                    "display/face",
+                    "sensor_msgs/Image",
+                    Some("/robot_face/image_raw")
+                ),
+                (
+                    "display/face/compressed",
+                    "sensor_msgs/CompressedImage",
+                    Some("/robot_face/image_raw/compressed")
+                ),
+            ]
+        );
+        assert!(
+            config.outputs.iter().all(|o| o.qos.is_none()),
+            "the image takes the outbound default (sensor data)"
+        );
+    }
+
     /// The seam keeps state, not history: a key written twice before the node
     /// task drains publishes once, at its newest value. This is what bounds the
     /// bridge's memory by the device's key count.

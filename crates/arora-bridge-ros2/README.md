@@ -158,7 +158,11 @@ and IIIA (`/expressive_face/*`): expression commands fan out to
 skills spawn the device's task runs — `interaction_skills/LookAt` on
 `/skill/look_at`, and `communication_skills/Say` on `/skill/say`, whose goal
 `input` is the utterance and whose feedback carries what the run reports (for
-a face, the viseme at the audio playhead). Enabling it is one call:
+a face, the viseme at the audio playhead). The rendered face publishes on the
+`image_transport` pair PAL OS documents — `display/face` as a
+`sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
+`sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
+writes the key of the transport it encodes. Enabling it is one call:
 
 ```rust
 let config = Ros2BridgeConfig::new("robot", 0)
