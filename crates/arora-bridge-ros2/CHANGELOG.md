@@ -4,6 +4,16 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.2.1] - 2026-09-10
+
+### Fixed
+
+- **The crate requires `arora-msgs-ros2` 1.2.** 6.2.0 declared `1`, which a
+  consumer's older lockfile satisfies with 1.0.0 — a version without the
+  hashers the bridge calls, and without the `communication_skills/Say` types
+  its ROS4HRI preset binds — so the bridge failed to compile there. The
+  requirement now names the version its code needs.
+
 ## [6.2.0] - 2026-09-10
 
 ### Added
