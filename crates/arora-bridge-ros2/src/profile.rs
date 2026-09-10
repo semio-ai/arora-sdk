@@ -7,7 +7,8 @@
 //! - [`Endpoint`]s bind an absolute topic to a registered message type and
 //!   fan its fields out over device keys ([`FieldRoute`]) — the command
 //!   surfaces, where a structured message maps to several keys and no string
-//!   rewrite could express the relation.
+//!   rewrite could express the relation — or, outbound, publish one device
+//!   key that already holds the whole message (the rendered face).
 //! - [`Include`]s select bulk data keys by **glob** (`*` one segment, `**`
 //!   the rest — regex was rejected) and rewrite their prefix into an absolute
 //!   topic name — the state plane, where key names and topic names correspond
@@ -123,10 +124,24 @@ impl ExposureProfile {
     ///   the device's `look_at` task run, its goal routed onto the
     ///   `(policy, target, frame)` parameters — the skill plane, for gaze
     ///   work that runs until it converges or is cancelled. `set_expression`
-    ///   stays a topic: setting a target state is not a task.
+    ///   stays a topic: setting a target state is not a task;
+    /// - the rendered face publishes as the `image_transport` pair PAL OS
+    ///   documents under `/robot_face/image_raw/*`: the key `display/face`
+    ///   as a `sensor_msgs/Image` on `/robot_face/image_raw`, and
+    ///   `display/face/compressed` as a `sensor_msgs/CompressedImage` on
+    ///   `/robot_face/image_raw/compressed`. One key per transport, because
+    ///   a profile is static and a face encodes one way: it writes the key
+    ///   of the transport it encodes, and a key never written never
+    ///   publishes. [`coverage`](Self::coverage) therefore reports the other
+    ///   transport's key as unserved — which is what a consumer of that
+    ///   transport finds, so it is the truth of the pair rather than a hole.
     ///
-    /// The outbound plane (image, diagnostics) is typed and tracked
-    /// separately, so the preset declares no bulk includes.
+    /// REP-155 standardises the perception of humans and says nothing of the
+    /// robot's own face; the `/robot_face/*` names are PAL's, and they are
+    /// what the ROS4HRI tooling (the interaction simulator, `rqt`) reads.
+    ///
+    /// Diagnostics are tracked separately, so the preset declares no bulk
+    /// includes.
     pub fn ros4hri() -> Self {
         let expression_routes = vec![
             FieldRoute {
@@ -156,15 +171,23 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
-        // Every ROS4HRI endpoint is a command surface, so all of them take the
-        // inbound default (reliable): an expression or a line of speech that is
-        // dropped is an instruction the face never carries out.
-        let endpoint = |topic: &str, ros_type: &str, routes: &Vec<FieldRoute>| Endpoint {
+        // Every endpoint takes its flow's default delivery. A command surface
+        // is reliable: an expression or a line of speech that is dropped is an
+        // instruction the face never carries out. The image is sensor data: a
+        // frame is state, and a slow reader must not stall the renderer.
+        let endpoint = |topic: &str, ros_type: &str, flow: Flow, routes: &[FieldRoute]| Endpoint {
             topic: topic.into(),
             ros_type: ros_type.into(),
-            flow: Flow::In,
-            routes: routes.clone(),
+            flow,
+            routes: routes.to_vec(),
             qos: None,
+        };
+        // An image is not fanned out: the key holds the whole message.
+        let whole = |key: &str| {
+            vec![FieldRoute {
+                field: String::new(),
+                key: key.into(),
+            }]
         };
         Self {
             name: "ros4hri".into(),
@@ -172,20 +195,45 @@ impl ExposureProfile {
                 endpoint(
                     "/robot_face/expression",
                     "hri_msgs/Expression",
+                    Flow::In,
                     &expression_routes,
                 ),
                 endpoint(
                     "/robot_face/look_at",
                     "geometry_msgs/PointStamped",
+                    Flow::In,
                     &look_at_routes,
                 ),
                 endpoint(
                     "/expressive_face/look_at",
                     "geometry_msgs/PointStamped",
+                    Flow::In,
                     &look_at_routes,
                 ),
-                endpoint("/robot_face/tts", "std_msgs/String", &speech_routes),
-                endpoint("/expressive_face/speech", "std_msgs/String", &speech_routes),
+                endpoint(
+                    "/robot_face/tts",
+                    "std_msgs/String",
+                    Flow::In,
+                    &speech_routes,
+                ),
+                endpoint(
+                    "/expressive_face/speech",
+                    "std_msgs/String",
+                    Flow::In,
+                    &speech_routes,
+                ),
+                endpoint(
+                    "/robot_face/image_raw",
+                    "sensor_msgs/Image",
+                    Flow::Out,
+                    &whole("display/face"),
+                ),
+                endpoint(
+                    "/robot_face/image_raw/compressed",
+                    "sensor_msgs/CompressedImage",
+                    Flow::Out,
+                    &whole("display/face/compressed"),
+                ),
             ],
             includes: Vec::new(),
             actions: vec![
@@ -346,10 +394,47 @@ mod tests {
             "/expressive_face/look_at",
             "/robot_face/tts",
             "/expressive_face/speech",
+            "/robot_face/image_raw",
+            "/robot_face/image_raw/compressed",
         ] {
             assert!(topics.contains(&expected), "missing {expected}");
         }
-        assert!(profile.endpoints.iter().all(|e| e.flow == Flow::In));
+        // The commands flow in and the image flows out; nothing else does.
+        for endpoint in &profile.endpoints {
+            let expected = if endpoint.topic.starts_with("/robot_face/image_raw") {
+                Flow::Out
+            } else {
+                Flow::In
+            };
+            assert_eq!(endpoint.flow, expected, "{}", endpoint.topic);
+        }
+    }
+
+    /// The image pair is the contract a face device writes against: one key
+    /// per transport, each holding the whole message its topic is typed as.
+    #[test]
+    fn ros4hri_preset_publishes_the_face_image_one_key_per_transport() {
+        let profile = ExposureProfile::ros4hri();
+        for (topic, ros_type, key) in [
+            ("/robot_face/image_raw", "sensor_msgs/Image", "display/face"),
+            (
+                "/robot_face/image_raw/compressed",
+                "sensor_msgs/CompressedImage",
+                "display/face/compressed",
+            ),
+        ] {
+            let endpoint = profile
+                .endpoints
+                .iter()
+                .find(|e| e.topic == topic)
+                .unwrap_or_else(|| panic!("{topic} is in the preset"));
+            assert_eq!(endpoint.ros_type, ros_type, "{topic}");
+            assert_eq!(endpoint.flow, Flow::Out, "{topic}");
+            let [route] = endpoint.routes.as_slice() else {
+                panic!("{topic} routes one whole key, got {:?}", endpoint.routes);
+            };
+            assert_eq!((route.field.as_str(), route.key.as_str()), ("", key));
+        }
     }
 
     #[test]
@@ -399,5 +484,17 @@ mod tests {
         assert_eq!(missing.len(), 2, "{missing:?}");
         assert!(missing.iter().any(|m| m.contains("/skill/look_at")));
         assert!(missing.iter().any(|m| m.contains("/skill/say")));
+        // A face encodes one transport, so the other's key is reported as
+        // unserved — the truth of the pair, named by topic and type.
+        let png_only: Vec<&str> = keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| *k != "display/face")
+            .collect();
+        let missing = profile.coverage(png_only, ["look_at", "say"]);
+        assert_eq!(
+            missing,
+            ["/robot_face/image_raw (sensor_msgs/Image): no device key 'display/face'"]
+        );
     }
 }

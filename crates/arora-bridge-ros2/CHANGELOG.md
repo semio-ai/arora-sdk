@@ -4,6 +4,19 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.3.0] - 2026-09-10
+
+### Added
+
+- **The ROS4HRI preset publishes the rendered face.** Two outbound endpoints,
+  one per `image_transport` transport, on the names PAL OS documents under
+  `/robot_face/image_raw/*`: the key `display/face` as a `sensor_msgs/Image`
+  on `/robot_face/image_raw`, and `display/face/compressed` as a
+  `sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`. A face
+  writes the key of the transport it encodes and the other never publishes;
+  `coverage()` reports that key as unserved, which is what a consumer of that
+  transport would find. A device exposed through the preset no longer declares
+  the image itself with `with_typed_output_on`.
 ## [6.2.1] - 2026-09-10
 
 ### Fixed
