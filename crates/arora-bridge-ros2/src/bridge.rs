@@ -560,7 +560,7 @@ async fn run_node(
     // runs' status/feedback/result keys.
     let mut action_change_txs: Vec<tmpsc::UnboundedSender<StateChange>> = Vec::new();
     for action in discovered_actions {
-        match create_raw_action_server(&mut node, &action) {
+        match create_raw_action_server(&mut node, &action, &registry) {
             Ok(server) => {
                 let (change_tx, change_rx) = tmpsc::unbounded_channel();
                 action_change_txs.push(change_tx);
@@ -724,11 +724,21 @@ fn service_qos() -> ros2_client::ros2::QosPolicies {
 /// topic is transient-local with a history of one (late-joining clients read
 /// the current goal states, per the ROS actions design); the services and the
 /// feedback topic ride the reliable [`service_qos`].
+///
+/// The runtime-typed endpoints are keyed on the REP-2016 hashes the action's
+/// `.action` generates — what a native `rmw_zenoh` client addresses them by —
+/// when they can be: a bound action's goal, result and feedback are registry
+/// messages, so its hashes reproduce `rosidl`'s. A synthesized action's result
+/// and feedback are typed from what the run writes, unknown when the server is
+/// made, so it keeps the placeholder — reachable by `ros2-client` peers, which
+/// no ROS package could give a native client a goal for anyway.
 fn create_raw_action_server(
     node: &mut Node,
     action: &actions::MethodAction,
+    registry: &Ros2Registry,
 ) -> Result<ros2_client::RawActionServer, String> {
     let name = services::parse_name(&action.name)?;
+    let hashes = action_type_hashes(action, registry);
     #[cfg(feature = "dds")]
     {
         use ros2_client::ros2::{policy, QosPolicyBuilder};
@@ -746,13 +756,64 @@ fn create_raw_action_server(
             feedback_publisher: service_qos(),
             status_publisher: status_qos,
         };
-        node.create_raw_action_server(&name, &action.action_type, qos)
-            .map_err(|e| format!("{e:?}"))
+        match hashes {
+            Some(hashes) => node
+                .create_raw_action_server_with_type_hashes(&name, &action.action_type, qos, &hashes)
+                .map_err(|e| format!("{e:?}")),
+            None => node
+                .create_raw_action_server(&name, &action.action_type, qos)
+                .map_err(|e| format!("{e:?}")),
+        }
     }
     #[cfg(feature = "zenoh")]
     {
-        node.create_raw_action_server(&name, &action.action_type)
-            .map_err(|e| format!("{e:?}"))
+        match hashes {
+            Some(hashes) => node
+                .create_raw_action_server_with_type_hashes(&name, &action.action_type, &hashes)
+                .map_err(|e| format!("{e:?}")),
+            None => node
+                .create_raw_action_server(&name, &action.action_type)
+                .map_err(|e| format!("{e:?}")),
+        }
+    }
+}
+
+/// The REP-2016 hashes of a bound action's `_SendGoal`, `_GetResult` and
+/// `_FeedbackMessage`, from its registry goal, result and feedback types;
+/// `None` for a synthesized action, or one whose types the hasher cannot
+/// describe (said once, as for publishers).
+fn action_type_hashes(
+    action: &actions::MethodAction,
+    registry: &Ros2Registry,
+) -> Option<ros2_client::ActionTypeHashes> {
+    let actions::Wire::Bound(bound) = &action.wire else {
+        return None;
+    };
+    let feedback = bound.feedback.as_ref()?;
+    let qualified = format!(
+        "{}/action/{}",
+        action.action_type.package_name(),
+        action.action_type.type_name()
+    );
+    match arora_msgs_ros2::action_hashes(
+        &qualified,
+        &bound.goal_type,
+        &bound.result_type,
+        &feedback.message,
+        registry.types(),
+    ) {
+        Ok(hashes) => Some(ros2_client::ActionTypeHashes {
+            send_goal: hashes.send_goal,
+            get_result: hashes.get_result,
+            feedback_message: hashes.feedback_message,
+        }),
+        Err(e) => {
+            warn!(
+                "Ros2Bridge action '{}' keeps the placeholder type hash — native rmw_zenoh clients will not reach it: {e}",
+                action.name
+            );
+            None
+        }
     }
 }
 
@@ -773,15 +834,42 @@ fn service_stream(
             return None;
         }
     };
-    #[cfg(feature = "dds")]
-    let server = node.create_raw_server(
-        &ros_name,
-        &service.service_type,
-        service_qos(),
-        service_qos(),
+    // Keyed on the hash the service's `.srv` would generate, so a native
+    // rmw_zenoh client reaches it once such a package exists; a type the
+    // hasher cannot describe keeps the placeholder and says so.
+    let hash = arora_msgs_ros2::service_rihs01(
+        &format!("arora/srv/{}", service.service_type.type_name()),
+        &service.request_type,
+        &service.response_type,
+        registry.types(),
     );
+    if let Err(e) = &hash {
+        warn!(
+            "Ros2Bridge service '{}' keeps the placeholder type hash — native rmw_zenoh clients will not reach it: {e}",
+            service.name
+        );
+    }
+    #[cfg(feature = "dds")]
+    let server = match &hash {
+        Ok(hash) => node.create_raw_server_with_type_hash(
+            &ros_name,
+            &service.service_type,
+            service_qos(),
+            service_qos(),
+            hash,
+        ),
+        Err(_) => node.create_raw_server(
+            &ros_name,
+            &service.service_type,
+            service_qos(),
+            service_qos(),
+        ),
+    };
     #[cfg(feature = "zenoh")]
-    let server = node.create_raw_server(&ros_name, &service.service_type);
+    let server = match &hash {
+        Ok(hash) => node.create_raw_server_with_type_hash(&ros_name, &service.service_type, hash),
+        Err(_) => node.create_raw_server(&ros_name, &service.service_type),
+    };
     let server = match server {
         Ok(server) => server,
         Err(e) => {

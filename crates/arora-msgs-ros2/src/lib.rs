@@ -60,7 +60,7 @@ pub use registry::{package_and_type, Ros2Registry};
 pub use representable::{ros2_representable, NotRepresentable};
 
 #[cfg(feature = "interop")]
-pub use hash::rihs01;
+pub use hash::{action_hashes, rihs01, service_rihs01, ActionHashes};
 #[cfg(feature = "interop")]
 pub use message::type_hash;
 

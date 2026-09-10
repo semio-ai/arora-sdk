@@ -42,13 +42,221 @@ pub fn rihs01(ty: &low::Type, registry: &TypeRegistry) -> Result<String, Error> 
     Ok(TypeDescription::new(top, referenced).rihs01())
 }
 
+/// The hashes an action's three runtime-typed endpoints are keyed on under
+/// `rmw_zenoh`: the `_SendGoal` and `_GetResult` services and the
+/// `_FeedbackMessage` topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionHashes {
+    pub send_goal: String,
+    pub get_result: String,
+    pub feedback_message: String,
+}
+
+/// The REP-2016 hashes of the action `action` (its ROS-qualified name,
+/// `communication_skills/action/Say`) whose goal, result and feedback are the
+/// arora message types given — exactly what `rosidl` computes for the
+/// `.action`, since the wrappers an action is made of are fixed by the
+/// standard: `goal_id` is a `unique_identifier_msgs/UUID`, a response carries
+/// a `builtin_interfaces/Time`, and every service has its `_Event` message.
+pub fn action_hashes(
+    action: &str,
+    goal: &low::Type,
+    result: &low::Type,
+    feedback: &low::Type,
+    registry: &TypeRegistry,
+) -> Result<ActionHashes, Error> {
+    let send_goal_request = IndividualTypeDescription::new(
+        format!("{action}_SendGoal_Request"),
+        vec![
+            Field::new("goal_id", FieldType::nested(UUID)),
+            Field::new("goal", FieldType::nested(ros_name(goal)?)),
+        ],
+    );
+    let send_goal_response = IndividualTypeDescription::new(
+        format!("{action}_SendGoal_Response"),
+        vec![
+            Field::new("accepted", FieldType::scalar(rid::BOOLEAN)),
+            Field::new("stamp", FieldType::nested(TIME)),
+        ],
+    );
+    let get_result_request = IndividualTypeDescription::new(
+        format!("{action}_GetResult_Request"),
+        vec![Field::new("goal_id", FieldType::nested(UUID))],
+    );
+    let get_result_response = IndividualTypeDescription::new(
+        format!("{action}_GetResult_Response"),
+        vec![
+            Field::new("status", FieldType::scalar(rid::INT8)),
+            Field::new("result", FieldType::nested(ros_name(result)?)),
+        ],
+    );
+    let feedback_message = IndividualTypeDescription::new(
+        format!("{action}_FeedbackMessage"),
+        vec![
+            Field::new("goal_id", FieldType::nested(UUID)),
+            Field::new("feedback", FieldType::nested(ros_name(feedback)?)),
+        ],
+    );
+    Ok(ActionHashes {
+        send_goal: service_hash(
+            &format!("{action}_SendGoal"),
+            send_goal_request,
+            send_goal_response,
+            &[described(goal, registry)?, vec![uuid(), time()]].concat(),
+        ),
+        get_result: service_hash(
+            &format!("{action}_GetResult"),
+            get_result_request,
+            get_result_response,
+            &[described(result, registry)?, vec![uuid()]].concat(),
+        ),
+        feedback_message: TypeDescription::new(
+            feedback_message,
+            dedup([described(feedback, registry)?, vec![uuid()]].concat()),
+        )
+        .rihs01(),
+    })
+}
+
+/// The REP-2016 hash of the service `service` (its ROS-qualified name,
+/// `pkg/srv/Name`) whose request and response are the arora message types
+/// given — named `<service>_Request` and `<service>_Response` on the wire.
+pub fn service_rihs01(
+    service: &str,
+    request: &low::Type,
+    response: &low::Type,
+    registry: &TypeRegistry,
+) -> Result<String, Error> {
+    let request_description =
+        IndividualTypeDescription::new(format!("{service}_Request"), fields_of(request, registry)?);
+    let response_description = IndividualTypeDescription::new(
+        format!("{service}_Response"),
+        fields_of(response, registry)?,
+    );
+    let mut referenced = Vec::new();
+    let mut seen = HashSet::from([request.id, response.id]);
+    collect_referenced(request, registry, &mut referenced, &mut seen)?;
+    collect_referenced(response, registry, &mut referenced, &mut seen)?;
+    Ok(service_hash(
+        service,
+        request_description,
+        response_description,
+        &referenced,
+    ))
+}
+
+const UUID: &str = "unique_identifier_msgs/msg/UUID";
+const TIME: &str = "builtin_interfaces/msg/Time";
+const SERVICE_EVENT_INFO: &str = "service_msgs/msg/ServiceEventInfo";
+
+/// The hash of a service from its request and response descriptions:
+/// `rosidl` describes a service as the three messages it is made of — the
+/// request, the response, and the event message that pairs them for
+/// introspection — and hashes that description with everything it references.
+fn service_hash(
+    service: &str,
+    request: IndividualTypeDescription,
+    response: IndividualTypeDescription,
+    referenced: &[IndividualTypeDescription],
+) -> String {
+    let event = IndividualTypeDescription::new(
+        format!("{service}_Event"),
+        vec![
+            Field::new("info", FieldType::nested(SERVICE_EVENT_INFO)),
+            Field::new(
+                "request",
+                FieldType::nested_bounded_sequence(request.type_name.clone(), 1),
+            ),
+            Field::new(
+                "response",
+                FieldType::nested_bounded_sequence(response.type_name.clone(), 1),
+            ),
+        ],
+    );
+    let top = IndividualTypeDescription::new(
+        service.to_string(),
+        vec![
+            Field::new(
+                "request_message",
+                FieldType::nested(request.type_name.clone()),
+            ),
+            Field::new(
+                "response_message",
+                FieldType::nested(response.type_name.clone()),
+            ),
+            Field::new("event_message", FieldType::nested(event.type_name.clone())),
+        ],
+    );
+    let mut all = vec![request, response, event, service_event_info(), time()];
+    all.extend_from_slice(referenced);
+    TypeDescription::new(top, dedup(all)).rihs01()
+}
+
+/// A message's own description followed by everything it references.
+fn described(
+    ty: &low::Type,
+    registry: &TypeRegistry,
+) -> Result<Vec<IndividualTypeDescription>, Error> {
+    let mut out = vec![individual(ty, registry)?];
+    let mut seen = HashSet::from([ty.id]);
+    collect_referenced(ty, registry, &mut out, &mut seen)?;
+    Ok(out)
+}
+
+/// One description per type name — the standard wrappers are referenced from
+/// several places (`Time` by a response and by the event info).
+fn dedup(descriptions: Vec<IndividualTypeDescription>) -> Vec<IndividualTypeDescription> {
+    let mut seen = HashSet::new();
+    descriptions
+        .into_iter()
+        .filter(|d| seen.insert(d.type_name.clone()))
+        .collect()
+}
+
+fn uuid() -> IndividualTypeDescription {
+    IndividualTypeDescription::new(
+        UUID,
+        vec![Field::new("uuid", FieldType::array(rid::UINT8, 16))],
+    )
+}
+
+fn time() -> IndividualTypeDescription {
+    IndividualTypeDescription::new(
+        TIME,
+        vec![
+            Field::new("sec", FieldType::scalar(rid::INT32)),
+            Field::new("nanosec", FieldType::scalar(rid::UINT32)),
+        ],
+    )
+}
+
+fn service_event_info() -> IndividualTypeDescription {
+    IndividualTypeDescription::new(
+        SERVICE_EVENT_INFO,
+        vec![
+            Field::new("event_type", FieldType::scalar(rid::UINT8)),
+            Field::new("stamp", FieldType::nested(TIME)),
+            Field::new("client_gid", FieldType::array(rid::UINT8, 16)),
+            Field::new("sequence_number", FieldType::scalar(rid::INT64)),
+        ],
+    )
+}
+
 /// The `IndividualTypeDescription` for one structure type — its ROS name and its
 /// fields, without recursing into nested types.
 fn individual(ty: &low::Type, registry: &TypeRegistry) -> Result<IndividualTypeDescription, Error> {
+    Ok(IndividualTypeDescription::new(
+        ros_name(ty)?,
+        fields_of(ty, registry)?,
+    ))
+}
+
+/// The REP-2016 fields of one structure type, in declaration order.
+fn fields_of(ty: &low::Type, registry: &TypeRegistry) -> Result<Vec<Field>, Error> {
     let low::TypeKind::Structure(structure) = &ty.kind else {
         return Err(Error(format!(
             "type {:?} is not a structure (only message structs map to REP-2016)",
-            ros_name(ty)?
+            ty.name
         )));
     };
     let mut fields = Vec::with_capacity(structure.fields.len());
@@ -58,7 +266,7 @@ fn individual(ty: &low::Type, registry: &TypeRegistry) -> Result<IndividualTypeD
             field_type(&field.type_ref, registry)?,
         ));
     }
-    Ok(IndividualTypeDescription::new(ros_name(ty)?, fields))
+    Ok(fields)
 }
 
 /// The array shape of a field: a single value, a fixed `[N]`, or an unbounded
@@ -405,6 +613,54 @@ mod tests {
         );
         let direct = TypeDescription::new(top, vec![point_desc]).rihs01();
         assert_eq!(from_arora, direct);
+    }
+
+    /// The wrappers every action and service is made of hash to what `rosidl`
+    /// generates for them (read off a Jazzy build's type-description JSON).
+    #[test]
+    fn the_standard_wrappers_hash_like_rosidl() {
+        let alone = |d: IndividualTypeDescription| TypeDescription::new(d, vec![]).rihs01();
+        assert_eq!(
+            alone(uuid()),
+            "RIHS01_1b8e8aca958cbea28fe6ef60bf6c19b683c97a9ef60bb34752067d0f2f7ab437"
+        );
+        assert_eq!(
+            alone(time()),
+            "RIHS01_b106235e25a4c5ed35098aa0a61a3ee9c9b18d197f398b0e4206cea9acf9c197"
+        );
+        assert_eq!(
+            TypeDescription::new(service_event_info(), vec![time()]).rihs01(),
+            "RIHS01_41bcbbe07a75c9b52bc96bfd5c24d7f0fc0a08c0cb7921b3373c5732345a6f45"
+        );
+    }
+
+    /// The vendored `interaction_skills/LookAt` hashes, endpoint by endpoint,
+    /// to what a Jazzy `rosidl` build of the same `.action` generates — the
+    /// keys a native `rmw_zenoh` client addresses the action's servers by.
+    #[test]
+    fn the_look_at_action_hashes_like_rosidl() {
+        let registry = crate::registry();
+        let ty = |name: &str| registry.get_by_name(name).expect(name).clone();
+        let hashes = action_hashes(
+            "interaction_skills/action/LookAt",
+            &ty("interaction_skills/action/LookAt_Goal"),
+            &ty("interaction_skills/action/LookAt_Result"),
+            &ty("interaction_skills/action/LookAt_Feedback"),
+            registry.types(),
+        )
+        .expect("the vendored action hashes");
+        assert_eq!(
+            hashes.send_goal,
+            "RIHS01_531ff488ce0aebb68a128165311469208b35a3f5bbc2f71888184c22946c9d89"
+        );
+        assert_eq!(
+            hashes.get_result,
+            "RIHS01_2271b6c26ee3315bf64115cfda660c72833aaf8a1bf0c4c0d9131eafaa7c3f58"
+        );
+        assert_eq!(
+            hashes.feedback_message,
+            "RIHS01_4d3ba580d834355ddac57e191a21b4361fa70003660b7cc0984efc9c423dccee"
+        );
     }
 
     #[test]
