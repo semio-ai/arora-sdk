@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "arora-msgs-ros2"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arora-types",
  "proc-macro2",
@@ -5670,9 +5670,9 @@ dependencies = [
 
 [[package]]
 name = "ros2-client-multi-rmw"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "507526b5e82441bf7b9b810eaa53acd3226cf27ad1426dc5b079fbfea9e81994"
+checksum = "56b24a7b1d5cc1fa0fcad16b8896758b397629c1b2a38c9d66147f2003941335"
 dependencies = [
  "async-channel",
  "bstr",
