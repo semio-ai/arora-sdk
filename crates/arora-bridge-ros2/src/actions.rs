@@ -2536,12 +2536,21 @@ mod tests {
             Value::KeyValue(report),
         )
         .expect("the named fields land");
-        let viseme = extract_route(&message, &feedback.wire, registry.types(), "feedback.viseme")
-            .expect("viseme resolves");
+        let viseme = extract_route(
+            &message,
+            &feedback.wire,
+            registry.types(),
+            "feedback.viseme",
+        )
+        .expect("viseme resolves");
         assert_eq!(viseme, Value::String("aa".into()));
-        let intensity =
-            extract_route(&message, &feedback.wire, registry.types(), "feedback.intensity")
-                .expect("intensity resolves");
+        let intensity = extract_route(
+            &message,
+            &feedback.wire,
+            registry.types(),
+            "feedback.intensity",
+        )
+        .expect("intensity resolves");
         assert_eq!(intensity, Value::F32(0.75));
         let bytes = cdr::encode(&feedback.wire, registry.types(), &message)
             .expect("encode feedback message");
