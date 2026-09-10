@@ -663,6 +663,35 @@ mod tests {
         );
     }
 
+    /// The vendored `communication_skills/Say` — Vizij's extended feedback
+    /// included — hashes, endpoint by endpoint, to what a Jazzy `rosidl` build
+    /// of the same `.action` generates.
+    #[test]
+    fn the_say_action_hashes_like_rosidl() {
+        let registry = crate::registry();
+        let ty = |name: &str| registry.get_by_name(name).expect(name).clone();
+        let hashes = action_hashes(
+            "communication_skills/action/Say",
+            &ty("communication_skills/action/Say_Goal"),
+            &ty("communication_skills/action/Say_Result"),
+            &ty("communication_skills/action/Say_Feedback"),
+            registry.types(),
+        )
+        .expect("the vendored action hashes");
+        assert_eq!(
+            hashes.send_goal,
+            "RIHS01_945c699ae66d2e4ecab69fc4b43f19d91275c7000022ccca053d61cd15dbdff4"
+        );
+        assert_eq!(
+            hashes.get_result,
+            "RIHS01_d4a4f3a3b00fc8e7bc9b6b1a2cec9d180a5b47d4c65506a6bae7a20ef1106ac5"
+        );
+        assert_eq!(
+            hashes.feedback_message,
+            "RIHS01_1f56c25b7563b8d14c3b7a3dc18dd143be9f29ba22c9b393ef665692482f2cd8"
+        );
+    }
+
     #[test]
     fn missing_ros_name_is_rejected() {
         let anon = message("", id(0x55), vec![(id(0x551), field("x", *ty::F64_ID))]);
