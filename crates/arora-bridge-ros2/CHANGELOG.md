@@ -13,6 +13,10 @@ All notable changes to `arora-bridge-ros2`. The format follows
   `input` carrying the utterance. What the run feeds back rides
   `std_skills/Feedback` — for a face, the viseme at the audio playhead, so a
   ROS client watching the goal sees the lipsync stream.
+- **A record feeds a bound action's feedback field by field, by name.** A run
+  that reports several things at once — a face's `{viseme, intensity}` — lands
+  on the message without knowing its ids; an entry the message has no field
+  for is dropped, and a record landing nothing is no feedback.
 
 ### Changed
 

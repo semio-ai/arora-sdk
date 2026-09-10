@@ -990,6 +990,21 @@ fn bound_feedback_value(
         Value::Structure(structure) if structure.id == feedback.message.id => {
             Value::Structure(structure)
         }
+        // A record feeds the message field by field, by name — how a run
+        // reports several things at once (a face's `viseme` and `intensity`)
+        // without knowing the message's ids. An entry the message has no
+        // field for is dropped; a record landing nothing is no feedback.
+        Value::KeyValue(record) => {
+            let mut message = default_value(&feedback.message, registry).ok()?;
+            let mut landed = false;
+            for (name, field) in &record.fields {
+                let Some(value) = field.value.as_deref() else {
+                    continue;
+                };
+                landed |= set_named_field(&mut message, &feedback.message, registry, name, value);
+            }
+            landed.then_some(message)?
+        }
         value => {
             let field = match &value {
                 Value::Boolean(_) => "data_bool",
@@ -2492,6 +2507,58 @@ mod tests {
             cdr::decode(&bound.result_response_type, registry.types(), &bytes).unwrap(),
             response
         );
+    }
+
+    /// A run-written record lands field by field, by name, on the message —
+    /// a face's `{viseme, intensity}` onto the `Say` feedback Vizij extends —
+    /// and a record naming nothing the message has is no feedback at all.
+    #[test]
+    fn bound_feedback_maps_a_record_onto_the_say_feedback() {
+        use arora_types::keyvalue::{KeyValue, KeyValueField};
+
+        let registry = arora_msgs_ros2::registry();
+        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        let signatures = [bound_look_at_signature(), bound_say_signature()];
+        let (actions, _) = resolve_bound(&bindings, &signatures, &registry);
+        let Wire::Bound(bound) = &actions[1].wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        let feedback = bound.feedback.as_ref().expect("Say declares feedback");
+
+        let mut report = KeyValue::new();
+        report.set_field(KeyValueField::new("viseme", Value::String("aa".into())));
+        report.set_field(KeyValueField::new("intensity", Value::F32(0.75)));
+        report.set_field(KeyValueField::new("unknown", Value::F32(1.0)));
+        let message = bound_feedback_value(
+            feedback,
+            registry.types(),
+            [7u8; 16],
+            Value::KeyValue(report),
+        )
+        .expect("the named fields land");
+        let viseme = extract_route(&message, &feedback.wire, registry.types(), "feedback.viseme")
+            .expect("viseme resolves");
+        assert_eq!(viseme, Value::String("aa".into()));
+        let intensity =
+            extract_route(&message, &feedback.wire, registry.types(), "feedback.intensity")
+                .expect("intensity resolves");
+        assert_eq!(intensity, Value::F32(0.75));
+        let bytes = cdr::encode(&feedback.wire, registry.types(), &message)
+            .expect("encode feedback message");
+        assert_eq!(
+            cdr::decode(&feedback.wire, registry.types(), &bytes).unwrap(),
+            message
+        );
+
+        let mut stranger = KeyValue::new();
+        stranger.set_field(KeyValueField::new("unknown", Value::F32(1.0)));
+        assert!(bound_feedback_value(
+            feedback,
+            registry.types(),
+            [7u8; 16],
+            Value::KeyValue(stranger)
+        )
+        .is_none());
     }
 
     /// A run-written scalar lands on the matching `std_skills/Feedback`

@@ -49,6 +49,22 @@ rest — the message layer Vizij's face standard is built on (see
 `build.rs` parser and code generator do the rest. Its dependency packages must
 be present too (the closure here is builtin_interfaces + std/geometry/sensor/hri).
 
+## Departures from upstream
+
+The vendored files are the standards' own, byte-for-byte where they can be —
+a client built from the upstream package must match ours on the wire. Where
+using a standard in a new context has shown it a change, the vendored copy
+carries that change, marked in the file as Vizij's, and this table is the
+record of it: what differs, why, and where it stands upstream. A row leaves
+this table when upstream adopts it or we drop it.
+
+| File | Upstream | Departure | Why | Upstream status |
+|---|---|---|---|---|
+| `communication_skills/Say.action` | [ros4hri/communication_skills](https://github.com/ros4hri/communication_skills/blob/main/action/Say.action) | Feedback gains `string viseme` and `float32 intensity` after the standard's `std_skills/Feedback feedback`. | A face speaking under `/skill/say` shapes its mouth per viseme; a client mirroring the lips or captioning the speech needs that stream, and the standard's generic feedback has no place for it. Additive, so a goal from an upstream client still parses. | Not yet proposed. |
+
+A device exposes the extended contract only under the ROS4HRI exposure
+profile — the skill is ROS4HRI's, and so is the extension.
+
 ## Types defined at runtime
 
 The registry is not limited to the bundled messages:
