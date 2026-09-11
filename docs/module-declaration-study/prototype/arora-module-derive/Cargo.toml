@@ -1,0 +1,18 @@
+[package]
+name = "arora-module-derive"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study prototype: #[module] / #[export] / #[param] — declare an arora module on a Rust module."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+uuid = "1"
+# Read at expansion time by `module_from_header!`: the low header model and its YAML.
+arora-types = { workspace = true, default-features = false }
+serde_yaml = { workspace = true }

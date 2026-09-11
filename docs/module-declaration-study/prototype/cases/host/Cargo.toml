@@ -1,0 +1,22 @@
+[package]
+name = "case-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study case: the host side — every declared module folded into an arora-engine HostModule and dispatched through a real Engine. The only crate here that depends on arora-engine."
+
+[dependencies]
+arora-types = { workspace = true }
+# The guest test loads a built .wasm through the real executor.
+arora-engine = { workspace = true, features = ["wasmtime-host"] }
+arora-module-support = { workspace = true }
+arora-module-derive = { workspace = true }
+case-polly = { path = "../polly" }
+case-polly-outline = { path = "../polly-outline" }
+case-animation = { path = "../animation" }
+case-bt-nodes = { path = "../bt-nodes" }
+case-polly-client = { path = "../polly-client" }
+case-vizij-skills = { path = "../vizij-skills" }
+
+[dev-dependencies]
+uuid = { workspace = true }
