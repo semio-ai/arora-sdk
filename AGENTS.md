@@ -66,7 +66,8 @@ module manifests. See `docs/design_decisions.md`.
 **Consequence:** Requires nightly Rust (pinned in `rust-toolchain.toml`).
 
 Key build concepts:
-- `cargo build --workspace` is the entry point
+- `cargo build` (the default members) is the entry point; `--workspace` also
+  builds the opt-in NAO cross-compile, which needs its own toolchain
 - Cross-compilation happens automatically via artifact dependencies
 - C++ modules use CMake, but invoked from Rust `build.rs`
 - Legacy wasm modules target `wasm32-wasip1`; component-model modules
@@ -141,8 +142,8 @@ cargo test -- --nocapture
 ### Building Modules
 
 ```bash
-# Workspace build (includes all modules)
-cargo build --workspace
+# Default members (everything but the opt-in NAO cross-compile)
+cargo build
 
 # Specific module (will trigger build.rs and code generation)
 cargo build -p test-behavior-tree-nodes

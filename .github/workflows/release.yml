@@ -30,7 +30,7 @@ jobs:
 
       # Trusted publishing: exchange the workflow's GitHub OIDC identity for a
       # short-lived crates.io token. Each published crate must have a Trusted
-      # Publisher configured on crates.io (GitHub: semio-ai/arora-engine,
+      # Publisher configured on crates.io (GitHub: semio-ai/arora-sdk,
       # workflow: release.yml).
       - name: Authenticate to crates.io (trusted publishing)
         uses: rust-lang/crates-io-auth-action@v1

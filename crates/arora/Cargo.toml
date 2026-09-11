@@ -16,8 +16,8 @@ path = "src/main.rs"
 # studio-bridge feature. On wasm, build the library with --no-default-features.
 required-features = ["native"]
 
-# A worked example of a device-specific arora (custom HAL injected into
-# arora::launch). Native-only, like the binary.
+# A worked example of a device-specific arora (custom HAL handed to
+# arora::run_with). Native-only, like the binary.
 [[example]]
 name = "device"
 required-features = ["native"]
