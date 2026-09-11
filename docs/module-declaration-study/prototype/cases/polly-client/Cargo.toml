@@ -1,0 +1,14 @@
+[package]
+name = "case-polly-client"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study case: a consumer of polly built from its resolved header (module.yaml) alone — ids and typed call stubs, no dependency on the module crate's declaration."
+
+[dependencies]
+arora-types = { workspace = true }
+arora-module-derive = { workspace = true }
+arora-module-support = { workspace = true }
+serde_yaml = { workspace = true }
+# Only for the `Status` type the stubs are told to use for polly's return.
+case-polly = { path = "../polly" }
