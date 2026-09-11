@@ -137,7 +137,7 @@ for other uses.
 - The device runtime around the engine — see the
   [runtime architecture](architecture.md#runtime-an-arora-instance-and-its-seams):
   - [`arora`](../crates/arora/readme.md): the opinionated runtime — the
-    step loop (`Arora`), the launcher, and the headless device runner;
+    step loop (`Arora`), the `run` family, and the headless device runner;
   - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
   - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
     boundary (Semio Studio via the studio-bridge connector);

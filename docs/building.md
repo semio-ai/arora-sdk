@@ -241,7 +241,8 @@ What the integration test crate actually declares as artifact dependencies
 
 - `cargo build -p arora-nao` — builds the NAO cross-compile (opt-in; requires
   i686-unknown-linux-musl toolchain). NAO is excluded from `default-members`,
-  so `cargo build --workspace` skips it.
+  so a bare `cargo build` skips it; `cargo build --workspace` includes it and
+  needs that toolchain.
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 
