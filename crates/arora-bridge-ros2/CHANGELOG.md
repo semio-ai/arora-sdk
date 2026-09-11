@@ -17,6 +17,7 @@ All notable changes to `arora-bridge-ros2`. The format follows
   `coverage()` reports that key as unserved, which is what a consumer of that
   transport would find. A device exposed through the preset no longer declares
   the image itself with `with_typed_output_on`.
+
 ## [6.2.1] - 2026-09-10
 
 ### Fixed
