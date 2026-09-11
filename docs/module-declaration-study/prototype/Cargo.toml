@@ -1,0 +1,17 @@
+# The module-declaration study's prototype: a standalone workspace so its
+# macros and examples compile and test in isolation from the SDK. Path deps
+# point at the SDK crates it would eventually live beside.
+[workspace]
+resolver = "2"
+members = ["arora-module-derive", "arora-module-support", "cases/*"]
+
+[workspace.dependencies]
+arora-types = { path = "../../../crates/arora-types" }
+arora-buffers = { path = "../../../crates/arora-buffers" }
+arora-engine = { path = "../../../crates/arora-engine", default-features = false }
+arora-module-derive = { path = "arora-module-derive" }
+arora-module-support = { path = "arora-module-support" }
+uuid = { version = "1", features = ["serde", "v4"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+semver = "1"

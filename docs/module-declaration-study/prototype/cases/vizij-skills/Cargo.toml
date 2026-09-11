@@ -1,0 +1,21 @@
+[package]
+name = "case-vizij-skills"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study case: vizij's host-only skill modules (say with a mutable viseme out-parameter; look_at with an f32-array target) declared in Rust, and exported to a module.yaml they never had."
+
+[dependencies]
+arora-types = { workspace = true }
+arora-module-derive = { workspace = true }
+arora-module-support = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+arora-buffers = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
+uuid = { workspace = true }
