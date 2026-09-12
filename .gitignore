@@ -2,3 +2,8 @@
 /build*/
 /wasi-sdk*
 /.claude/
+
+# The module-declaration study prototype is a nested workspace; its build
+# output must stay ignored on every branch, not only where its own .gitignore
+# is checked out.
+/docs/module-declaration-study/prototype/target/
