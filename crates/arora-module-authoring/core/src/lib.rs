@@ -42,7 +42,19 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
 
     // Resolve the module contents into a description compatible with the registry.
     // It already includes the dependencies (internal and external) as references.
-    let executor_name = module_definition.executor.name.to_owned();
+    // Generating an artifact's bindings needs the executor the artifact is
+    // built for: a `module.yaml` handed to the generator names it.
+    let executor_name = module_definition
+        .executor
+        .as_ref()
+        .ok_or_else(|| {
+            ModuleDeclarationError::Generic(
+                "module.yaml names no executor; the generator builds bindings for one (wasm, native, …)"
+                    .to_string(),
+            )
+        })?
+        .name
+        .to_owned();
     let resolved_module = resolve_high_module(module_definition, registry).await?;
 
     // Collect the actual types behind the references. The module's declared

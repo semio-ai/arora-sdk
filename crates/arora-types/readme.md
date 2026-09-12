@@ -26,7 +26,10 @@ code generators of
 to produce the proper bindings for a module.
 
 The "low-level" format of a module is called a
-[`Header`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/low.rs),
+[`Header`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/low.rs)
+(whose `executor` is optional: the export that builds an artifact names it, a
+declaration does not, and a header without one describes a module linked into the
+host rather than loaded),
 and is produced by the code generators under the file name `header.yaml`. It is
 used to load the module in the engine, with
 [`arora-cli`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-cli/readme.md).

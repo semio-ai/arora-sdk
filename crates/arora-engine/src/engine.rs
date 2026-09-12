@@ -46,6 +46,9 @@ impl EngineBuilder {
 #[derive(Debug, Display, From, Clone)]
 pub enum LoadModuleError {
     ExecutorNotFound,
+    /// The header names no executor: the module is meant to be linked into
+    /// the host and registered, not loaded from an artifact.
+    ExecutorUnspecified,
     MalformedExecutable,
     Internal(String),
 }
@@ -111,7 +114,17 @@ impl Engine {
         module_definition: ModuleDefinition,
     ) -> Result<(), LoadModuleError> {
         let module_id = module_definition.header.id;
-        let executor_name = module_definition.header.executor.name.as_str();
+        // A loaded module is one an executor runs: its header names it. A
+        // header without one describes a module linked into the host, which
+        // is registered (`register_module`), not loaded.
+        let executor_name = module_definition
+            .header
+            .executor
+            .as_ref()
+            .ok_or(LoadModuleError::ExecutorUnspecified)?
+            .name
+            .clone();
+        let executor_name = executor_name.as_str();
 
         if self.modules.contains_key(&module_id) {
             return Ok(());

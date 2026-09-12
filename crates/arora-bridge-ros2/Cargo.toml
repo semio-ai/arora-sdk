@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "6.2.1"
+version = "7.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -10,16 +10,16 @@ repository = "https://github.com/semio-ai/arora-sdk"
 name = "arora_bridge_ros2"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "2" }
-arora-bridge = { path = "../arora-bridge", version = "4" }
+arora-types = { path = "../arora-types", version = "3" }
+arora-bridge = { path = "../arora-bridge", version = "5" }
 # The behavior-tree Status enumeration's well-known ids: the action plane
 # discovers action-shaped methods by their Status return type and maps the
 # status-key values a run writes onto the ROS goal statuses.
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "1" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
 # The ROS 2 message types + the shared CDR codec (re-exported as this crate's
 # `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
 # where the bridge creates hash-keyed publishers.
-arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "1.2" }
+arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -50,7 +50,7 @@ zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 # The crate that DEFINES the interpreter-module SPAWN ABI the action plane
 # speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
 # the bridge's ids and encodings match, without a runtime engine dependency.
-arora-behavior = { path = "../arora-behavior", version = "8" }
+arora-behavior = { path = "../arora-behavior", version = "9" }
 rand = "0.10"
 env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile

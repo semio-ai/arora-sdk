@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree"
-version = "7.0.0"
+version = "8.0.0"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "MIT"
@@ -9,10 +9,10 @@ license = "MIT"
 path = "src/behavior_tree.rs"
 
 [dependencies]
-arora-buffers = { path = "../arora-buffers", version = "2" }
-arora-behavior = { path = "../arora-behavior", version = "8" }
-arora-types = { path = "../arora-types", version = "2.1" }
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "1" }
+arora-buffers = { path = "../arora-buffers", version = "3" }
+arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-types = { path = "../arora-types", version = "3" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
 lazy_static = "1"
 quick-xml = "0.40"
 serde = { version = "1", features = ["derive"] }
@@ -30,8 +30,8 @@ arora-simple-data-store = { path = "../arora-simple-data-store" }
 
 [build-dependencies]
 anyhow = "1"
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "1" }
-arora-registry = { path = "../arora-registry", version = "1" }
-arora-module-rust = { path = "../arora-module-authoring/rust", version = "1" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
+arora-registry = { path = "../arora-registry", version = "2" }
+arora-module-rust = { path = "../arora-module-authoring/rust", version = "2" }
 semver = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

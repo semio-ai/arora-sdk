@@ -4,6 +4,12 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-09-12
+
+### Changed
+
+- **Breaking:** re-pinned to arora-types 3 (the module-declaration wave).
+
 ## [6.1.0] - 2026-07-21
 
 ### Added

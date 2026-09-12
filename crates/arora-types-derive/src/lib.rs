@@ -2,14 +2,23 @@
 //! so the Rust definition is the source of truth for the schema instead of a
 //! hand-authored YAML record.
 //!
-//! The generated impl produces the type's own `ty::low::Type`, the id it is
-//! referenced by, and a `TypeRegistry` carrying it and its transitive
-//! dependencies. Type and field ids must be pinned with
-//! `#[arora(id = "…uuid…")]`: a name-hash id silently changes when a type or
-//! field is renamed, so it is not a reliable identity. A ROS type may instead
-//! set `#[arora(name = "pkg/msg/Name")]` on the struct to opt into name-hashing
-//! its qualified name (a ROS name is the stable spec identity) — that also
-//! name-hashes the struct's fields.
+//! The generated impls produce the type's own `ty::low::Type`, the id it is
+//! referenced by, the record version it is pinned at, a `TypeRegistry`
+//! carrying it and its transitive dependencies, and the value-plane
+//! conversions `From<T> for Value` and `TryFrom<Value> for T` — a structure
+//! under the type's id with each field under its id, in declared order; a
+//! unit-variant enum as an enumeration under its variant's id. Type and field
+//! ids must be pinned with `#[arora(id = "…")]`, spelled as a hex UUID or as
+//! its thirteen-emoji form (`arora_id`): a name-hash id silently changes when
+//! a type or field is renamed, so it is not a reliable identity. A ROS type
+//! may instead set `#[arora(name = "pkg/msg/Name")]` on the struct to opt into
+//! name-hashing its qualified name (a ROS name is the stable spec identity) —
+//! that also name-hashes the struct's fields. `#[arora(version = "…")]` pins
+//! the record version (`1.0.0` by default).
+//!
+//! A `#[arora(keyvalue)]` field crosses the value plane as-is when its Rust
+//! type is `Value`, and through `value_serde` (name-hashed, unseeded)
+//! otherwise.
 //!
 //! Mirrors the type-directed walk it feeds: named-field structs whose fields are
 //! primitive scalars, `String`, `Uuid`, other `#[derive(AroraType)]` types, a
@@ -21,7 +30,7 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Attribute, Data, DeriveInput, Fields, Type};
 
@@ -65,10 +74,19 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
   // qualified name is the stable identity). Then it and its fields may name-hash;
   // otherwise every id must be pinned explicitly.
   let name_hash_mode = meta.name.is_some();
-  let type_id_expr = id_expr(meta.id, &type_name, name_hash_mode, Span::call_site())?;
+  let type_id_expr = id_expr(
+    meta.id.clone(),
+    &type_name,
+    name_hash_mode,
+    Span::call_site(),
+  )?;
 
   let mut field_entries = Vec::new();
   let mut register_calls = Vec::new();
+  let mut field_idents = Vec::new();
+  let mut field_temps = Vec::new();
+  let mut encode_fields = Vec::new();
+  let mut decode_fields = Vec::new();
   for field in &named.named {
     let fname = field.ident.as_ref().expect("a named field has an ident");
     // A raw identifier (`r#type`, for a field whose ROS name is a Rust keyword)
@@ -105,7 +123,37 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         <#ty as arora_types::AroraType>::register_types(registry);
       });
     }
+
+    // The value-plane conversions of this field.
+    let shape = if field_meta.keyvalue {
+      Shape::KeyValue(field.ty.clone())
+    } else {
+      shape_of(&field.ty)?
+    };
+    let what = format!("field `{}` of `{}`", fname_str, name_str);
+    let temp_in = format_ident!("__field_{}", field_idents.len());
+    let encode = shape.encode(quote! { #temp_in });
+    encode_fields.push(quote! {
+      arora_types::value::StructureField { id: #field_id_expr, value: ::std::boxed::Box::new(#encode) }
+    });
+    let decode = shape.decode(&what);
+    let temp = format_ident!("__field_{}", field_idents.len());
+    decode_fields.push(quote! {
+      let #temp = {
+        let __id = #field_id_expr;
+        let __value = __fields
+          .iter()
+          .find(|__field| __field.id == __id)
+          .map(|__field| (*__field.value).clone())
+          .ok_or_else(|| arora_types::value::ConversionError { message: format!("missing {}", #what) })?;
+        #decode
+      };
+    });
+    field_temps.push(temp);
+    field_idents.push(fname.clone());
   }
+  let version_fn = version_fn(&meta);
+  let mismatch = format!("expected a `{}` structure", name_str);
 
   Ok(quote! {
     impl arora_types::AroraType for #name {
@@ -138,6 +186,34 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
         #(#register_calls)*
       }
+
+      #version_fn
+    }
+
+    impl ::std::convert::From<#name> for arora_types::value::Value {
+      fn from(value: #name) -> arora_types::value::Value {
+        let #name { #(#field_idents: #field_temps),* } = value;
+        arora_types::value::Value::Structure(arora_types::value::Structure {
+          id: <#name as arora_types::AroraType>::arora_type_id(),
+          fields: vec![ #(#encode_fields),* ],
+        })
+      }
+    }
+
+    impl ::std::convert::TryFrom<arora_types::value::Value> for #name {
+      type Error = arora_types::value::ConversionError;
+      fn try_from(value: arora_types::value::Value) -> ::std::result::Result<Self, Self::Error> {
+        let arora_types::value::Value::Structure(arora_types::value::Structure { id: __id, fields: __fields }) = value else {
+          return Err(arora_types::value::ConversionError { message: #mismatch.to_string() });
+        };
+        if __id != <#name as arora_types::AroraType>::arora_type_id() {
+          return Err(arora_types::value::ConversionError {
+            message: format!("{}, got structure {}", #mismatch, __id),
+          });
+        }
+        #(#decode_fields)*
+        Ok(#name { #(#field_idents: #field_temps),* })
+      }
     }
   })
 }
@@ -157,9 +233,18 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
   let meta = parse_arora_meta(&input.attrs)?;
   let type_name = meta.name.clone().unwrap_or_else(|| name_str.clone());
   let name_hash_mode = meta.name.is_some();
-  let type_id_expr = id_expr(meta.id, &type_name, name_hash_mode, Span::call_site())?;
+  let type_id_expr = id_expr(
+    meta.id.clone(),
+    &type_name,
+    name_hash_mode,
+    Span::call_site(),
+  )?;
+  let version_fn = version_fn(&meta);
+  let mismatch = format!("expected a `{}` enumeration", name_str);
 
   let mut value_entries = Vec::new();
+  let mut encode_arms = Vec::new();
+  let mut decode_arms = Vec::new();
   for variant in &data.variants {
     if !matches!(variant.fields, Fields::Unit) {
       return Err(syn::Error::new_spanned(
@@ -169,8 +254,11 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
       ));
     }
     let vname = variant.ident.to_string();
+    let vident = &variant.ident;
     let variant_meta = parse_arora_meta(&variant.attrs)?;
     let variant_id_expr = id_expr(variant_meta.id, &vname, name_hash_mode, variant.span())?;
+    encode_arms.push(quote! { #name::#vident => #variant_id_expr });
+    decode_arms.push(quote! { x if x == #variant_id_expr => #name::#vident });
     value_entries.push(quote! {
       (
         #variant_id_expr,
@@ -210,8 +298,56 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
         }
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
       }
+
+      #version_fn
+    }
+
+    impl ::std::convert::From<#name> for arora_types::value::Value {
+      fn from(value: #name) -> arora_types::value::Value {
+        arora_types::value::Value::Enumeration(arora_types::value::Enumeration {
+          id: <#name as arora_types::AroraType>::arora_type_id(),
+          variant_id: match value { #(#encode_arms),* },
+          value: ::std::boxed::Box::new(arora_types::value::Value::Unit),
+        })
+      }
+    }
+
+    impl ::std::convert::TryFrom<arora_types::value::Value> for #name {
+      type Error = arora_types::value::ConversionError;
+      fn try_from(value: arora_types::value::Value) -> ::std::result::Result<Self, Self::Error> {
+        let arora_types::value::Value::Enumeration(e) = &value else {
+          return Err(arora_types::value::ConversionError { message: #mismatch.to_string() });
+        };
+        if e.id != <#name as arora_types::AroraType>::arora_type_id() {
+          return Err(arora_types::value::ConversionError {
+            message: format!("{}, got enumeration {}", #mismatch, e.id),
+          });
+        }
+        Ok(match e.variant_id {
+          #(#decode_arms,)*
+          other => return Err(arora_types::value::ConversionError {
+            message: format!("{}: unknown variant {}", #mismatch, other),
+          }),
+        })
+      }
     }
   })
+}
+
+/// The `arora_type_version` override, when `#[arora(version = "…")]` is set.
+fn version_fn(meta: &AroraMeta) -> TokenStream2 {
+  match meta.version {
+    Some((major, minor, patch)) => quote! {
+      fn arora_type_version() -> arora_types::record::Version {
+        arora_types::record::Version::from(arora_types::SemanticVersion {
+          major: #major,
+          minor: #minor,
+          patch: #patch,
+        })
+      }
+    },
+    None => quote! {},
+  }
 }
 
 /// The id expression for a struct or field. An explicit `#[arora(id = "…")]`
@@ -245,6 +381,9 @@ fn id_expr(
 struct AroraMeta {
   id: Option<(String, Span)>,
   name: Option<String>,
+  /// `#[arora(version = "major.minor.patch")]`: the record version the type
+  /// is pinned at; `1.0.0` when absent.
+  version: Option<(u32, u32, u32)>,
   /// A `#[arora(keyvalue)]` field: its schema is the well-known KeyValue type,
   /// its contents dynamically typed. Used for a field that carries arbitrary
   /// arora values whose types are not known statically (e.g. a call's args).
@@ -274,9 +413,22 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
       } else if meta.path.is_ident("keyvalue") {
         parsed.keyvalue = true;
         Ok(())
+      } else if meta.path.is_ident("version") {
+        let lit: syn::LitStr = meta.value()?.parse()?;
+        let parts: Vec<u32> = lit
+          .value()
+          .split('.')
+          .map(|p| p.parse::<u32>())
+          .collect::<Result<_, _>>()
+          .map_err(|_| syn::Error::new(lit.span(), "version must be `major.minor.patch`"))?;
+        if parts.len() != 3 {
+          return Err(syn::Error::new(lit.span(), "version must be `major.minor.patch`"));
+        }
+        parsed.version = Some((parts[0], parts[1], parts[2]));
+        Ok(())
       } else {
         Err(meta.error(
-          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, or `keyvalue`)",
+          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, `version = \"…\"`, or `keyvalue`)",
         ))
       }
     })?;
@@ -284,10 +436,10 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
   Ok(parsed)
 }
 
-/// Validate a UUID literal at macro time and emit it as a `Uuid::from_bytes`.
+/// Validate an id literal — hex UUID or thirteen emoji — at macro time and
+/// emit it as a `Uuid::from_bytes`.
 fn uuid_bytes_expr(literal: &str, span: Span) -> syn::Result<TokenStream2> {
-  let uuid = uuid::Uuid::parse_str(literal)
-    .map_err(|e| syn::Error::new(span, format!("invalid uuid: {e}")))?;
+  let uuid = arora_id::parse(literal).map_err(|e| syn::Error::new(span, e.to_string()))?;
   let bytes = uuid.as_bytes().iter().map(|b| quote! { #b });
   Ok(quote! { arora_types::Uuid::from_bytes([ #(#bytes),* ]) })
 }
@@ -442,4 +594,223 @@ fn primitive_id_ident(ident: &str) -> Option<&'static str> {
     "Uuid" => "UUID_ID",
     _ => return None,
   })
+}
+
+// ---- value-plane conversions -----------------------------------------------
+
+/// How a field's Rust type crosses the value plane. Mirrors the schema
+/// classification above; the two are produced from the same syntax so they
+/// cannot disagree.
+enum Shape {
+  Primitive {
+    variant: &'static str,
+  },
+  /// `Option<T>`.
+  Option(Box<Shape>),
+  /// `Vec<T>`.
+  Vec(Box<Shape>),
+  /// `[T; N]`.
+  FixedArray(Box<Shape>, syn::Expr),
+  /// A nested type converting through its own `From`/`TryFrom<Value>`.
+  Nested(Type),
+  /// `#[arora(keyvalue)]`: `Value` passes as-is; anything else goes through
+  /// `value_serde`.
+  KeyValue(Type),
+}
+
+fn shape_of(ty: &Type) -> syn::Result<Shape> {
+  if let Type::Array(array) = ty {
+    return Ok(Shape::FixedArray(
+      Box::new(shape_of(&array.elem)?),
+      array.len.clone(),
+    ));
+  }
+  let Type::Path(type_path) = ty else {
+    return Err(syn::Error::new(
+      ty.span(),
+      "unsupported field type (expected a named type)",
+    ));
+  };
+  let segment = type_path
+    .path
+    .segments
+    .last()
+    .ok_or_else(|| syn::Error::new(ty.span(), "empty type path"))?;
+  let ident = segment.ident.to_string();
+  match ident.as_str() {
+    "Vec" => Ok(Shape::Vec(Box::new(shape_of(single_type_arg(
+      segment, "Vec",
+    )?)?))),
+    "Option" => Ok(Shape::Option(Box::new(shape_of(single_type_arg(
+      segment, "Option",
+    )?)?))),
+    _ => Ok(match primitive_variant(&ident) {
+      Some(variant) => Shape::Primitive { variant },
+      None => Shape::Nested(ty.clone()),
+    }),
+  }
+}
+
+/// The `Value` variant a Rust primitive travels as.
+fn primitive_variant(ident: &str) -> Option<&'static str> {
+  Some(match ident {
+    "bool" => "Boolean",
+    "i8" => "I8",
+    "i16" => "I16",
+    "i32" => "I32",
+    "i64" => "I64",
+    "u8" => "U8",
+    "u16" => "U16",
+    "u32" => "U32",
+    "u64" => "U64",
+    "f32" => "F32",
+    "f64" => "F64",
+    "String" => "String",
+    "Uuid" => "Uuid",
+    _ => return None,
+  })
+}
+
+impl Shape {
+  /// An expression converting `expr` (owned, of this shape) to a `Value`.
+  fn encode(&self, expr: TokenStream2) -> TokenStream2 {
+    match self {
+      Shape::Primitive { .. } | Shape::Nested(_) => {
+        quote! { <arora_types::value::Value as ::std::convert::From<_>>::from(#expr) }
+      }
+      Shape::Option(inner) => {
+        let e = inner.encode(quote! { __inner });
+        quote! {
+          arora_types::value::Value::Option((#expr).map(|__inner| ::std::boxed::Box::new(#e)))
+        }
+      }
+      Shape::Vec(inner) | Shape::FixedArray(inner, _) => {
+        let e = inner.encode(quote! { __element });
+        let element_id = inner.element_id();
+        quote! {
+          arora_types::value::Value::array_of(
+            #element_id,
+            (#expr).into_iter().map(|__element| #e).collect(),
+          )
+        }
+      }
+      Shape::KeyValue(ty) => {
+        if is_value_type(ty) {
+          quote! { #expr }
+        } else {
+          quote! {
+            arora_types::value_serde::to_value(&#expr)
+              .expect("a serializable field converts to a Value")
+          }
+        }
+      }
+    }
+  }
+
+  /// The id of this shape's type — an array's element type.
+  fn element_id(&self) -> TokenStream2 {
+    match self {
+      Shape::Primitive { variant } => {
+        let id = syn::Ident::new(
+          match *variant {
+            "Boolean" => "BOOLEAN_ID",
+            "I8" => "I8_ID",
+            "I16" => "I16_ID",
+            "I32" => "I32_ID",
+            "I64" => "I64_ID",
+            "U8" => "U8_ID",
+            "U16" => "U16_ID",
+            "U32" => "U32_ID",
+            "U64" => "U64_ID",
+            "F32" => "F32_ID",
+            "F64" => "F64_ID",
+            "String" => "STRING_ID",
+            _ => "UUID_ID",
+          },
+          Span::call_site(),
+        );
+        quote! { *arora_types::ty::#id }
+      }
+      Shape::Nested(ty) => quote! { <#ty as arora_types::AroraType>::arora_type_id() },
+      Shape::Option(_) => quote! { *arora_types::ty::OPTION_ID },
+      Shape::Vec(_) | Shape::FixedArray(..) => quote! { *arora_types::ty::ARRAY_VALUE_ID },
+      Shape::KeyValue(_) => quote! { *arora_types::ty::KEY_VALUE_ID },
+    }
+  }
+
+  /// An expression reading `__value: Value` as this shape, or returning a
+  /// `ConversionError` naming `what`.
+  fn decode(&self, what: &str) -> TokenStream2 {
+    let fail = |message: TokenStream2| {
+      quote! {
+        return Err(arora_types::value::ConversionError { message: #message })
+      }
+    };
+    match self {
+      Shape::Primitive { variant } => {
+        let variant = syn::Ident::new(variant, Span::call_site());
+        let mismatch = fail(quote! { format!("{}: unexpected value {}", #what, other) });
+        quote! { match __value { arora_types::value::Value::#variant(x) => x, other => #mismatch } }
+      }
+      Shape::Nested(ty) => quote! {
+        <#ty as ::std::convert::TryFrom<arora_types::value::Value>>::try_from(__value)
+          .map_err(|e| arora_types::value::ConversionError { message: format!("{}: {}", #what, e) })?
+      },
+      Shape::Option(inner) => {
+        let d = inner.decode(what);
+        let mismatch = fail(quote! { format!("{}: expected an option, got {}", #what, other) });
+        quote! {
+          match __value {
+            arora_types::value::Value::Option(None) => None,
+            arora_types::value::Value::Option(Some(__boxed)) => Some({ let __value = *__boxed; #d }),
+            other => #mismatch,
+          }
+        }
+      }
+      Shape::Vec(inner) => {
+        let d = inner.decode(what);
+        quote! {
+          {
+            let mut __out = ::std::vec::Vec::new();
+            for __value in __value.into_elements().map_err(|e| arora_types::value::ConversionError { message: format!("{}: {}", #what, e) })? {
+              __out.push({ #d });
+            }
+            __out
+          }
+        }
+      }
+      Shape::FixedArray(inner, len) => {
+        let d = inner.decode(what);
+        let wrong_len =
+          fail(quote! { format!("{}: expected {} elements, got {}", #what, #len, __out.len()) });
+        quote! {
+          {
+            let mut __out = ::std::vec::Vec::new();
+            for __value in __value.into_elements().map_err(|e| arora_types::value::ConversionError { message: format!("{}: {}", #what, e) })? {
+              __out.push({ #d });
+            }
+            match <[_; #len]>::try_from(__out) {
+              Ok(array) => array,
+              Err(__out) => #wrong_len,
+            }
+          }
+        }
+      }
+      Shape::KeyValue(ty) => {
+        if is_value_type(ty) {
+          quote! { __value }
+        } else {
+          quote! {
+            arora_types::value_serde::from_value(__value)
+              .map_err(|e| arora_types::value::ConversionError { message: format!("{}: {}", #what, e) })?
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Whether a type path names arora's `Value` itself.
+fn is_value_type(ty: &Type) -> bool {
+  matches!(ty, Type::Path(p) if p.path.segments.last().map(|s| s.ident == "Value").unwrap_or(false))
 }

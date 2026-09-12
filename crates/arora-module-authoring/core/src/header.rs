@@ -43,11 +43,11 @@ pub fn generate_header_file(
             minor: 0u32,
             patch: 0u32,
         },
-        executor: Executor {
+        executor: Some(Executor {
             name: executor.to_owned(),
             min_version: None,
             max_version: None,
-        },
+        }),
         exports: module
             .exports
             .iter()

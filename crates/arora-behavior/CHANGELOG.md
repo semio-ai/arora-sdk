@@ -4,6 +4,13 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-09-12
+
+### Changed
+
+- **Breaking:** re-pinned to arora-types 3. `Status`'s `Value` conversions
+  now come from `#[derive(AroraType)]`; `TaskId` gains `From`/`TryFrom<Value>`.
+
 ## [7.0.0] - 2026-07-24
 
 ### Breaking

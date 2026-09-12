@@ -2,8 +2,15 @@
 
 `#[derive(AroraType)]` — generate an arora
 [`ty::low::Type`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/low.rs)
-from a Rust `struct`, so the Rust definition is the single source of truth for the
-type's schema instead of a hand-authored YAML record.
+from a Rust `struct` or unit-variant `enum`, so the Rust definition is the single
+source of truth for the type's schema instead of a hand-authored YAML record — and,
+from the same pinned ids, the value-plane conversions `From<T> for Value` and
+`TryFrom<Value> for T`, so the type crosses a `Call` boundary without a second
+place its ids are written.
+
+Ids are pinned with `#[arora(id = "…")]`, as a hex UUID or as its thirteen-emoji
+spelling (`arora-id`); `#[arora(version = "…")]` pins the record version a frozen
+form names the type at (`1.0.0` by default).
 
 It is re-exported from [`arora-types`](../arora-types/readme.md) under the `derive`
 feature, so you write `use arora_types::AroraType;`.

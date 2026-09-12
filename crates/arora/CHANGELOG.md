@@ -4,6 +4,12 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-09-12
+
+### Changed
+
+- **Breaking:** re-pinned to arora-types 3 (the module-declaration wave).
+
 ## [9.11.0] - 2026-07-30
 
 ### Added

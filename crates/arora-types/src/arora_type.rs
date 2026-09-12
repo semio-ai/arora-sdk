@@ -34,6 +34,17 @@ pub trait AroraType {
   /// `registry`. Idempotent, and safe for types reachable from themselves.
   fn register_types(registry: &mut TypeRegistry);
 
+  /// The record version this type is pinned at wherever a frozen form names
+  /// it — a described function's signature, a module record's dependencies.
+  /// `1.0.0` unless the derive is told otherwise with `#[arora(version = "…")]`.
+  fn arora_type_version() -> crate::record::Version {
+    crate::record::Version::from(crate::SemanticVersion {
+      major: 1,
+      minor: 0,
+      patch: 0,
+    })
+  }
+
   /// This type's definition together with a registry holding it and all its
   /// dependencies — everything a walk needs to resolve a value of this type.
   fn arora_type_with_registry() -> (low::Type, TypeRegistry) {
@@ -196,5 +207,238 @@ mod tests {
       structure.fields[&g("55555555-5555-4555-8555-555555555555")].type_ref,
       TypeRef::Option { id } if id == *ty::UUID_ID
     ));
+  }
+
+  // ---- the value-plane conversions the derive emits ----------------------
+
+  #[test]
+  fn a_struct_round_trips_as_a_structure_under_its_ids() {
+    use crate::value::{Structure, StructureField, Value};
+    #[derive(Debug, Clone, PartialEq, AroraType)]
+    #[arora(id = "66666666-6666-4666-8666-666666666666")]
+    struct Reading {
+      #[arora(id = "66666666-6666-4666-8666-000000000001")]
+      name: String,
+      #[arora(id = "66666666-6666-4666-8666-000000000002")]
+      value: f32,
+      #[arora(id = "66666666-6666-4666-8666-000000000003")]
+      source: Option<crate::Uuid>,
+      #[arora(id = "66666666-6666-4666-8666-000000000004")]
+      samples: Vec<u8>,
+      #[arora(id = "66666666-6666-4666-8666-000000000005")]
+      window: [f64; 2],
+    }
+    let g = |s: &str| crate::Uuid::parse_str(s).unwrap();
+    let reading = Reading {
+      name: "temp".into(),
+      value: 21.5,
+      source: None,
+      samples: vec![1, 2, 3],
+      window: [0.5, 1.5],
+    };
+    let value = Value::from(reading.clone());
+    // Fields in declared order, each under its id; arrays in their typed form.
+    assert_eq!(
+      value,
+      Value::Structure(Structure {
+        id: g("66666666-6666-4666-8666-666666666666"),
+        fields: vec![
+          StructureField {
+            id: g("66666666-6666-4666-8666-000000000001"),
+            value: Box::new(Value::String("temp".into()))
+          },
+          StructureField {
+            id: g("66666666-6666-4666-8666-000000000002"),
+            value: Box::new(Value::F32(21.5))
+          },
+          StructureField {
+            id: g("66666666-6666-4666-8666-000000000003"),
+            value: Box::new(Value::Option(None))
+          },
+          StructureField {
+            id: g("66666666-6666-4666-8666-000000000004"),
+            value: Box::new(Value::ArrayU8(vec![1, 2, 3]))
+          },
+          StructureField {
+            id: g("66666666-6666-4666-8666-000000000005"),
+            value: Box::new(Value::ArrayF64(vec![0.5, 1.5]))
+          },
+        ],
+      })
+    );
+    assert_eq!(Reading::try_from(value).unwrap(), reading);
+    // A structure of another id is refused; a fixed array of the wrong length too.
+    let wrong = Value::Structure(Structure {
+      id: g("77777777-7777-4777-8777-777777777777"),
+      fields: vec![],
+    });
+    assert!(Reading::try_from(wrong)
+      .unwrap_err()
+      .message
+      .contains("expected a `Reading` structure"));
+  }
+
+  #[test]
+  fn nested_types_and_arrays_of_them_round_trip() {
+    use crate::value::Value;
+    #[derive(Debug, Clone, PartialEq, AroraType)]
+    #[arora(id = "88888888-8888-4888-8888-000000000001")]
+    struct Point {
+      #[arora(id = "88888888-8888-4888-8888-000000000011")]
+      x: f32,
+    }
+    #[derive(Debug, Clone, PartialEq, AroraType)]
+    #[arora(id = "88888888-8888-4888-8888-000000000002")]
+    struct Path {
+      #[arora(id = "88888888-8888-4888-8888-000000000021")]
+      start: Point,
+      #[arora(id = "88888888-8888-4888-8888-000000000022")]
+      points: Vec<Point>,
+    }
+    let path = Path {
+      start: Point { x: 0.0 },
+      points: vec![Point { x: 1.0 }, Point { x: 2.0 }],
+    };
+    let value = Value::from(path.clone());
+    let Value::Structure(s) = &value else {
+      panic!("a structure")
+    };
+    assert!(matches!(&*s.fields[0].value, Value::Structure(p) if p.id == Point::arora_type_id()));
+    assert!(
+      matches!(&*s.fields[1].value, Value::ArrayStructure { id, elements } if *id == Point::arora_type_id() && elements.len() == 2)
+    );
+    assert_eq!(Path::try_from(value).unwrap(), path);
+    // An empty array of a structure type keeps the structure form.
+    let empty = Value::from(Path {
+      start: Point { x: 0.0 },
+      points: vec![],
+    });
+    let Value::Structure(s) = &empty else {
+      panic!("a structure")
+    };
+    assert!(
+      matches!(&*s.fields[1].value, Value::ArrayStructure { elements, .. } if elements.is_empty())
+    );
+  }
+
+  #[test]
+  fn a_unit_enum_round_trips_as_the_enumeration_the_value_plane_speaks() {
+    use crate::value::{Enumeration, Value};
+    #[derive(Debug, Clone, Copy, PartialEq, AroraType)]
+    #[arora(id = "325a5767-e344-4532-860e-0749bcf2e428")]
+    enum Status {
+      #[arora(id = "766e9e9a-446d-4e46-83e6-14b7ca101169")]
+      Success,
+      #[arora(id = "2468f46c-bb60-425c-9a4d-9ad326ccc7e2")]
+      Failure,
+    }
+    let parse = |s| crate::Uuid::parse_str(s).unwrap();
+    assert_eq!(
+      Value::from(Status::Failure),
+      Value::Enumeration(Enumeration {
+        id: parse("325a5767-e344-4532-860e-0749bcf2e428"),
+        variant_id: parse("2468f46c-bb60-425c-9a4d-9ad326ccc7e2"),
+        value: Box::new(Value::Unit),
+      })
+    );
+    assert_eq!(
+      Status::try_from(Value::from(Status::Success)).unwrap(),
+      Status::Success
+    );
+    let foreign = Value::Enumeration(Enumeration {
+      id: parse("325a5767-e344-4532-860e-0749bcf2e428"),
+      variant_id: parse("00000000-0000-4000-8000-000000000000"),
+      value: Box::new(Value::Unit),
+    });
+    assert!(Status::try_from(foreign)
+      .unwrap_err()
+      .message
+      .contains("unknown variant"));
+  }
+
+  #[test]
+  fn a_keyvalue_field_passes_a_value_through_and_serializes_anything_else() {
+    use crate::value::Value;
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Extra {
+      note: String,
+    }
+    #[derive(Debug, Clone, PartialEq, AroraType)]
+    #[arora(id = "99999999-9999-4999-8999-000000000001")]
+    struct Envelope {
+      #[arora(id = "99999999-9999-4999-8999-000000000011", keyvalue)]
+      payload: Value,
+      #[arora(id = "99999999-9999-4999-8999-000000000012", keyvalue)]
+      extra: Extra,
+    }
+    let envelope = Envelope {
+      payload: Value::F32(0.5),
+      extra: Extra { note: "n".into() },
+    };
+    let value = Value::from(envelope.clone());
+    let Value::Structure(s) = &value else {
+      panic!("a structure")
+    };
+    assert_eq!(*s.fields[0].value, Value::F32(0.5));
+    assert!(matches!(&*s.fields[1].value, Value::KeyValue(_)));
+    assert_eq!(Envelope::try_from(value).unwrap(), envelope);
+  }
+
+  #[test]
+  fn a_field_named_fields_or_id_does_not_confuse_the_generated_code() {
+    use crate::value::Value;
+    #[derive(Debug, Clone, PartialEq, AroraType)]
+    #[arora(id = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001")]
+    struct Cloud {
+      #[arora(id = "aaaaaaaa-aaaa-4aaa-8aaa-000000000011")]
+      id: u32,
+      #[arora(id = "aaaaaaaa-aaaa-4aaa-8aaa-000000000012")]
+      fields: Vec<String>,
+      #[arora(id = "aaaaaaaa-aaaa-4aaa-8aaa-000000000013")]
+      value: bool,
+    }
+    let cloud = Cloud {
+      id: 7,
+      fields: vec!["x".into(), "y".into()],
+      value: true,
+    };
+    assert_eq!(Cloud::try_from(Value::from(cloud.clone())).unwrap(), cloud);
+  }
+
+  #[test]
+  fn the_version_is_the_types_and_defaults_to_one() {
+    #[derive(AroraType)]
+    #[arora(id = "bbbbbbbb-bbbb-4bbb-8bbb-000000000001", version = "1.1.0")]
+    struct Pinned {
+      #[arora(id = "bbbbbbbb-bbbb-4bbb-8bbb-000000000011")]
+      x: u8,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "bbbbbbbb-bbbb-4bbb-8bbb-000000000002")]
+    struct Unpinned {
+      #[arora(id = "bbbbbbbb-bbbb-4bbb-8bbb-000000000021")]
+      x: u8,
+    }
+    assert_eq!(Pinned::arora_type_version().to_string(), "1.1.0");
+    assert_eq!(Unpinned::arora_type_version().to_string(), "1.0.0");
+  }
+
+  #[test]
+  fn an_id_may_be_spelled_in_emoji() {
+    // 🎯🚤🧪💲🌼🏪🔘😊🉑🍉⚪🔕♍ is e1b4bda7-1c7b-4322-b9a0-552201b8a011 (arora-id's vector).
+    #[derive(AroraType)]
+    #[arora(id = "🎯🚤🧪💲🌼🏪🔘😊🉑🍉⚪🔕♍")]
+    struct Spelled {
+      #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000011")]
+      x: u8,
+    }
+    assert_eq!(
+      Spelled::arora_type_id(),
+      crate::Uuid::parse_str("e1b4bda7-1c7b-4322-b9a0-552201b8a011").unwrap()
+    );
+    assert_eq!(
+      crate::id::encode(&Spelled::arora_type_id()),
+      "🎯🚤🧪💲🌼🏪🔘😊🉑🍉⚪🔕♍"
+    );
   }
 }

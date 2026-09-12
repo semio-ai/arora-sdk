@@ -1,6 +1,6 @@
 [package]
 name = "arora-msgs-ros2"
-version = "1.2.0"
+version = "2.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 message types for Arora: the std/geometry/sensor/hri messages as arora types, a runtime type registry, and the CDR codec — shared by arora-bridge-ros2 and arora-hal-ros2."
@@ -14,7 +14,7 @@ name = "arora_msgs_ros2"
 # `TypeRegistry`, and the `value_serde` walk the CDR codec is a backend of. The
 # `derive` feature is on because the generated message structs are the schema
 # source of truth via `#[derive(AroraType)]`.
-arora-types = { path = "../arora-types", version = "2", features = ["derive"] }
+arora-types = { path = "../arora-types", version = "3", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # serde implements its traits for arrays only up to length 32; the generated

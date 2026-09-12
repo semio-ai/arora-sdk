@@ -4,6 +4,15 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-09-12
+
+### Changed
+
+- **Breaking:** `Engine::load_module` refuses a header that names no executor
+  (`LoadModuleError::ExecutorUnspecified`): a loaded module is one an
+  executor runs; a module without one is registered, not loaded. Re-pinned
+  to arora-types 3.
+
 ## [4.1.0] - 2026-07-29
 
 ### Added

@@ -205,8 +205,12 @@ pub struct Header {
   pub license: String,
   /// Semantic version of this module
   pub version: SemanticVersion,
-  /// The executor (e.g., WebAssembly, Python, JavaScript, etc.)
-  pub executor: Executor,
+  /// The executor that runs the module's artifact (`wasm`, `native`, …).
+  /// Named by the export that builds the artifact — a declaration cannot know
+  /// it — and required to load: a header without one describes a module that
+  /// is linked into the host, not loaded by an executor.
+  #[serde(default)]
+  pub executor: Option<Executor>,
   /// Exported symbols
   pub exports: Vec<ExportSymbol>,
   /// Imported symbols

@@ -29,6 +29,11 @@ use std::hash::{Hash, Hasher};
 // generates, and used internally.
 pub use uuid::Uuid;
 
+/// How an identifier is spelled: hex, or thirteen emoji. `id::parse` reads
+/// either; every `id = "…"` attribute of the derives and the module macros
+/// goes through it.
+pub use arora_id as id;
+
 pub fn gen_uuid_from_str(key: &str) -> uuid::Uuid {
   match Uuid::parse_str(key) {
     Ok(uuid) => uuid,

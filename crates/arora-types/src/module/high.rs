@@ -107,8 +107,10 @@ pub struct ModuleDefinition {
   pub license: String,
   /// Semantic version of this module
   pub version: SemanticVersion,
-  /// The executor (e.g., WebAssembly, Python, JavaScript, etc.)
-  pub executor: Executor,
+  /// The executor that runs the module's artifact (`wasm`, `native`, …);
+  /// absent for a module that is linked into the host rather than loaded.
+  #[serde(default)]
+  pub executor: Option<Executor>,
   /// Exported symbols
   pub exports: Vec<ExportSymbol>,
   /// Imported symbols

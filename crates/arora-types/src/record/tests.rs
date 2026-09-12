@@ -504,11 +504,11 @@ fn header_is_versioned() {
       minor: 4,
       patch: 2,
     },
-    executor: Executor {
+    executor: Some(Executor {
       name: "wasm".into(),
       min_version: None,
       max_version: None,
-    },
+    }),
     exports: vec![],
     imports: vec![],
     executable_mime: "application/wasm".into(),

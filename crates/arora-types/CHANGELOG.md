@@ -4,6 +4,32 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-09-12
+
+### Added
+
+- `module::declared`: the `AroraModule` trait (`id`, `header(executor)`,
+  `record(parent)`, `host_functions`) and `HostFunction`, what a module
+  declared in Rust implements — the twin of `AroraType` for modules.
+- `AroraType::arora_type_version()`: the record version a frozen form pins a
+  type at, `1.0.0` unless `#[arora(version = "…")]` says otherwise.
+- `Value::array_of`, `Value::array_of_type` and `Value::into_elements`: pack
+  elements of one type into the array form the value plane uses for it, and
+  unpack any array form.
+- `arora_types::id`: the identifier spellings (`arora-id`) — hex, or thirteen
+  emoji.
+- `From<Key> for Value` / `TryFrom<Value> for Key`.
+
+### Changed
+
+- **Breaking:** `Header::executor` and `high::ModuleDefinition::executor` are
+  `Option<Executor>`: the executor is named by the export that builds an
+  artifact, not by a declaration, and a header without one describes a module
+  linked into the host rather than loaded. Existing YAML parses unchanged
+  (`#[serde(default)]`).
+- `#[derive(AroraType)]` (arora-types-derive 2) also emits `From<T> for Value`
+  and `TryFrom<Value> for T`.
+
 ## [2.5.1] - 2026-08-31
 
 ### Fixed

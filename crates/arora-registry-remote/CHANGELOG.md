@@ -4,6 +4,12 @@ All notable changes to `arora-registry-remote`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-12
+
+### Changed
+
+- **Breaking:** re-pinned to arora-types 3 (the module-declaration wave).
+
 ## [0.1.1] - 2026-07-10
 
 ### Changed

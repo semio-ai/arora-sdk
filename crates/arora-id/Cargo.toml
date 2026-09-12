@@ -1,0 +1,23 @@
+[package]
+name = "arora-id"
+version = "1.0.0"
+edition = "2021"
+description = "How Arora spells identifiers: hex UUIDs and their 13-emoji base-1024 form."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+homepage = "https://github.com/semio-ai/arora-sdk"
+documentation = "https://docs.rs/arora-id"
+keywords = ["arora", "uuid", "emoji"]
+categories = ["encoding"]
+readme = "readme.md"
+
+[features]
+default = []
+# `v4()`: a fresh random identifier.
+v4 = ["uuid/v4"]
+
+[dependencies]
+uuid = "1"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
