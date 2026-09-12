@@ -1,0 +1,9 @@
+[package]
+name = "arora-module-support"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study prototype: the traits a declared module and its types implement — in the SDK these live in arora-types."
+
+[dependencies]
+arora-types = { workspace = true }

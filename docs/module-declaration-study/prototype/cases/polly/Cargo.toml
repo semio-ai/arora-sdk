@@ -1,0 +1,22 @@
+[package]
+name = "case-polly"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Study case: modules/polly declared in Rust with #[module] on an inline module, checked against its generated module.yaml. No arora-engine dependency."
+
+[dependencies]
+arora-types = { workspace = true }
+arora-module-derive = { workspace = true }
+arora-module-support = { workspace = true }
+
+# The guest shim's wire codec — only when built as a wasm guest.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+arora-buffers = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
+uuid = { workspace = true }
