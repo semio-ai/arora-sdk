@@ -704,10 +704,19 @@ async fn discover(
     (resolved, resolved_actions)
 }
 
-/// The QoS every bridge-served ROS 2 service endpoint uses: reliable,
-/// transient-local, a short history — the profile ros2-client's own service and
-/// action examples run (`DEFAULT_SUBSCRIPTION_QOS` is best-effort, which drops
-/// service requests with no redelivery).
+/// The QoS every bridge-served ROS 2 service endpoint uses, on both the
+/// request reader and the reply writer of the plain method services and of an
+/// action's goal, result, cancel and feedback: reliable (the best-effort
+/// `DEFAULT_SUBSCRIPTION_QOS` drops service requests with no redelivery), a
+/// short history, and **volatile** durability — the profile
+/// `rmw_qos_profile_services_default` gives every rclcpp, rclpy and `ros2` CLI
+/// client. DDS refuses to match a reader that requests more durability than
+/// the writer offers, so a request reader asking for transient-local never
+/// hears a native client and the server never becomes available to it. The
+/// same profile on both sides means a `ros2-client` peer must also request
+/// volatile on its services, exactly as a native client does; asking for
+/// transient-local on a reply reader leaves it unmatched. Only the status
+/// topic is transient-local, per the ROS actions design.
 #[cfg(feature = "dds")]
 fn service_qos() -> ros2_client::ros2::QosPolicies {
     use ros2_client::ros2::{policy, QosPolicyBuilder};
@@ -716,14 +725,14 @@ fn service_qos() -> ros2_client::ros2::QosPolicies {
             max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
         })
         .history(policy::History::KeepLast { depth: 4 })
-        .durability(policy::Durability::TransientLocal)
+        .durability(policy::Durability::Volatile)
         .build()
 }
 
 /// Create the five ROS 2 endpoints for one action, per backend. The status
 /// topic is transient-local with a history of one (late-joining clients read
 /// the current goal states, per the ROS actions design); the services and the
-/// feedback topic ride the reliable [`service_qos`].
+/// feedback topic ride the reliable, volatile [`service_qos`].
 ///
 /// The runtime-typed endpoints are keyed on the REP-2016 hashes the action's
 /// `.action` generates — what a native `rmw_zenoh` client addresses them by —
