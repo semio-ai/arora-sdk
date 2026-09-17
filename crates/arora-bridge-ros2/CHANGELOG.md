@@ -4,6 +4,23 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.3.1] - 2026-09-17
+
+### Fixed
+
+- **Action and service servers match native DDS clients.** Every service
+  endpoint the bridge serves — the plain method services and an action's goal,
+  result, cancel and feedback — rides volatile durability on both the request
+  and the reply side, the profile `rmw_qos_profile_services_default` gives
+  every rclcpp, rclpy and `ros2` CLI client. They requested transient-local,
+  and DDS refuses to match a reader that requests more durability than the
+  writer offers, so under `rmw_fastrtps_cpp` a native action client waited on
+  "action server not available" forever while `ros2 action list` showed the
+  server. The status topic stays transient-local. A `ros2-client` peer must
+  request volatile on its services to match, as a native client does — the
+  crate's tests do, and a consumer's own test clients need the same. The Zenoh
+  backend, which matches without durability, is unaffected.
+
 ## [6.3.0] - 2026-09-10
 
 ### Added

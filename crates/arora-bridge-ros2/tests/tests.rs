@@ -650,8 +650,10 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
         let (_ctx, mut node) = create_test_node(domain_id, "action_client");
         let action_type = ros2_client::ActionTypeName::new("arora", "look_at");
         let action_name = Name::parse("/robot/actions/look_at").expect("valid action name");
-        // The reliable service profile ros2-client's own action examples use —
-        // the best-effort DEFAULT_SUBSCRIPTION_QOS drops service requests.
+        // The service profile a native rclcpp/rclpy action client runs
+        // (`rmw_qos_profile_services_default`): reliable — the best-effort
+        // DEFAULT_SUBSCRIPTION_QOS drops service requests — and volatile, so
+        // this client matches the server exactly as a native one would.
         let service_qos = {
             use ros2_client::ros2::{policy, QosPolicyBuilder};
             QosPolicyBuilder::new()
@@ -659,7 +661,7 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
                     max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
                 })
                 .history(policy::History::KeepLast { depth: 4 })
-                .durability(policy::Durability::TransientLocal)
+                .durability(policy::Durability::Volatile)
                 .build()
         };
         let qos = ros2_client::action::ActionClientQosPolicies {
@@ -1039,7 +1041,7 @@ async fn the_bound_look_at_skill_serves_the_standard_contract() {
                     max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
                 })
                 .history(policy::History::KeepLast { depth: 4 })
-                .durability(policy::Durability::TransientLocal)
+                .durability(policy::Durability::Volatile)
                 .build()
         };
         let qos = ros2_client::action::ActionClientQosPolicies {
