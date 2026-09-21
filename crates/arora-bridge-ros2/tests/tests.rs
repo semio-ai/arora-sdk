@@ -424,6 +424,78 @@ async fn send_data_reaches_topic_subscriber() {
     assert!((msg.data - 0.42).abs() < f64::EPSILON, "got {}", msg.data);
 }
 
+/// The ROS4HRI preset's speech surface, live: the device writes the speech
+/// state key and a `std_msgs/String` subscriber on `/robot_face/speech` reads
+/// the utterance — the key composed into the message's `data` field by the
+/// outbound route, on the absolute topic the profile names.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config); these run on Linux CI. To run locally, \
+              ensure an active multicast-capable interface and use `--ignored`."
+)]
+async fn the_ros4hri_profile_publishes_the_speech_text_as_a_string_topic() {
+    let _ = env_logger::try_init();
+    let domain_id = random_domain_id();
+    let namespace = format!("test_speech_{domain_id}");
+
+    let mut bridge = Ros2Bridge::new(
+        Ros2BridgeConfig::new(&namespace, domain_id)
+            .with_profile(arora_bridge_ros2::ExposureProfile::ros4hri()),
+    )
+    .await;
+    // Drain the inbound stream so the startup discovery resolves and the
+    // bridge proceeds to publish (see `send_data_reaches_topic_subscriber`).
+    let mut inbound = bridge.take_inbound();
+    tokio::spawn(async move { while inbound.next().await.is_some() {} });
+
+    let (_ctx, mut sub_node) = create_test_node(domain_id, &format!("subtitles_{domain_id}"));
+    let topic = Name::parse("/robot_face/speech").expect("valid topic name");
+    // The profile publishes state as sensor data (best-effort); the reader
+    // asks for the same, as a subtitle node would.
+    let sub_topic = sub_node
+        .create_topic(
+            &topic,
+            msg_types::String::message_type_name(),
+            &DEFAULT_SUBSCRIPTION_QOS,
+        )
+        .expect("create topic");
+    let subscription = sub_node
+        .create_subscription::<msg_types::String>(&sub_topic, None)
+        .expect("create subscription");
+
+    let publisher = async {
+        loop {
+            bridge.try_send(&arora_types::data::StateChange::set(
+                "standard/ros4hri/speech/text",
+                Value::String("hello there".into()),
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    tokio::pin!(publisher);
+
+    let received = tokio::select! {
+        _ = &mut publisher => unreachable!("publisher loop never returns"),
+        result = async {
+            tokio::time::timeout(
+                Duration::from_secs(30),
+                subscription.wait_for_publisher(&sub_node),
+            )
+            .await
+            .expect("timed out waiting for the subscriber to discover the bridge publisher");
+            tokio::time::timeout(Duration::from_secs(10), subscription.async_take()).await
+        } => result,
+    };
+
+    let (msg, _info) = received
+        .expect("timed out waiting for the published utterance")
+        .expect("subscription take failed");
+    assert_eq!(msg.data, "hello there");
+}
+
 // =============================================================================
 // The action plane, live over DDS.
 // =============================================================================

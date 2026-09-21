@@ -4,6 +4,31 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.4.0] - 2026-09-21
+
+### Added
+
+- **Outbound field fan-in.** A typed output composes its message from several
+  device keys, the mirror of the inbound fan-out: each `FieldRoute` places one
+  key's value at a dotted field of the message (a scalar coerced to the
+  field's kind, a vec3 key becoming a point, a nested message or an array
+  taken as is), the other fields keep their last value (their type's default
+  until written), and a change to any routed key publishes the whole message
+  again — once per change, however many of its keys the change carried. An
+  `ExposureProfile`'s outbound endpoints route every field they declare
+  instead of only their first route's key; `TypedOutput` carries the routes.
+- **The ROS4HRI preset publishes what the face is saying**: `/robot_face/speech`
+  (`std_msgs/String`) from the speech state key
+  `standard/ros4hri/speech/text` — the utterance while a say run speaks, empty
+  at rest — for subtitles and transcripts.
+
+### Removed
+
+- **The preset's text inputs `/robot_face/tts` and `/expressive_face/speech`.**
+  Text is not commanded through a topic: speaking is the `/skill/say` action,
+  which is what produces visemes and the speech state. The key they landed on
+  is now the speech state key above, written by the device.
+
 ## [6.3.1] - 2026-09-17
 
 ### Fixed

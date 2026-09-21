@@ -44,8 +44,8 @@ flow:
 
 | Flow | Default | Policy |
 | --- | --- | --- |
-| out (state: rig values, the face image) | `Qos::SensorData` | best-effort, volatile, keep-last-1 |
-| in (commands: speech text, an expression) | `Qos::Reliable` | reliable, volatile, keep-last-1 |
+| out (state: rig values, the face image, the utterance) | `Qos::SensorData` | best-effort, volatile, keep-last-1 |
+| in (commands: an expression, a gaze point) | `Qos::Reliable` | reliable, volatile, keep-last-1 |
 
 State is only interesting at its newest value and a slow reader must not stall
 the writer; a command is an instruction and dropping one loses it. Override per
@@ -144,6 +144,13 @@ docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
 Typed topics bind per endpoint: `with_typed_input`/`with_typed_output` (and
 their `_on` variants for absolute topic names) subscribe or publish a device
 key as a registered ROS message, decoded and encoded against its runtime type.
+A typed endpoint may instead **route fields to keys** by dotted name, both
+ways: inbound, each message fans out over its routed keys in one atomic
+change; outbound, the message is composed from its routed keys — each key
+lands at its field, the fields keep their last value (their type's default
+until written), and a change to any routed key publishes the whole message
+again. A `std_msgs` wrapper around one key (`data` ← the key) is the smallest
+case; a `PointStamped` from a vec3 key and a frame key is the same mechanism.
 
 **Exposure profiles** (`profile` module) bundle a whole surface: an
 [`ExposureProfile`] holds typed endpoints on absolute topics with per-field
@@ -154,12 +161,15 @@ standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
 the ROS4HRI face surface for both incumbent name sets — PAL (`/robot_face/*`)
 and IIIA (`/expressive_face/*`): expression commands fan out to
 `standard/ros4hri/expression/*`, `look_at` points land as the gaze target
-(vec3) and frame, speech text feeds the lipsync key, and the two standard
-skills spawn the device's task runs — `interaction_skills/LookAt` on
-`/skill/look_at`, and `communication_skills/Say` on `/skill/say`, whose goal
-`input` is the utterance and whose feedback carries what the run reports (for
-a face, the viseme at the audio playhead). The rendered face publishes on the
-`image_transport` pair PAL OS documents — `display/face` as a
+(vec3) and frame, and the two standard skills spawn the device's task runs —
+`interaction_skills/LookAt` on `/skill/look_at`, and `communication_skills/Say`
+on `/skill/say`, whose goal `input` is the utterance and whose feedback carries
+what the run reports (for a face, the viseme at the audio playhead). What the
+face is saying publishes as a `std_msgs/String` on `/robot_face/speech` from
+the speech state key `standard/ros4hri/speech/text` — the utterance while a
+say run speaks, empty at rest — for subtitles and transcripts; text is not
+commanded through a topic, speaking is the action. The rendered face publishes
+on the `image_transport` pair PAL OS documents — `display/face` as a
 `sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
 `sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
 writes the key of the transport it encodes. Enabling it is one call:
