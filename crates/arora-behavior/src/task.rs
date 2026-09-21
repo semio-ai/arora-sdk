@@ -39,6 +39,24 @@ impl arora_types::AroraType for TaskId {
     }
 }
 
+impl From<TaskId> for arora_types::value::Value {
+    fn from(id: TaskId) -> Self {
+        arora_types::value::Value::Uuid(id.0)
+    }
+}
+
+impl TryFrom<arora_types::value::Value> for TaskId {
+    type Error = arora_types::value::ConversionError;
+    fn try_from(value: arora_types::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            arora_types::value::Value::Uuid(id) => Ok(TaskId(id)),
+            other => Err(arora_types::value::ConversionError {
+                message: format!("expected a task id (a uuid), got {other}"),
+            }),
+        }
+    }
+}
+
 /// How a run coexists with the runs an interpreter already hosts.
 ///
 /// Only [`Concurrent`](Self::Concurrent) is honoured today; the enum is

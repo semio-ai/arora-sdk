@@ -275,6 +275,175 @@ pub struct ConversionError {
 
 impl std::error::Error for ConversionError {}
 
+impl Value {
+  /// Pack `elements` — values of one type, `element_id` — into the array form
+  /// the value plane uses for that type: the typed array of a primitive
+  /// (`ArrayU8`, `ArrayString`, …), `ArrayStructure` for structures,
+  /// `ArrayEnumeration` for enumerations, `ArrayValue` otherwise. An empty
+  /// array of a user type is packed by [`array_of_type`](Self::array_of_type),
+  /// which can tell a structure from an enumeration; here it is a structure.
+  pub fn array_of(element_id: Uuid, elements: Vec<Value>) -> Value {
+    macro_rules! typed {
+      ($variant:ident, $array:ident) => {
+        if elements.iter().all(|v| matches!(v, Value::$variant(_))) {
+          return Value::$array(
+            elements
+              .into_iter()
+              .map(|v| match v {
+                Value::$variant(x) => x,
+                _ => unreachable!(),
+              })
+              .collect(),
+          );
+        }
+      };
+    }
+    if elements.is_empty() {
+      return Self::empty_array(element_id, false);
+    }
+    typed!(Boolean, ArrayBoolean);
+    typed!(U8, ArrayU8);
+    typed!(U16, ArrayU16);
+    typed!(U32, ArrayU32);
+    typed!(U64, ArrayU64);
+    typed!(I8, ArrayI8);
+    typed!(I16, ArrayI16);
+    typed!(I32, ArrayI32);
+    typed!(I64, ArrayI64);
+    typed!(F32, ArrayF32);
+    typed!(F64, ArrayF64);
+    typed!(String, ArrayString);
+    if elements.iter().all(|v| matches!(v, Value::Structure(_))) {
+      return Value::ArrayStructure {
+        id: element_id,
+        elements: elements
+          .into_iter()
+          .map(|v| match v {
+            Value::Structure(s) => StructureWithoutId { fields: s.fields },
+            _ => unreachable!(),
+          })
+          .collect(),
+      };
+    }
+    if elements.iter().all(|v| matches!(v, Value::Enumeration(_))) {
+      return Value::ArrayEnumeration {
+        id: element_id,
+        elements: elements
+          .into_iter()
+          .map(|v| match v {
+            Value::Enumeration(e) => EnumerationWithoutId {
+              variant_id: e.variant_id,
+              value: e.value,
+            },
+            _ => unreachable!(),
+          })
+          .collect(),
+      };
+    }
+    Value::ArrayValue(elements)
+  }
+
+  /// [`array_of`](Self::array_of) for elements of an [`AroraType`], which
+  /// settles the empty array's form from the type's definition.
+  pub fn array_of_type<T: crate::AroraType>(elements: Vec<Value>) -> Value {
+    if elements.is_empty() {
+      let enumeration = matches!(
+        T::arora_type().kind,
+        crate::ty::low::TypeKind::Enumeration(_)
+      );
+      return Self::empty_array(T::arora_type_id(), enumeration);
+    }
+    Self::array_of(T::arora_type_id(), elements)
+  }
+
+  fn empty_array(element_id: Uuid, enumeration: bool) -> Value {
+    let id = &element_id;
+    if id == &*crate::ty::BOOLEAN_ID {
+      Value::ArrayBoolean(vec![])
+    } else if id == &*crate::ty::U8_ID {
+      Value::ArrayU8(vec![])
+    } else if id == &*crate::ty::U16_ID {
+      Value::ArrayU16(vec![])
+    } else if id == &*crate::ty::U32_ID {
+      Value::ArrayU32(vec![])
+    } else if id == &*crate::ty::U64_ID {
+      Value::ArrayU64(vec![])
+    } else if id == &*crate::ty::I8_ID {
+      Value::ArrayI8(vec![])
+    } else if id == &*crate::ty::I16_ID {
+      Value::ArrayI16(vec![])
+    } else if id == &*crate::ty::I32_ID {
+      Value::ArrayI32(vec![])
+    } else if id == &*crate::ty::I64_ID {
+      Value::ArrayI64(vec![])
+    } else if id == &*crate::ty::F32_ID {
+      Value::ArrayF32(vec![])
+    } else if id == &*crate::ty::F64_ID {
+      Value::ArrayF64(vec![])
+    } else if id == &*crate::ty::STRING_ID {
+      Value::ArrayString(vec![])
+    } else if id == &*crate::ty::UUID_ID || id == &*crate::ty::KEY_VALUE_ID {
+      Value::ArrayValue(vec![])
+    } else if enumeration {
+      Value::ArrayEnumeration {
+        id: element_id,
+        elements: vec![],
+      }
+    } else {
+      Value::ArrayStructure {
+        id: element_id,
+        elements: vec![],
+      }
+    }
+  }
+
+  /// The elements of any array form, each as a standalone [`Value`] — the
+  /// inverse of [`array_of`](Self::array_of). Not an array: `Err` naming what
+  /// it was.
+  pub fn into_elements(self) -> Result<Vec<Value>, String> {
+    macro_rules! typed {
+      ($array:ident, $variant:ident, $v:expr) => {
+        $v.into_iter().map(Value::$variant).collect()
+      };
+    }
+    Ok(match self {
+      Value::ArrayBoolean(v) => typed!(ArrayBoolean, Boolean, v),
+      Value::ArrayU8(v) => typed!(ArrayU8, U8, v),
+      Value::ArrayU16(v) => typed!(ArrayU16, U16, v),
+      Value::ArrayU32(v) => typed!(ArrayU32, U32, v),
+      Value::ArrayU64(v) => typed!(ArrayU64, U64, v),
+      Value::ArrayI8(v) => typed!(ArrayI8, I8, v),
+      Value::ArrayI16(v) => typed!(ArrayI16, I16, v),
+      Value::ArrayI32(v) => typed!(ArrayI32, I32, v),
+      Value::ArrayI64(v) => typed!(ArrayI64, I64, v),
+      Value::ArrayF32(v) => typed!(ArrayF32, F32, v),
+      Value::ArrayF64(v) => typed!(ArrayF64, F64, v),
+      Value::ArrayString(v) => typed!(ArrayString, String, v),
+      Value::ArrayValue(v) => v,
+      Value::ArrayStructure { id, elements } => elements
+        .into_iter()
+        .map(|e| {
+          Value::Structure(Structure {
+            id,
+            fields: e.fields,
+          })
+        })
+        .collect(),
+      Value::ArrayEnumeration { id, elements } => elements
+        .into_iter()
+        .map(|e| {
+          Value::Enumeration(Enumeration {
+            id,
+            variant_id: e.variant_id,
+            value: e.value,
+          })
+        })
+        .collect(),
+      other => return Err(format!("expected an array, got {other}")),
+    })
+  }
+}
+
 impl From<()> for Value {
   fn from(_: ()) -> Self {
     Value::Unit

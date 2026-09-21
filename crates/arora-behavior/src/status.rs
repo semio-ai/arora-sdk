@@ -9,12 +9,11 @@
 //!
 //! The Rust type is the source of truth for the schema — it derives
 //! [`AroraType`](arora_types::AroraType), pinning the enumeration id and each
-//! variant id, so no hand-authored record or codegen is needed. The value-plane
-//! conversions ([`From<Status>`](Value)/[`TryFrom<Value>`]) produce the
-//! `Value::Enumeration { id, variant_id, Unit }` form the plane already speaks;
-//! their ids match the derived schema, so the two never drift.
+//! variant id, so no hand-authored record or codegen is needed. The derive
+//! also produces the value-plane conversions (`From<Status> for Value`,
+//! `TryFrom<Value> for Status`): the `Value::Enumeration { id, variant_id,
+//! Unit }` form the plane speaks, from the same pinned ids.
 
-use arora_types::value::{ConversionError, Enumeration, Value};
 use arora_types::AroraType;
 use arora_types::Uuid;
 
@@ -58,45 +57,6 @@ pub const STATUS_RUNNING_VARIANT_ID: Uuid = Uuid::from_bytes([
 ]);
 /// The version the `Status` type is registered under.
 pub const STATUS_ENUMERATION_VERSION: semver::Version = semver::Version::new(1, 0, 0);
-
-impl From<Status> for Value {
-    fn from(status: Status) -> Value {
-        let variant_id = match status {
-            Status::Success => STATUS_SUCCESS_VARIANT_ID,
-            Status::Failure => STATUS_FAILURE_VARIANT_ID,
-            Status::Running => STATUS_RUNNING_VARIANT_ID,
-        };
-        Value::Enumeration(Enumeration {
-            id: STATUS_ENUMERATION_ID,
-            variant_id,
-            value: Box::new(Value::Unit),
-        })
-    }
-}
-
-impl TryFrom<Value> for Status {
-    type Error = ConversionError;
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let Value::Enumeration(enumeration) = value else {
-            return Err(ConversionError {
-                message: "expected an enumeration value for Status".to_string(),
-            });
-        };
-        if enumeration.id != STATUS_ENUMERATION_ID {
-            return Err(ConversionError {
-                message: "enumeration id is not Status".to_string(),
-            });
-        }
-        match enumeration.variant_id {
-            STATUS_SUCCESS_VARIANT_ID => Ok(Status::Success),
-            STATUS_FAILURE_VARIANT_ID => Ok(Status::Failure),
-            STATUS_RUNNING_VARIANT_ID => Ok(Status::Running),
-            _ => Err(ConversionError {
-                message: "unknown Status variant".to_string(),
-            }),
-        }
-    }
-}
 
 /// Declare the `Status` enumeration in the record/registry form — the
 /// hand-authored declaration the behavior-tree and message codegen consume, kept
@@ -147,6 +107,7 @@ pub fn declare_status_enumeration(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arora_types::value::Value;
 
     /// The derived schema and the pinned const ids agree — the id the value
     /// plane carries is the id the schema declares.

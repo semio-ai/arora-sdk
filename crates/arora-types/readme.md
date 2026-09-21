@@ -41,6 +41,13 @@ functions. Their declaration may involve references to existing [types](#type-ty
 - as the key or value type of a map (`TypeRef::Map`). This kind of reference is
   not used in this project, in practice.
 
+A module written in Rust can carry its own interface instead of a `module.yaml`:
+the marker type its declaration emits implements
+[`AroraModule`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/declared.rs),
+which yields the `Header` for a given executor (the exporter names it), the
+store record, and the host closures a device registers. The trait is what
+`arora-types` provides; the declaration macros live in `arora-module`.
+
 ## Type (`ty`)
 
 Structured types can be described in both
