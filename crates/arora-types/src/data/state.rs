@@ -315,6 +315,26 @@ impl From<&str> for Key {
   }
 }
 
+/// A key crosses the value plane as its bare path string (its arora type is
+/// the string primitive).
+impl From<Key> for crate::value::Value {
+  fn from(key: Key) -> Self {
+    crate::value::Value::String(key.path)
+  }
+}
+
+impl TryFrom<crate::value::Value> for Key {
+  type Error = crate::value::ConversionError;
+  fn try_from(value: crate::value::Value) -> Result<Self, Self::Error> {
+    match value {
+      crate::value::Value::String(path) => Ok(Key { path }),
+      other => Err(crate::value::ConversionError {
+        message: format!("expected a key (a string), got {other}"),
+      }),
+    }
+  }
+}
+
 impl From<Key> for String {
   fn from(val: Key) -> Self {
     val.path
