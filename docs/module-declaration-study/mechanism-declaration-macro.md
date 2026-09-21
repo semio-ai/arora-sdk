@@ -81,9 +81,9 @@ that is not a Rust declaration gets the same stubs from its header with
 **The executor is not the declaration's to name.** A declaration cannot know
 whether it will be built native or wasm; the step that exports the artifact
 does, and a description handed to `Engine::load_module` must carry it. So
-`header(executor)` takes it from the exporter — the prototype's stand-in for
-`Header::executor: Option<Executor>` ([Q10](open-questions.md#q10)) — and a
-host-only module, which is linked rather than loaded, exports its interface as
+`header(executor)` takes it from the exporter ([Q10](open-questions.md#q10)),
+`Header::executor` stays required, and a host-only module, which is linked
+rather than loaded, has no header: it exports its interface as
 `record(parent)`, which has no executor.
 
 ## Facts

@@ -59,4 +59,4 @@ no executor because a module linked into the host has none.
 
 ## Executor
 
-None: a host-only module is linked, not loaded — [Q10](open-questions.md#q10).
+No header: a host-only module is linked, not loaded — [Q10](open-questions.md#q10).
