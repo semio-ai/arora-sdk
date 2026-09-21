@@ -28,7 +28,7 @@ use arora_bridge::{
 };
 use arora_msgs_ros2::Ros2Registry;
 use arora_types::data::StateChange;
-use arora_types::value::Type;
+use arora_types::value::{Type, Value};
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
 use futures::{Stream, StreamExt};
@@ -39,8 +39,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::actions;
 use crate::conversions::{
-    setup_key_subscriber, setup_typed_key_publisher, setup_typed_key_subscriber, topic_name,
-    KeyPublisher, StateChangeStream, TypedKeyPublisher, OVERSIZED_JSON_BYTES,
+    default_value, place_route, setup_key_subscriber, setup_typed_key_publisher,
+    setup_typed_key_subscriber, topic_name, KeyPublisher, StateChangeStream, TypedKeyPublisher,
+    OVERSIZED_JSON_BYTES,
 };
 use crate::profile;
 use crate::qos::Qos;
@@ -70,15 +71,25 @@ impl InputKey {
     }
 }
 
-/// An output key published as a **typed** ROS 2 message rather than a
-/// `std_msgs` scalar: the key's value is encoded as `ros_type` (a registered
-/// ROS message name, e.g. `hri_msgs/Expression`) and published on `topic`.
+/// An output published as a **typed** ROS 2 message rather than a `std_msgs`
+/// scalar: a message of `ros_type` (a registered ROS message name, e.g.
+/// `hri_msgs/Expression`) published on `topic`, composed from device keys.
+///
+/// With no `routes`, the key `path` holds the whole message and every write
+/// to it publishes. With `routes`, the message is composed **field by field
+/// from several keys** — the outbound mirror of [`TypedInput`]'s fan-out: each
+/// route places one key's value at a dotted field of the message, the other
+/// fields keep their last value (their type's default until written), and a
+/// change to any routed key publishes the whole message again. A `std_msgs`
+/// wrapper around one key is the smallest case: `data` ← the key.
 ///
 /// A key without such a declaration still publishes on the untyped path (a
 /// `std_msgs` scalar, or a JSON `std_msgs/String` for composites) — this is the
 /// opt-in that lets a device key ride a ROS4HRI message.
 #[derive(Debug, Clone)]
 pub struct TypedOutput {
+    /// The key holding the whole message when `routes` is empty; otherwise a
+    /// name for the binding in logs (a profile uses the topic).
     pub path: String,
     /// The registered ROS message name, e.g. `hri_msgs/Expression`.
     pub ros_type: String,
@@ -86,6 +97,10 @@ pub struct TypedOutput {
     /// `Some` is used verbatim, so an absolute ROS name (e.g.
     /// `/robot_face/expression`) escapes the namespace prefix.
     pub topic: Option<String>,
+    /// Field fan-in from device keys (see [`profile::FieldRoute`]): the
+    /// route's `key` lands at its dotted `field`. Empty publishes the whole
+    /// message from `path`.
+    pub routes: Vec<profile::FieldRoute>,
     /// Delivery profile; `None` takes [`Qos::default_for`] an outbound flow
     /// (sensor data — an output topic carries state).
     pub qos: Option<Qos>,
@@ -208,6 +223,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: None,
+            routes: Vec::new(),
             qos: None,
         });
         self
@@ -226,6 +242,7 @@ impl Ros2BridgeConfig {
             path: path.into(),
             ros_type: ros_type.into(),
             topic: Some(topic.into()),
+            routes: Vec::new(),
             qos: None,
         });
         self
@@ -233,10 +250,9 @@ impl Ros2BridgeConfig {
 
     /// Expose the device through a named [`profile::ExposureProfile`]: each
     /// endpoint becomes a typed binding on its absolute topic with its field
-    /// fan-out, the profile's includes join the scalar plane's rewrite set,
-    /// and its action bindings join the skill plane. Outbound endpoints route
-    /// the whole message from their first route's key (field fan-in is not
-    /// implemented).
+    /// routes — fanned out over keys inbound, composed from keys outbound —
+    /// the profile's includes join the scalar plane's rewrite set, and its
+    /// action bindings join the skill plane.
     pub fn with_profile(mut self, profile: profile::ExposureProfile) -> Self {
         for endpoint in profile.endpoints {
             match endpoint.flow {
@@ -249,22 +265,174 @@ impl Ros2BridgeConfig {
                     routes: endpoint.routes,
                     qos: endpoint.qos,
                 }),
-                profile::Flow::Out => {
-                    let Some(route) = endpoint.routes.first() else {
-                        continue;
-                    };
-                    self.outputs.push(TypedOutput {
-                        path: route.key.clone(),
-                        ros_type: endpoint.ros_type,
-                        topic: Some(endpoint.topic),
-                        qos: endpoint.qos,
-                    });
-                }
+                profile::Flow::Out => self.outputs.push(TypedOutput {
+                    path: endpoint.topic.clone(),
+                    ros_type: endpoint.ros_type,
+                    topic: Some(endpoint.topic),
+                    routes: endpoint.routes,
+                    qos: endpoint.qos,
+                }),
             }
         }
         self.includes.extend(profile.includes);
         self.action_bindings.extend(profile.actions);
         self
+    }
+}
+
+/// The typed outbound plane at run time: every declared [`TypedOutput`], the
+/// message each is composing, and the publisher it goes out on.
+///
+/// A message is state, composed once and kept: a change to one routed key
+/// places that field and republishes the message with the others as last
+/// written. What is published is therefore always the newest of every field,
+/// however the keys arrive — one per step or all in one change — and a change
+/// carrying several keys of one message publishes it once.
+struct TypedOutputs {
+    bindings: Vec<TypedOutput>,
+    /// The bindings a key feeds: a whole-message binding by its `path`, a
+    /// routed one by each route's key.
+    by_key: HashMap<String, Vec<usize>>,
+    /// Per binding: the message under composition, every field at its type's
+    /// default until a key writes it. `None` until the first key arrives.
+    messages: Vec<Option<Value>>,
+    /// Per binding: the raw publisher, created on the first publish.
+    publishers: Vec<Option<TypedKeyPublisher>>,
+    /// Bindings that changed since the last publish.
+    dirty: Vec<bool>,
+    /// Bindings given up on — a topic this bridge subscribes to, an unknown
+    /// message type, a publisher that could not be created — each reported
+    /// once.
+    refused: Vec<bool>,
+}
+
+impl TypedOutputs {
+    fn new(bindings: Vec<TypedOutput>) -> Self {
+        let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, binding) in bindings.iter().enumerate() {
+            if binding.routes.is_empty() {
+                by_key.entry(binding.path.clone()).or_default().push(index);
+            }
+            for route in &binding.routes {
+                by_key.entry(route.key.clone()).or_default().push(index);
+            }
+        }
+        let count = bindings.len();
+        Self {
+            bindings,
+            by_key,
+            messages: vec![None; count],
+            publishers: (0..count).map(|_| None).collect(),
+            dirty: vec![false; count],
+            refused: vec![false; count],
+        }
+    }
+
+    /// Land a key's new value on every message it feeds. `false` when no
+    /// typed output takes the key, which then belongs to the scalar plane.
+    fn feed(&mut self, key: &str, value: &Value, registry: &Ros2Registry) -> bool {
+        let Some(indexes) = self.by_key.get(key) else {
+            return false;
+        };
+        for &index in indexes {
+            if self.refused[index] {
+                continue;
+            }
+            let binding = &self.bindings[index];
+            if binding.routes.is_empty() {
+                // The key holds the whole message; a value of the wrong
+                // shape is reported when it fails to encode.
+                self.messages[index] = Some(value.clone());
+                self.dirty[index] = true;
+                continue;
+            }
+            let Some(message_type) = registry.get_by_name(&binding.ros_type) else {
+                warn!(
+                    "Ros2Bridge does not publish '{}': unknown ROS message type '{}'",
+                    binding.path, binding.ros_type
+                );
+                self.refused[index] = true;
+                continue;
+            };
+            let message = match &mut self.messages[index] {
+                Some(message) => message,
+                slot => match default_value(message_type, registry.types()) {
+                    Ok(message) => slot.insert(message),
+                    Err(e) => {
+                        warn!(
+                            "Ros2Bridge does not publish '{}': no default '{}' message to \
+                             compose on: {e}",
+                            binding.path, binding.ros_type
+                        );
+                        self.refused[index] = true;
+                        continue;
+                    }
+                },
+            };
+            for route in binding.routes.iter().filter(|route| route.key == key) {
+                match place_route(message, message_type, registry.types(), &route.field, value) {
+                    Ok(()) => self.dirty[index] = true,
+                    Err(e) => warn!("key '{key}' on '{}': {e}", binding.path),
+                }
+            }
+        }
+        true
+    }
+
+    /// Publish every message that changed, creating its publisher on first
+    /// use. A binding whose topic this bridge also subscribes to is refused:
+    /// echoing it back would feed the device its own commands.
+    async fn publish_dirty(
+        &mut self,
+        node: &mut Node,
+        namespace: &str,
+        registry: &Arc<Ros2Registry>,
+        subscribed: &HashSet<String>,
+    ) {
+        for index in 0..self.bindings.len() {
+            if !self.dirty[index] || self.refused[index] {
+                continue;
+            }
+            self.dirty[index] = false;
+            let binding = &self.bindings[index];
+            if self.publishers[index].is_none() {
+                let topic = binding
+                    .topic
+                    .clone()
+                    .unwrap_or_else(|| topic_name(namespace, &binding.path));
+                if subscribed.contains(&topic) {
+                    warn!(
+                        "Ros2Bridge does not publish '{}': its topic '{topic}' is one this bridge \
+                         subscribes to, and echoing it back would feed the device its own commands",
+                        binding.path
+                    );
+                    self.refused[index] = true;
+                    continue;
+                }
+                match setup_typed_key_publisher(
+                    node,
+                    &topic,
+                    &binding.ros_type,
+                    registry.clone(),
+                    binding.qos.unwrap_or(Qos::default_for(profile::Flow::Out)),
+                ) {
+                    Ok(publisher) => self.publishers[index] = Some(publisher),
+                    Err(e) => {
+                        warn!(
+                            "Ros2Bridge could not create a typed publisher for '{}': {e}",
+                            binding.path
+                        );
+                        self.refused[index] = true;
+                        continue;
+                    }
+                }
+            }
+            if let (Some(publisher), Some(message)) =
+                (&self.publishers[index], &self.messages[index])
+            {
+                publisher.publish(message).await;
+            }
+        }
     }
 }
 
@@ -578,11 +746,9 @@ async fn run_node(
 
     // Publishers are created lazily from the first value written to each key.
     let mut publishers: HashMap<String, KeyPublisher> = HashMap::new();
-    // Output keys the caller declared as typed ROS messages, indexed by path,
-    // with their own lazily-created raw publishers.
-    let typed_outputs: HashMap<String, TypedOutput> =
-        outputs.into_iter().map(|o| (o.path.clone(), o)).collect();
-    let mut typed_publishers: HashMap<String, TypedKeyPublisher> = HashMap::new();
+    // The typed outbound plane: each declared message under composition from
+    // its keys, with its own lazily-created raw publisher.
+    let mut typed_outputs = TypedOutputs::new(outputs);
     // Keys whose outbound topic turned out to be one we subscribe to, remembered
     // so the decision is made (and logged) once per key.
     let mut echoed: HashSet<String> = HashSet::new();
@@ -613,8 +779,7 @@ async fn run_node(
                     &mut node,
                     &namespace,
                     &mut publishers,
-                    &typed_outputs,
-                    &mut typed_publishers,
+                    &mut typed_outputs,
                     &includes,
                     &registry,
                     &subscribed,
@@ -960,17 +1125,16 @@ async fn build_response(
 }
 
 /// Publish each set key of a change to its topic, creating a publisher on first
-/// use. A key declared in `typed_outputs` rides a typed ROS message (its value
-/// encoded against that message's runtime type); every other key takes the
-/// untyped `std_msgs` path. `unset` keys have no ROS 2 representation and are
-/// ignored.
+/// use. A key feeding a typed output lands on that message, which publishes
+/// once per change however many of its keys the change carried; every other
+/// key takes the untyped `std_msgs` path. `unset` keys have no ROS 2
+/// representation and are ignored.
 #[allow(clippy::too_many_arguments)]
 async fn publish_change(
     node: &mut Node,
     namespace: &str,
     publishers: &mut HashMap<String, KeyPublisher>,
-    typed_outputs: &HashMap<String, TypedOutput>,
-    typed_publishers: &mut HashMap<String, TypedKeyPublisher>,
+    typed_outputs: &mut TypedOutputs,
     includes: &[profile::Include],
     registry: &Arc<Ros2Registry>,
     subscribed: &HashSet<String>,
@@ -987,46 +1151,9 @@ async fn publish_change(
             continue;
         }
 
-        // A typed output rides its declared ROS message; its publisher is
-        // created lazily like the untyped one.
-        if let Some(binding) = typed_outputs.get(&key.path) {
-            if !typed_publishers.contains_key(&key.path) {
-                let topic = binding
-                    .topic
-                    .clone()
-                    .unwrap_or_else(|| topic_name(namespace, &key.path));
-                if subscribed.contains(&topic) {
-                    warn!(
-                        "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this \
-                         bridge subscribes to, and echoing it back would feed the device its own \
-                         commands",
-                        key.path
-                    );
-                    echoed.insert(key.path.clone());
-                    continue;
-                }
-                match setup_typed_key_publisher(
-                    node,
-                    &topic,
-                    &binding.ros_type,
-                    registry.clone(),
-                    binding.qos.unwrap_or(Qos::default_for(profile::Flow::Out)),
-                ) {
-                    Ok(publisher) => {
-                        typed_publishers.insert(key.path.clone(), publisher);
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Ros2Bridge could not create a typed publisher for key '{}': {e}",
-                            key.path
-                        );
-                        continue;
-                    }
-                }
-            }
-            if let Some(publisher) = typed_publishers.get(&key.path) {
-                publisher.publish(value).await;
-            }
+        // A key feeding a typed output lands on its message; the message
+        // publishes after the whole change has landed.
+        if typed_outputs.feed(&key.path, value, registry) {
             continue;
         }
 
@@ -1081,50 +1208,122 @@ async fn publish_change(
             }
         }
     }
+    typed_outputs
+        .publish_dirty(node, namespace, registry, subscribed)
+        .await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversions::extract_route;
     use arora_types::data::Key;
-    use arora_types::value::Value;
 
     fn set(key: &str, value: f64) -> StateChange {
         StateChange::set(Key::from(key), Value::F64(value))
     }
 
-    /// The preset's image pair reaches the config as the typed outputs the
-    /// publish path keys on: the device key, the message, the absolute topic.
-    /// The command surfaces stay inbound, so nothing else is on that plane.
+    /// The preset's outbound endpoints reach the config as typed outputs
+    /// keyed on their routes: the image pair as whole-message routes from
+    /// the display keys, the speech text as a `data` route from the speech
+    /// state key. The command surfaces stay inbound, so nothing else is on
+    /// that plane.
     #[test]
-    fn the_ros4hri_profile_declares_the_face_image_as_typed_outputs() {
+    fn the_ros4hri_profile_declares_its_outbound_endpoints_as_typed_outputs() {
         let config =
             Ros2BridgeConfig::new("robot", 0).with_profile(profile::ExposureProfile::ros4hri());
-        let mut outputs: Vec<(&str, &str, Option<&str>)> = config
+        let mut outputs: Vec<String> = config
             .outputs
             .iter()
-            .map(|o| (o.path.as_str(), o.ros_type.as_str(), o.topic.as_deref()))
+            .map(|o| {
+                let routes: Vec<String> = o
+                    .routes
+                    .iter()
+                    .map(|r| format!("{} <- {}", r.field, r.key))
+                    .collect();
+                format!(
+                    "{} {} [{}]",
+                    o.topic
+                        .as_deref()
+                        .expect("a profile output names its topic"),
+                    o.ros_type,
+                    routes.join(", ")
+                )
+            })
             .collect();
         outputs.sort();
         assert_eq!(
             outputs,
             [
-                (
-                    "display/face",
-                    "sensor_msgs/Image",
-                    Some("/robot_face/image_raw")
-                ),
-                (
-                    "display/face/compressed",
-                    "sensor_msgs/CompressedImage",
-                    Some("/robot_face/image_raw/compressed")
-                ),
+                "/robot_face/image_raw sensor_msgs/Image [ <- display/face]",
+                "/robot_face/image_raw/compressed sensor_msgs/CompressedImage \
+                 [ <- display/face/compressed]",
+                "/robot_face/speech std_msgs/String [data <- standard/ros4hri/speech/text]",
             ]
         );
         assert!(
             config.outputs.iter().all(|o| o.qos.is_none()),
-            "the image takes the outbound default (sensor data)"
+            "state takes the outbound default (sensor data)"
         );
+    }
+
+    /// A routed key lands on its message and marks it for publishing; a key
+    /// no typed output takes belongs to the scalar plane. The message keeps
+    /// what earlier keys wrote, so a change to one field publishes the whole
+    /// message with the others as last written.
+    #[test]
+    fn typed_outputs_compose_a_message_from_its_routed_keys() {
+        let registry = arora_msgs_ros2::registry();
+        let mut outputs = TypedOutputs::new(vec![TypedOutput {
+            path: "/gaze".into(),
+            ros_type: "geometry_msgs/PointStamped".into(),
+            topic: Some("/gaze".into()),
+            routes: vec![
+                profile::FieldRoute {
+                    field: "point".into(),
+                    key: "gaze/target".into(),
+                },
+                profile::FieldRoute {
+                    field: "header.frame_id".into(),
+                    key: "gaze/frame".into(),
+                },
+            ],
+            qos: None,
+        }]);
+        assert!(!outputs.feed("battery/level", &Value::F64(0.5), &registry));
+        assert!(outputs.feed("gaze/frame", &Value::String("face".into()), &registry));
+        assert!(outputs.dirty[0]);
+        outputs.dirty[0] = false;
+        assert!(outputs.feed(
+            "gaze/target",
+            &Value::ArrayF32(vec![1.0, 2.0, 3.0]),
+            &registry
+        ));
+        assert!(outputs.dirty[0]);
+        let message = outputs.messages[0]
+            .as_ref()
+            .expect("a message under composition");
+        let ty = registry
+            .get_by_name("geometry_msgs/PointStamped")
+            .expect("registered");
+        let frame = extract_route(message, ty, registry.types(), "header.frame_id").unwrap();
+        assert_eq!(frame, Value::String("face".into()));
+        let point = extract_route(message, ty, registry.types(), "point").unwrap();
+        assert_eq!(point, Value::ArrayF32(vec![1.0, 2.0, 3.0]));
+        // A value of the wrong kind leaves the message as it was.
+        assert!(outputs.feed("gaze/frame", &Value::F64(1.0), &registry));
+        let frame = extract_route(
+            message_of(&outputs),
+            ty,
+            registry.types(),
+            "header.frame_id",
+        )
+        .unwrap();
+        assert_eq!(frame, Value::String("face".into()));
+
+        fn message_of(outputs: &TypedOutputs) -> &Value {
+            outputs.messages[0].as_ref().unwrap()
+        }
     }
 
     /// The seam keeps state, not history: a key written twice before the node

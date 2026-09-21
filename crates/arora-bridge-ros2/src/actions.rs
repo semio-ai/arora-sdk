@@ -82,7 +82,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc as tmpsc;
 
-use crate::conversions::{extract_route, type_ref_id, xyz_structure};
+use crate::conversions::{coerce_scalar, default_value, extract_route, type_ref_id, xyz_structure};
 use crate::profile;
 use crate::services::type_ref_of;
 
@@ -730,102 +730,6 @@ fn bound_goal_call_of(
     ))
 }
 
-/// A zero value of a registry message type: every field defaulted,
-/// recursively — what a bound result or feedback message starts from before
-/// the meaningful fields are set. `Err` on shapes ROS messages do not use.
-fn default_value(ty: &low::Type, registry: &ty::TypeRegistry) -> Result<Value, String> {
-    let low::TypeKind::Structure(structure) = &ty.kind else {
-        return Err(format!("'{}' is not a structure", ty.name));
-    };
-    let mut fields = Vec::with_capacity(structure.fields.len());
-    for (id, field) in &structure.fields {
-        let value = default_of_ref(&field.type_ref, registry)
-            .map_err(|e| format!("'{}': {e}", field.name))?;
-        fields.push(StructureField {
-            id: *id,
-            value: Box::new(value),
-        });
-    }
-    Ok(Value::Structure(Structure { id: ty.id, fields }))
-}
-
-/// The zero value behind one field reference.
-fn default_of_ref(type_ref: &TypeRef, registry: &ty::TypeRegistry) -> Result<Value, String> {
-    match type_ref {
-        TypeRef::Scalar { id } => default_scalar(id, registry),
-        TypeRef::Array { id } => default_array(id, 0),
-        TypeRef::FixedArray { id, len } => default_array(id, *len),
-        other => Err(format!("no default for a {other:?} field")),
-    }
-}
-
-/// The zero value of a scalar field: the primitive's zero, or a nested
-/// message's default.
-fn default_scalar(id: &Uuid, registry: &ty::TypeRegistry) -> Result<Value, String> {
-    let id = *id;
-    if id == *ty::BOOLEAN_ID {
-        Ok(Value::Boolean(false))
-    } else if id == *ty::U8_ID {
-        Ok(Value::U8(0))
-    } else if id == *ty::U16_ID {
-        Ok(Value::U16(0))
-    } else if id == *ty::U32_ID {
-        Ok(Value::U32(0))
-    } else if id == *ty::U64_ID {
-        Ok(Value::U64(0))
-    } else if id == *ty::I8_ID {
-        Ok(Value::I8(0))
-    } else if id == *ty::I16_ID {
-        Ok(Value::I16(0))
-    } else if id == *ty::I32_ID {
-        Ok(Value::I32(0))
-    } else if id == *ty::I64_ID {
-        Ok(Value::I64(0))
-    } else if id == *ty::F32_ID {
-        Ok(Value::F32(0.0))
-    } else if id == *ty::F64_ID {
-        Ok(Value::F64(0.0))
-    } else if id == *ty::STRING_ID {
-        Ok(Value::String(String::new()))
-    } else if let Some(nested) = registry.get(&id) {
-        default_value(nested, registry)
-    } else {
-        Err(format!("unregistered type {id}"))
-    }
-}
-
-/// The zero value of an array field (`len` zeros for a fixed array).
-fn default_array(id: &Uuid, len: usize) -> Result<Value, String> {
-    let id = *id;
-    if id == *ty::BOOLEAN_ID {
-        Ok(Value::ArrayBoolean(vec![false; len]))
-    } else if id == *ty::U8_ID {
-        Ok(Value::ArrayU8(vec![0; len]))
-    } else if id == *ty::U16_ID {
-        Ok(Value::ArrayU16(vec![0; len]))
-    } else if id == *ty::U32_ID {
-        Ok(Value::ArrayU32(vec![0; len]))
-    } else if id == *ty::U64_ID {
-        Ok(Value::ArrayU64(vec![0; len]))
-    } else if id == *ty::I8_ID {
-        Ok(Value::ArrayI8(vec![0; len]))
-    } else if id == *ty::I16_ID {
-        Ok(Value::ArrayI16(vec![0; len]))
-    } else if id == *ty::I32_ID {
-        Ok(Value::ArrayI32(vec![0; len]))
-    } else if id == *ty::I64_ID {
-        Ok(Value::ArrayI64(vec![0; len]))
-    } else if id == *ty::F32_ID {
-        Ok(Value::ArrayF32(vec![0.0; len]))
-    } else if id == *ty::F64_ID {
-        Ok(Value::ArrayF64(vec![0.0; len]))
-    } else if id == *ty::STRING_ID {
-        Ok(Value::ArrayString(vec![String::new(); len]))
-    } else {
-        Err(format!("no default for an array of type {id}"))
-    }
-}
-
 /// Set the first field named `name` (depth-first, declared order) in a
 /// message value to `new`, coercing scalars into the field's primitive.
 /// `false` when no such field takes the value.
@@ -867,59 +771,6 @@ fn set_named_field(
         }
     }
     false
-}
-
-/// `value` as the primitive `target` names, when the conversion preserves the
-/// kind (any integer feeds an integer field, either float a float field).
-fn coerce_scalar(value: &Value, target: &Uuid) -> Option<Value> {
-    let int = |value: &Value| -> Option<i128> {
-        Some(match value {
-            Value::U8(v) => *v as i128,
-            Value::U16(v) => *v as i128,
-            Value::U32(v) => *v as i128,
-            Value::U64(v) => *v as i128,
-            Value::I8(v) => *v as i128,
-            Value::I16(v) => *v as i128,
-            Value::I32(v) => *v as i128,
-            Value::I64(v) => *v as i128,
-            _ => return None,
-        })
-    };
-    let float = |value: &Value| -> Option<f64> {
-        Some(match value {
-            Value::F32(v) => *v as f64,
-            Value::F64(v) => *v,
-            _ => return None,
-        })
-    };
-    let target = *target;
-    if target == *ty::BOOLEAN_ID {
-        matches!(value, Value::Boolean(_)).then(|| value.clone())
-    } else if target == *ty::STRING_ID {
-        matches!(value, Value::String(_)).then(|| value.clone())
-    } else if target == *ty::U8_ID {
-        int(value).map(|v| Value::U8(v as u8))
-    } else if target == *ty::U16_ID {
-        int(value).map(|v| Value::U16(v as u16))
-    } else if target == *ty::U32_ID {
-        int(value).map(|v| Value::U32(v as u32))
-    } else if target == *ty::U64_ID {
-        int(value).map(|v| Value::U64(v as u64))
-    } else if target == *ty::I8_ID {
-        int(value).map(|v| Value::I8(v as i8))
-    } else if target == *ty::I16_ID {
-        int(value).map(|v| Value::I16(v as i16))
-    } else if target == *ty::I32_ID {
-        int(value).map(|v| Value::I32(v as i32))
-    } else if target == *ty::I64_ID {
-        int(value).map(|v| Value::I64(v as i64))
-    } else if target == *ty::F32_ID {
-        float(value).map(|v| Value::F32(v as f32))
-    } else if target == *ty::F64_ID {
-        float(value).map(Value::F64)
-    } else {
-        None
-    }
 }
 
 /// The `std_skills` errno of a terminal goal, when the run wrote none

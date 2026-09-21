@@ -119,7 +119,11 @@ impl ExposureProfile {
     ///   `standard/ros4hri/expression/*` keys the face standard reads;
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
-    /// - speech text (`std_msgs/String`) lands on the lipsync feed key;
+    /// - the utterance being spoken publishes as `std_msgs/String` on
+    ///   `/robot_face/speech` from the speech state key
+    ///   `standard/ros4hri/speech/text` — what a say run is saying, empty at
+    ///   rest — so a subtitle or a transcript follows the voice. Text is not
+    ///   commanded through a topic: speaking is the `/skill/say` action;
     /// - the `/skill/look_at` **action** (`interaction_skills/LookAt`) spawns
     ///   the device's `look_at` task run, its goal routed onto the
     ///   `(policy, target, frame)` parameters — the skill plane, for gaze
@@ -172,9 +176,10 @@ impl ExposureProfile {
             key: "standard/ros4hri/speech/text".into(),
         }];
         // Every endpoint takes its flow's default delivery. A command surface
-        // is reliable: an expression or a line of speech that is dropped is an
-        // instruction the face never carries out. The image is sensor data: a
-        // frame is state, and a slow reader must not stall the renderer.
+        // is reliable: an expression that is dropped is an instruction the
+        // face never carries out. The image and the speech text are sensor
+        // data: a frame or an utterance is state, and a slow reader must not
+        // stall the renderer.
         let endpoint = |topic: &str, ros_type: &str, flow: Flow, routes: &[FieldRoute]| Endpoint {
             topic: topic.into(),
             ros_type: ros_type.into(),
@@ -211,15 +216,9 @@ impl ExposureProfile {
                     &look_at_routes,
                 ),
                 endpoint(
-                    "/robot_face/tts",
+                    "/robot_face/speech",
                     "std_msgs/String",
-                    Flow::In,
-                    &speech_routes,
-                ),
-                endpoint(
-                    "/expressive_face/speech",
-                    "std_msgs/String",
-                    Flow::In,
+                    Flow::Out,
                     &speech_routes,
                 ),
                 endpoint(
@@ -392,16 +391,17 @@ mod tests {
             "/robot_face/expression",
             "/robot_face/look_at",
             "/expressive_face/look_at",
-            "/robot_face/tts",
-            "/expressive_face/speech",
+            "/robot_face/speech",
             "/robot_face/image_raw",
             "/robot_face/image_raw/compressed",
         ] {
             assert!(topics.contains(&expected), "missing {expected}");
         }
-        // The commands flow in and the image flows out; nothing else does.
+        // The commands flow in; the image and the speech text flow out.
         for endpoint in &profile.endpoints {
-            let expected = if endpoint.topic.starts_with("/robot_face/image_raw") {
+            let expected = if endpoint.topic.starts_with("/robot_face/image_raw")
+                || endpoint.topic == "/robot_face/speech"
+            {
                 Flow::Out
             } else {
                 Flow::In
