@@ -202,16 +202,16 @@ such a module is registered, not loaded.
 Recommendation: **A**: it states what is true, and a store record or a
 `DescribeMethods` consumer can tell in-process modules apart.
 
-**Decided: B, by this rationale.** The executor is not knowable at the
-declaration: only the step that compiles and exports the module — building
-the artifact — can tell whether it is native or wasm. A consumer importing the
-interface neither knows nor cares. It matters at **load**, and there are two
-ways to load: linking directly against the Rust symbols (the host case), where
-no header is involved; or providing a description plus a binary, where the
-description **must** name the executor — `"host"` is not an executor, and
-`None` is not acceptable there. So `Header::executor` becomes
-`Option<Executor>`: `None` from a declaration, `Some` set at export, required
-by `Engine::load_module`. The prototype cannot change the SDK type; it models
-the same split with `header(executor)` — the exporter supplies it — and a
-host-only module's interface is exported as its `record(parent)`, which has
-no executor field at all.
+**Decided: none of the three — a host-only module has no header.** The
+executor is not knowable at the declaration: only the step that compiles and
+exports the module — building the artifact — can tell whether it is native or
+wasm. A consumer importing the interface neither knows nor cares. It matters at
+**load**, and there are two ways to load: linking directly against the Rust
+symbols (the host case), where no header is involved; or providing a
+description plus a binary, where the description **must** name the executor —
+`"host"` is not an executor, and an absent one is not acceptable there. So
+`Header::executor` stays a required `Executor`, and the declaration never
+holds a header: `AroraModule::header(executor)` builds one on request, the
+exporter supplying the executor it builds for; a host-only module is registered
+from `host_functions()` and exports its interface as `record(parent)`, whose
+frozen form has no executor field. This is exactly what the prototype does.
