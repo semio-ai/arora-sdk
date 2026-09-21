@@ -705,6 +705,76 @@ mod tests {
         assert_eq!(decoded, value);
     }
 
+    #[test]
+    fn set_expression_routes_nested_expression_fields() {
+        use arora_msgs_ros2::{hri_msgs, interaction_skills, std_skills};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let message_type = registry
+            .get_by_name("interaction_skills/SetExpression")
+            .expect("interaction_skills/SetExpression is registered")
+            .clone();
+
+        let msg = interaction_skills::SetExpression {
+            meta: std_skills::Meta {
+                caller: "test".into(),
+                priority: std_skills::Meta::NORMAL_PRIORITY,
+            },
+            expression: hri_msgs::Expression {
+                expression: "happy".into(),
+                valence: 0.8,
+                arousal: 0.2,
+                ..Default::default()
+            },
+        };
+
+        let (ty, reg) =
+            <interaction_skills::SetExpression as AroraType>::arora_type_with_registry();
+
+        let value = to_value_seeded(&msg, &ty, &reg).expect("SetExpression to value");
+
+        let bytes =
+            cdr::encode(&message_type, registry.types(), &value).expect("encode SetExpression");
+
+        let decoded =
+            cdr::decode(&message_type, registry.types(), &bytes).expect("decode SetExpression");
+
+        assert_eq!(
+            extract_route(
+                &decoded,
+                &message_type,
+                registry.types(),
+                "expression.expression"
+            )
+            .expect("expression.expression"),
+            Value::String("happy".into())
+        );
+
+        assert_eq!(
+            extract_route(
+                &decoded,
+                &message_type,
+                registry.types(),
+                "expression.valence"
+            )
+            .expect("expression.valence"),
+            Value::F32(0.8)
+        );
+
+        assert_eq!(
+            extract_route(
+                &decoded,
+                &message_type,
+                registry.types(),
+                "expression.arousal"
+            )
+            .expect("expression.arousal"),
+            Value::F32(0.2)
+        );
+    }
+
     /// The profile fan-out resolves dotted field paths by name against the
     /// runtime type, and an x/y/z structure coerces to the store's vec3 form.
     #[test]

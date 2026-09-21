@@ -137,42 +137,60 @@ async fn inbound_topic_becomes_update_command() {
               To run locally, ensure a multicast-capable interface and use `--ignored`."
 )]
 async fn a_typed_hri_expression_publisher_lands_the_device_key() {
-    use arora_msgs_ros2::{builtin_interfaces, hri_msgs, std_msgs};
-    use arora_types::value_serde::bridge::to_value_seeded;
+    use arora_msgs_ros2::{
+        builtin_interfaces,
+        hri_msgs,
+        interaction_skills,
+        std_msgs,
+        std_skills,
+    };
     use arora_types::AroraType;
+    use arora_types::value_serde::bridge::to_value_seeded;
 
     let _ = env_logger::try_init();
     let domain_id = random_domain_id();
     let namespace = format!("test_hri_in_{domain_id}");
 
-    let make_expr = || hri_msgs::Expression {
-        header: std_msgs::Header {
-            stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
-            frame_id: "face".into(),
+    let make_expr = || interaction_skills::SetExpression {
+        meta: std_skills::Meta {
+            caller: "test".into(),
+            priority: std_skills::Meta::NORMAL_PRIORITY,
         },
-        expression: "happy".into(),
-        valence: 0.8,
-        arousal: 0.2,
-        confidence: 1.0,
+        expression: hri_msgs::Expression {
+            header: std_msgs::Header {
+                stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                frame_id: "face".into(),
+            },
+            expression: "happy".into(),
+            valence: 0.8,
+            arousal: 0.2,
+            confidence: 1.0,
+        },
     };
 
     let config = Ros2BridgeConfig::new(&namespace, domain_id)
-        .with_typed_input("expression", "hri_msgs/Expression");
+        .with_typed_input("expression", "interaction_skills/SetExpression");
+
     let mut bridge = Ros2Bridge::new(config).await;
     let mut inbound = bridge.take_inbound();
 
     let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
-    let topic = Name::parse(&topic_name(&namespace, "expression")).expect("valid topic name");
+
+    let topic =
+        Name::parse(&topic_name(&namespace, "expression")).expect("valid topic name");
+
     let pub_topic = pub_node
         .create_topic(
             &topic,
-            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            ros2_client::MessageTypeName::new("interaction_skills", "SetExpression"),
             &DEFAULT_PUBLISHER_QOS,
         )
         .expect("create topic");
+
     let publisher = pub_node
-        .create_publisher::<hri_msgs::Expression>(&pub_topic, None)
+        .create_publisher::<interaction_skills::SetExpression>(&pub_topic, None)
         .expect("create publisher");
+
     tokio::time::timeout(
         Duration::from_secs(30),
         publisher.wait_for_subscription(&pub_node),
@@ -205,11 +223,14 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
     .await
     .expect("timed out waiting for the expression Update command");
 
-    let (ty, reg) = <hri_msgs::Expression as AroraType>::arora_type_with_registry();
-    let expected = to_value_seeded(&make_expr(), &ty, &reg).expect("expression to value");
+    let (ty, reg) =
+        <interaction_skills::SetExpression as AroraType>::arora_type_with_registry();
+
+    let expected =
+        to_value_seeded(&make_expr(), &ty, &reg).expect("SetExpression to value");
+
     assert_eq!(change.set.get("expression"), Some(&Some(expected)));
 }
-
 /// Enabling the `ros4hri` exposure profile is all the wiring a face device
 /// needs (ARORA-86): a typed publisher on an absolute incumbent topic — here
 /// the PAL expression alias and the IIIA look_at alias — fans out onto the
@@ -239,8 +260,8 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
 
     let expr_topic = pub_node
         .create_topic(
-            &Name::parse("/robot_face/expression").expect("valid topic name"),
-            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            &Name::parse("/skill/set_expression").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("interaction_skills", "SetExpression"),
             &DEFAULT_PUBLISHER_QOS,
         )
         .expect("create expression topic");
