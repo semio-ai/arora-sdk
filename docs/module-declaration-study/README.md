@@ -5,6 +5,9 @@ declared with macros on the Rust module and its functions — the way
 `#[derive(AroraType)]` already lets a Rust type carry its own schema — instead
 of a `module.yaml` transcribed by hand into every place that needs its ids.
 
+Reading guide: [five slides](module-declaration-deck.md) on what changes for the
+developer who writes, hosts or calls a Rust module.
+
 Every claim here is either exercised by a test in [`prototype/`](prototype/)
 (a standalone workspace: `prototype/test.sh` builds the guest artifact and
 runs the 37 tests) or points at the code that establishes it. The module crates under `prototype/cases`
