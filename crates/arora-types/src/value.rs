@@ -343,7 +343,7 @@ impl Value {
     Value::ArrayValue(elements)
   }
 
-  /// [`array_of`](Self::array_of) for elements of an [`AroraType`], which
+  /// [`array_of`](Self::array_of) for elements of an [`AroraType`](crate::AroraType), which
   /// settles the empty array's form from the type's definition.
   pub fn array_of_type<T: crate::AroraType>(elements: Vec<Value>) -> Value {
     if elements.is_empty() {

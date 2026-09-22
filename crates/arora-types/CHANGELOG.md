@@ -9,10 +9,11 @@ All notable changes to `arora-types`. The format follows
 ### Added
 
 - `module::declared`: the `AroraModule` trait (`id`, `header(executor)`,
-  `record(parent)`, `host_functions`) and `HostFunction`, what a module
-  declared in Rust implements — the twin of `AroraType` for modules. The
-  executor is the exporter's to name, so `header` takes it; a module linked
-  into the host has no header and is described by its `record`.
+  `record(parent)`, `exports`) and `Export` — an exported function in its
+  callable form — what a module declared in Rust implements, the twin of
+  `AroraType` for modules. The executor is the exporter's to name, so
+  `header` takes it; a module linked into the host has no header and is
+  described by its `record`.
 - `AroraType::arora_type_version()`: the record version a frozen form pins a
   type at, `1.0.0` unless `#[arora(version = "…")]` says otherwise.
 - `Value::array_of`, `Value::array_of_type` and `Value::into_elements`: pack
