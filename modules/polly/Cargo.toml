@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+# `rlib` beside the `cdylib` so the module's own tests reach its declaration
+# (its header, its ids) — the artifact the executor loads is the cdylib.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "*"
-arora-buffers = { path = "../../crates/arora-buffers" }
-arora-types = { path = "../../crates/arora-types", version = "2" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
+arora-module = { path = "../../crates/arora-module", version = "1" }
 aws-config = "1"
 aws-sdk-polly = "1"
 bytes = "1"
@@ -32,12 +34,3 @@ serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 test-behavior-tree-nodes = { path = "../../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
-
-[build-dependencies]
-anyhow = "*"
-arora-behavior-tree-types = { path = "../../crates/arora-behavior-tree-types" }
-arora-behavior-tree-types-yaml = { path = "../../crates/arora-behavior-tree-types-yaml" }
-arora-module-core = { path = "../../crates/arora-module-authoring/core" }
-arora-module-rust = { path = "../../crates/arora-module-authoring/rust" }
-arora-registry = { path = "../../crates/arora-registry" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }

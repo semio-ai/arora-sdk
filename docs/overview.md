@@ -39,24 +39,27 @@ JavaScript.
 Modules are the building blocks of Semio Arora.
 Each module exports symbols for other modules to use.
 They can be implemented in C++ and in Rust, compiled into WebAssembly libraries.
-The symbols available in a compiled module is described in a `module.yaml` file.
-See [test-cpp](../modules/test-cpp/readme.md),
-[test-cpp-2](../modules/test-cpp-2/readme.md) or
-[test-rust-wasm](../modules/test-rust-wasm/readme.md)
-for working examples.
+A module's interface — its id, its exported functions, their parameters, each
+pinned by id — has one source of truth, and which one depends on the language.
 
-Authors of modules should write a `module.yaml` file and
-use `arora-module-cli` to generate the adequate sources to implement it.
-`arora-module-cli` also produces a `module.yaml` file with named symbols stripped.
-This is called a "header", and it is used by the runtime to identify the symbols.
-Use `arora-cli --header <module.yaml> --exe <binary>` to try loading a module.
+**In Rust**, the crate that implements the module carries it, declared with
+[`arora-module`](../crates/arora-module/readme.md)'s macros on the Rust module
+and its functions. Everything else comes from that declaration: the header, the
+store record, the functions a host registers, the stubs a caller programs
+against, the entry points an executor looks up. See
+[test-rust-wasm](../modules/test-rust-wasm/readme.md).
 
-**Important:** The `module.yaml` file is the source of truth. Each module's `build.rs`
-regenerates code in `src/arora_generated/` on every build. Manual edits to generated
-files will be lost. To add or modify functions, edit `module.yaml` and run
-`cargo clean -p <module-name>` to force regeneration. When importing functions from
-other modules, add them to both the `imports:` and `dependencies:` sections.
-See [`AGENTS.md`](../AGENTS.md) for detailed guidance on code generation.
+**In another language**, the interface is a `module.yaml`, and
+`arora-module-cli` generates the sources to implement it. See
+[test-cpp](../modules/test-cpp/readme.md) or
+[test-cpp-2](../modules/test-cpp-2/readme.md); a module still authored this way
+regenerates `src/arora_generated/` from the YAML on every build, so edits to
+generated files are lost — change the YAML instead, and list a function you
+call from another module under both `imports:` and `dependencies:`.
+
+Either way, what the runtime loads is a "header": the same declaration with
+named symbols stripped, written at export. Use
+`arora-cli --header <module.yaml> --exe <binary>` to try loading a module.
 
 When a function is called (for instance by using `arora-cli --call`),
 the call arguments are passed in via a structure which `id`

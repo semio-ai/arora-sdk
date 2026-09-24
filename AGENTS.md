@@ -181,14 +181,21 @@ The workspace handles cross-compilation via artifact dependencies:
 
 ### Creating a New Module
 
-1. Create directory under `modules/<name>/`
-2. Write `module.yaml` defining types, functions, imports
-3. Write `build.rs` using `arora-module-core` to analyze and generate code
-4. Write `Cargo.toml` with necessary artifact dependencies
-5. Implement functions in `src/lib.rs`
-6. Build and test
+**In Rust**, the crate carries the interface — no `module.yaml`, no `build.rs`:
 
-See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) or [`modules/test-behavior-tree-nodes/`](modules/test-behavior-tree-nodes/) for working examples.
+1. Create directory under `modules/<name>/`
+2. Depend on [`arora-module`](crates/arora-module/readme.md)
+3. Put `#[arora_module::module(id = "…", …)]` on the Rust module and
+   `#[export(id = "…")]` / `#[param(id = "…")]` on its functions
+4. Build and test; a host registers it with `HostModule::of::<M>()`
+
+See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) (wasm guest) or
+[`modules/polly/`](modules/polly/) (native) for working examples.
+
+**In another language** (C++), the interface is a `module.yaml` and the
+`arora-module-*` generators produce the bindings: write the YAML, a `build.rs`
+calling `arora-module-core`, then implement the functions. See
+[`modules/test-cpp/`](modules/test-cpp/).
 
 ### Module Interface Contract
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use arora_types::call::{Call, CallError, CallResult};
+use arora_types::module::declared::AroraModule;
 use arora_types::record::module::frozen::Function;
 use derive_more::{Display, Error};
 use uuid::Uuid;
@@ -63,6 +64,27 @@ pub struct HostModule {
 }
 
 impl HostModule {
+    /// The host module a declared one describes: its id, and every export of
+    /// [`AroraModule::exports`] attached under its own id with its frozen
+    /// signature, so the functions dispatch by parameter id and method
+    /// introspection lists them.
+    ///
+    /// ```ignore
+    /// engine.register_module(polly::ids::MODULE, Box::new(HostModule::of::<polly::Module>()));
+    /// ```
+    pub fn of<M: AroraModule>() -> HostModule {
+        let mut builder = ModuleBuilder::new(M::id());
+        for function in M::exports() {
+            builder = builder.described_function(
+                function.id,
+                function.name,
+                function.signature,
+                function.invoke,
+            );
+        }
+        builder.build()
+    }
+
     /// The module id this was built for (the id to register it under).
     pub fn id(&self) -> Uuid {
         self.id

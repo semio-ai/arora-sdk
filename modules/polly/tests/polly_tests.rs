@@ -1,6 +1,7 @@
 use anyhow::Result;
-use arora_behavior_tree::{variable::VariableCell, 
-    arora_generated::behavior_tree::status::Status, nodes::*, schema::Expression,
+use arora_behavior::Status;
+use arora_behavior_tree::{variable::VariableCell,
+    nodes::*, schema::Expression,
     tree_node::TreeNode, BehaviorTreeRuntime, ModuleFunction,
 };
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
@@ -177,7 +178,7 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
     engine: &mut PinnedEngine,
 ) {
     let module_root = module_root_path(name);
-    let header = read_header_from_module_root(module_root.to_owned()).await;
+    let header = read_header(name, &module_root).await;
     let module_id = header.id.to_owned();
     let module_version = header.version.to_owned();
     let module = resolve_low_module(header.to_owned(), registry)
@@ -236,6 +237,20 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
             executable,
         })
         .expect("failed to load module");
+}
+
+/// A module's header. polly declares itself in Rust, so its header comes from
+/// the declaration; a module still written as a `module.yaml` is read from the
+/// header its generator produced.
+async fn read_header(name: &str, module_root: &Path) -> Header {
+    if name == "polly" {
+        return polly::polly::header(arora_types::module::low::Executor {
+            name: "native".to_string(),
+            min_version: None,
+            max_version: None,
+        });
+    }
+    read_header_from_module_root(module_root.to_path_buf()).await
 }
 
 async fn read_header_from_module_root(module_root: PathBuf) -> Header {

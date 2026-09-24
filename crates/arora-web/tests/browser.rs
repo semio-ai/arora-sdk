@@ -13,22 +13,30 @@ use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-const HEADER_YAML: &str = include_str!(env!("TEST_RUST_WASM_HEADER_YAML"));
 // test-rust-wasm is a cdylib artifact dependency; cargo exposes its built wasm
 // path as CARGO_CDYLIB_FILE_<DEP>_<lib>.
 const WASM_BYTES: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-// `ping` from modules/test-rust-wasm/src/arora_generated/module.yaml.
+// `ping`, as the guest's Rust declaration pins it.
 const PING_FN_ID: &str = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6";
 
-fn yaml_header_to_json(yaml: &str) -> String {
-    let header: Header = serde_yaml::from_str(yaml).expect("parse header yaml");
-    serde_json::to_string(&header).expect("re-serialize header to json")
+/// The guest's header, from its declaration — what an export step would write
+/// as a `module.yaml`, here handed straight to the engine.
+fn header() -> Header {
+    test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
+        name: "wasm".to_string(),
+        min_version: None,
+        max_version: None,
+    })
+}
+
+fn header_json() -> String {
+    serde_json::to_string(&header()).expect("the declared header serializes to json")
 }
 
 #[wasm_bindgen_test]
 fn load_and_ping_test_rust_wasm() {
-    let header_json = yaml_header_to_json(HEADER_YAML);
+    let header_json = header_json();
     let mut engine = Engine::new();
 
     let module_id: String = engine
@@ -37,8 +45,7 @@ fn load_and_ping_test_rust_wasm() {
         .expect("loadModule succeeded");
 
     // Sanity: returned ID matches the header's id.
-    let header: Header = serde_yaml::from_str(HEADER_YAML).unwrap();
-    assert_eq!(module_id, header.id.to_string());
+    assert_eq!(module_id, header().id.to_string());
 
     let call_json = format!(r#"{{"id":"{PING_FN_ID}","args":[]}}"#);
     let result = engine
@@ -55,7 +62,7 @@ fn load_and_ping_test_rust_wasm() {
 /// than Chrome's 8 MB main-thread compile/instantiate limit.
 #[wasm_bindgen_test]
 async fn prepare_load_and_ping_test_rust_wasm() {
-    let header_json = yaml_header_to_json(HEADER_YAML);
+    let header_json = header_json();
     let mut engine = Engine::new();
 
     wasm_bindgen_futures::JsFuture::from(engine.prepare_module(&header_json, WASM_BYTES.to_vec()))
@@ -67,8 +74,7 @@ async fn prepare_load_and_ping_test_rust_wasm() {
         .map_err(jsval_to_string)
         .expect("loadPreparedModule succeeded");
 
-    let header: Header = serde_yaml::from_str(HEADER_YAML).unwrap();
-    assert_eq!(module_id, header.id.to_string());
+    assert_eq!(module_id, header().id.to_string());
 
     let call_json = format!(r#"{{"id":"{PING_FN_ID}","args":[]}}"#);
     let result = engine

@@ -1,0 +1,21 @@
+[package]
+name = "arora-module"
+version = "1.0.0"
+edition = "2021"
+description = "Write an Arora module in Rust: the declaration macros and the traits they implement."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "readme.md"
+
+[dependencies]
+arora-module-macros = { path = "../arora-module-macros", version = "1" }
+arora-types = { path = "../arora-types", version = "2.6" }
+# The artifact entry points the macros emit speak the engine's buffer wire
+# format; a host-linked module never calls into it.
+arora-buffers = { path = "../arora-buffers", version = "2" }
+
+[dev-dependencies]
+# The record round-trip test reads the store's wire form back.
+serde_yaml = "0.9"
+arora-behavior = { path = "../arora-behavior", version = "8.5" }
+arora-engine = { path = "../arora-engine", version = "4" }

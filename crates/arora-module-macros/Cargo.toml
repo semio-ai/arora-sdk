@@ -1,0 +1,21 @@
+[package]
+name = "arora-module-macros"
+version = "1.0.0"
+edition = "2021"
+description = "Declare an Arora module on a Rust module: #[module], #[export], #[param], declare_module!, module_from_header!."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "readme.md"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "extra-traits"] }
+# Read at expansion time: `#[arora(id)]` literals, and — for
+# `module_from_header!` — the low header model and its YAML.
+uuid = "1"
+arora-types = { path = "../arora-types", version = "2.6", default-features = false }
+serde_yaml = "0.9"

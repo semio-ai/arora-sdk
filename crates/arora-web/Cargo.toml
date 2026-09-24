@@ -41,4 +41,6 @@ wasm-bindgen-test = "0.3"
 serde_yaml = "0.9"
 # test-rust-wasm guest (wasm32-wasip1) the browser test include_bytes!s; cargo
 # exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
-test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+# `lib = true` also brings the crate itself in, for the test's own target: the
+# header the test loads comes from the module's Rust declaration.
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
