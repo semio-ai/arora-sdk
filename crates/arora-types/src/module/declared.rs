@@ -4,8 +4,8 @@
 //! A declaration (the `arora-module` macros) pins a module's id, its exported
 //! functions and their parameter ids in Rust, and produces from them every
 //! other form the module takes: the [`Header`] a `module.yaml` is written
-//! from, the [`record`](frozen::Module) a store serves, and the exports in
-//! their callable form. The marker type the declaration emits implements this
+//! from, the [`record`](frozen::Module) a store serves, and its exported
+//! functions, callable. The marker type the declaration emits implements this
 //! trait, so a host reaches all of that generically.
 //!
 //! [`AroraType`]: crate::AroraType
@@ -15,14 +15,14 @@ use crate::module::low::{Executor, Header};
 use crate::record::module::frozen::{self, Function};
 use crate::Uuid;
 
-/// One exported function in its callable form: a [`Call`] in — arguments
-/// matched by parameter id — and its [`CallResult`] out.
+/// One function a declared module exports, callable: a [`Call`] in —
+/// arguments matched by parameter id — and its [`CallResult`] out.
 ///
-/// How it is reached depends on how the module is built, not on the export:
+/// How it is reached depends on how the module is built, not on the function:
 /// a host that links the module registers `invoke` directly; a module built
 /// as an artifact (a wasm guest, a native shared library) wraps the same
 /// `invoke` under the executor's buffer ABI.
-pub struct Export {
+pub struct AroraFunction {
   /// The function's id, what a call targets.
   pub id: Uuid,
   /// The function's name, what method introspection lists.
@@ -49,5 +49,5 @@ pub trait AroraModule {
   fn record(parent: Uuid) -> frozen::Module;
 
   /// Every exported function, callable.
-  fn exports() -> Vec<Export>;
+  fn exports() -> Vec<AroraFunction>;
 }
