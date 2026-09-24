@@ -119,6 +119,15 @@ impl ExposureProfile {
     ///   `standard/ros4hri/expression/*` keys the face standard reads;
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
+    /// - a streamed viseme lands as its ROS4HRI code on
+    ///   `standard/ros4hri/viseme`, from either shape a TTS node publishes it
+    ///   in: one `hri_msgs/Viseme` on `/tts/viseme`, or an `hri_msgs/Visemes`
+    ///   on `/tts/visemes`. Both carry the shape at the audio playhead, so
+    ///   the sequence's first viseme is the one that lands; a message holding
+    ///   a whole alignment is a timeline, and playing one out over time is a
+    ///   viseme player's work rather than a bridge's. This is how a face
+    ///   lipsyncs to speech synthesized elsewhere — a `/skill/say` run drives
+    ///   the lips from the run itself, never through this topic;
     /// - the utterance being spoken publishes as `std_msgs/String` on
     ///   `/robot_face/speech` from the speech state key
     ///   `standard/ros4hri/speech/text` — what a say run is saying, empty at
@@ -175,6 +184,17 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
+        // The two shapes a viseme stream comes in reach the same key: the
+        // code alone, or the first of a sequence.
+        let viseme_key = "standard/ros4hri/viseme";
+        let viseme_routes = vec![FieldRoute {
+            field: "value".into(),
+            key: viseme_key.into(),
+        }];
+        let viseme_sequence_routes = vec![FieldRoute {
+            field: "visemes.0.value".into(),
+            key: viseme_key.into(),
+        }];
         // Every endpoint takes its flow's default delivery. A command surface
         // is reliable: an expression that is dropped is an instruction the
         // face never carries out. The image and the speech text are sensor
@@ -214,6 +234,13 @@ impl ExposureProfile {
                     "geometry_msgs/PointStamped",
                     Flow::In,
                     &look_at_routes,
+                ),
+                endpoint("/tts/viseme", "hri_msgs/Viseme", Flow::In, &viseme_routes),
+                endpoint(
+                    "/tts/visemes",
+                    "hri_msgs/Visemes",
+                    Flow::In,
+                    &viseme_sequence_routes,
                 ),
                 endpoint(
                     "/robot_face/speech",
@@ -391,6 +418,8 @@ mod tests {
             "/robot_face/expression",
             "/robot_face/look_at",
             "/expressive_face/look_at",
+            "/tts/viseme",
+            "/tts/visemes",
             "/robot_face/speech",
             "/robot_face/image_raw",
             "/robot_face/image_raw/compressed",
@@ -434,6 +463,32 @@ mod tests {
                 panic!("{topic} routes one whole key, got {:?}", endpoint.routes);
             };
             assert_eq!((route.field.as_str(), route.key.as_str()), ("", key));
+        }
+    }
+
+    /// Both viseme shapes a TTS node publishes reach the same key, so a face
+    /// lipsyncs to either without knowing which it is fed.
+    #[test]
+    fn ros4hri_preset_takes_a_viseme_in_either_shape() {
+        let profile = ExposureProfile::ros4hri();
+        for (topic, ros_type, field) in [
+            ("/tts/viseme", "hri_msgs/Viseme", "value"),
+            ("/tts/visemes", "hri_msgs/Visemes", "visemes.0.value"),
+        ] {
+            let endpoint = profile
+                .endpoints
+                .iter()
+                .find(|e| e.topic == topic)
+                .unwrap_or_else(|| panic!("{topic} is in the preset"));
+            assert_eq!(endpoint.ros_type, ros_type, "{topic}");
+            assert_eq!(endpoint.flow, Flow::In, "{topic}");
+            let [route] = endpoint.routes.as_slice() else {
+                panic!("{topic} routes one field, got {:?}", endpoint.routes);
+            };
+            assert_eq!(
+                (route.field.as_str(), route.key.as_str()),
+                (field, "standard/ros4hri/viseme"),
+            );
         }
     }
 

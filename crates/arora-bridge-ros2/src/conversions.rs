@@ -8,6 +8,7 @@
 //! their `std_msgs` counterpart, everything else falls back to a JSON-encoded
 //! `std_msgs/String`.
 
+use std::borrow::Cow;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -18,7 +19,7 @@ use arora_types::ty::{
     low, TypeRegistry, BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID,
     U16_ID, U32_ID, U64_ID, U8_ID,
 };
-use arora_types::value::{Structure, StructureField, Type, Value};
+use arora_types::value::{Enumeration, Structure, StructureField, Type, Value};
 use arora_types::Uuid;
 use futures::stream::unfold;
 use futures::Stream;
@@ -264,6 +265,10 @@ pub(crate) fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora
 /// the field up **by name** in the structure type, then descends type and
 /// value together.
 ///
+/// A numeric segment indexes an array instead (`"visemes.0.value"`): a ROS
+/// sequence field carries its element type, so the walk only moves the value
+/// along and the type stays where the field left it.
+///
 /// A geometry point/vector — a structure of exactly `x`, `y`, `z` numeric
 /// fields — coerces to [`Value::ArrayF32`], the store's vec3 form, so a
 /// `PointStamped.point` lands directly on a `gaze/target`-style key.
@@ -274,13 +279,19 @@ pub(crate) fn extract_route(
     dotted: &str,
 ) -> Result<Value, String> {
     use arora_types::ty::low::TypeKind;
-    let mut current_value = value;
+    let mut current_value = Cow::Borrowed(value);
     // The current position's type — `None` past a primitive (well-known ids
     // are not registry entries), which only matters for further descent or
     // the vec3 coercion, neither of which applies to a primitive.
     let mut current_ty = Some(ty);
     if !dotted.is_empty() {
         for segment in dotted.split('.') {
+            if let Ok(index) = segment.parse::<usize>() {
+                current_value = Cow::Owned(element_at(&current_value, index).ok_or_else(|| {
+                    format!("'{dotted}': no element {index} in the sequence at '{segment}'")
+                })?);
+                continue;
+            }
             let Some(TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
                 return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
             };
@@ -289,23 +300,63 @@ pub(crate) fn extract_route(
                 .iter()
                 .find(|(_, field)| field.name == segment)
                 .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
-            let Value::Structure(value_structure) = current_value else {
+            let Value::Structure(value_structure) = current_value.as_ref() else {
                 return Err(format!(
                     "'{dotted}': value at '{segment}' is not a structure"
                 ));
             };
-            current_value = value_structure
+            let field_value = value_structure
                 .fields
                 .iter()
                 .find(|value_field| value_field.id == *field_id)
-                .map(|value_field| value_field.value.as_ref())
+                .map(|value_field| value_field.value.as_ref().clone())
                 .ok_or_else(|| format!("'{dotted}': decoded value misses '{segment}'"))?;
+            current_value = Cow::Owned(field_value);
             current_ty = registry.get(&type_ref_id(&field.type_ref));
         }
     }
     Ok(current_ty
-        .and_then(|ty| coerce_xyz(current_value, ty))
-        .unwrap_or_else(|| current_value.clone()))
+        .and_then(|ty| coerce_xyz(&current_value, ty))
+        .unwrap_or_else(|| current_value.into_owned()))
+}
+
+/// One element of an array value, whatever the array's element kind, `None`
+/// past its end or on a value that is not an array. Structure and enumeration
+/// elements regain the array's element id, so the element is a value in its
+/// own right.
+fn element_at(value: &Value, index: usize) -> Option<Value> {
+    fn nth<T: Copy>(items: &[T], index: usize, wrap: impl Fn(T) -> Value) -> Option<Value> {
+        items.get(index).copied().map(wrap)
+    }
+    match value {
+        Value::ArrayBoolean(items) => nth(items, index, Value::Boolean),
+        Value::ArrayU8(items) => nth(items, index, Value::U8),
+        Value::ArrayU16(items) => nth(items, index, Value::U16),
+        Value::ArrayU32(items) => nth(items, index, Value::U32),
+        Value::ArrayU64(items) => nth(items, index, Value::U64),
+        Value::ArrayI8(items) => nth(items, index, Value::I8),
+        Value::ArrayI16(items) => nth(items, index, Value::I16),
+        Value::ArrayI32(items) => nth(items, index, Value::I32),
+        Value::ArrayI64(items) => nth(items, index, Value::I64),
+        Value::ArrayF32(items) => nth(items, index, Value::F32),
+        Value::ArrayF64(items) => nth(items, index, Value::F64),
+        Value::ArrayString(items) => items.get(index).cloned().map(Value::String),
+        Value::ArrayValue(items) => items.get(index).cloned(),
+        Value::ArrayStructure { id, elements } => elements.get(index).map(|element| {
+            Value::Structure(Structure {
+                id: *id,
+                fields: element.fields.clone(),
+            })
+        }),
+        Value::ArrayEnumeration { id, elements } => elements.get(index).map(|element| {
+            Value::Enumeration(Enumeration {
+                id: *id,
+                variant_id: element.variant_id,
+                value: element.value.clone(),
+            })
+        }),
+        _ => None,
+    }
 }
 
 /// Whether a type is a geometry point/vector — a structure of exactly `x`,
@@ -1113,5 +1164,54 @@ mod tests {
         assert_eq!(whole, decoded);
         // A missing field reports, not panics.
         assert!(extract_route(&decoded, &message_type, registry.types(), "nope").is_err());
+    }
+
+    /// A numeric segment indexes a sequence, which is how the ROS4HRI preset
+    /// takes the viseme out of an `hri_msgs/Visemes` — off the wire, so the
+    /// walk runs on what a real publisher's bytes decode to.
+    #[test]
+    fn routes_index_a_sequence() {
+        use arora_msgs_ros2::hri_msgs;
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let message_type = registry
+            .get_by_name("hri_msgs/Visemes")
+            .expect("hri_msgs/Visemes is registered")
+            .clone();
+        let visemes = hri_msgs::Visemes {
+            visemes: vec![
+                hri_msgs::Viseme {
+                    value: hri_msgs::Viseme::AA,
+                    time: 0.25,
+                    duration: 0.1,
+                },
+                hri_msgs::Viseme {
+                    value: hri_msgs::Viseme::OU,
+                    time: 0.35,
+                    duration: 0.1,
+                },
+            ],
+        };
+        let (ty, reg) = <hri_msgs::Visemes as AroraType>::arora_type_with_registry();
+        let value = to_value_seeded(&visemes, &ty, &reg).expect("visemes to value");
+        let bytes = cdr::encode(&message_type, registry.types(), &value).expect("encode");
+        let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+
+        let types = registry.types();
+        assert_eq!(
+            extract_route(&decoded, &message_type, types, "visemes.0.value").unwrap(),
+            Value::U8(hri_msgs::Viseme::AA),
+        );
+        assert_eq!(
+            extract_route(&decoded, &message_type, types, "visemes.1.time").unwrap(),
+            Value::F32(0.35),
+        );
+        // Past the end reports, not panics — an empty sequence writes nothing.
+        assert!(extract_route(&decoded, &message_type, types, "visemes.2.value").is_err());
+        let empty = hri_msgs::Visemes { visemes: vec![] };
+        let empty = to_value_seeded(&empty, &ty, &reg).expect("empty to value");
+        assert!(extract_route(&empty, &message_type, types, "visemes.0.value").is_err());
     }
 }
