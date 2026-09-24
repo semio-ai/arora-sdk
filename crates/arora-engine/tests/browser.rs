@@ -28,19 +28,24 @@ use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-// The test-rust-wasm guest (built for wasm32-wasip1 as a cdylib artifact
-// dependency) plus its low-level header, wired in by Cargo + build.rs.
-const HEADER_YAML: &str = include_str!(env!("TEST_RUST_WASM_HEADER_YAML"));
+// The test-rust-wasm guest, built for wasm32-wasip1 as a cdylib artifact
+// dependency and wired in by Cargo.
 const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-// Function + parameter ids from modules/test-rust-wasm/src/arora_generated/module.yaml.
+// Function + parameter ids, as the guest's Rust declaration pins them.
 const SUCCEED: &str = "00cd31a8-2cf4-48e6-a957-69a55de90424"; // () -> bool
 const ADD: &str = "e4b0a2f3-6c7d-4e8f-9a0b-1c2d3e4f5a6b"; // (f32, f32) -> f32
 const ADD_A: &str = "a1b2c3d4-e5f6-4a8b-9c0d-e1f2a3b4c5d6";
 const ADD_B: &str = "b2c3d4e5-f6a7-4b9c-8d1e-f2a3b4c5d6e7";
 
+/// The guest's header, from its declaration — what an export step writes as a
+/// `module.yaml`, here handed straight to the engine.
 fn header() -> Header {
-    serde_yaml::from_str(HEADER_YAML).expect("parse test-rust-wasm header yaml")
+    test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
+        name: "wasm".to_string(),
+        min_version: None,
+        max_version: None,
+    })
 }
 
 fn id(s: &str) -> Uuid {
