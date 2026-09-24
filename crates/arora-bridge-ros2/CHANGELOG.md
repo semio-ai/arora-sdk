@@ -4,6 +4,23 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.5.0] - 2026-09-24
+
+### Added
+
+- **Sequence indexing in a field route.** A numeric segment of an inbound
+  route's dotted path indexes an array (`visemes.0.value`), so a message that
+  wraps its payload in a sequence routes by the same mechanism as any other —
+  no message type is special-cased in the subscriber.
+- **The ROS4HRI preset takes a streamed viseme**, landing its ROS4HRI code on
+  `standard/ros4hri/viseme` from either shape a TTS node publishes it in: one
+  `hri_msgs/Viseme` on `/tts/viseme`, or an `hri_msgs/Visemes` on
+  `/tts/visemes`. Both carry the shape at the audio playhead, so a sequence's
+  first viseme is the one that lands; a message holding a whole alignment is a
+  timeline, and playing one out over time is a viseme player's work rather
+  than a bridge's. This is how a face lipsyncs to speech synthesized
+  elsewhere — a `/skill/say` run drives the lips from the run itself.
+
 ## [6.4.0] - 2026-09-21
 
 ### Added

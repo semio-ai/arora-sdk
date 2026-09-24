@@ -2,6 +2,18 @@
 
 All notable changes.
 
+## [1.3.0] - 2026-09-24
+
+### Added
+
+- **`hri_msgs/Viseme` and `hri_msgs/Visemes`**, the lip shapes a TTS node
+  aligns to speech: the 15-shape constants (the Oculus/Meta set), a `value`,
+  and the `time`/`duration` that place it in the utterance; `Visemes` is a
+  sequence of them. Neither exists upstream — the README's "Departures from
+  upstream" table is the record of it — but the names and fields are what the
+  ROS4HRI TTS nodes publishing `/tts/viseme` and `/tts/visemes` already use,
+  so a face built from these files hears them.
+
 ## [1.2.0] - 2026-09-10
 
 ### Added

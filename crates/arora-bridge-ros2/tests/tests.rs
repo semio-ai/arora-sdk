@@ -212,9 +212,10 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
 
 /// Enabling the `ros4hri` exposure profile is all the wiring a face device
 /// needs (ARORA-86): a typed publisher on an absolute incumbent topic — here
-/// the PAL expression alias and the IIIA look_at alias — fans out onto the
-/// `standard/ros4hri/*` keys the face standard reads, fields routed by name
-/// and the gaze point coerced to the store's vec3 form.
+/// the PAL expression alias, the IIIA look_at alias, and both shapes a TTS
+/// node streams a viseme in — fans out onto the `standard/ros4hri/*` keys the
+/// face standard reads, fields routed by name, the gaze point coerced to the
+/// store's vec3 form, and the sequence indexed at its first element.
 #[tokio::test]
 #[serial]
 #[cfg_attr(
@@ -257,6 +258,26 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     let gaze_publisher = pub_node
         .create_publisher::<geometry_msgs::PointStamped>(&gaze_topic, None)
         .expect("create look_at publisher");
+    let viseme_topic = pub_node
+        .create_topic(
+            &Name::parse("/tts/viseme").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("hri_msgs", "Viseme"),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create viseme topic");
+    let viseme_publisher = pub_node
+        .create_publisher::<hri_msgs::Viseme>(&viseme_topic, None)
+        .expect("create viseme publisher");
+    let visemes_topic = pub_node
+        .create_topic(
+            &Name::parse("/tts/visemes").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("hri_msgs", "Visemes"),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create visemes topic");
+    let visemes_publisher = pub_node
+        .create_publisher::<hri_msgs::Visemes>(&visemes_topic, None)
+        .expect("create visemes publisher");
     tokio::time::timeout(
         Duration::from_secs(30),
         expr_publisher.wait_for_subscription(&pub_node),
@@ -269,6 +290,18 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     )
     .await
     .expect("timed out waiting for the bridge to discover the look_at publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        viseme_publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the viseme publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        visemes_publisher.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the visemes publisher");
 
     tokio::spawn(async move {
         loop {
@@ -297,16 +330,46 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
                     },
                 })
                 .await;
+            // Distinct shapes, so each change says which topic it came from.
+            let _ = viseme_publisher
+                .async_publish(hri_msgs::Viseme {
+                    value: hri_msgs::Viseme::PP,
+                    time: 0.0,
+                    duration: 0.1,
+                })
+                .await;
+            let _ = visemes_publisher
+                .async_publish(hri_msgs::Visemes {
+                    visemes: vec![
+                        hri_msgs::Viseme {
+                            value: hri_msgs::Viseme::OU,
+                            time: 0.2,
+                            duration: 0.1,
+                        },
+                        hri_msgs::Viseme {
+                            value: hri_msgs::Viseme::AA,
+                            time: 0.3,
+                            duration: 0.1,
+                        },
+                    ],
+                })
+                .await;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
 
-    // One expression message fans out atomically; the look_at lands on its
-    // own change. Collect until both surfaces arrived.
+    // One expression message fans out atomically; the look_at and each viseme
+    // land on their own change. Collect until every surface arrived.
     let mut expression_change = None;
     let mut gaze_change = None;
+    let mut viseme = None;
+    let mut sequence_viseme = None;
     tokio::time::timeout(Duration::from_secs(10), async {
-        while expression_change.is_none() || gaze_change.is_none() {
+        while expression_change.is_none()
+            || gaze_change.is_none()
+            || viseme.is_none()
+            || sequence_viseme.is_none()
+        {
             match inbound.next().await {
                 Some(Inbound::Command(cmd)) => {
                     if let BridgeOp::Update(change) = cmd.op {
@@ -314,11 +377,19 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
                             expression_change = Some(change);
                         } else if change.set.contains_key("standard/ros4hri/gaze/target") {
                             gaze_change = Some(change);
+                        } else if let Some(Some(shape)) =
+                            change.set.get("standard/ros4hri/viseme").cloned()
+                        {
+                            if shape == Value::U8(hri_msgs::Viseme::PP) {
+                                viseme = Some(shape);
+                            } else {
+                                sequence_viseme = Some(shape);
+                            }
                         }
                     }
                 }
                 Some(_) => {}
-                None => panic!("the inbound stream ended before both surfaces arrived"),
+                None => panic!("the inbound stream ended before every surface arrived"),
             }
         }
     })
@@ -348,6 +419,10 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
         gaze.set.get("standard/ros4hri/gaze/frame"),
         Some(&Some(Value::String("sellion_link".into()))),
     );
+
+    // Both shapes reach the one key, the sequence at its first element.
+    assert_eq!(viseme, Some(Value::U8(hri_msgs::Viseme::PP)));
+    assert_eq!(sequence_viseme, Some(Value::U8(hri_msgs::Viseme::OU)));
 }
 
 /// `try_send` publishes a changed key to its topic, where a separate node

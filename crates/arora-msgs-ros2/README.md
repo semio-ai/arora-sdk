@@ -41,8 +41,8 @@ arora_msgs_ros2::hri_msgs::LiveSpeech
 `arora_msgs_ros2::registry()` returns a `Ros2Registry` with every bundled type.
 
 The `hri_msgs` package is [ROS4HRI](https://ros.org/reps/rep-0155.html)'s human-robot-interaction
-vocabulary — `Expression`, `FacialActionUnits`, `Gaze`, `LiveSpeech`, and the
-rest — the message layer Vizij's face standard is built on (see
+vocabulary — `Expression`, `FacialActionUnits`, `Gaze`, `LiveSpeech`, `Viseme`,
+and the rest — the message layer Vizij's face standard is built on (see
 [vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
 
 **To add a message**, drop its `.msg` into `msgs/<package>/` and rebuild — the
@@ -61,6 +61,7 @@ this table when upstream adopts it or we drop it.
 | File | Upstream | Departure | Why | Upstream status |
 |---|---|---|---|---|
 | `communication_skills/Say.action` | [ros4hri/communication_skills](https://github.com/ros4hri/communication_skills/blob/main/action/Say.action) | Feedback gains `string viseme` and `float32 intensity` after the standard's `std_skills/Feedback feedback`. | A face speaking under `/skill/say` shapes its mouth per viseme; a client mirroring the lips or captioning the speech needs that stream, and the standard's generic feedback has no place for it. Additive, so a goal from an upstream client still parses. | Not yet proposed. |
+| `hri_msgs/Viseme.msg`, `hri_msgs/Visemes.msg` | None — [ros4hri/hri_msgs](https://github.com/ros4hri/hri_msgs/tree/master/msg) has no viseme message on any branch. | New files: `Viseme` carries the 15-shape constants, a `value`, and the `time`/`duration` that place it in the utterance; `Visemes` is a sequence of them. | A TTS node aligning speech to lip shapes publishes them on `/tts/viseme` and `/tts/visemes`, which is how a face lipsyncs to speech synthesized elsewhere, and upstream has no vocabulary for it. The fields and the constants are the ones the ROS4HRI TTS nodes in the field already publish under these names, so a face built from these files hears them. | Not yet proposed; the shape to propose is this one, since it is what is deployed. |
 
 A device exposes the extended contract only under the ROS4HRI exposure
 profile — the skill is ROS4HRI's, and so is the extension.

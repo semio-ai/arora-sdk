@@ -151,6 +151,8 @@ lands at its field, the fields keep their last value (their type's default
 until written), and a change to any routed key publishes the whole message
 again. A `std_msgs` wrapper around one key (`data` ← the key) is the smallest
 case; a `PointStamped` from a vec3 key and a frame key is the same mechanism.
+Inbound, a numeric segment indexes a sequence (`visemes.0.value`), so a
+message wrapping its payload in an array routes like any other.
 
 **Exposure profiles** (`profile` module) bundle a whole surface: an
 [`ExposureProfile`] holds typed endpoints on absolute topics with per-field
@@ -161,7 +163,11 @@ standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
 the ROS4HRI face surface for both incumbent name sets — PAL (`/robot_face/*`)
 and IIIA (`/expressive_face/*`): expression commands fan out to
 `standard/ros4hri/expression/*`, `look_at` points land as the gaze target
-(vec3) and frame, and the two standard skills spawn the device's task runs —
+(vec3) and frame, a streamed viseme lands as its ROS4HRI code on
+`standard/ros4hri/viseme` — from either shape a TTS node publishes it in, one
+`hri_msgs/Viseme` on `/tts/viseme` or an `hri_msgs/Visemes` on `/tts/visemes`,
+both carrying the shape at the audio playhead — and the two standard skills
+spawn the device's task runs —
 `interaction_skills/LookAt` on `/skill/look_at`, and `communication_skills/Say`
 on `/skill/say`, whose goal `input` is the utterance and whose feedback carries
 what the run reports (for a face, the viseme at the audio playhead). What the
