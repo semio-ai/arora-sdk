@@ -4,6 +4,15 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] - 2026-09-24
+
+### Added
+
+- `HostModule::of::<M: AroraModule>()`: the host module a Rust declaration
+  describes — every export attached under its own id with its frozen
+  signature, so calls match arguments by parameter id and method
+  introspection lists the functions.
+
 ## [4.1.0] - 2026-07-29
 
 ### Added

@@ -647,17 +647,19 @@ mod module_loading_tests {
     use arora_types::call::{Call, CallBridge};
     use arora_types::value::Value;
 
-    const HEADER_YAML: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../modules/test-rust-wasm/src/arora_generated/module.yaml"
-    ));
     const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-    // Function id from modules/test-rust-wasm/module.yaml.
+    // Function id, as the guest's Rust declaration pins it.
     const SUCCEED: &str = "00cd31a8-2cf4-48e6-a957-69a55de90424"; // () -> bool
 
+    /// The guest's header, from its declaration — what an export step writes
+    /// as a `module.yaml`, here handed straight to the engine.
     fn test_module_header() -> Header {
-        serde_yaml::from_str(HEADER_YAML).expect("parse test-rust-wasm header yaml")
+        test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
+            name: "wasm".to_string(),
+            min_version: None,
+            max_version: None,
+        })
     }
 
     /// `with_module` loads the guest executable into the engine, and its

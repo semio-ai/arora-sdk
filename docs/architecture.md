@@ -188,7 +188,8 @@ through guest wasm.
 ## Modules
 
 A module is a binary (host cdylib, wasm32-wasip1 .wasm, or cross-compiled
-ELF) plus a `module.yaml` header. The header declares:
+ELF) plus a header, written at export from the module's declaration. The header
+declares:
 
 - **Types**: `Enumeration`s and `Structure`s, identified by UUID.
 - **Functions**: each has an id, an args struct id, and a return struct id.
@@ -209,19 +210,23 @@ through ordinary module calls.
 Rust types cross these boundaries via serde: `arora_types::value_serde`
 converts any `Serialize`/`Deserialize` type to and from an Arora `Value`, and
 `arora_buffers::typed` serializes the same types straight to the wire bytes,
-skipping the intermediate `Value`. Generated code from `module.yaml` remains
-the path for cross-language modules; the serde path serves host-side Rust.
+skipping the intermediate `Value`.
 
-Authors write a `module.yaml` and run `arora-module-cli` to generate the
-language-specific scaffold (`arora-module-rust` for Rust, `arora-module-cpp`
-for C++) and a stripped "header" form for runtime use. The host-tool
-location is delivered to each module's `build.rs` via cargo bindeps.
+**A Rust module declares itself in Rust.**
+[`arora-module`](../crates/arora-module/readme.md)'s macros go on the Rust
+module and its exported functions, ids pinned in the attributes, and produce
+the header, the store record, the functions a host registers
+(`HostModule::of::<M>()`), the client stubs, and the artifact's entry points —
+no `module.yaml`, no `build.rs`. The executor is not part of the declaration:
+`header(executor)` takes it from the step that builds the artifact.
 
-**Code generation:** Each module's `build.rs` automatically regenerates
-`src/arora_generated/` on every build from the `module.yaml` source. Manual
-edits to generated files are lost. To modify a module's interface, edit
-`module.yaml` (including `imports:` and `dependencies:` for cross-module
-calls) and rebuild. See [`../AGENTS.md`](../AGENTS.md) for detailed guidance.
+**A module in another language ships a `module.yaml`**, and `arora-module-cli`
+generates the scaffold (`arora-module-cpp`) plus the stripped "header" form the
+runtime uses. The host-tool location is delivered to that module's `build.rs`
+via cargo bindeps, which regenerates `src/arora_generated/` on every build, so
+edits to generated files are lost — change the YAML (including `imports:` and
+`dependencies:` for cross-module calls) and rebuild. See
+[`../AGENTS.md`](../AGENTS.md) for detailed guidance.
 
 ## Build orchestration
 

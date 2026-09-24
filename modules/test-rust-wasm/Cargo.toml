@@ -13,19 +13,7 @@ crate-type = ["cdylib", "rlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-buffers = { path = "../../crates/arora-buffers" }
-arora-types = { path = "../../crates/arora-types", version = "2" }
-bytes = "1"
-derive_more = "2"
-serde = { version = "1", features = ["derive"] }
-uuid = { version = "1", features = ["serde", "v4"] }
+arora-module = { path = "../../crates/arora-module", version = "1" }
 
 [dev-dependencies]
 anyhow = "*"
-
-[build-dependencies]
-anyhow = "*"
-arora-module-core = { path = "../../crates/arora-module-authoring/core" }
-arora-module-rust = { path = "../../crates/arora-module-authoring/rust" }
-arora-registry = { path = "../../crates/arora-registry" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

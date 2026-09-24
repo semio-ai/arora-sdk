@@ -29,11 +29,19 @@ fn run(args: &[&str]) {
 
 #[test]
 fn call_test_rust_wasm_from_engine() {
-    let module_root = workspace_root().join("modules").join("test-rust-wasm");
-    let module_yaml = module_root
-        .join("src")
-        .join("arora_generated")
-        .join("module.yaml");
+    // The module declares itself in Rust: the header the engine loads it with
+    // is written from that declaration, which is what an export step does.
+    let module_yaml = std::env::temp_dir().join("arora-test-rust-wasm-header.yaml");
+    let header = test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
+        name: "wasm".to_string(),
+        min_version: None,
+        max_version: None,
+    });
+    std::fs::write(
+        &module_yaml,
+        serde_yaml::to_string(&header).expect("the declared header serializes"),
+    )
+    .expect("writing the header");
     // Use the artifact dependency path from build script
     let wasm = PathBuf::from(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
     run(&[

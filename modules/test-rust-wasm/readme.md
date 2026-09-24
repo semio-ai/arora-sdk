@@ -3,9 +3,10 @@
 This is a module written in Rust and compiled to WASM to be executed by arora-engine.
 It relies on [wasmtime for Rust](https://docs.wasmtime.dev/lang-rust.html).
 
-It uses a code generation step using `arora-module-cli -l rust`,
-and puts all the sources under `src/arora-generated`,
-and provides bindings for the Arora engine.
+The module declares its Arora interface in Rust, with
+[`arora-module`](../../crates/arora-module/readme.md)'s macros: the ids, the
+header the engine loads it with, and the `arora_function_<id>` entry points
+the executor calls all come from `src/lib.rs`.
 
 This module exports symbols imported by the module
 [Behavior Tree Nodes](https://github.com/semio-ai/arora-sdk),
@@ -16,8 +17,8 @@ Exported functions:
 
 | Name | Signature | Notes |
 |------|-----------|-------|
-| `ping` | `() -> string` | Returns `"pong"` |
-| `succeed` | `() -> Status` | Always `Status::Success` |
+| `ping` | `() -> ()` | Does nothing |
+| `succeed` | `() -> bool` | Always `true` |
 | `cos` | `(angle: f32) -> f32` | Wraps `f32::cos` |
 | `add` | `(a: f32, b: f32) -> f32` | Returns `a + b` |
 

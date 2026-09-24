@@ -1,9 +1,4 @@
-// Generated code: lint hygiene is the generator's responsibility, not this
-// repo's. Allow clippy/dead_code over the whole generated subtree.
-#[allow(clippy::all, dead_code)]
-mod arora_generated;
-
-use arora_generated::behavior_tree::status::Status;
+use arora_behavior::Status;
 use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
 use aws_sdk_polly::{
     types::{OutputFormat, VoiceId},
@@ -37,8 +32,29 @@ lazy_static::lazy_static! {
   static ref RUNS: Mutex<HashMap<u64, JoinHandle<Status>>> = Mutex::new(HashMap::new());
 }
 
-fn hello_world() -> Status {
-    say(Some("Hello, world!".to_string()))
+/// The module's interface, declared in Rust: `module.yaml` is written from
+/// this at export, not the other way round.
+#[arora_module::module(
+    id = "a1a6bb9a-334f-4617-a764-9a55817039d8",
+    name = "polly",
+    version = "0.1.0",
+    author = "Semio",
+    license = "Proprietary",
+    description = "AWS Polly support module",
+    executable_mime = "application/x-binary"
+)]
+pub mod polly {
+    use super::Status;
+
+    #[export(id = "e5a41333-4848-411f-878c-f1d662ebb4a0")]
+    pub fn hello_world() -> Status {
+        say("Hello, world!".to_string())
+    }
+
+    #[export(id = "e1b4bda7-1c7b-4322-b9a0-552201b8a011")]
+    pub fn say(#[param(id = "fb3787f2-2151-49ce-8b61-6274984558ea")] text: String) -> Status {
+        super::say(text)
+    }
 }
 
 /// The run key for an utterance. The module ABI hands `say` only its arguments —
@@ -52,11 +68,7 @@ fn utterance_key(text: &str) -> u64 {
     h.finish()
 }
 
-fn say(text: Option<String>) -> Status {
-    let text = match text {
-        Some(text) => text,
-        None => return Status::Failure,
-    };
+fn say(text: String) -> Status {
     let key = utterance_key(&text);
     let mut runs = match RUNS.lock() {
         Ok(runs) => runs,

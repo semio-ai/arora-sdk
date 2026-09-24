@@ -227,12 +227,25 @@ together with the component-model migration.
 
 ## Module surface
 
-### `module.yaml` is the single source of truth
+### A module's interface has one source of truth, and which one depends on the language
 
-Each module ships a `module.yaml` describing its types and functions.
-`arora-module-cli` generates language bindings from it (`arora-module-rust`,
-`arora-module-cpp`) and a "header" form with named symbols stripped that the
-runtime uses for identification.
+A module written in Rust declares its interface in Rust, with
+[`arora-module`](../crates/arora-module/readme.md)'s macros on the Rust module
+and its functions: the crate that implements the module carries it. A module
+written in another language ships a `module.yaml`, and `arora-module-cli`
+generates the bindings from it (`arora-module-cpp`).
+
+`module.yaml` is then one form the interface takes, not the interface: an
+export writes it, from a declaration or from the authored YAML, in the
+"header" form with named symbols stripped that the runtime identifies a module
+by. A store record is another form, and the two differ — records are versioned
+and frozen, headers are not.
+
+**The executor is the export's to name.** A declaration cannot know whether it
+will be built native or wasm; the step that produces the artifact does, and a
+header handed to `Engine::load_module` must carry it. A module linked into the
+host has no header at all: it is registered from its exports and described by
+its record.
 
 Module functions take and return a structure whose `id` matches the
 function. The first field carries the return value; subsequent fields
