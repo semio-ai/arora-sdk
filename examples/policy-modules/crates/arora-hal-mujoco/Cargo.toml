@@ -1,0 +1,21 @@
+[package]
+name = "arora-hal-mujoco"
+description = "A MuJoCo simulation as an Arora HAL: any MJCF robot presented under the same keys a real one is"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+arora-hal.workspace = true
+arora-types.workspace = true
+async-trait = "0.1"
+futures-channel = "0.3"
+futures-core = "0.3"
+log.workspace = true
+# Binds MuJoCo 3.12.0, a shared library found through MUJOCO_DYNAMIC_LINK_DIR
+# at build time and the loader path at run time (see ../../tools/setup-mujoco.sh).
+mujoco-rs = "6.1"
+
+[dev-dependencies]
+futures = "0.3"
