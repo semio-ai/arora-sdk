@@ -7,7 +7,7 @@
 //!  * the structure round-trips through `Value` and through buffers, and its
 //!    bytes match the `serde_uuid` codec;
 //!  * the export shim is called with an optional argument absent, present,
-//!    explicitly `None`, and bare (refused);
+//!    explicitly `None`, and bare (a present value);
 //!  * the `module.yaml` the generator writes declares the optionals, and reads
 //!    back to the same frozen signature.
 
@@ -270,12 +270,18 @@ fn main() {{
         some_string("3 at 30"),
         "present"
     );
+    assert_eq!(
+        call(sample, "{SAMPLE_ID}", vec![anim(), rate(Value::F32(30.0))]),
+        some_string("3 at 30"),
+        "a bare element is a present value"
+    );
     assert!(
-        try_call(sample, "{SAMPLE_ID}", vec![anim(), rate(Value::F32(30.0))]).is_err(),
-        "a bare element is not an optional"
+        try_call(sample, "{SAMPLE_ID}", vec![anim(), rate(Value::String("fast".into()))]).is_err(),
+        "a bare element of the wrong type"
     );
     assert_eq!(call(sample, "{SAMPLE_ID}", vec![anim(), rate(Value::Option(None))]), some_string("3 at 60"), "explicit None");
-    let window = Value::Option(Some(Box::new(Coord {{ x: 4.0, y: 0.0 }}.into())));
+    // A bare structure is a present one too.
+    let window: Value = Coord {{ x: 4.0, y: 0.0 }}.into();
     assert_eq!(
         call(sample, "{SAMPLE_ID}", vec![anim(), field("{SAMPLE_WINDOW_ID}", window)]),
         some_string("3 at 60 from 4"),

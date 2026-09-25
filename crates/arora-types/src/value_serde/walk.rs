@@ -410,13 +410,18 @@ fn write_by_ref<W: ValueWriter>(
     TypeRef::Array { id } => write_array(*id, registry, value, writer),
     TypeRef::FixedArray { id, len } => write_fixed_array(*id, *len, registry, value, writer),
     TypeRef::Map { .. } => err("map types are not supported yet"),
+    // A bare element is a present value: it is written framed, like
+    // `Value::Option(Some(…))`.
     TypeRef::Option { id } => match value {
       Value::Option(None) => writer.begin_option(false),
       Value::Option(Some(inner)) => {
         writer.begin_option(true)?;
         write_by_ref(&TypeRef::Scalar { id: *id }, registry, inner, writer)
       }
-      other => err(format!("expected an optional value, found {other:?}")),
+      bare => {
+        writer.begin_option(true)?;
+        write_by_ref(&TypeRef::Scalar { id: *id }, registry, bare, writer)
+      }
     },
   }
 }

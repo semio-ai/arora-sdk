@@ -27,6 +27,12 @@ impl<'a> BufferReader<'a> {
         self.backing = &self.backing[pad..];
     }
 
+    /// The type tag [`next_type`](Self::next_type) would read, without
+    /// consuming it.
+    pub fn peek_type(&self) -> Option<u8> {
+        self.backing.first().copied()
+    }
+
     pub fn next_type(&mut self) -> Option<u8> {
         if self.backing.is_empty() {
             return None;
