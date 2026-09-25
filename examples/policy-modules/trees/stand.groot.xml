@@ -1,0 +1,8 @@
+<root main_tree_to_execute="MainTree">
+  <!-- Stand and balance, holding the commanded head pose. -->
+  <BehaviorTree ID="MainTree">
+    <Stand head="{command.head}" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+           joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+           targets="{joints.target_position}" />
+  </BehaviorTree>
+</root>
