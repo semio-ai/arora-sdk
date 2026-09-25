@@ -189,6 +189,23 @@ impl Arora {
         self.engine.arora_call(call)
     }
 
+    /// Install a Groot behavior tree as the device's behavior. Its tags are
+    /// resolved against the device's own method index — the natively-hosted
+    /// control nodes and every loaded module's exports — and the lowered graph
+    /// is loaded through the interpreter module, the path a remote's load
+    /// takes. Call it between steps, after [`build`](AroraBuilder::build); the
+    /// tree binds to the store at its first tick.
+    pub fn load_groot(&mut self, xml: &str) -> Result<()> {
+        let tree = arora_behavior_tree::schema_groot::BehaviorTree::try_from_groot_xml(xml)
+            .map_err(|e| anyhow::anyhow!("the Groot tree does not parse: {e:?}"))?;
+        let graph = tree
+            .into_graph(&self.function_index)
+            .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
+        self.call(interpreter_module::encode_load(&graph))
+            .map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
+        Ok(())
+    }
+
     /// Borrow the engine's call seam. [`call`](Arora::call) covers plain
     /// dispatch; this is for embedders that need the rest of the
     /// [`CallBridge`] — registering an in-process [`Callable`]
@@ -768,6 +785,48 @@ mod module_loading_tests {
             })
             .expect("call succeed() on the declared module's guest");
         assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A Groot tree loaded into the built device reaches a declared guest
+    /// module's function by name: the tag resolves against the device's own
+    /// index, the tree binds its arguments to store keys, and the guest's
+    /// return lands in the store through the `_ret` binding.
+    #[test]
+    fn load_groot_reaches_a_declared_module_function_by_name() {
+        use arora_types::data::{Key, StateChange};
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("angle", Value::F32(0.0)))
+            .expect("seed the input");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .build()
+            .expect("build a device with a declared wasm module");
+        arora
+            .load_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <cos angle="{angle}" res="{cosine}"/>
+                   </BehaviorTree></root>"#,
+            )
+            .expect("the tree names the guest's cos by its declared name");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("cosine")]),
+            vec![Some(Value::F32(1.0))],
+            "cos(0) written back to the bound key"
+        );
     }
 
     /// A loaded guest module's primitive-typed exports join the method index
