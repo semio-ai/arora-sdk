@@ -5,6 +5,13 @@ declared with macros on the Rust module and its functions — the way
 `#[derive(AroraType)]` already lets a Rust type carry its own schema — instead
 of a `module.yaml` transcribed by hand into every place that needs its ids.
 
+The design is implemented by [`arora-module`](../../crates/arora-module/) and
+[`arora-module-macros`](../../crates/arora-module-macros/); their documentation
+is the reference for writing a module. This study is the design record: the
+case analyses, the [open questions](open-questions.md) and how each was settled,
+and the [`prototype/`](prototype/) that exercised them. The prototype's crate
+names and module paths are its own and differ from the shipped crates.
+
 Reading guide: [five slides](module-declaration-deck.md) on what changes for the
 developer who writes, hosts or calls a Rust module.
 
