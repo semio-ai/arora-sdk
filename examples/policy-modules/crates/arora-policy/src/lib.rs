@@ -104,10 +104,11 @@ impl OnnxPolicy {
                 ),
             });
         }
-        let input = tract_ndarray::Array2::from_shape_vec((1, observation.len()), observation.to_vec())
-            .map_err(|e| PolicyError {
-                message: e.to_string(),
-            })?;
+        let input =
+            tract_ndarray::Array2::from_shape_vec((1, observation.len()), observation.to_vec())
+                .map_err(|e| PolicyError {
+                    message: e.to_string(),
+                })?;
         let outputs = self.plan.run(tvec!(Tensor::from(input).into()))?;
         let output = outputs.first().ok_or_else(|| PolicyError {
             message: "the policy produced no output".to_string(),
@@ -128,7 +129,9 @@ fn flat_len(model: &TypedModel, outlet: Option<OutletId>) -> Result<usize, Polic
         .iter()
         .map(|dim| {
             dim.to_usize().map_err(|_| PolicyError {
-                message: format!("the policy has a symbolic dimension ({dim}); export it with a batch of one"),
+                message: format!(
+                    "the policy has a symbolic dimension ({dim}); export it with a batch of one"
+                ),
             })
         })
         .collect::<Result<_, _>>()?;
@@ -286,9 +289,9 @@ mod tests {
     #[test]
     fn decimator_fires_at_the_control_rate_from_faster_ticks() {
         let mut d = Decimator::new(20_000_000); // 50 Hz
-        // The first tick fires immediately; its 10 ms already count toward
-        // the next period, so the next firing is one more tick later, then
-        // every second tick.
+                                                // The first tick fires immediately; its 10 ms already count toward
+                                                // the next period, so the next firing is one more tick later, then
+                                                // every second tick.
         assert!(d.due(10_000_000));
         let fired: Vec<bool> = (0..6).map(|_| d.due(10_000_000)).collect();
         assert_eq!(fired, [true, false, true, false, true, false]);
@@ -307,7 +310,11 @@ mod tests {
     #[test]
     fn gravity_projects_down_for_an_upright_body_and_tilts_with_it() {
         let upright = projected_gravity([1.0, 0.0, 0.0, 0.0]);
-        assert!((upright[0]).abs() < 1e-6 && (upright[1]).abs() < 1e-6 && (upright[2] + 1.0).abs() < 1e-6);
+        assert!(
+            (upright[0]).abs() < 1e-6
+                && (upright[1]).abs() < 1e-6
+                && (upright[2] + 1.0).abs() < 1e-6
+        );
         // Pitched 90° nose-down about +y: the body's x axis points down, so
         // gravity appears along +x in the body frame.
         let half = std::f32::consts::FRAC_PI_4;
