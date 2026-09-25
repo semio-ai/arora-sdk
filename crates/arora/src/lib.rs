@@ -63,6 +63,7 @@ use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Subscription};
+use arora_types::module::declared::AroraModule;
 use arora_types::module::low::{self, Header};
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
@@ -349,6 +350,45 @@ impl AroraBuilder {
         self
     }
 
+    /// Load a module **declared in Rust** as a guest executable: the header
+    /// comes from the declaration, and every export joins the method index
+    /// with the declaration's frozen signature. Repeatable.
+    ///
+    /// [`with_module`](Self::with_module) can index only primitive-typed
+    /// exports, because a header carries no type versions to freeze a structure
+    /// or an enumeration against. The declaration does: `M::exports()` hands
+    /// each function's frozen signature, so an export of any type — a
+    /// `Status`-returning behavior leaf included — is discoverable and reachable
+    /// from a behavior tree, exactly as the same crate registered in-process
+    /// with [`with_host_module`](Self::with_host_module)
+    /// (`HostModule::of::<M>()`) would be. `executor` names how `executable`
+    /// runs — `"wasm"` for the `wasm32-wasip1` build of the declaring crate.
+    ///
+    /// ```ignore
+    /// let device = Arora::builder()
+    ///     .with_declared_module::<my_module::Module>(wasm_executor(), WASM_BYTES)
+    ///     .build()?;
+    /// ```
+    pub fn with_declared_module<M: AroraModule>(
+        mut self,
+        executor: low::Executor,
+        executable: impl Into<Box<[u8]>>,
+    ) -> Self {
+        for function in M::exports() {
+            self.functions.insert(
+                function.id,
+                ModuleFunction {
+                    module_id: M::id(),
+                    function_id: function.id,
+                    function_name: function.name.to_string(),
+                    function: function.signature,
+                },
+            );
+        }
+        self.modules.push((M::header(executor), executable.into()));
+        self
+    }
+
     /// Add a host-side module: a set of in-process functions under a module id,
     /// assembled with [`ModuleBuilder`] and finished with
     /// [`ModuleBuilder::build`]. Repeatable — each call adds one module.
@@ -448,6 +488,12 @@ impl AroraBuilder {
             let module_id = header.id;
             for export in &header.exports {
                 let low::ExportSymbol::Function(function) = export;
+                // An export its declaration already indexed
+                // (`with_declared_module`) keeps that frozen signature; only a
+                // bare header's exports are frozen from their primitives here.
+                if functions.contains_key(&function.id) {
+                    continue;
+                }
                 match module_discovery::guest_function_signature(function) {
                     Some(signature) => {
                         functions.insert(
@@ -681,6 +727,46 @@ mod module_loading_tests {
                 args: Vec::new(),
             })
             .expect("call succeed() on the loaded module");
+        assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A module loaded from its Rust declaration indexes every export with the
+    /// declaration's own frozen signature — the same entries the crate would
+    /// contribute registered in-process — and its functions dispatch to the
+    /// guest executable.
+    #[test]
+    fn with_declared_module_indexes_every_export_from_the_declaration() {
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let mut arora = Arora::builder()
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .build()
+            .expect("build a device with a declared wasm module");
+
+        for declared in Module::exports() {
+            let indexed = arora
+                .function_index
+                .get(&declared.id)
+                .unwrap_or_else(|| panic!("{} is indexed", declared.name));
+            assert_eq!(indexed.module_id, Module::id());
+            assert_eq!(indexed.function_name, declared.name);
+            assert_eq!(indexed.function, declared.signature);
+        }
+
+        let result = arora
+            .call(Call {
+                module_id: Some(Module::id()),
+                id: Uuid::parse_str(SUCCEED).expect("valid uuid"),
+                args: Vec::new(),
+            })
+            .expect("call succeed() on the declared module's guest");
         assert_eq!(result.ret, Value::Boolean(true));
     }
 
