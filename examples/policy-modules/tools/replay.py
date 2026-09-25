@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 
 
@@ -55,6 +56,9 @@ def main():
 
     rows, joints = load(args.recording)
     model = mujoco.MjModel.from_xml_path(str(args.model))
+    # The offscreen buffer must fit the frames; the scene's default is 640×480.
+    model.vis.global_.offwidth = max(model.vis.global_.offwidth, args.width)
+    model.vis.global_.offheight = max(model.vis.global_.offheight, args.height)
     data = mujoco.MjData(model)
     times = np.array([float(r["time"]) for r in rows])
     period = float(np.median(np.diff(times))) if len(times) > 1 else 0.02
@@ -80,8 +84,6 @@ def main():
 
     if args.view:
         import time
-
-        import mujoco.viewer
 
         with mujoco.viewer.launch_passive(model, data) as viewer:
             start = time.perf_counter()
