@@ -31,6 +31,12 @@ pub mod test_rust_wasm {
     ) -> f32 {
         a + b
     }
+
+    /// A string of `length` bytes, so a host can choose the size of the result.
+    #[export(id = "431fb111-d750-4470-b1c8-94b0ad8c6e6b")]
+    pub fn text(#[param(id = "64351cbc-d84b-4df3-bd52-fd23edd943cf")] length: u32) -> String {
+        "x".repeat(length as usize)
+    }
 }
 
 #[cfg(test)]
