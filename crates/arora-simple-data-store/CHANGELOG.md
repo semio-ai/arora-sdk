@@ -4,6 +4,12 @@ All notable changes to `arora-simple-data-store`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3.
+
 ## [2.0.0] - 2026-07-20
 
 ### Breaking

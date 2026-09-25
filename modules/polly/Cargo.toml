@@ -10,8 +10,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "*"
-arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
-arora-module = { path = "../../crates/arora-module", version = "1" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
+arora-module = { path = "../../crates/arora-module", version = "2" }
 aws-config = "1"
 aws-sdk-polly = "1"
 bytes = "1"
@@ -27,7 +27,7 @@ arora-engine = { path = "../../crates/arora-engine" }
 arora-behavior-tree = { path = "../../crates/arora-behavior-tree" }
 arora-module-core = { path = "../../crates/arora-module-authoring/core" }
 arora-registry = { path = "../../crates/arora-registry" }
-arora-types = { path = "../../crates/arora-types", version = "2" }
+arora-types = { path = "../../crates/arora-types", version = "3" }
 convert_case = "0.11"
 rand = "0.10"
 serde_yaml = "0.9"

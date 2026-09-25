@@ -14,7 +14,7 @@ use crate::reader::BufferReader;
 use crate::writer::BufferWriter;
 use crate::{
     TYPE_ARRAY, TYPE_BOOLEAN, TYPE_F32, TYPE_F64, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8,
-    TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
+    TYPE_OPTION, TYPE_STRING, TYPE_STRUCTURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
 };
 
 /// Generates the buffers `write_*_array` methods for numeric/bool elements: the
@@ -139,6 +139,14 @@ impl ValueWriter for BuffersValueWriter {
     fn begin_struct(&mut self, id: Uuid, field_count: usize) -> Result<()> {
         self.inner
             .begin_structure(id.as_bytes(), field_count as u32);
+        Ok(())
+    }
+    fn begin_option(&mut self, present: bool) -> Result<()> {
+        if present {
+            self.inner.add_option_some();
+        } else {
+            self.inner.add_option_none();
+        }
         Ok(())
     }
     fn begin_field(&mut self, id: Uuid) -> Result<()> {
@@ -292,6 +300,10 @@ impl ValueReader for BuffersValueReader<'_> {
             )));
         }
         Ok(())
+    }
+    fn enter_option(&mut self) -> Result<bool> {
+        self.expect_tag(TYPE_OPTION, "option")?;
+        Ok(self.inner.get_option_presence())
     }
     fn enter_field(&mut self, expected_id: Uuid) -> Result<()> {
         let id = Self::uuid_from(self.inner.get_structure_field())?;
@@ -690,5 +702,78 @@ mod tests {
         let via_serde_uuid = crate::serde_uuid::serialize(&value);
         assert_eq!(via_walk, via_serde_uuid, "walk and serde_uuid diverge");
         assert_eq!(crate::serde_uuid::deserialize(&via_walk), value);
+    }
+
+    // Maybe { rate: Option<f32>, inner: Option<Inner> }.
+    const MAYBE: u128 = 0x40;
+
+    fn maybe_type() -> low::Type {
+        let optional = |name: &str, element: Uuid| low::StructureField {
+            name: name.to_string(),
+            type_ref: TypeRef::Option { id: element },
+        };
+        let fields = [
+            (id(0x41), optional("rate", *ty::F32_ID)),
+            (id(0x42), optional("inner", id(INNER))),
+        ]
+        .into_iter()
+        .collect();
+        low::Type {
+            name: "Maybe".to_string(),
+            id: id(MAYBE),
+            description: String::new(),
+            kind: low::TypeKind::Structure(low::Structure { fields }),
+        }
+    }
+
+    fn maybe_value(rate: Option<f32>, inner: bool) -> Value {
+        let inner = inner.then(|| {
+            Box::new(Value::Structure(Structure {
+                id: id(INNER),
+                fields: vec![vfield(0xA, Value::I32(7)), vfield(0xB, Value::F32(1.5))],
+            }))
+        });
+        Value::Structure(Structure {
+            id: id(MAYBE),
+            fields: vec![
+                vfield(0x41, Value::Option(rate.map(|r| Box::new(Value::F32(r))))),
+                vfield(0x42, Value::Option(inner)),
+            ],
+        })
+    }
+
+    /// Present and absent optionals — of a primitive and of a structure — round
+    /// trip through the walk, and encode exactly as the `serde_uuid` `Value`
+    /// path does.
+    #[test]
+    fn optionals_round_trip_through_the_walk() {
+        let maybe = maybe_type();
+        let registry = registry();
+        for value in [maybe_value(Some(2.5), true), maybe_value(None, false)] {
+            let mut w = BuffersValueWriter::new();
+            write_value(&maybe, &registry, &value, &mut w).expect("write");
+            let buf = w.finish();
+            assert_eq!(
+                buf,
+                crate::serde_uuid::serialize(&value),
+                "walk and serde_uuid diverge"
+            );
+            let mut r = BuffersValueReader::new(&buf);
+            assert_eq!(read_value(&maybe, &registry, &mut r).expect("read"), value);
+        }
+    }
+
+    #[test]
+    fn a_bare_value_for_an_optional_is_rejected() {
+        let maybe = maybe_type();
+        let value = Value::Structure(Structure {
+            id: id(MAYBE),
+            fields: vec![
+                vfield(0x41, Value::F32(2.5)),
+                vfield(0x42, Value::Option(None)),
+            ],
+        });
+        let mut w = BuffersValueWriter::new();
+        assert!(write_value(&maybe, &registry(), &value, &mut w).is_err());
     }
 }

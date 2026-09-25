@@ -41,12 +41,10 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -uo pipefail
-          # Publishable crates (semio-free deps, already resolvable on crates.io),
-          # in dependency order. The module-authoring / registry / behavior-tree
-          # crates are intentionally absent: they carry private semio-record /
-          # semio-client git deps, which crates.io forbids. They join this list
-          # once the semio-record migration removes those deps.
-          publishable=(arora-types-derive arora-types arora-module-macros arora-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-bridge-ros2 arora-behavior arora-hal arora-simple-data-store arora-vfs arora-buffers arora-registry arora-module-core arora-module-rust arora-behavior-tree-types arora-behavior-tree arora-engine arora arora-web)
+          # Publishable crates in dependency order: every crate follows the ones
+          # it depends on, so a release that bumps several in lockstep publishes
+          # each after its new dependencies.
+          publishable=(arora-types-derive arora-types arora-buffers arora-vfs arora-behavior arora-module-macros arora-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-behavior-tree-types arora-bridge-ros2 arora-hal arora-simple-data-store arora-registry arora-module-core arora-module-rust arora-behavior-tree arora-engine arora arora-web)
           for crate in "${publishable[@]}"; do
             ver=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')

@@ -53,7 +53,7 @@ pub fn generate_header_file(
             .iter()
             .map(|(export_id, export)| {
                 let ExportKind::Function(function) = &export.kind;
-                ExportSymbol::Function(ExportFunction {
+                Ok(ExportSymbol::Function(ExportFunction {
                     id: export_id.to_owned(),
                     name: export.name.to_owned(),
                     parameters: function
@@ -61,24 +61,24 @@ pub fn generate_header_file(
                         .iter()
                         .map(|parameter_id| {
                             let parameter = function.parameters.get(parameter_id).unwrap();
-                            Parameter {
+                            Ok(Parameter {
                                 name: parameter.name.to_owned(),
-                                ty: low_type_ref_from_unfrozen_ty(&parameter.ty),
+                                ty: low_type_ref_from_unfrozen_ty(&parameter.ty)?,
                                 mutable: parameter.mutable,
                                 id: parameter_id.to_owned(),
                                 default_value: None,
-                            }
+                            })
                         })
-                        .collect(),
-                    ret: low_type_ref_from_unfrozen_ty(&function.return_ty),
-                })
+                        .collect::<Result<_, _>>()?,
+                    ret: low_type_ref_from_unfrozen_ty(&function.return_ty)?,
+                }))
             })
-            .collect(),
+            .collect::<Result<_, ModuleDeclarationError>>()?,
         imports: imports
             .iter()
             .map(|import| {
                 let ExportKind::Function(import_function) = &import.import.kind;
-                ImportSymbol::Function(ImportFunction {
+                Ok(ImportSymbol::Function(ImportFunction {
                     id: import.id.to_owned(),
                     name: import.import.name.to_owned(),
                     module: import.module_id.to_owned(),
@@ -87,19 +87,19 @@ pub fn generate_header_file(
                         .iter()
                         .map(|parameter_id| {
                             let parameter = import_function.parameters.get(parameter_id).unwrap();
-                            Parameter {
+                            Ok(Parameter {
                                 name: parameter.name.to_owned(),
-                                ty: low_type_ref_from_unfrozen_ty(&parameter.ty),
+                                ty: low_type_ref_from_unfrozen_ty(&parameter.ty)?,
                                 mutable: parameter.mutable,
                                 id: parameter_id.to_owned(),
                                 default_value: None,
-                            }
+                            })
                         })
-                        .collect(),
-                    ret: low_type_ref_from_unfrozen_ty(&import_function.return_ty),
-                })
+                        .collect::<Result<_, _>>()?,
+                    ret: low_type_ref_from_unfrozen_ty(&import_function.return_ty)?,
+                }))
             })
-            .collect(),
+            .collect::<Result<_, ModuleDeclarationError>>()?,
         executable_mime: "".to_string(),
     };
     let mut result = Directory::new();
@@ -133,8 +133,10 @@ pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry 
     ))
 }
 
-fn low_type_ref_from_unfrozen_ty(unfrozen: &FrozenTy) -> TypeRef {
-    match unfrozen {
+/// The header form of a frozen type. A header optional names its element by
+/// id, so an optional of anything but a scalar has no header form.
+fn low_type_ref_from_unfrozen_ty(unfrozen: &FrozenTy) -> Result<TypeRef, ModuleDeclarationError> {
+    Ok(match unfrozen {
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => TypeRef::Scalar {
                 id: UNIT_ID.to_owned(),
@@ -218,5 +220,13 @@ fn low_type_ref_from_unfrozen_ty(unfrozen: &FrozenTy) -> TypeRef {
         FrozenTy::FrozenArray(array) => TypeRef::Array {
             id: array.reference.id.to_owned(),
         },
-    }
+        FrozenTy::FrozenOption(option) => match low_type_ref_from_unfrozen_ty(&option.element)? {
+            TypeRef::Scalar { id } => TypeRef::Option { id },
+            other => {
+                return Err(ModuleDeclarationError::Generic(format!(
+                    "an optional of {other:?} has no header form"
+                )))
+            }
+        },
+    })
 }

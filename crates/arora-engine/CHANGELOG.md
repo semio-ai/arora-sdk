@@ -4,6 +4,12 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3 and arora-buffers 3.
+
 ## [4.2.1] - 2026-09-25
 
 ### Fixed

@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-module = { path = "../../crates/arora-module", version = "1" }
+arora-module = { path = "../../crates/arora-module", version = "2" }
 
 [dev-dependencies]
 anyhow = "*"

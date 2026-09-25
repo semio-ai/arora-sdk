@@ -843,6 +843,8 @@ pub async fn generate_structure_source(
         FrozenTy::Primitive(_) => false,
         FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
         FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
+        // Refused when the field itself is generated.
+        FrozenTy::FrozenOption(_) => false,
     });
     let generated_modules_use = if references_generated_modules {
         quote! { use crate::arora_generated; }
@@ -1418,6 +1420,7 @@ async fn generate_value_from_frozen(
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     Ok(match ty {
+        FrozenTy::FrozenOption(_) => return Err(optional_unsupported()),
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => quote! { Value::Unit },
             PrimitiveKind::Boolean => quote! { Value::Boolean(#value_expression) },
@@ -1510,6 +1513,7 @@ async fn generate_field_from_value_frozen(
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
+        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
         FrozenTy::Primitive(primitive) => {
             let mismatch = format!("field {}: unexpected value kind", field_name);
             let arm = match primitive.kind {
@@ -1627,6 +1631,7 @@ async fn generate_serialize_from_frozen(
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
+        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
         FrozenTy::Primitive(primitive) => {
             let generate_serialize_primitive_array =
                 |primitive_type_id: &Uuid, write_function: TokenStream| {
@@ -1764,6 +1769,7 @@ async fn generate_deserialize_from_frozen(
     check_type: CheckType,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
+        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
         FrozenTy::Primitive(primitive) => {
             let type_kind_ident = type_kind_ident_from_primitive(&primitive.kind);
 
@@ -2114,6 +2120,7 @@ async fn type_ident_from_frozen(
     with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
     Ok(match ty {
+        FrozenTy::FrozenOption(_) => return Err(optional_unsupported()),
         FrozenTy::Primitive(primitive) => match *primitive {
             Primitive::UNIT => quote! { () },
             Primitive::BOOLEAN => quote!(bool),
@@ -2320,6 +2327,15 @@ pub enum GenerationError {
 }
 
 impl std::error::Error for GenerationError {}
+
+/// The generator has no optional form: a module whose signature carries an
+/// optional is declared in Rust with `arora-module` instead.
+fn optional_unsupported() -> GenerationError {
+    GenerationError::Generic(
+        "optional types are not supported by the Rust generator; declare the module with arora-module"
+            .to_string(),
+    )
+}
 
 /// A helper to format a Uuid into an inlined byte array.
 pub struct RawUuidValue<'a>(pub &'a Uuid);

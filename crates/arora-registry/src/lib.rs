@@ -159,15 +159,9 @@ impl TypeDefinitionFrozen {
     pub fn direct_dependencies(&self) -> HashSet<Uuid> {
         let mut dependencies = HashSet::new();
         let mut maybe_insert = |ty: &FrozenTy| {
-            match ty {
-                FrozenTy::Primitive(_) => {}
-                FrozenTy::FrozenScalar(scalar) => {
-                    dependencies.insert(scalar.reference.id.to_owned());
-                }
-                FrozenTy::FrozenArray(array) => {
-                    dependencies.insert(array.reference.id.to_owned());
-                }
-            };
+            let mut references = HashSet::new();
+            ty.dependencies(&mut references);
+            dependencies.extend(references.into_iter().map(|reference| reference.id));
         };
         match self {
             Self::Primitive(_) => {}

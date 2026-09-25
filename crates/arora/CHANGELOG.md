@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3, arora-engine 5, arora-behavior 9,
+  arora-behavior-tree 8, arora-bridge 5, arora-bridge-ws 5, arora-hal 4 and
+  arora-simple-data-store 3.
+- The `studio-bridge` feature does not build until arora-studio-bridge-client
+  is released against arora-bridge 5: the client implements
+  `arora_bridge::Bridge`.
+
 ## [9.11.0] - 2026-07-30
 
 ### Added

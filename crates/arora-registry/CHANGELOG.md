@@ -4,6 +4,13 @@ All notable changes to `arora-registry`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3. A frozen type's dependencies are
+  collected through `FrozenTy::dependencies`, so an optional's element counts.
+
 ## [1.0.0] - 2026-07-20
 
 ### Breaking

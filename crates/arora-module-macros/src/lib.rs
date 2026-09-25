@@ -58,6 +58,10 @@ enum Kind {
     Dynamic,
     /// Anything else: an `AroraType` converting through `Into`/`TryFrom<Value>`.
     User(Type),
+    /// `Option<T>`: an argument that may be absent, or a return that may carry
+    /// nothing. The element is a primitive, a user type or a dynamic value —
+    /// what a header optional can name by id.
+    Option(Box<Kind>),
 }
 
 fn primitive(ident: &str) -> Option<Kind> {
@@ -117,11 +121,24 @@ fn kind_of(ty: &Type) -> syn::Result<Kind> {
             }
         }
         "Value" => Ok(Kind::Dynamic),
-        "Option" | "HashMap" | "BTreeMap" | "Box" => Err(syn::Error::new(
+        "Option" => {
+            let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+                return Err(syn::Error::new(ty.span(), "`Option` needs a type argument"));
+            };
+            let Some(syn::GenericArgument::Type(element)) = args.args.first() else {
+                return Err(syn::Error::new(ty.span(), "`Option` needs a type argument"));
+            };
+            match kind_of(element)? {
+                Kind::Array(_) | Kind::Unit | Kind::Option(_) => Err(syn::Error::new(
+                    ty.span(),
+                    "an optional element is a primitive, a structure or a `Value`",
+                )),
+                element => Ok(Kind::Option(Box::new(element))),
+            }
+        }
+        "HashMap" | "BTreeMap" | "Box" => Err(syn::Error::new(
             ty.span(),
-            format!(
-                "`{ident}` is not expressible in the record vocabulary (no optional or map form)"
-            ),
+            format!("`{ident}` is not expressible in the record vocabulary (no map form)"),
         )),
         _ => Ok(Kind::User(ty.clone())),
     }
@@ -139,7 +156,9 @@ impl Kind {
             }
             Kind::Dynamic => quote! { *arora_types::ty::KEY_VALUE_ID },
             Kind::User(ty) => quote! { <#ty as arora_types::AroraType>::arora_type_id() },
-            Kind::Array(_) => unreachable!("an array of arrays is rejected at parse time"),
+            Kind::Array(_) | Kind::Option(_) => {
+                unreachable!("an array or optional element is a scalar, checked at parse time")
+            }
         }
     }
 
@@ -149,6 +168,10 @@ impl Kind {
             Kind::Array(element) => {
                 let id = element.element_id();
                 quote! { arora_types::module::low::TypeRef::Array { id: #id } }
+            }
+            Kind::Option(element) => {
+                let id = element.element_id();
+                quote! { arora_types::module::low::TypeRef::Option { id: #id } }
             }
             other => {
                 let id = other.element_id();
@@ -201,6 +224,14 @@ impl Kind {
                 }
                 _ => unreachable!("rejected at parse time"),
             },
+            Kind::Option(element) => {
+                let element = element.frozen_ty();
+                quote! {
+                  arora_types::record::ty::FrozenTy::FrozenOption(arora_types::record::ty::FrozenOption {
+                    element: ::std::boxed::Box::new(#element),
+                  })
+                }
+            }
         }
     }
 
@@ -231,6 +262,10 @@ impl Kind {
             Kind::Array(element) => {
                 let e = element.rust_type();
                 quote! { ::std::vec::Vec<#e> }
+            }
+            Kind::Option(element) => {
+                let e = element.rust_type();
+                quote! { ::std::option::Option<#e> }
             }
         }
     }
@@ -277,6 +312,21 @@ impl Kind {
                 },
                 _ => unreachable!("rejected at parse time"),
             },
+            // An optional travels as `Value::Option`, or bare when present: a
+            // caller that knows nothing of optionals passes the element itself.
+            Kind::Option(element) => {
+                let element = element.decode(what, fail);
+                quote! {
+                  match __value {
+                    arora_types::value::Value::Option(::std::option::Option::None) => ::std::option::Option::None,
+                    arora_types::value::Value::Option(::std::option::Option::Some(__inner)) => {
+                      let __value = *__inner;
+                      ::std::option::Option::Some(#element)
+                    }
+                    __value => ::std::option::Option::Some(#element),
+                  }
+                }
+            }
         }
     }
 
@@ -306,6 +356,12 @@ impl Kind {
                 },
                 _ => unreachable!("rejected at parse time"),
             },
+            Kind::Option(element) => {
+                let element = element.encode(quote! { __element });
+                quote! {
+                  arora_types::value::Value::Option((#expr).map(|__element| ::std::boxed::Box::new(#element)))
+                }
+            }
         }
     }
 }
@@ -513,7 +569,7 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
         .chain(std::iter::once(&export.ret))
         .filter_map(|kind| match kind {
             Kind::User(ty) => Some(ty),
-            Kind::Array(element) => match &**element {
+            Kind::Array(element) | Kind::Option(element) => match &**element {
                 Kind::User(ty) => Some(ty),
                 _ => None,
             },
@@ -540,11 +596,18 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
             quote! {}
         };
         let missing = format!("missing parameter `{}` of `{}`", p.name, fn_name);
+        // An absent optional argument is `None`; any other absent argument
+        // fails the call by name.
+        let absent = if matches!(p.kind, Kind::Option(_)) {
+            quote! { .unwrap_or(arora_types::value::Value::Option(::std::option::Option::None)) }
+        } else {
+            quote! { .ok_or_else(|| #fail(#missing.to_string()))? }
+        };
         quote! {
           let #mutability #ident = {
             let __value = call.args.iter().find(|field| field.id == ids::#c)
               .map(|field| (*field.value).clone())
-              .ok_or_else(|| #fail(#missing.to_string()))?;
+              #absent;
             #decode
           };
         }
@@ -1128,12 +1191,14 @@ fn kind_of_type_ref(
             Kind::Dynamic => Ok(Kind::Array(Box::new(Kind::Dynamic))),
             element => Ok(Kind::Array(Box::new(element))),
         },
-        TypeRef::FixedArray { .. } | TypeRef::Map { .. } | TypeRef::Option { .. } => {
-            Err(syn::Error::new(
-                span,
-                "fixed arrays, maps and options are not supported by the header macro yet",
-            ))
-        }
+        TypeRef::Option { id } => match of_id(id)? {
+            Kind::Unit => Err(syn::Error::new(span, "an optional of unit has no meaning")),
+            element => Ok(Kind::Option(Box::new(element))),
+        },
+        TypeRef::FixedArray { .. } | TypeRef::Map { .. } => Err(syn::Error::new(
+            span,
+            "fixed arrays and maps are not supported by the header macro yet",
+        )),
     }
 }
 

@@ -257,6 +257,14 @@ pub struct UnfrozenArray {
   pub reference: UnfrozenReference,
 }
 
+/// An optional value of another type expression, versions not yet pinned: an
+/// absent value, or a present one of type `element`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename = "unfrozen_Option")]
+pub struct UnfrozenOption {
+  pub element: Box<UnfrozenTy>,
+}
+
 /// A scalar reference to another type record, pinned to a concrete version.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 #[serde(rename = "frozen_Scalar")]
@@ -271,6 +279,14 @@ pub struct FrozenArray {
   pub reference: FrozenReference,
 }
 
+/// An optional value of another type expression, every version pinned: an
+/// absent value, or a present one of type `element`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename = "frozen_Option")]
+pub struct FrozenOption {
+  pub element: Box<FrozenTy>,
+}
+
 /// A type expression whose record references are not yet version-pinned.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 #[serde(
@@ -283,6 +299,7 @@ pub enum UnfrozenTy {
   Primitive(Primitive),
   UnfrozenScalar(UnfrozenScalar),
   UnfrozenArray(UnfrozenArray),
+  UnfrozenOption(UnfrozenOption),
 }
 
 impl From<PrimitiveKind> for UnfrozenTy {
@@ -312,6 +329,7 @@ pub enum FrozenTy {
   Primitive(Primitive),
   FrozenScalar(FrozenScalar),
   FrozenArray(FrozenArray),
+  FrozenOption(FrozenOption),
 }
 
 impl From<PrimitiveKind> for FrozenTy {
@@ -340,6 +358,10 @@ impl FrozenTy {
     matches!(self, Self::FrozenArray(_))
   }
 
+  pub fn is_option(&self) -> bool {
+    matches!(self, Self::FrozenOption(_))
+  }
+
   /// Collect the pinned record references this type expression depends on.
   pub fn dependencies<'a>(&'a self, set: &mut std::collections::HashSet<&'a FrozenReference>) {
     match self {
@@ -350,6 +372,7 @@ impl FrozenTy {
       Self::FrozenArray(array) => {
         set.insert(&array.reference);
       }
+      Self::FrozenOption(option) => option.element.dependencies(set),
     }
   }
 
@@ -363,6 +386,13 @@ impl FrozenTy {
   pub fn as_array(&self) -> Option<&FrozenArray> {
     match self {
       Self::FrozenArray(array) => Some(array),
+      _ => None,
+    }
+  }
+
+  pub fn as_option(&self) -> Option<&FrozenOption> {
+    match self {
+      Self::FrozenOption(option) => Some(option),
       _ => None,
     }
   }
@@ -391,6 +421,17 @@ impl<R: Resolver> Freeze<R> for UnfrozenArray {
 }
 
 #[async_trait]
+impl<R: Resolver> Freeze<R> for UnfrozenOption {
+  type Frozen = FrozenOption;
+
+  async fn freeze(&self, resolver: &R) -> Result<Self::Frozen, R::Error> {
+    Ok(FrozenOption {
+      element: Box::new(self.element.freeze(resolver).await?),
+    })
+  }
+}
+
+#[async_trait]
 impl<R: Resolver> Freeze<R> for UnfrozenTy {
   type Frozen = FrozenTy;
 
@@ -399,6 +440,7 @@ impl<R: Resolver> Freeze<R> for UnfrozenTy {
       Self::Primitive(primitive) => FrozenTy::Primitive(*primitive),
       Self::UnfrozenScalar(scalar) => FrozenTy::FrozenScalar(scalar.freeze(resolver).await?),
       Self::UnfrozenArray(array) => FrozenTy::FrozenArray(array.freeze(resolver).await?),
+      Self::UnfrozenOption(option) => FrozenTy::FrozenOption(option.freeze(resolver).await?),
     })
   }
 }
@@ -414,6 +456,54 @@ impl UnfrozenTy {
       Self::UnfrozenArray(array) => {
         set.insert(&array.reference);
       }
+      Self::UnfrozenOption(option) => option.element.dependencies(set),
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::record::Version;
+  use uuid::Uuid;
+
+  fn reference() -> FrozenReference {
+    FrozenReference {
+      id: Uuid::from_u128(0x0bf1),
+      version: Version::parse("1.2.0").expect("a version"),
+    }
+  }
+
+  /// An optional's element carries its dependencies, and the form survives the
+  /// record's serialized shape.
+  #[test]
+  fn an_optional_depends_on_its_element_and_round_trips() {
+    let optional = FrozenTy::FrozenOption(FrozenOption {
+      element: Box::new(FrozenTy::FrozenScalar(FrozenScalar {
+        reference: reference(),
+      })),
+    });
+    let mut dependencies = std::collections::HashSet::new();
+    optional.dependencies(&mut dependencies);
+    assert_eq!(
+      dependencies.into_iter().collect::<Vec<_>>(),
+      vec![&reference()]
+    );
+
+    let json = serde_json::to_string(&optional).expect("serializes");
+    assert_eq!(
+      serde_json::from_str::<FrozenTy>(&json).expect("deserializes"),
+      optional
+    );
+    let primitive = FrozenTy::FrozenOption(FrozenOption {
+      element: Box::new(FrozenTy::from(PrimitiveKind::F32)),
+    });
+    assert!(primitive.is_option());
+    let mut none = std::collections::HashSet::new();
+    primitive.dependencies(&mut none);
+    assert!(
+      none.is_empty(),
+      "a primitive element has no record dependency"
+    );
   }
 }

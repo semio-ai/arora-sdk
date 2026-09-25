@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "9.11.1"
+version = "10.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -57,20 +57,20 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "4", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "7" }
-arora-behavior = { path = "../arora-behavior", version = "8" }
-arora-types = { path = "../arora-types", version = "2" }
-arora-bridge-ws = { path = "../arora-bridge-ws", version = "4", optional = true }
+arora-engine = { path = "../arora-engine", version = "5", default-features = false }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "8" }
+arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-types = { path = "../arora-types", version = "3" }
+arora-bridge-ws = { path = "../arora-bridge-ws", version = "5", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 # Portable instant for the run loop's dt/Hz measurements: `performance.now()`
 # on wasm32-unknown-unknown, a zero-cost re-export of `std::time` elsewhere.
 web-time = "1"
 # The three interfaces the runtime loop wires around the shared state.
-arora-hal = { path = "../arora-hal", version = "3" }
-arora-bridge = { path = "../arora-bridge", version = "4" }
-arora-simple-data-store = { path = "../arora-simple-data-store", version = "2" }
+arora-hal = { path = "../arora-hal", version = "4" }
+arora-bridge = { path = "../arora-bridge", version = "5" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Only the runtime-free sync primitives here (the behavior-error watch); the
 # fat, executor-bearing tokio stays native-only below.

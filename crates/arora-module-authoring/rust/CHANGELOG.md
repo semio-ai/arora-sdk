@@ -4,6 +4,15 @@ All notable changes to `arora-module-rust`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3, arora-module-core 2 and
+  arora-registry 2.
+- A signature or structure carrying an optional type fails generation with an
+  error naming `arora-module` as the way to declare it.
+
 ## [1.0.0] - 2026-07-20
 
 ### Breaking

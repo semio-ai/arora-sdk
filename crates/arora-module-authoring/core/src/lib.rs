@@ -106,10 +106,10 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
 /// directly: a structure's field types and an enumeration's variant payload
 /// types. Feeds the transitive walk in [`analyze_module`].
 fn collect_type_references(type_def: &TypeDefinitionFrozen, out: &mut Vec<FrozenReference>) {
-    let push_ty = |ty: &FrozenTy, out: &mut Vec<FrozenReference>| match ty {
-        FrozenTy::Primitive(_) => {}
-        FrozenTy::FrozenScalar(scalar) => out.push(scalar.reference.to_owned()),
-        FrozenTy::FrozenArray(array) => out.push(array.reference.to_owned()),
+    let push_ty = |ty: &FrozenTy, out: &mut Vec<FrozenReference>| {
+        let mut references = std::collections::HashSet::new();
+        ty.dependencies(&mut references);
+        out.extend(references.into_iter().cloned());
     };
     match type_def {
         TypeDefinitionFrozen::Primitive(_) => {}

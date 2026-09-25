@@ -225,6 +225,9 @@ impl ValueWriter for CdrWriter {
     fn begin_field(&mut self, _id: Uuid) -> Result<()> {
         Ok(())
     }
+    fn begin_option(&mut self, _present: bool) -> Result<()> {
+        Err(Error::new("ROS 2 messages have no optional form"))
+    }
     // Scalar arrays are CDR sequences: a 4-aligned u32 count, then the elements,
     // each self-aligned by its own scalar op. The element type is positional
     // (from the schema), so it is not on the wire.
@@ -383,6 +386,9 @@ impl ValueReader for CdrReader<'_> {
     }
     fn enter_field(&mut self, _expected_id: Uuid) -> Result<()> {
         Ok(())
+    }
+    fn enter_option(&mut self) -> Result<bool> {
+        Err(Error::new("ROS 2 messages have no optional form"))
     }
     cdr_read_arrays! {
         read_bool_array(bool) => read_bool;
