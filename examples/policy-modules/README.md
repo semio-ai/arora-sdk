@@ -74,12 +74,17 @@ module and a HAL publishing those keys.
 
 ## What to expect
 
-- The walking networks stand still below about 0.25 m/s in plain MuJoCo (the
-  robot's own daemon and reference script behave the same); command 0.25–0.3.
-- The wasm guest is about 16 MB with the ONNX runtime and six networks inside
-  (release profile, debug info stripped) and takes about 15 s to compile and
-  load in a dev build of the device; inference is well under a millisecond.
-- Lockstep simulation runs many times faster than real time.
+Measured on an Apple M1 laptop:
+
+| | |
+|---|---|
+| showcase tree, 0.3 m/s, 12 simulated s (release, wasm guest) | 1.38 m travelled, upright, 7.2 s of wall time including the wasm compile |
+| wasm guest | about 16 MB stripped, the ONNX runtime and seven networks inside; 13.6 s to compile and load in a dev build |
+| lockstep speed with the policy in wasm | 6 simulated s in 0.2 s (about 30× real time) |
+| `cargo test`, warm | about 20 s, seven simulated runs included |
+
+The walking networks stand still below about 0.25 m/s in plain MuJoCo (the
+robot's own daemon and reference script behave the same); command 0.25–0.3.
 
 ## Read next
 
