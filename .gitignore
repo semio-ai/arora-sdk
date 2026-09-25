@@ -7,3 +7,7 @@
 # output must stay ignored on every branch, not only where its own .gitignore
 # is checked out.
 /docs/module-declaration-study/prototype/target/
+
+# The policy-modules example is a nested workspace with its own build output.
+/examples/policy-modules/target/
+/examples/policy-modules/.mujoco/
