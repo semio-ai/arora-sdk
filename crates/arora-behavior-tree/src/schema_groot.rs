@@ -69,11 +69,7 @@ impl Node {
                 Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap()
             }
             REGEX_MATCH_GROOT_ID => Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap(),
-            id => {
-                return Err(BehaviorTreeError::InconsistentTreeError {
-                    message: format!("unexpected node id: {}", id),
-                })
-            }
+            tag => function_by_groot_tag(index, tag)?,
         };
 
         let children = if tree_node_children.is_empty() {
@@ -159,11 +155,14 @@ impl Node {
             id if id == Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap() => {
                 REGEX_MATCH_GROOT_ID
             }
-            id => {
-                return Err(BehaviorTreeError::InconsistentTreeError {
-                    message: format!("unexpected node id: {}", id),
-                })
-            }
+            // Any other function is written under its own name — the form the
+            // importer resolves against the index.
+            id => index
+                .get(&id)
+                .map(|function| function.function_name.as_str())
+                .ok_or(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("node refers to function {} that could not be resolved", id),
+                })?,
         }
         .to_string();
 
@@ -200,6 +199,57 @@ impl Node {
             children: groot_children,
         })
     }
+}
+
+/// The indexed function a Groot tag names, for the tags that are not built in
+/// or in the palette above: any module function is reachable from a Groot tree
+/// under its own name, so a palette written for a module needs no entry here.
+///
+/// A tag matches a function's name exactly, or as the PascalCase spelling of
+/// its snake_case name (`Walk` for `walk`, `PlayClip` for `play_clip`), the
+/// convention the palette's own tags follow. The index spans every loaded
+/// module, so a name two modules both export is refused as ambiguous rather
+/// than resolved to whichever the index happens to yield first.
+fn function_by_groot_tag(
+    index: &HashMap<Uuid, ModuleFunction>,
+    tag: &str,
+) -> Result<Uuid, BehaviorTreeError> {
+    let mut matches: Vec<&ModuleFunction> = index
+        .values()
+        .filter(|function| {
+            function.function_name == tag || pascal_case(&function.function_name) == tag
+        })
+        .collect();
+    match matches.len() {
+        1 => Ok(matches.remove(0).function_id),
+        0 => Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!("unexpected node id: {tag} (no loaded module exports it)"),
+        }),
+        _ => Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!(
+                "ambiguous node id: {tag} is exported by several modules ({})",
+                matches
+                    .iter()
+                    .map(|function| function.module_id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }),
+    }
+}
+
+/// `snake_case` → `PascalCase`: each underscore-separated word capitalized.
+fn pascal_case(name: &str) -> String {
+    name.split('_')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Whether the given arora function id is a basic control node dispatched
@@ -821,4 +871,126 @@ fn display_param_args(param_args: &HashMap<String, String>) -> String {
 
 fn to_string_map(m: HashMap<&str, &str>) -> HashMap<String, String> {
     HashMap::from_iter(m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arora_types::record::module::frozen::Function;
+    use arora_types::record::ty::{FrozenScalar, PrimitiveKind};
+    use arora_types::record::FrozenReference;
+
+    /// Index a `Status`-returning function `name(speed: f32)` under `module`,
+    /// the way a loaded module's export is indexed. Returns its function id.
+    fn index_status_leaf(
+        index: &mut HashMap<Uuid, ModuleFunction>,
+        module: Uuid,
+        name: &str,
+    ) -> Uuid {
+        let function_id = Uuid::new_v4();
+        let speed = Uuid::new_v4();
+        index.insert(
+            function_id,
+            ModuleFunction {
+                module_id: module,
+                function_id,
+                function_name: name.to_string(),
+                function: Function {
+                    parameters: HashMap::from([(
+                        speed,
+                        Parameter {
+                            name: "speed".to_string(),
+                            ty: FrozenTy::from(PrimitiveKind::F32),
+                            mutable: false,
+                        },
+                    )]),
+                    parameter_ordering: vec![speed],
+                    return_ty: FrozenTy::FrozenScalar(FrozenScalar {
+                        reference: FrozenReference {
+                            id: STATUS_TYPE_ID,
+                            version: arora_behavior::STATUS_ENUMERATION_VERSION.into(),
+                        },
+                    }),
+                },
+            },
+        );
+        function_id
+    }
+
+    fn groot(body: &str) -> BehaviorTree {
+        let xml = format!(
+            r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">{body}</BehaviorTree></root>"#
+        );
+        BehaviorTree::try_from_groot_xml(&xml).expect("well-formed Groot XML")
+    }
+
+    /// A tag outside the palette resolves to the indexed function of that
+    /// name — spelled as declared or in PascalCase — with its arguments bound
+    /// like any palette node's.
+    #[test]
+    fn a_module_function_is_reachable_under_its_name_or_its_pascal_case() {
+        let mut index = HashMap::new();
+        let walk = index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        let play_clip = index_status_leaf(&mut index, Uuid::new_v4(), "play_clip");
+
+        let tree = groot(r#"<Sequence><walk speed="{cmd}"/><PlayClip speed="0.5f32"/></Sequence>"#);
+        let mut variables = HashMap::new();
+        let root = tree
+            .root
+            .try_into_tree_node(&index, &mut variables)
+            .expect("both tags resolve");
+        let children = root.children.expect("the sequence keeps its children");
+        assert_eq!(children[0].function, walk);
+        assert_eq!(children[1].function, play_clip);
+        assert!(
+            variables.contains_key("cmd"),
+            "the {{cmd}} argument became a named variable"
+        );
+    }
+
+    /// A tag no loaded module exports is refused, as before.
+    #[test]
+    fn a_tag_no_module_exports_is_refused() {
+        let mut index = HashMap::new();
+        index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        let tree = groot(r#"<Fly speed="1.0f32"/>"#);
+        let error = tree
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .map(|_| ())
+            .expect_err("Fly is exported by no module");
+        assert!(format!("{error:?}").contains("Fly"));
+    }
+
+    /// A name two modules both export is refused rather than resolved to
+    /// whichever the index yields first.
+    #[test]
+    fn a_name_two_modules_export_is_ambiguous() {
+        let mut index = HashMap::new();
+        index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        let tree = groot(r#"<Walk speed="1.0f32"/>"#);
+        let error = tree
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .map(|_| ())
+            .expect_err("two modules export walk");
+        assert!(format!("{error:?}").contains("ambiguous"));
+    }
+
+    /// The export writes a module function under its declared name — the
+    /// spelling the importer accepts — so a tree round-trips.
+    #[test]
+    fn a_module_function_exports_under_its_name_and_round_trips() {
+        let mut index = HashMap::new();
+        let walk = index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        let node = TreeNode::action_node(walk);
+        let mut names = HashMap::new();
+        let exported = Node::try_from_tree_node(&node, &index, &mut names).expect("exported");
+        assert_eq!(exported.id, "walk");
+        let back = exported
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .expect("the exported tag resolves again");
+        assert_eq!(back.function, walk);
+    }
 }
