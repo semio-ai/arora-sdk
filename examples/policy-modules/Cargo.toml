@@ -10,6 +10,8 @@ resolver = "2"
 members = [
   "crates/arora-policy",
   "crates/arora-hal-mujoco",
+  "modules/microduck-policies",
+  "crates/device",
 ]
 
 [workspace.package]
@@ -35,11 +37,26 @@ arora-simple-data-store = { path = "../../crates/arora-simple-data-store", versi
 arora-types = { path = "../../crates/arora-types", version = "2.6" }
 arora-engine = { path = "../../crates/arora-engine", version = "4.2" }
 
+# The policy module is built twice: natively (its tests, the in-process
+# device) and as a wasm guest through the device's artifact dependency, which
+# follows the device's own profile. The guest is what ships, so both profiles
+# optimize it and keep debug info out of it (debug info is most of a wasm
+# file's size).
 [profile.release]
+debug = false
+strip = true
+lto = "thin"
+
+[profile.dev]
 debug = 1
 
-# A policy module is built twice: natively (its tests, the in-process device)
-# and as a wasm guest. The wasm guest is what ships, so it gets full
-# optimization even in a dev build of the device.
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.dev.package.microduck-policies]
+opt-level = 3
+debug = false
+
+[profile.dev.package.arora-policy]
+opt-level = 3
+debug = false

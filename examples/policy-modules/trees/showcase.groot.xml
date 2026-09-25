@@ -1,0 +1,21 @@
+<root main_tree_to_execute="MainTree">
+  <!-- Switch policies on the situation. Down: hold still (the Fallen check
+       succeeds, the sequence ends there). Up: look around with a head clip
+       while the walking leaf balances and follows the commanded twist — the
+       clip writes command.head, the leaf reads it the same tick. -->
+  <BehaviorTree ID="MainTree">
+    <Fallback>
+      <Sequence>
+        <Fallen orientation="{imu.orientation}" />
+        <Succeed />
+      </Sequence>
+      <Parallel>
+        <HeadClip clip="look_around" dt_ns="{arora/dt}" head="{command.head}" />
+        <Walk vx="{command.vx}" vy="{command.vy}" vyaw="{command.vyaw}" head="{command.head}"
+              dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+              joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+              targets="{joints.target_position}" />
+      </Parallel>
+    </Fallback>
+  </BehaviorTree>
+</root>

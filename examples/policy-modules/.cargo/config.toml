@@ -8,3 +8,8 @@ bindeps = true
 # `libmujoco.so` (tools/setup-mujoco.sh downloads the pinned release there).
 # The variable is read from the environment, not from here, so that the same
 # checkout builds on a machine where MuJoCo lives elsewhere.
+
+# The policy module keeps one run at a time, so device tests must not
+# interleave: one test thread across the workspace.
+[env]
+RUST_TEST_THREADS = "1"

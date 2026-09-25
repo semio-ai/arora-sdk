@@ -21,6 +21,7 @@
 //! | `imu.accelerometer` | `ArrayF32` | specific force in the IMU frame, m/s² |
 //! | `imu.orientation` | `ArrayF32` | world-from-IMU unit quaternion `[w, x, y, z]` |
 //! | `<contact>.contact` | `Boolean` | a touch sensor reports force |
+//! | `<joint>.target_position` / `joints.target_position` | `F32` / `ArrayF32` | the setpoints in force, reported back |
 //! | `sim/time` | `F64` | simulated seconds |
 //! | `sim/base.position` / `sim/base.orientation` / `sim/base.linear_velocity` | `ArrayF32` | the base body's ground truth |
 //!
@@ -136,7 +137,8 @@ pub struct MujocoHalConfig {
     pub control_hz: f64,
     pub clock: Clock,
     /// Record every control period's `time, <joint>.position…, <joint>.ctrl…,
-    /// base.x, base.y, base.z` as CSV, for replay and plots.
+    /// base.x, base.y, base.z, base.qw, base.qx, base.qy, base.qz` as CSV,
+    /// for replay and plots.
     pub record: Option<PathBuf>,
     pub description: HalDescription,
 }
@@ -243,9 +245,9 @@ impl MujocoHal {
             let joint = data
                 .joint(&spec.joint)
                 .ok_or_else(|| HalError::NoSuchKey(format!("joint {}", spec.joint)))?;
-            let actuator = data.actuator(spec.actuator_name()).ok_or_else(|| {
-                HalError::NoSuchKey(format!("actuator {}", spec.actuator_name()))
-            })?;
+            let actuator = data
+                .actuator(spec.actuator_name())
+                .ok_or_else(|| HalError::NoSuchKey(format!("actuator {}", spec.actuator_name())))?;
             if joint.view(&data).qpos.len() != 1 {
                 return Err(HalError::Other(format!(
                     "joint {} is not a hinge or slide joint (one position)",
@@ -300,7 +302,12 @@ impl MujocoHal {
                 let mut header = vec!["time".to_string()];
                 header.extend(joints.iter().map(|j| format!("{}.position", j.key)));
                 header.extend(joints.iter().map(|j| format!("{}.ctrl", j.key)));
-                header.extend(["base.x", "base.y", "base.z"].map(String::from));
+                header.extend(
+                    [
+                        "base.x", "base.y", "base.z", "base.qw", "base.qx", "base.qy", "base.qz",
+                    ]
+                    .map(String::from),
+                );
                 writeln!(writer, "{}", header.join(","))
                     .map_err(|e| HalError::Other(e.to_string()))?;
                 Some(writer)
@@ -379,6 +386,45 @@ impl MujocoHal {
     /// The last published values.
     pub fn snapshot(&self) -> State {
         self.shared.snapshot.lock().unwrap().clone()
+    }
+}
+
+/// A handle onto a [`MujocoHal`]'s simulation that outlives handing the HAL
+/// to a device by value: what a lockstep driver advances, and what a test
+/// reads ground truth from.
+#[derive(Clone)]
+pub struct SimHandle {
+    shared: Arc<Shared>,
+}
+
+impl SimHandle {
+    /// Advance one control period — see [`MujocoHal::advance`].
+    pub fn advance(&self) {
+        advance(&self.shared);
+    }
+
+    /// The control period, in simulated time.
+    pub fn control_period(&self) -> Duration {
+        self.shared.control_period
+    }
+
+    /// The last published values.
+    pub fn snapshot(&self) -> State {
+        self.shared.snapshot.lock().unwrap().clone()
+    }
+
+    /// The controlled joints, in the order of the aggregate keys.
+    pub fn joint_names(&self) -> &[String] {
+        &self.shared.joint_names
+    }
+}
+
+impl MujocoHal {
+    /// A handle onto this simulation, independent of the HAL's ownership.
+    pub fn handle(&self) -> SimHandle {
+        SimHandle {
+            shared: self.shared.clone(),
+        }
     }
 }
 
@@ -494,6 +540,24 @@ impl Sim {
             Key::from("joints.velocity"),
             Some(Value::ArrayF32(velocities)),
         );
+        // The setpoints in force, reported the way a robot reports its
+        // commanded targets: what a behavior's `targets` out-parameter starts
+        // from before it has written anything.
+        let targets: Vec<f32> = self
+            .joints
+            .iter()
+            .map(|handles| handles.actuator.view(data).ctrl[0] as f32)
+            .collect();
+        for (handles, target) in self.joints.iter().zip(&targets) {
+            change.set.insert(
+                Key::from(format!("{}.target_position", handles.key)),
+                Some(Value::F32(*target)),
+            );
+        }
+        change.set.insert(
+            Key::from("joints.target_position"),
+            Some(Value::ArrayF32(targets)),
+        );
 
         let sensor_f32 = |info: &MjSensorDataInfo| -> Vec<f32> {
             info.view(data).data.iter().map(|v| *v as f32).collect()
@@ -572,6 +636,13 @@ impl Sim {
                     .map(|handles| format!("{:.5}", handles.actuator.view(data).ctrl[0])),
             );
             row.extend(base_position.iter().map(|p| format!("{p:.4}")));
+            row.extend(
+                base_quat
+                    .as_deref()
+                    .unwrap_or(&[1.0, 0.0, 0.0, 0.0])
+                    .iter()
+                    .map(|q| format!("{q:.5}")),
+            );
             // A recording that cannot be written is not worth stopping the
             // robot for; the failure is logged and recording stops.
             if let Err(error) = writeln!(recorder, "{}", row.join(",")) {
@@ -586,11 +657,7 @@ impl Sim {
 /// A key entity is alphanumeric with underscores; a joint or contact name
 /// that is not would be silently unreachable under the key it names.
 fn check_key_entity(name: &str) -> HalResult<()> {
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(HalError::Other(format!(
             "{name:?} cannot name a key entity (alphanumeric and underscore only)"
         )));
@@ -866,8 +933,7 @@ mod tests {
     }
 
     fn tempdir() -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("arora-hal-mujoco-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("arora-hal-mujoco-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
