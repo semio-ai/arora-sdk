@@ -1,0 +1,45 @@
+# Control policies as Arora modules — a self-contained workspace.
+#
+# It is deliberately not a member of the arora-sdk workspace: it pulls a
+# physics engine (MuJoCo) and an ONNX runtime that the SDK itself has no use
+# for, and it is meant to be forked into its own repository. The arora crates
+# are reached by path while it lives here; each path dependency also names the
+# published version, so moving it out is deleting the `path` keys.
+[workspace]
+resolver = "2"
+members = [
+  "crates/arora-policy",
+  "crates/arora-hal-mujoco",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Semio"]
+
+[workspace.dependencies]
+anyhow = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+# The arora crates this workspace builds on.
+arora = { path = "../../crates/arora", version = "9.11" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "7" }
+arora-bridge = { path = "../../crates/arora-bridge", version = "4.1" }
+arora-hal = { path = "../../crates/arora-hal", version = "3" }
+arora-module = { path = "../../crates/arora-module", version = "1" }
+arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "2" }
+arora-types = { path = "../../crates/arora-types", version = "2.6" }
+arora-engine = { path = "../../crates/arora-engine", version = "4.2" }
+
+[profile.release]
+debug = 1
+
+# A policy module is built twice: natively (its tests, the in-process device)
+# and as a wasm guest. The wasm guest is what ships, so it gets full
+# optimization even in a dev build of the device.
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,15 @@
+[package]
+name = "arora-policy"
+description = "Run a learned control policy inside an Arora module: ONNX inference and the observation bookkeeping a policy needs, with no host runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Pure Rust, so it builds for wasm32-wasip1 unchanged; default features off
+# keeps the multithreaded and file-system paths out of the guest.
+tract-onnx = { version = "0.23", default-features = false }
+
+[dev-dependencies]
+anyhow.workspace = true
