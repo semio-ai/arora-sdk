@@ -10,9 +10,23 @@ These docs explain the runtime, module system, build orchestration, and cross-co
 
 ## Key Architectural Concepts
 
+### Where a Module's Interface Lives
+
+A module's interface — its id, functions, parameters and their ids — has exactly
+one source, and which one tells you how the module builds:
+
+- **A Rust declaration** (`modules/polly`, `modules/test-rust-wasm`): macros
+  from [`arora-module`](crates/arora-module/readme.md) on the Rust module and
+  its functions. No `module.yaml`, no `build.rs`, no generated sources; the
+  header, the host registration and the guest entry points come out of macro
+  expansion. Edit the Rust code.
+- **A `module.yaml`** (C++ modules, and Rust modules that import other modules'
+  functions, which the macros do not declare): the generator pipeline below.
+  A `module.yaml` beside `Cargo.toml` means the YAML is the source of truth.
+
 ### Code Generation Pipeline
 
-**Critical:** Many parts of this repository generate code for other parts. Understanding this pipeline is essential:
+For `module.yaml` modules, and for crates that generate types (`arora-behavior-tree`):
 
 1. **Module definitions** (`module.yaml`) define the contract: types, functions, imports, exports
 2. **Build scripts** (`build.rs`) invoke code generators (`arora-module-cli`, `arora-module-rust`, `arora-module-cpp`)
@@ -21,7 +35,8 @@ These docs explain the runtime, module system, build orchestration, and cross-co
 
 #### Example: Adding a Function to a Module
 
-When adding a function that depends on another module:
+When adding a function that depends on another module (see
+`modules/test-cpp-2/module.yaml`):
 
 ```yaml
 # modules/my-module/module.yaml
@@ -87,18 +102,13 @@ Error: internal error: function <uuid> is missing from index
 
 **Solution:**
 1. Identify which module should export the function (check the UUID against module definitions)
-2. Add the function to that module's `module.yaml` exports section
-3. If the function wraps another module's function, add it to `imports` as well
-4. Add the dependency module to the `dependencies` list
-5. Implement the function in the module's `src/lib.rs`
-6. Clean build the module: `cargo clean -p <module-name>`
-7. The build script will regenerate bindings automatically
-
-**Real example:** The `cos` function (UUID `104b9710-5d43-4a93-944c-d64bddb30ef8`) needed to be:
-- Exported by `behavior-tree-nodes` module
-- Implemented as a wrapper calling `test-rust-wasm::cos`
-- Imported from `test-rust-wasm` (UUID `c13757cb-2311-4c93-abcc-cb12d6cbb859`)
-- Added `test-rust-wasm` to dependencies list
+2. Export it from that module:
+   - Rust declaration: add the function to the `#[module]` with `#[export(id = "<uuid>")]`
+   - `module.yaml`: add it to `exports`, and if it wraps another module's
+     function, to `imports` and the dependency to `dependencies`; then
+     `cargo clean -p <module-name>` so the build script regenerates bindings
+3. Implement the function in the module's `src/lib.rs`
+4. Make sure the test loads that module
 
 ### Issue: Registry Error During Build
 
@@ -145,10 +155,10 @@ cargo test -- --nocapture
 # Default members (everything but the opt-in NAO cross-compile)
 cargo build
 
-# Specific module (will trigger build.rs and code generation)
-cargo build -p test-behavior-tree-nodes
+# Specific module
+cargo build -p test-rust-wasm
 
-# Clean a specific module (useful after changing module.yaml)
+# A module.yaml module after changing its YAML: clean to force regeneration
 cargo clean -p test-behavior-tree-nodes && cargo build -p test-behavior-tree-nodes
 ```
 
@@ -235,6 +245,8 @@ Quick reference:
 | `arora-web` | Browser wasm bindings |
 | `arora-buffers` | Serialization primitives |
 | `arora-registry` | Type/module registry (local + remote) |
+| `arora-module` | Declare a module in Rust (facade over the macros + `AroraModule`) |
+| `arora-module-macros` | Proc macros behind `arora-module` (use through the facade) |
 | `arora-module-core` | Module analysis and resolution |
 | `arora-module-cli` | Code generator CLI |
 | `arora-module-rust` | Rust code generation |
@@ -246,9 +258,9 @@ Quick reference:
 
 1. **Always read the README and docs first** — they contain critical context about build orchestration and cross-compilation
    
-2. **Understand the code generation flow** — many compilation errors stem from not understanding that `module.yaml` is the source of truth
+2. **Know where the interface lives** — a Rust declaration or a `module.yaml`, never both; edit that source, not what is derived from it
    
-3. **Use `cargo clean -p <module>` liberally** — when changing `module.yaml`, force regeneration
+3. **Use `cargo clean -p <module>` after changing a `module.yaml`** — it forces regeneration
    
 4. **Check UUIDs carefully** — function/type mismatches often come down to UUID confusion between similar concepts
    
@@ -258,9 +270,9 @@ Quick reference:
    
 7. **Watch out for generated files** — if you see `src/arora_generated/`, don't edit it directly
    
-8. **Build scripts are key** — if something doesn't generate correctly, the bug is likely in `build.rs`, not the source files
+8. **Build scripts are key for `module.yaml` modules** — if something doesn't generate correctly, the bug is likely in `build.rs`, not the source files
    
-9. **Imports vs Dependencies** — modules need BOTH:
+9. **Imports vs Dependencies** — `module.yaml` modules need BOTH:
    - `imports:` section for functions you'll call
    - `dependencies:` section for modules to link against
    
@@ -270,6 +282,7 @@ Quick reference:
 
 Diagnostic checklist:
 
+- [ ] Rust declaration: do the `#[export]` / `#[param]` ids match the ids callers use?
 - [ ] Is `module.yaml` syntactically correct?
 - [ ] Do all referenced UUIDs exist in the registry?
 - [ ] Are imported modules listed in both `imports:` and `dependencies:`?
