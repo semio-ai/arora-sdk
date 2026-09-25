@@ -65,7 +65,8 @@ type deriving [`AroraType`](../arora-types/readme.md), which also gives it the
 refused: the record vocabulary has no form for them.
 
 An `Option<T>` of any of those but an array is an **optional** parameter or
-return. A caller may leave an optional argument out, or send `Value::Option(None)`,
-and the function receives `None`. A present argument arrives bare or wrapped in
-`Value::Option`. Any other parameter is required: a call without it fails,
-naming the parameter.
+return. It travels as `Value::Option`. A caller may leave an optional argument
+out, or send `Value::Option(None)`, and the function receives `None`; a bare
+element where an optional is declared fails the call, like any other type
+mismatch. Any other parameter is required: a call without it fails, naming the
+parameter.

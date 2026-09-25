@@ -9,7 +9,8 @@ std::int32_t test_cpp_2::test_structured(
 {
   printf("a = %d\n", a.value_or(false));
   printf("test2 = %d\n", test_cpp::test_2_args(1, 2).value_or(false));
-  return a.value_or(false) ? 1 : 0;
+  // 1 only when both arguments arrived: the boolean, and the structure.
+  return a.value_or(false) && b.has_value() ? 1 : 0;
 }
 
 int main(int argc, char *argv[])

@@ -12,6 +12,8 @@ All notable changes to `arora-types`. The format follows
   vocabulary's optional type, an absent value or a present one of type
   `element`. Freezing, dependency collection and serde carry it.
 - `FrozenTy::is_option` and `FrozenTy::as_option`.
+- `module::high::TypeRef::Option`: a hand-written `module.yaml` declares an
+  optional as `{ kind: option, id: … }`.
 - The typed wire walk reads and writes `TypeRef::Option`: a presence flag,
   then the element when present.
 

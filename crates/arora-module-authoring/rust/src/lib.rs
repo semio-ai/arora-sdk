@@ -806,8 +806,12 @@ pub async fn generate_structure_source(
             .push(quote! { let mut #field_var: Option<#field_type_ident> = None; });
         from_value_cases.push(quote! { #field_const_id_ident => { #field_var = Some(#extract); } });
         let missing_message = format!("missing field {}", field.name);
-        from_value_assignments.push(quote! {
-          #field_ident: #field_var.ok_or_else(|| ConversionError { message: #missing_message.to_string() })?
+        from_value_assignments.push(if field.ty.is_option() {
+            quote! { #field_ident: #field_var.flatten() }
+        } else {
+            quote! {
+              #field_ident: #field_var.ok_or_else(|| ConversionError { message: #missing_message.to_string() })?
+            }
         });
     }
     let from_value = quote! {
@@ -843,8 +847,12 @@ pub async fn generate_structure_source(
         FrozenTy::Primitive(_) => false,
         FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
         FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
-        // Refused when the field itself is generated.
-        FrozenTy::FrozenOption(_) => false,
+        FrozenTy::FrozenOption(option) => match &*option.element {
+            FrozenTy::Primitive(_) => false,
+            FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
+            FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
+            FrozenTy::FrozenOption(_) => true,
+        },
     });
     let generated_modules_use = if references_generated_modules {
         quote! { use crate::arora_generated; }
@@ -1065,7 +1073,7 @@ async fn generate_imports_from_module_source(
               .expect("input is too small");
           let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
           let input =
-            unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
+            unsafe { std::slice::from_raw_parts(result_buffer_ptr, input_size) };
           let mut reader = BufferReader::new(&input);
           let reader = &mut reader;
         };
@@ -1238,8 +1246,14 @@ async fn generate_module_source(
                 let mut param_declarations = Vec::new();
                 for (param_id, param) in &function_symbol.parameters {
                     let param_var_ident = param_ident(param_id, param);
+                    // Every parameter reaches the function as an `Option`: absent
+                    // is `None`. An optional parameter already is one.
+                    let declared_ty = match &param.ty {
+                        FrozenTy::FrozenOption(option) => &*option.element,
+                        other => other,
+                    };
                     let param_type_ident =
-                        type_ident_from_frozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+                        type_ident_from_frozen(declared_ty, registry, PrefixWithMod::Yes).await?;
                     param_declarations.push(
                         quote! { let mut #param_var_ident: Option<#param_type_ident> = None; },
                     );
@@ -1256,9 +1270,14 @@ async fn generate_module_source(
                     let deserialize =
                         generate_deserialize_from_frozen(&param.ty, registry, CheckType::YesResult)
                             .await?;
+                    let assign = if param.ty.is_option() {
+                        quote! { #param_var_ident = #deserialize; }
+                    } else {
+                        quote! { #param_var_ident = Some(#deserialize); }
+                    };
                     deserialization_cases.push(quote! {
                       if field_raw_id == #param_const_id_ident {
-                        #param_var_ident = Some(#deserialize);
+                        #assign
                       }
                     });
                 }
@@ -1319,12 +1338,13 @@ async fn generate_module_source(
                         let param_var_ident = param_ident(param_id, param);
                         let param_const_id_ident =
                             function_param_const_id_ident(&export.name, &param.name);
-                        let serialize_param = generate_serialize_from_frozen(
-                            &param.ty,
-                            quote! {#param_var_ident.unwrap()},
-                            registry,
-                        )
-                        .await?;
+                        let written = if param.ty.is_option() {
+                            quote! { #param_var_ident }
+                        } else {
+                            quote! { #param_var_ident.unwrap() }
+                        };
+                        let serialize_param =
+                            generate_serialize_from_frozen(&param.ty, written, registry).await?;
                         write_mutated_params.push(quote! {
                           writer.add_structure_field(&#param_const_id_ident);
                           #serialize_param;
@@ -1349,7 +1369,8 @@ async fn generate_module_source(
           }.try_into().expect("input is too small");
           let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
           let input = unsafe {
-            std::slice::from_raw_parts(input_ptr, INPUT_SIZE_SIZE + input_size)
+            // The size prefix counts itself.
+            std::slice::from_raw_parts(input_ptr, input_size)
           };
           let _result: ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> = (|| {
             #call_check
@@ -1414,13 +1435,19 @@ pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
 /// Generate an expression building a generic `Value` from a Rust field value.
 /// Counterpart of [`generate_serialize_from_frozen`] for the in-memory `Value`
 /// vocabulary instead of the binary buffer format.
+#[async_recursion(?Send)]
 async fn generate_value_from_frozen(
     ty: &FrozenTy,
     value_expression: TokenStream,
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     Ok(match ty {
-        FrozenTy::FrozenOption(_) => return Err(optional_unsupported()),
+        // `Value::Option` of the element's own conversion.
+        FrozenTy::FrozenOption(option) => {
+            let element =
+                generate_value_from_frozen(&option.element, quote! { __element }, registry).await?;
+            quote! { Value::Option((#value_expression).map(|__element| Box::new(#element))) }
+        }
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => quote! { Value::Unit },
             PrimitiveKind::Boolean => quote! { Value::Boolean(#value_expression) },
@@ -1513,7 +1540,24 @@ async fn generate_field_from_value_frozen(
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
-        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
+        // An optional arrives as `Value::Option`.
+        FrozenTy::FrozenOption(option) => {
+            let element = generate_field_from_value_frozen(
+                &option.element,
+                quote! { (*__boxed) },
+                field_name,
+                registry,
+            )
+            .await?;
+            let mismatch = format!("field {}: expected an optional value", field_name);
+            Ok(quote! {
+                match #value_expression {
+                    Value::Option(None) => None,
+                    Value::Option(Some(__boxed)) => Some(#element),
+                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                }
+            })
+        }
         FrozenTy::Primitive(primitive) => {
             let mismatch = format!("field {}: unexpected value kind", field_name);
             let arm = match primitive.kind {
@@ -1625,13 +1669,29 @@ async fn generate_field_from_value_frozen(
     }
 }
 
+#[async_recursion(?Send)]
 async fn generate_serialize_from_frozen(
     ty: &FrozenTy,
     value_expression: TokenStream,
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
-        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
+        // A presence flag, then the element when present — the framing
+        // `serde_uuid` gives `Value::Option`.
+        FrozenTy::FrozenOption(option) => {
+            let element =
+                generate_serialize_from_frozen(&option.element, quote! { (*__element) }, registry)
+                    .await?;
+            Ok(quote! {
+              match &#value_expression {
+                Some(__element) => {
+                  writer.add_option_some();
+                  #element;
+                }
+                None => writer.add_option_none(),
+              }
+            })
+        }
         FrozenTy::Primitive(primitive) => {
             let generate_serialize_primitive_array =
                 |primitive_type_id: &Uuid, write_function: TokenStream| {
@@ -1769,7 +1829,40 @@ async fn generate_deserialize_from_frozen(
     check_type: CheckType,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
-        FrozenTy::FrozenOption(_) => Err(optional_unsupported()),
+        FrozenTy::FrozenOption(option) => {
+            // The element carries its own tag, so it is read with a type check
+            // whatever the optional's own context.
+            let element_check = if check_type == CheckType::YesResult {
+                CheckType::YesResult
+            } else {
+                CheckType::Yes
+            };
+            let element =
+                generate_deserialize_from_frozen(&option.element, registry, element_check).await?;
+            Ok(if check_type == CheckType::YesResult {
+                quote! {{
+                  let _next_type = reader.next_type();
+                  if _next_type != Some(TYPE_OPTION) {
+                    return Err(format!("type mismatch: expected an optional but got {:?}", _next_type));
+                  }
+                  if reader.get_option_presence() {
+                    Some(#element)
+                  } else {
+                    None
+                  }
+                }}
+            } else {
+                quote! {{
+                  let _next_type = reader.next_type();
+                  assert_eq!(_next_type, Some(TYPE_OPTION), "type mismatch");
+                  if reader.get_option_presence() {
+                    Some(#element)
+                  } else {
+                    None
+                  }
+                }}
+            })
+        }
         FrozenTy::Primitive(primitive) => {
             let type_kind_ident = type_kind_ident_from_primitive(&primitive.kind);
 
@@ -2114,13 +2207,17 @@ pub fn variable_ident(name: &String) -> Ident {
     format_ident!("{}", name.to_case(Case::Snake))
 }
 
+#[async_recursion(?Send)]
 async fn type_ident_from_frozen(
     ty: &FrozenTy,
     registry: &mut dyn ReadableRegistry,
     with_mod: PrefixWithMod,
 ) -> Result<TokenStream, GenerationError> {
     Ok(match ty {
-        FrozenTy::FrozenOption(_) => return Err(optional_unsupported()),
+        FrozenTy::FrozenOption(option) => {
+            let element = type_ident_from_frozen(&option.element, registry, with_mod).await?;
+            quote! { Option<#element> }
+        }
         FrozenTy::Primitive(primitive) => match *primitive {
             Primitive::UNIT => quote! { () },
             Primitive::BOOLEAN => quote!(bool),
@@ -2327,15 +2424,6 @@ pub enum GenerationError {
 }
 
 impl std::error::Error for GenerationError {}
-
-/// The generator has no optional form: a module whose signature carries an
-/// optional is declared in Rust with `arora-module` instead.
-fn optional_unsupported() -> GenerationError {
-    GenerationError::Generic(
-        "optional types are not supported by the Rust generator; declare the module with arora-module"
-            .to_string(),
-    )
-}
 
 /// A helper to format a Uuid into an inlined byte array.
 pub struct RawUuidValue<'a>(pub &'a Uuid);

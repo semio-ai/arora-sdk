@@ -312,8 +312,8 @@ impl Kind {
                 },
                 _ => unreachable!("rejected at parse time"),
             },
-            // An optional travels as `Value::Option`, or bare when present: a
-            // caller that knows nothing of optionals passes the element itself.
+            // An optional travels as `Value::Option`; a bare element is a type
+            // mismatch, as for any other kind.
             Kind::Option(element) => {
                 let element = element.decode(what, fail);
                 quote! {
@@ -323,7 +323,7 @@ impl Kind {
                       let __value = *__inner;
                       ::std::option::Option::Some(#element)
                     }
-                    __value => ::std::option::Option::Some(#element),
+                    #mismatch
                   }
                 }
             }

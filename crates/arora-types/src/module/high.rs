@@ -13,9 +13,21 @@ pub struct Executor {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TypeRef {
-  Scalar { id: String },
-  Array { id: String },
-  Map { key_id: String, value_id: String },
+  Scalar {
+    id: String,
+  },
+  Array {
+    id: String,
+  },
+  Map {
+    key_id: String,
+    value_id: String,
+  },
+  /// An optional value of element type `id` (a name or an id): present or
+  /// absent.
+  Option {
+    id: String,
+  },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

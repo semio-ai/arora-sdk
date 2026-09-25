@@ -138,15 +138,10 @@ fn an_absent_optional_argument_is_none() {
 }
 
 #[test]
-fn an_optional_argument_arrives_bare_or_wrapped() {
+fn an_optional_argument_travels_as_an_option() {
     let mut engine = engine();
     let anim = || field(sampler::ids::describe::ANIM, Value::U32(3));
     let rate = |value| field(sampler::ids::describe::FRAME_RATE, value);
-    assert_eq!(
-        describe(&mut engine, vec![anim(), rate(Value::F32(30.0))]),
-        some_string("3 at 30 Hz over 0..1"),
-        "a present value is the element itself"
-    );
     assert_eq!(
         describe(
             &mut engine,
@@ -156,12 +151,25 @@ fn an_optional_argument_arrives_bare_or_wrapped() {
             ]
         ),
         some_string("3 at 30 Hz over 0..1"),
-        "or a present `Value::Option`"
+        "a present `Value::Option`"
     );
     assert_eq!(
         describe(&mut engine, vec![anim(), rate(Value::Option(None))]),
         some_string("3 at 60 Hz over 0..1"),
         "an explicit `None` is absent"
+    );
+    let error = engine
+        .arora_call(Call {
+            module_id: Some(sampler::ids::MODULE),
+            id: sampler::ids::describe::FUNCTION,
+            args: vec![anim(), rate(Value::F32(30.0))],
+        })
+        .expect_err("a bare element is not an optional");
+    assert!(
+        error
+            .to_string()
+            .contains("parameter `frame_rate` of `describe`"),
+        "{error}"
     );
 }
 
@@ -192,10 +200,10 @@ fn an_empty_optional_return_is_none() {
             field(sampler::ids::describe::ANIM, Value::U32(3)),
             field(
                 sampler::ids::describe::WINDOW,
-                Value::from(Window {
+                Value::Option(Some(Box::new(Value::from(Window {
                     start: 1.0,
                     end: 1.0,
-                }),
+                })))),
             ),
         ],
     );
