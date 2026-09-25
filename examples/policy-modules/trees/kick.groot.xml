@@ -1,0 +1,14 @@
+<root main_tree_to_execute="MainTree">
+  <!-- A learned skill then a stand: kick with the left foot (0.5 s), then
+       balance for good. -->
+  <BehaviorTree ID="MainTree">
+    <SequenceStar>
+      <Skill skill="kick_left" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+      <Stand head="{command.head}" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+    </SequenceStar>
+  </BehaviorTree>
+</root>
