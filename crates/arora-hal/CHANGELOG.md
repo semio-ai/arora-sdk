@@ -4,6 +4,12 @@ All notable changes to `arora-hal`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3.
+
 ## [3.0.0] - 2026-07-20
 
 ### Breaking

@@ -61,5 +61,11 @@ let status = say(&mut engine, "hello".to_string())?;
 A parameter or return type is a primitive, a `Vec<T>` of one, an
 `arora_types::value::Value` (anything, as the dynamic key-value type), or a
 type deriving [`AroraType`](../arora-types/readme.md), which also gives it the
-`Value` conversions and the version a frozen signature pins it at. `Option` and
-maps are refused: the record vocabulary has no form for them.
+`Value` conversions and the version a frozen signature pins it at. Maps are
+refused: the record vocabulary has no form for them.
+
+An `Option<T>` of any of those but an array is an **optional** parameter or
+return. A caller may leave an optional argument out, or send `Value::Option(None)`,
+and the function receives `None`. A present argument arrives bare or wrapped in
+`Value::Option`. Any other parameter is required: a call without it fails,
+naming the parameter.

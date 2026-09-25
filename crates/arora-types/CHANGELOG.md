@@ -4,6 +4,24 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-09-25
+
+### Added
+
+- `FrozenTy::FrozenOption` and `UnfrozenTy::UnfrozenOption`: the record
+  vocabulary's optional type, an absent value or a present one of type
+  `element`. Freezing, dependency collection and serde carry it.
+- `FrozenTy::is_option` and `FrozenTy::as_option`.
+- The typed wire walk reads and writes `TypeRef::Option`: a presence flag,
+  then the element when present.
+
+### Changed
+
+- **Breaking:** `FrozenTy` and `UnfrozenTy` have a new variant, so an
+  exhaustive `match` on either must handle it.
+- **Breaking:** `ValueWriter::begin_option` and `ValueReader::enter_option`
+  are required methods. A format with no optional form returns an error.
+
 ## [2.6.0] - 2026-09-22
 
 ### Added

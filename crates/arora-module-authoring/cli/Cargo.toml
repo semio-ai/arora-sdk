@@ -9,7 +9,7 @@ edition = "2021"
 arora-module-core = { path = "../core" }
 arora-registry = { path = "../../arora-registry" }
 arora-registry-remote = { path = "../../arora-registry-remote" }
-arora-types = { path = "../../arora-types", version = "2" }
+arora-types = { path = "../../arora-types", version = "3" }
 arora-vfs = { path = "../../arora-vfs" }
 semio-client = { git = "https://github.com/semio-ai/semio-client.git", branch = "main" }
 anyhow = "1"

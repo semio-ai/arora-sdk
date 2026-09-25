@@ -4,6 +4,13 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3, arora-buffers 3, arora-behavior 9,
+  arora-behavior-tree-types 2 and arora-registry 2.
+
 ## [7.0.0] - 2026-07-29
 
 ### Changed

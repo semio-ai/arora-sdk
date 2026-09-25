@@ -16,7 +16,7 @@ use arora_types::module::{
 use arora_types::record::Selector;
 use arora_types::record::{
     module::unfrozen::{Export, Function, Parameter},
-    ty::{UnfrozenArray, UnfrozenScalar, UnfrozenTy},
+    ty::{UnfrozenArray, UnfrozenOption, UnfrozenScalar, UnfrozenTy},
 };
 use arora_types::record::{Freeze, Resolver, UnfrozenReference, VersionReq};
 use std::collections::HashSet;
@@ -105,6 +105,11 @@ pub async fn resolve_low_type_ref(
                 }))
             }
         }
+        LowTypeRef::Option { id } => Ok(UnfrozenTy::UnfrozenOption(UnfrozenOption {
+            element: Box::new(
+                Box::pin(resolve_low_type_ref(&LowTypeRef::Scalar { id: *id })).await?,
+            ),
+        })),
         _ => Err(ModuleDeclarationError::Generic(format!(
             "Unsupported type ref: {:?}",
             type_ref

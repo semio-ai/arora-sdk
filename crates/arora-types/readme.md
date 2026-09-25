@@ -209,8 +209,10 @@ The walk covers scalars, strings, nested structures and homogeneous arrays. A
 scalar array goes through the `write_*_array` / `read_*_array` bulk methods (the
 element type framed once, not re-tagged per element); an array of structures
 through `begin_struct_array` / `begin_struct_element`, each element a headerless
-struct body. Enumerations, options and maps extend the trait and the walk
-together.
+struct body. An optional goes through `begin_option` / `enter_option`: a
+presence flag, then the element when present. A format with no optional form
+(ROS 2 CDR) returns an error there. Enumerations and maps extend the trait and
+the walk together.
 
 ## Web Bindings
 

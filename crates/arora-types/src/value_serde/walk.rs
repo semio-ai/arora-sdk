@@ -144,6 +144,11 @@ pub trait ValueWriter {
   fn begin_fixed_struct_array(&mut self, element_id: Uuid, len: usize) -> Result<()> {
     self.begin_struct_array(element_id, len)
   }
+
+  /// Begin an optional value: whether one is `present`. A present value's
+  /// datum follows; an absent one has none. A format with no optional form
+  /// (ROS CDR) refuses it.
+  fn begin_option(&mut self, present: bool) -> Result<()>;
 }
 
 /// A format a [`Value`] is read from, type-directed by the walk. A
@@ -172,6 +177,9 @@ pub trait ValueReader {
   /// self-describing format reads and validates its inline field id; a
   /// positional format reads nothing.
   fn enter_field(&mut self, expected_id: Uuid) -> Result<()>;
+  /// Enter an optional value and report whether one is present; a present
+  /// value's datum follows. A format with no optional form refuses it.
+  fn enter_option(&mut self) -> Result<bool>;
 
   // Counterparts of the `write_*_array` bulk writers: read a whole homogeneous
   // scalar array. A self-describing format validates the array head's element
@@ -402,7 +410,14 @@ fn write_by_ref<W: ValueWriter>(
     TypeRef::Array { id } => write_array(*id, registry, value, writer),
     TypeRef::FixedArray { id, len } => write_fixed_array(*id, *len, registry, value, writer),
     TypeRef::Map { .. } => err("map types are not supported yet"),
-    TypeRef::Option { .. } => err("optional types are not supported by the typed wire walk yet"),
+    TypeRef::Option { id } => match value {
+      Value::Option(None) => writer.begin_option(false),
+      Value::Option(Some(inner)) => {
+        writer.begin_option(true)?;
+        write_by_ref(&TypeRef::Scalar { id: *id }, registry, inner, writer)
+      }
+      other => err(format!("expected an optional value, found {other:?}")),
+    },
   }
 }
 
@@ -428,7 +443,15 @@ fn read_by_ref<R: ValueReader>(
     TypeRef::Array { id } => read_array(*id, registry, reader),
     TypeRef::FixedArray { id, len } => read_fixed_array(*id, *len, registry, reader),
     TypeRef::Map { .. } => err("map types are not supported yet"),
-    TypeRef::Option { .. } => err("optional types are not supported by the typed wire walk yet"),
+    TypeRef::Option { id } => Ok(Value::Option(if reader.enter_option()? {
+      Some(Box::new(read_by_ref(
+        &TypeRef::Scalar { id: *id },
+        registry,
+        reader,
+      )?))
+    } else {
+      None
+    })),
   }
 }
 

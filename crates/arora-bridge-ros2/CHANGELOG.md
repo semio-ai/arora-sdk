@@ -4,6 +4,15 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3, arora-bridge 5, arora-msgs-ros2 2
+  and arora-behavior 9.
+- A method with an optional parameter or return is skipped, like any other
+  signature ROS 2 cannot carry.
+
 ## [6.5.0] - 2026-09-24
 
 ### Added

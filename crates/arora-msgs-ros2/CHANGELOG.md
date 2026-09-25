@@ -2,6 +2,13 @@
 
 All notable changes.
 
+## [2.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3. CDR refuses an optional value: ROS 2
+  messages have no optional form.
+
 ## [1.3.0] - 2026-09-24
 
 ### Added

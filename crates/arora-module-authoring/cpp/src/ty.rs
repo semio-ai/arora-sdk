@@ -104,6 +104,12 @@ pub fn type_name<'a>(context: &'a Context<'a>, ty: &FrozenTy) -> String {
             let ty = context.types.get(&array.reference.id).unwrap();
             format!("std::vector<{}>", ty.name())
         }
+        FrozenTy::FrozenOption(option) => {
+            format!(
+                "{OPTIONAL_TYPENAME}<{}>",
+                type_name(context, &option.element)
+            )
+        }
     }
 }
 

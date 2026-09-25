@@ -4,6 +4,22 @@ All notable changes to `arora-module-macros`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-25
+
+### Added
+
+- An `Option<T>` parameter or return, where `T` is a primitive, a type
+  deriving `AroraType`, or `Value`. The header declares it as
+  `TypeRef::Option` and the record as `FrozenTy::FrozenOption`. An absent
+  argument, or `Value::Option(None)`, is `None`. A present argument is
+  accepted bare or as `Value::Option(Some(…))`. The return travels as
+  `Value::Option`.
+- `module_from_header!` reads `TypeRef::Option` as an `Option<T>`.
+
+### Changed
+
+- **Breaking:** generates code against arora-types 3.
+
 ## [1.0.0] - 2026-09-24
 
 ### Added

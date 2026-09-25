@@ -243,6 +243,18 @@ pub(crate) fn type_ref_of(ty: &FrozenTy) -> TypeRef {
         FrozenTy::FrozenArray(array) => TypeRef::Array {
             id: array.reference.id,
         },
+        // ROS 2 has no optional: `ros2_representable` refuses the result, so a
+        // method with an optional parameter or return is skipped, whatever its
+        // element.
+        FrozenTy::FrozenOption(option) => TypeRef::Option {
+            id: match type_ref_of(&option.element) {
+                TypeRef::Scalar { id }
+                | TypeRef::Array { id }
+                | TypeRef::FixedArray { id, .. }
+                | TypeRef::Option { id } => id,
+                TypeRef::Map { value_id, .. } => value_id,
+            },
+        },
     }
 }
 

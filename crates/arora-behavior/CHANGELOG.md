@@ -4,6 +4,12 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-09-25
+
+### Changed
+
+- **Breaking:** depends on arora-types 3.
+
 ## [8.5.0] - 2026-09-22
 
 ### Added
