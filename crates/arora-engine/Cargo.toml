@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "4.2.0"
+version = "4.2.1"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -68,3 +68,9 @@ console_error_panic_hook = "0.1"
 # `lib = true` also brings the crate in for the test's own target: the header
 # the test loads comes from the module's Rust declaration.
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+
+# Native-host integration test (tests/native.rs): the same guest built for the
+# host as a cdylib, loaded through NativeExecutor; cargo exposes its path as
+# CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", lib = true }

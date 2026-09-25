@@ -4,6 +4,14 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.2.1] - 2026-09-25
+
+### Fixed
+
+- `NativeExecutor` reads a result's 4-byte size prefix little-endian, as the
+  buffer writer produces it and every other executor reads it. The result
+  slice it returns now spans the result instead of a byte-swapped length.
+
 ## [4.2.0] - 2026-09-24
 
 ### Added
