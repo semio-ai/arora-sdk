@@ -364,7 +364,9 @@ fn groot_param_arg_to_arora(
                         variables.insert(variable_name.to_owned(), id.to_owned());
                         id
                     };
-                    Expression::Uuid(id)
+                    // A variable reference, so the graph lowering binds the
+                    // return to the named store slot rather than to a literal.
+                    Expression::VariableId(id)
                 } else {
                     Expression::Value(Value::String(param_arg.1.to_owned()))
                 };
