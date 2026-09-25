@@ -305,14 +305,8 @@ fn generate_module_imports<'a>(
                         .into(),
                     );
                     function_declarations.push(
-                        format!(
-                            "arora::buffer::serialize<{}>",
-                            ty::type_name(context, &parameter.ty)
-                        )
-                        .to_expression()
-                        .call(["writer".to_expression(), parameter.name.to_expression()])
-                        .into_statement()
-                        .into(),
+                        declare::serialize(context, &parameter.ty, &parameter.name.to_expression())
+                            .into(),
                     );
                 }
 
@@ -418,18 +412,11 @@ fn generate_module_imports<'a>(
                     Variable {
                         name: "__arora_return__".to_string(),
                         ty: ty::optional_const(&TypeRef {
-                            ty: ty::type_name(context, &func.return_ty),
+                            ty: ty::wrapped_type_name(context, &func.return_ty),
                             constant: false,
                             ..Default::default()
                         }),
-                        value: Some(
-                            format!(
-                                "arora::buffer::deserialize<{}>",
-                                ty::type_name(context, &func.return_ty)
-                            )
-                            .to_expression()
-                            .call(["reader".to_expression()]),
-                        ),
+                        value: Some(declare::deserialize(context, &func.return_ty)),
                         ..Default::default()
                     }
                     .into(),
@@ -456,7 +443,7 @@ fn generate_module_imports<'a>(
                         ),
                         parameters,
                         ret: Some(ty::optional(&TypeRef {
-                            ty: ty::type_name(context, &func.return_ty),
+                            ty: ty::wrapped_type_name(context, &func.return_ty),
                             ..Default::default()
                         })),
                         body: Block {
@@ -536,7 +523,7 @@ fn generate_module_imports<'a>(
                         name: import.import.name.to_string(),
                         parameters,
                         ret: Some(ty::optional(&TypeRef {
-                            ty: ty::type_name(context, &func.return_ty),
+                            ty: ty::wrapped_type_name(context, &func.return_ty),
                             ..Default::default()
                         })),
                         ..Default::default()
@@ -639,7 +626,7 @@ fn generate_self_header<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                         name: parameter.name.clone(),
                         type_ref: optional(
                             TypeRef {
-                                ty: ty::type_name(context, &parameter.ty).to_string(),
+                                ty: ty::wrapped_type_name(context, &parameter.ty),
                                 ..Default::default()
                             },
                             parameter.mutable,
@@ -743,19 +730,23 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                     declare::uuid_variable(id::function_uuid(&export.name), export_id).into(),
                 );
 
-                let mut function_declarations: Vec<Declaration> = Vec::new();
-
-                function_declarations.push(declare::arora_buffer_reader("arg").into());
-
-                function_declarations.push(
+                let mut function_declarations: Vec<Declaration> = vec![
+                    declare::arora_buffer_reader("arg").into(),
+                    // Read the tag outside the `assert`: a build with `NDEBUG`
+                    // drops the assertion's expression, side effect included.
+                    Variable {
+                        name: "__arora_arg_type__".to_string(),
+                        ty: ty::U8.clone(),
+                        value: Some(declare::arora_buffer_reader_next_type()),
+                        ..Default::default()
+                    }
+                    .into(),
                     declare::assert(
-                        declare::arora_buffer_reader_next_type()
+                        "__arora_arg_type__"
+                            .to_expression()
                             .equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone()),
                     )
                     .into(),
-                );
-
-                function_declarations.push(
                     Variable {
                         name: "structure_metadata".to_string(),
                         ty: ty::ARORA_GET_STRUCTURE_RESULT.clone(),
@@ -763,7 +754,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                         ..Default::default()
                     }
                     .into(),
-                );
+                ];
 
                 for parameter_id in f.parameter_ordering.iter() {
                     let parameter = f.parameters.get(parameter_id).unwrap();
@@ -772,7 +763,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                             name: parameter_variable_name(parameter_id, parameter),
                             ty: optional(
                                 TypeRef {
-                                    ty: ty::type_name(context, &parameter.ty).to_string(),
+                                    ty: ty::wrapped_type_name(context, &parameter.ty),
                                     ..Default::default()
                                 },
                                 true,
@@ -784,115 +775,24 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                     );
                 }
 
-                let mut read_declarations: Vec<Declaration> = Vec::new();
-
-                read_declarations.push(
-                    Variable {
-                        name: "field_index".to_string(),
-                        ty: ty::U32.clone(),
-                        value: Some("0".to_expression()),
-                        ..Default::default()
-                    }
-                    .into(),
+                let read_declarations = declare::read_fields_by_id(
+                    f.parameter_ordering
+                        .iter()
+                        .map(|parameter_id| {
+                            let parameter = f.parameters.get(parameter_id).unwrap();
+                            (
+                                id::parameter_uuid(&export.name, &parameter.name).to_expression(),
+                                vec![parameter_variable_name(parameter_id, parameter)
+                                    .to_expression()
+                                    .assign(declare::deserialize(context, &parameter.ty))
+                                    .into_statement()
+                                    .into()],
+                            )
+                        })
+                        .collect(),
                 );
-
-                read_declarations.push(
-                    Variable {
-                        name: "field".to_string(),
-                        ty: ty::U8_CONST_PTR.clone(),
-                        value: Some(declare::arora_buffer_reader_get_structure_field()),
-                        ..Default::default()
-                    }
-                    .into(),
-                );
-
-                read_declarations.push(
-                    Variable {
-                        name: "current_res".to_string(),
-                        ty: ty::U8.clone(),
-                        value: Some(0u64.to_expression()),
-                        ..Default::default()
-                    }
-                    .into(),
-                );
-
-                let field = "field".to_expression();
-                let field_index = "field_index".to_expression();
                 let structure_metadata = "structure_metadata".to_expression();
                 let field_count = "field_count".to_expression();
-                let current_res = "current_res".to_expression();
-
-                for (i, parameter_id) in f.parameter_ordering.iter().enumerate() {
-                    let parameter = f.parameters.get(parameter_id).unwrap();
-                    let mut field_declarations: Vec<Declaration> = Vec::new();
-
-                    let name = parameter_variable_name(parameter_id, parameter).to_expression();
-                    let type_name = ty::type_name(context, &parameter.ty);
-
-                    field_declarations.push(
-                        name.assign(declare::deserialize(&type_name))
-                            .into_statement()
-                            .into(),
-                    );
-
-                    field_declarations
-                        .push(field_index.clone().pre_increment().into_statement().into());
-
-                    if i < f.parameter_ordering.len() - 1 {
-                        field_declarations.push(
-                            field
-                                .clone()
-                                .assign(declare::arora_buffer_reader_get_structure_field())
-                                .into_statement()
-                                .into(),
-                        );
-                    }
-
-                    read_declarations.push(
-                        Statement::While(
-                            field_index
-                                .less_than(structure_metadata.dot(field_count.clone()))
-                                .logical_and(
-                                    current_res
-                                        .assign(
-                                            func::ARORA_UUID_COMPARE.call([
-                                                field.clone(),
-                                                id::parameter_uuid(&export.name, &parameter.name)
-                                                    .to_expression(),
-                                            ]),
-                                        )
-                                        .parenthesized(),
-                                )
-                                .less_than("0".to_expression()),
-                            Block {
-                                statements: vec![
-                                    field_index.clone().pre_increment().into_statement().into(),
-                                    field
-                                        .clone()
-                                        .assign(declare::arora_buffer_reader_get_structure_field())
-                                        .into_statement()
-                                        .into(),
-                                ],
-                                semicolon: false,
-                            },
-                        )
-                        .into(),
-                    );
-
-                    read_declarations.push(
-                        Statement::If(
-                            field_index
-                                .less_than(structure_metadata.dot(field_count.clone()))
-                                .logical_and(current_res.equal("0".to_expression())),
-                            Block {
-                                statements: field_declarations,
-                                ..Default::default()
-                            },
-                            None,
-                        )
-                        .into(),
-                    );
-                }
 
                 function_declarations.push(
                     Statement::If(
@@ -977,11 +877,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                 );
 
                 function_declarations.push(
-                    declare::serialize(
-                        &ty::type_name(context, &f.return_ty),
-                        &"result".to_expression(),
-                    )
-                    .into(),
+                    declare::serialize(context, &f.return_ty, &"result".to_expression()).into(),
                 );
 
                 for (_, parameter) in mutable_parameters {
@@ -993,11 +889,8 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                     );
 
                     function_declarations.push(
-                        declare::serialize(
-                            &ty::type_name(context, &parameter.ty),
-                            &parameter.name.to_expression(),
-                        )
-                        .into(),
+                        declare::serialize(context, &parameter.ty, &parameter.name.to_expression())
+                            .into(),
                     );
                 }
 

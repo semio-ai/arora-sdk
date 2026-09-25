@@ -27,6 +27,18 @@ exports:
     ret:
       kind: scalar
       id: bool
+  - type: function
+    id: a24fd5ab-baf8-4f44-af41-053a54b3fa81
+    name: test_optional
+    parameters:
+      - id: b3ec8dd2-2df1-43ae-bf2d-0a567c998243
+        name: a
+        type:
+          kind: option
+          id: u32
+    ret:
+      kind: option
+      id: u32
 imports: []
 dependencies: []
 executable_mime: application/wasm

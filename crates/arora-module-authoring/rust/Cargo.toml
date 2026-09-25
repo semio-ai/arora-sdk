@@ -37,3 +37,7 @@ indexmap = "2"
 [[test]]
 name = "nested_structs"
 path = "tests/nested_structs.rs"
+
+[[test]]
+name = "optional"
+path = "tests/optional.rs"

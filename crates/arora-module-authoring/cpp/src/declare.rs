@@ -105,18 +105,18 @@ pub fn arora_buffer_skip_array() -> Expression {
     func::ARORA_BUFFER_SKIP_ARRAY.call(["reader", "array_type"])
 }
 
-pub fn serialize(type_name: &str, value: &Expression) -> Statement {
+pub fn serialize(context: &Context, ty: &FrozenTy, value: &Expression) -> Statement {
     format!(
-        "arora::buffer::serialize<{}>(writer, {})",
-        type_name,
+        "{}(writer, {})",
+        ty::serialize_function(context, ty),
         value.to_pretty_string(0)
     )
     .to_expression()
     .into_statement()
 }
 
-pub fn deserialize(type_name: &str) -> Expression {
-    format!("arora::buffer::deserialize<{}>(reader)", type_name).to_expression()
+pub fn deserialize(context: &Context, ty: &FrozenTy) -> Expression {
+    format!("{}(reader)", ty::deserialize_function(context, ty)).to_expression()
 }
 
 // ARORA_BUFFER_READER_GET_STRUCTURE_FIELD
@@ -127,6 +127,70 @@ pub fn arora_buffer_reader_get_structure_field() -> Expression {
 // arora_buffer_reader_next_type
 pub fn arora_buffer_reader_next_type() -> Expression {
     func::ARORA_BUFFER_READER_NEXT_TYPE.call(["reader"])
+}
+
+/// Read the fields a structure announces, in the order they arrive: each is
+/// matched by id against `cases` and read by the statements given for it; a
+/// field no case names has its value skipped. The order a writer emits fields
+/// in carries no meaning, so none is assumed. Expects `structure_metadata` and
+/// `reader` in scope.
+pub fn read_fields_by_id(cases: Vec<(Expression, Vec<Declaration>)>) -> Vec<Declaration> {
+    let field = "field".to_expression();
+    let field_index = "field_index".to_expression();
+    let skip = Block {
+        statements: vec![func::ARORA_BUFFER_SKIP
+            .call(["reader".to_expression(), arora_buffer_reader_next_type()])
+            .into_statement()
+            .into()],
+        semicolon: false,
+    };
+    let dispatch = cases
+        .into_iter()
+        .rev()
+        .fold(skip, |otherwise, (field_id, statements)| Block {
+            statements: vec![Statement::If(
+                func::ARORA_UUID_COMPARE
+                    .call([field.clone(), field_id])
+                    .equal("0".to_expression()),
+                Block {
+                    statements,
+                    semicolon: false,
+                },
+                Some(otherwise),
+            )
+            .into()],
+            semicolon: false,
+        });
+    let mut body = vec![Variable {
+        name: "field".to_string(),
+        ty: ty::U8_CONST_PTR.clone(),
+        value: Some(arora_buffer_reader_get_structure_field()),
+        ..Default::default()
+    }
+    .into()];
+    body.extend(dispatch.statements);
+    body.push(field_index.clone().pre_increment().into_statement().into());
+    vec![
+        Variable {
+            name: "field_index".to_string(),
+            ty: ty::U32.clone(),
+            value: Some("0".to_expression()),
+            ..Default::default()
+        }
+        .into(),
+        Statement::While(
+            field_index.less_than(
+                "structure_metadata"
+                    .to_expression()
+                    .dot("field_count".to_expression()),
+            ),
+            Block {
+                statements: body,
+                semicolon: false,
+            },
+        )
+        .into(),
+    ]
 }
 
 pub fn assert(expression: Expression) -> Statement {
@@ -151,7 +215,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
                 name: field.name.clone(),
                 parameters: vec![],
                 ret: Some(ty::optional_const_ref(&TypeRef {
-                    ty: ty::type_name(context, &field.ty),
+                    ty: ty::wrapped_type_name(context, &field.ty),
                     ..Default::default()
                 })),
                 constant: true,
@@ -167,7 +231,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
                 parameters: vec![Parameter {
                     name: "value".to_string(),
                     type_ref: ty::optional_const_ref(&TypeRef {
-                        ty: ty::type_name(context, &field.ty),
+                        ty: ty::wrapped_type_name(context, &field.ty),
                         ..Default::default()
                     }),
                 }],
@@ -183,7 +247,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
                 parameters: vec![Parameter {
                     name: "value".to_string(),
                     type_ref: ty::optional_move(&TypeRef {
-                        ty: ty::type_name(context, &field.ty),
+                        ty: ty::wrapped_type_name(context, &field.ty),
                         ..Default::default()
                     }),
                 }],
@@ -201,7 +265,7 @@ pub fn structure(context: &Context, name: &str, ty: &StructureFrozen) -> Struct 
             Variable {
                 name: structure_private_field_variable_name(id, field),
                 ty: ty::optional(&TypeRef {
-                    ty: ty::type_name(context, &field.ty),
+                    ty: ty::wrapped_type_name(context, &field.ty),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -783,7 +847,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
             FunctionImplementation {
                 name: format!("{}::{}", name, field.name.to_lowercase()),
                 ret: Some(ty::optional_const_ref(&TypeRef {
-                    ty: ty::type_name(context, &field.ty),
+                    ty: ty::wrapped_type_name(context, &field.ty),
                     ..Default::default()
                 })),
                 body: Block {
@@ -806,7 +870,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
                 parameters: vec![Parameter {
                     name: "value".to_string(),
                     type_ref: ty::optional_const_ref(&TypeRef {
-                        ty: ty::type_name(context, &field.ty),
+                        ty: ty::wrapped_type_name(context, &field.ty),
                         ..Default::default()
                     }),
                 }],
@@ -828,7 +892,7 @@ pub fn structure_impl(context: &Context, name: &str, ty: &StructureFrozen) -> Ve
                 parameters: vec![Parameter {
                     name: "value".to_string(),
                     type_ref: ty::optional_move(&TypeRef {
-                        ty: ty::type_name(context, &field.ty),
+                        ty: ty::wrapped_type_name(context, &field.ty),
                         ..Default::default()
                     }),
                 }],
@@ -870,7 +934,8 @@ pub fn structure_deserializer(
 
     function_statements.push(
         Statement::If(
-            arora_buffer_reader_next_type().equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone()),
+            arora_buffer_reader_next_type()
+                .not_equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone()),
             Block {
                 statements: vec![Statement::Return(constant::NULL_OPTION.clone()).into()],
                 semicolon: false,
@@ -930,113 +995,22 @@ pub fn structure_deserializer(
         .into(),
     );
 
-    let mut sorted_field_ids = ty.fields.keys().collect::<Vec<_>>();
-    sorted_field_ids.sort();
-
-    function_statements.push(
-        Variable {
-            name: "field_index".to_string(),
-            ty: ty::U32.clone(),
-            value: Some("0".to_expression()),
-            ..Default::default()
-        }
-        .into(),
-    );
-
-    function_statements.push(
-        Variable {
-            name: "field".to_string(),
-            ty: ty::U8_CONST_PTR.clone(),
-            value: Some(arora_buffer_reader_get_structure_field()),
-            ..Default::default()
-        }
-        .into(),
-    );
-
-    function_statements.push(
-        Variable {
-            name: "current_res".to_string(),
-            ty: ty::U8.clone(),
-            value: Some(0u64.to_expression()),
-            ..Default::default()
-        }
-        .into(),
-    );
-
-    let field_value = "field".to_expression();
-    let field_index = "field_index".to_expression();
-    let current_res = "current_res".to_expression();
-
-    for (i, field_id) in sorted_field_ids.iter().enumerate() {
-        let field = ty.fields.get(*field_id).unwrap();
-
-        let mut field_declarations: Vec<Declaration> = Vec::new();
-
-        let type_name = ty::type_name(context, &field.ty);
-
-        field_declarations.push(
-            "__arora_result__"
-                .to_expression()
-                .dot(format!("set_{}", field.name))
-                .call([deserialize(&type_name)])
-                .into_statement()
-                .into(),
-        );
-
-        field_declarations.push(field_index.clone().pre_increment().into_statement().into());
-
-        if i < sorted_field_ids.len() - 1 {
-            field_declarations.push(
-                field_value
-                    .clone()
-                    .assign(arora_buffer_reader_get_structure_field())
+    let cases = ty
+        .fields
+        .values()
+        .map(|field| {
+            (
+                id::field_uuid(name, &field.name).to_expression(),
+                vec!["__arora_result__"
+                    .to_expression()
+                    .dot(format!("set_{}", field.name))
+                    .call([deserialize(context, &field.ty)])
                     .into_statement()
-                    .into(),
-            );
-        }
-
-        function_statements.push(
-            Statement::While(
-                field_index
-                    .less_than(structure_metadata.dot(field_count.clone()))
-                    .logical_and(
-                        current_res
-                            .assign(func::ARORA_UUID_COMPARE.call([
-                                field_value.clone(),
-                                id::field_uuid(name, &field.name).to_expression(),
-                            ]))
-                            .parenthesized(),
-                    )
-                    .less_than("0".to_expression()),
-                Block {
-                    statements: vec![
-                        field_index.clone().pre_increment().into_statement().into(),
-                        field_value
-                            .clone()
-                            .assign(arora_buffer_reader_get_structure_field())
-                            .into_statement()
-                            .into(),
-                    ],
-                    semicolon: false,
-                },
+                    .into()],
             )
-            .into(),
-        );
-
-        function_statements.push(
-            Statement::If(
-                field_index
-                    .less_than(structure_metadata.dot(field_count.clone()))
-                    .logical_and(current_res.equal("0".to_expression())),
-                Block {
-                    statements: field_declarations,
-                    ..Default::default()
-                },
-                None,
-            )
-            .into(),
-        );
-    }
+        })
+        .collect();
+    function_statements.extend(read_fields_by_id(cases));
 
     function_statements.push(Statement::Return("__arora_result__".to_expression()).into());
 
@@ -1128,7 +1102,7 @@ pub fn enumeration_deserializer(
             Statement::Return(
                 name.to_expression()
                     .colon_colon(variant.name.to_lowercase().to_expression())
-                    .call([deserialize(ty::type_name(context, &variant.ty).as_str())]),
+                    .call([deserialize(context, &variant.ty)]),
             )
         } else {
             Statement::Return(
@@ -1247,9 +1221,19 @@ pub fn structure_serializer(
         .into(),
     );
 
-    // Count fields that are available
+    // Count fields that are available; an optional field always is.
     for field_id in sorted_field_ids.iter() {
         let field = ty.fields.get(*field_id).unwrap();
+        if field.ty.is_option() {
+            function_statements.push(
+                field_count
+                    .to_expression()
+                    .pre_increment()
+                    .into_statement()
+                    .into(),
+            );
+            continue;
+        }
         function_statements.push(
             Statement::If(
                 value_name
@@ -1280,6 +1264,18 @@ pub fn structure_serializer(
     for field_id in sorted_field_ids {
         let field = ty.fields.get(field_id).unwrap();
         let value_accessor = value_name.to_expression().dot(field.name.as_str());
+        // An optional field is always written: absent is its `None`.
+        if field.ty.is_option() {
+            function_statements.push(
+                arora_buffer_writer_add_structure_field(
+                    id::field_uuid(name, &field.name).to_expression(),
+                )
+                .into(),
+            );
+            function_statements
+                .push(serialize(context, &field.ty, &value_accessor.call::<String, _>([])).into());
+            continue;
+        }
         function_statements.push(
             Statement::If(
                 value_accessor

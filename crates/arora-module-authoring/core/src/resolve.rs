@@ -16,7 +16,7 @@ use arora_types::module::{
 use arora_types::record::Selector;
 use arora_types::record::{
     module::unfrozen::{Export, Function, Parameter},
-    ty::{UnfrozenArray, UnfrozenOption, UnfrozenScalar, UnfrozenTy},
+    ty::{PrimitiveKind, UnfrozenArray, UnfrozenOption, UnfrozenScalar, UnfrozenTy},
 };
 use arora_types::record::{Freeze, Resolver, UnfrozenReference, VersionReq};
 use std::collections::HashSet;
@@ -67,13 +67,22 @@ pub async fn resolve_high_type_ref(
         HighTypeRef::Array { id } => {
             let selector = Selector::from_str(id).map_err(ModuleDeclarationError::Generic)?;
             if let Some(primitive) = get_primitive(&selector) {
-                Ok(UnfrozenTy::Primitive(primitive.into()))
+                Ok(UnfrozenTy::Primitive(array_of(primitive)?.into()))
             } else {
                 Ok(UnfrozenTy::UnfrozenArray(UnfrozenArray {
                     reference: unfrozen_reference_from_name(id, registry).await?,
                 }))
             }
         }
+        HighTypeRef::Option { id } => Ok(UnfrozenTy::UnfrozenOption(UnfrozenOption {
+            element: Box::new(
+                Box::pin(resolve_high_type_ref(
+                    &HighTypeRef::Scalar { id: id.clone() },
+                    registry,
+                ))
+                .await?,
+            ),
+        })),
         _ => Err(ModuleDeclarationError::Generic(format!(
             "Unsupported type ref: {:?}",
             type_ref
@@ -98,7 +107,7 @@ pub async fn resolve_low_type_ref(
         LowTypeRef::Array { id } => {
             let selector = Selector::Id(id.to_owned());
             if let Some(primitive) = get_primitive(&selector) {
-                Ok(UnfrozenTy::Primitive(primitive.into()))
+                Ok(UnfrozenTy::Primitive(array_of(primitive)?.into()))
             } else {
                 Ok(UnfrozenTy::UnfrozenArray(UnfrozenArray {
                     reference: unfrozen_reference_from_id(id).await?,
@@ -115,6 +124,31 @@ pub async fn resolve_low_type_ref(
             type_ref
         ))),
     }
+}
+
+/// The primitive array kind whose elements are `element`. The record
+/// vocabulary names an array of a primitive by its own kind (`ArrayF32`), not
+/// as an array reference.
+fn array_of(element: PrimitiveKind) -> Result<PrimitiveKind, ModuleDeclarationError> {
+    Ok(match element {
+        PrimitiveKind::Boolean => PrimitiveKind::ArrayBoolean,
+        PrimitiveKind::U8 => PrimitiveKind::ArrayU8,
+        PrimitiveKind::U16 => PrimitiveKind::ArrayU16,
+        PrimitiveKind::U32 => PrimitiveKind::ArrayU32,
+        PrimitiveKind::U64 => PrimitiveKind::ArrayU64,
+        PrimitiveKind::I8 => PrimitiveKind::ArrayI8,
+        PrimitiveKind::I16 => PrimitiveKind::ArrayI16,
+        PrimitiveKind::I32 => PrimitiveKind::ArrayI32,
+        PrimitiveKind::I64 => PrimitiveKind::ArrayI64,
+        PrimitiveKind::F32 => PrimitiveKind::ArrayF32,
+        PrimitiveKind::F64 => PrimitiveKind::ArrayF64,
+        PrimitiveKind::String => PrimitiveKind::ArrayString,
+        other => {
+            return Err(ModuleDeclarationError::Generic(format!(
+                "no array of {other} in the record vocabulary"
+            )))
+        }
+    })
 }
 
 async fn unfrozen_reference_from_name(

@@ -6,6 +6,7 @@ extern "C" {
 }
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 #include "types.hpp"
@@ -104,6 +105,18 @@ namespace arora
     inline void serialize<std::string>(arora_buffer_writer *const writer, const std::string &value) noexcept
     {
       arora_buffer_writer_add_string(writer, reinterpret_cast<const std::uint8_t *>(value.data()), value.size());
+    }
+
+    // An optional value: a presence flag, then the element when present.
+    template<typename E>
+    void serialize_optional(arora_buffer_writer *const writer, const std::optional<E> &value) noexcept
+    {
+      if (value) {
+        arora_buffer_writer_add_option_some(writer);
+        serialize<E>(writer, *value);
+      } else {
+        arora_buffer_writer_add_option_none(writer);
+      }
     }
 
     template<>

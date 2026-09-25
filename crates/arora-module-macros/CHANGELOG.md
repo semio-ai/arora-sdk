@@ -10,10 +10,9 @@ All notable changes to `arora-module-macros`. The format follows
 
 - An `Option<T>` parameter or return, where `T` is a primitive, a type
   deriving `AroraType`, or `Value`. The header declares it as
-  `TypeRef::Option` and the record as `FrozenTy::FrozenOption`. An absent
-  argument, or `Value::Option(None)`, is `None`. A present argument is
-  accepted bare or as `Value::Option(Some(…))`. The return travels as
-  `Value::Option`.
+  `TypeRef::Option` and the record as `FrozenTy::FrozenOption`. An optional
+  travels as `Value::Option`: an absent argument, or `Value::Option(None)`, is
+  `None`, and a bare element is a type mismatch.
 - `module_from_header!` reads `TypeRef::Option` as an `Option<T>`.
 
 ### Changed
