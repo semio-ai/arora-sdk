@@ -764,9 +764,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_value_for_an_optional_is_rejected() {
+    fn a_bare_value_for_an_optional_is_written_present() {
         let maybe = maybe_type();
-        let value = Value::Structure(Structure {
+        let registry = registry();
+        let bare = Value::Structure(Structure {
             id: id(MAYBE),
             fields: vec![
                 vfield(0x41, Value::F32(2.5)),
@@ -774,6 +775,12 @@ mod tests {
             ],
         });
         let mut w = BuffersValueWriter::new();
-        assert!(write_value(&maybe, &registry(), &value, &mut w).is_err());
+        write_value(&maybe, &registry, &bare, &mut w).expect("write");
+        let buf = w.finish();
+        let mut r = BuffersValueReader::new(&buf);
+        assert_eq!(
+            read_value(&maybe, &registry, &mut r).expect("read"),
+            maybe_value(Some(2.5), false)
+        );
     }
 }

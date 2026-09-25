@@ -57,8 +57,8 @@ fn call_test_rust_wasm_from_engine() {
 }
 
 /// A C++ module's optional parameter and return, through the generated
-/// bindings: a present argument comes back incremented, an absent one or an
-/// explicit `None` comes back as `None`.
+/// bindings: a present argument — framed or bare — comes back incremented, an
+/// absent one or an explicit `None` comes back as `None`.
 #[test]
 fn call_test_cpp_with_optionals() {
     let profile = if cfg!(debug_assertions) {
@@ -90,6 +90,13 @@ fn call_test_cpp_with_optionals() {
         "      u32: 41\n",
     ));
     assert!(present.contains("u32: 42"), "{present}");
+    let bare = call(concat!(
+        "args:\n",
+        "- id: b3ec8dd2-2df1-43ae-bf2d-0a567c998243\n",
+        "  value:\n",
+        "    u32: 41\n",
+    ));
+    assert!(bare.contains("u32: 42"), "{bare}");
     let explicit_none = call(concat!(
         "args:\n",
         "- id: b3ec8dd2-2df1-43ae-bf2d-0a567c998243\n",

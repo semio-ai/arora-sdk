@@ -32,6 +32,19 @@ pub extern "C" fn arora_buffer_reader_next_type(reader: *mut BufferReader) -> i1
     }
 }
 
+/// The type tag `arora_buffer_reader_next_type` would read, without consuming
+/// it; -1 at the end of the buffer.
+#[no_mangle]
+pub extern "C" fn arora_buffer_reader_peek_type(reader: *const BufferReader) -> i16 {
+    unsafe {
+        let reader = &*reader;
+        match reader.peek_type() {
+            Some(value) => value as i16,
+            None => -1,
+        }
+    }
+}
+
 #[repr(C)]
 pub struct GetStructureResult {
     pub id: *const u8,

@@ -11,6 +11,8 @@ All notable changes to `arora-buffers`. The format follows
 - The checked `Value` codec (`BuffersValueWriter` / `BuffersValueReader`)
   frames optionals exactly as the `serde_uuid` codec does, so the two encode
   an optional identically.
+- `BufferReader::peek_type` and its C ABI `arora_buffer_reader_peek_type`: the
+  next type tag, not consumed.
 
 ### Changed
 

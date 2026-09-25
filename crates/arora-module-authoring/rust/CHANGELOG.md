@@ -11,8 +11,8 @@ All notable changes to `arora-module-rust`. The format follows
 - Optional types: an optional parameter, return or structure field generates
   as `Option<T>`, travels as the buffers' optional framing (byte-identical to
   `serde_uuid`'s `Value::Option`) and converts to and from `Value::Option`. An
-  absent optional argument or structure field is `None`; a bare element where
-  an optional is declared is a type mismatch.
+  absent optional argument or structure field is `None`; a present one is read
+  framed or as its bare element.
 
 ### Changed
 

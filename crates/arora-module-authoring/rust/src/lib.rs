@@ -1540,21 +1540,28 @@ async fn generate_field_from_value_frozen(
     registry: &mut dyn ReadableRegistry,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
-        // An optional arrives as `Value::Option`.
+        // An optional arrives as `Value::Option`, or as its bare element when
+        // present.
         FrozenTy::FrozenOption(option) => {
-            let element = generate_field_from_value_frozen(
+            let boxed = generate_field_from_value_frozen(
                 &option.element,
                 quote! { (*__boxed) },
                 field_name,
                 registry,
             )
             .await?;
-            let mismatch = format!("field {}: expected an optional value", field_name);
+            let bare = generate_field_from_value_frozen(
+                &option.element,
+                quote! { __bare },
+                field_name,
+                registry,
+            )
+            .await?;
             Ok(quote! {
                 match #value_expression {
                     Value::Option(None) => None,
-                    Value::Option(Some(__boxed)) => Some(#element),
-                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
+                    Value::Option(Some(__boxed)) => Some(#boxed),
+                    __bare => Some(#bare),
                 }
             })
         }
@@ -1829,9 +1836,10 @@ async fn generate_deserialize_from_frozen(
     check_type: CheckType,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
+        // An optional arrives framed (a presence flag, then the element), or
+        // as its bare element when present. The element carries its own tag,
+        // so it is read with a type check whatever the optional's context.
         FrozenTy::FrozenOption(option) => {
-            // The element carries its own tag, so it is read with a type check
-            // whatever the optional's own context.
             let element_check = if check_type == CheckType::YesResult {
                 CheckType::YesResult
             } else {
@@ -1839,29 +1847,18 @@ async fn generate_deserialize_from_frozen(
             };
             let element =
                 generate_deserialize_from_frozen(&option.element, registry, element_check).await?;
-            Ok(if check_type == CheckType::YesResult {
-                quote! {{
-                  let _next_type = reader.next_type();
-                  if _next_type != Some(TYPE_OPTION) {
-                    return Err(format!("type mismatch: expected an optional but got {:?}", _next_type));
-                  }
-                  if reader.get_option_presence() {
-                    Some(#element)
-                  } else {
-                    None
-                  }
-                }}
-            } else {
-                quote! {{
-                  let _next_type = reader.next_type();
-                  assert_eq!(_next_type, Some(TYPE_OPTION), "type mismatch");
-                  if reader.get_option_presence() {
-                    Some(#element)
-                  } else {
-                    None
-                  }
-                }}
-            })
+            Ok(quote! {{
+              if reader.peek_type() == Some(TYPE_OPTION) {
+                reader.next_type();
+                if reader.get_option_presence() {
+                  Some(#element)
+                } else {
+                  None
+                }
+              } else {
+                Some(#element)
+              }
+            }})
         }
         FrozenTy::Primitive(primitive) => {
             let type_kind_ident = type_kind_ident_from_primitive(&primitive.kind);

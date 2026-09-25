@@ -932,12 +932,30 @@ pub fn structure_deserializer(
 ) -> FunctionImplementation {
     let mut function_statements = Vec::<Declaration>::new();
 
+    // Anything but a structure is skipped whole, so the fields after it
+    // still line up.
+    function_statements.push(
+        Variable {
+            name: "type".to_string(),
+            ty: ty::U8.clone(),
+            value: Some(arora_buffer_reader_next_type()),
+            ..Default::default()
+        }
+        .into(),
+    );
     function_statements.push(
         Statement::If(
-            arora_buffer_reader_next_type()
+            "type"
+                .to_expression()
                 .not_equal(constant::ARORA_BUFFER_TYPE_STRUCTURE.clone()),
             Block {
-                statements: vec![Statement::Return(constant::NULL_OPTION.clone()).into()],
+                statements: vec![
+                    func::ARORA_BUFFER_SKIP
+                        .call(["reader".to_expression(), "type".to_expression()])
+                        .into_statement()
+                        .into(),
+                    Statement::Return(constant::NULL_OPTION.clone()).into(),
+                ],
                 semicolon: false,
             },
             None,

@@ -15,7 +15,8 @@ All notable changes to `arora-types`. The format follows
 - `module::high::TypeRef::Option`: a hand-written `module.yaml` declares an
   optional as `{ kind: option, id: … }`.
 - The typed wire walk reads and writes `TypeRef::Option`: a presence flag,
-  then the element when present.
+  then the element when present. A bare element is written as a present
+  value.
 
 ### Changed
 

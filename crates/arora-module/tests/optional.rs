@@ -138,7 +138,7 @@ fn an_absent_optional_argument_is_none() {
 }
 
 #[test]
-fn an_optional_argument_travels_as_an_option() {
+fn an_optional_argument_arrives_wrapped_or_bare() {
     let mut engine = engine();
     let anim = || field(sampler::ids::describe::ANIM, Value::U32(3));
     let rate = |value| field(sampler::ids::describe::FRAME_RATE, value);
@@ -158,13 +158,18 @@ fn an_optional_argument_travels_as_an_option() {
         some_string("3 at 60 Hz over 0..1"),
         "an explicit `None` is absent"
     );
+    assert_eq!(
+        describe(&mut engine, vec![anim(), rate(Value::F32(30.0))]),
+        some_string("3 at 30 Hz over 0..1"),
+        "a bare element is a present value"
+    );
     let error = engine
         .arora_call(Call {
             module_id: Some(sampler::ids::MODULE),
             id: sampler::ids::describe::FUNCTION,
-            args: vec![anim(), rate(Value::F32(30.0))],
+            args: vec![anim(), rate(Value::String("fast".into()))],
         })
-        .expect_err("a bare element is not an optional");
+        .expect_err("a bare element of the wrong type");
     assert!(
         error
             .to_string()
