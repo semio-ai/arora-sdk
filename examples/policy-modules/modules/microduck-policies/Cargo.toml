@@ -1,0 +1,18 @@
+[package]
+name = "microduck-policies"
+description = "Microduck's learned locomotion policies as Arora behavior leaves: walk, stand, sit, rise, skills, and a head animation over the balancing policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# The `cdylib` is the wasm guest the device loads; the `rlib` lets the same
+# crate run in-process (`HostModule::of`) and carries the declaration (ids,
+# header, signatures) to whoever loads the guest.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arora-behavior.workspace = true
+arora-module.workspace = true
+arora-policy = { path = "../../crates/arora-policy", version = "0.1" }
