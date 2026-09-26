@@ -54,18 +54,26 @@ pub const CONTROL_PERIOD_NS: u64 = 20_000_000;
 const STANDING_THRESHOLD: f32 = 0.05;
 
 /// Projected gravity `z` above which the robot is on its side or back
-/// (upright is −1).
-const FALLEN_GRAVITY_Z: f32 = -0.5;
+/// (upright is −1) — the daemon's fall threshold, applied here without its
+/// 200 ms debounce.
+pub const FALLEN_GRAVITY_Z: f32 = -0.5;
 
-/// A leaf that has not been ticked for this long starts over: its history
-/// belongs to a run that ended (the tree switched to another leaf).
-const STALE_AFTER_NS: u64 = 3 * CONTROL_PERIOD_NS;
+/// Not ticked for this long, the module starts over — the previous action,
+/// the filter anchor and the smoothed command are those of a run that ended.
+/// The daemon resets its controller after the same pause.
+const RESET_AFTER_PAUSE_NS: u64 = 200_000_000;
+
+/// The daemon's command smoothing: each control tick the twist and head move
+/// this fraction of the way to what was requested.
+const COMMAND_ALPHA: f32 = 0.2;
 
 const OBS_LEN: usize = 61;
 const ACTION_LEN: usize = 14;
 const HEAD: std::ops::Range<usize> = 5..9;
 
-/// The daemon's deployment tuning: how an action becomes targets.
+/// The daemon's deployment tuning: how an action becomes targets. The scale
+/// and the filters are the daemon's; the servo gain it also switches (200
+/// walking, 160 standing) is fixed in the MJCF and not reproduced.
 struct Tuning {
     action_scale: f32,
     /// First-order low-pass on the leg targets (`None` for none).
@@ -190,7 +198,7 @@ impl Inputs<'_> {
 }
 
 /// The 13-value command block: twist, head, body pose.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
 struct Command {
     twist: [f32; 3],
     head: [f32; 4],
@@ -199,18 +207,41 @@ struct Command {
     body_pitch: f32,
 }
 
-/// One run of a leaf: which leaf, the network in use, its history, and the
-/// clocks. Replaced whenever another leaf takes over or a run goes stale.
+impl Command {
+    /// The daemon's smoothing toward `target`: the twist and the head move a
+    /// fraction of the way each control tick; the body pose is taken as is.
+    fn smoothed_toward(self, target: Command) -> Command {
+        let mut next = target;
+        for i in 0..3 {
+            next.twist[i] = self.twist[i] + COMMAND_ALPHA * (target.twist[i] - self.twist[i]);
+        }
+        for i in 0..4 {
+            next.head[i] = self.head[i] + COMMAND_ALPHA * (target.head[i] - self.head[i]);
+        }
+        next
+    }
+}
+
+/// What persists across leaves and networks: the controller's memory, the
+/// daemon's `Controller` state. The previous action feeds every network's
+/// observation, the previous targets anchor the low-pass, the smoothed command
+/// is what the gaits see. Reset only after a pause.
+struct Memory {
+    last_action: [f32; ACTION_LEN],
+    previous_targets: Option<[f32; ACTION_LEN]>,
+    command: Command,
+    last_tick_ns: u64,
+}
+
+/// One run of a leaf: its clock and its held targets. Replaced when another
+/// leaf takes over; the memory above carries across.
 struct Run {
     leaf: Leaf,
     net: Net,
-    last_action: [f32; ACTION_LEN],
-    previous_targets: Option<[f32; ACTION_LEN]>,
     decimator: Decimator,
-    /// Time in the run, and the time the leaf was last ticked, on the
-    /// module's own clock (the sum of every `dt` it was handed).
+    /// Time in the run, on the module's own clock (the sum of every `dt` it
+    /// was handed).
     elapsed_ns: u64,
-    last_tick_ns: u64,
     targets: [f32; ACTION_LEN],
 }
 
@@ -223,15 +254,18 @@ enum Leaf {
     Skill(String),
 }
 
-/// The module's state: the networks (loaded on first use) and the current run.
+/// The module's state: the networks (loaded on first use), the controller
+/// memory, and the current run.
 struct Runtime {
     policies: Vec<(Net, OnnxPolicy)>,
+    memory: Option<Memory>,
     run: Option<Run>,
     clock_ns: u64,
 }
 
 static RUNTIME: Mutex<Runtime> = Mutex::new(Runtime {
     policies: Vec::new(),
+    memory: None,
     run: None,
     clock_ns: 0,
 });
@@ -258,32 +292,43 @@ impl Runtime {
             .1)
     }
 
-    /// The run for `leaf`, continuing the current one if it is the same leaf
-    /// ticked without a gap, otherwise a fresh one. Advances the clock by
-    /// `dt_ns` either way.
-    fn run_for(&mut self, leaf: Leaf, net: Net, dt_ns: u64) -> &mut Run {
+    /// Advance the clock by `dt_ns` and settle the memory and the run for this
+    /// tick of `leaf`: after a pause both start over; a different leaf starts
+    /// a fresh run over the same memory; the same leaf continues.
+    fn tick(&mut self, leaf: Leaf, net: Net, dt_ns: u64) -> (&mut Memory, &mut Run) {
         self.clock_ns = self.clock_ns.saturating_add(dt_ns);
         let now = self.clock_ns;
-        let continues = match &self.run {
-            Some(run) => run.leaf == leaf && now.saturating_sub(run.last_tick_ns) <= STALE_AFTER_NS,
-            None => false,
+        let paused = match &self.memory {
+            Some(memory) => now.saturating_sub(memory.last_tick_ns) > RESET_AFTER_PAUSE_NS,
+            None => true,
         };
+        if paused {
+            self.memory = Some(Memory {
+                last_action: [0.0; ACTION_LEN],
+                previous_targets: None,
+                command: Command::default(),
+                last_tick_ns: now,
+            });
+            self.run = None;
+        }
+        let memory = self.memory.as_mut().expect("just ensured");
+        memory.last_tick_ns = now;
+        let continues = matches!(&self.run, Some(run) if run.leaf == leaf);
         if !continues {
             self.run = Some(Run {
                 leaf,
                 net,
-                last_action: [0.0; ACTION_LEN],
-                previous_targets: None,
                 decimator: Decimator::new(CONTROL_PERIOD_NS),
                 elapsed_ns: 0,
-                last_tick_ns: now,
-                targets: DEFAULT_POSE,
+                targets: memory.previous_targets.unwrap_or(DEFAULT_POSE),
             });
         }
         let run = self.run.as_mut().expect("just ensured");
+        // The shipped networks are feed-forward: switching one for another
+        // resets nothing. (A recurrent network would clear its state here.)
+        run.net = net;
         run.elapsed_ns = run.elapsed_ns.saturating_add(dt_ns);
-        run.last_tick_ns = now;
-        run
+        (memory, run)
     }
 }
 
@@ -343,31 +388,41 @@ fn targets_from(
     targets
 }
 
+/// Whether a leaf's command goes through the daemon's smoothing (a client's
+/// twist and head do; a skill's fixed or phase-encoded command does not).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Smoothing {
+    Client,
+    Raw,
+}
+
 /// One tick of a policy leaf: infer when the control period is due, hold the
-/// last targets otherwise; write the targets out. Returns the time elapsed in
-/// the run.
+/// last targets otherwise; write the targets out. `command` is built from the
+/// time elapsed in the run, so a phase-encoded skill sees its own clock.
+/// Returns that elapsed time.
 fn step(
     runtime: &mut Runtime,
     leaf: Leaf,
     net: Net,
     tuning: &Tuning,
     inputs: &Inputs,
-    command: &Command,
+    command: &dyn Fn(u64) -> Command,
+    smoothing: Smoothing,
     targets: &mut Vec<f32>,
 ) -> Result<u64, String> {
     inputs.check().map_err(String::from)?;
-    let run = runtime.run_for(leaf, net, inputs.dt_ns);
-    if run.net != net {
-        // A network switch resets its memory, as in the daemon; the previous
-        // action is shared across networks.
-        run.net = net;
-        run.previous_targets = None;
-    }
+    let (memory, run) = runtime.tick(leaf, net, inputs.dt_ns);
     let due = run.decimator.due(inputs.dt_ns);
     let elapsed = run.elapsed_ns;
     if due {
-        let obs = observation(inputs, &run.last_action, command);
-        let previous = run.previous_targets;
+        let requested = command(elapsed);
+        let effective = match smoothing {
+            Smoothing::Client => memory.command.smoothed_toward(requested),
+            Smoothing::Raw => requested,
+        };
+        memory.command = effective;
+        let obs = observation(inputs, &memory.last_action, &effective);
+        let previous = memory.previous_targets;
         let action = runtime
             .policy(net)?
             .infer(&obs)
@@ -375,12 +430,12 @@ fn step(
         let mut action_array = [0.0f32; ACTION_LEN];
         action_array.copy_from_slice(&action);
         let new_targets = targets_from(&action_array, previous, tuning);
-        let run = runtime.run.as_mut().expect("the run exists");
-        run.last_action = action_array;
-        run.previous_targets = Some(new_targets);
-        run.targets = new_targets;
+        let memory = runtime.memory.as_mut().expect("settled by tick");
+        memory.last_action = action_array;
+        memory.previous_targets = Some(new_targets);
+        runtime.run.as_mut().expect("settled by tick").targets = new_targets;
     }
-    let run = runtime.run.as_ref().expect("the run exists");
+    let run = runtime.run.as_ref().expect("settled by tick");
     targets.clear();
     targets.extend_from_slice(&run.targets);
     Ok(elapsed)
@@ -412,8 +467,12 @@ fn failing(message: String) -> Status {
 pub mod microduck_policies {
     use super::*;
 
-    /// Walk at a commanded twist, standing still (the standing network) when
-    /// the twist is at most 0.05. Runs until the tree stops ticking it.
+    /// Walk at a commanded twist with the `alpha_walking` network, standing
+    /// still with `alpha_stand` when the twist is at most 0.05, the twist and
+    /// head smoothed as the daemon smooths a client's. Runs until the tree
+    /// stops ticking it. (`velstand`, the robot's default gait since its v5
+    /// policies, walks and stands with one network; it drifts sideways in
+    /// this simulator, so the pair is used.)
     ///
     /// `vx`, `vy` in m/s (x forward, y left), `vyaw` in rad/s (positive turns
     /// left); the policies do not walk visibly below about 0.25 m/s in this
@@ -465,7 +524,8 @@ pub mod microduck_policies {
             net,
             tuning,
             &inputs,
-            &command,
+            &|_| command,
+            Smoothing::Client,
             targets,
         ) {
             Ok(_) => Status::Running,
@@ -507,7 +567,8 @@ pub mod microduck_policies {
             Net::Standing,
             &STANDING,
             &inputs,
-            &command,
+            &|_| command,
+            Smoothing::Client,
             targets,
         ) {
             Ok(_) => Status::Running,
@@ -515,8 +576,8 @@ pub mod microduck_policies {
         }
     }
 
-    /// Sit down with the sit/stand network (3 s), then succeed. The targets
-    /// last written hold the seat.
+    /// Sit down with the sit/stand network, head and body neutral, for 3 s,
+    /// then succeed; the targets last written hold the seat.
     #[export(id = "c5f3b2e4-1d0a-4b8c-8e7f-3a4b5c6d7e8f")]
     pub fn sit(
         #[param(id = "4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80")] dt_ns: u64,
@@ -538,7 +599,8 @@ pub mod microduck_policies {
         )
     }
 
-    /// Rise from a seat with the sit/stand network (3 s), then succeed.
+    /// Rise from a seat with the sit/stand network, head and body neutral,
+    /// for 3 s, then succeed.
     #[export(id = "d6a4c3f5-2e1b-4c9d-9f80-4b5c6d7e8f90")]
     pub fn rise(
         #[param(id = "4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80")] dt_ns: u64,
@@ -586,19 +648,10 @@ pub mod microduck_policies {
             joint_velocities: &joint_velocities,
         };
         let mut runtime = RUNTIME.lock().unwrap();
-        // The command depends on the time in the run, known once the run is
-        // looked up; a skill's clock only starts at its first tick, so the
-        // command of that first tick is the phase-zero one.
-        let elapsed = runtime
-            .run
-            .as_ref()
-            .filter(|run| run.leaf == Leaf::Skill(name.clone()))
-            .map(|run| run.elapsed_ns)
-            .unwrap_or(0);
-        let command = match skill.command {
+        let command = |elapsed_ns: u64| match skill.command {
             SkillCommand::Zero => Command::default(),
             SkillCommand::Phase { period_ns, .. } => {
-                let phase = elapsed as f32 / period_ns as f32;
+                let phase = elapsed_ns as f32 / period_ns as f32;
                 let angle = std::f32::consts::TAU * phase;
                 Command {
                     twist: [angle.cos(), angle.sin(), 0.0],
@@ -613,6 +666,7 @@ pub mod microduck_policies {
             &STANDING,
             &inputs,
             &command,
+            Smoothing::Raw,
             targets,
         ) {
             Ok(elapsed) => {
@@ -637,7 +691,8 @@ pub mod microduck_policies {
     }
 
     /// Succeeds when the robot is down (projected gravity `z` above −0.5),
-    /// fails while it is upright — a condition leaf.
+    /// fails while it is upright — a condition leaf, instantaneous where the
+    /// daemon debounces its verdict for 200 ms.
     #[export(id = "09d7f6c8-5b4e-4f2a-8cb3-7e8f90a1b2c3")]
     pub fn fallen(
         #[param(id = "6f7a8b9c-0d1e-4f2a-9b4c-5d6e7f8091a2")] orientation: Vec<f32>,
@@ -679,7 +734,10 @@ pub mod microduck_policies {
 }
 
 /// The sit/stand network with the posture flag in the twist's `vx` slot
-/// (sit = 1, stand = 0), for the daemon's ramp plus unwind time.
+/// (sit = 1, stand = 0), head and body zero. Each leaf runs 3 s then
+/// succeeds so a sequence can move on: the daemon rises in 1 s and lets a
+/// seat settle for 2 s before handing over, and 3 s covers either with
+/// margin; the seat itself is held by the targets last written.
 #[allow(clippy::too_many_arguments)]
 fn posture(
     leaf: Leaf,
@@ -710,7 +768,8 @@ fn posture(
         Net::SitStand,
         &STANDING,
         &inputs,
-        &command,
+        &|_| command,
+        Smoothing::Raw,
         targets,
     ) {
         Ok(elapsed) if elapsed >= POSTURE_NS => Status::Success,
@@ -899,6 +958,153 @@ mod tests {
             ),
             Status::Failure
         );
+    }
+
+    /// The observation layout, index by index, as the daemon lays it out:
+    /// gyro 0..3, gravity 3..6, Δq 6..20, q̇ 20..34, previous action 34..48,
+    /// twist 48..51, head 51..55, body x y 55..57 zero, z roll pitch 57..60,
+    /// yaw 60 zero.
+    #[test]
+    fn observation_is_laid_out_as_the_daemon_lays_it_out() {
+        let gyro = [0.1, 0.2, 0.3];
+        let positions: Vec<f32> = (0..14).map(|i| DEFAULT_POSE[i] + 0.01 * i as f32).collect();
+        let velocities: Vec<f32> = (0..14).map(|i| 1.0 + i as f32).collect();
+        let last_action: [f32; 14] = std::array::from_fn(|i| -(i as f32));
+        let inputs = Inputs {
+            dt_ns: CONTROL_PERIOD_NS,
+            gyro: &gyro,
+            orientation: &[1.0, 0.0, 0.0, 0.0],
+            joint_positions: &positions,
+            joint_velocities: &velocities,
+        };
+        let command = Command {
+            twist: [0.3, 0.02, -0.5],
+            head: [0.1, 0.2, 0.3, 0.4],
+            body_z: -0.01,
+            body_roll: 0.05,
+            body_pitch: 0.06,
+        };
+        let obs = observation(&inputs, &last_action, &command);
+        assert_eq!(obs.len(), 61);
+        assert_eq!(&obs[0..3], &gyro);
+        assert!((obs[3]).abs() < 1e-6 && (obs[4]).abs() < 1e-6 && (obs[5] + 1.0).abs() < 1e-6);
+        for i in 0..14 {
+            assert!(
+                (obs[6 + i] - 0.01 * i as f32).abs() < 1e-6,
+                "Δq at {}",
+                6 + i
+            );
+            assert_eq!(obs[20 + i], 1.0 + i as f32, "q̇ at {}", 20 + i);
+            assert_eq!(obs[34 + i], -(i as f32), "previous action at {}", 34 + i);
+        }
+        assert_eq!(&obs[48..51], &[0.3, 0.02, -0.5]);
+        assert_eq!(&obs[51..55], &[0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(&obs[55..57], &[0.0, 0.0]);
+        assert_eq!(&obs[57..60], &[-0.01, 0.05, 0.06]);
+        assert_eq!(obs[60], 0.0);
+    }
+
+    /// The daemon's target tuning: default pose plus the scaled action, then
+    /// the low-pass toward the previous targets — 0.7 on the legs, 0.5 on the
+    /// four head joints (5..9), scale 0.9 walking and 1.0 standing.
+    #[test]
+    fn targets_follow_the_daemon_tuning() {
+        let action = [1.0f32; 14];
+        let fresh = targets_from(&action, None, &WALKING);
+        for i in 0..14 {
+            assert!((fresh[i] - (DEFAULT_POSE[i] + 0.9)).abs() < 1e-6, "{i}");
+        }
+        let previous = [0.0f32; 14];
+        let filtered = targets_from(&action, Some(previous), &STANDING);
+        for i in 0..14 {
+            let raw = DEFAULT_POSE[i] + 1.0;
+            let expected = if (5..9).contains(&i) {
+                0.5 * raw
+            } else {
+                0.7 * raw
+            };
+            assert!(
+                (filtered[i] - expected).abs() < 1e-6,
+                "{i}: {} vs {expected}",
+                filtered[i]
+            );
+        }
+    }
+
+    /// A client's command is smoothed a fifth of the way per control tick;
+    /// the memory carries across leaves and resets after a 200 ms pause.
+    #[test]
+    fn memory_carries_across_leaves_and_resets_after_a_pause() {
+        let _serial = SERIAL.lock().unwrap();
+        let (gyro, positions, velocities) = at_rest();
+        let mut targets = Vec::new();
+        // Start clean: a pause resets everything.
+        {
+            let mut runtime = RUNTIME.lock().unwrap();
+            runtime.clock_ns = runtime.clock_ns.saturating_add(RESET_AFTER_PAUSE_NS + 1);
+        }
+        walk(
+            0.3,
+            0.0,
+            0.0,
+            vec![0.0; 4],
+            CONTROL_PERIOD_NS,
+            gyro.clone(),
+            upright(),
+            positions.clone(),
+            velocities.clone(),
+            &mut targets,
+        );
+        {
+            let runtime = RUNTIME.lock().unwrap();
+            let memory = runtime.memory.as_ref().unwrap();
+            assert!(
+                (memory.command.twist[0] - 0.06).abs() < 1e-6,
+                "one fifth of 0.3: {:?}",
+                memory.command
+            );
+            assert!(memory.previous_targets.is_some());
+        }
+        // Another leaf keeps the memory (the previous action, the anchor).
+        let last_action = RUNTIME.lock().unwrap().memory.as_ref().unwrap().last_action;
+        stand(
+            vec![0.0; 4],
+            CONTROL_PERIOD_NS,
+            gyro.clone(),
+            upright(),
+            positions.clone(),
+            velocities.clone(),
+            &mut targets,
+        );
+        {
+            let runtime = RUNTIME.lock().unwrap();
+            assert_eq!(runtime.run.as_ref().unwrap().leaf, Leaf::Stand);
+            assert_ne!(runtime.memory.as_ref().unwrap().last_action, [0.0; 14]);
+            assert_ne!(
+                runtime.memory.as_ref().unwrap().last_action,
+                last_action,
+                "stand inferred once more"
+            );
+        }
+        // A pause longer than 200 ms starts over.
+        stand(
+            vec![0.0; 4],
+            RESET_AFTER_PAUSE_NS + 1,
+            gyro,
+            upright(),
+            positions,
+            velocities,
+            &mut targets,
+        );
+        {
+            let runtime = RUNTIME.lock().unwrap();
+            let memory = runtime.memory.as_ref().unwrap();
+            assert_eq!(memory.command.twist, [0.0; 3]);
+            assert_eq!(
+                runtime.run.as_ref().unwrap().elapsed_ns,
+                RESET_AFTER_PAUSE_NS + 1
+            );
+        }
     }
 
     #[test]

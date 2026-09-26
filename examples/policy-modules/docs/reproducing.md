@@ -65,8 +65,9 @@ likelihood:
    `Decimator`-driven counter), command blocks with reserved zeros, and
    biases only present in training (Open Duck Mini adds 1.3 m/s² to the
    accelerometer's x).
-3. **`targets_from()`** — the action scale, the default pose, slew limits,
-   low-pass filters, gain schedules. A robot whose actuators are torque motors
+3. **`targets_from()`** and the memory rules — the action scale, the default
+   pose, slew limits, low-pass filters, gain schedules, command smoothing, and
+   what resets when (a network switch, a pause, a fall). A robot whose actuators are torque motors
    in the MJCF needs a PD loop somewhere: put it in the HAL config as a
    position actuator in the MJCF (preferred, it is what the policy saw) or in
    the leaf.
@@ -87,10 +88,12 @@ likelihood:
 | Joints | 14 (5 per leg, neck pitch, head pitch/yaw/roll); the daemon's wire order adds a mouth at index 9, the policies never see it |
 | Observation | 61: gyro 3, projected gravity 3, Δq 14, q̇ 14, previous action 14, command 13 (twist 3, head 4, body x y 0, z, roll, pitch, yaw 0) |
 | Action | 14 offsets; targets = default pose + 0.9 (walk) / 1.0 (stand, skills) × action; low-pass 0.7 legs, 0.5 head |
-| Rate | 50 Hz over a 5 ms physics step (decimation 4) |
+| Rate | 50 Hz over a 5 ms physics step (decimation 4); the MJCF sets no timestep, so the HAL config sets it (MuJoCo's default is 2 ms) |
 | Networks | one architecture for every skill (MLP 61→512→256→128→14, ELU); the leaf picks the file |
 | Standing switch | twist magnitude ≤ 0.05 → standing network |
-| Tradeoffs | walks only from 0.25 m/s in this simulator; no get-up network; the daemon's gain schedule (200 walking / 160 standing) is not modelled since the MJCF fixes `kp`; the mouth is not simulated |
+| Command | twist and head smoothed a fifth of the way per tick (the daemon's `cmd_alpha`); skills and postures take theirs raw |
+| Memory | previous action, filter anchor and smoothed command carry across leaves; reset after a 200 ms pause without a tick |
+| Tradeoffs | walks only from 0.25 m/s in this simulator; no get-up network; the daemon's gain schedule (200 walking / 160 standing) is not modelled since the MJCF fixes `kp`; the fall verdict is instantaneous where the daemon debounces 200 ms; the mouth is not simulated; `alpha_walking` + `alpha_stand` rather than the single `velstand` gait the robot defaults to |
 
 Open Duck Mini v2 differs on every line but the rate (see the study): 101
 observation values with three past actions and the last targets, foot
@@ -104,15 +107,18 @@ Do these in order; each catches a different class of mistake.
 1. **Ground truth in Python.** Before writing Rust, run the robot's own
    sim2sim script (or a 60-line headless replica of it) with plain `mujoco`
    and `onnxruntime` and record what "working" looks like: distance per
-   command, height, whether it falls, at which speeds. This is where the
-   Microduck dead band below 0.25 m/s was found; without it a Rust port that
-   stands still at 0.1 m/s would look broken.
+   command, height, whether it falls, at which speeds. Without it, a port that
+   stands still at 0.1 m/s looks broken when the policy simply has a dead
+   band (Microduck's lies below 0.25 m/s).
 2. **The observation, offline.** Feed the Rust observation builder the same
    sensor values as the Python one and compare the vectors index by index;
    then compare one inference. tract and onnxruntime agree to float
    precision.
-3. **The module's unit tests** — leaves return `Running`/`Success` as
-   specified, write the right number of targets, reset on a switch.
+3. **The module's unit tests** — a golden test pins the observation layout
+   index by index and the targets tuning numerically (a shifted block or a
+   wrong scale still walks in simulation, so nothing else catches it); leaves
+   return `Running`/`Success` as specified; the memory carries and resets as
+   specified.
 4. **The device in lockstep** — the simulation tests: stands for 10 s,
    walks a distance at a commanded speed, stops when the command drops, the
    showcase tree runs, from the wasm guest as well as in-process.
