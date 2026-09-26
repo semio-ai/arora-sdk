@@ -13,6 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use arora::{Arora, HostModule};
 use arora_hal::HalDescription;
 use arora_hal_mujoco::{Clock, ImuSpec, JointSpec, MujocoHal, MujocoHalConfig, SimHandle};
+use arora_policy::projected_gravity;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::value::Value;
@@ -121,6 +122,8 @@ impl Device {
             contacts: Vec::new(),
             base_body: Some("trunk_base".to_string()),
             keyframe: Some("STAND".to_string()),
+            // The policies' physics step (the model sets none).
+            timestep: Some(0.005),
             control_hz: 50.0,
             clock: config.clock,
             record: config.record.clone(),
@@ -214,7 +217,7 @@ impl Device {
             self.step()?;
             let (position, gravity_z) = self.ground_truth();
             min_height = min_height.min(position[2]);
-            fell |= gravity_z > -0.5;
+            fell |= gravity_z > microduck_policies::FALLEN_GRAVITY_Z;
         }
         let (position, _) = self.ground_truth();
         let dx = position[0] - start[0];
@@ -236,7 +239,9 @@ impl Device {
             _ => [0.0; 3],
         };
         let gravity_z = match snapshot.get(&Key::from("sim/base.orientation")) {
-            Some(Some(Value::ArrayF32(q))) if q.len() == 4 => gravity_z([q[0], q[1], q[2], q[3]]),
+            Some(Some(Value::ArrayF32(q))) if q.len() == 4 => {
+                projected_gravity([q[0], q[1], q[2], q[3]])[2]
+            }
             _ => -1.0,
         };
         (position, gravity_z)
@@ -263,10 +268,4 @@ fn command_change(command: Command) -> StateChange {
         .set
         .insert(Key::from("command.vyaw"), Some(Value::F32(command.vyaw)));
     change
-}
-
-/// Projected gravity's `z` for a world-from-body quaternion `[w, x, y, z]`.
-fn gravity_z(q: [f32; 4]) -> f32 {
-    let [_, x, y, _] = q;
-    -(1.0 - 2.0 * (x * x + y * y))
 }

@@ -78,10 +78,11 @@ Measured on an Apple M1 laptop:
 
 | | |
 |---|---|
-| showcase tree, 0.3 m/s, 12 simulated s (release, wasm guest) | 1.38 m travelled, upright, 7.2 s of wall time including the wasm compile |
-| wasm guest | about 16 MB stripped, the ONNX runtime and seven networks inside; 13.6 s to compile and load in a dev build |
+| showcase tree, 0.3 m/s, 12 simulated s (release, wasm guest) | 1.37 m travelled, upright, 5.2 s of wall time including the wasm compile |
+| walk tree, 0.3 m/s, 10 simulated s | 1.17 m travelled, upright |
+| wasm guest | 22 MB in the release build (thin LTO, stripped), the ONNX runtime and seven networks inside |
 | lockstep speed with the policy in wasm | 6 simulated s in 0.2 s (about 30× real time) |
-| `cargo test`, warm | about 20 s, seven simulated runs included |
+| `cargo test`, warm | about half a minute, seven simulated runs included |
 
 The walking networks stand still below about 0.25 m/s in plain MuJoCo (the
 robot's own daemon and reference script behave the same); command 0.25–0.3.
@@ -99,10 +100,10 @@ robot's own daemon and reference script behave the same); command 0.25–0.3.
 
 The workspace is self-contained: its own `Cargo.lock`, toolchain file and
 `.cargo/config.toml`. The `arora-*` dependencies are declared with both a
-`path` (into the SDK checkout) and a published `version`; delete the `path`
-keys and they resolve from crates.io. The SDK additions it relies on
-(`AroraBuilder::with_declared_module`, `Arora::load_groot`, Groot tags resolved
-by function name) ship with the `arora` release that carries them.
+`path` (into the SDK checkout) and the `version` the code calls into; once
+`arora` 9.12 and `arora-behavior-tree` 7.1 (the releases carrying
+`with_declared_module`, `load_groot` and Groot tags resolved by function name)
+are on crates.io, deleting the `path` keys makes them resolve from there.
 
 ## Not in this version
 
