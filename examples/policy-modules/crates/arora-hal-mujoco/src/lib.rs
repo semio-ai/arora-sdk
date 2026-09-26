@@ -132,6 +132,10 @@ pub struct MujocoHalConfig {
     /// The keyframe the simulation starts from and resets to; the model's
     /// default state with none.
     pub keyframe: Option<String>,
+    /// The physics step, seconds, overriding the model's `<option timestep>`.
+    /// A model that sets none gets MuJoCo's default of 2 ms; a policy trained
+    /// on another step (Microduck: 5 ms) is run on the step it was trained on.
+    pub timestep: Option<f64>,
     /// The control rate: sensors are published and setpoints applied this
     /// often. Must be an integral number of physics steps.
     pub control_hz: f64,
@@ -211,9 +215,19 @@ impl MujocoHal {
             return Err(HalError::Other("no joints listed".to_string()));
         }
 
-        let model = MjModel::from_xml(&config.model).map_err(|e| {
+        let mut model = MjModel::from_xml(&config.model).map_err(|e| {
             HalError::Other(format!("could not load {}: {e}", config.model.display()))
         })?;
+        if let Some(timestep) = config.timestep {
+            if !(timestep > 0.0) {
+                return Err(HalError::Other(format!(
+                    "a timestep of {timestep} s is not positive"
+                )));
+            }
+            // SAFETY: the option block is plain data on a model nothing else
+            // holds yet; MuJoCo reads it at every step.
+            unsafe { model.ffi_mut().opt.timestep = timestep };
+        }
         let timestep = model.opt().timestep;
         let control_period_s = 1.0 / config.control_hz;
         let substeps_exact = control_period_s / timestep;
@@ -826,6 +840,7 @@ mod tests {
             }],
             base_body: Some("base".into()),
             keyframe: Some("home".into()),
+            timestep: None,
             control_hz: 50.0,
             clock: Clock::Lockstep,
             record: None,
