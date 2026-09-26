@@ -209,8 +209,11 @@ curriculum. The browser simulator commands 0.25 m/s forward.
   scale/filter tuning, and embeds the policies as ONNX bytes.
 - Walking commands below 0.25 m/s do nothing visible in this simulator.
 - Sim time and physics live in `arora-hal-mujoco` with `scene.xml`, the
-  `STAND` keyframe, control at 50 Hz over a 5 ms timestep, the `imu_ang_vel`
-  gyro and the base body's orientation for gravity.
+  `STAND` keyframe, control at 50 Hz over a 5 ms timestep — set by the HAL
+  configuration, since the MJCF sets none and MuJoCo defaults to 2 ms — the
+  `imu_ang_vel` gyro and the base body's orientation for gravity.
+- The daemon's command smoothing, low-pass filters and 200 ms controller
+  reset are reproduced; its servo gain schedule and fall debounce are not.
 
 ## Open Duck Mini v2 (the fallback)
 
