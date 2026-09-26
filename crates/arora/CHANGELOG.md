@@ -4,6 +4,13 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.1] - 2026-09-26
+
+### Fixed
+
+- The `studio-bridge` feature builds: it depends on arora-studio-bridge-client
+  7, which implements the arora-bridge 5 `Bridge` trait.
+
 ## [10.0.0] - 2026-09-25
 
 ### Changed

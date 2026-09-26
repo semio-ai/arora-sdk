@@ -163,12 +163,12 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "10.0.0"
+version = "10.0.1"
 dependencies = [
  "anyhow",
  "arora-behavior",
  "arora-behavior-tree",
- "arora-bridge 5.0.0",
+ "arora-bridge",
  "arora-bridge-ws",
  "arora-engine",
  "arora-hal",
@@ -254,20 +254,6 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7848310653e25a84361cae07d1131f540b528f959e593e815e3e6a8a8f52859"
-dependencies = [
- "arora-types 2.6.0",
- "async-trait",
- "futures-channel",
- "futures-core",
- "futures-util",
- "serde",
-]
-
-[[package]]
-name = "arora-bridge"
 version = "5.0.0"
 dependencies = [
  "arora-types 3.0.0",
@@ -286,7 +272,7 @@ version = "7.0.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
- "arora-bridge 5.0.0",
+ "arora-bridge",
  "arora-msgs-ros2",
  "arora-types 3.0.0",
  "async-trait",
@@ -306,7 +292,7 @@ dependencies = [
 name = "arora-bridge-ws"
 version = "5.0.0"
 dependencies = [
- "arora-bridge 5.0.0",
+ "arora-bridge",
  "arora-types 3.0.0",
  "async-trait",
  "futures",
@@ -645,12 +631,12 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "6.1.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6149c5c40cf84cff3fb7d3efc3541559050922a0a0d9e800941f83b738df7516"
+checksum = "250b94c2e1f62c0ce9bd12ca1f9160ea19aba6577a24838166c2e5bd241bfb77"
 dependencies = [
- "arora-bridge 4.1.0",
- "arora-types 2.6.0",
+ "arora-bridge",
+ "arora-types 3.0.0",
  "async-stream",
  "async-trait",
  "chrono",
@@ -2661,7 +2647,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2792,7 +2778,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3638,7 +3624,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3658,7 +3644,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core",
 ]
 
 [[package]]
@@ -4558,7 +4544,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5238,7 +5224,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5298,7 +5284,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.43",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -5339,9 +5325,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5891,7 +5877,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5993,7 +5979,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6822,11 +6808,11 @@ dependencies = [
 
 [[package]]
 name = "studio-bridge-msgs"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d33e3c9d81b89b46140184efa3b8c16d8b7e68a52bae43b081766b9e4bc4d2b"
+checksum = "d1d5ca450c72ac4252c6e8a8eb141b130224e3faf7fc3c6939bf94f50a9c4a53"
 dependencies = [
- "arora-types 2.6.0",
+ "arora-types 3.0.0",
  "chrono",
  "js-sys",
  "partially",
@@ -6966,10 +6952,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8548,7 +8534,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -8582,7 +8568,7 @@ version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
 dependencies = [
- "windows-core 0.57.0",
+ "windows-core",
  "windows-targets 0.52.6",
 ]
 
@@ -8592,23 +8578,10 @@ version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
 dependencies = [
- "windows-implement 0.57.0",
- "windows-interface 0.57.0",
+ "windows-implement",
+ "windows-interface",
  "windows-result 0.1.2",
  "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.62.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
-dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
- "windows-link",
- "windows-result 0.4.1",
- "windows-strings",
 ]
 
 [[package]]
@@ -8623,32 +8596,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-implement"
-version = "0.60.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.59.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",

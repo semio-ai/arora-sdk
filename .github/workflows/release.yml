@@ -42,9 +42,11 @@ jobs:
         run: |
           set -uo pipefail
           # Publishable crates in dependency order: every crate follows the ones
-          # it depends on, so a release that bumps several in lockstep publishes
-          # each after its new dependencies.
-          publishable=(arora-types-derive arora-types arora-buffers arora-vfs arora-behavior arora-module-macros arora-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-behavior-tree-types arora-bridge-ros2 arora-hal arora-simple-data-store arora-registry arora-module-core arora-module-rust arora-behavior-tree arora-engine arora arora-web)
+          # it depends on — dev-dependencies with a version included, since
+          # `cargo publish` verifies those against the registry too — so a
+          # release that bumps several in lockstep publishes each after its new
+          # dependencies.
+          publishable=(arora-types-derive arora-types arora-buffers arora-engine arora-vfs arora-behavior arora-module-macros arora-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-behavior-tree-types arora-bridge-ros2 arora-hal arora-simple-data-store arora-registry arora-module-core arora-module-rust arora-behavior-tree arora arora-web)
           for crate in "${publishable[@]}"; do
             ver=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')
@@ -58,7 +60,13 @@ jobs:
               echo "$crate $ver already on crates.io — skip"
             else
               echo "Publishing $crate $ver"
-              cargo publish -p "$crate" \
-                || echo "::warning::failed to publish $crate $ver (deps may need to index first; rerun)"
+              # A dependency published moments earlier in this loop can take a
+              # while to show in the index cargo resolves against: retry.
+              published=false
+              for attempt in 1 2 3 4; do
+                if cargo publish -p "$crate"; then published=true; break; fi
+                sleep 60
+              done
+              $published || echo "::warning::failed to publish $crate $ver"
             fi
           done
