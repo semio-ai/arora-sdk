@@ -338,7 +338,9 @@ impl AroraBuilder {
     /// Inject the behavior interpreter the device ticks — the one executor, set
     /// once here and not swapped afterwards. An interpreter is constructed empty
     /// and ready; a behavior is loaded *into* it as a separate step (e.g.
-    /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here. Default
+    /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here — or,
+    /// for a tree whose leaves name loaded modules, into the built device with
+    /// [`Arora::load_groot`], which resolves them against the index. Default
     /// (when none is injected): an empty [`BehaviorTreeInterpreter`] over the
     /// assembled function index, so the device idles (each tick a no-op) until a
     /// behavior is loaded.
