@@ -207,9 +207,12 @@ impl Node {
 ///
 /// A tag matches a function's name exactly, or as the PascalCase spelling of
 /// its snake_case name (`Walk` for `walk`, `PlayClip` for `play_clip`), the
-/// convention the palette's own tags follow. The index spans every loaded
-/// module, so a name two modules both export is refused as ambiguous rather
-/// than resolved to whichever the index happens to yield first.
+/// convention the palette's own tags follow. The palette is matched first, so
+/// a module export spelled like a palette entry (`cos`, `store`, `status`,
+/// `increase`, …) is reachable only under its exact snake_case name. The index
+/// spans every loaded module, host and guest alike, so a name two modules both
+/// export is refused as ambiguous rather than resolved to whichever the index
+/// happens to yield first.
 fn function_by_groot_tag(
     index: &HashMap<Uuid, ModuleFunction>,
     tag: &str,
