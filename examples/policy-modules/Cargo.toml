@@ -27,9 +27,9 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
-arora = { path = "../../crates/arora", version = "9.11" }
+arora = { path = "../../crates/arora", version = "9.12" }
 arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
-arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "7" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "7.1" }
 arora-bridge = { path = "../../crates/arora-bridge", version = "4.1" }
 arora-hal = { path = "../../crates/arora-hal", version = "3" }
 arora-module = { path = "../../crates/arora-module", version = "1" }
@@ -52,6 +52,10 @@ debug = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+# Dependencies' debug info is most of a dev wasm guest's size (the ONNX
+# runtime alone puts it over a hundred megabytes); the workspace's own crates
+# keep theirs.
+debug = false
 
 [profile.dev.package.microduck-policies]
 opt-level = 3

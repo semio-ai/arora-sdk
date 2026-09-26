@@ -87,20 +87,28 @@ microseconds natively and well under a millisecond in wasm.
 
 ### Where the state lives
 
-A policy needs memory between ticks: the previous action (an input to the
-network), the previous targets (for the filter), the decimator's phase, and a
-run's elapsed time. The module keeps one **run** in a `static`. A run belongs
-to a leaf: the same leaf ticked again continues it; another leaf, or the same
-leaf after a gap of more than three control periods, starts a fresh one. That
-gap rule is what makes switching safe: when a tree stops ticking `walk` and
-starts ticking `sit`, `sit` begins with a clean history, and if the tree comes
-back to `walk` later it begins clean too — exactly what the robot's daemon does
-when it switches networks.
+A policy needs memory between ticks. The module keeps two things in a
+`static`, on the model of the robot's own controller:
 
-A module runs one body, so one run at a time is the honest model. (Two leaves
-of the same function in one tree would share it; the module ABI hands a leaf
-no run identity, which the SDK's async-functions design notes as the open
-question.)
+- **The controller memory** — the previous raw action (an input to every
+  network), the previous targets (the low-pass anchor), and the smoothed
+  command. It carries across leaves and networks: when a tree moves from
+  `sit` to `rise`, the first `rise` observation carries the last `sit` action,
+  as the daemon's does. It resets only after a pause of more than 200 ms
+  without a tick — the daemon resets its controller after the same pause —
+  so a branch the tree abandons and comes back to seconds later starts clean.
+- **The run** — which leaf is active, its clock (a skill's elapsed time), its
+  50 Hz decimator, and the targets it holds between inferences. Another leaf
+  starts a fresh run over the same memory.
+
+The shipped networks are feed-forward, so switching networks resets nothing;
+a recurrent network would clear its state at the switch, where the daemon
+does.
+
+A module runs one body, so one memory and one run at a time is the honest
+model. (Two leaves of the same function in one tree would share them; the
+module ABI hands a leaf no run identity, which the SDK's async-functions
+design notes as the open question.)
 
 The networks themselves are loaded lazily from the embedded bytes on first use
 and kept: loading is the expensive part (tract type-checks and optimizes the
@@ -140,8 +148,8 @@ The tree is where situations are told apart. The `showcase` tree:
   `Failure`; it drives no actuator. The `Fallback` tries the fallen branch
   first: while the robot is up, `Fallen` fails and the fallback moves on to
   walking; once it is down, the sequence succeeds and the walking leaf is no
-  longer ticked — its run goes stale, the last targets hold. (The robot has
-  no get-up network; a robot that has one puts it in that branch.)
+  longer ticked — the last targets hold. (The robot has no get-up network; a
+  robot that has one puts it in that branch.)
 - **The walking leaf itself** switches networks on the command: at a twist
   magnitude of 0.05 or less it runs the standing network, above it the
   walking one, as the robot's daemon does. So "walk + direction" and "stand
@@ -157,8 +165,9 @@ The tree is where situations are told apart. The `showcase` tree:
   the head keeps looking around for as long as the branch is active.
 - **Episodic skills** are leaves that end: `Skill skill="kick_left"` runs its
   network for the trained 0.5 s and returns `Success`; `Sit` and `Rise` run
-  the sit/stand network for 3 s. A `SequenceStar` chains them and resumes
-  past the ones that succeeded (`sit_rise` and `kick` trees).
+  the sit/stand network for 3 s each (a choice: the daemon rises in 1 s and
+  lets a seat settle for 2 s). A `SequenceStar` chains them and resumes past
+  the ones that succeeded (`sit_rise` and `kick` trees).
 
 The same trees run on any Arora that loads this module: the runtime, the
 tree interpreter and the module are the same code on a laptop with MuJoCo, a
@@ -180,7 +189,12 @@ leaves be reached from an authored tree.
 
 ## Limits worth knowing
 
-- The module keeps one run; concurrent leaves of one function share it.
+- The module keeps one memory and one run; concurrent leaves of one function
+  share them.
+- Deliberately not reproduced from the daemon: its servo gain schedule (200
+  walking, 160 standing; the MJCF fixes the gain), the 200 ms debounce on its
+  fall verdict, and head or body commands while seated (`sit` and `rise` hold
+  them at zero).
 - Groot numeric literals are passed as strings; bind numbers to keys
   (`{command.vx}`) rather than writing them inline.
 - The Microduck walking networks do not walk visibly below 0.25 m/s in this

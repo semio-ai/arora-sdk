@@ -16,6 +16,7 @@ arora.workspace = true
 arora-bridge.workspace = true
 arora-hal.workspace = true
 arora-hal-mujoco = { path = "../arora-hal-mujoco", version = "0.1" }
+arora-policy = { path = "../arora-policy", version = "0.1" }
 arora-simple-data-store.workspace = true
 arora-types.workspace = true
 clap = { version = "4", features = ["derive"] }
