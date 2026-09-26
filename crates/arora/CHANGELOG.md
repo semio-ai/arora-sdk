@@ -4,6 +4,23 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.12.0] - 2026-09-26
+
+### Added
+
+- `AroraBuilder::with_declared_module::<M>` loads a module declared in Rust
+  as a guest executable with the declaration's frozen signatures, so every
+  export — a `Status`-returning behavior leaf, a structure-typed parameter —
+  joins the method index and is reachable from a behavior tree. `with_module`
+  can index only primitive-typed exports, because a bare header carries no
+  type versions; `build` keeps a declaration's signature over the primitive
+  freeze it would otherwise derive from the header.
+- `Arora::load_groot` installs a Groot tree into a built device: its tags
+  resolve against the device's own method index and the lowered graph loads
+  through the interpreter module. The `arora` binary's Groot option covers a
+  device with no modules; a device that loads modules needs the index the
+  builder assembled.
+
 ## [9.11.0] - 2026-07-30
 
 ### Added

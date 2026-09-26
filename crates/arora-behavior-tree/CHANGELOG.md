@@ -4,6 +4,26 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.1.0] - 2026-09-26
+
+### Added
+
+- A Groot tag outside the built-in palette resolves to the indexed module
+  function of that name — as declared, or in PascalCase (`Walk` for `walk`,
+  `PlayClip` for `play_clip`). A name several loaded modules export is refused
+  as ambiguous rather than resolved to whichever the index yields first. The
+  exporter writes such nodes under the function's name, so trees round-trip.
+  A palette tag (`Cos`, `Store`, `Status`, …) still names the palette's
+  function; a module export of the same name is reachable under its exact
+  snake_case spelling.
+
+### Fixed
+
+- A Groot return binding (`res="{cosine}"` on a function that does not return
+  a `Status`) lowers to a variable reference, so the graph binds it to the
+  named store slot and the return reaches the store. As a literal it bound to
+  a local cell nobody read.
+
 ## [7.0.0] - 2026-07-29
 
 ### Changed
