@@ -63,6 +63,7 @@ use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Subscription};
+use arora_types::module::declared::AroraModule;
 use arora_types::module::low::{self, Header};
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
@@ -186,6 +187,23 @@ impl Arora {
     /// module or function the engine does not know, or the callee failing.
     pub fn call(&mut self, call: Call) -> Result<CallResult, CallError> {
         self.engine.arora_call(call)
+    }
+
+    /// Install a Groot behavior tree as the device's behavior. Its tags are
+    /// resolved against the device's own method index — the natively-hosted
+    /// control nodes and every loaded module's exports — and the lowered graph
+    /// is loaded through the interpreter module, the path a remote's load
+    /// takes. Call it between steps, after [`build`](AroraBuilder::build); the
+    /// tree binds to the store at its first tick.
+    pub fn load_groot(&mut self, xml: &str) -> Result<()> {
+        let tree = arora_behavior_tree::schema_groot::BehaviorTree::try_from_groot_xml(xml)
+            .map_err(|e| anyhow::anyhow!("the Groot tree does not parse: {e:?}"))?;
+        let graph = tree
+            .into_graph(&self.function_index)
+            .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
+        self.call(interpreter_module::encode_load(&graph))
+            .map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
+        Ok(())
     }
 
     /// Borrow the engine's call seam. [`call`](Arora::call) covers plain
@@ -320,7 +338,9 @@ impl AroraBuilder {
     /// Inject the behavior interpreter the device ticks — the one executor, set
     /// once here and not swapped afterwards. An interpreter is constructed empty
     /// and ready; a behavior is loaded *into* it as a separate step (e.g.
-    /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here. Default
+    /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here — or,
+    /// for a tree whose leaves name loaded modules, into the built device with
+    /// [`Arora::load_groot`], which resolves them against the index. Default
     /// (when none is injected): an empty [`BehaviorTreeInterpreter`] over the
     /// assembled function index, so the device idles (each tick a no-op) until a
     /// behavior is loaded.
@@ -346,6 +366,45 @@ impl AroraBuilder {
     /// loadable executable), use [`with_host_module`](Self::with_host_module).
     pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
         self.modules.push((header, executable.into()));
+        self
+    }
+
+    /// Load a module **declared in Rust** as a guest executable: the header
+    /// comes from the declaration, and every export joins the method index
+    /// with the declaration's frozen signature. Repeatable.
+    ///
+    /// [`with_module`](Self::with_module) can index only primitive-typed
+    /// exports, because a header carries no type versions to freeze a structure
+    /// or an enumeration against. The declaration does: `M::exports()` hands
+    /// each function's frozen signature, so an export of any type — a
+    /// `Status`-returning behavior leaf included — is discoverable and reachable
+    /// from a behavior tree, exactly as the same crate registered in-process
+    /// with [`with_host_module`](Self::with_host_module)
+    /// (`HostModule::of::<M>()`) would be. `executor` names how `executable`
+    /// runs — `"wasm"` for the `wasm32-wasip1` build of the declaring crate.
+    ///
+    /// ```ignore
+    /// let device = Arora::builder()
+    ///     .with_declared_module::<my_module::Module>(wasm_executor(), WASM_BYTES)
+    ///     .build()?;
+    /// ```
+    pub fn with_declared_module<M: AroraModule>(
+        mut self,
+        executor: low::Executor,
+        executable: impl Into<Box<[u8]>>,
+    ) -> Self {
+        for function in M::exports() {
+            self.functions.insert(
+                function.id,
+                ModuleFunction {
+                    module_id: M::id(),
+                    function_id: function.id,
+                    function_name: function.name.to_string(),
+                    function: function.signature,
+                },
+            );
+        }
+        self.modules.push((M::header(executor), executable.into()));
         self
     }
 
@@ -448,6 +507,12 @@ impl AroraBuilder {
             let module_id = header.id;
             for export in &header.exports {
                 let low::ExportSymbol::Function(function) = export;
+                // An export its declaration already indexed
+                // (`with_declared_module`) keeps that frozen signature; only a
+                // bare header's exports are frozen from their primitives here.
+                if functions.contains_key(&function.id) {
+                    continue;
+                }
                 match module_discovery::guest_function_signature(function) {
                     Some(signature) => {
                         functions.insert(
@@ -682,6 +747,88 @@ mod module_loading_tests {
             })
             .expect("call succeed() on the loaded module");
         assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A module loaded from its Rust declaration indexes every export with the
+    /// declaration's own frozen signature — the same entries the crate would
+    /// contribute registered in-process — and its functions dispatch to the
+    /// guest executable.
+    #[test]
+    fn with_declared_module_indexes_every_export_from_the_declaration() {
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let mut arora = Arora::builder()
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .build()
+            .expect("build a device with a declared wasm module");
+
+        for declared in Module::exports() {
+            let indexed = arora
+                .function_index
+                .get(&declared.id)
+                .unwrap_or_else(|| panic!("{} is indexed", declared.name));
+            assert_eq!(indexed.module_id, Module::id());
+            assert_eq!(indexed.function_name, declared.name);
+            assert_eq!(indexed.function, declared.signature);
+        }
+
+        let result = arora
+            .call(Call {
+                module_id: Some(Module::id()),
+                id: Uuid::parse_str(SUCCEED).expect("valid uuid"),
+                args: Vec::new(),
+            })
+            .expect("call succeed() on the declared module's guest");
+        assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A Groot tree loaded into the built device reaches a declared guest
+    /// module's function by name: the tag resolves against the device's own
+    /// index, the tree binds its arguments to store keys, and the guest's
+    /// return lands in the store through the `_ret` binding.
+    #[test]
+    fn load_groot_reaches_a_declared_module_function_by_name() {
+        use arora_types::data::{Key, StateChange};
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("angle", Value::F32(0.0)))
+            .expect("seed the input");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .build()
+            .expect("build a device with a declared wasm module");
+        arora
+            .load_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <cos angle="{angle}" res="{cosine}"/>
+                   </BehaviorTree></root>"#,
+            )
+            .expect("the tree names the guest's cos by its declared name");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("cosine")]),
+            vec![Some(Value::F32(1.0))],
+            "cos(0) written back to the bound key"
+        );
     }
 
     /// A loaded guest module's primitive-typed exports join the method index

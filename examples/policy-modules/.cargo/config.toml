@@ -1,0 +1,15 @@
+# Artifact dependencies: the device crate depends on the policy module built
+# for wasm32-wasip1 and embeds the resulting `.wasm` (see crates/device).
+[unstable]
+bindeps = true
+
+# MuJoCo is a shared library the `mujoco-rs` build script links against; point
+# `MUJOCO_DYNAMIC_LINK_DIR` at the directory holding `libmujoco.dylib` /
+# `libmujoco.so` (tools/setup-mujoco.sh downloads the pinned release there).
+# The variable is read from the environment, not from here, so that the same
+# checkout builds on a machine where MuJoCo lives elsewhere.
+
+# The policy module keeps one run at a time, so device tests must not
+# interleave: one test thread across the workspace.
+[env]
+RUST_TEST_THREADS = "1"

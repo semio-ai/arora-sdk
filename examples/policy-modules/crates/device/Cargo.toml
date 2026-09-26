@@ -1,0 +1,29 @@
+[package]
+name = "policy-device"
+description = "Microduck in MuJoCo, driven by Arora: the policy module (wasm or in-process), a behavior tree, and the local bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "policy-device"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arora.workspace = true
+arora-bridge.workspace = true
+arora-hal.workspace = true
+arora-hal-mujoco = { path = "../arora-hal-mujoco", version = "0.1" }
+arora-policy = { path = "../arora-policy", version = "0.1" }
+arora-simple-data-store.workspace = true
+arora-types.workspace = true
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log.workspace = true
+# The policy module twice over: its library (the declaration: ids, header,
+# signatures, and the in-process functions) and its wasm32-wasip1 build (the
+# guest the device loads), both from one dependency.
+microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,66 @@
+# Control policies as Arora modules — a self-contained workspace.
+#
+# It is deliberately not a member of the arora-sdk workspace: it pulls a
+# physics engine (MuJoCo) and an ONNX runtime that the SDK itself has no use
+# for, and it is meant to be forked into its own repository. The arora crates
+# are reached by path while it lives here; each path dependency also names the
+# published version, so moving it out is deleting the `path` keys.
+[workspace]
+resolver = "2"
+members = [
+  "crates/arora-policy",
+  "crates/arora-hal-mujoco",
+  "modules/microduck-policies",
+  "crates/device",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Semio"]
+
+[workspace.dependencies]
+anyhow = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+# The arora crates this workspace builds on.
+arora = { path = "../../crates/arora", version = "9.12" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "7.1" }
+arora-bridge = { path = "../../crates/arora-bridge", version = "4.1" }
+arora-hal = { path = "../../crates/arora-hal", version = "3" }
+arora-module = { path = "../../crates/arora-module", version = "1" }
+arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "2" }
+arora-types = { path = "../../crates/arora-types", version = "2.6" }
+arora-engine = { path = "../../crates/arora-engine", version = "4.2" }
+
+# The policy module is built twice: natively (its tests, the in-process
+# device) and as a wasm guest through the device's artifact dependency, which
+# follows the device's own profile. The guest is what ships, so both profiles
+# optimize it and keep debug info out of it (debug info is most of a wasm
+# file's size).
+[profile.release]
+debug = false
+strip = true
+lto = "thin"
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+# Dependencies' debug info is most of a dev wasm guest's size (the ONNX
+# runtime alone puts it over a hundred megabytes); the workspace's own crates
+# keep theirs.
+debug = false
+
+[profile.dev.package.microduck-policies]
+opt-level = 3
+debug = false
+
+[profile.dev.package.arora-policy]
+opt-level = 3
+debug = false
