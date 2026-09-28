@@ -8,7 +8,7 @@ use std::time::Instant;
 use arora_hal_mujoco::Clock;
 use arora_types::data::{Key, StateChange};
 use arora_types::value::Value;
-use policy_device::{default_model, tree_path, Command, Device, DeviceConfig, Executor};
+use policy_device::{default_model, tree_path, Command, Device, DeviceConfig, Executor, Speech};
 
 fn device(tree: &str, executor: Executor, command: Command) -> Device {
     let config = DeviceConfig {
@@ -19,6 +19,7 @@ fn device(tree: &str, executor: Executor, command: Command) -> Device {
         record: None,
         command,
         studio: None,
+        speech: Speech::Silent,
     };
     Device::build(config).expect("the device builds")
 }
@@ -207,4 +208,25 @@ fn sit_holds_until_a_rise_is_requested() {
     assert_eq!(behavior(&device), "walk", "the rise handed back");
     assert!(!outcome.fell, "{outcome:?}");
     assert!(outcome.position[2] > 0.10, "standing again: {outcome:?}");
+}
+
+/// The interactive tree announces each phase once, however long the phase
+/// lasts, and in full even when the phase is shorter than its sentence: the
+/// kick lasts 0.5 s, "Watch my kick!" 1.4 s at a speaker's pace.
+#[test]
+fn each_phase_is_announced_once() {
+    let mut device = device("interactive", Executor::Native, Command::default());
+    let _ = say_silent::spoken();
+    device.run_for(2.0).unwrap();
+    assert_eq!(say_silent::spoken(), vec!["Ready to go."]);
+    request(&device, "kick_right");
+    device.run_for(4.0).unwrap();
+    assert_eq!(say_silent::spoken(), vec!["Watch my kick!", "Ready to go."]);
+    request(&device, "sit");
+    device.run_for(6.0).unwrap();
+    assert_eq!(
+        say_silent::spoken(),
+        vec!["Time to sit down."],
+        "said once, held quiet"
+    );
 }
