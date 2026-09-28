@@ -28,15 +28,15 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
-arora = { path = "../../crates/arora", version = "9.12" }
-arora-behavior = { path = "../../crates/arora-behavior", version = "8.5" }
-arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "7.1" }
-arora-bridge = { path = "../../crates/arora-bridge", version = "4.1" }
-arora-hal = { path = "../../crates/arora-hal", version = "3" }
-arora-module = { path = "../../crates/arora-module", version = "1" }
-arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "2" }
-arora-types = { path = "../../crates/arora-types", version = "2.6" }
-arora-engine = { path = "../../crates/arora-engine", version = "4.2" }
+arora = { path = "../../crates/arora", version = "10.1" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.1" }
+arora-bridge = { path = "../../crates/arora-bridge", version = "5" }
+arora-hal = { path = "../../crates/arora-hal", version = "4" }
+arora-module = { path = "../../crates/arora-module", version = "2" }
+arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3" }
+arora-types = { path = "../../crates/arora-types", version = "3" }
+arora-engine = { path = "../../crates/arora-engine", version = "5" }
 
 # Crates published outside this checkout — the Studio client behind the
 # `studio` feature — depend on these two from crates.io; patched to the same
