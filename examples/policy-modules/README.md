@@ -166,7 +166,7 @@ robot's own daemon and reference script behave the same); command 0.25–0.3.
 The workspace is self-contained: its own `Cargo.lock`, toolchain file and
 `.cargo/config.toml`. The `arora-*` dependencies are declared with both a
 `path` (into the SDK checkout) and the `version` the code calls into; once
-`arora` 9.12 and `arora-behavior-tree` 7.1 (the releases carrying
+`arora` 10.1 and `arora-behavior-tree` 8.1 (the releases carrying
 `with_declared_module`, `load_groot`, `with_groot`, `with_step_period`, the
 local bridge's write fix, and Groot tags resolved by function name) are on
 crates.io, deleting the `path` keys makes them resolve from there.
