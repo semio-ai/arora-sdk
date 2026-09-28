@@ -43,9 +43,9 @@ struct Cli {
     /// base pose are published under the ids Studio drives it by.
     #[arg(long)]
     studio_model: Option<PathBuf>,
-    /// Who speaks the tree's `Say` leaves: the cloud voice on this machine's
-    /// speakers, or nobody (sentences are logged).
-    #[arg(long, value_enum, default_value_t = Speech::Cloud)]
+    /// Who speaks the tree's `Say` leaves: Piper on this machine's speakers
+    /// (builds with the `piper` feature), or nobody (sentences are logged).
+    #[arg(long, value_enum, default_value_t = Speech::default())]
     speech: Speech,
 }
 
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
         speech: cli.speech,
     };
 
-    match cli.duration {
+    let result = match cli.duration {
         Some(seconds) => {
             env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
                 .init();
@@ -102,5 +102,9 @@ async fn main() -> Result<()> {
         }
         // The run installs its own log sink with the front end it picks.
         None => serve(config).await,
-    }
+    };
+    // libpiper aborts when the process tears it down with a voice loaded.
+    #[cfg(feature = "piper")]
+    say_piper::shut_down();
+    result
 }

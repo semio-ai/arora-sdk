@@ -15,7 +15,7 @@ examples/policy-modules/
 ├── crates/arora-hal-mujoco      any MJCF robot as an Arora HAL, under the keys a real robot HAL uses
 ├── modules/microduck-policies   the policy module: walk, stand, sit, rise, skill, fallen, head_clip, joint_names
 ├── modules/blackboard           equals / assign: the leaves a tree switches on a request with
-├── modules/say, say-silent      the say leaf: Vizij's cloud voice (a copy, until Say leaves Vizij) and a silent one
+├── modules/say-piper, say-silent  the say leaf: Piper on board (GPLv3, opt-in) and a silent one
 ├── crates/device                the device: simulator + modules (wasm or in-process) + tree, on the standard Arora run
 ├── trees/                       Groot trees: interactive, stand, walk, showcase, sit_rise, kick
 ├── tools/                       setup-mujoco.sh, fetch-assets.sh, export-urdf.py (for Studio), replay.py (recording → video)
@@ -61,7 +61,7 @@ Then, for each demo:
 4. Run the device with the Studio bridge:
 
    ```sh
-   cargo run --release -p policy-device --features studio -- \
+   cargo run --release -p policy-device --features studio,piper -- \
        --studio-model assets/microduck/studio-model.glb
    ```
 
@@ -84,13 +84,14 @@ Then, for each demo:
    | `command.vx`, `command.vy`, `command.vyaw` | a number (slider) | walk: m/s forward, m/s left, rad/s turning left; walks from about 0.25 m/s |
    | `command.behavior` | `walk`, `stand`, `sit`, `rise`, `kick_left`, `kick_right` | switch behavior; a kick or a rise hands back to `walk` when done, a sit holds until `rise` |
    | `sim/reset` | `true` | put the duck back on its feet at the start |
-   | `speech.voice` | an AWS Polly voice (`Ruth`, `Matthew`, `Ivy`, …) | the voice the duck announces its phases in |
 
 The device runs the `interactive` tree by default: on the ground, it holds
 still until reset; otherwise it does what `command.behavior` asks, looking
 around while it walks, and announces each phase out loud on this machine's
-speakers ("Ready to go.", "Watch my kick!", …) through Vizij's cloud voice;
-`--speech silent` keeps it quiet.
+speakers ("Ready to go.", "Watch my kick!", …), synthesized on board by
+Piper — the `piper` feature, whose first build compiles libpiper (cmake)
+and downloads a voice; libpiper is GPLv3, hence opt-in. Without it, or with
+`--speech silent`, the sentences are only logged.
 
 ## Without Studio
 
@@ -106,6 +107,7 @@ changed, and writes as
 ```sh
 cargo run --release -p policy-device                       # serves; the bridge answers once the modules are compiled
 cargo run --release -p policy-device -- --command 0.3 0 0  # starts walking
+cargo run --release -p policy-device --features piper      # and speaks on board
 ```
 
 Without `--studio-model`, joints are published under their names
