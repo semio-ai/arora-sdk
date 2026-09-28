@@ -1,0 +1,12 @@
+[package]
+name = "say-silent"
+description = "The say contract without a speaker: each sentence is logged and succeeds at once"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+arora-behavior.workspace = true
+arora-module.workspace = true
+log.workspace = true

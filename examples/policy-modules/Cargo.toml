@@ -12,6 +12,8 @@ members = [
   "crates/arora-hal-mujoco",
   "modules/microduck-policies",
   "modules/blackboard",
+  "modules/say",
+  "modules/say-silent",
   "crates/device",
 ]
 

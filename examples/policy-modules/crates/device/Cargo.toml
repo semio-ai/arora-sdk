@@ -33,4 +33,11 @@ serde_json = "1"
 microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 # The blackboard leaves the interactive tree switches with, the same way.
 blackboard = { path = "../../modules/blackboard", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The voice's providers, host modules only (network and audio).
+say = { path = "../../modules/say", version = "0.1" }
+say-silent = { path = "../../modules/say-silent", version = "0.1" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+# The silent voice's log, read by the speech test.
+say-silent = { path = "../../modules/say-silent", version = "0.1" }

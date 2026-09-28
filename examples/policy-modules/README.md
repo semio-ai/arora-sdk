@@ -15,6 +15,7 @@ examples/policy-modules/
 ├── crates/arora-hal-mujoco      any MJCF robot as an Arora HAL, under the keys a real robot HAL uses
 ├── modules/microduck-policies   the policy module: walk, stand, sit, rise, skill, fallen, head_clip, joint_names
 ├── modules/blackboard           equals / assign: the leaves a tree switches on a request with
+├── modules/say, say-silent      the say leaf: Vizij's cloud voice (a copy, until Say leaves Vizij) and a silent one
 ├── crates/device                the device: simulator + modules (wasm or in-process) + tree, on the standard Arora run
 ├── trees/                       Groot trees: interactive, stand, walk, showcase, sit_rise, kick
 ├── tools/                       setup-mujoco.sh, fetch-assets.sh, export-urdf.py (for Studio), replay.py (recording → video)
@@ -83,10 +84,13 @@ Then, for each demo:
    | `command.vx`, `command.vy`, `command.vyaw` | a number (slider) | walk: m/s forward, m/s left, rad/s turning left; walks from about 0.25 m/s |
    | `command.behavior` | `walk`, `stand`, `sit`, `rise`, `kick_left`, `kick_right` | switch behavior; a kick or a rise hands back to `walk` when done, a sit holds until `rise` |
    | `sim/reset` | `true` | put the duck back on its feet at the start |
+   | `speech.voice` | an AWS Polly voice (`Ruth`, `Matthew`, `Ivy`, …) | the voice the duck announces its phases in |
 
 The device runs the `interactive` tree by default: on the ground, it holds
 still until reset; otherwise it does what `command.behavior` asks, looking
-around while it walks.
+around while it walks, and announces each phase out loud on this machine's
+speakers ("Ready to go.", "Watch my kick!", …) through Vizij's cloud voice;
+`--speech silent` keeps it quiet.
 
 ## Without Studio
 
@@ -123,7 +127,7 @@ uv run --python 3.12 --with mujoco --with numpy --with imageio --with imageio-ff
 
 | Tree | What it does |
 |---|---|
-| `interactive` | the device's default: `command.behavior` selects walking, standing, sitting, rising or a kick; holds still when fallen |
+| `interactive` | the device's default: `command.behavior` selects walking, standing, sitting, rising or a kick; holds still when fallen; announces each phase out loud |
 | `stand` | balance in place, holding the commanded head angles |
 | `walk` | walk at the commanded twist; the leaf hands over to the standing network at zero command |
 | `showcase` | a fallback: hold still when fallen, else look around (a head clip) in parallel with walking |
@@ -158,6 +162,8 @@ robot's own daemon and reference script behave the same); command 0.25–0.3.
   request.
 - [`docs/reproducing.md`](docs/reproducing.md) — what to keep and what to adapt
   for another robot, how to show it in Studio, and how to verify a port.
+- [`docs/speech.md`](docs/speech.md) — how the tree speaks while it balances,
+  and where the say contract should live.
 - [`docs/study.md`](docs/study.md) — the survey: every robot, simulator and
   policy considered, what was verified on this machine, and the routes not taken.
 
