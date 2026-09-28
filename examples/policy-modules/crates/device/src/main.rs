@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use arora_hal_mujoco::Clock;
 use clap::Parser;
 use policy_device::{
-    default_model, serve, tree_path, Command, Device, DeviceConfig, Executor, StudioModel,
+    default_model, serve, tree_path, Command, Device, DeviceConfig, Executor, Speech, StudioModel,
 };
 
 #[derive(Parser, Debug)]
@@ -43,6 +43,10 @@ struct Cli {
     /// base pose are published under the ids Studio drives it by.
     #[arg(long)]
     studio_model: Option<PathBuf>,
+    /// Who speaks the tree's `Say` leaves: the cloud voice on this machine's
+    /// speakers, or nobody (sentences are logged).
+    #[arg(long, value_enum, default_value_t = Speech::Cloud)]
+    speech: Speech,
 }
 
 #[tokio::main]
@@ -75,6 +79,7 @@ async fn main() -> Result<()> {
         record: cli.record,
         command,
         studio,
+        speech: cli.speech,
     };
 
     match cli.duration {
