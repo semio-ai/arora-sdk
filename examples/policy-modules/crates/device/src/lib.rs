@@ -58,6 +58,16 @@ pub fn tree_path(name: &str) -> PathBuf {
 /// The runtime's step period: the policies' 50 Hz, one sensor sample per tick.
 pub const PERIOD: Duration = Duration::from_millis(20);
 
+/// Who speaks the tree's `Say` leaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Speech {
+    /// The Vizij TTS cloud function (AWS Polly), played on this machine's
+    /// audio output; needs the network.
+    Cloud,
+    /// Nobody: each sentence is logged and succeeds at once.
+    Silent,
+}
+
 /// How the policy module runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Executor {
@@ -91,6 +101,7 @@ pub struct DeviceConfig {
     /// Publish the joints and the base pose under the ids Semio Studio
     /// drives this robot's model by, instead of the joint names.
     pub studio: Option<StudioModel>,
+    pub speech: Speech,
 }
 
 /// The device, with a handle onto its simulation.
@@ -269,6 +280,17 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         "command.head",
         Value::ArrayF32(vec![0.0; 4]),
     ))?;
+    // What the phase wants said, what the voice is saying and has said, the
+    // voice, and the mouth shape at the playhead — seeded so the `Say` leaf's bindings read strings.
+    for (key, value) in [
+        ("speech.text", ""),
+        ("speech.saying", ""),
+        ("speech.said", ""),
+        ("speech.voice", say::DEFAULT_VOICE),
+        ("speech.viseme", say::SILENCE_VISEME),
+    ] {
+        store.write(StateChange::set(key, Value::String(value.to_string())))?;
+    }
     store.write(StateChange::set(
         "command.behavior",
         Value::String("walk".to_string()),
@@ -287,6 +309,12 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         Executor::Native => builder
             .with_host_module(HostModule::of::<Policies>())
             .with_host_module(HostModule::of::<blackboard::blackboard::Module>()),
+    };
+    // The voice is a host module whatever the executor: it opens the
+    // network and the audio output, which a guest has no access to.
+    builder = match config.speech {
+        Speech::Cloud => builder.with_host_module(HostModule::of::<say::cloud::Module>()),
+        Speech::Silent => builder.with_host_module(HostModule::of::<say_silent::silent::Module>()),
     };
     Ok((builder.with_groot(config.tree), sim))
 }
