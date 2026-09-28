@@ -1,0 +1,6 @@
+# The same nightly as arora-sdk: the device depends on the policy module's
+# wasm32-wasip1 artifact (`-Z bindeps`), so a stable toolchain cannot build it.
+[toolchain]
+channel = "nightly-2026-06-03"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = ["wasm32-wasip1"]

@@ -1,0 +1,99 @@
+<root main_tree_to_execute="MainTree">
+  <!-- The tree an operator drives, from an editor's live data or any bridge
+       client: command.behavior selects the branch, command.vx / vy / vyaw
+       steer the walk. Two things run side by side every tick:
+
+       The behavior, a fallback trying its branches in order:
+       - down: hold still (reset the simulation with sim/reset = true);
+       - "sit": sit down, then hold the seat until another behavior is asked;
+       - "rise", "kick_left", "kick_right": perform it, then hand the request
+         back to "walk";
+       - "stand": balance in place, head still;
+       - anything else, "walk" included: look around while walking at the
+         commanded twist (standing when it is zero).
+       Each branch writes the sentence for its phase into speech.text.
+
+       The voice: when idle (speech.saying empty) and speech.text differs
+       from speech.said, it takes speech.text into speech.saying; it then
+       says that sentence to the end and records it as said. So each phase
+       is announced once, whatever the branch ticks meanwhile; the policies
+       keep balancing the robot while it speaks; a phase shorter than its
+       sentence (a kick) is still announced in full; the voice then says
+       the latest phase's sentence, not a backlog; and a sentence that
+       cannot be said (no network) is skipped rather than retried. -->
+  <BehaviorTree ID="MainTree">
+    <Parallel>
+      <Fallback>
+        <Sequence>
+          <Fallen orientation="{imu.orientation}" />
+          <Assign value="Oops, I fell. Please reset me." target="{speech.text}" />
+        </Sequence>
+        <Sequence>
+          <Equals value="{command.behavior}" expected="sit" />
+          <Assign value="Time to sit down." target="{speech.text}" />
+          <Sit dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+        </Sequence>
+        <Sequence>
+          <Equals value="{command.behavior}" expected="rise" />
+          <Assign value="Up I get!" target="{speech.text}" />
+          <Rise dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+          <Assign value="walk" target="{command.behavior}" />
+        </Sequence>
+        <Sequence>
+          <Equals value="{command.behavior}" expected="kick_left" />
+          <Assign value="Watch my kick!" target="{speech.text}" />
+          <Skill skill="kick_left" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+          <Assign value="walk" target="{command.behavior}" />
+        </Sequence>
+        <Sequence>
+          <Equals value="{command.behavior}" expected="kick_right" />
+          <Assign value="Watch my kick!" target="{speech.text}" />
+          <Skill skill="kick_right" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+          <Assign value="walk" target="{command.behavior}" />
+        </Sequence>
+        <Sequence>
+          <Equals value="{command.behavior}" expected="stand" />
+          <Assign value="Standing still." target="{speech.text}" />
+          <Stand head="{command.head}" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+        </Sequence>
+        <Sequence>
+          <Assign value="Ready to go." target="{speech.text}" />
+          <Parallel>
+            <HeadClip clip="look_around" dt_ns="{arora/dt}" head="{command.head}" />
+            <Walk vx="{command.vx}" vy="{command.vy}" vyaw="{command.vyaw}" head="{command.head}"
+                  dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+          </Parallel>
+        </Sequence>
+      </Fallback>
+      <Fallback>
+        <Sequence>
+          <Equals value="{speech.saying}" expected="" />
+          <Fallback>
+            <Equals value="{speech.text}" expected="{speech.said}" />
+            <Assign value="{speech.text}" target="{speech.saying}" />
+          </Fallback>
+        </Sequence>
+        <Sequence>
+          <Fallback>
+            <Say text="{speech.saying}" voice="{speech.voice}" viseme="{speech.viseme}" />
+            <Succeed />
+          </Fallback>
+          <Assign value="{speech.saying}" target="{speech.said}" />
+          <Assign value="" target="{speech.saying}" />
+        </Sequence>
+      </Fallback>
+    </Parallel>
+  </BehaviorTree>
+</root>

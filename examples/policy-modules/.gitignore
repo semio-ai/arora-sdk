@@ -1,0 +1,6 @@
+# Fetched by tools/fetch-assets.sh and tools/setup-mujoco.sh.
+/assets/microduck/
+/.mujoco/
+/target/
+# Runs write their recordings here.
+/recordings/
