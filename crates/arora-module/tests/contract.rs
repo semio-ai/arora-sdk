@@ -235,6 +235,15 @@ fn the_record_describes_the_contract_s_functions_in_declaration_order() {
 }
 
 #[test]
+fn the_descriptions_are_the_record_s_exports() {
+    assert_eq!(tally::descriptions(), tally::record(Uuid::nil()).exports);
+    assert_eq!(
+        tally::descriptions()[&tally::ids::reset::FUNCTION].name,
+        "reset"
+    );
+}
+
+#[test]
 fn the_host_module_describes_each_function_for_introspection() {
     let module = HostModule::from_exports(COUNTING, tally::exports(Counting { sum: 0 }));
     assert_eq!(module.id(), COUNTING);

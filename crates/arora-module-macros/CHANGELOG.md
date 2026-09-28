@@ -11,7 +11,8 @@ All notable changes to `arora-module-macros`. The format follows
 - `#[contract(name = "…")]` on a trait: functions several modules implement,
   each under its own module id. The trait's methods carry `#[export]` and
   `#[param]`, take `&mut self` and have no body. Beside the trait, a module
-  named after it in snake case holds `ids`, `NAME`, `record(parent)` and
+  named after it in snake case holds `ids`, `NAME`, `descriptions()` (each
+  function's name and frozen signature, by id), `record(parent)` and
   `exports(implementation)`, whose functions share the implementation. A
   contract emits no artifact entry points.
 - Each export's declaration carries its name as a constant, `NAME`.

@@ -39,8 +39,8 @@
 //! HostModule::from_exports(CLOUD_ID, say::exports(Cloud::new()));
 //! ```
 //!
-//! The declaration yields `say::ids`, `say::NAME`, `say::record(parent)` and
-//! `say::exports(implementation)`. A contract has no artifact entry points:
+//! The declaration yields `say::ids`, `say::NAME`, `say::descriptions()`,
+//! `say::record(parent)` and `say::exports(implementation)`. A contract has no artifact entry points:
 //! an artifact exports one module's functions, declared with `#[module]`.
 //!
 //! **The executor is not the declaration's to name.** Only the step that

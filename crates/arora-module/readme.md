@@ -70,6 +70,7 @@ Beside the trait, the module `say` (the trait's name in snake case) holds:
 |---|---|
 | `say::ids` | per function, its id and parameter ids |
 | `say::NAME` | the contract's name, `name = "…"` or the module's |
+| `say::descriptions()` | each function's name and frozen signature, by id — how a device describes them, whatever implements them |
 | `say::record(parent)` | the frozen module record of an implementation |
 | `say::exports(implementation)` | every function callable on `implementation`, for `HostModule::from_exports` |
 

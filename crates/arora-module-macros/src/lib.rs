@@ -17,8 +17,9 @@
 //! - `#[contract(name = "…")]` on a trait declares functions that several
 //!   modules implement, each under its own module id: its methods carry the
 //!   same `#[export]` and `#[param]` attributes, take `&mut self` and have no
-//!   body. It emits a sibling module holding `ids`, `NAME`, `record(parent)`
-//!   and `exports(implementation)`, and no artifact entry point.
+//!   body. It emits a sibling module holding `ids`, `NAME`, `descriptions()`,
+//!   `record(parent)` and `exports(implementation)`, and no artifact entry
+//!   point.
 //! - `module_from_header!("…/module.yaml", types = ["<uuid>" => Type, …])`
 //!   is the consumer side for a module that is not a Rust declaration: ids
 //!   and typed stubs from its resolved header.
@@ -1334,7 +1335,7 @@ fn snake_case(ident: &str) -> String {
 /// `#[param]` as a module's functions do, have no body and take `&mut self`:
 /// the implementation the host module owns, a unit struct when it keeps no
 /// state. Beside the trait, a module named after it in snake case holds `ids`,
-/// `NAME`, `record(parent)` and `exports(implementation)`.
+/// `NAME`, `descriptions()`, `record(parent)` and `exports(implementation)`.
 #[proc_macro_attribute]
 pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as ContractArgs);
@@ -1455,19 +1456,27 @@ fn expand_contract(args: ContractArgs, contract: &mut syn::ItemTrait) -> syn::Re
         /// its record.
         pub const NAME: &str = #contract_name;
 
-        /// The contract as a module **record** — the frozen form a store
-        /// serves: its functions keyed by id with their frozen signatures,
-        /// and the versioned type references they depend on. `parent` is the
-        /// folder the record lives under; a module implementing the contract
-        /// is stored under its own id.
-        pub fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module {
+        /// The contract's functions by id, each with its name and frozen
+        /// signature: how a device describes them, whatever implements them
+        /// — a module, or a behavior interpreter hosting them as task runs.
+        pub fn descriptions() -> ::std::collections::HashMap<arora_types::Uuid, arora_types::record::module::frozen::Export> {
           let mut exports = ::std::collections::HashMap::new();
-          let mut dependencies: ::std::vec::Vec<arora_types::record::FrozenReference> = ::std::vec::Vec::new();
           #(
             exports.insert(#fn_mods::ids::FUNCTION, arora_types::record::module::frozen::Export {
               name: #fn_mods::NAME.to_string(),
               kind: arora_types::record::module::frozen::ExportKind::Function(#fn_mods::signature()),
             });
+          )*
+          exports
+        }
+
+        /// The contract as a module **record** — the frozen form a store
+        /// serves: its [`descriptions`], and the versioned type references
+        /// they depend on. `parent` is the folder the record lives under; a
+        /// module implementing the contract is stored under its own id.
+        pub fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module {
+          let mut dependencies: ::std::vec::Vec<arora_types::record::FrozenReference> = ::std::vec::Vec::new();
+          #(
             for dependency in #fn_mods::dependencies() {
               if !dependencies.contains(&dependency) {
                 dependencies.push(dependency);
@@ -1477,7 +1486,7 @@ fn expand_contract(args: ContractArgs, contract: &mut syn::ItemTrait) -> syn::Re
           arora_types::record::module::frozen::Module {
             parent,
             name: NAME.to_string(),
-            exports,
+            exports: descriptions(),
             executable: ::std::option::Option::None,
             dependencies,
           }
