@@ -1,4 +1,4 @@
-error: a contract function takes `&mut self`: each implementation keeps its own state
+error: a contract function takes `&mut self`: the implementation the host module calls it on, a unit struct when it keeps no state
  --> tests/compile-fail/contract_shared_self.rs:4:67
   |
 4 |     #[export(id = "5e1f0000-0000-4000-8000-000000000001")] fn say(&self);

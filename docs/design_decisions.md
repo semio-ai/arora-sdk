@@ -252,6 +252,47 @@ function. The first field carries the return value; subsequent fields
 correspond to mutated parameters. Values use `arora-types`'s externally-tagged
 serde representation (`{f32: 0.5}`, not `{kind: "scalar", value: 0.5}`).
 
+### A contract's functions take `&mut self`
+
+A contract (`#[arora_module::contract]`) declares functions that several
+modules implement, each under its own module id. Its methods take
+`&mut self`.
+
+**The receiver names the implementation.** A trait is implemented for a
+type, so every implementation has a type whether or not its methods take
+`self`. The receiver adds a value of that type, which the host module owns
+and hands to each call. An implementation with no state is a unit struct
+(`struct Cloud;`). It is zero-sized: the value takes no memory, and nothing
+is ever read through the reference. The receiver asks for nothing a trait
+implementation does not already need.
+
+**`&mut`, because the engine owns a host module exclusively.** A host
+module's functions are `FnMut` closures, and dispatch takes the module by
+`&mut`: one call at a time, with exclusive access. `&mut self` hands that
+access to the implementation, which changes its fields without a lock.
+
+**Considered: `&self`.** A stateful implementation would need interior
+mutability (`RefCell`, `Mutex`) to change anything, for no gain: nothing
+calls an implementation concurrently.
+
+**Considered: `self` by value.** The first call would consume the
+implementation.
+
+**Considered: no receiver, dispatch by type.** The methods would be
+`fn say(text: String) -> Status` and the host would call
+`say::exports::<Cloud>()`, so a stateless implementation would carry no value
+at all. A stateful one, though, could only keep its state in a process-wide
+`static`:
+- every module of that type in the process shares it, so two devices in one
+  process share one set of runs;
+- it needs a lock, because a `static` is shared across threads.
+
+A `#[module]`'s free functions have the same limit, which is why a host whose
+module needs state per instance cannot register it with `HostModule::of`.
+
+One receiver form keeps the macro and its rules single. Receiver-less methods
+could be added later without breaking an existing contract.
+
 ### Cross-language code-gen tools are co-located at runtime
 
 `arora-module-cli` locates language-specific generators (`arora-module-cpp`,

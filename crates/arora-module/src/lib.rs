@@ -24,8 +24,9 @@
 //!
 //! A **contract** declares functions that several modules implement, each
 //! under its own module id — one `say` served by two speech providers, say.
-//! It is a trait whose methods take `&mut self`, so each implementation keeps
-//! its own state:
+//! It is a trait whose methods have no body and take `&mut self`: the
+//! implementation the host module owns and calls them on, a zero-sized unit
+//! struct when it keeps no state:
 //!
 //! ```ignore
 //! #[arora_module::contract(name = "say")]

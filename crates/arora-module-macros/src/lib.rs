@@ -465,8 +465,8 @@ struct Export {
 }
 
 /// The receiver a declared function takes: none for a module's function, and
-/// `&mut self` for a contract's method, so each implementation keeps its own
-/// state.
+/// `&mut self` for a contract's method — the implementation the host module
+/// owns and hands each call, a zero-sized unit struct when it keeps no state.
 #[derive(Clone, Copy, PartialEq)]
 enum Receiver {
     None,
@@ -507,7 +507,8 @@ fn parse_signature(
         if !is_mut_self(first.as_ref()) {
             return Err(syn::Error::new(
                 first.map_or(sig_span, |arg| arg.span()),
-                "a contract function takes `&mut self`: each implementation keeps its own state",
+                "a contract function takes `&mut self`: the implementation the host module calls \
+                 it on, a unit struct when it keeps no state",
             ));
         }
     }
@@ -1330,8 +1331,9 @@ fn snake_case(ident: &str) -> String {
 
 /// `#[contract(name = "…")]` on a trait: functions several modules implement,
 /// each under its own module id. The trait's methods carry `#[export]` and
-/// `#[param]` as a module's functions do, take `&mut self` and have no body.
-/// Beside the trait, a module named after it in snake case holds `ids`,
+/// `#[param]` as a module's functions do, have no body and take `&mut self`:
+/// the implementation the host module owns, a unit struct when it keeps no
+/// state. Beside the trait, a module named after it in snake case holds `ids`,
 /// `NAME`, `record(parent)` and `exports(implementation)`.
 #[proc_macro_attribute]
 pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {

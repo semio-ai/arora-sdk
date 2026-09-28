@@ -47,8 +47,8 @@ declare_module! {
 
 A **contract** declares functions that several modules implement, each under
 its own module id: one `say`, served by a cloud speech provider on one device
-and by a local one on another. It is a trait whose methods take `&mut self`,
-so each implementation keeps its own state, and have no body:
+and by a local one on another. It is a trait whose methods have no body and
+take `&mut self`, the implementation the host module owns and calls them on:
 
 ```rust
 #[arora_module::contract(name = "say")]
@@ -72,6 +72,30 @@ Beside the trait, the module `say` (the trait's name in snake case) holds:
 | `say::NAME` | the contract's name, `name = "…"` or the module's |
 | `say::record(parent)` | the frozen module record of an implementation |
 | `say::exports(implementation)` | every function callable on `implementation`, for `HostModule::from_exports` |
+
+### Why `&mut self`
+
+The receiver names the implementation. A trait is implemented for a type, so
+an implementation has one whether or not its methods take `self`; the
+receiver adds a value of that type, which the host module owns. An
+implementation with no state is a unit struct. It is zero-sized: the value
+takes no memory, and nothing is ever read through the reference.
+
+```rust
+struct Cloud;
+
+impl Say for Cloud { fn say(&mut self, text: String, voice: Option<String>) -> Status { … } }
+
+let module = HostModule::from_exports(CLOUD_ID, say::exports(Cloud));
+```
+
+An implementation with state keeps it in its fields, and each host module
+holds its own value: two devices in one process do not share it. The
+reference is `&mut` because the engine calls a host module's functions one
+at a time, with exclusive access, so the implementation changes its fields
+without a lock. The alternatives, and why they were not taken, are under
+*A contract's functions take `&mut self`* in the
+[design decisions](../../docs/design_decisions.md).
 
 rustc checks that each implementation provides every function with its
 declared signature. A contract has no artifact entry points: an artifact
