@@ -13,8 +13,8 @@
 
        Each branch runs its policy and its sentence side by side: a Parallel
        of the policy leaf and a Say. The policy keeps balancing the robot
-       while it speaks; Say advances its synthesis and playback a step per
-       tick, succeeds when the sentence has played, and keeps succeeding while
+       while it speaks; Say plays what its synthesizing worker produces
+       without ever waiting on it, succeeds when the sentence has played, and keeps succeeding while
        the branch runs, so it speaks once per entry into the branch. A branch
        that hands back (rise, kick) finishes when both its policy and its
        sentence have. Say is wrapped in a Fallback with Succeed: a voice that
