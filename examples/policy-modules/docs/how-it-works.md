@@ -43,7 +43,7 @@ Take `walk`, the leaf that drives the walking network:
 ```rust
 #[export(id = "…")]
 pub fn walk(
-    vx: f32, vy: f32, vyaw: f32,        // the command
+    vx: f64, vy: f64, vyaw: f64,        // the command
     head: Vec<f32>,                      // more command: head angles
     dt_ns: u64,                          // the tick period (arora/dt)
     gyro: Vec<f32>, orientation: Vec<f32>,
@@ -116,9 +116,13 @@ graph), inference is cheap.
 
 ### What crosses the module boundary
 
-Only primitives and arrays: `f32`, `u64`, `String`, `Vec<f32>`, `Vec<String>`,
-and the `Status` enumeration. That keeps the leaf callable from any tree
-editor, any host, and any executor without a shared type registry. The joint
+Only primitives and arrays: `f32`, `f64`, `u64`, `String`, `Vec<f32>`,
+`Vec<String>`, and the `Status` enumeration. That keeps the leaf callable from
+any tree editor, any host, and any executor without a shared type registry.
+A parameter's type is checked, not converted: an `F64` in the store does not
+bind to an `f32` parameter. So a parameter an operator writes takes the type
+editors write — `walk`'s velocities are `f64`, the number Semio Studio sends —
+and the leaf narrows it for the network. The joint
 order is the one convention both sides must agree on: the module exports it
 (`joint_names`) and the device refuses to start when the HAL's order differs.
 
@@ -167,7 +171,31 @@ The tree is where situations are told apart. The `showcase` tree:
   network for the trained 0.5 s and returns `Success`; `Sit` and `Rise` run
   the sit/stand network for 3 s each (a choice: the daemon rises in 1 s and
   lets a seat settle for 2 s). A `SequenceStar` chains them and resumes past
-  the ones that succeeded (`sit_rise` and `kick` trees).
+  the ones that succeeded (`sit_rise` and `kick` trees). Ticked again after
+  its end, an episodic leaf keeps running its network and keeps returning
+  `Success`: a seat is held by the sitting network, not by frozen targets.
+- **A request from outside** selects a branch in the `interactive` tree. A
+  tree has no comparison of its own — control nodes route on their
+  children's status only — so the `blackboard` module supplies two leaves:
+  `Equals` turns "`command.behavior` is `kick_left`" into a status, and
+  `Assign` writes a value back. Each requestable behavior is a branch of the
+  fallback headed by an `Equals`:
+
+  ```xml
+  <Sequence>
+    <Equals value="{command.behavior}" expected="kick_left" />
+    <Skill skill="kick_left" … />
+    <Assign value="walk" target="{command.behavior}" />
+  </Sequence>
+  ```
+
+  While the request stands, the sequence re-enters the same skill leaf every
+  tick, so its run continues; when the skill succeeds, `Assign` hands the
+  request back to `walk`, and the next tick falls through to the walking
+  branch. A branch without an `Assign` (`sit`) holds until something else is
+  requested. Whoever writes `command.behavior` — an editor's live data, a
+  script on the local bridge, another leaf — switches the policy, and the
+  situation checks placed before it (`Fallen`) still take precedence.
 
 The same trees run on any Arora that loads this module: the runtime, the
 tree interpreter and the module are the same code on a laptop with MuJoCo, a
@@ -181,11 +209,18 @@ policies that take them), `Decimator` (the fixed-rate clock), and
 `projected_gravity`. It has no host dependency and builds for wasm unchanged.
 
 `crates/arora-hal-mujoco` holds the simulator side: any MJCF robot under the
-standard keys, a real-time or lockstep clock, CSV recording.
+standard keys, a real-time or lockstep clock, CSV recording, and the keys an
+editor drives its model by (joints under ids of its choosing, the base pose
+as six scalars).
 
-The two SDK seams this example added — `AroraBuilder::with_declared_module`
-and Groot tags resolved by function name — are what let a declared module's
-leaves be reached from an authored tree.
+`modules/blackboard` holds the two leaves a tree needs to switch on a
+request; nothing in it is robot-specific.
+
+The SDK seams this example added: `AroraBuilder::with_declared_module` and
+Groot tags resolved by function name let a declared module's leaves be
+reached from an authored tree; `AroraBuilder::with_groot` and
+`with_step_period` let a device carrying such a tree run on the standard
+`AroraBuilder::run` (the operator front end, the Studio or local bridge).
 
 ## Limits worth knowing
 

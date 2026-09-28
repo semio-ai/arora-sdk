@@ -10,10 +10,14 @@ authors.workspace = true
 name = "policy-device"
 path = "src/main.rs"
 
+[features]
+# Serve through Semio Studio instead of the open local bridge (the `arora`
+# crate's Studio connection: sign-in, device registration, the Zenoh link).
+studio = ["arora/studio-bridge"]
+
 [dependencies]
 anyhow.workspace = true
 arora.workspace = true
-arora-bridge.workspace = true
 arora-hal.workspace = true
 arora-hal-mujoco = { path = "../arora-hal-mujoco", version = "0.1" }
 arora-policy = { path = "../arora-policy", version = "0.1" }
@@ -22,8 +26,11 @@ arora-types.workspace = true
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log.workspace = true
+serde_json = "1"
 # The policy module twice over: its library (the declaration: ids, header,
 # signatures, and the in-process functions) and its wasm32-wasip1 build (the
 # guest the device loads), both from one dependency.
 microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The blackboard leaves the interactive tree switches with, the same way.
+blackboard = { path = "../../modules/blackboard", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
