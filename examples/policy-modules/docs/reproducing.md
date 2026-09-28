@@ -39,12 +39,24 @@ learned policy for a different robot into an Arora module. It assumes the
   velocimeter, a magnetometer), add a `<sensor>` kind to the HAL as a
   configurable spec rather than a robot-specific key.
 - The key conventions: `<joint>.position`, `<joint>.velocity`,
-  `<joint>.target_position` per joint, and the `joints.*` aggregates in the
-  HAL's declared order; `imu.gyro`, `imu.accelerometer`, `imu.orientation`
+  `<joint>.target_position` per joint (the joint's key entity is its name, or
+  the id an editor drives it by), and the `joints.*` aggregates in the HAL's
+  declared order; `imu.gyro`, `imu.accelerometer`, `imu.orientation`
   (`[w, x, y, z]`, world from IMU); `sim/*` for what only a simulator knows.
-- The device shape (`crates/device`): HAL + declared module (wasm or
-  in-process) + Groot tree + optional bridge, with lockstep for tests and
-  real time for serving, and the joint-order check at build.
+  Leaves read the aggregates, so renaming the per-joint keys changes nothing
+  above the HAL.
+- The device shape (`crates/device`): HAL + declared modules (wasm or
+  in-process) + Groot tree (`with_groot`), built directly for a lockstep run
+  and handed to the standard `AroraBuilder::run` for serving — the operator
+  front end, and Semio Studio or the local bridge by build feature — with
+  the joint-order check at build. Only the HAL is simulation-specific: the
+  device for the real robot swaps it and keeps the rest.
+- `modules/blackboard` and the `interactive` tree's shape: a fallback of
+  situation checks first, then one branch per requestable behavior headed by
+  `Equals` on `command.behavior`, `Assign` handing an episodic one back.
+- Command parameters an operator writes typed as the editors write them:
+  `f64` for numbers (Semio Studio sends every number as one; a type is
+  checked, not converted, at the leaf boundary).
 - The module shape: one run in a `static`, leaf identity + staleness to
   reset it, the decimator, the observation builder, the targets builder, the
   `Status` semantics (`Running` for gaits, `Success` when an episodic skill
@@ -100,6 +112,35 @@ observation values with three past actions and the last targets, foot
 contacts, an imitation phase; `0.25 × action` with a slew limit; Feetech
 servos at `kp 13.37`.
 
+## Showing it in Semio Studio
+
+Studio needs the robot's model and the device's keys under Studio's ids.
+
+1. **The model.** `tools/export-urdf.py` turns any MJCF with a floating base
+   and hinge joints into a URDF with STL visuals, and checks every mesh
+   vertex against MuJoCo's. It needs the hinges at their bodies' origins (as
+   onshape-to-robot places them) and STL meshes (Studio reads STL and DAE
+   only, matched by file name — two meshes with one file name in different
+   directories collide). Studio files the model under the URDF's robot name,
+   capitalised, as its model family: the family the device registers with
+   must match it for Studio to offer pairing.
+2. **The ids.** Studio gives each joint, and the robot's root translation and
+   rotation, an id at upload, and drives them from `<id>.position` (radians,
+   metres). The device reads them from the GLB Studio saves
+   (`--studio-model`, `crates/device/src/studio.rs`), gives the joint ids to
+   the HAL as the joints' key entities, and the root ids as its
+   `base_pose_keys`: six scalars, the translation and the fixed-axes
+   roll, pitch, yaw — what Studio's root takes, in its Z-up world.
+3. **The commands.** Studio's Live Data page writes a number as `F64`, a
+   string as `String`, a boolean as `Boolean`, and a key the device has not
+   published yet as a string: seed every command key in the store with its
+   type at build (`command.behavior`, `command.vx`) and publish the ones a
+   HAL consumes (`sim/reset`).
+
+A real robot's device does the same with its own HAL: joint ids as key
+entities, and a base pose only if the robot estimates one (without it,
+Studio's duck walks in place).
+
 ## Verifying a port
 
 Do these in order; each catches a different class of mistake.
@@ -123,7 +164,9 @@ Do these in order; each catches a different class of mistake.
    walks a distance at a commanded speed, stops when the command drops, the
    showcase tree runs, from the wasm guest as well as in-process.
 5. **Served, at real time**, with the recording on, and replay the CSV in
-   the robot's own viewer to look at the gait.
+   the robot's own viewer to look at the gait; then drive it over the local
+   bridge from a script (write `command.vx` as `{"f64": 0.3}`, read the
+   `values_changed` feed) before showing it in Studio.
 
 ## What this does not cover
 

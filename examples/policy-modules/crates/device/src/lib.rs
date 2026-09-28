@@ -1,29 +1,42 @@
 //! A Microduck device: MuJoCo as the HAL, the policy module as the leaves,
 //! a Groot tree as the behavior — assembled on the standard Arora runtime.
 //!
-//! The same [`Device`] serves two uses. Driven in [lockstep](Device::run_for)
-//! it is a deterministic, faster-than-real-time simulation for tests and batch
-//! runs; [served](Device::serve) it is a live device at real time with the
-//! local bridge open, for an editor or a script to observe and command.
+//! One assembly serves two uses. Built as a [`Device`] and driven in
+//! [lockstep](Device::run_for) it is a deterministic, faster-than-real-time
+//! simulation for tests and batch runs; [served](serve) it is a live device
+//! at real time on the standard Arora run — the operator front end, and the
+//! bridge the build selects: Semio Studio under the `studio` feature, the
+//! open local bridge otherwise.
+//!
+//! Only the HAL is simulation-specific: a device for the real robot is this
+//! assembly with the robot's HAL in place of [`MujocoHal`], publishing the
+//! same keys.
+
+pub mod studio;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use arora::{Arora, HostModule};
+use arora::{Arora, AroraBuilder, HostModule};
 use arora_hal::HalDescription;
 use arora_hal_mujoco::{Clock, ImuSpec, JointSpec, MujocoHal, MujocoHalConfig, SimHandle};
 use arora_policy::projected_gravity;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::value::Value;
-use microduck_policies::microduck_policies::Module;
+use microduck_policies::microduck_policies::Module as Policies;
+
+pub use studio::StudioModel;
 
 /// The policy module's wasm32-wasip1 build, handed over by cargo (the
 /// artifact dependency in `Cargo.toml`).
 const POLICY_WASM: &[u8] = include_bytes!(env!(
     "CARGO_CDYLIB_FILE_MICRODUCK_POLICIES_microduck_policies"
 ));
+
+/// The blackboard module's wasm32-wasip1 build, the same way.
+const BLACKBOARD_WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_BLACKBOARD_blackboard"));
 
 /// The workspace root, for the default asset and tree paths.
 fn workspace_root() -> PathBuf {
@@ -56,12 +69,13 @@ pub enum Executor {
     Native,
 }
 
-/// The walking command, as the keys the trees bind.
+/// The walking command, as the keys the trees bind (`F64`, the number an
+/// editor writes).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Command {
-    pub vx: f32,
-    pub vy: f32,
-    pub vyaw: f32,
+    pub vx: f64,
+    pub vy: f64,
+    pub vyaw: f64,
 }
 
 /// What to build.
@@ -74,6 +88,9 @@ pub struct DeviceConfig {
     pub clock: Clock,
     pub record: Option<PathBuf>,
     pub command: Command,
+    /// Publish the joints and the base pose under the ids Semio Studio
+    /// drives this robot's model by, instead of the joint names.
+    pub studio: Option<StudioModel>,
 }
 
 /// The device, with a handle onto its simulation.
@@ -97,83 +114,12 @@ pub struct Outcome {
 }
 
 impl Device {
-    /// Build the device: the simulator on the model, the policy module on the
-    /// chosen executor, the tree loaded, the command seeded. The simulator's
-    /// joint order is checked against the policies' before anything runs.
-    ///
-    /// `bridge` is an endpoint to attach (the local bridge for a served
-    /// device); none for a lockstep run.
-    pub fn build(
-        config: DeviceConfig,
-        bridge: Option<Box<dyn arora_bridge::Bridge>>,
-    ) -> Result<Self> {
-        let hal = MujocoHal::new(MujocoHalConfig {
-            model: config.model.clone(),
-            joints: microduck_policies::JOINT_NAMES
-                .iter()
-                .map(|name| JointSpec::named(*name))
-                .collect(),
-            imu: Some(ImuSpec {
-                gyro: "imu_ang_vel".to_string(),
-                accelerometer: "imu_accel".to_string(),
-                // The IMU is rigid on the trunk: its orientation is the base's.
-                orientation: None,
-            }),
-            contacts: Vec::new(),
-            base_body: Some("trunk_base".to_string()),
-            keyframe: Some("STAND".to_string()),
-            // The policies' physics step (the model sets none).
-            timestep: Some(0.005),
-            control_hz: 50.0,
-            clock: config.clock,
-            record: config.record.clone(),
-            description: HalDescription {
-                model_family: Some("microduck".to_string()),
-                hardware_version: Some("mujoco".to_string()),
-                software_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            },
-        })
-        .map_err(|e| {
-            anyhow!(
-                "could not start the simulator on {}: {e}",
-                config.model.display()
-            )
-        })?;
-        let sim = hal.handle();
-        if sim.joint_names() != microduck_policies::JOINT_NAMES {
-            bail!(
-                "the simulator's joints {:?} are not the policies' {:?}",
-                sim.joint_names(),
-                microduck_policies::JOINT_NAMES
-            );
-        }
-
-        let store = SimpleDataStore::new();
-        store.write(command_change(config.command))?;
-        store.write(StateChange::set(
-            "command.head",
-            Value::ArrayF32(vec![0.0; 4]),
-        ))?;
-
-        let mut builder = Arora::builder()
-            .with_data_store(Box::new(store))
-            .with_hal(Box::new(hal));
-        builder = match config.executor {
-            Executor::Wasm => builder.with_declared_module::<Module>(
-                arora_types::module::low::Executor {
-                    name: "wasm".to_string(),
-                    min_version: None,
-                    max_version: None,
-                },
-                POLICY_WASM,
-            ),
-            Executor::Native => builder.with_host_module(HostModule::of::<Module>()),
-        };
-        if let Some(bridge) = bridge {
-            builder = builder.with_bridge(bridge);
-        }
-        let mut arora = builder.build().context("could not build the device")?;
-        arora.load_groot(&config.tree)?;
+    /// Build the device for a lockstep run (the configuration's clock
+    /// should be [`Clock::Lockstep`]): the simulator on the model, the
+    /// modules on the chosen executor, the tree loaded, the command seeded.
+    pub fn build(config: DeviceConfig) -> Result<Self> {
+        let (builder, sim) = assemble(config)?;
+        let arora = builder.build().context("could not build the device")?;
         Ok(Self { arora, sim })
     }
 
@@ -246,12 +192,111 @@ impl Device {
         };
         (position, gravity_z)
     }
+}
 
-    /// Serve the device at real time until the run is dropped: the simulator
-    /// paces itself, the runtime steps at the policies' period, and the
-    /// attached bridge carries state and commands.
-    pub async fn serve(mut self) -> Result<()> {
-        self.arora.run(PERIOD).await.map_err(|e| anyhow!("{e}"))
+/// Serve the device until the process stops, on the standard Arora run: the
+/// simulator paces itself at real time, the runtime steps at the policies'
+/// period, and the bridge is the build's default — Semio Studio under the
+/// `studio` feature (the operator is asked for the owner, the device name and
+/// the model family, or they come from `DEVICE_OWNERS`, `DEVICE_NAME`,
+/// `MODEL_FAMILY`), the open local bridge on `ws://127.0.0.1:9000`
+/// otherwise.
+pub async fn serve(config: DeviceConfig) -> Result<()> {
+    let (builder, _sim) = assemble(config)?;
+    builder.with_step_period(PERIOD).run().await
+}
+
+/// The device's parts on a builder: the simulator on the model, the modules
+/// on the chosen executor, the tree, the seeded commands. The simulator's
+/// joint order is checked against the policies' before anything runs.
+fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
+    let keys: Vec<String> = match &config.studio {
+        Some(model) => model.joint_ids(&microduck_policies::JOINT_NAMES)?,
+        None => microduck_policies::JOINT_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect(),
+    };
+    let hal = MujocoHal::new(MujocoHalConfig {
+        model: config.model.clone(),
+        joints: microduck_policies::JOINT_NAMES
+            .iter()
+            .zip(&keys)
+            .map(|(name, key)| JointSpec {
+                key: Some(key.clone()),
+                ..JointSpec::named(*name)
+            })
+            .collect(),
+        imu: Some(ImuSpec {
+            gyro: "imu_ang_vel".to_string(),
+            accelerometer: "imu_accel".to_string(),
+            // The IMU is rigid on the trunk: its orientation is the base's.
+            orientation: None,
+        }),
+        contacts: Vec::new(),
+        base_body: Some("trunk_base".to_string()),
+        base_pose_keys: config.studio.as_ref().and_then(|model| model.base.clone()),
+        keyframe: Some("STAND".to_string()),
+        // The policies' physics step (the model sets none).
+        timestep: Some(0.005),
+        control_hz: 50.0,
+        clock: config.clock,
+        record: config.record.clone(),
+        description: HalDescription {
+            model_family: Some("microduck".to_string()),
+            hardware_version: Some("mujoco".to_string()),
+            software_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        },
+    })
+    .map_err(|e| {
+        anyhow!(
+            "could not start the simulator on {}: {e}",
+            config.model.display()
+        )
+    })?;
+    let sim = hal.handle();
+    if sim.joint_names() != keys.as_slice() {
+        bail!(
+            "the simulator's joints {:?} are not the policies' {:?}",
+            sim.joint_names(),
+            keys
+        );
+    }
+
+    let store = SimpleDataStore::new();
+    store.write(command_change(config.command))?;
+    store.write(StateChange::set(
+        "command.head",
+        Value::ArrayF32(vec![0.0; 4]),
+    ))?;
+    store.write(StateChange::set(
+        "command.behavior",
+        Value::String("walk".to_string()),
+    ))?;
+
+    let mut builder = Arora::builder()
+        .with_data_store(Box::new(store))
+        .with_hal(Box::new(hal));
+    builder = match config.executor {
+        Executor::Wasm => builder
+            .with_declared_module::<Policies>(wasm_executor(), POLICY_WASM)
+            .with_declared_module::<blackboard::blackboard::Module>(
+                wasm_executor(),
+                BLACKBOARD_WASM,
+            ),
+        Executor::Native => builder
+            .with_host_module(HostModule::of::<Policies>())
+            .with_host_module(HostModule::of::<blackboard::blackboard::Module>()),
+    };
+    Ok((builder.with_groot(config.tree), sim))
+}
+
+/// The engine's WebAssembly executor, as a module header names it.
+fn wasm_executor() -> arora_types::module::low::Executor {
+    arora_types::module::low::Executor {
+        name: "wasm".to_string(),
+        min_version: None,
+        max_version: None,
     }
 }
 
@@ -260,12 +305,12 @@ fn command_change(command: Command) -> StateChange {
     let mut change = StateChange::new();
     change
         .set
-        .insert(Key::from("command.vx"), Some(Value::F32(command.vx)));
+        .insert(Key::from("command.vx"), Some(Value::F64(command.vx)));
     change
         .set
-        .insert(Key::from("command.vy"), Some(Value::F32(command.vy)));
+        .insert(Key::from("command.vy"), Some(Value::F64(command.vy)));
     change
         .set
-        .insert(Key::from("command.vyaw"), Some(Value::F32(command.vyaw)));
+        .insert(Key::from("command.vyaw"), Some(Value::F64(command.vyaw)));
     change
 }
