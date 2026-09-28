@@ -4,6 +4,22 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.0] - 2026-09-28
+
+### Added
+
+- `local_ws_bridge_with(ServerConfig)`: the open local bridge on another port, on
+  a LAN-facing address, or serving the control panel — everything else is
+  `local_ws_bridge`, so an app that needs one of those no longer rebuilds the
+  bind, the serving task and its cancellation.
+- `arora::bridge_ws`: the open local bridge's crate re-exported, so an embedder
+  names `ServerConfig` through the arora it serves.
+
+### Changed
+
+- Depends on arora-bridge-ws 6, where a client reaches the device's own methods
+  and subscribes to the keys it wants.
+
 ## [10.0.1] - 2026-09-26
 
 ### Fixed

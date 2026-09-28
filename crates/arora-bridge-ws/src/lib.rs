@@ -26,18 +26,31 @@
 //! {"type": "read_values", "keys": ["face/mouth"]}
 //! {"type": "list_keys", "path": "face"}
 //! {"type": "list_methods"}
-//! {"type": "invoke", "method": "reset", "request_id": "req-1"}
+//! {"type": "invoke", "method": "say", "args": {"text": {"str": "hello"}}, "request_id": "req-1"}
+//! {"type": "halt", "run": "0195e1f2-...", "request_id": "req-2"}
+//! {"type": "subscribe", "keys": ["face/mouth"]}
 //!
 //! // Server -> Client
 //! {"type": "write_values_resp", "success": true}
 //! {"type": "read_values_resp", "values": {"face/mouth": {"f64": 0.5}}}
 //! {"type": "list_keys_resp", "keys": [...]}
 //! {"type": "list_methods_resp", "methods": [...]}
-//! {"type": "invoke_resp", "success": true, "request_id": "req-1"}
+//! {"type": "invoke_resp", "success": true, "request_id": "req-1", "value": {...}}
+//! {"type": "halt_resp", "success": true, "request_id": "req-2"}
+//! {"type": "subscribe_resp", "keys": ["face/mouth"]}
 //!
-//! // Server -> Client, unsolicited: the live state feed
+//! // Server -> Client, unsolicited: the live state feed, for the subscribed keys
 //! {"type": "values_changed", "values": {"face/mouth": {"f64": 0.5}}}
 //! ```
+//!
+//! # Methods
+//!
+//! `list_methods` and `invoke` answer from two places: the [`Registry`], which
+//! holds the methods the server itself owns, and the device behind the bridge,
+//! whose module functions are listed with their described signatures and called
+//! by name. A method that starts a **run** (a long-running, cancellable one —
+//! `MethodInfo::task`) answers with the run's handle, and `halt` stops it by the
+//! id that handle carried.
 //!
 //! # Server Example
 //!
@@ -49,13 +62,13 @@
 //! async fn main() {
 //!     let server = AroraWSServer::with_port(9000);
 //!
-//!     // Register a method
+//!     // A method of the server's own. The device's own methods need no
+//!     // registration: they are listed and called by name through the bridge.
 //!     server.registry().register_method_fn(
 //!         MethodInfo {
 //!             path: "reset".to_string(),
-//!             params: vec![],
-//!             return_type: None,
 //!             description: Some("Reset to defaults".to_string()),
+//!             ..Default::default()
 //!         },
 //!         |_args| InvokeResult::ok(),
 //!     ).await;
@@ -75,6 +88,7 @@
 /// The WS server as an Arora `Bridge`.
 pub mod bridge;
 pub mod handlers;
+mod interpreter;
 mod key;
 mod messages;
 mod method;
@@ -82,14 +96,14 @@ mod registry;
 mod server;
 
 pub use handlers::{
-    MethodHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
-    WriteValuesResult,
+    DeviceMethods, DeviceMethodsHandler, MethodHandler, OnClientConnectedHandler,
+    ReadValuesHandler, WriteValuesHandler, WriteValuesResult,
 };
 pub use key::KeyInfo;
 pub use messages::{Incoming, Outgoing};
 pub use method::{InvokeResult, MethodInfo, MethodParam};
 pub use registry::Registry;
-pub use server::{process_message, AroraWSServer, ServerConfig};
+pub use server::{AroraWSServer, ServerConfig};
 pub use tokio_util::sync::CancellationToken;
 
 pub use arora_types::keyvalue::{KeyValue, KeyValueField};

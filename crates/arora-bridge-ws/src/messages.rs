@@ -33,6 +33,20 @@ pub enum Incoming {
         keys: Vec<String>,
     },
 
+    /// Choose the keys this connection is pushed
+    /// [`ValuesChanged`](Outgoing::ValuesChanged) for. Absent `keys` means every
+    /// key, which is where a connection starts — so a client that never
+    /// subscribes sees the whole feed, and one that does sees only what it asked
+    /// for. Nothing about a key makes it special: a client that wants the clock
+    /// subscribes to it.
+    ///
+    /// Example: `{"type": "subscribe", "keys": ["face/mouth"]}`
+    Subscribe {
+        /// The keys to receive pushes for; absent or null means all of them.
+        #[serde(default)]
+        keys: Option<Vec<String>>,
+    },
+
     /// Request the list of available keys.
     ///
     /// Example: `{"type": "list_keys"}` or `{"type": "list_keys", "path": "face"}`
@@ -66,6 +80,19 @@ pub enum Incoming {
         #[serde(default)]
         request_id: Option<String>,
     },
+
+    /// Stop a run started by invoking a task-shaped method, named by the run id
+    /// its handle carried.
+    ///
+    /// Example: `{"type": "halt", "run": "0195...", "request_id": "req-2"}`
+    Halt {
+        /// The run's id, as the invoke's task handle gave it.
+        run: String,
+
+        /// Optional request ID for correlating responses
+        #[serde(default)]
+        request_id: Option<String>,
+    },
 }
 
 /// Messages sent to WebSocket clients.
@@ -92,6 +119,15 @@ pub enum Outgoing {
     ReadValuesResp {
         /// Map of key paths to their current values
         values: HashMap<String, Value>,
+    },
+
+    /// Response to Subscribe: the keys now pushed to this connection, or null
+    /// for all of them.
+    ///
+    /// Example: `{"type": "subscribe_resp", "keys": ["face/mouth"]}`
+    SubscribeResp {
+        /// The effective subscription; null means every key.
+        keys: Option<Vec<String>>,
     },
 
     /// Response to ListKeys message.
@@ -124,6 +160,22 @@ pub enum Outgoing {
         /// Return value from the method (if any)
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<Value>,
+
+        /// Error message if success is false
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+
+    /// Response to Halt: whether the run was asked to stop.
+    ///
+    /// Example: `{"type": "halt_resp", "success": true, "request_id": "req-2"}`
+    HaltResp {
+        /// Whether the halt reached the run.
+        success: bool,
+
+        /// Echo back request_id if provided in the request
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
 
         /// Error message if success is false
         #[serde(skip_serializing_if = "Option::is_none")]

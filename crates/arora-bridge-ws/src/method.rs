@@ -28,7 +28,7 @@ pub struct MethodParam {
 /// Metadata describing an available RPC method.
 ///
 /// Methods represent callable operations that can be invoked via the Invoke message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MethodInfo {
     /// Method path/name (e.g., "audio/play", "animation/trigger", "reset")
     pub path: String,
@@ -44,6 +44,13 @@ pub struct MethodInfo {
     /// Human-readable description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Whether invoking this method starts a **run**: long-running, cancellable
+    /// work that answers with a task handle at once and reports its outcome on
+    /// the handle's status key. A client halts it with the `halt` message; a
+    /// plain method answers with its return value instead.
+    #[serde(default)]
+    pub task: bool,
 }
 
 /// Result type for method invocation.

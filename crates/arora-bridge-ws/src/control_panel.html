@@ -281,6 +281,25 @@
         color: var(--text-dim);
         font-size: 12px;
       }
+      #methods {
+        padding: 0 16px;
+      }
+      .method {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .method .name {
+        font-weight: 600;
+        min-width: 120px;
+      }
+      .method input {
+        flex: 1 1 100px;
+        min-width: 80px;
+      }
     </style>
   </head>
   <body>
@@ -312,6 +331,7 @@
       </div>
     </header>
     <nav id="tabs"></nav>
+    <section id="methods"></section>
     <main id="main"></main>
 
     <script>
@@ -323,6 +343,10 @@
       let pending = {};
       let flushTimer = null;
       let connectTimeout = null;
+      // The device's methods, and the last run each task-shaped one started —
+      // what a Stop halts.
+      let methods = [];
+      let runs = new Map();
 
       const $ = (id) => document.getElementById(id);
       const wsPort = location.port || "9000";
@@ -334,6 +358,7 @@
       const searchInput = $("search");
       const mainEl = $("main");
       const tabsEl = $("tabs");
+      const methodsEl = $("methods");
 
       const numberSuffixes = ["f64", "f32", "i64", "i32", "u64", "u32"];
 
@@ -811,6 +836,101 @@
         );
       }
 
+      // A parameter's value as the wire wants it: the arora Type names the
+      // Value variant, and the text typed in the box is read as that.
+      function argumentValue(type, text) {
+        if (numberSuffixes.includes(type)) {
+          return { [type]: Number(text) };
+        }
+        if (type === "bool") {
+          return { bool: text === "true" || text === "1" };
+        }
+        if (type === "str") {
+          return { str: text };
+        }
+        // Anything else travels as the JSON the client types: an enumeration,
+        // a structure, an array.
+        return JSON.parse(text);
+      }
+
+      function callMethod(name) {
+        const method = methods.find((m) => m.path === name);
+        if (!method || !ws || ws.readyState !== 1) {
+          return;
+        }
+        const args = {};
+        try {
+          (method.params || []).forEach((param) => {
+            const input = document.getElementById("arg-" + name + "-" + param.name);
+            const text = (input && input.value.trim()) || "";
+            if (!text) {
+              return;
+            }
+            args[param.name] = argumentValue(param.param_type, text);
+          });
+        } catch (error) {
+          status("off", name + ": " + error.message);
+          return;
+        }
+        ws.send(
+          JSON.stringify({
+            type: "invoke",
+            method: name,
+            args,
+            request_id: name + "-" + Date.now(),
+          }),
+        );
+      }
+
+      function haltMethod(name) {
+        const run = runs.get(name);
+        if (!run || !ws || ws.readyState !== 1) {
+          return;
+        }
+        ws.send(
+          JSON.stringify({
+            type: "halt",
+            run,
+            request_id: "halt-" + Date.now(),
+          }),
+        );
+        runs.delete(name);
+        rebuildMethods();
+      }
+
+      function rebuildMethods() {
+        methodsEl.innerHTML = "";
+        methods.forEach((method) => {
+          const row = document.createElement("div");
+          row.className = "method";
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = method.path;
+          name.title = method.description || "";
+          row.appendChild(name);
+          (method.params || []).forEach((param) => {
+            const input = document.createElement("input");
+            input.id = "arg-" + method.path + "-" + param.name;
+            input.placeholder = param.name + ": " + param.param_type;
+            row.appendChild(input);
+          });
+          const call = document.createElement("button");
+          call.className = "btn-on";
+          call.textContent = method.task ? "Start" : "Call";
+          call.onclick = () => callMethod(method.path);
+          row.appendChild(call);
+          if (method.task) {
+            const halt = document.createElement("button");
+            halt.className = "btn-warn";
+            halt.textContent = "Stop";
+            halt.disabled = !runs.has(method.path);
+            halt.onclick = () => haltMethod(method.path);
+            row.appendChild(halt);
+          }
+          methodsEl.appendChild(row);
+        });
+      }
+
       function requestValuesForCurrentControls() {
         if (!ws || ws.readyState !== 1 || !controls.length) {
           return;
@@ -851,6 +971,7 @@
           rbtn.disabled = false;
           searchInput.value = "";
           ws.send(JSON.stringify({ type: "list_keys" }));
+          ws.send(JSON.stringify({ type: "list_methods" }));
           requestValuesForCurrentControls();
         };
         ws.onmessage = (event) => {
@@ -864,7 +985,36 @@
           if (message.type === "list_keys_resp") {
             setControls(deriveControls(message.keys || []));
             rebuildUI();
+            // The panel is pushed the keys it displays, and nothing else: the
+            // device's own keys (the clock among them) change every step.
+            ws.send(
+              JSON.stringify({
+                type: "subscribe",
+                keys: controls.map((c) => c.path),
+              }),
+            );
             requestValuesForCurrentControls();
+          } else if (message.type === "list_methods_resp") {
+            methods = (message.methods || []).slice().sort((a, b) =>
+              a.path.localeCompare(b.path),
+            );
+            rebuildMethods();
+          } else if (message.type === "invoke_resp") {
+            // A run answers with its handle, named: remember the id so Stop can
+            // halt it, and name the method the request id carried.
+            const method = (message.request_id || "").replace(/-\d+$/, "");
+            const fields =
+              (message.value &&
+                message.value.keyvalue &&
+                message.value.keyvalue.fields) ||
+              {};
+            const run = fields.run && fields.run.value && fields.run.value.str;
+            if (message.success && run) {
+              runs.set(method, run);
+              rebuildMethods();
+            } else if (!message.success) {
+              status("off", method + ": " + (message.message || "failed"));
+            }
           } else if (
             message.type === "read_values_resp" ||
             message.type === "values_changed"
@@ -891,6 +1041,9 @@
           ws = null;
           controls = [];
           controlByPath = new Map();
+          methods = [];
+          runs = new Map();
+          rebuildMethods();
           rebuildUI();
         };
         ws.onerror = (err) => {

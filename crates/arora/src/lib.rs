@@ -32,8 +32,17 @@ pub mod studio;
 #[cfg(feature = "tui")]
 pub mod tui;
 
+/// The open local bridge's crate, re-exported: an embedder configuring the
+/// bridge it hands to [`local_ws_bridge_with`] names `ServerConfig` here instead
+/// of depending on the crate separately, so the version it configures is the one
+/// this arora serves.
 #[cfg(feature = "native")]
-pub use run::{local_ws_bridge, run, run_with, run_with_frontend, run_with_hal, DeviceCli};
+pub use arora_bridge_ws as bridge_ws;
+#[cfg(feature = "native")]
+pub use run::{
+    local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
+    DeviceCli,
+};
 pub use runtime::RuntimeError;
 
 /// Re-exported so embedders can construct the default behavior executor — an

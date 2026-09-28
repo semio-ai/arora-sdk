@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "10.0.1"
+version = "10.1.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -61,7 +61,7 @@ arora-engine = { path = "../arora-engine", version = "5", default-features = fal
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "8" }
 arora-behavior = { path = "../arora-behavior", version = "9" }
 arora-types = { path = "../arora-types", version = "3" }
-arora-bridge-ws = { path = "../arora-bridge-ws", version = "5", optional = true }
+arora-bridge-ws = { path = "../arora-bridge-ws", version = "6", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 # Portable instant for the run loop's dt/Hz measurements: `performance.now()`

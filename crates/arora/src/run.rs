@@ -106,9 +106,24 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 /// port frees for the next device in the same process.
 #[cfg(feature = "native")]
 pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
-    let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
-        arora_bridge_ws::ServerConfig::default(),
-    ));
+    local_ws_bridge_with(arora_bridge_ws::ServerConfig::default()).await
+}
+
+/// The open local bridge on a server configuration of your own — another port
+/// for a second device on the same machine, an interface address for a phone or
+/// tablet on the LAN (an explicit choice: the link is unauthenticated), the
+/// control panel served on the same port.
+///
+/// Everything else is [`local_ws_bridge`]: the bind happens here so an unusable
+/// address fails the call, the serving task is cancelled when the returned
+/// bridge is dropped, and the device's methods are reachable through it.
+#[cfg(feature = "native")]
+pub async fn local_ws_bridge_with(
+    config: arora_bridge_ws::ServerConfig,
+) -> Result<Box<dyn Bridge>> {
+    let port = config.port;
+    let bind_address = config.bind_address.clone();
+    let server = Arc::new(arora_bridge_ws::AroraWSServer::new(config));
     let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
     // Bind before spawning: an unusable address (port already taken) fails the
     // run here instead of leaving a device serving a bridge nobody can reach.
@@ -125,7 +140,7 @@ pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
             }
         }
     });
-    info!("serving the local bridge on ws://127.0.0.1:9000");
+    info!("serving the local bridge on ws://{bind_address}:{port}");
     Ok(Box::new(LocalBridge {
         inner: bridge,
         server: cancel,

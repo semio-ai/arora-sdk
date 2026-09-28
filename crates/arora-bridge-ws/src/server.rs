@@ -3,7 +3,7 @@
 //! Provides a ready-to-use WebSocket server that bridges the Arora API.
 //! Each server supports at most one active client at a time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -16,10 +16,14 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::handlers::{OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler};
+use crate::handlers::{
+    DeviceMethodsHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
+};
 use arora_types::value::Value;
+use arora_types::Uuid;
 
 use crate::messages::{Incoming, Outgoing};
+use crate::method::InvokeResult;
 use crate::registry::Registry;
 
 /// Configuration for the WebSocket server.
@@ -86,6 +90,7 @@ pub struct AroraWSServer {
     registry: Arc<Registry>,
     write_values_handler: RwLock<Option<WriteValuesHandler>>,
     read_values_handler: RwLock<Option<ReadValuesHandler>>,
+    device_methods: RwLock<Option<DeviceMethodsHandler>>,
     on_client_connected_handler: RwLock<Option<OnClientConnectedHandler>>,
     /// Cancel token for the single active client. When cancelled, the client is disconnected.
     active_client: Arc<RwLock<Option<CancellationToken>>>,
@@ -107,6 +112,7 @@ impl AroraWSServer {
             registry: Arc::new(Registry::new()),
             write_values_handler: RwLock::new(None),
             read_values_handler: RwLock::new(None),
+            device_methods: RwLock::new(None),
             on_client_connected_handler: RwLock::new(None),
             active_client: Arc::new(RwLock::new(None)),
             is_running: RwLock::new(false),
@@ -148,6 +154,15 @@ impl AroraWSServer {
     /// This is called whenever a valid ReadValues message is received.
     pub async fn set_read_values_handler(&self, handler: ReadValuesHandler) {
         *self.read_values_handler.write().await = Some(handler);
+    }
+
+    /// Set the device behind this server: where `list_methods` and `invoke`
+    /// go for the methods the registry does not own.
+    /// [`WsBridge`](crate::bridge::WsBridge) sets it to the device it bridges,
+    /// so an embedder wiring the bridge gets the device's methods without
+    /// declaring any of them here.
+    pub async fn set_device_methods(&self, device: DeviceMethodsHandler) {
+        *self.device_methods.write().await = Some(device);
     }
 
     /// Set the handler called when a new client connects.
@@ -220,14 +235,19 @@ impl AroraWSServer {
         *self.is_running.write().await = true;
 
         let serve_control_panel = self.config.serve_control_panel;
-        let validate_paths = self.config.validate_paths;
         let conn_id = self.connection_id();
         let bind_addr = self.config.bind_address.clone();
         let port = self.config.port;
 
-        // Snapshot handlers once -- they are set during setup_all() and never change.
-        let write_handler = self.write_values_handler.read().await.clone();
-        let read_handler = self.read_values_handler.read().await.clone();
+        // Snapshot the dispatch context once: the seams are wired before the
+        // server serves and never change afterwards.
+        let dispatch = Dispatch {
+            registry: self.registry.clone(),
+            write_values: self.write_values_handler.read().await.clone(),
+            read_values: self.read_values_handler.read().await.clone(),
+            device: self.device_methods.read().await.clone(),
+            validate_paths: self.config.validate_paths,
+        };
         let on_connected = self.on_client_connected_handler.read().await.clone();
 
         loop {
@@ -238,9 +258,7 @@ impl AroraWSServer {
                             // Spawn a task per connection so the accept loop never blocks.
                             // (peek can block if a client connects without sending data.)
                             let active_client = self.active_client.clone();
-                            let registry = self.registry.clone();
-                            let write_handler = write_handler.clone();
-                            let read_handler = read_handler.clone();
+                            let dispatch = dispatch.clone();
                             let on_connected = on_connected.clone();
                             let conn_id = conn_id.clone();
                             let bind_addr = bind_addr.clone();
@@ -295,10 +313,8 @@ impl AroraWSServer {
                                 }
 
                                 handle_connection(
-                                    stream, peer_addr, registry,
-                                    write_handler, read_handler,
-                                    validate_paths, client_token, active_client,
-                                    outbound_tx,
+                                    stream, peer_addr, dispatch,
+                                    client_token, active_client, outbound_tx,
                                 ).await;
                             });
                         }
@@ -326,15 +342,22 @@ impl AroraWSServer {
     }
 }
 
+/// What a connection dispatches an incoming message against: the registry, the
+/// value handlers, and the device behind the bridge.
+#[derive(Clone)]
+struct Dispatch {
+    registry: Arc<Registry>,
+    write_values: Option<WriteValuesHandler>,
+    read_values: Option<ReadValuesHandler>,
+    device: Option<DeviceMethodsHandler>,
+    validate_paths: bool,
+}
+
 /// Handle a single WebSocket connection.
-#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
-    registry: Arc<Registry>,
-    write_values_handler: Option<WriteValuesHandler>,
-    read_values_handler: Option<ReadValuesHandler>,
-    validate_paths: bool,
+    dispatch: Dispatch,
     client_token: CancellationToken,
     active_client: Arc<RwLock<Option<CancellationToken>>>,
     outbound_tx: broadcast::Sender<Outgoing>,
@@ -360,6 +383,10 @@ async fn handle_connection(
     let (mut write, mut read) = ws_stream.split();
     let mut outbound_rx = outbound_tx.subscribe();
 
+    // The keys this connection is pushed. `None` until it subscribes: a client
+    // that never does sees the whole feed.
+    let mut subscription: Option<HashSet<String>> = None;
+
     loop {
         tokio::select! {
             msg = read.next() => {
@@ -368,9 +395,14 @@ async fn handle_connection(
                         debug!("Received message: {}", text);
 
                         let response = match serde_json::from_str::<Incoming>(&text) {
-                            Ok(incoming) => {
-                                process_message(incoming, &registry, &write_values_handler, &read_values_handler, validate_paths).await
+                            // The subscription is this connection's own state,
+                            // so it is answered here rather than in the shared
+                            // dispatch.
+                            Ok(Incoming::Subscribe { keys }) => {
+                                subscription = keys.clone().map(HashSet::from_iter);
+                                Outgoing::SubscribeResp { keys }
                             }
+                            Ok(incoming) => process_message(incoming, &dispatch).await,
                             Err(e) => {
                                 warn!("Failed to parse message: {}", e);
                                 Outgoing::Error {
@@ -418,6 +450,22 @@ async fn handle_connection(
             pushed = outbound_rx.recv() => {
                 match pushed {
                     Ok(msg) => {
+                        // A subscribed connection is pushed the keys it asked
+                        // for, and nothing is pushed for a change that holds
+                        // none of them.
+                        let msg = match (&subscription, msg) {
+                            (Some(keys), Outgoing::ValuesChanged { values }) => {
+                                let values: HashMap<String, Value> = values
+                                    .into_iter()
+                                    .filter(|(path, _)| keys.contains(path))
+                                    .collect();
+                                if values.is_empty() {
+                                    continue;
+                                }
+                                Outgoing::ValuesChanged { values }
+                            }
+                            (_, msg) => msg,
+                        };
                         let text = match serde_json::to_string(&msg) {
                             Ok(text) => text,
                             Err(e) => {
@@ -481,17 +529,17 @@ async fn serve_control_panel_http(mut stream: TcpStream) {
     let _ = stream.write_all(body).await;
 }
 
-/// Process an incoming message and return the response.
-///
-/// This function is public so it can be reused by other connection types
-/// (e.g., WebAppServer) that share the same message set.
-pub async fn process_message(
-    incoming: Incoming,
-    registry: &Registry,
-    write_values_handler: &Option<WriteValuesHandler>,
-    read_values_handler: &Option<ReadValuesHandler>,
-    validate_paths: bool,
-) -> Outgoing {
+/// Answer one incoming message. Everything but the subscription, which belongs
+/// to the connection that made it.
+async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
+    let Dispatch {
+        registry,
+        write_values: write_values_handler,
+        read_values: read_values_handler,
+        device,
+        validate_paths,
+    } = dispatch;
+    let validate_paths = *validate_paths;
     match incoming {
         Incoming::WriteValues { values } => {
             // Validate paths if enabled
@@ -563,7 +611,20 @@ pub async fn process_message(
         }
 
         Incoming::ListMethods { path } => {
-            let methods = registry.get_methods_filtered(path.as_deref()).await;
+            // The registry's own methods, then the device's — a module function
+            // is listed under its declared name, with the signature the device
+            // described, so nothing has to mirror it here.
+            let mut methods = registry.get_methods_filtered(path.as_deref()).await;
+            if let Some(device) = device {
+                let owned: HashSet<String> = methods.iter().map(|m| m.path.clone()).collect();
+                let prefix = path.as_deref().map(|p| p.trim_end_matches('/').to_string());
+                methods.extend(device.methods().await.into_iter().filter(|method| {
+                    !owned.contains(&method.path)
+                        && prefix
+                            .as_ref()
+                            .is_none_or(|prefix| method.path.starts_with(prefix.as_str()))
+                }));
+            }
             Outgoing::ListMethodsResp { methods }
         }
 
@@ -572,7 +633,15 @@ pub async fn process_message(
             args,
             request_id,
         } => {
-            let result = registry.invoke_method(&method, args).await;
+            // A name the registry owns is the server's own method; anything else
+            // is the device's, called by name on its described signature.
+            let result = if registry.has_method(&method).await {
+                registry.invoke_method(&method, args).await
+            } else if let Some(device) = device {
+                device.invoke(&method, args).await
+            } else {
+                InvokeResult::err(format!("Method not found: {method}"))
+            };
             Outgoing::InvokeResp {
                 success: result.success,
                 request_id,
@@ -580,6 +649,22 @@ pub async fn process_message(
                 message: result.message,
             }
         }
+
+        Incoming::Halt { run, request_id } => {
+            let result = match (Uuid::parse_str(&run), device) {
+                (Ok(run), Some(device)) => device.halt(run).await,
+                (Ok(_), None) => InvokeResult::err("no device to halt a run on"),
+                (Err(e), _) => InvokeResult::err(format!("'{run}' is not a run id: {e}")),
+            };
+            Outgoing::HaltResp {
+                success: result.success,
+                request_id,
+                message: result.message,
+            }
+        }
+
+        // The connection owns its subscription, and answers it there.
+        Incoming::Subscribe { keys } => Outgoing::SubscribeResp { keys },
     }
 }
 
