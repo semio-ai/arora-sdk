@@ -4,6 +4,18 @@ All notable changes to `arora-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-09-28
+
+### Added
+
+- `#[contract]`: functions several modules implement, each under its own
+  module id; see arora-module-macros 2.1.0.
+
+### Changed
+
+- Duplicate ids and names in a declaration fail the build; see
+  arora-module-macros 2.1.0.
+
 ## [2.0.0] - 2026-09-25
 
 ### Added

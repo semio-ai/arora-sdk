@@ -1,0 +1,5 @@
+error: a contract declares functions only, each with `#[export(id = "<uuid>")]`
+ --> tests/compile-fail/contract_associated_type.rs:4:5
+  |
+4 |     type Voice;
+  |     ^^^^^^^^^^^

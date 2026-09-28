@@ -1,0 +1,5 @@
+error: a contract declares at least one function
+ --> tests/compile-fail/contract_empty.rs:3:11
+  |
+3 | pub trait Speak {}
+  |           ^^^^^

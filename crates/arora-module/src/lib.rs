@@ -22,12 +22,32 @@
 //! the marker type `polly::Module`, which implements [`AroraModule`]. A host
 //! registers the module with `HostModule::of::<polly::Module>()`.
 //!
+//! A **contract** declares functions that several modules implement, each
+//! under its own module id — one `say` served by two speech providers, say.
+//! It is a trait whose methods take `&mut self`, so each implementation keeps
+//! its own state:
+//!
+//! ```ignore
+//! #[arora_module::contract(name = "say")]
+//! pub trait Say {
+//!   #[export(id = "e1b4bda7-…")]
+//!   fn say(&mut self, #[param(id = "fb3787f2-…")] text: String) -> Status;
+//! }
+//!
+//! impl Say for Cloud { fn say(&mut self, text: String) -> Status { … } }
+//! HostModule::from_exports(CLOUD_ID, say::exports(Cloud::new()));
+//! ```
+//!
+//! The declaration yields `say::ids`, `say::NAME`, `say::record(parent)` and
+//! `say::exports(implementation)`. A contract has no artifact entry points:
+//! an artifact exports one module's functions, declared with `#[module]`.
+//!
 //! **The executor is not the declaration's to name.** Only the step that
 //! builds the artifact knows whether it is native or wasm, so `header` takes
 //! it there. A module linked into the host has no header at all: it is
 //! registered from its exports and described by its record.
 
-pub use arora_module_macros::{declare_module, export, module, module_from_header};
+pub use arora_module_macros::{contract, declare_module, export, module, module_from_header};
 pub use arora_types::module::declared::{AroraFunction, AroraModule};
 
 /// What the generated code reaches through, so a module crate depends on this

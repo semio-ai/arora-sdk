@@ -1,0 +1,9 @@
+// A module's function takes no `self`.
+struct S;
+
+impl S {
+    #[arora_module::export(id = "5e1f0000-0000-4000-8000-000000000001")]
+    pub fn f(&self) {}
+}
+
+fn main() {}

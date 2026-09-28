@@ -1,0 +1,5 @@
+error: cannot read /nonexistent/module.yaml: No such file or directory (os error 2)
+ --> tests/compile-fail/module_from_header_missing_file.rs:2:35
+  |
+2 | arora_module::module_from_header!("/nonexistent/module.yaml");
+  |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^

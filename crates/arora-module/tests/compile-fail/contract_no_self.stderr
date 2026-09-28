@@ -1,0 +1,5 @@
+error: a contract function takes `&mut self`: each implementation keeps its own state
+ --> tests/compile-fail/contract_no_self.rs:4:67
+  |
+4 |     #[export(id = "5e1f0000-0000-4000-8000-000000000001")] fn say(#[param(id = "5e1f0000-0000-4000-8000-000000000002")] text: String);
+  |                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

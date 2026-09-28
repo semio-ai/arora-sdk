@@ -1,0 +1,5 @@
+error: version must be `major.minor.patch`
+ --> tests/compile-fail/module_bad_version.rs:2:79
+  |
+2 | #[arora_module::module(id = "5e1f0000-0000-4000-8000-000000000064", version = "1.0")]
+  |                                                                               ^^^^^

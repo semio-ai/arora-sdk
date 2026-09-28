@@ -1,0 +1,5 @@
+error: unsupported type (expected a named type)
+ --> tests/compile-fail/type_tuple.rs:3:67
+  |
+3 | pub fn f(#[param(id = "5e1f0000-0000-4000-8000-000000000002")] x: (u32, u32)) { unimplemented!() }
+  |                                                                   ^^^^^^^^^^

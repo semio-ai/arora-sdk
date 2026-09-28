@@ -1,0 +1,8 @@
+error[E0046]: not all trait items implemented, missing: `whisper`
+  --> tests/compile-fail/contract_missing_method.rs:13:1
+   |
+ 8 |     fn whisper(&mut self, #[param(id = "5e1f0000-0000-4000-8000-000000000004")] text: String);
+   |     ------------------------------------------------------------------------------------------ `whisper` from trait
+...
+13 | impl Speak for Loud {
+   | ^^^^^^^^^^^^^^^^^^^ missing `whisper` in implementation

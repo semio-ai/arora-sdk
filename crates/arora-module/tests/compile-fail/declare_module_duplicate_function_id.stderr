@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: functions `f` and `g` of module `m` share an id
+  --> tests/compile-fail/declare_module_duplicate_function_id.rs:12:5
+   |
+12 |     declare_module! { id = "5e1f0000-0000-4000-8000-000000000064", name = "m", exports = [f, g] }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `m::_` failed here

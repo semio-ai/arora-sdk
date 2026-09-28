@@ -14,6 +14,11 @@
 //!   knows whether it is native or wasm, so `header` takes it there.
 //! - `#[module(id = "…", …)]` on an **inline** Rust module is sugar: it scans
 //!   the module for `#[export]` functions and injects `declare_module!`.
+//! - `#[contract(name = "…")]` on a trait declares functions that several
+//!   modules implement, each under its own module id: its methods carry the
+//!   same `#[export]` and `#[param]` attributes, take `&mut self` and have no
+//!   body. It emits a sibling module holding `ids`, `NAME`, `record(parent)`
+//!   and `exports(implementation)`, and no artifact entry point.
 //! - `module_from_header!("…/module.yaml", types = ["<uuid>" => Type, …])`
 //!   is the consumer side for a module that is not a Rust declaration: ids
 //!   and typed stubs from its resolved header.
@@ -24,14 +29,19 @@
 //!
 //! Type mapping follows `#[derive(AroraType)]`: a Rust primitive maps by table
 //! to its well-known id, `PrimitiveKind` and `Value` variant; `Vec<T>` to an
-//! array of `T`; `arora_types::value::Value` to the dynamic KeyValue type; any
-//! other path is taken to be an `AroraType` that also converts through
-//! `From`/`TryFrom<Value>`. `&mut T` is a mutable parameter. `Option` and maps
-//! are rejected: the record vocabulary cannot express them.
+//! array of `T`; `arora_types::value::Value` to the dynamic KeyValue type;
+//! `Option<T>` to an optional of any of those but an array; any other path is
+//! taken to be an `AroraType` that also converts through
+//! `From`/`TryFrom<Value>`. `&mut T` is a mutable parameter. Maps are
+//! rejected: the record vocabulary cannot express them.
+//!
+//! Ids and names are checked at compile time: two functions of one module or
+//! contract cannot share an id or a name, nor two parameters of one function.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -371,15 +381,31 @@ impl Kind {
 // Attribute parsing
 // =============================================================================
 
+fn parse_uuid(literal: &str, span: Span) -> syn::Result<uuid::Uuid> {
+    uuid::Uuid::parse_str(literal).map_err(|e| syn::Error::new(span, format!("invalid uuid: {e}")))
+}
+
 fn uuid_expr(literal: &str, span: Span) -> syn::Result<TokenStream2> {
-    let uuid = uuid::Uuid::parse_str(literal)
-        .map_err(|e| syn::Error::new(span, format!("invalid uuid: {e}")))?;
+    let uuid = parse_uuid(literal, span)?;
     let bytes = uuid.as_bytes().iter().map(|b| quote! { #b });
     Ok(quote! { arora_types::Uuid::from_bytes([ #(#bytes),* ]) })
 }
 
 /// An id literal and where it was written, so a bad one is reported there.
 type SpannedId = (String, Span);
+
+/// The positions of the first key an earlier one equals, and of that earlier
+/// one: where a duplicate id or name is reported, and what it duplicates.
+fn first_duplicate<K: PartialEq>(keys: impl IntoIterator<Item = K>) -> Option<(usize, usize)> {
+    let mut seen: Vec<K> = Vec::new();
+    for (later, key) in keys.into_iter().enumerate() {
+        if let Some(earlier) = seen.iter().position(|k| *k == key) {
+            return Some((earlier, later));
+        }
+        seen.push(key);
+    }
+    None
+}
 
 /// Parse `#[<name>(id = "…", name = "…")]` out of `attrs`, removing it.
 fn take_id_attr(
@@ -438,6 +464,15 @@ struct Export {
     ret: Kind,
 }
 
+/// The receiver a declared function takes: none for a module's function, and
+/// `&mut self` for a contract's method, so each implementation keeps its own
+/// state.
+#[derive(Clone, Copy, PartialEq)]
+enum Receiver {
+    None,
+    MutSelf,
+}
+
 fn parse_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<Export> {
     // The attribute's own arguments arrive separately; reuse the id parser by
     // re-attaching them as an attribute.
@@ -446,10 +481,40 @@ fn parse_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<Export> {
     let Some((id, name)) = take_id_attr(&mut attrs, "export")? else {
         unreachable!("just attached");
     };
-    let ident = f.sig.ident.clone();
+    parse_signature(&mut f.sig, id, name, Receiver::None)
+}
+
+/// The declaration a function signature makes under `#[export]`: its
+/// parameters' ids (their `#[param]` attributes are removed), names and
+/// kinds, and its return kind.
+fn parse_signature(
+    sig: &mut syn::Signature,
+    id: SpannedId,
+    name: Option<String>,
+    receiver: Receiver,
+) -> syn::Result<Export> {
+    parse_uuid(&id.0, id.1)?;
+    let ident = sig.ident.clone();
     let name = name.unwrap_or_else(|| ident.to_string());
+    let sig_span = sig.span();
+    let mut inputs = sig.inputs.iter_mut();
+    if receiver == Receiver::MutSelf {
+        let is_mut_self = |arg: Option<&&mut FnArg>| {
+            matches!(arg, Some(FnArg::Receiver(r))
+                if matches!(r.kind, syn::ReceiverKind::Reference(_, _, Some(_))))
+        };
+        let first = inputs.next();
+        if !is_mut_self(first.as_ref()) {
+            return Err(syn::Error::new(
+                first.map_or(sig_span, |arg| arg.span()),
+                "a contract function takes `&mut self`: each implementation keeps its own state",
+            ));
+        }
+    }
     let mut params = Vec::new();
-    for arg in &mut f.sig.inputs {
+    for arg in inputs {
+        // A contract function's receiver was taken above, and Rust accepts
+        // no second one.
         let FnArg::Typed(pt) = arg else {
             return Err(syn::Error::new(
                 arg.span(),
@@ -478,15 +543,48 @@ fn parse_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<Export> {
             }
             other => (false, other.clone()),
         };
+        let param_name = param_name.unwrap_or_else(|| pat.ident.unraw().to_string());
+        // The name also spells the parameter's id constant.
+        if syn::parse_str::<Ident>(&upper_snake(&param_name)).is_err() {
+            return Err(syn::Error::new(
+                param_id.1,
+                format!("parameter name `{param_name}` is not a Rust identifier"),
+            ));
+        }
         params.push(Param {
-            name: param_name.unwrap_or_else(|| pat.ident.to_string()),
+            name: param_name,
             ident: pat.ident.clone(),
             id: param_id,
             kind: kind_of(&ty)?,
             mutable,
         });
     }
-    let ret = match &f.sig.output {
+    let ids = params
+        .iter()
+        .map(|p| parse_uuid(&p.id.0, p.id.1))
+        .collect::<syn::Result<Vec<_>>>()?;
+    if let Some((earlier, later)) = first_duplicate(ids) {
+        let (earlier, later) = (&params[earlier], &params[later]);
+        return Err(syn::Error::new(
+            later.id.1,
+            format!(
+                "parameters `{}` and `{}` of `{name}` share an id",
+                earlier.ident, later.ident
+            ),
+        ));
+    }
+    // Names are compared as the id constants they spell.
+    if let Some((earlier, later)) = first_duplicate(params.iter().map(|p| upper_snake(&p.name))) {
+        let (earlier, later) = (&params[earlier], &params[later]);
+        return Err(syn::Error::new(
+            later.ident.span(),
+            format!(
+                "parameters `{}` and `{}` of `{name}` share the name `{}`",
+                earlier.ident, later.ident, later.name
+            ),
+        ));
+    }
+    let ret = match &sig.output {
         ReturnType::Default => Kind::Unit,
         ReturnType::Type(_, ty) => kind_of(ty)?,
     };
@@ -516,12 +614,24 @@ pub fn export(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2> {
-    let export = parse_export(f, attr)?;
+/// How a declared function's `invoke` reaches its implementation.
+enum Callee<'a> {
+    /// The free function beside the declaration (`#[export]`).
+    Function,
+    /// The method of a value implementing the contract trait at this path,
+    /// which `invoke` takes as `this`.
+    Method(&'a TokenStream2),
+}
+
+/// What a declared function's module holds however the function is
+/// implemented: its ids, its name, the record references its signature pins,
+/// its frozen signature, and `invoke` — the call's arguments read out by
+/// parameter id, the implementation called, its result and mutated arguments
+/// returned.
+fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> {
     let fn_ident = &export.ident;
     let fn_name = &export.name;
     let fn_id = uuid_expr(&export.id.0, export.id.1)?;
-    let module_ident = export_module_ident(fn_ident);
     let fail = quote! { (|message: ::std::string::String| arora_types::call::CallError::Guest { message }) };
 
     let param_consts = export
@@ -535,20 +645,6 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
         })
         .collect::<syn::Result<Vec<_>>>()?;
     let fn_doc = format!("`{}`: {}", fn_name, export.id.0);
-
-    let header_params = export.params.iter().map(|p| {
-        let c = format_ident!("{}", upper_snake(&p.name));
-        let name = &p.name;
-        let ty = p.kind.type_ref();
-        let mutable = p.mutable;
-        quote! {
-          arora_types::module::low::Parameter {
-            id: ids::#c, name: #name.to_string(), ty: #ty, mutable: #mutable,
-            default_value: ::std::option::Option::None,
-          }
-        }
-    });
-    let ret_ref = export.ret.type_ref();
 
     let frozen_params = export.params.iter().map(|p| {
         let c = format_ident!("{}", upper_snake(&p.name));
@@ -622,31 +718,115 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
         }
     });
     let push_mutated = export.params.iter().filter(|p| p.mutable).map(|p| {
-    let c = format_ident!("{}", upper_snake(&p.name));
-    let ident = &p.ident;
-    let encode = p.kind.encode(quote! { #ident });
-    quote! {
-      __mutated.push(arora_types::value::StructureField { id: ids::#c, value: ::std::boxed::Box::new(#encode) });
-    }
-  });
-    let encode_ret = export.ret.encode(quote! { __ret });
-
-    // The client stub: build the call by id, dispatch through a bridge, decode.
-    let stub_params = export.params.iter().map(|p| {
+        let c = format_ident!("{}", upper_snake(&p.name));
         let ident = &p.ident;
-        let ty = p.kind.rust_type();
-        if p.mutable {
-            quote! { #ident: &mut #ty }
-        } else {
-            quote! { #ident: #ty }
+        let encode = p.kind.encode(quote! { #ident });
+        quote! {
+          __mutated.push(arora_types::value::StructureField { id: ids::#c, value: ::std::boxed::Box::new(#encode) });
         }
     });
+    let encode_ret = export.ret.encode(quote! { __ret });
+
+    let (generics, this, call) = match callee {
+        Callee::Function => (
+            quote! {},
+            quote! {},
+            quote! { super::#fn_ident(#(#call_args),*) },
+        ),
+        Callee::Method(contract) => (
+            quote! { <T: #contract + ?Sized> },
+            quote! { this: &mut T, },
+            quote! { this.#fn_ident(#(#call_args),*) },
+        ),
+    };
+
+    Ok(quote! {
+      pub mod ids {
+        use ::arora_module::__rt::types as arora_types;
+
+        #[doc = #fn_doc]
+        pub const FUNCTION: arora_types::Uuid = #fn_id;
+        #(#param_consts)*
+      }
+
+      /// The function's name.
+      pub const NAME: &str = #fn_name;
+
+      /// The record references this function's signature pins (its user
+      /// types, versioned) — a module record's dependencies.
+      pub fn dependencies() -> ::std::vec::Vec<arora_types::record::FrozenReference> {
+        let mut out = ::std::vec::Vec::new();
+        #(#dependency_pushes)*
+        out
+      }
+
+      /// The frozen signature a described function carries.
+      pub fn signature() -> arora_types::record::module::frozen::Function {
+        let mut parameters = ::std::collections::HashMap::new();
+        let mut parameter_ordering = ::std::vec::Vec::new();
+        #(#frozen_params)*
+        arora_types::record::module::frozen::Function { parameters, parameter_ordering, return_ty: #ret_frozen }
+      }
+
+      /// The invocation: arguments out of the call by parameter id, the
+      /// implementation, the result back. Shared by every way the function is
+      /// reached — the ABI differs, the marshalling does not.
+      pub fn invoke #generics (#this call: arora_types::call::Call) -> ::std::result::Result<arora_types::call::CallResult, arora_types::call::CallError> {
+        let mut __mutated: ::std::vec::Vec<arora_types::value::StructureField> = ::std::vec::Vec::new();
+        #(#decode_params)*
+        let __ret = #call;
+        #(#push_mutated)*
+        ::std::result::Result::Ok(arora_types::call::CallResult { ret: #encode_ret, mutated: __mutated })
+      }
+    })
+}
+
+fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2> {
+    let export = parse_export(f, attr)?;
+    let fn_ident = &export.ident;
+    let fn_name = &export.name;
+    let module_ident = export_module_ident(fn_ident);
+    let fail = quote! { (|message: ::std::string::String| arora_types::call::CallError::Guest { message }) };
+    let items = function_items(&export, Callee::Function)?;
+
+    let header_params = export.params.iter().map(|p| {
+        let c = format_ident!("{}", upper_snake(&p.name));
+        let name = &p.name;
+        let ty = p.kind.type_ref();
+        let mutable = p.mutable;
+        quote! {
+          arora_types::module::low::Parameter {
+            id: ids::#c, name: #name.to_string(), ty: #ty, mutable: #mutable,
+            default_value: ::std::option::Option::None,
+          }
+        }
+    });
+    let ret_ref = export.ret.type_ref();
+
+    // The client stub: build the call by id, dispatch through a bridge, decode.
+    let stub_params: Vec<TokenStream2> = export
+        .params
+        .iter()
+        .map(|p| {
+            let ident = &p.ident;
+            let ty = p.kind.rust_type();
+            if p.mutable {
+                quote! { #ident: &mut #ty }
+            } else {
+                quote! { #ident: #ty }
+            }
+        })
+        .collect();
     let stub_args = export.params.iter().map(|p| {
-    let c = format_ident!("{}", upper_snake(&p.name));
-    let ident = &p.ident;
-    let encode = if p.mutable { p.kind.encode(quote! { ::std::clone::Clone::clone(&*#ident) }) } else { p.kind.encode(quote! { #ident }) };
-    quote! { arora_types::value::StructureField { id: ids::#c, value: ::std::boxed::Box::new(#encode) } }
-  });
+        let c = format_ident!("{}", upper_snake(&p.name));
+        let ident = &p.ident;
+        let encode = if p.mutable {
+            p.kind.encode(quote! { ::std::clone::Clone::clone(&*#ident) })
+        } else {
+            p.kind.encode(quote! { #ident })
+        };
+        quote! { arora_types::value::StructureField { id: ids::#c, value: ::std::boxed::Box::new(#encode) } }
+    });
     let stub_read_mutated = export.params.iter().filter(|p| p.mutable).map(|p| {
         let c = format_ident!("{}", upper_snake(&p.name));
         let ident = &p.ident;
@@ -666,27 +846,7 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
 
     let shim_ident = format_ident!("arora_function_{}", export.id.0.replace('-', "_"));
     let client_macro_ident = format_ident!("__arora_client_{}", fn_ident);
-    let client_params: Vec<TokenStream2> = export
-        .params
-        .iter()
-        .map(|p| {
-            let ident = &p.ident;
-            let ty = p.kind.rust_type();
-            if p.mutable {
-                quote! { #ident: &mut #ty }
-            } else {
-                quote! { #ident: #ty }
-            }
-        })
-        .collect();
-    let client_args: Vec<TokenStream2> = export
-        .params
-        .iter()
-        .map(|p| {
-            let ident = &p.ident;
-            quote! { #ident }
-        })
-        .collect();
+    let client_args = export.params.iter().map(|p| &p.ident);
 
     Ok(quote! {
       #f
@@ -701,7 +861,7 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
           /// The stub for this export, bound to the module's id.
           pub fn #fn_ident<B: arora_types::call::CallBridge + ?Sized>(
             bridge: &mut B,
-            #(#client_params),*
+            #(#stub_params),*
           ) -> ::std::result::Result<#ret_ty, arora_types::call::CallError> {
             super::#module_ident::call(bridge, $module_id, #(#client_args),*)
           }
@@ -714,13 +874,7 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
         use super::*;
         use ::arora_module::__rt::{buffers as arora_buffers, types as arora_types};
 
-        pub mod ids {
-          use ::arora_module::__rt::types as arora_types;
-
-          #[doc = #fn_doc]
-          pub const FUNCTION: arora_types::Uuid = #fn_id;
-          #(#param_consts)*
-        }
+        #items
 
         /// The export as a header declares it.
         pub fn export() -> arora_types::module::low::ExportSymbol {
@@ -730,33 +884,6 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
             parameters: vec![ #(#header_params),* ],
             ret: #ret_ref,
           })
-        }
-
-        /// The record references this function's signature pins (its user
-        /// types, versioned) — a module record's dependencies.
-        pub fn dependencies() -> ::std::vec::Vec<arora_types::record::FrozenReference> {
-          let mut out = ::std::vec::Vec::new();
-          #(#dependency_pushes)*
-          out
-        }
-
-        /// The frozen signature a described function carries.
-        pub fn signature() -> arora_types::record::module::frozen::Function {
-          let mut parameters = ::std::collections::HashMap::new();
-          let mut parameter_ordering = ::std::vec::Vec::new();
-          #(#frozen_params)*
-          arora_types::record::module::frozen::Function { parameters, parameter_ordering, return_ty: #ret_frozen }
-        }
-
-        /// The invocation: arguments out of the call by parameter id, the Rust
-        /// function, the result back. Shared by the host closure and the guest
-        /// shim — the ABI differs, the marshalling does not.
-        pub fn invoke(call: arora_types::call::Call) -> ::std::result::Result<arora_types::call::CallResult, arora_types::call::CallError> {
-          let mut __mutated: ::std::vec::Vec<arora_types::value::StructureField> = ::std::vec::Vec::new();
-          #(#decode_params)*
-          let __ret = super::#fn_ident(#(#call_args),*);
-          #(#push_mutated)*
-          ::std::result::Result::Ok(arora_types::call::CallResult { ret: #encode_ret, mutated: __mutated })
         }
 
         /// The export in its callable form: what a host registers, and what
@@ -921,8 +1048,8 @@ impl Parse for ModuleArgs {
 }
 
 /// `declare_module! { id = "…", name = "…", …, exports = [a, b] }`: the
-/// aggregate — `ids`, `header()`, `host_functions()` — from the named
-/// `#[export]`s.
+/// aggregate — `ids`, `header(executor)`, `exports()`, `record(parent)`,
+/// `client` and the `Module` marker — from the named `#[export]`s.
 #[proc_macro]
 pub fn declare_module(input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(input as ModuleArgs);
@@ -982,6 +1109,54 @@ fn expand_module_attr(mut args: ModuleArgs, module: &mut ItemMod) -> syn::Result
     Ok(quote! { #module })
 }
 
+/// A compile-time check that no two of a module's exports share an id or a
+/// name. The aggregate may not see the exports' attributes (`declare_module!`
+/// in a file of its own names them only), so it compares the constants each
+/// export's declaration emits, in a const block: a duplicate fails the build
+/// naming both functions.
+fn distinct_exports_check(
+    module_name: &str,
+    exports: &[Ident],
+    export_mods: &[Ident],
+) -> TokenStream2 {
+    let mut pairs = Vec::new();
+    for (i, (a, a_mod)) in exports.iter().zip(export_mods).enumerate() {
+        for (b, b_mod) in exports.iter().zip(export_mods).skip(i + 1) {
+            let same_id =
+                format!("functions `{a}` and `{b}` of module `{module_name}` share an id");
+            let same_name =
+                format!("functions `{a}` and `{b}` of module `{module_name}` share a name");
+            pairs.push(quote! {
+              if #a_mod::ids::FUNCTION.as_u128() == #b_mod::ids::FUNCTION.as_u128() {
+                panic!("{}", #same_id);
+              }
+              if same(#a_mod::NAME, #b_mod::NAME) {
+                panic!("{}", #same_name);
+              }
+            });
+        }
+    }
+    quote! {
+      const _: () = {
+        const fn same(a: &str, b: &str) -> bool {
+          let (a, b) = (a.as_bytes(), b.as_bytes());
+          if a.len() != b.len() {
+            return false;
+          }
+          let mut i = 0;
+          while i < a.len() {
+            if a[i] != b[i] {
+              return false;
+            }
+            i += 1;
+          }
+          true
+        }
+        #(#pairs)*
+      };
+    }
+}
+
 fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<TokenStream2> {
     let module_id = uuid_expr(&args.id.0, args.id.1)?;
     let module_name = args
@@ -1009,11 +1184,14 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
     let id_reexports = exports.iter().zip(&export_mods).map(|(fn_ident, m)| {
         quote! { pub use super::#m::ids as #fn_ident; }
     });
+    let distinct = distinct_exports_check(&module_name, &exports, &export_mods);
 
     // Wrapped in a const block: a `module!` invocation must expand to items,
     // and a `mod` item cannot be spliced into the middle of a file twice.
     Ok(quote! {
       use ::arora_module::__rt::types as arora_types;
+
+      #distinct
 
       /// The module's ids: its own, and one submodule per exported function
       /// holding `FUNCTION` and the parameter ids.
@@ -1027,9 +1205,7 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
       /// The module's header — what a `module.yaml` declares, in the resolved
       /// (`low`) form the runtime loads. The executor is the exporter's to
       /// name: a declaration does not know whether it will be built native or
-      /// wasm, so `header` takes it from the step that builds the artifact
-      /// (in the SDK: `Header::executor` becomes `Option`, `None` here, and a
-      /// load refuses `None`).
+      /// wasm, so `header` takes it from the step that builds the artifact.
       pub fn header(executor: arora_types::module::low::Executor) -> arora_types::module::low::Header {
         arora_types::module::low::Header {
           id: ids::MODULE,
@@ -1102,6 +1278,234 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
 }
 
 // =============================================================================
+// #[contract]
+// =============================================================================
+
+struct ContractArgs {
+    name: Option<String>,
+}
+
+/// `name = "…"`, or nothing.
+impl Parse for ContractArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut name = None;
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            if key != "name" {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!("unknown contract attribute `{key}` (expected `name = \"…\"`)"),
+                ));
+            }
+            input.parse::<Token![=]>()?;
+            name = Some(input.parse::<syn::LitStr>()?.value());
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(ContractArgs { name })
+    }
+}
+
+/// `PlayViseme` → `play_viseme`: the module a contract's declaration lands in.
+fn snake_case(ident: &str) -> String {
+    let chars: Vec<char> = ident.chars().collect();
+    let mut out = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() {
+            let prev = i.checked_sub(1).map(|j| chars[j]);
+            let next = chars.get(i + 1);
+            let word_start = prev.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit())
+                || (prev.is_some_and(char::is_uppercase) && next.is_some_and(|n| n.is_lowercase()));
+            if word_start {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `#[contract(name = "…")]` on a trait: functions several modules implement,
+/// each under its own module id. The trait's methods carry `#[export]` and
+/// `#[param]` as a module's functions do, take `&mut self` and have no body.
+/// Beside the trait, a module named after it in snake case holds `ids`,
+/// `NAME`, `record(parent)` and `exports(implementation)`.
+#[proc_macro_attribute]
+pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as ContractArgs);
+    let mut contract = parse_macro_input!(item as syn::ItemTrait);
+    expand_contract(args, &mut contract)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn expand_contract(args: ContractArgs, contract: &mut syn::ItemTrait) -> syn::Result<TokenStream2> {
+    if !contract.generics.params.is_empty() || contract.generics.where_clause.is_some() {
+        return Err(syn::Error::new(
+            contract.generics.span(),
+            "a contract takes no generics: its functions' types are fixed",
+        ));
+    }
+    let trait_ident = contract.ident.clone();
+    let module_ident = format_ident!("{}", snake_case(&trait_ident.to_string()));
+    let contract_name = args.name.unwrap_or_else(|| module_ident.to_string());
+    let mut functions = Vec::new();
+    for item in &mut contract.items {
+        let syn::TraitItem::Fn(method) = item else {
+            return Err(syn::Error::new(
+                item.span(),
+                "a contract declares functions only, each with `#[export(id = \"<uuid>\")]`",
+            ));
+        };
+        let Some((id, name)) = take_id_attr(&mut method.attrs, "export")? else {
+            return Err(syn::Error::new(
+                method.sig.ident.span(),
+                "every function of a contract needs `#[export(id = \"<uuid>\")]`",
+            ));
+        };
+        if let Some(body) = &method.default {
+            return Err(syn::Error::new(
+                body.span(),
+                "a contract function has no body: each implementation provides it",
+            ));
+        }
+        functions.push(parse_signature(
+            &mut method.sig,
+            id,
+            name,
+            Receiver::MutSelf,
+        )?);
+    }
+    if functions.is_empty() {
+        return Err(syn::Error::new(
+            trait_ident.span(),
+            "a contract declares at least one function",
+        ));
+    }
+    let ids = functions
+        .iter()
+        .map(|f| parse_uuid(&f.id.0, f.id.1))
+        .collect::<syn::Result<Vec<_>>>()?;
+    if let Some((earlier, later)) = first_duplicate(ids) {
+        let (earlier, later) = (&functions[earlier], &functions[later]);
+        return Err(syn::Error::new(
+            later.id.1,
+            format!(
+                "functions `{}` and `{}` of contract `{contract_name}` share an id",
+                earlier.ident, later.ident
+            ),
+        ));
+    }
+    if let Some((earlier, later)) = first_duplicate(functions.iter().map(|f| &f.name)) {
+        let (earlier, later) = (&functions[earlier], &functions[later]);
+        return Err(syn::Error::new(
+            later.ident.span(),
+            format!(
+                "functions `{}` and `{}` of contract `{contract_name}` share the name `{}`",
+                earlier.ident, later.ident, later.name
+            ),
+        ));
+    }
+
+    let vis = &contract.vis;
+    let contract_path = quote! { super::super::#trait_ident };
+    let fn_idents: Vec<&Ident> = functions.iter().map(|f| &f.ident).collect();
+    let fn_mods: Vec<Ident> = fn_idents.iter().map(|i| export_module_ident(i)).collect();
+    let fn_items = functions
+        .iter()
+        .zip(&fn_mods)
+        .map(|(f, m)| {
+            let items = function_items(f, Callee::Method(&contract_path))?;
+            Ok(quote! {
+              #[doc(hidden)]
+              #[allow(non_snake_case, unused_imports, clippy::all)]
+              pub mod #m {
+                use super::*;
+                use ::arora_module::__rt::types as arora_types;
+
+                #items
+              }
+            })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    let module_doc = format!("The declaration of the [`{trait_ident}`] contract.");
+
+    Ok(quote! {
+      #contract
+
+      #[doc = #module_doc]
+      #vis mod #module_ident {
+        use super::*;
+        use ::arora_module::__rt::types as arora_types;
+
+        #(#fn_items)*
+
+        /// The contract's ids: one submodule per function, holding
+        /// `FUNCTION` and the parameter ids.
+        pub mod ids {
+          #(pub use super::#fn_mods::ids as #fn_idents;)*
+        }
+
+        /// The contract's name: what a module implementing it is named in
+        /// its record.
+        pub const NAME: &str = #contract_name;
+
+        /// The contract as a module **record** — the frozen form a store
+        /// serves: its functions keyed by id with their frozen signatures,
+        /// and the versioned type references they depend on. `parent` is the
+        /// folder the record lives under; a module implementing the contract
+        /// is stored under its own id.
+        pub fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module {
+          let mut exports = ::std::collections::HashMap::new();
+          let mut dependencies: ::std::vec::Vec<arora_types::record::FrozenReference> = ::std::vec::Vec::new();
+          #(
+            exports.insert(#fn_mods::ids::FUNCTION, arora_types::record::module::frozen::Export {
+              name: #fn_mods::NAME.to_string(),
+              kind: arora_types::record::module::frozen::ExportKind::Function(#fn_mods::signature()),
+            });
+            for dependency in #fn_mods::dependencies() {
+              if !dependencies.contains(&dependency) {
+                dependencies.push(dependency);
+              }
+            }
+          )*
+          arora_types::record::module::frozen::Module {
+            parent,
+            name: NAME.to_string(),
+            exports,
+            executable: ::std::option::Option::None,
+            dependencies,
+          }
+        }
+
+        /// Every function of the contract, callable on `implementation`:
+        /// what a host registers under the id of the module that implements
+        /// it. The functions share the one implementation, each call reaching
+        /// it through `&mut self`.
+        pub fn exports<T: super::#trait_ident + 'static>(
+          implementation: T,
+        ) -> ::std::vec::Vec<arora_types::module::declared::AroraFunction> {
+          let implementation = ::std::rc::Rc::new(::std::cell::RefCell::new(implementation));
+          vec![
+            #({
+              let implementation = ::std::rc::Rc::clone(&implementation);
+              arora_types::module::declared::AroraFunction {
+                id: #fn_mods::ids::FUNCTION,
+                name: #fn_mods::NAME,
+                signature: #fn_mods::signature(),
+                invoke: ::std::boxed::Box::new(move |call| #fn_mods::invoke(&mut *implementation.borrow_mut(), call)),
+              }
+            }),*
+          ]
+        }
+      }
+    })
+}
+
+// =============================================================================
 // module_from_header!("path/module.yaml", types = ["<uuid>" => Type, …])
 // =============================================================================
 
@@ -1140,7 +1544,8 @@ impl Parse for FromHeaderArgs {
 }
 
 /// The consumer side for a module that is not a Rust declaration: from its
-/// resolved (`low`) header, `ids`, `header()` and one `call` stub per export.
+/// resolved (`low`) header, `ids`, `HEADER_YAML`, `NAME` and one stub per
+/// export.
 /// User types are named by the `types` map (`"<uuid>" => Type`); a user type
 /// left unmapped is passed as a raw `Value`.
 #[proc_macro]
@@ -1305,4 +1710,104 @@ fn expand_from_header(args: &FromHeaderArgs) -> syn::Result<TokenStream2> {
 
       #(#stubs)*
     })
+}
+
+/// The errors `module_from_header!` reports on a header's contents, which a
+/// compile-fail case cannot reach: the macro reads the header relative to the
+/// crate being compiled, and a case has no header of its own to point at.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arora_types::module::low::{
+        Executor, ExportFunction, ExportSymbol, Header, Parameter, TypeRef,
+    };
+
+    /// What `module_from_header!` reports on a header file holding `yaml`.
+    fn error_on(file: &str, yaml: &str) -> String {
+        let path = std::env::temp_dir().join(format!(
+            "arora-module-macros-{}-{file}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, yaml).expect("write the header");
+        let args = FromHeaderArgs {
+            path: syn::LitStr::new(&path.display().to_string(), Span::call_site()),
+            types: Vec::new(),
+        };
+        let error = expand_from_header(&args).expect_err("the header is refused");
+        std::fs::remove_file(&path).expect("remove the header");
+        error.to_string()
+    }
+
+    /// A header exporting `f(x: <ty>)`.
+    fn header_with_parameter(ty: TypeRef) -> String {
+        let header = Header {
+            id: uuid::Uuid::from_u128(1),
+            name: "m".to_string(),
+            author: String::new(),
+            description: None,
+            license: String::new(),
+            version: arora_types::SemanticVersion {
+                major: 0,
+                minor: 1,
+                patch: 0,
+            },
+            executor: Executor {
+                name: "wasm".to_string(),
+                min_version: None,
+                max_version: None,
+            },
+            exports: vec![ExportSymbol::Function(ExportFunction {
+                id: uuid::Uuid::from_u128(2),
+                name: "f".to_string(),
+                parameters: vec![Parameter {
+                    id: uuid::Uuid::from_u128(3),
+                    name: "x".to_string(),
+                    ty,
+                    mutable: false,
+                    default_value: None,
+                }],
+                ret: TypeRef::Scalar {
+                    id: *arora_types::ty::UNIT_ID,
+                },
+            })],
+            imports: Vec::new(),
+            executable_mime: String::new(),
+        };
+        serde_yaml::to_string(&header).expect("a header serializes")
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_header_is_refused() {
+        let error = error_on("not-a-header", "just: text\n");
+        assert!(error.starts_with("not a module header"), "{error}");
+    }
+
+    #[test]
+    fn an_optional_of_unit_is_refused() {
+        let yaml = header_with_parameter(TypeRef::Option {
+            id: *arora_types::ty::UNIT_ID,
+        });
+        assert_eq!(
+            error_on("optional-unit", &yaml),
+            "an optional of unit has no meaning"
+        );
+    }
+
+    #[test]
+    fn fixed_arrays_and_maps_are_refused() {
+        let fixed = header_with_parameter(TypeRef::FixedArray {
+            id: *arora_types::ty::U8_ID,
+            len: 4,
+        });
+        let map = header_with_parameter(TypeRef::Map {
+            key_id: *arora_types::ty::STRING_ID,
+            value_id: *arora_types::ty::U8_ID,
+        });
+        for (file, yaml) in [("fixed-array", fixed), ("map", map)] {
+            assert_eq!(
+                error_on(file, &yaml),
+                "fixed arrays and maps are not supported by the header macro yet"
+            );
+        }
+    }
 }

@@ -1,0 +1,5 @@
+error: parameter name `frame rate` is not a Rust identifier
+ --> tests/compile-fail/param_name_not_an_identifier.rs:3:23
+  |
+3 | pub fn f(#[param(id = "5e1f0000-0000-4000-8000-000000000002", name = "frame rate")] x: u32) { unimplemented!() }
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

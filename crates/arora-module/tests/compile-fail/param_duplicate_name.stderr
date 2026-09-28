@@ -1,0 +1,5 @@
+error: parameters `x` and `y` of `f` share the name `x`
+ --> tests/compile-fail/param_duplicate_name.rs:3:138
+  |
+3 | ...param(id = "5e1f0000-0000-4000-8000-000000000003", name = "x")] y: u32) { unimplemented!() }
+  |                                                                    ^

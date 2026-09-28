@@ -1,0 +1,5 @@
+error: every parameter of an exported function needs `#[param(id = "<uuid>")]`
+ --> tests/compile-fail/param_without_id.rs:3:10
+  |
+3 | pub fn f(x: u32) { unimplemented!() }
+  |          ^^^^^^

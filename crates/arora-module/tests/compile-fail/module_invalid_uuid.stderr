@@ -1,0 +1,5 @@
+error: invalid uuid: invalid length: found 4
+ --> tests/compile-fail/module_invalid_uuid.rs:2:29
+  |
+2 | #[arora_module::module(id = "0000")]
+  |                             ^^^^^^

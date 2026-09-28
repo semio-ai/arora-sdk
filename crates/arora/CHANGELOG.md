@@ -4,6 +4,13 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.2.0] - 2026-09-28
+
+### Added
+
+- The re-exported `HostModule` has `from_exports`: depends on arora-engine
+  5.1.
+
 ## [10.1.0] - 2026-09-28
 
 ### Added

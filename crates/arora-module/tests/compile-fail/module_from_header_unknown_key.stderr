@@ -1,0 +1,5 @@
+error: expected `types = ["<uuid>" => Type, …]`
+ --> tests/compile-fail/module_from_header_unknown_key.rs:2:50
+  |
+2 | arora_module::module_from_header!("module.yaml", kinds = []);
+  |                                                  ^^^^^

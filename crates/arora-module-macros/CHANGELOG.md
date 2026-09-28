@@ -4,6 +4,31 @@ All notable changes to `arora-module-macros`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-09-28
+
+### Added
+
+- `#[contract(name = "…")]` on a trait: functions several modules implement,
+  each under its own module id. The trait's methods carry `#[export]` and
+  `#[param]`, take `&mut self` and have no body. Beside the trait, a module
+  named after it in snake case holds `ids`, `NAME`, `record(parent)` and
+  `exports(implementation)`, whose functions share the implementation. A
+  contract emits no artifact entry points.
+- Each export's declaration carries its name as a constant, `NAME`.
+
+### Changed
+
+- The build fails when two functions of one module or contract share an id or
+  a name, or two parameters of one function do. Before, the later one
+  silently replaced the earlier in the signature or the host module.
+- A parameter name that is not a Rust identifier is reported as such, at the
+  `#[param]` attribute; the macro used to panic on it.
+
+### Fixed
+
+- The crate docs no longer say `Option` is rejected, and describe what
+  `declare_module!` and `module_from_header!` generate.
+
 ## [2.0.0] - 2026-09-25
 
 ### Added

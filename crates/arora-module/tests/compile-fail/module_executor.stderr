@@ -1,0 +1,5 @@
+error: a declaration does not name an executor: only the export that builds the artifact knows whether it is native or wasm — `header(executor)` takes it there
+ --> tests/compile-fail/module_executor.rs:2:69
+  |
+2 | #[arora_module::module(id = "5e1f0000-0000-4000-8000-000000000064", executor = "wasm")]
+  |                                                                     ^^^^^^^^

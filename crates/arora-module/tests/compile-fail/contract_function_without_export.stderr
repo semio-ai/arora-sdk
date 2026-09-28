@@ -1,0 +1,5 @@
+error: every function of a contract needs `#[export(id = "<uuid>")]`
+ --> tests/compile-fail/contract_function_without_export.rs:4:8
+  |
+4 |     fn say(&mut self);
+  |        ^^^

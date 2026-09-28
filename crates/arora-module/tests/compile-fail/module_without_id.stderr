@@ -1,0 +1,7 @@
+error: a module declaration requires `id = "<uuid>"`
+ --> tests/compile-fail/module_without_id.rs:2:1
+  |
+2 | #[arora_module::module(name = "m")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `arora_module::module` (in Nightly builds, run with -Z macro-backtrace for more info)

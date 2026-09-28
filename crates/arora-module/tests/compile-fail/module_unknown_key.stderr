@@ -1,0 +1,5 @@
+error: unknown module attribute `homepage`
+ --> tests/compile-fail/module_unknown_key.rs:2:69
+  |
+2 | #[arora_module::module(id = "5e1f0000-0000-4000-8000-000000000064", homepage = "https://example.com")]
+  |                                                                     ^^^^^^^^

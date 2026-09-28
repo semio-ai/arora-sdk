@@ -1,0 +1,5 @@
+error: invalid uuid: invalid character: found `n` at 0
+ --> tests/compile-fail/export_invalid_uuid.rs:2:29
+  |
+2 | #[arora_module::export(id = "not-a-uuid")]
+  |                             ^^^^^^^^^^^^

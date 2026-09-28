@@ -1,0 +1,5 @@
+error: parameters `x` and `y` of `f` share an id
+ --> tests/compile-fail/param_duplicate_id.rs:3:85
+  |
+3 | pub fn f(#[param(id = "5e1f0000-0000-4000-8000-000000000002")] x: u32, #[param(id = "5E1F0000-0000-4000-8000-000000000002")] y: u32) ...
+  |                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

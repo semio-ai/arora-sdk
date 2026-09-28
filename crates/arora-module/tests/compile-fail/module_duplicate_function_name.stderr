@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: functions `f` and `g` of module `m` share a name
+ --> tests/compile-fail/module_duplicate_function_name.rs:2:1
+  |
+2 | #[arora_module::module(id = "5e1f0000-0000-4000-8000-000000000064")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `m::_` failed here

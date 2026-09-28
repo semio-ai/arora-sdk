@@ -1,0 +1,5 @@
+error: functions `say` and `whisper` of contract `speak` share an id
+ --> tests/compile-fail/contract_duplicate_function_id.rs:5:19
+  |
+5 |     #[export(id = "5e1f0000-0000-4000-8000-000000000001")] fn whisper(&mut self);
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -199,6 +199,11 @@ The workspace handles cross-compilation via artifact dependencies:
    `#[export(id = "…")]` / `#[param(id = "…")]` on its functions
 4. Build and test; a host registers it with `HostModule::of::<M>()`
 
+Functions that several modules implement, each under its own module id, are
+declared once as a contract: `#[arora_module::contract]` on a trait whose
+methods take `&mut self`. A host registers an implementation with
+`HostModule::from_exports(module_id, contract::exports(implementation))`.
+
 See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) (wasm guest) or
 [`modules/polly/`](modules/polly/) (native) for working examples.
 

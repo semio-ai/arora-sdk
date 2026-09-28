@@ -1,0 +1,14 @@
+error[E0658]: file modules in proc macro input are unstable
+ --> tests/compile-fail/module_out_of_line.rs:3:1
+  |
+3 | mod elsewhere;
+  | ^^^^^^^^^^^^^^
+  |
+  = note: see issue #54727 <https://github.com/rust-lang/rust/issues/54727> for more information
+  = help: add `#![feature(proc_macro_hygiene)]` to the crate attributes to enable
+
+error: #[module] must be on an inline module (`mod name { … }`): an attribute macro does not see the items of `mod name;` — put `declare_module! { …, exports = […] }` inside that file instead
+ --> tests/compile-fail/module_out_of_line.rs:3:1
+  |
+3 | mod elsewhere;
+  | ^^^^^^^^^^^^^^

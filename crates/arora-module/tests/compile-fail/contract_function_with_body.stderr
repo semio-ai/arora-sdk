@@ -1,0 +1,5 @@
+error: a contract function has no body: each implementation provides it
+ --> tests/compile-fail/contract_function_with_body.rs:4:78
+  |
+4 |     #[export(id = "5e1f0000-0000-4000-8000-000000000001")] fn say(&mut self) {}
+  |                                                                              ^^

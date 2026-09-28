@@ -1,0 +1,5 @@
+error: `Vec` needs a type argument
+ --> tests/compile-fail/type_vec_without_element.rs:3:67
+  |
+3 | pub fn f(#[param(id = "5e1f0000-0000-4000-8000-000000000002")] x: Vec) { unimplemented!() }
+  |                                                                   ^^^

@@ -1,0 +1,5 @@
+error: unknown `export` attribute (expected `id = "…"`)
+ --> tests/compile-fail/export_unknown_key.rs:2:69
+  |
+2 | #[arora_module::export(id = "5e1f0000-0000-4000-8000-000000000001", version = "1.0.0")]
+  |                                                                     ^^^^^^^

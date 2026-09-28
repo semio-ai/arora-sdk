@@ -43,6 +43,40 @@ declare_module! {
 }
 ```
 
+## Several modules, one set of functions: contracts
+
+A **contract** declares functions that several modules implement, each under
+its own module id: one `say`, served by a cloud speech provider on one device
+and by a local one on another. It is a trait whose methods take `&mut self`,
+so each implementation keeps its own state, and have no body:
+
+```rust
+#[arora_module::contract(name = "say")]
+pub trait Say {
+  #[export(id = "e1b4bda7-…")]
+  fn say(&mut self,
+         #[param(id = "fb3787f2-…")] text: String,
+         #[param(id = "5d0c7e91-…")] voice: Option<String>) -> Status;
+}
+
+impl Say for Cloud { fn say(&mut self, text: String, voice: Option<String>) -> Status { … } }
+
+let module = HostModule::from_exports(CLOUD_ID, say::exports(Cloud::new()));
+```
+
+Beside the trait, the module `say` (the trait's name in snake case) holds:
+
+| | |
+|---|---|
+| `say::ids` | per function, its id and parameter ids |
+| `say::NAME` | the contract's name, `name = "…"` or the module's |
+| `say::record(parent)` | the frozen module record of an implementation |
+| `say::exports(implementation)` | every function callable on `implementation`, for `HostModule::from_exports` |
+
+rustc checks that each implementation provides every function with its
+declared signature. A contract has no artifact entry points: an artifact
+exports one module's functions, declared with `#[module]`.
+
 ## Calling a module that is not a Rust declaration
 
 `module_from_header!` reads a resolved header at expansion and produces the
@@ -70,3 +104,9 @@ return. A caller may leave an optional argument out, or send
 arrives wrapped in `Value::Option`, or as its bare element; either way the
 element's type is checked. Any other parameter is required: a call without it
 fails, naming the parameter.
+
+## Checked at compile time
+
+Two functions of one module or contract cannot share an id or a name, nor two
+parameters of one function; the build fails naming both. A parameter's name
+spells its id constant, so it is a Rust identifier.

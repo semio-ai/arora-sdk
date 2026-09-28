@@ -1,0 +1,5 @@
+error: `declare_module!` requires `exports = [fn, …]`
+ --> tests/compile-fail/declare_module_without_exports.rs:8:28
+  |
+8 |     declare_module! { id = "5e1f0000-0000-4000-8000-000000000064", name = "m" }
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

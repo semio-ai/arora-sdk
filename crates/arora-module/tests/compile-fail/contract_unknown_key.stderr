@@ -1,0 +1,5 @@
+error: unknown contract attribute `version` (expected `name = "…"`)
+ --> tests/compile-fail/contract_unknown_key.rs:2:42
+  |
+2 | #[arora_module::contract(name = "speak", version = "1")]
+  |                                          ^^^^^^^

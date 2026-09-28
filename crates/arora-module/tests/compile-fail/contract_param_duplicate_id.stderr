@@ -1,0 +1,5 @@
+error: parameters `text` and `voice` of `say` share an id
+ --> tests/compile-fail/contract_param_duplicate_id.rs:4:159
+  |
+4 | ...00-000000000002")] text: String, #[param(id = "5e1f0000-0000-4000-8000-000000000002")] voice: String);
+  |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

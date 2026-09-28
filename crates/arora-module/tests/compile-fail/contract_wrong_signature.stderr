@@ -1,0 +1,18 @@
+error[E0053]: method `say` has an incompatible type for trait
+  --> tests/compile-fail/contract_wrong_signature.rs:11:30
+   |
+11 |     fn say(&mut self, _text: u32) {}
+   |                              ^^^ expected `String`, found `u32`
+   |
+note: type in trait
+  --> tests/compile-fail/contract_wrong_signature.rs:5:83
+   |
+ 5 |     fn say(&mut self, #[param(id = "5e1f0000-0000-4000-8000-000000000002")] text: String);
+   |                                                                                   ^^^^^^
+   = note: expected signature `fn(&mut Loud, String)`
+              found signature `fn(&mut Loud, u32)`
+help: change the parameter type to match the trait
+   |
+11 -     fn say(&mut self, _text: u32) {}
+11 +     fn say(&mut self, _text: String) {}
+   |

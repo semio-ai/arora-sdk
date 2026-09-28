@@ -1,0 +1,5 @@
+error: functions `say` and `whisper` of contract `speak` share the name `say`
+ --> tests/compile-fail/contract_duplicate_function_name.rs:5:77
+  |
+5 |     #[export(id = "5e1f0000-0000-4000-8000-000000000002", name = "say")] fn whisper(&mut self);
+  |                                                                             ^^^^^^^
