@@ -26,35 +26,45 @@ Two providers, registered one at a time (`policy-device --speech`):
 Both are host modules, whatever executor the policies use: a speaker is the
 host's, not a portable guest's.
 
-### An iterative Say
+### Synthesis on a worker, playback in the tick
 
-`say-piper` does its work in the ticks that call it; nothing runs on its
-behalf between them but the audio device.
+Synthesis is the long part — a model inference per sentence — and a tick
+must not wait for it: the robot's policies share the tick. So `say-piper`
+splits the work where it is long:
 
-1. The first tick phonemizes the text (`piper_synthesize_start`, espeak-ng).
-2. Each tick where less than 0.3 s of audio is queued ahead of the playhead
-   synthesizes the next sentence (`piper_synthesize_next`: one model
-   inference) and queues its samples, and its phoneme timeline, on the
-   utterance's sink.
-3. The audio output plays the queue on its device thread; each tick reads
-   the playhead and writes the mouth shape there into `viseme`.
-4. The tick that finds the text fully synthesized and the queue played out
-   returns `Success`.
+- **The worker thread synthesizes, and only that.** It owns the Piper voice
+  and answers requests in turn: phonemize a text and synthesize its first
+  sentence, or synthesize the next one. Each answer carries the sentence's
+  samples and its phoneme timeline as mouth shapes.
+- **The tick plays.** It owns the audio output and each sentence's queue on
+  it. Each tick takes what the worker has produced and queues it, asks for
+  the next sentence when less than 0.3 s of audio is queued ahead of the
+  playhead, reads the playhead to write the mouth shape into `viseme`, and
+  returns `Success` once the text is synthesized and played. It never waits
+  on the worker.
 
-A tick does at most one sentence's inference, and speech starts as soon as
-the first sentence is ready rather than when the whole text is. A halt is
-silence: a `say` the tree stops ticking for 250 ms is stopped by the audio
-thread. The voice's model load and first inference happen at device start
-(`say_piper::warm_up`), not in a tick.
+The two share no data: requests go down one channel, sentences come back on
+another, the samples moved rather than copied. Speech starts with the first
+sentence rather than the whole text. A halt is silence: a leaf no longer
+ticked asks for no further sentence, and the next `say` tick stops its
+audio once it has gone 250 ms unticked. The voice's model load and first
+inference happen at device start (`say_piper::warm_up`), not in a tick.
 
-What a sentence's inference costs the control loop, on an Apple M1 (the
-`en_US-lessac-medium` voice, about a second of audio per sentence): 78 ms
-for the sentence, so the tick that synthesizes it stalls the 50 Hz loop for
-four control periods. On the live device, steps took a median 19.8 ms, a
-99th percentile of 22.6 ms and a worst of 113 ms, and the duck stayed
-upright through every announcement. Should a policy need a steadier loop,
-the step that runs the inference is the one to hand to a worker, the tick
-still requesting each sentence and collecting it.
+Measured on an Apple M1, the live device walking and kicking while it
+speaks (the `en_US-lessac-medium` voice; a sentence takes about 78 ms to
+synthesize):
+
+| | median step | 99th percentile | worst step |
+|---|---|---|---|
+| silent voice (baseline) | 19.9 ms | 21.4 ms | 22.5 ms |
+| Piper, synthesis in the tick | 19.8 ms | 22.6 ms | 113 ms |
+| Piper, synthesis on the worker | 20.0 ms | 21.7 ms | 34–44 ms |
+
+No `say` tick takes over 2 ms (a slower one is logged at debug level):
+queuing a sentence is a move. What remains in the worst step is the
+machine's, not the tick's — the inference's thread pool competing with the
+control loop for cores — and the duck stays upright through every
+announcement.
 
 ## Speech beside the policy
 
@@ -104,8 +114,8 @@ provider, `vizij-piper` Piper's provisioning, and the Vizij app's
 cannot depend on them without Vizij's face and node-graph crates, so this
 example carries copies: `modules/say-piper/build.rs` is `vizij-piper`'s
 build script verbatim (it shares that crate's cache), and the provider
-reuses Vizij's phoneme-to-shape table and chunk decoding; the iterative
-driving, the latched success and the halt by the audio thread are this
+reuses Vizij's phoneme-to-shape table and chunk decoding; the split between
+a synthesizing worker and a playing tick, and the latched success, are this
 example's.
 
 Taking Say out of Vizij splits it along the lines it already has:
