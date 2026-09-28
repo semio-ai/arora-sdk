@@ -1,0 +1,22 @@
+[package]
+name = "say-piper"
+description = "The say leaf spoken on board by Piper: synthesis and playback advanced a step per tick"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# libpiper and espeak-ng are GPLv3: a binary linking this crate is GPL-affected.
+# The device links it only behind its opt-in `piper` feature.
+license = "GPL-3.0-or-later"
+# Opens the DEP_PIPER_* channel: the device's build script reads
+# DEP_PIPER_INSTALL_DIR to put libpiper's directory on its binaries' rpath.
+links = "piper"
+
+[dependencies]
+arora-behavior.workspace = true
+arora-module.workspace = true
+log.workspace = true
+# Playback on the host's audio output (cpal): nothing to install.
+rodio = { version = "0.20", default-features = false }
+
+[build-dependencies]
+bindgen = "0.69"

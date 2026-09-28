@@ -61,11 +61,21 @@ pub const PERIOD: Duration = Duration::from_millis(20);
 /// Who speaks the tree's `Say` leaves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Speech {
-    /// The Vizij TTS cloud function (AWS Polly), played on this machine's
-    /// audio output; needs the network.
-    Cloud,
-    /// Nobody: each sentence is logged and succeeds at once.
+    /// Piper, on board, on this machine's audio output (the `piper` feature).
+    #[cfg(feature = "piper")]
+    Piper,
+    /// Nobody: each sentence takes a speaker's time and is logged.
     Silent,
+}
+
+impl Default for Speech {
+    /// Piper when the build carries it, silence otherwise.
+    fn default() -> Self {
+        #[cfg(feature = "piper")]
+        return Speech::Piper;
+        #[cfg(not(feature = "piper"))]
+        return Speech::Silent;
+    }
 }
 
 /// How the policy module runs.
@@ -280,17 +290,11 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         "command.head",
         Value::ArrayF32(vec![0.0; 4]),
     ))?;
-    // What the phase wants said, what the voice is saying and has said, the
-    // voice, and the mouth shape at the playhead — seeded so the `Say` leaf's bindings read strings.
-    for (key, value) in [
-        ("speech.text", ""),
-        ("speech.saying", ""),
-        ("speech.said", ""),
-        ("speech.voice", say::DEFAULT_VOICE),
-        ("speech.viseme", say::SILENCE_VISEME),
-    ] {
-        store.write(StateChange::set(key, Value::String(value.to_string())))?;
-    }
+    // The mouth shape at the playhead, which `Say` leaves write.
+    store.write(StateChange::set(
+        "speech.viseme",
+        Value::String(say_silent::SILENCE_VISEME.to_string()),
+    ))?;
     store.write(StateChange::set(
         "command.behavior",
         Value::String("walk".to_string()),
@@ -310,10 +314,19 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
             .with_host_module(HostModule::of::<Policies>())
             .with_host_module(HostModule::of::<blackboard::blackboard::Module>()),
     };
-    // The voice is a host module whatever the executor: it opens the
-    // network and the audio output, which a guest has no access to.
+    // The voice is a host module whatever the executor: it opens the audio
+    // output, which a guest has no access to.
     builder = match config.speech {
-        Speech::Cloud => builder.with_host_module(HostModule::of::<say::cloud::Module>()),
+        #[cfg(feature = "piper")]
+        Speech::Piper => {
+            // The model load and the first inference are slow; they happen
+            // here, not in a tick. A voice that cannot load leaves the `Say`
+            // leaves failing, which the trees treat as silence.
+            if let Err(why) = say_piper::warm_up() {
+                log::error!("the Piper voice is unavailable: {why}");
+            }
+            builder.with_host_module(HostModule::of::<say_piper::piper::Module>())
+        }
         Speech::Silent => builder.with_host_module(HostModule::of::<say_silent::silent::Module>()),
     };
     Ok((builder.with_groot(config.tree), sim))

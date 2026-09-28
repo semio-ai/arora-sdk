@@ -12,7 +12,17 @@ members = [
   "crates/arora-hal-mujoco",
   "modules/microduck-policies",
   "modules/blackboard",
-  "modules/say",
+  "modules/say-piper",
+  "modules/say-silent",
+  "crates/device",
+]
+# Piper (say-piper) builds libpiper with cmake and links GPLv3 code: it is
+# built only when asked for (`-p say-piper`, or the device's `piper` feature).
+default-members = [
+  "crates/arora-policy",
+  "crates/arora-hal-mujoco",
+  "modules/microduck-policies",
+  "modules/blackboard",
   "modules/say-silent",
   "crates/device",
 ]
