@@ -30,6 +30,21 @@ walks the interpreter lifecycle — load, time update, ticks, graph updates, and
 [`arora-behavior-tree`](../arora-behavior-tree/docs/nodes.md) and the whole
 device loop in [`arora`](../arora/docs/runtime-and-data-flow.md).
 
+## Methods an interpreter implements
+
+An interpreter that hosts task runs (`spawn`, `halt`) may implement some
+methods itself: a skill whose run is a node-graph fragment, say, rather than a
+module call. `described_methods` lists them by function id, each with its name
+and frozen signature. The runtime puts them in the device's method index under
+the interpreter module (`interpreter_module::ID`), so a remote discovers one
+over method introspection and spawns it through that module like any task
+run.
+
+- A direct call to such a method fails, saying to spawn it: a task run has no
+  single call to answer.
+- A function id that a module describes too fails the build: a method has one
+  implementation.
+
 ## Built-in keys: timing is data, not an argument
 
 The runtime keeps time out of the `tick` signature. Before it ticks any

@@ -73,6 +73,7 @@ use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Subscription};
 use arora_types::module::low::{self, Header};
+use arora_types::record::module::frozen::ExportKind;
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
@@ -501,6 +502,50 @@ impl AroraBuilder {
             engine.register_module(module.id(), Box::new(module));
         }
 
+        // The methods the behavior interpreter implements itself join the
+        // index under its module: a remote spawns one through that module's
+        // `SPAWN`, like any task run. A method has one implementation, so one
+        // a module describes too fails the build, as does one reusing an id of
+        // the interpreter module's own functions.
+        let interpreter_methods = self
+            .interpreter
+            .as_ref()
+            .map(|interpreter| interpreter.described_methods())
+            .unwrap_or_default();
+        let own = [
+            interpreter_module::LOAD,
+            interpreter_module::EDIT,
+            interpreter_module::SPAWN,
+            interpreter_module::HALT,
+        ];
+        for (function_id, export) in &interpreter_methods {
+            if let Some(described) = functions.get(function_id) {
+                anyhow::bail!(
+                    "function {function_id} ('{}') is described by module {} and by the behavior \
+                     interpreter",
+                    export.name,
+                    described.module_id
+                );
+            }
+            if own.contains(function_id) {
+                anyhow::bail!(
+                    "the behavior interpreter describes '{}' under the id of one of the \
+                     interpreter module's own functions ({function_id})",
+                    export.name
+                );
+            }
+            let ExportKind::Function(function) = &export.kind;
+            functions.insert(
+                *function_id,
+                ModuleFunction {
+                    module_id: interpreter_module::ID,
+                    function_id: *function_id,
+                    function_name: export.name.clone(),
+                    function: function.clone(),
+                },
+            );
+        }
+
         let store = self
             .store
             .unwrap_or_else(|| Box::new(SimpleDataStore::new()));
@@ -589,6 +634,22 @@ impl AroraBuilder {
                         .map_err(|message| CallError::Guest { message })?;
                     runtime::with_interpreter(&cell, |interpreter| interpreter.halt(task))
                 }
+            });
+        // A method the interpreter implements is a task run, which a direct
+        // call has no run to host: the call fails, saying how to reach it.
+        let module = interpreter_methods
+            .into_iter()
+            .fold(module, |module, (function_id, export)| {
+                let message = format!(
+                    "'{}' is a task run the behavior interpreter implements: spawn it through \
+                     the interpreter module",
+                    export.name
+                );
+                module.function(function_id, move |_call| {
+                    Err(CallError::Guest {
+                        message: message.clone(),
+                    })
+                })
             })
             .build();
         engine.register_module(module.id(), Box::new(module));
@@ -946,7 +1007,8 @@ mod module_loading_tests {
 #[cfg(test)]
 mod host_module_tests {
     use super::*;
-    use arora_types::call::{Call, CallBridge};
+    use arora_types::call::Call;
+    use arora_types::record::module::frozen;
     use arora_types::value::Value;
 
     /// `with_host_module` registers a host-side module built from
@@ -1043,5 +1105,92 @@ mod host_module_tests {
         assert_eq!(entry.function_name, "look_at");
         assert_eq!(entry.function, signature);
         assert!(arora.function_index.get(&undescribed).is_none());
+    }
+
+    /// An interpreter hosting `look_at` as a task run of its own.
+    struct Describing;
+
+    const LOOK_AT: Uuid = Uuid::from_u128(0x6c6f6f6b);
+
+    impl BehaviorInterpreter for Describing {
+        fn tick(
+            &mut self,
+            _ctx: &mut arora_behavior::BehaviorContext,
+        ) -> Result<arora_behavior::BehaviorStatus, arora_behavior::BehaviorError> {
+            Ok(arora_behavior::BehaviorStatus::Running)
+        }
+
+        fn described_methods(&self) -> HashMap<Uuid, frozen::Export> {
+            HashMap::from([(
+                LOOK_AT,
+                frozen::Export {
+                    name: "look_at".to_string(),
+                    kind: frozen::ExportKind::Function(unit_signature()),
+                },
+            )])
+        }
+    }
+
+    fn unit_signature() -> frozen::Function {
+        frozen::Function {
+            parameters: HashMap::new(),
+            parameter_ordering: Vec::new(),
+            return_ty: arora_types::record::ty::FrozenTy::from(
+                arora_types::record::ty::PrimitiveKind::Unit,
+            ),
+        }
+    }
+
+    /// A method the interpreter describes joins the method index under the
+    /// interpreter module, and a direct call to it says to spawn it.
+    #[test]
+    fn the_interpreter_s_methods_join_the_method_index() {
+        let mut arora = Arora::builder()
+            .with_behavior_interpreter(Box::new(Describing))
+            .build()
+            .expect("build a device whose interpreter describes a method");
+
+        let entry = arora
+            .function_index
+            .get(&LOOK_AT)
+            .expect("the interpreter's method is indexed");
+        assert_eq!(entry.module_id, interpreter_module::ID);
+        assert_eq!(entry.function_name, "look_at");
+        assert_eq!(entry.function, unit_signature());
+
+        let error = arora
+            .call(Call {
+                module_id: Some(interpreter_module::ID),
+                id: LOOK_AT,
+                args: Vec::new(),
+            })
+            .expect_err("a task run is not called directly");
+        assert!(
+            error
+                .to_string()
+                .contains("spawn it through the interpreter module"),
+            "{error}"
+        );
+    }
+
+    /// A method has one implementation: a module and the interpreter both
+    /// describing one function id fail the build.
+    #[test]
+    fn a_method_described_by_a_module_and_the_interpreter_fails_the_build() {
+        let module = ModuleBuilder::new(Uuid::from_u128(0x6761))
+            .described_function(LOOK_AT, "look_at", unit_signature(), |_call| {
+                Ok(CallResult {
+                    ret: Value::Unit,
+                    mutated: Vec::new(),
+                })
+            })
+            .build();
+        let error = Arora::builder()
+            .with_host_module(module)
+            .with_behavior_interpreter(Box::new(Describing))
+            .build()
+            .err()
+            .expect("the build is refused");
+        assert!(error.to_string().contains("described by module"), "{error}");
     }
 }

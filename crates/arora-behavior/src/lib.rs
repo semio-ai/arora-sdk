@@ -34,8 +34,12 @@
 //! the store under the [`built_in`] keys before it ticks, so an interpreter that
 //! needs `dt` or elapsed time reads it from the store like any other slot.
 
+use std::collections::HashMap;
+
 use arora_types::call::{Call, CallBridge};
 use arora_types::data::DataStore;
+use arora_types::record::module::frozen;
+use arora_types::Uuid;
 
 pub mod built_in;
 pub mod graph;
@@ -189,6 +193,19 @@ pub trait BehaviorInterpreter {
             message: "this interpreter does not support halting task runs".to_string(),
         })
     }
+
+    /// The methods this interpreter implements itself, by function id, each
+    /// with its name and frozen signature: task runs it hosts as behavior (a
+    /// node-graph fragment, a behavior-tree subtree) rather than as a module
+    /// call. The runtime lists them in the device's method index under the
+    /// interpreter module ([`interpreter_module::ID`]), so a remote discovers
+    /// one over method introspection and [`spawn`](Self::spawn)s it like any
+    /// task run.
+    ///
+    /// Asked once, when the runtime is built. The default describes none.
+    fn described_methods(&self) -> HashMap<Uuid, frozen::Export> {
+        HashMap::new()
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +219,11 @@ mod tests {
         fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
             Ok(BehaviorStatus::Running)
         }
+    }
+
+    #[test]
+    fn an_interpreter_describes_no_method_by_default() {
+        assert!(Idle.described_methods().is_empty());
     }
 
     #[test]
