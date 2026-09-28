@@ -1,0 +1,61 @@
+<root main_tree_to_execute="MainTree">
+  <!-- The tree an operator drives, from an editor's live data or any bridge
+       client: command.behavior selects the branch, command.vx / vy / vyaw
+       steer the walk. The fallback tries the branches in order every tick:
+
+       - down: hold still (reset the simulation with sim/reset = true);
+       - "sit": sit down, then hold the seat until another behavior is asked;
+       - "rise", "kick_left", "kick_right": perform it, then hand the request
+         back to "walk";
+       - "stand": balance in place, head still;
+       - anything else, "walk" included: look around while walking at the
+         commanded twist (standing when it is zero). -->
+  <BehaviorTree ID="MainTree">
+    <Fallback>
+      <Sequence>
+        <Fallen orientation="{imu.orientation}" />
+        <Succeed />
+      </Sequence>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="sit" />
+        <Sit dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+      </Sequence>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="rise" />
+        <Rise dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+        <Assign value="walk" target="{command.behavior}" />
+      </Sequence>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="kick_left" />
+        <Skill skill="kick_left" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+        <Assign value="walk" target="{command.behavior}" />
+      </Sequence>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="kick_right" />
+        <Skill skill="kick_right" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+        <Assign value="walk" target="{command.behavior}" />
+      </Sequence>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="stand" />
+        <Stand head="{command.head}" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+      </Sequence>
+      <Parallel>
+        <HeadClip clip="look_around" dt_ns="{arora/dt}" head="{command.head}" />
+        <Walk vx="{command.vx}" vy="{command.vy}" vyaw="{command.vyaw}" head="{command.head}"
+              dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+             joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+             targets="{joints.target_position}" />
+      </Parallel>
+    </Fallback>
+  </BehaviorTree>
+</root>

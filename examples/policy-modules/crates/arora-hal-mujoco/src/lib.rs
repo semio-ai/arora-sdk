@@ -9,6 +9,9 @@
 //!
 //! # Keys
 //!
+//! `<joint>` is a joint's key entity: its MJCF name, or the key its
+//! [`JointSpec`] gives it.
+//!
 //! Published (the sensor feed, once per control period):
 //!
 //! | Key | Value | Meaning |
@@ -24,6 +27,7 @@
 //! | `<joint>.target_position` / `joints.target_position` | `F32` / `ArrayF32` | the setpoints in force, reported back |
 //! | `sim/time` | `F64` | simulated seconds |
 //! | `sim/base.position` / `sim/base.orientation` / `sim/base.linear_velocity` | `ArrayF32` | the base body's ground truth |
+//! | `<x>.position` … `<yaw>.position` | `F64` | the same base pose as six scalars, under the entities [`BasePoseKeys`] names |
 //!
 //! Consumed (the actuation the runtime flushes):
 //!
@@ -31,7 +35,7 @@
 //! |---|---|---|
 //! | `<joint>.target_position` | `F32` / `F64` | that joint's actuator setpoint |
 //! | `joints.target_position` | `ArrayF32` / `ArrayF64` | every setpoint, in `joints.names` order |
-//! | `sim/reset` | `Boolean` `true` | reset to the initial keyframe at the next tick |
+//! | `sim/reset` | `Boolean` `true` | reset to the initial keyframe at the next tick; the HAL publishes it back as `false` at start and after each reset, so the next `true` is a change again |
 //!
 //! A setpoint is a position: the MJCF is expected to drive each listed joint
 //! with a position actuator (MuJoCo's `<position>` servo), the actuator model
@@ -47,6 +51,11 @@
 //! calling [`advance`](MujocoHal::advance) between runtime steps for a run
 //! that is deterministic and as fast as the machine allows — what a test
 //! wants.
+//!
+//! The real-time clock starts when the feed gets its first subscriber — the
+//! runtime, at the end of its build — not at construction: a robot left
+//! standing in a running world while its controller loads (a wasm compile
+//! takes seconds) has fallen by the time the controller starts.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -67,24 +76,49 @@ use mujoco_rs::prelude::*;
 /// One controlled joint: its MJCF joint and the position actuator driving it.
 #[derive(Debug, Clone)]
 pub struct JointSpec {
-    /// The MJCF joint name; also the key entity (`<joint>.position`).
+    /// The MJCF joint name.
     pub joint: String,
     /// The MJCF actuator name; the same as the joint when not given.
     pub actuator: Option<String>,
+    /// The key entity the joint is published and commanded under
+    /// (`<key>.position`, `<key>.target_position`); the joint name when not
+    /// given. An editor that names joints by its own ids — Semio Studio keys
+    /// a joint by the id it gave it — reads the joint under that id.
+    pub key: Option<String>,
 }
 
 impl JointSpec {
-    /// A joint whose actuator carries the joint's name.
+    /// A joint whose actuator and key carry the joint's name.
     pub fn named(joint: impl Into<String>) -> Self {
         Self {
             joint: joint.into(),
             actuator: None,
+            key: None,
         }
     }
 
     fn actuator_name(&self) -> &str {
         self.actuator.as_deref().unwrap_or(&self.joint)
     }
+
+    fn key_entity(&self) -> &str {
+        self.key.as_deref().unwrap_or(&self.joint)
+    }
+}
+
+/// The key entities the base pose is published under as six scalars
+/// (`<entity>.position`, `F64`): the translation in metres and the
+/// orientation as roll, pitch, yaw in radians about the fixed X, Y, Z axes
+/// (a URDF `rpy`). What an editor that places a robot by six numbers reads —
+/// Semio Studio's root translation and rotation.
+#[derive(Debug, Clone)]
+pub struct BasePoseKeys {
+    pub x: String,
+    pub y: String,
+    pub z: String,
+    pub roll: String,
+    pub pitch: String,
+    pub yaw: String,
 }
 
 /// The IMU, as MJCF sensors on one site.
@@ -129,6 +163,8 @@ pub struct MujocoHalConfig {
     pub contacts: Vec<ContactSpec>,
     /// The body whose ground truth is published under `sim/base.*`.
     pub base_body: Option<String>,
+    /// Also publish the base body's pose as six scalars under these entities.
+    pub base_pose_keys: Option<BasePoseKeys>,
     /// The keyframe the simulation starts from and resets to; the model's
     /// default state with none.
     pub keyframe: Option<String>,
@@ -164,6 +200,7 @@ struct Sim {
     orientation: Option<MjSensorDataInfo>,
     contacts: Vec<(String, MjSensorDataInfo)>,
     base: Option<MjBodyDataInfo>,
+    base_pose_keys: Option<BasePoseKeys>,
     keyframe: Option<usize>,
     substeps: usize,
     recorder: Option<std::io::BufWriter<std::fs::File>>,
@@ -198,21 +235,41 @@ struct Shared {
 pub struct MujocoHal {
     shared: Arc<Shared>,
     description: HalDescription,
-    thread: Option<JoinHandle<()>>,
+    clock: Clock,
+    /// The real-time clock's thread, once the feed has a subscriber.
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl MujocoHal {
     /// Load the model, resolve every named joint, actuator, sensor and body,
-    /// put the robot in its keyframe, and start the clock.
+    /// and put the robot in its keyframe. A real-time clock starts with the
+    /// first subscriber to the feed.
     pub fn new(config: MujocoHalConfig) -> HalResult<Self> {
         for spec in &config.joints {
-            check_key_entity(&spec.joint)?;
+            check_key_entity(spec.key_entity())?;
         }
         for spec in &config.contacts {
             check_key_entity(&spec.key)?;
         }
         if config.joints.is_empty() {
             return Err(HalError::Other("no joints listed".to_string()));
+        }
+        if let Some(keys) = &config.base_pose_keys {
+            if config.base_body.is_none() {
+                return Err(HalError::Other(
+                    "base pose keys need a base body to take the pose from".to_string(),
+                ));
+            }
+            for entity in [
+                &keys.x,
+                &keys.y,
+                &keys.z,
+                &keys.roll,
+                &keys.pitch,
+                &keys.yaw,
+            ] {
+                check_key_entity(entity)?;
+            }
         }
 
         let mut model = MjModel::from_xml(&config.model).map_err(|e| {
@@ -269,7 +326,7 @@ impl MujocoHal {
                 )));
             }
             joints.push(JointHandles {
-                key: spec.joint.clone(),
+                key: spec.key_entity().to_string(),
                 joint,
                 actuator,
             });
@@ -338,6 +395,7 @@ impl MujocoHal {
             orientation,
             contacts,
             base,
+            base_pose_keys: config.base_pose_keys.clone(),
             keyframe,
             substeps,
             recorder,
@@ -348,6 +406,7 @@ impl MujocoHal {
                 "joints.names",
                 Some(Value::ArrayString(joint_names.clone())),
             );
+            state.set("sim/reset", Some(Value::Boolean(false)));
             state.apply(sim.sample());
             state
         };
@@ -365,18 +424,11 @@ impl MujocoHal {
             stop: AtomicBool::new(false),
         });
 
-        let thread = match config.clock {
-            Clock::Lockstep => None,
-            Clock::RealTime { speed } => {
-                let shared = shared.clone();
-                Some(std::thread::spawn(move || pace(shared, speed)))
-            }
-        };
-
         Ok(Self {
             shared,
             description: config.description,
-            thread,
+            clock: config.clock,
+            thread: Mutex::new(None),
         })
     }
 
@@ -445,7 +497,7 @@ impl MujocoHal {
 impl Drop for MujocoHal {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
-        if let Some(thread) = self.thread.take() {
+        if let Some(thread) = self.thread.lock().unwrap().take() {
             let _ = thread.join();
         }
     }
@@ -491,7 +543,13 @@ fn advance(shared: &Shared) {
             sim.apply(&ctrl);
         }
         sim.step();
-        sim.sample()
+        let mut change = sim.sample();
+        if reset {
+            change
+                .set
+                .insert(Key::from("sim/reset"), Some(Value::Boolean(false)));
+        }
+        change
     };
     shared.snapshot.lock().unwrap().apply(change.clone());
     shared
@@ -639,6 +697,24 @@ impl Sim {
                     view.subtree_linvel.iter().map(|v| *v as f32).collect(),
                 )),
             );
+            if let Some(keys) = &self.base_pose_keys {
+                let q = &view.xquat;
+                let (roll, pitch, yaw) = fixed_axes_rpy([q[0], q[1], q[2], q[3]]);
+                let p = &view.xpos;
+                for (entity, value) in [
+                    (&keys.x, p[0]),
+                    (&keys.y, p[1]),
+                    (&keys.z, p[2]),
+                    (&keys.roll, roll),
+                    (&keys.pitch, pitch),
+                    (&keys.yaw, yaw),
+                ] {
+                    change.set.insert(
+                        Key::from(format!("{entity}.position")),
+                        Some(Value::F64(value)),
+                    );
+                }
+            }
         }
 
         if let Some(recorder) = &mut self.recorder {
@@ -668,15 +744,42 @@ impl Sim {
     }
 }
 
-/// A key entity is alphanumeric with underscores; a joint or contact name
-/// that is not would be silently unreachable under the key it names.
+/// A key entity is alphanumeric with underscores and hyphens (a UUID is
+/// one); a name with a `/` or a `.` would be read as a namespace or a
+/// component, and the value would be silently unreachable under the key it
+/// names.
 fn check_key_entity(name: &str) -> HalResult<()> {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err(HalError::Other(format!(
-            "{name:?} cannot name a key entity (alphanumeric and underscore only)"
+            "{name:?} cannot name a key entity (alphanumeric, underscore and hyphen only)"
         )));
     }
     Ok(())
+}
+
+/// Roll, pitch, yaw about the fixed X, Y, Z axes (`R = Rz(yaw) Ry(pitch)
+/// Rx(roll)`, a URDF `rpy`) of a `[w, x, y, z]` quaternion. At ±90° of pitch
+/// roll and yaw turn about one axis; the combination goes to roll.
+fn fixed_axes_rpy(q: [f64; 4]) -> (f64, f64, f64) {
+    let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    let [w, x, y, z] = q.map(|v| v / norm);
+    let r00 = 1.0 - 2.0 * (y * y + z * z);
+    let r10 = 2.0 * (x * y + w * z);
+    let r20 = 2.0 * (x * z - w * y);
+    let r21 = 2.0 * (y * z + w * x);
+    let r22 = 1.0 - 2.0 * (x * x + y * y);
+    let r11 = 1.0 - 2.0 * (x * x + z * z);
+    let r12 = 2.0 * (y * z - w * x);
+    let pitch = (-r20).clamp(-1.0, 1.0).asin();
+    if pitch.cos() > 1e-6 {
+        (r21.atan2(r22), pitch, r10.atan2(r00))
+    } else {
+        ((-r12).atan2(r11), pitch, 0.0)
+    }
 }
 
 /// A setpoint as a number, whichever float it was written as.
@@ -772,7 +875,8 @@ impl Hal for MujocoHal {
     }
 
     /// The feed opens with the whole current state — the joint order included
-    /// — then carries every control period's sensors.
+    /// — then carries every control period's sensors. The first call starts a
+    /// real-time clock.
     fn updates(&self) -> UpdatesStream {
         let (tx, rx) = futures_channel::mpsc::unbounded();
         let snapshot = self.snapshot();
@@ -782,6 +886,13 @@ impl Hal for MujocoHal {
         }
         let _ = tx.unbounded_send(first);
         self.shared.subscribers.lock().unwrap().push(tx);
+        if let Clock::RealTime { speed } = self.clock {
+            let mut thread = self.thread.lock().unwrap();
+            if thread.is_none() {
+                let shared = self.shared.clone();
+                *thread = Some(std::thread::spawn(move || pace(shared, speed)));
+            }
+        }
         Box::pin(rx) as Pin<Box<dyn futures_core::Stream<Item = StateChange> + Send>>
     }
 }
@@ -839,6 +950,7 @@ mod tests {
                 touch: "pad_touch".into(),
             }],
             base_body: Some("base".into()),
+            base_pose_keys: None,
             keyframe: Some("home".into()),
             timestep: None,
             control_hz: 50.0,
@@ -934,6 +1046,130 @@ mod tests {
             Some(Some(Value::F32(p))) => assert!((p - 0.1).abs() < 0.02, "{p}"),
             other => panic!("pivot.position missing: {other:?}"),
         }
+    }
+
+    /// A joint published under a key of the editor's choosing, and the base
+    /// pose as six scalars: what Semio Studio drives a robot model by.
+    #[test]
+    fn joints_and_the_base_pose_publish_under_the_given_entities() {
+        let dir = tempdir();
+        let mut config = config(&dir);
+        config.joints = vec![JointSpec {
+            key: Some("0f02308d-7ff3-4d6b-8c8e-a63a3ec4ce4a".into()),
+            ..JointSpec::named("pivot")
+        }];
+        let entity = |name: &str| name.to_string();
+        config.base_pose_keys = Some(BasePoseKeys {
+            x: entity("bx"),
+            y: entity("by"),
+            z: entity("bz"),
+            roll: entity("broll"),
+            pitch: entity("bpitch"),
+            yaw: entity("byaw"),
+        });
+        let hal = MujocoHal::new(config).unwrap();
+        hal.try_send(&StateChange::set(
+            "0f02308d-7ff3-4d6b-8c8e-a63a3ec4ce4a.target_position",
+            Value::F64(0.5),
+        ));
+        for _ in 0..100 {
+            hal.advance();
+        }
+        let snapshot = hal.snapshot();
+        match snapshot.get(&Key::from("0f02308d-7ff3-4d6b-8c8e-a63a3ec4ce4a.position")) {
+            Some(Some(Value::F32(p))) => assert!((p - 0.5).abs() < 0.05, "servo reached {p}"),
+            other => panic!("the joint is not under its key: {other:?}"),
+        }
+        assert!(snapshot.get(&Key::from("pivot.position")).is_none());
+        // The base body is the pendulum: 0.5 m up, pitched by the pivot.
+        let scalar = |entity: &str| match snapshot.get(&Key::from(format!("{entity}.position"))) {
+            Some(Some(Value::F64(v))) => *v,
+            other => panic!("{entity}.position missing: {other:?}"),
+        };
+        assert!((scalar("bz") - 0.5).abs() < 1e-9);
+        assert!(
+            (scalar("bpitch") - 0.5).abs() < 0.05,
+            "{}",
+            scalar("bpitch")
+        );
+        for entity in ["bx", "by", "broll", "byaw"] {
+            match snapshot.get(&Key::from(format!("{entity}.position"))) {
+                Some(Some(Value::F64(v))) => assert!(v.abs() < 1e-9, "{entity} = {v}"),
+                other => panic!("{entity}.position missing: {other:?}"),
+            }
+        }
+    }
+
+    /// The fixed-axes angles recompose the rotation they came from, at the
+    /// ±90° pitch where roll and yaw share an axis too.
+    #[test]
+    fn fixed_axes_rpy_recomposes_the_rotation() {
+        let quat = |roll: f64, pitch: f64, yaw: f64| {
+            let (cr, sr) = ((roll / 2.0).cos(), (roll / 2.0).sin());
+            let (cp, sp) = ((pitch / 2.0).cos(), (pitch / 2.0).sin());
+            let (cy, sy) = ((yaw / 2.0).cos(), (yaw / 2.0).sin());
+            [
+                cr * cp * cy + sr * sp * sy,
+                sr * cp * cy - cr * sp * sy,
+                cr * sp * cy + sr * cp * sy,
+                cr * cp * sy - sr * sp * cy,
+            ]
+        };
+        let same_rotation = |a: [f64; 4], b: [f64; 4]| {
+            let dot: f64 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            (dot.abs() - 1.0).abs() < 1e-9
+        };
+        for (roll, pitch, yaw) in [
+            (0.3, -0.2, 1.1),
+            (-2.0, 1.2, -0.4),
+            (0.4, std::f64::consts::FRAC_PI_2, 0.7),
+            (0.4, -std::f64::consts::FRAC_PI_2, -0.7),
+        ] {
+            let q = quat(roll, pitch, yaw);
+            let (r, p, y) = fixed_axes_rpy(q);
+            assert!(
+                same_rotation(q, quat(r, p, y)),
+                "{roll} {pitch} {yaw} -> {r} {p} {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reset_publishes_itself_back_as_false() {
+        let dir = tempdir();
+        let hal = MujocoHal::new(config(&dir)).unwrap();
+        assert_eq!(
+            hal.snapshot().get(&Key::from("sim/reset")),
+            Some(&Some(Value::Boolean(false)))
+        );
+        let mut feed = hal.updates();
+        drain(&mut feed);
+        hal.try_send(&StateChange::set("sim/reset", Value::Boolean(true)));
+        hal.advance();
+        let change = drain(&mut feed).pop().unwrap();
+        assert_eq!(
+            change.set.get(&Key::from("sim/reset")),
+            Some(&Some(Value::Boolean(false)))
+        );
+    }
+
+    /// A real-time simulation waits for its first subscriber before time
+    /// runs.
+    #[test]
+    fn the_real_time_clock_starts_with_the_first_subscriber() {
+        let dir = tempdir();
+        let mut config = config(&dir);
+        config.clock = Clock::RealTime { speed: 0.0 };
+        let hal = MujocoHal::new(config).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let time = |hal: &MujocoHal| match hal.snapshot().get(&Key::from("sim/time")) {
+            Some(Some(Value::F64(t))) => *t,
+            other => panic!("sim/time missing: {other:?}"),
+        };
+        assert_eq!(time(&hal), 0.0, "no subscriber, no time");
+        let _feed = hal.updates();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(time(&hal) > 0.0, "time runs once the feed is taken");
     }
 
     #[test]

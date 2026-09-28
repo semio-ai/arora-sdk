@@ -476,16 +476,17 @@ pub mod microduck_policies {
     ///
     /// `vx`, `vy` in m/s (x forward, y left), `vyaw` in rad/s (positive turns
     /// left); the policies do not walk visibly below about 0.25 m/s in this
-    /// simulator. `head` is the four head angles the policy holds while it
+    /// simulator. They are `f64`, the number an editor writes (Semio Studio
+    /// writes every number as one); the networks take them as `f32`. `head` is the four head angles the policy holds while it
     /// balances. `dt_ns` is the tick period (`arora/dt`); `gyro` (3, rad/s),
     /// `orientation` (a world-from-trunk quaternion `[w, x, y, z]`),
     /// `joint_positions` and `joint_velocities` (14, in the policy order) are
     /// the robot's sensors; `targets` receives the 14 joint setpoints.
     #[export(id = "a3d1f0c2-9b8e-4f6a-8c5d-1e2f3a4b5c6d")]
     pub fn walk(
-        #[param(id = "0f1e2d3c-4b5a-4968-8776-655443322110")] vx: f32,
-        #[param(id = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")] vy: f32,
-        #[param(id = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e")] vyaw: f32,
+        #[param(id = "0f1e2d3c-4b5a-4968-8776-655443322110")] vx: f64,
+        #[param(id = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")] vy: f64,
+        #[param(id = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e")] vyaw: f64,
         #[param(id = "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f")] head: Vec<f32>,
         #[param(id = "4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80")] dt_ns: u64,
         #[param(id = "5e6f7a8b-9c0d-4e1f-8a3b-4c5d6e7f8091")] gyro: Vec<f32>,
@@ -498,8 +499,8 @@ pub mod microduck_policies {
             Ok(head) => head,
             Err(e) => return failing(e),
         };
-        let twist = [vx, vy, vyaw];
-        let magnitude = (vx * vx + vy * vy + vyaw * vyaw).sqrt();
+        let twist = [vx as f32, vy as f32, vyaw as f32];
+        let magnitude = twist.iter().map(|v| v * v).sum::<f32>().sqrt();
         let (net, tuning) = if magnitude <= STANDING_THRESHOLD {
             (Net::Standing, &STANDING)
         } else {
@@ -894,7 +895,7 @@ mod tests {
         let _serial = SERIAL.lock().unwrap();
         let (gyro, positions, velocities) = at_rest();
         let mut targets = Vec::new();
-        let tick = |vx: f32, targets: &mut Vec<f32>| {
+        let tick = |vx: f64, targets: &mut Vec<f32>| {
             walk(
                 vx,
                 0.0,

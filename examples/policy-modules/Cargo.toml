@@ -11,6 +11,7 @@ members = [
   "crates/arora-policy",
   "crates/arora-hal-mujoco",
   "modules/microduck-policies",
+  "modules/blackboard",
   "crates/device",
 ]
 
@@ -36,6 +37,14 @@ arora-module = { path = "../../crates/arora-module", version = "1" }
 arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "2" }
 arora-types = { path = "../../crates/arora-types", version = "2.6" }
 arora-engine = { path = "../../crates/arora-engine", version = "4.2" }
+
+# Crates published outside this checkout — the Studio client behind the
+# `studio` feature — depend on these two from crates.io; patched to the same
+# path copies, their `Bridge` and `Value` are the ones the runtime uses.
+# Removed with the `path` keys when the workspace leaves the SDK checkout.
+[patch.crates-io]
+arora-bridge = { path = "../../crates/arora-bridge" }
+arora-types = { path = "../../crates/arora-types" }
 
 # The policy module is built twice: natively (its tests, the in-process
 # device) and as a wasm guest through the device's artifact dependency, which
