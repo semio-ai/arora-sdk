@@ -177,4 +177,4 @@ not hold its arguments.
 - A proposal to make indirect dispatch obsolete for behavior trees (by exposing
   a single `tick(tree_id, node_id)` registered through a unified registration
   path) is tracked in
-  [semio-ai/arora-engine#77](https://github.com/semio-ai/arora-engine/issues/77).
+  [semio-ai/arora-sdk#77](https://github.com/semio-ai/arora-sdk/issues/77).

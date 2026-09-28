@@ -6,8 +6,8 @@ description = "Shared type definitions for the Semio Arora framework"
 license = "MIT"
 # arora-types lives in the arora-engine workspace since the multi-repo
 # consolidation; the old standalone arora-types repo is gone.
-repository = "https://github.com/semio-ai/arora-engine"
-homepage = "https://github.com/semio-ai/arora-engine"
+repository = "https://github.com/semio-ai/arora-sdk"
+homepage = "https://github.com/semio-ai/arora-sdk"
 documentation = "https://docs.rs/arora-types"
 keywords = ["arora", "robotics", "types"]
 categories = ["data-structures"]
