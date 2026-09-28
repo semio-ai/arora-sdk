@@ -332,6 +332,15 @@ libqi and is unrelated to simulation.
   four Gemm layers with one activation, so 150 lines of Rust would do and the
   module would shrink from megabytes to kilobytes. Kept as an option; tract
   was chosen because it loads any ONNX a forker drops in without a converter.
+- **A live view from the simulator** — MuJoCo's own viewer in the device
+  (`mujoco-rs`'s `viewer` feature), or a web page of the device's drawing the
+  scene in three.js from the simulator's body poses. Both show only a
+  simulated robot: the viewer is MuJoCo, and the page would read ground truth
+  a real robot does not publish. The view is Semio Studio instead, fed by the
+  device's live keys through the Studio bridge, which shows the real robot
+  the same way; `tools/export-urdf.py` gives Studio the model and the MuJoCo
+  HAL publishes under Studio's ids. (On macOS the native viewer also needs a
+  patched `glutin` and the window on the main thread.)
 
 ## Tooling verified on this machine
 

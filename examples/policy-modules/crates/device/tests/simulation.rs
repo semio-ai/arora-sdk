@@ -6,6 +6,8 @@
 use std::time::Instant;
 
 use arora_hal_mujoco::Clock;
+use arora_types::data::{Key, StateChange};
+use arora_types::value::Value;
 use policy_device::{default_model, tree_path, Command, Device, DeviceConfig, Executor};
 
 fn device(tree: &str, executor: Executor, command: Command) -> Device {
@@ -16,8 +18,9 @@ fn device(tree: &str, executor: Executor, command: Command) -> Device {
         clock: Clock::Lockstep,
         record: None,
         command,
+        studio: None,
     };
-    Device::build(config, None).expect("the device builds")
+    Device::build(config).expect("the device builds")
 }
 
 /// Standing still for ten seconds, the duck keeps its height and stays upright.
@@ -131,4 +134,77 @@ fn kicks_then_stands() {
     let outcome = device.run_for(4.0).unwrap();
     assert!(!outcome.fell, "{outcome:?}");
     assert!(outcome.position[2] > 0.10, "{outcome:?}");
+}
+
+/// The behavior an operator asked for, as the interactive tree leaves it.
+fn behavior(device: &Device) -> String {
+    match device
+        .store()
+        .read(&[Key::from("command.behavior")])
+        .remove(0)
+    {
+        Some(Value::String(behavior)) => behavior,
+        other => panic!("command.behavior is not a string: {other:?}"),
+    }
+}
+
+fn request(device: &Device, behavior: &str) {
+    device
+        .store()
+        .write(StateChange::set(
+            "command.behavior",
+            Value::String(behavior.to_string()),
+        ))
+        .unwrap();
+}
+
+/// The interactive tree from the wasm guests (the policies and the
+/// blackboard leaves): it walks by default, on an `F64` command — the number
+/// an editor writes.
+#[test]
+fn the_interactive_tree_walks_from_the_wasm_guests() {
+    let mut device = device("interactive", Executor::Wasm, Command::default());
+    device
+        .store()
+        .write(StateChange::set("command.vx", Value::F64(0.3)))
+        .unwrap();
+    let outcome = device.run_for(8.0).unwrap();
+    assert!(!outcome.fell, "{outcome:?}");
+    assert!(outcome.distance > 0.3, "{outcome:?}");
+    assert_eq!(behavior(&device), "walk");
+}
+
+/// A requested kick runs to its end, then the tree hands the request back
+/// to walking, still upright.
+#[test]
+fn a_requested_kick_hands_back_to_walking() {
+    let mut device = device("interactive", Executor::Native, Command::default());
+    device.run_for(1.0).unwrap();
+    request(&device, "kick_right");
+    device.run_for(0.2).unwrap();
+    assert_eq!(behavior(&device), "kick_right", "the kick is under way");
+    let outcome = device.run_for(3.0).unwrap();
+    assert_eq!(behavior(&device), "walk", "the kick handed back");
+    assert!(!outcome.fell, "{outcome:?}");
+    assert!(outcome.position[2] > 0.10, "{outcome:?}");
+}
+
+/// A requested sit holds the seat for as long as it is asked for; a
+/// requested rise stands the duck up and hands back to walking.
+#[test]
+fn sit_holds_until_a_rise_is_requested() {
+    let mut device = device("interactive", Executor::Native, Command::default());
+    request(&device, "sit");
+    device.run_for(6.0).unwrap();
+    let (seated, _) = device.ground_truth();
+    assert!(
+        seated[2] < 0.09,
+        "still seated after the sit leaf ended: {seated:?}"
+    );
+    assert_eq!(behavior(&device), "sit");
+    request(&device, "rise");
+    let outcome = device.run_for(5.0).unwrap();
+    assert_eq!(behavior(&device), "walk", "the rise handed back");
+    assert!(!outcome.fell, "{outcome:?}");
+    assert!(outcome.position[2] > 0.10, "standing again: {outcome:?}");
 }
