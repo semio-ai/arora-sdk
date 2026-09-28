@@ -211,16 +211,22 @@ fn sit_holds_until_a_rise_is_requested() {
 }
 
 /// The interactive tree announces each phase once, however long the phase
-/// lasts, and in full even when the phase is shorter than its sentence: the
-/// kick lasts 0.5 s, "Watch my kick!" 1.4 s at a speaker's pace.
+/// lasts, and in full even when the phase's policy is done before its
+/// sentence: the kick lasts 0.5 s, "Watch my kick!" 1.4 s at a speaker's
+/// pace, and the branch hands back only when both have finished — the duck
+/// still upright.
 #[test]
 fn each_phase_is_announced_once() {
+    say_silent::reset();
     let mut device = device("interactive", Executor::Native, Command::default());
-    let _ = say_silent::spoken();
     device.run_for(2.0).unwrap();
     assert_eq!(say_silent::spoken(), vec!["Ready to go."]);
     request(&device, "kick_right");
-    device.run_for(4.0).unwrap();
+    device.run_for(1.0).unwrap();
+    assert_eq!(behavior(&device), "kick_right", "still speaking at 1 s");
+    let outcome = device.run_for(3.0).unwrap();
+    assert_eq!(behavior(&device), "walk");
+    assert!(!outcome.fell, "{outcome:?}");
     assert_eq!(say_silent::spoken(), vec!["Watch my kick!", "Ready to go."]);
     request(&device, "sit");
     device.run_for(6.0).unwrap();

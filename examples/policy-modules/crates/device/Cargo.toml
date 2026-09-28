@@ -14,6 +14,9 @@ path = "src/main.rs"
 # Serve through Semio Studio instead of the open local bridge (the `arora`
 # crate's Studio connection: sign-in, device registration, the Zenoh link).
 studio = ["arora/studio-bridge"]
+# Speak on board with Piper. libpiper and espeak-ng are GPLv3: a binary built
+# with this feature is GPL-affected, so it is opt-in.
+piper = ["dep:say-piper"]
 
 [dependencies]
 anyhow.workspace = true
@@ -33,8 +36,8 @@ serde_json = "1"
 microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 # The blackboard leaves the interactive tree switches with, the same way.
 blackboard = { path = "../../modules/blackboard", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
-# The voice's providers, host modules only (network and audio).
-say = { path = "../../modules/say", version = "0.1" }
+# The voice's providers, host modules only (a speaker is the host's).
+say-piper = { path = "../../modules/say-piper", version = "0.1", optional = true }
 say-silent = { path = "../../modules/say-silent", version = "0.1" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
