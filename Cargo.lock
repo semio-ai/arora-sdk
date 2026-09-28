@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "10.2.0"
+version = "10.3.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.0.0"
+version = "9.1.0"
 dependencies = [
  "arora-types",
  "semver",

@@ -453,6 +453,14 @@ host-function special case in dispatch — a remote editing a behavior calls a
 module function like any other, and interpreter implementations stay engine-
 agnostic behind the `BehaviorInterpreter` trait.
 
+**The interpreter describes the task runs it implements.** A method whose run
+is behavior the interpreter hosts (a node-graph fragment) has no module of
+its own. The interpreter lists it (`described_methods`), and the runtime
+indexes it under the interpreter module, the module a remote spawns task runs
+through. The alternative, a host module per such method whose function only
+fails, would describe a method under a module that does not implement it;
+every device would repeat it.
+
 ### Predetermined keys are conventions, not wiring
 
 Behaviors read their inputs from store paths and write outputs back; the
