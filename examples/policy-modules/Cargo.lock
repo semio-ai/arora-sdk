@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "9.12.0"
+version = "10.1.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "8.5.0"
+version = "9.0.0"
 dependencies = [
  "arora-types",
  "semver",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "7.1.0"
+version = "8.1.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree-types"
-version = "1.1.0"
+version = "2.0.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "4.1.0"
+version = "5.0.0"
 dependencies = [
  "arora-types",
  "async-trait",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ws"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "arora-types",
  "bytes",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "4.2.1"
+version = "5.0.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "arora-types",
  "async-trait",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "arora-buffers",
  "arora-module-macros",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-core"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "arora-registry",
  "arora-types",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-macros"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "arora-types",
  "proc-macro2",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-rust"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "arora-module-core",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "arora-registry"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -415,16 +415,16 @@ dependencies = [
 
 [[package]]
 name = "arora-simple-data-store"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "arora-types",
 ]
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "6.1.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6149c5c40cf84cff3fb7d3efc3541559050922a0a0d9e800941f83b738df7516"
+checksum = "250b94c2e1f62c0ce9bd12ca1f9160ea19aba6577a24838166c2e5bd241bfb77"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "2.6.0"
+version = "3.0.0"
 dependencies = [
  "arora-types-derive",
  "async-trait",
@@ -5124,9 +5124,9 @@ dependencies = [
 
 [[package]]
 name = "studio-bridge-msgs"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d33e3c9d81b89b46140184efa3b8c16d8b7e68a52bae43b081766b9e4bc4d2b"
+checksum = "d1d5ca450c72ac4252c6e8a8eb141b130224e3faf7fc3c6939bf94f50a9c4a53"
 dependencies = [
  "arora-types",
  "chrono",
@@ -5235,7 +5235,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
