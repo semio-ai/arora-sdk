@@ -20,6 +20,23 @@ All notable changes to `arora`. The format follows
   through the interpreter module. The `arora` binary's Groot option covers a
   device with no modules; a device that loads modules needs the index the
   builder assembled.
+- `AroraBuilder::with_groot` hands the builder a Groot tree, which `build`
+  resolves against the method index it assembled and installs, failing the
+  build when the tree does not load. A device run through
+  `AroraBuilder::run` has no built device to call `load_groot` on; this is
+  how its tree reaches modules' leaves.
+- `AroraBuilder::with_step_period` sets the step period `run` drives the
+  device at (default `Arora::DEFAULT_STEP_PERIOD`), for a behavior sampled
+  at a fixed control rate.
+
+### Fixed
+
+- The open local bridge (`local_ws_bridge`, the default bridge of `run`)
+  accepts a client's writes. It validated written paths against a registry
+  of input keys that nothing fills, so it refused every write with "Unknown
+  input path(s)"; the bridge carries the device's whole store, whose keys
+  are whatever the HAL, the behavior and the modules write, so it accepts
+  every path.
 
 ## [10.0.1] - 2026-09-26
 

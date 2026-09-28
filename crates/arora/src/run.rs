@@ -106,8 +106,11 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 /// port frees for the next device in the same process.
 #[cfg(feature = "native")]
 pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
+    // The bridge carries the device's whole store, whose keys are whatever
+    // the HAL, the behavior and the modules write; the server has no registry
+    // of them to check a client's write against, so it accepts every path.
     let server = Arc::new(arora_bridge_ws::AroraWSServer::new(
-        arora_bridge_ws::ServerConfig::default(),
+        arora_bridge_ws::ServerConfig::default().validate_paths(false),
     ));
     let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
     // Bind before spawning: an unusable address (port already taken) fails the
@@ -255,6 +258,7 @@ pub(crate) async fn run_builder_with_frontend(
     let device_id = bridge.device_id().await;
     let access_requests = bridge.access_requests().await;
 
+    let period = builder.step_period.unwrap_or(Arora::DEFAULT_STEP_PERIOD);
     let mut arora = builder.build().context("failed to build Arora")?;
 
     // Hand the front end its live view now that the device exists: a
@@ -272,7 +276,7 @@ pub(crate) async fn run_builder_with_frontend(
     let serving = serve_access_requests(access_requests, operator).fuse();
     futures::pin_mut!(serving);
     info!("running — Ctrl-C to stop");
-    let run = arora.run(Arora::DEFAULT_STEP_PERIOD).fuse();
+    let run = arora.run(period).fuse();
     futures::pin_mut!(run);
     loop {
         futures::select_biased! {

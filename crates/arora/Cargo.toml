@@ -125,6 +125,12 @@ serde_yaml = "0.9"
 # by `cargo test` (the wasm32-wasip1 target is pinned in rust-toolchain.toml).
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 
+# The local-bridge test's WebSocket client and its JSON replies; the test is
+# native-only, and the client's randomness has no browser backend.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+serde_json = "1"
+tokio-tungstenite = "0.24"
+
 # The metronome tests also run in a browser, where the cadence rides a JS timer.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
