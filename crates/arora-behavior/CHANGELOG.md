@@ -4,6 +4,16 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.1.0] - 2026-09-28
+
+### Added
+
+- `BehaviorInterpreter::described_methods`: the methods an interpreter
+  implements itself — task runs it hosts as behavior rather than as a module
+  call — by function id, each with its name and frozen signature. The runtime
+  lists them in the method index under the interpreter module. The default
+  describes none.
+
 ## [9.0.0] - 2026-09-25
 
 ### Changed

@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.3.0] - 2026-09-28
+
+### Added
+
+- The methods the behavior interpreter describes (arora-behavior 9.1's
+  `described_methods`) join the method index under the interpreter module,
+  so a remote discovers and spawns them like any task run. A direct call to
+  one fails, saying to spawn it. A function id described both by a module
+  and by the interpreter fails the build.
+
 ## [10.2.0] - 2026-09-28
 
 ### Added
