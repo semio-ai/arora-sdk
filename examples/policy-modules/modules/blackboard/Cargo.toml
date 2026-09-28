@@ -1,0 +1,16 @@
+[package]
+name = "blackboard"
+description = "Behavior leaves over the store's strings: test a value, assign one — how a tree switches on a request written from outside"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# The `cdylib` is the wasm guest; the `rlib` carries the declaration and runs
+# in-process, as the policy module does.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arora-behavior.workspace = true
+arora-module.workspace = true
