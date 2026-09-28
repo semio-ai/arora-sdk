@@ -1,138 +1,135 @@
 # Speaking from the behavior tree
 
-The robot announces each phase of its behavior out loud — "Ready to go.",
-"Watch my kick!", "Time to sit down." — through a `Say` leaf in the `interactive`
-tree. This page explains how a speech leaf fits a tree that also runs
-control policies, what the speech module is, and where it should live.
+The robot announces each phase of its behavior out loud, on board — "Ready
+to go.", "Watch my kick!", "Time to sit down." — through a `Say` leaf that
+runs beside the phase's policy in the `interactive` tree. This page explains
+how the leaf works, how it fits a tree that also runs control policies, and
+where it should live.
 
 ## The leaf
 
 `say(text, voice, viseme: &mut String) -> Status` is Vizij's speech
 contract: fixed function and parameter ids, one signature, several
-providers. A call starts an utterance and returns `Running`; the tree
-re-ticks it, and each tick polls the utterance and writes the mouth shape
-at the audio playhead into `viseme`; it returns `Success` when the audio
-ends and `Failure` when synthesis or playback fails. Stopping the ticks
-stops the audio within 250 ms — a halt is silence.
+providers. `Running` while the sentence is synthesized and played;
+`Success` when it has played, and for as long as the leaf keeps being
+ticked afterwards — the episodic-leaf convention the policy leaves follow
+too; `Failure` when the voice or the audio output fails. `viseme` carries
+the mouth shape at the audio playhead (`PP`, `aa`, … and `sil` at rest).
 
 Two providers, registered one at a time (`policy-device --speech`):
 
 | Provider | Crate | What it does |
 |---|---|---|
-| `cloud` (default) | `modules/say` | the Vizij TTS cloud function (AWS Polly behind HTTPS, no credentials in the app), played on the host's audio output through `rodio` |
-| `silent` | `modules/say-silent` | takes a speaker's time (five ticks a character), then logs the sentence: tests, offline runs |
+| `piper` (the `piper` feature) | `modules/say-piper` | Piper synthesizes on board, the host's audio output plays: no network, no credentials |
+| `silent` | `modules/say-silent` | a speaker's timing counted in ticks (five a character), each sentence logged: tests, builds without Piper |
 
-Both are host modules, whatever executor the policies use: speech needs the
-network and a speaker, which a wasm guest has no access to. The split falls
-where it should — pure computation (the networks) ships as a portable
-guest, I/O-bound providers are the host's.
+Both are host modules, whatever executor the policies use: a speaker is the
+host's, not a portable guest's.
 
-## The voice beside the behavior
+### An iterative Say
 
-A tree that speaks while it balances has to meet three constraints:
+`say-piper` does its work in the ticks that call it; nothing runs on its
+behalf between them but the audio device.
 
-- **The policy must keep running while the robot speaks.** A sentence lasts
-  a second or more; a leg left without its policy for that long falls. So
-  speech is never a step *before* an action in a sequence.
-- **A phase is announced once.** The engine's `Parallel` ticks every child
-  every tick, so a `Say` inside one restarts as soon as it succeeds, and a
-  `SequenceStar` forgets its place only when it finishes — a sitting branch
-  that never finishes would never speak again.
-- **A short phase is still announced in full.** A kick lasts 0.5 s; the
-  cloud voice needs about as long to synthesize "Watch my kick!" and a
-  second and a half to say it (the first sentence of a run waits a few
-  more seconds for the cloud function to wake). A voice that followed the
-  phase would lose every sentence longer than its phase.
+1. The first tick phonemizes the text (`piper_synthesize_start`, espeak-ng).
+2. Each tick where less than 0.3 s of audio is queued ahead of the playhead
+   synthesizes the next sentence (`piper_synthesize_next`: one model
+   inference) and queues its samples, and its phoneme timeline, on the
+   utterance's sink.
+3. The audio output plays the queue on its device thread; each tick reads
+   the playhead and writes the mouth shape there into `viseme`.
+4. The tick that finds the text fully synthesized and the queue played out
+   returns `Success`.
 
-The `interactive` tree meets them with a voice that runs in parallel with
-the behavior, takes the phase's sentence when it is idle, and says it to the
-end:
+A tick does at most one sentence's inference, and speech starts as soon as
+the first sentence is ready rather than when the whole text is. A halt is
+silence: a `say` the tree stops ticking for 250 ms is stopped by the audio
+thread. The voice's model load and first inference happen at device start
+(`say_piper::warm_up`), not in a tick.
+
+What a sentence's inference costs the control loop, on an Apple M1 (the
+`en_US-lessac-medium` voice, about a second of audio per sentence): 78 ms
+for the sentence, so the tick that synthesizes it stalls the 50 Hz loop for
+four control periods. On the live device, steps took a median 19.8 ms, a
+99th percentile of 22.6 ms and a worst of 113 ms, and the duck stayed
+upright through every announcement. Should a policy need a steadier loop,
+the step that runs the inference is the one to hand to a worker, the tick
+still requesting each sentence and collecting it.
+
+## Speech beside the policy
+
+A sentence lasts a second or more, and a leg left without its policy that
+long falls: speech is never a step before an action. Each branch of the
+`interactive` tree runs its policy and its sentence in a `Parallel`:
 
 ```xml
-<Parallel>
-  <Fallback>                                   <!-- the behavior -->
-    <Sequence>
-      <Equals value="{command.behavior}" expected="kick_left" />
-      <Assign value="Kick!" target="{speech.text}" />
-      <Skill skill="kick_left" … />
-      <Assign value="walk" target="{command.behavior}" />
-    </Sequence>
-    …
-  </Fallback>
-  <Fallback>                                   <!-- the voice -->
-    <Sequence>                                 <!-- idle: take what is new -->
-      <Equals value="{speech.saying}" expected="" />
-      <Fallback>
-        <Equals value="{speech.text}" expected="{speech.said}" />
-        <Assign value="{speech.text}" target="{speech.saying}" />
-      </Fallback>
-    </Sequence>
-    <Sequence>                                 <!-- busy: say it to the end -->
-      <Fallback>
-        <Say text="{speech.saying}" voice="{speech.voice}" viseme="{speech.viseme}" />
-        <Succeed />
-      </Fallback>
-      <Assign value="{speech.saying}" target="{speech.said}" />
-      <Assign value="" target="{speech.saying}" />
-    </Sequence>
-  </Fallback>
-</Parallel>
+<Sequence>
+  <Equals value="{command.behavior}" expected="kick_left" />
+  <Parallel>
+    <Skill skill="kick_left" … />
+    <Fallback>
+      <Say text="Watch my kick!" voice="" viseme="{speech.viseme}" />
+      <Succeed />
+    </Fallback>
+  </Parallel>
+  <Assign value="walk" target="{command.behavior}" />
+</Sequence>
 ```
 
-Each branch writes its phase's sentence to `speech.text` every tick —
-idempotent, so it costs nothing. When the voice is idle (`speech.saying`
-empty) and `speech.text` differs from `speech.said`, it takes the sentence
-into `speech.saying`; from the next tick it says that sentence to the end,
-records it as said and is idle again. What follows from the shape:
+The engine's `Parallel` ticks every child every tick and succeeds when all
+have. With the Say latching its `Success`, that composition gives:
 
-- the policies never stop for speech;
-- a sentence is never cut by the next phase: the kick is announced in full
-  while the robot is already walking again;
-- the voice says the latest phase's sentence when it frees up, not a
-  backlog: a phase that starts and ends while another sentence plays is
-  not announced;
-- a sentence that cannot be said (no network) is skipped, not retried
-  every tick;
-- the same sentence twice in a row is said once — a phase that must repeat
-  its announcement writes a different sentence in between (walking says
-  "Ready to go." between two kicks);
-- `speech.voice` is a key: an operator changes the voice live (any AWS
-  Polly voice the endpoint accepts);
-- the tree still decides when a sentence must stop: a branch that ends the
-  `Say` (a stop command, a fall that must be announced at once) halts it,
-  and the provider goes quiet within 250 ms;
-- `speech.viseme` carries the mouth shape at the playhead: what a face — or
-  the Microduck's mouth joint, which this simulation does not model — would
-  follow.
+- **the policy never stops for speech**: both children are ticked every tick;
+- **once per entry into the branch**: a finished Say keeps succeeding while
+  the branch runs (a seated robot does not repeat itself), and a new text
+  forgets finished sentences, so the phase speaks again next time;
+- **a phase ends when its policy and its sentence both have**: the kick's
+  network keeps running, holding the robot, until "Watch my kick!" has
+  played, then the branch hands back to walking — for a continuous policy
+  (walking, sitting, standing) the branch never ends, and the sentence is
+  said once;
+- **leaving a branch halts its sentence**: the next phase's Say takes the
+  synthesizer and the old sink stops within the halt bound;
+- **speech is best effort**: the `Fallback` with `Succeed` keeps a voice
+  that cannot speak from failing the `Parallel`, which would send the
+  fallback to the next branch and tick a second policy in the same tick.
 
 ## Where Say should live
 
-The contract and the cloud provider live in vizij-rs today
-(`vizij-arora-host::skills` holds the ids, `vizij-arora-behavior::speech`
-the signature and Vizij's lip-sync fragment, `vizij-arora-tts` the cloud
-provider, `vizij-piper` a local one). A robot that is not a Vizij face cannot
-depend on them without Vizij's face and node-graph crates, so this example
-carries a copy: `modules/say` is `vizij-arora-tts` 4.0.0's native producer
-(synthesis, `rodio` playback, the halt pulse, Polly's viseme table) behind
-the same ids, declared with `#[arora_module::module]`, which gives the leaf a
-typed `Status` return and `&mut String` out-parameter.
+The contract and its providers live in vizij-rs today:
+`vizij-arora-host::skills` holds the ids, `vizij-arora-behavior::speech` the
+signature and Vizij's lip-sync fragment, `vizij-arora-tts` the cloud
+provider, `vizij-piper` Piper's provisioning, and the Vizij app's
+`tts_piper` module the Piper provider. A robot that is not a Vizij face
+cannot depend on them without Vizij's face and node-graph crates, so this
+example carries copies: `modules/say-piper/build.rs` is `vizij-piper`'s
+build script verbatim (it shares that crate's cache), and the provider
+reuses Vizij's phoneme-to-shape table and chunk decoding; the iterative
+driving, the latched success and the halt by the audio thread are this
+example's.
 
 Taking Say out of Vizij splits it along the lines it already has:
 
 | Piece | Home | Depends on |
 |---|---|---|
 | the contract: ids, signature, the rest shape, the viseme vocabulary | a small crate of its own, next to the Arora crates | `arora-types`, `arora-behavior` |
-| each provider (cloud, Piper, silent) | a sibling crate per provider, one module id each | the contract |
+| each provider (Piper, cloud, silent) | a sibling crate per provider, one module id each | the contract |
+| Piper's provisioning (libpiper, espeak-ng data, the aligned voice) | the Piper provider's crate, GPLv3 | — |
 | the lip-sync fragment that turns `viseme` into a face's shapes | Vizij | the contract |
 
 A device then picks its provider by a feature or an option, as this one
-does, and a tree names `Say` without knowing which. Two things the move
-should settle, which the copy inherits:
+does, and a tree names `Say` without knowing which. Settled by the move,
+inherited by the copy:
 
 - **Run identity.** The module ABI hands a call no run id, so utterances are
-  keyed by their text and voice: two branches saying the same sentence at
-  once share one utterance. The SDK's async-functions design records the
-  run-id question.
-- **One symbol per function id per crate.** `#[arora_module::module]` exports
-  a symbol named after each function id, so two providers of one contract
-  cannot share a crate — the shape the table above takes anyway.
+  keyed by their text: two branches saying the same sentence at once share
+  one utterance, and a provider tells a re-entered phase from a continued
+  one only by a new text in between or the halt bound. The SDK's
+  async-functions design records the run-id question.
+- **One provider per crate.** `#[arora_module::module]` exports a symbol
+  named after each function id, so two providers of one contract cannot
+  share a crate — the table's shape anyway.
+- **Licensing.** libpiper and espeak-ng are GPLv3: the Piper provider is a
+  GPL crate, and a binary linking it is GPL-affected; here it is behind the
+  device's opt-in `piper` feature and out of the workspace's default
+  members.
