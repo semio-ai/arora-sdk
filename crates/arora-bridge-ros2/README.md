@@ -115,8 +115,11 @@ A method maps onto a `.srv` the way ROS already models one: the parameter list i
 the **request** (one field per parameter), the return value is the **response**.
 Both messages are synthesised as runtime types and driven through the shared CDR
 codec (`arora_msgs_ros2::cdr`) against the registry — real ROS 2 message types on
-the wire, no ad-hoc encoding. Signatures ROS 2 cannot represent are skipped and
-reported, not silently dropped.
+the wire, no ad-hoc encoding. An optional parameter or return of a scalar or a
+message travels as the bounded sequence `T[<=1]`, the ROS 2 spelling of an
+optional field: empty is absent, one element is present, and a request holding
+more is refused. Signatures ROS 2 cannot represent are skipped and reported, not
+silently dropped.
 
 ## Task runs as actions
 
@@ -125,8 +128,9 @@ enumeration, i.e. tickable, long-running, cancellable work — are mirrored as R
 2 **actions** instead. That enum is also the one return type the service plane
 cannot carry, so actions claim exactly the methods services skip; the two planes
 never overlap. A goal spawns the run (through `BridgeOp::Call` to the
-interpreter's `SPAWN`), feedback and result are typed from what the run writes,
-and cancel/status ride ros2-client's `RawActionServer`. The goal lifecycle lives
+interpreter's `SPAWN`), feedback and result are typed from what the run writes
+(an optional of a scalar as `T[<=1]`, like an optional goal parameter), and
+cancel/status ride ros2-client's `RawActionServer`. The goal lifecycle lives
 in a `GoalBook`.
 
 Introspection over the bridge (`ListKeys` / `ListMethods`) and `BridgeOp::Call`

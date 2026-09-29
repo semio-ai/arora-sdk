@@ -53,8 +53,10 @@ pub(crate) struct MethodService {
 
 /// Resolve every method whose signature is representable in ROS 2 to a
 /// [`MethodService`]. A method referencing a type ROS 2 cannot carry (a non-ROS
-/// scalar, an enum, a map, an unknown record) is skipped — its name is returned
-/// alongside so the caller can log the omission (no silent truncation).
+/// scalar, an enum, a map, an unknown record, an optional array) is skipped —
+/// its name is returned alongside so the caller can log the omission (no silent
+/// truncation). An optional of a scalar or a record travels as the bounded
+/// sequence `T[<=1]`.
 pub(crate) fn resolve(
     namespace: &str,
     signatures: &[MethodSignature],
@@ -63,14 +65,14 @@ pub(crate) fn resolve(
     let mut services = Vec::new();
     let mut skipped = Vec::new();
     for signature in signatures {
-        let request_type = request_type(signature);
-        let response_type = response_type(signature);
-        let representable = ros2_representable(&request_type, registry.types()).is_ok()
-            && ros2_representable(&response_type, registry.types()).is_ok();
-        if !representable {
+        let types = request_type(signature).zip(response_type(signature));
+        let Some((request_type, response_type)) = types.filter(|(request, response)| {
+            ros2_representable(request, registry.types()).is_ok()
+                && ros2_representable(response, registry.types()).is_ok()
+        }) else {
             skipped.push(signature.name.clone());
             continue;
-        }
+        };
         services.push(MethodService {
             name: service_name(namespace, &signature.name),
             service_type: service_type_name(signature),
@@ -85,32 +87,38 @@ pub(crate) fn resolve(
 
 /// The request message type for a method: a structure with one field per
 /// parameter, in declared order. Each field keeps the **parameter's id**, so a
-/// decoded request's fields are the [`Call`] arguments verbatim.
-fn request_type(signature: &MethodSignature) -> low::Type {
+/// decoded request's fields are the [`Call`] arguments verbatim. `None` when a
+/// parameter's type has no low-level form ([`type_ref_of`]).
+fn request_type(signature: &MethodSignature) -> Option<low::Type> {
     let function = &signature.function;
-    let fields = function.parameter_ordering.iter().filter_map(|id| {
-        let parameter = function.parameters.get(id)?;
-        Some((
-            *id,
-            low::StructureField {
-                name: parameter.name.clone(),
-                type_ref: type_ref_of(&parameter.ty),
-            },
-        ))
-    });
+    let fields = function
+        .parameter_ordering
+        .iter()
+        .filter_map(|id| Some((*id, function.parameters.get(id)?)))
+        .map(|(id, parameter)| {
+            Some((
+                id,
+                low::StructureField {
+                    name: parameter.name.clone(),
+                    type_ref: type_ref_of(&parameter.ty)?,
+                },
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
     let name = format!("{}_Request", signature.name);
-    low::Type {
+    Some(low::Type {
         id: gen_uuid_from_str(&name),
         name,
         description: String::new(),
         kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
-    }
+    })
 }
 
 /// The response message type for a method: a structure wrapping the return value
 /// in a single `result` field — or an empty structure when the method returns
 /// `unit` (which ROS 2 cannot carry as a field, and which needs no data anyway).
-fn response_type(signature: &MethodSignature) -> low::Type {
+/// `None` when the return type has no low-level form ([`type_ref_of`]).
+fn response_type(signature: &MethodSignature) -> Option<low::Type> {
     let ret = &signature.function.return_ty;
     let fields: Vec<(Uuid, low::StructureField)> = if is_unit(ret) {
         Vec::new()
@@ -119,17 +127,17 @@ fn response_type(signature: &MethodSignature) -> low::Type {
             gen_uuid_from_str(RESULT_FIELD),
             low::StructureField {
                 name: RESULT_FIELD.to_string(),
-                type_ref: type_ref_of(ret),
+                type_ref: type_ref_of(ret)?,
             },
         )]
     };
     let name = format!("{}_Response", signature.name);
-    low::Type {
+    Some(low::Type {
         id: gen_uuid_from_str(&name),
         name,
         description: String::new(),
         kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
-    }
+    })
 }
 
 /// The synthesised ROS 2 service type for a method: `arora/{Name}`. These are the
@@ -204,8 +212,12 @@ pub(crate) fn parse_name(name: &str) -> Result<Name, String> {
 /// type graph). Mirrors module authoring's private lifting of a frozen type into
 /// a module header. Shared with the action plane, which lifts goal parameters
 /// the same way.
-pub(crate) fn type_ref_of(ty: &FrozenTy) -> TypeRef {
-    match ty {
+///
+/// `None` for an optional whose element is not a scalar or a record: a
+/// [`TypeRef::Option`] names its element's id alone, so an optional array (or
+/// an optional optional) has no low-level form.
+pub(crate) fn type_ref_of(ty: &FrozenTy) -> Option<TypeRef> {
+    Some(match ty {
         FrozenTy::Primitive(primitive) => match primitive.kind {
             PrimitiveKind::Unit => TypeRef::Scalar { id: *ty::UNIT_ID },
             PrimitiveKind::Boolean => TypeRef::Scalar {
@@ -243,19 +255,11 @@ pub(crate) fn type_ref_of(ty: &FrozenTy) -> TypeRef {
         FrozenTy::FrozenArray(array) => TypeRef::Array {
             id: array.reference.id,
         },
-        // ROS 2 has no optional: `ros2_representable` refuses the result, so a
-        // method with an optional parameter or return is skipped, whatever its
-        // element.
-        FrozenTy::FrozenOption(option) => TypeRef::Option {
-            id: match type_ref_of(&option.element) {
-                TypeRef::Scalar { id }
-                | TypeRef::Array { id }
-                | TypeRef::FixedArray { id, .. }
-                | TypeRef::Option { id } => id,
-                TypeRef::Map { value_id, .. } => value_id,
-            },
+        FrozenTy::FrozenOption(option) => match type_ref_of(&option.element)? {
+            TypeRef::Scalar { id } => TypeRef::Option { id },
+            _ => return None,
         },
-    }
+    })
 }
 
 /// Whether a frozen return type is `unit` (no response payload).
@@ -322,7 +326,7 @@ mod tests {
                 primitive(PrimitiveKind::F64),
             ),
         );
-        let request = request_type(&sig);
+        let request = request_type(&sig).unwrap();
         let low::TypeKind::Structure(structure) = &request.kind else {
             panic!("request is a structure");
         };
@@ -338,7 +342,7 @@ mod tests {
     #[test]
     fn unit_return_yields_an_empty_response_type() {
         let sig = signature("reset", function(&[], primitive(PrimitiveKind::Unit)));
-        let response = response_type(&sig);
+        let response = response_type(&sig).unwrap();
         let low::TypeKind::Structure(structure) = &response.kind else {
             panic!("response is a structure");
         };
@@ -420,5 +424,125 @@ mod tests {
         let (services, skipped) = resolve("robot", std::slice::from_ref(&sig), &registry);
         assert!(services.is_empty());
         assert_eq!(skipped, vec!["weird".to_string()]);
+    }
+
+    fn optional(element: FrozenTy) -> FrozenTy {
+        FrozenTy::FrozenOption(arora_types::record::ty::FrozenOption {
+            element: Box::new(element),
+        })
+    }
+
+    /// An optional parameter or return travels as the bounded sequence
+    /// `T[<=1]`: the request decodes to `None`/`Some` arguments, and an optional
+    /// return fills the reply.
+    #[test]
+    fn optional_parameters_and_returns_ride_as_bounded_sequences() {
+        let registry = arora_msgs_ros2::registry();
+        let sig = signature(
+            "speak",
+            function(
+                &[
+                    ("text", primitive(PrimitiveKind::String)),
+                    ("voice", optional(primitive(PrimitiveKind::String))),
+                    ("rate", optional(primitive(PrimitiveKind::F64))),
+                ],
+                optional(primitive(PrimitiveKind::String)),
+            ),
+        );
+        let (services, skipped) = resolve("robot", std::slice::from_ref(&sig), &registry);
+        assert!(skipped.is_empty(), "optionals of scalars are representable");
+        let service = &services[0];
+
+        let field = |name: &str, value: Value| StructureField {
+            id: gen_uuid_from_str(name),
+            value: Box::new(value),
+        };
+        let request = Value::Structure(Structure {
+            id: service.request_type.id,
+            fields: vec![
+                field("text", Value::String("hello".into())),
+                field("voice", Value::from(Some("alto".to_string()))),
+                field("rate", Value::Option(None)),
+            ],
+        });
+        let bytes =
+            cdr::encode(&service.request_type, registry.types(), &request).expect("encode request");
+        let call = call_of(
+            service,
+            decode_request(service, &bytes, &registry).expect("decode request"),
+        );
+        assert_eq!(
+            call.args,
+            vec![
+                field("text", Value::String("hello".into())),
+                field("voice", Value::from(Some("alto".to_string()))),
+                field("rate", Value::Option(None)),
+            ]
+        );
+
+        for ret in [Value::from(Some("spoken".to_string())), Value::Option(None)] {
+            let response = response_value(
+                service,
+                CallResult {
+                    ret,
+                    mutated: vec![],
+                },
+            );
+            let response_bytes =
+                encode_response(service, &response, &registry).expect("encode response");
+            let back = cdr::decode(&service.response_type, registry.types(), &response_bytes)
+                .expect("decode response");
+            assert_eq!(back, response);
+        }
+    }
+
+    /// A request holding more than one element where an optional is due is
+    /// refused rather than truncated.
+    #[test]
+    fn a_request_with_an_overfull_optional_is_refused() {
+        let registry = arora_msgs_ros2::registry();
+        let sig = signature(
+            "speak",
+            function(
+                &[("voice", optional(primitive(PrimitiveKind::String)))],
+                primitive(PrimitiveKind::Unit),
+            ),
+        );
+        let (services, _) = resolve("robot", std::slice::from_ref(&sig), &registry);
+        let service = &services[0];
+        // The same field declared as a sequence, holding two voices.
+        let mut sequence_type = service.request_type.clone();
+        let low::TypeKind::Structure(structure) = &mut sequence_type.kind else {
+            panic!("request is a structure");
+        };
+        for field in structure.fields.values_mut() {
+            field.type_ref = TypeRef::Array { id: *ty::STRING_ID };
+        }
+        let two = Value::Structure(Structure {
+            id: sequence_type.id,
+            fields: vec![StructureField {
+                id: gen_uuid_from_str("voice"),
+                value: Box::new(Value::ArrayString(vec!["alto".into(), "bass".into()])),
+            }],
+        });
+        let bytes = cdr::encode(&sequence_type, registry.types(), &two).expect("encode");
+        assert!(decode_request(service, &bytes, &registry).is_err());
+    }
+
+    /// An optional array has no low-level form (`T[]` inside `T[<=1]`), so its
+    /// method is skipped.
+    #[test]
+    fn a_method_with_an_optional_array_is_skipped() {
+        let sig = signature(
+            "weigh",
+            function(
+                &[("weights", optional(primitive(PrimitiveKind::ArrayF64)))],
+                primitive(PrimitiveKind::Unit),
+            ),
+        );
+        let registry = arora_msgs_ros2::registry();
+        let (services, skipped) = resolve("robot", std::slice::from_ref(&sig), &registry);
+        assert!(services.is_empty());
+        assert_eq!(skipped, vec!["weigh".to_string()]);
     }
 }

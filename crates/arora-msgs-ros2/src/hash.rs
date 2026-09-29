@@ -11,10 +11,10 @@
 //! The type and every type it nests must carry its ROS-qualified name
 //! (`geometry_msgs/msg/PointStamped`, `builtin_interfaces/msg/Time`, …) in
 //! [`low::Type::name`], because REP-2016 hashes those names alongside the fields.
-//! Structures of scalars, strings, nested structures and homogeneous arrays
-//! (ROS sequences `T[]` and fixed arrays `T[N]`) are supported — the same shape
-//! the CDR codec ([`crate::cdr`]) carries. Maps have no ROS 2 form and are
-//! rejected.
+//! Structures of scalars, strings, nested structures, homogeneous arrays (ROS
+//! sequences `T[]` and fixed arrays `T[N]`) and optionals (the bounded sequence
+//! `T[<=1]`) are supported — the same shape the CDR codec ([`crate::cdr`])
+//! carries. Maps have no ROS 2 form and are rejected.
 
 use std::collections::HashSet;
 
@@ -269,11 +269,12 @@ fn fields_of(ty: &low::Type, registry: &TypeRegistry) -> Result<Vec<Field>, Erro
     Ok(fields)
 }
 
-/// The array shape of a field: a single value, a fixed `[N]`, or an unbounded
-/// `[]` sequence.
+/// The array shape of a field: a single value, a fixed `[N]`, a bounded
+/// `[<=N]` sequence, or an unbounded `[]` sequence.
 enum Shape {
     Unit,
     Fixed(u64),
+    Bounded(u64),
     Unbounded,
 }
 
@@ -284,11 +285,10 @@ fn field_type(type_ref: &TypeRef, registry: &TypeRegistry) -> Result<FieldType, 
         TypeRef::Scalar { id } => (id, Shape::Unit),
         TypeRef::Array { id } => (id, Shape::Unbounded),
         TypeRef::FixedArray { id, len } => (id, Shape::Fixed(*len as u64)),
+        // An optional is the bounded sequence `T[<=1]` it travels as in CDR.
+        TypeRef::Option { id } => (id, Shape::Bounded(1)),
         TypeRef::Map { .. } => {
             return Err(Error("key/value maps have no REP-2016 field type".into()))
-        }
-        TypeRef::Option { .. } => {
-            return Err(Error("optional values have no REP-2016 field type".into()))
         }
     };
     if let Some(base) = rep2016_scalar(id) {
@@ -303,12 +303,19 @@ fn field_type(type_ref: &TypeRef, registry: &TypeRegistry) -> Result<FieldType, 
 }
 
 /// A scalar base in its array shape. REP-2016 encodes the shape as an offset on
-/// the base type id: `+ARRAY_OFFSET` for a fixed array, `+UNBOUNDED_SEQUENCE_OFFSET`
-/// for a sequence.
+/// the base type id: `+ARRAY_OFFSET` for a fixed array,
+/// `+BOUNDED_SEQUENCE_OFFSET` for a bounded sequence (its bound in `capacity`),
+/// `+UNBOUNDED_SEQUENCE_OFFSET` for a sequence.
 fn scalar_field(base: u8, shape: Shape) -> FieldType {
     match shape {
         Shape::Unit => FieldType::scalar(base),
         Shape::Fixed(capacity) => FieldType::array(base, capacity),
+        Shape::Bounded(capacity) => FieldType {
+            type_id: base + rid::BOUNDED_SEQUENCE_OFFSET,
+            capacity,
+            string_capacity: 0,
+            nested_type_name: String::new(),
+        },
         Shape::Unbounded => FieldType {
             type_id: base + rid::UNBOUNDED_SEQUENCE_OFFSET,
             capacity: 0,
@@ -328,6 +335,7 @@ fn nested_field(name: String, shape: Shape) -> FieldType {
             string_capacity: 0,
             nested_type_name: name,
         },
+        Shape::Bounded(capacity) => FieldType::nested_bounded_sequence(name, capacity),
         Shape::Unbounded => FieldType {
             type_id: rid::NESTED_TYPE + rid::UNBOUNDED_SEQUENCE_OFFSET,
             capacity: 0,
@@ -350,11 +358,14 @@ fn collect_referenced(
         return Ok(());
     };
     for field in structure.fields.values() {
-        // The element type of a scalar, sequence or fixed array; a map has none.
+        // The element type of a scalar, sequence, fixed array or optional; a
+        // map has no ROS field form, so it is not walked.
         let id = match &field.type_ref {
-            TypeRef::Scalar { id } | TypeRef::Array { id } | TypeRef::FixedArray { id, .. } => *id,
-            // Maps and options have no ROS field form, so they are not walked.
-            TypeRef::Map { .. } | TypeRef::Option { .. } => continue,
+            TypeRef::Scalar { id }
+            | TypeRef::Array { id }
+            | TypeRef::FixedArray { id, .. }
+            | TypeRef::Option { id } => *id,
+            TypeRef::Map { .. } => continue,
         };
         if rep2016_scalar(&id).is_some() || !seen.insert(id) {
             continue;

@@ -4,6 +4,14 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.1] - 2026-10-02
+
+### Fixed
+
+- The walk's optional hooks no longer name ROS 2 CDR as a format with no
+  optional form: arora-msgs-ros2 2.1 writes an optional as a bounded sequence
+  `T[<=1]`.
+
 ## [3.1.0] - 2026-09-29
 
 ### Added

@@ -13,9 +13,13 @@
 //! (the rmw_cyclonedds / rmw_fastrtps convention). Strings: align 4, u32 length
 //! *including* the NUL terminator, bytes, then the NUL.
 //!
-//! First cut mirrors the walk: scalars, string and nested structures. Arrays
-//! (ROS sequences), enumerations and options follow when the walk's type model
-//! grows them.
+//! Scalars, strings, nested structures and arrays (ROS sequences `T[]`, fixed
+//! arrays `T[N]`) take their ROS forms. An optional takes the ROS 2 spelling of
+//! an optional field, a bounded sequence `T[<=1]`: a count of 0 (absent) or 1
+//! (present), then the element; decoding refuses a larger count. ROS 2 declares
+//! no optional type, so a message type read from a `.msg` never holds one, and
+//! a bounded sequence declared there stays a sequence. Enumerations have no CDR
+//! form.
 
 use arora_types::ty::{low, TypeRegistry};
 use arora_types::value::Value;
@@ -225,8 +229,11 @@ impl ValueWriter for CdrWriter {
     fn begin_field(&mut self, _id: Uuid) -> Result<()> {
         Ok(())
     }
-    fn begin_option(&mut self, _present: bool) -> Result<()> {
-        Err(Error::new("ROS 2 messages have no optional form"))
+    // An optional is a bounded sequence `T[<=1]`: its count, then the element
+    // the walk writes when one is present.
+    fn begin_option(&mut self, present: bool) -> Result<()> {
+        self.put_sequence_len(usize::from(present));
+        Ok(())
     }
     // Scalar arrays are CDR sequences: a 4-aligned u32 count, then the elements,
     // each self-aligned by its own scalar op. The element type is positional
@@ -388,7 +395,13 @@ impl ValueReader for CdrReader<'_> {
         Ok(())
     }
     fn enter_option(&mut self) -> Result<bool> {
-        Err(Error::new("ROS 2 messages have no optional form"))
+        match self.take_sequence_len()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            count => Err(Error::new(format!(
+                "an optional is a sequence of at most one element (T[<=1]); this one holds {count}"
+            ))),
+        }
     }
     cdr_read_arrays! {
         read_bool_array(bool) => read_bool;
@@ -916,5 +929,125 @@ mod tests {
             from_value_seeded::<JointTrajectory>(value, ty, types).unwrap(),
             trajectory
         );
+    }
+
+    fn option_field(name: &str, element_id: Uuid) -> low::StructureField {
+        low::StructureField {
+            name: name.to_string(),
+            type_ref: TypeRef::Option { id: element_id },
+        }
+    }
+
+    // Say { string voice (optional); float64 rate (optional); float64 gain
+    // (optional) }, and its twin declaring each as a sequence.
+    fn say_ty(field: fn(&str, Uuid) -> low::StructureField) -> low::Type {
+        structure(
+            id(0x66),
+            vec![
+                (id(0x661), field("voice", *ty::STRING_ID)),
+                (id(0x662), field("rate", *ty::F64_ID)),
+                (id(0x663), field("gain", *ty::F64_ID)),
+            ],
+        )
+    }
+
+    /// An optional travels as the bounded sequence `T[<=1]`: a count of 0 or 1,
+    /// then the element. The golden bytes decode, under the sequence twin, as
+    /// sequences of at most one element.
+    #[test]
+    fn an_optional_matches_the_golden_cdr_of_a_bounded_sequence() {
+        let registry = TypeRegistry::new();
+        let value = st(
+            0x66,
+            vec![
+                f(0x661, Value::from(Some("hi".to_string()))),
+                f(0x662, Value::Option(None)),
+                f(0x663, Value::from(Some(1.0f64))),
+            ],
+        );
+        let bytes = encode(&say_ty(option_field), &registry, &value).unwrap();
+
+        #[rustfmt::skip]
+        let golden: Vec<u8> = vec![
+            0x00, 0x01, 0x00, 0x00,                         // encapsulation: CDR_LE
+            0x01, 0x00, 0x00, 0x00,                         // voice: count 1
+            0x03, 0x00, 0x00, 0x00,                         //   string length 3 (with NUL)
+            0x68, 0x69, 0x00,                               //   "hi\0"
+            0x00,                                           // pad to 4-align the count
+            0x00, 0x00, 0x00, 0x00,                         // rate: count 0
+            0x01, 0x00, 0x00, 0x00,                         // gain: count 1
+            0x00, 0x00, 0x00, 0x00,                         //   pad to 8-align the double
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F, //   1.0 (f64 LE)
+        ];
+        assert_eq!(bytes, golden);
+        assert_eq!(
+            decode(&say_ty(option_field), &registry, &golden).unwrap(),
+            value
+        );
+        assert_eq!(
+            decode(&say_ty(array_field), &registry, &golden).unwrap(),
+            st(
+                0x66,
+                vec![
+                    f(0x661, Value::ArrayString(vec!["hi".to_string()])),
+                    f(0x662, Value::ArrayF64(vec![])),
+                    f(0x663, Value::ArrayF64(vec![1.0])),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn an_optional_message_round_trips_present_and_absent() {
+        let ty = structure(
+            id(0x77),
+            vec![(id(0x771), option_field("target", id(0x33)))],
+        );
+        let registry = registry();
+        let point = st(
+            0x33,
+            vec![
+                f(0x331, Value::F64(1.0)),
+                f(0x332, Value::F64(2.0)),
+                f(0x333, Value::F64(3.0)),
+            ],
+        );
+        for target in [Value::Option(Some(Box::new(point))), Value::Option(None)] {
+            let value = st(0x77, vec![f(0x771, target)]);
+            let bytes = encode(&ty, &registry, &value).unwrap();
+            assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
+        }
+    }
+
+    /// The walk writes a bare element given for an optional as a present one.
+    #[test]
+    fn a_bare_element_encodes_as_a_present_optional() {
+        let ty = structure(
+            id(0x88),
+            vec![(id(0x881), option_field("voice", *ty::STRING_ID))],
+        );
+        let registry = TypeRegistry::new();
+        let bare = st(0x88, vec![f(0x881, Value::String("hi".into()))]);
+        let bytes = encode(&ty, &registry, &bare).unwrap();
+        assert_eq!(
+            decode(&ty, &registry, &bytes).unwrap(),
+            st(0x88, vec![f(0x881, Value::from(Some("hi".to_string())))])
+        );
+    }
+
+    #[test]
+    fn an_optional_holding_more_than_one_element_is_refused() {
+        let registry = TypeRegistry::new();
+        let two = st(
+            0x66,
+            vec![
+                f(0x661, Value::ArrayString(vec![])),
+                f(0x662, Value::ArrayF64(vec![1.0, 2.0])),
+                f(0x663, Value::ArrayF64(vec![])),
+            ],
+        );
+        let bytes = encode(&say_ty(array_field), &registry, &two).unwrap();
+        let error = decode(&say_ty(option_field), &registry, &bytes).unwrap_err();
+        assert!(error.to_string().contains("at most one"), "{error}");
     }
 }

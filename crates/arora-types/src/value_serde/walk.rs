@@ -147,7 +147,7 @@ pub trait ValueWriter {
 
   /// Begin an optional value: whether one is `present`. A present value's
   /// datum follows; an absent one has none. A format with no optional form
-  /// (ROS CDR) refuses it.
+  /// refuses it.
   fn begin_option(&mut self, present: bool) -> Result<()>;
 }
 

@@ -1,12 +1,13 @@
 //! Whether an arora type can travel as a ROS 2 message.
 //!
-//! The ROS 2 bridge exposes a device's keys as topics. A key whose value type
-//! the CDR codec cannot carry — a map, an option, an enumeration, or an array of
-//! those — is not a ROS message, so the bridge skips it (or falls back to a JSON
-//! string). [`ros2_representable`] is that decision, made against the type alone:
-//! it accepts exactly the shapes [`crate::cdr`] round-trips and (with the
-//! `interop` feature) [`crate::hash`] can hash, so a type that passes here has a
-//! faithful place on the ROS 2 wire.
+//! The ROS 2 bridge serves a device's methods as services and actions whose
+//! messages it synthesizes from their signatures. A type the CDR codec cannot
+//! carry — a map, an enumeration, or an array of those — is not a ROS message,
+//! so the bridge skips the method. [`ros2_representable`] is that decision, made
+//! against the type alone: it accepts exactly the shapes [`crate::cdr`]
+//! round-trips and (with the `interop` feature) [`crate::hash`] can hash, so a
+//! type that passes here has a faithful place on the ROS 2 wire. An optional of
+//! a scalar or a message passes, as the bounded sequence `T[<=1]`.
 
 use arora_types::module::low::TypeRef;
 use arora_types::ty::{self, low, TypeRegistry};
@@ -66,8 +67,9 @@ fn check_ref(
         // or a nested message.
         TypeRef::Array { id } => check_element(id, registry, seen),
         TypeRef::FixedArray { id, .. } => check_element(id, registry, seen),
+        // An optional is the bounded sequence `T[<=1]` of its element.
+        TypeRef::Option { id } => check_element(id, registry, seen),
         TypeRef::Map { .. } => Err(no("key/value maps have no ROS 2 CDR encoding")),
-        TypeRef::Option { .. } => Err(no("optional values have no ROS 2 CDR encoding")),
     }
 }
 
@@ -212,5 +214,41 @@ mod tests {
         let mut registry = TypeRegistry::new();
         registry.insert(outer.id, outer.clone());
         assert!(ros2_representable(&outer, &registry).is_err());
+    }
+
+    #[test]
+    fn an_optional_of_a_scalar_or_a_message_is_representable() {
+        let point = structure(
+            "geometry_msgs/msg/Point",
+            id(1),
+            vec![(id(11), field("x", TypeRef::Scalar { id: *ty::F64_ID }))],
+        );
+        let say = structure(
+            "arora/msg/Say",
+            id(6),
+            vec![
+                (
+                    id(61),
+                    field("voice", TypeRef::Option { id: *ty::STRING_ID }),
+                ),
+                (id(62), field("target", TypeRef::Option { id: id(1) })),
+            ],
+        );
+        let mut registry = TypeRegistry::new();
+        registry.insert(point.id, point);
+        registry.insert(say.id, say.clone());
+        assert!(ros2_representable(&say, &registry).is_ok());
+    }
+
+    #[test]
+    fn an_optional_of_a_type_missing_from_the_registry_is_rejected() {
+        let outer = structure(
+            "my_msgs/msg/Outer",
+            id(7),
+            vec![(id(71), field("inner", TypeRef::Option { id: id(999) }))],
+        );
+        let registry = TypeRegistry::new();
+        let err = ros2_representable(&outer, &registry).unwrap_err();
+        assert!(err.reason.contains("inner"), "reason names the field");
     }
 }

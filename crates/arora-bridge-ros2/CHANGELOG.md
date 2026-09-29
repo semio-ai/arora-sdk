@@ -4,6 +4,21 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.1.0] - 2026-10-02
+
+### Added
+
+- **Methods with optional parameters or returns are served.** An optional of a
+  scalar or a message travels as the bounded sequence `T[<=1]` in a synthesized
+  service's request and reply and in a synthesized action's goal: empty is
+  absent, one element is present, and a message holding more is refused. A
+  run's result or feedback that is an optional of a scalar is typed the same
+  way. An optional array still has no ROS 2 form, and its method is skipped.
+
+### Changed
+
+- Depends on arora-msgs-ros2 2.1.
+
 ## [8.0.1] - 2026-09-29
 
 ### Fixed

@@ -244,11 +244,12 @@ pub(crate) fn resolve(
         if !is_action_shaped(signature) {
             continue;
         }
-        let send_goal_request_type = send_goal_request_type(signature);
-        if ros2_representable(&send_goal_request_type, registry.types()).is_err() {
+        let Some(send_goal_request_type) = send_goal_request_type(signature)
+            .filter(|request| ros2_representable(request, registry.types()).is_ok())
+        else {
             skipped.push(signature.name.clone());
             continue;
-        }
+        };
         actions.push(MethodAction {
             name: action_name(namespace, &signature.name),
             action_type: ActionTypeName::new("arora", &signature.name),
@@ -423,7 +424,9 @@ fn resolve_field_ref(
 /// the field is an `x`/`y`/`z` structure and the parameter the vec3 array it
 /// coerces to (see [`extract_route`]).
 fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Registry) -> bool {
-    let parameter_ref = type_ref_of(parameter);
+    let Some(parameter_ref) = type_ref_of(parameter) else {
+        return false;
+    };
     let same = match (field, &parameter_ref) {
         (TypeRef::Scalar { id: a }, TypeRef::Scalar { id: b })
         | (TypeRef::Array { id: a }, TypeRef::Array { id: b })
@@ -460,26 +463,30 @@ fn goal_id_low_field() -> (Uuid, low::StructureField) {
 /// parameter in declared order, each keeping the **parameter's id** — so a
 /// decoded request's non-goal-id fields are the spawn call's arguments
 /// verbatim.
-fn send_goal_request_type(signature: &MethodSignature) -> low::Type {
+fn send_goal_request_type(signature: &MethodSignature) -> Option<low::Type> {
     let function = &signature.function;
-    let params = function.parameter_ordering.iter().filter_map(|id| {
-        let parameter = function.parameters.get(id)?;
-        Some((
-            *id,
-            low::StructureField {
-                name: parameter.name.clone(),
-                type_ref: type_ref_of(&parameter.ty),
-            },
-        ))
-    });
+    let params = function
+        .parameter_ordering
+        .iter()
+        .filter_map(|id| Some((*id, function.parameters.get(id)?)))
+        .map(|(id, parameter)| {
+            Some((
+                id,
+                low::StructureField {
+                    name: parameter.name.clone(),
+                    type_ref: type_ref_of(&parameter.ty)?,
+                },
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
     let fields = std::iter::once(goal_id_low_field()).chain(params);
     let name = format!("{}_SendGoal_Request", signature.name);
-    low::Type {
+    Some(low::Type {
         id: gen_uuid_from_str(&name),
         name,
         description: String::new(),
         kind: low::TypeKind::Structure(low::Structure::from_fields(fields)),
-    }
+    })
 }
 
 /// The GetResult **response** type for a given terminal result value: `status:
@@ -571,8 +578,10 @@ pub(crate) fn feedback_message_value(goal_id: [u8; 16], feedback: Value) -> Valu
 
 /// The [`TypeRef`] a runtime [`Value`] carries on the wire — the lazy typing
 /// used for feedback and result messages, whose types are defined by what the
-/// run actually writes. `None` for values ROS 2 cannot carry as a field
-/// (structures, enumerations, unit, options, maps): the caller logs and skips.
+/// run actually writes. An optional of a scalar is the bounded sequence
+/// `T[<=1]` of its element. `None` for values ROS 2 cannot carry as a field
+/// (structures, enumerations, unit, maps, an optional of those or of an
+/// array): the caller logs and skips.
 pub(crate) fn type_ref_of_value(value: &Value) -> Option<TypeRef> {
     let scalar = |id: &Uuid| Some(TypeRef::Scalar { id: *id });
     let array = |id: &Uuid| Some(TypeRef::Array { id: *id });
@@ -601,6 +610,13 @@ pub(crate) fn type_ref_of_value(value: &Value) -> Option<TypeRef> {
         Value::ArrayF32(_) => array(&ty::F32_ID),
         Value::ArrayF64(_) => array(&ty::F64_ID),
         Value::ArrayString(_) => array(&ty::STRING_ID),
+        // An absent optional has no element to type it by, and needs none: an
+        // empty sequence's bytes are the same whatever its element type.
+        Value::Option(None) => Some(TypeRef::Option { id: *ty::U8_ID }),
+        Value::Option(Some(inner)) => match type_ref_of_value(inner)? {
+            TypeRef::Scalar { id } => Some(TypeRef::Option { id }),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1837,6 +1853,106 @@ mod tests {
             fields: vec![],
         });
         assert!(feedback_message_type(&opaque).is_none());
+    }
+
+    /// `say(text, voice: Option<String>, viseme: &mut String) -> Status`: the
+    /// shape of Vizij's say contract.
+    fn say_signature() -> MethodSignature {
+        let mut parameters = HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        let voice = FrozenTy::FrozenOption(arora_types::record::ty::FrozenOption {
+            element: Box::new(FrozenTy::from(PrimitiveKind::String)),
+        });
+        for (name, ty, mutable) in [
+            ("text", FrozenTy::from(PrimitiveKind::String), false),
+            ("voice", voice, false),
+            ("viseme", FrozenTy::from(PrimitiveKind::String), true),
+        ] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty,
+                    mutable,
+                },
+            );
+        }
+        MethodSignature {
+            module_id: gen_uuid_from_str("speech-module"),
+            id: gen_uuid_from_str("say"),
+            name: "say".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: status_return(),
+            },
+        }
+    }
+
+    /// An optional goal parameter travels as the bounded sequence `T[<=1]`, and
+    /// reaches the spawn call as `None` or `Some`.
+    #[test]
+    fn an_optional_goal_parameter_rides_as_a_bounded_sequence() {
+        let registry = arora_msgs_ros2::registry();
+        let (actions, skipped) = resolve("robot", &[say_signature()], &registry);
+        assert!(
+            skipped.is_empty(),
+            "an optional string goal is representable"
+        );
+        let action = &actions[0];
+
+        for voice in [Value::from(Some("alto".to_string())), Value::Option(None)] {
+            let field = |name: &str, value: Value| StructureField {
+                id: gen_uuid_from_str(name),
+                value: Box::new(value),
+            };
+            let request = Value::Structure(Structure {
+                id: action.send_goal_request_type.id,
+                fields: vec![
+                    StructureField {
+                        id: goal_id_field(),
+                        value: Box::new(Value::ArrayU8(vec![1; 16])),
+                    },
+                    field("text", Value::String("hello".into())),
+                    field("voice", voice.clone()),
+                    field("viseme", Value::String("sil".into())),
+                ],
+            });
+            let bytes = cdr::encode(&action.send_goal_request_type, registry.types(), &request)
+                .expect("encode SendGoal request");
+            let decoded = cdr::decode(&action.send_goal_request_type, registry.types(), &bytes)
+                .expect("decode SendGoal request");
+            let (_, call) = goal_call_of(action, decoded).expect("goal + call");
+            assert!(call.args.contains(&field("voice", voice)));
+        }
+    }
+
+    /// A result or feedback that is an optional of a scalar is typed lazily as
+    /// `T[<=1]`; an absent one needs no element type. An optional array has no
+    /// wire type.
+    #[test]
+    fn optional_results_and_feedback_type_lazily() {
+        let registry = arora_msgs_ros2::registry();
+        for result in [Value::from(Some(1.5f64)), Value::Option(None)] {
+            let ty = get_result_response_type(Some(&result)).expect("an optional f64 result");
+            let response = get_result_response_value(GoalStatusEnum::Succeeded, Some(result));
+            let bytes = cdr::encode(&ty, registry.types(), &response).expect("encode");
+            assert_eq!(
+                cdr::decode(&ty, registry.types(), &bytes).unwrap(),
+                response
+            );
+        }
+
+        let feedback = Value::from(Some(0.5f32));
+        let ty = feedback_message_type(&feedback).expect("an optional f32 feedback");
+        let message = feedback_message_value([3u8; 16], feedback);
+        let bytes = cdr::encode(&ty, registry.types(), &message).expect("encode");
+        assert_eq!(cdr::decode(&ty, registry.types(), &bytes).unwrap(), message);
+
+        let optional_array = Value::Option(Some(Box::new(Value::ArrayF64(vec![1.0]))));
+        assert!(feedback_message_type(&optional_array).is_none());
     }
 
     // =========================================================================
