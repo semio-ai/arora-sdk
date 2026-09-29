@@ -73,6 +73,46 @@ On wasm, build the library with `--no-default-features`: the `native` feature
 carries the wasmtime and dynamic-library hosts, the operator flow, and the
 binary.
 
+## Where a device keeps its data
+
+A device keeps what is its own from one run to the next in its **device
+directory**, each use in a subdirectory of its own:
+
+```text
+<data_local_dir>/semio/arora/      per user: ~/Library/Application Support (macOS),
+│                                  ~/.local/share (Linux), %LOCALAPPDATA% (Windows)
+└── devices/
+    └── <local id>/                the device directory: DEVICE_LOCAL_ID, `default` when unset;
+        │                          DEVICE_DIR replaces this whole path
+        └── studio/                the Studio connection's credentials, kept by
+            ├── key                arora-studio-bridge-client's DeviceCredentials
+            └── refresh_token
+```
+
+The local id tells apart the devices one user runs on one host. It is local
+only: the name a device shows (`DEVICE_NAME`) can change without making it
+another device, and the id Studio knows it by is assigned at its first sign-in.
+Anything else a device keeps goes in a subdirectory of its own beside `studio/`.
+
+The chain down to the bridge's code, in a `studio-bridge` build:
+
+1. [`device_dir`](src/device_dir.rs) resolves the device directory: `DEVICE_DIR`,
+   else `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. An embedder whose
+   platform gives it a data directory (Android, a Tauri app) passes its own to
+   `studio::connect_with_device_dir`.
+2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
+   and hands it to `DeviceCredentials::in_dir`. arora never writes inside it;
+   the files there are the client's.
+3. `studio::connect` passes `DeviceCredentials::refresh_token()` and `saver()` to
+   `ZenohDeviceClient::new`, whose Firebase authenticator signs the device in
+   with the token and calls the saver with each rotated one.
+
+Credentials from arora 11.0 and earlier, in `.semio/arora` under the
+executable's directory, the home directory or the current directory, move into
+`devices/default/studio/` at the device's first start. A deprecated
+`IDENTITY_FILE` migrates to `<IDENTITY_FILE>_dir`, which that run uses as its
+device directory.
+
 See the [root map](../../readme.md) for where this sits in Arora.
 
 [`Arora`]: src/lib.rs

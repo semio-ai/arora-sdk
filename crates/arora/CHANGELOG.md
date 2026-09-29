@@ -4,6 +4,45 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.1.0] - 2026-10-02
+
+### Added
+
+- **The device directory**: what a device keeps of its own from one run to the
+  next, each use in a subdirectory of its own. It is
+  `<data_local_dir>/semio/arora/devices/<local id>` (`~/Library/Application
+  Support` on macOS, `~/.local/share` on Linux, `%LOCALAPPDATA%` on Windows),
+  the local id coming from `DEVICE_LOCAL_ID`, `default` when unset; two devices
+  on one host set different ids. `DEVICE_DIR` replaces the whole path, and so
+  does `studio::connect_with_device_dir(&Path)` for an embedder whose platform
+  gives it a data directory (Android, a Tauri app). `device_dir::of(local_id)`
+  gives a local id's per-user directory. The README shows the tree.
+
+### Changed
+
+- **The Studio credentials live in the device directory's `studio/`**, kept by
+  arora-studio-bridge-client 8.1's `DeviceCredentials`, which alone writes
+  inside it. Rebuilding, reinstalling or moving the binary no longer registers
+  the device anew. Credentials from arora 11.0 and earlier (`.semio/arora`
+  under the executable's directory, the home directory or the current
+  directory) move into `devices/default/studio/` at the first start, so the
+  device keeps its Studio identity.
+- No file is written to probe a directory's writability; the directories and
+  files are readable by the current user alone on Unix.
+- A saved refresh token that cannot be read says why when the device signs in
+  anew.
+- Depends on arora-studio-bridge-client 8.1, and no longer on
+  `crypto_secretbox`.
+
+### Deprecated
+
+- `IDENTITY_FILE`. The device directory of a run that sets it is
+  `<IDENTITY_FILE>_dir`: the file is copied there with the key it decrypts
+  under, and is neither updated nor removed afterwards. Each run warns of the
+  deprecation and that the file can be removed; a run with the file absent
+  falls back to the directory. With neither the file nor the directory
+  present, the run fails.
+
 ## [11.0.1] - 2026-09-29
 
 ### Fixed

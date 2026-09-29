@@ -16,6 +16,10 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
+/// A device's directory: what the device keeps of its own from one run to the
+/// next, each use in a subdirectory of its own.
+#[cfg(feature = "studio-bridge")]
+pub mod device_dir;
 mod module_discovery;
 #[cfg(feature = "native")]
 pub mod operator;

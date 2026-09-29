@@ -21,8 +21,16 @@
 //!     `FirebaseEmulatorOptions::from_env`).
 //!   - `STUDIO_BRIDGE_ENDPOINT` — override the baked bridge endpoint (e.g.
 //!     `tcp/localhost:7447`) to target a local/preprod bridge without a rebuild.
-//!   - `IDENTITY_FILE` — path to the refresh-token file; defaults to
-//!     `<app_data_dir>/refresh_token`. Use it to run several devices on one host.
+//!   - `DEVICE_LOCAL_ID` — the device's local id, which names its directory
+//!     `<data_local_dir>/semio/arora/devices/<local id>` ([`crate::device_dir`]);
+//!     `default` when unset. Two devices on one host set different ids. The
+//!     Studio connection keeps its credentials (the refresh token of the
+//!     device's Studio account and the key encrypting it) in the directory's
+//!     `studio/` subdirectory.
+//!   - `DEVICE_DIR` — the device directory itself, replacing the per-user
+//!     path. An embedder passes it to [`connect_with_device_dir`] instead.
+//!   - `IDENTITY_FILE` — deprecated: the identity it names migrates to
+//!     `<IDENTITY_FILE>_dir`, which the run uses as its device directory.
 //!   - `DEVICE_OWNERS` (comma-separated), `DEVICE_NAME`, `MODEL_FAMILY`,
 //!     `DEVICE_DESCRIPTION`, `HARDWARE_VERSION`, `SOFTWARE_VERSION` — the device
 //!     info registered with Studio. Under the terminal UI the operator is
@@ -31,8 +39,9 @@
 //!     Studio. Headless, only these env vars are read (no prompt).
 //!   - `RUST_LOG` — log filter (`env_logger`).
 
-mod app_data_files;
-mod token_storage;
+mod credentials;
+
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use arora_bridge::{Bridge, DeviceInfo};
@@ -44,7 +53,7 @@ use log::{info, warn};
 
 use crate::operator::Operator;
 
-use app_data_files::ensure_app_data_dir;
+use arora_studio_bridge_client::credentials::DeviceCredentials;
 
 /// The prompt shown to the operator for the Studio owner UID(s). Empty is
 /// allowed and meaningful: no owner means "do not connect to Studio".
@@ -135,7 +144,7 @@ pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Option<Box
         owners,
     };
 
-    let client = build_studio_bridge().await?;
+    let client = build_studio_bridge(credentials::from_env()?).await?;
     client
         .update_device_info(Some(info))
         .await
@@ -166,8 +175,22 @@ pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Option<Box
 /// attached to differs. Configuration is environment-only — see the
 /// [module docs](self) for the variables read.
 pub async fn connect() -> Result<Box<dyn Bridge>> {
-    let client = build_studio_bridge().await?;
+    register_from_env(build_studio_bridge(credentials::from_env()?).await?).await
+}
 
+/// [`connect`], with `device_dir` as the device directory rather than the one
+/// the environment names; the Studio credentials go in its `studio/`
+/// subdirectory. An app whose platform gives it a data directory (Android, a
+/// Tauri app) passes that; [`crate::device_dir::of`] gives the per-user one
+/// of a local id. The directories are created if missing, and the
+/// credentials on first connection.
+pub async fn connect_with_device_dir(device_dir: &Path) -> Result<Box<dyn Bridge>> {
+    register_from_env(build_studio_bridge(credentials::in_device_dir(device_dir)?).await?).await
+}
+
+/// Register the device behind `client` from the device info configured in the
+/// environment, and hand the client back.
+async fn register_from_env(client: Box<dyn Bridge>) -> Result<Box<dyn Bridge>> {
     // Register this device with Studio from the configured device info. `None`
     // when nothing is set, so an already-registered device is left untouched.
     if let Some(info) = device_info_from_env() {
@@ -182,10 +205,11 @@ pub async fn connect() -> Result<Box<dyn Bridge>> {
 }
 
 /// Build the Studio bridge itself — Firebase auth, token load/rotate, the Zenoh
-/// connection — without registering any device info. Both [`connect`] (env-only)
-/// and [`connect_with_operator`] (operator-driven) build the bridge this way and
-/// then register their own resolved [`DeviceInfo`].
-async fn build_studio_bridge() -> Result<Box<dyn Bridge>> {
+/// connection — as the device whose Studio credentials `credentials` holds,
+/// without registering any device info. [`connect`],
+/// [`connect_with_device_dir`] and [`connect_with_operator`] build the bridge
+/// this way and then register their own resolved [`DeviceInfo`].
+async fn build_studio_bridge(credentials: DeviceCredentials) -> Result<Box<dyn Bridge>> {
     // Read the Firebase options and Zenoh endpoints from the environment.
     let firebase_options = FirebaseOptions::from_env();
     let firebase_emulator_options = FirebaseEmulatorOptions::from_env();
@@ -197,25 +221,18 @@ async fn build_studio_bridge() -> Result<Box<dyn Bridge>> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Look for the refresh token that might have been saved. It is encrypted
-    // with a key stored in the same app-data directory.
-    let app_data_dir = ensure_app_data_dir().context("could not create app data directory")?;
-    let key_path = app_data_dir.join("key");
-    let token_path = match std::env::var("IDENTITY_FILE") {
-        Ok(identity_file) => std::path::PathBuf::from(identity_file),
-        Err(_) => app_data_dir.join("refresh_token"),
-    };
-
     // Install the rustls ring crypto provider (the Zenoh/Firebase TLS stacks
     // need a default provider).
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
 
-    // Load and decrypt the refresh token, if one was saved.
-    let refresh_token = token_storage::load_token(&key_path, &token_path)
-        .ok()
-        .flatten();
+    // The refresh token an earlier run saved. One that cannot be read signs
+    // the device in as a new Studio device, which the warning says.
+    let refresh_token = credentials.refresh_token().unwrap_or_else(|e| {
+        warn!("could not read the saved refresh token, so the device signs in anew: {e}");
+        None
+    });
     if refresh_token.is_some() {
         info!("Refresh token found");
     } else {
@@ -223,15 +240,7 @@ async fn build_studio_bridge() -> Result<Box<dyn Bridge>> {
     }
 
     // Persist future refresh tokens as the client rotates them.
-    let save_cb: Box<dyn FnMut(String) + Send + Sync> = {
-        let key_path = key_path.clone();
-        let token_path = token_path.clone();
-        Box::new(move |token: String| {
-            if let Err(e) = token_storage::save_token(&key_path, &token_path, &token) {
-                warn!("Failed to save refresh token to {:?}: {:?}", token_path, e);
-            }
-        })
-    };
+    let save_cb = credentials.saver();
 
     // Build the Zenoh bridge here (awaiting its async construction on the caller's
     // runtime) and hand the finished bridge to the run loop — no bridge factory.
