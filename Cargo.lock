@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "8.0.0"
+version = "8.0.1"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",

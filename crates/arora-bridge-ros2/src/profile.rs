@@ -97,7 +97,10 @@ pub struct ActionBinding {
     pub function: String,
     /// Goal fan-out onto the function's parameters: [`FieldRoute::field`] is
     /// the dotted path into the goal message, [`FieldRoute::key`] names the
-    /// parameter it becomes. Every parameter must be routed.
+    /// parameter it becomes. A parameter no route names is left out of the
+    /// spawn call, and what an absent argument means is the implementation's:
+    /// a method declared with arora-module reads an absent optional parameter
+    /// as `None`, and fails the call on an absent required one.
     pub goal_routes: Vec<FieldRoute>,
 }
 
@@ -283,8 +286,9 @@ impl ExposureProfile {
                     ],
                 },
                 // The speech skill. `person_id` and `group_id` address an
-                // audience a face device has no notion of, and the goal
-                // carries no voice, so the method's own default speaks.
+                // audience a face device has no notion of. The goal carries
+                // only the text, so the device's `say` takes its other
+                // parameters as absent (an optional voice) or supplies them.
                 ActionBinding {
                     action: "/skill/say".into(),
                     ros_type: "communication_skills/Say".into(),

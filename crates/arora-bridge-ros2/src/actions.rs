@@ -317,8 +317,7 @@ fn resolve_binding(
     }
 
     // Every routed field must resolve in the goal message and land on a
-    // parameter of a compatible type — and every parameter must be routed,
-    // or the spawn call would miss arguments.
+    // parameter of a compatible type.
     let function = &signature.function;
     let mut routes = Vec::new();
     for route in &binding.goal_routes {
@@ -348,10 +347,14 @@ fn resolve_binding(
     // A standard contract carries what the standard says, which need not be
     // every parameter the implementing method takes — ROS4HRI's `Say` goal has
     // no field for a voice, say. Such a parameter is left out of the spawn
-    // call and keeps the method's own default, announced here so the gap is
-    // legible in the log rather than surprising at the first goal. A route
-    // naming a field the goal lacks, or a parameter the method lacks, is still
-    // refused above: a typo is not an omission.
+    // call, and what an absent argument means is the implementation's: a
+    // method declared with arora-module reads an absent optional parameter as
+    // `None` and fails the call on an absent required one, while a task
+    // fragment may supply the argument itself. So the binding is served, not
+    // refused, and the gap is announced here to be legible in the log rather
+    // than surprising at the first goal. A route naming a field the goal
+    // lacks, or a parameter the method lacks, is still refused above: a typo
+    // is not an omission.
     let unrouted: Vec<&str> = function
         .parameter_ordering
         .iter()
@@ -361,11 +364,12 @@ fn resolve_binding(
         .collect();
     if !unrouted.is_empty() {
         log::info!(
-            "{}: the goal carries no {} — '{}' runs on its own default{}",
+            "{}: '{}' is spawned without {}, which the goal does not carry: \
+             an absent optional parameter is None, and the implementation \
+             supplies an absent required one or fails the run",
             binding.action,
-            unrouted.join(", "),
             binding.function,
-            if unrouted.len() > 1 { "s" } else { "" }
+            unrouted.join(", "),
         );
     }
 
@@ -2160,9 +2164,9 @@ mod tests {
         assert!(none.is_empty());
         assert!(errors[0].contains("not a task run"), "{errors:?}");
 
-        // A parameter the goal does not route is served anyway, on the
-        // method's own default — the standard contract need not name every
-        // parameter the implementation takes.
+        // A parameter the goal does not route leaves the binding served and
+        // the parameter out of the spawn call — the standard contract need
+        // not name every parameter the implementation takes.
         let mut extra = bound_look_at_signature();
         let id = gen_uuid_from_str("speed");
         extra.function.parameter_ordering.push(id);

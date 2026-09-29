@@ -4,6 +4,17 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.0.1] - 2026-09-29
+
+### Fixed
+
+- **What an unrouted goal parameter becomes.** A parameter an action binding
+  does not route is left out of the spawn call. The resolve-time log said the
+  method then ran "on its own default"; it now states that an absent optional
+  parameter is `None`, and that the implementation supplies an absent
+  required one or fails the run. `ActionBinding::goal_routes` no longer says
+  every parameter must be routed.
+
 ## [8.0.0] - 2026-09-29
 
 ### Changed

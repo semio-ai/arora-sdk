@@ -188,9 +188,13 @@ let config = Ros2BridgeConfig::new("robot", 0)
 An action binding is the exterior contract of a skill: at startup the bridge
 checks it against the device's described methods (the function exists, is a
 task run, and every goal field routes onto a parameter of a compatible type)
-and refuses it loudly otherwise. A parameter the goal does not name is left to
-the method's own default and logged — a standard contract carries what the
-standard says, not every parameter an implementation happens to take. A bound action serves one goal at a time —
+and refuses it loudly otherwise. A parameter the goal does not name is left out
+of the spawn call, and the bridge logs it — a standard contract carries what
+the standard says, not every parameter an implementation happens to take. What
+the absent argument means is the implementation's: a method declared with
+arora-module reads an absent optional parameter as `None` and fails the call on
+an absent required one, while a task fragment may supply the argument itself.
+A bound action serves one goal at a time —
 `std_skills/Meta.priority` arbitrates, an equal-or-higher replacement
 preempting the active run (its result reports `ROS_EINTR`) and a lower one
 being rejected — and answers with the standard Result message carrying the
