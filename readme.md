@@ -108,3 +108,8 @@ open source. It now lives as **one public workspace** (`arora-sdk`); the only
 external dependency is Semio's own backend services (the hosted record store),
 which the opinionated `arora` / `arora-cli` / `arora-web` layer integrates and
 which everything below `arora-engine` can be built without.
+
+## License
+
+Arora is released under the [MIT License](LICENSE), copyright Semio Community. Each
+published crate ships the same license file.
