@@ -4,6 +4,13 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.0.0] - 2026-09-29
+
+### Changed
+
+- **Breaking:** depends on arora 11, whose `Arora` and `AroraBuilder` this crate's
+  surface carries.
+
 ## [7.0.0] - 2026-09-25
 
 ### Changed

@@ -15,7 +15,9 @@
 
 use std::sync::Arc;
 
-use arora_types::data::{DataError, DataStore, Key, Slot, State, StateChange, Subscription};
+use arora_types::data::{
+    DataError, DataStore, Key, KeyMeta, Slot, State, StateChange, Subscription,
+};
 use arora_types::value::Value;
 
 /// A [`DataStore`] view that prefixes every key with `<namespace>/` before
@@ -56,6 +58,45 @@ impl DataStore for NamespacedStore {
         let prefixed: Vec<Key> = keys.iter().map(|k| self.prefixed(k)).collect();
         // The inner store preserves order, so values line up with `keys`.
         self.inner.read(&prefixed)
+    }
+
+    fn meta(&self, keys: &[Key]) -> Vec<Option<KeyMeta>> {
+        let prefixed: Vec<Key> = keys.iter().map(|k| self.prefixed(k)).collect();
+        self.inner.meta(&prefixed)
+    }
+
+    /// Delegates to the inner store as-is, like [`snapshot`](Self::snapshot):
+    /// the meta comes back under the full, namespaced keys.
+    fn all_meta(&self) -> std::collections::HashMap<Key, KeyMeta> {
+        self.inner.all_meta()
+    }
+
+    fn set_meta(&self, meta: std::collections::HashMap<Key, KeyMeta>) -> Result<(), DataError> {
+        self.inner.set_meta(
+            meta.into_iter()
+                .map(|(key, meta)| (self.prefixed(&key), meta))
+                .collect(),
+        )
+    }
+
+    /// A subtree of this device's keys: the empty prefix is the whole device —
+    /// its namespace — and never a neighbour's.
+    fn set_prefix_meta(
+        &self,
+        meta: std::collections::HashMap<String, KeyMeta>,
+    ) -> Result<(), DataError> {
+        self.inner.set_prefix_meta(
+            meta.into_iter()
+                .map(|(prefix, meta)| {
+                    let prefixed = if prefix.is_empty() {
+                        self.namespace.clone()
+                    } else {
+                        format!("{}/{prefix}", self.namespace)
+                    };
+                    (prefixed, meta)
+                })
+                .collect(),
+        )
     }
 
     fn write(&self, changes: StateChange) -> Result<(), DataError> {

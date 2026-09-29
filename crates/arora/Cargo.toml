@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "10.3.0"
+version = "11.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -60,8 +60,8 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 arora-engine = { path = "../arora-engine", version = "5.1", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "8" }
 arora-behavior = { path = "../arora-behavior", version = "9.1" }
-arora-types = { path = "../arora-types", version = "3" }
-arora-bridge-ws = { path = "../arora-bridge-ws", version = "6", optional = true }
+arora-types = { path = "../arora-types", version = "3.1" }
+arora-bridge-ws = { path = "../arora-bridge-ws", version = "7", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 # Portable instant for the run loop's dt/Hz measurements: `performance.now()`
@@ -69,7 +69,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 web-time = "1"
 # The three interfaces the runtime loop wires around the shared state.
 arora-hal = { path = "../arora-hal", version = "4" }
-arora-bridge = { path = "../arora-bridge", version = "5" }
+arora-bridge = { path = "../arora-bridge", version = "6" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Only the runtime-free sync primitives here (the behavior-error watch); the

@@ -20,7 +20,7 @@ JSON messages with a `type` field discriminator, over a WebSocket:
 | --- | --- | --- |
 | `{"type": "write_values", "values": {"face/mouth": {"f64": 0.5}}}` | `write_values_resp` | Write values to keys |
 | `{"type": "read_values", "keys": ["face/mouth"]}` | `read_values_resp` | Read current values |
-| `{"type": "list_keys", "path": "face"}` | `list_keys_resp` | List available keys (optionally under a prefix) |
+| `{"type": "list_keys", "path": "face"}` | `list_keys_resp` | List the device's keys (optionally under a prefix) |
 | `{"type": "list_methods"}` | `list_methods_resp` | List the callable methods |
 | `{"type": "invoke", "method": "say", "args": {"text": {"str": "hi"}}}` | `invoke_resp` | Call a method by name |
 | `{"type": "halt", "run": "<run id>"}` | `halt_resp` | Stop a run |
@@ -31,6 +31,26 @@ unsolicited whenever the runtime writes new state — the live feed a connected
 editor renders from. A client is pushed every key until it subscribes, and only
 the keys it named afterwards: nothing about a key makes it special, so a client
 that wants the device's clock subscribes to it like any other.
+
+## Keys
+
+`list_keys` answers from the device, asked as the client asks: every key it holds
+right now, each with the `KeyMeta` its store keeps —
+
+```json
+{"path": "face/mouth", "__meta": {"ty": "f64", "min": 0.0, "max": 1.0,
+                                  "default": {"f64": 0.0}, "editable": true,
+                                  "description": "how open the mouth is"}}
+```
+
+— so a slider knows its range without anyone restating it here, and a module
+loaded while the device runs is listed at once. A key nobody has described
+carries the default meta: the shape of the value it holds, and closed to writes.
+
+A write reaches the device, which accepts it only for the keys it opened
+(`editable: true`, by key or by subtree in its store) and refuses the rest,
+naming the path. A device that opens nothing accepts no writes: a client on an
+unauthenticated link does not get to set a key the device never offered.
 
 ## Methods and runs
 
@@ -62,19 +82,17 @@ run with `{"type": "halt", "run": "0195e1f2-…"}`.
 - `AroraWSServer` — the ready-to-use server. Binds loopback by default: the
   link is unauthenticated, so exposing other interfaces is an explicit opt-in.
   One active client at a time; a new connection replaces the old one.
-- `Registry` — the keys (`KeyInfo`) clients discover with `list_keys`, and the
-  methods (`MethodInfo`) the server itself owns. Written keys are checked against
-  it (`ServerConfig::validate_paths`), so what it lists as an input is what a
-  client may write.
-- `DeviceMethods` — the device behind the server: where `list_methods` and
-  `invoke` go for every name the registry does not own.
+- `Device` — the device behind the server, and the only thing a client
+  discovers: its keys with their meta, its functions with their signatures, and
+  the calls it answers. The server keeps nothing of its own.
 - `bridge::WsBridge` — drives the server as an Arora `Bridge`: incoming
   writes/reads become `BridgeCommand`s for the runtime, the runtime's state flows
   out as `values_changed`, and the device's methods are described and called
   through the same channel.
 - A built-in control panel served on plain HTTP from the same port (opt-in via
   `ServerConfig::serve_control_panel`): sliders over the advertised input keys,
-  and a row per method with its arguments, a call and a stop.
+  and a row per method with its arguments, a call and a stop; the device's other
+  keys are listed read-only beneath, with the value they held when listed.
 
 ## Example
 

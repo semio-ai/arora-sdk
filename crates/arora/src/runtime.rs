@@ -19,7 +19,7 @@ use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound, MethodSignature};
 use arora_hal::Hal;
 use arora_types::call::{CallBridge, CallError, CallResult};
-use arora_types::data::{DataStore, Key, StateChange, Subscription};
+use arora_types::data::{DataStore, Key, KeyMeta, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
 use tokio::sync::watch;
@@ -305,32 +305,87 @@ fn apply_command(
                 mutated: Vec::new(),
             })
         }
-        BridgeOp::Update(change) => match store.write(change.clone()) {
-            Ok(()) => Ok(CallResult {
-                ret: Value::Unit,
-                mutated: Vec::new(),
-            }),
-            Err(e) => Err(e.to_string()),
-        },
+        BridgeOp::Update(change) => {
+            // Every bridge's inbound write passes here, so this is where a key
+            // the device never opened is refused — once, for all of them. A key
+            // is closed unless its meta says it is an input.
+            let keys: Vec<Key> = change
+                .set
+                .keys()
+                .chain(change.unset.iter())
+                .cloned()
+                .collect();
+            let refused: Vec<String> = store
+                .meta(&keys)
+                .into_iter()
+                .zip(&keys)
+                .filter(|(meta, _)| !meta.as_ref().is_some_and(|meta| meta.editable))
+                .map(|(_, key)| key.path.clone())
+                .collect();
+            if !refused.is_empty() {
+                Err(format!(
+                    "not an input of this device: {}",
+                    refused.join(", ")
+                ))
+            } else {
+                match store.write(change.clone()) {
+                    Ok(()) => Ok(CallResult {
+                        ret: Value::Unit,
+                        mutated: Vec::new(),
+                    }),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+        }
         BridgeOp::Call(call) => call_bridge
             .arora_call(call.clone())
             .map_err(|e| format!("call failed: {e:?}")),
         BridgeOp::ListKeys { prefix } => {
-            // Introspection: enumerate the live (set) key paths, optionally
-            // filtered by prefix, sorted for a deterministic reply.
+            // Introspection: every key the device holds a value for, plus every
+            // key the store has meta for — a key can be described before
+            // anything writes it. Sorted for a deterministic reply.
             let snapshot = store.snapshot();
-            let mut paths: Vec<String> = snapshot
+            let mut listed: Vec<(Key, Option<Value>)> = snapshot
                 .storage
-                .iter()
+                .into_iter()
                 .filter(|(_, value)| value.is_some())
-                .map(|(key, _)| key.path.clone())
-                .filter(|path| prefix.as_ref().is_none_or(|p| path.starts_with(p.as_str())))
                 .collect();
-            paths.sort();
-            Ok(CallResult {
-                ret: Value::ArrayValue(paths.into_iter().map(Value::String).collect()),
-                mutated: Vec::new(),
-            })
+            // A key can be described before anything writes it.
+            let held: std::collections::HashSet<Key> =
+                listed.iter().map(|(key, _)| key.clone()).collect();
+            listed.extend(
+                store
+                    .all_meta()
+                    .into_keys()
+                    .filter(|key| !held.contains(key))
+                    .map(|key| (key, None)),
+            );
+            listed.retain(|(key, _)| {
+                prefix
+                    .as_ref()
+                    .is_none_or(|p| key.path.starts_with(p.as_str()))
+            });
+            let paths: Vec<Key> = listed.iter().map(|(key, _)| key.clone()).collect();
+            let mut keys: Vec<(String, KeyMeta)> = listed
+                .into_iter()
+                .zip(store.meta(&paths))
+                .map(|((key, value), meta)| {
+                    let mut meta = meta.unwrap_or_default();
+                    // The value shows its own shape; the store says the rest.
+                    if meta.ty.is_none() {
+                        meta.ty = value.as_ref().map(|value| value.kind());
+                    }
+                    (key.path, meta)
+                })
+                .collect();
+            keys.sort_by(|left, right| left.0.cmp(&right.0));
+            match arora_types::value_serde::to_value(&keys) {
+                Ok(ret) => Ok(CallResult {
+                    ret,
+                    mutated: Vec::new(),
+                }),
+                Err(e) => Err(format!("list_keys: encode failed: {e}")),
+            }
         }
         BridgeOp::ListMethods { prefix } => {
             // Introspection: enumerate registered module method names, optionally
@@ -1274,6 +1329,10 @@ mod tests {
     async fn get_and_update_commands_round_trip() {
         let mut arora = build(Box::new(UnregisterBridge));
         let key = Key::from("greeting");
+        arora
+            .store
+            .set_meta(HashMap::from([(key.clone(), KeyMeta::new().editable())]))
+            .unwrap();
 
         // Update writes a value into the store.
         let (tx, rx) = oneshot::channel();
@@ -1358,29 +1417,73 @@ mod tests {
 
     // Exercises `ListMethods` (deprecated) alongside `ListKeys`/`DescribeMethods`.
     #[allow(deprecated)]
+    /// A remote write reaches only the keys the device opened: a key nothing
+    /// described is refused on the way in, naming it, for every bridge at once;
+    /// a key its meta makes an input — its own, or a subtree's — is accepted.
+    #[tokio::test]
+    async fn a_remote_write_reaches_only_the_devices_inputs() {
+        let mut arora = build(Box::new(UnregisterBridge));
+        let write = |path: &str| {
+            let mut set = HashMap::new();
+            set.insert(Key::from(path), Some(Value::F32(1.0)));
+            BridgeOp::Update(StateChange {
+                set,
+                unset: std::collections::HashSet::new(),
+            })
+        };
+        let mut apply = |op| {
+            let (tx, rx) = oneshot::channel();
+            apply_command(
+                &*arora.store,
+                &arora.function_index,
+                &mut arora.engine,
+                BridgeCommand::new(op, tx),
+            )
+            .unwrap();
+            rx
+        };
+
+        let error = apply(write("face/mouth"))
+            .await
+            .unwrap()
+            .expect_err("closed until the device says otherwise");
+        assert!(error.contains("face/mouth"), "{error}");
+        assert_eq!(
+            arora.store.read(&[Key::from("face/mouth")])[0],
+            None,
+            "nothing was written"
+        );
+
+        arora
+            .store
+            .set_prefix_meta(HashMap::from([(
+                "face".to_string(),
+                KeyMeta::new().editable(),
+            )]))
+            .expect("the store keeps meta");
+        assert!(apply(write("face/mouth")).await.unwrap().is_ok(), "opened");
+        assert!(
+            apply(write("arora/time")).await.unwrap().is_err(),
+            "outside the opened subtree"
+        );
+    }
+
     #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
         let mut arora = build(Box::new(UnregisterBridge));
 
-        // Seed three keys across two prefixes.
+        // Seed three keys across two prefixes — the device's own writes.
         let mut set = HashMap::new();
         set.insert(Key::from("face/mouth"), Some(Value::F32(0.5)));
         set.insert(Key::from("face/eyes"), Some(Value::F32(0.1)));
         set.insert(Key::from("body/hand"), Some(Value::F32(0.9)));
-        let (tx, _rx) = oneshot::channel();
-        apply_command(
-            &*arora.store,
-            &arora.function_index,
-            &mut arora.engine,
-            BridgeCommand::new(
-                BridgeOp::Update(StateChange {
-                    set,
-                    unset: std::collections::HashSet::new(),
-                }),
-                tx,
-            ),
-        )
-        .unwrap();
+        arora
+            .store
+            .write(StateChange {
+                set,
+                unset: std::collections::HashSet::new(),
+            })
+            .unwrap();
 
         // ListKeys with a prefix returns only that subtree, sorted.
         let (tx, rx) = oneshot::channel();
@@ -1397,13 +1500,21 @@ mod tests {
         )
         .unwrap();
         let result = rx.await.unwrap().expect("list_keys ok");
+        let keys: Vec<(String, KeyMeta)> =
+            arora_types::value_serde::from_value(result.ret).expect("the listed keys");
         assert_eq!(
-            result.ret,
-            Value::ArrayValue(vec![
-                Value::String("face/eyes".into()),
-                Value::String("face/mouth".into()),
-            ])
+            keys.iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            ["face/eyes", "face/mouth"]
         );
+        // Nothing described these keys, so each carries the shape of the value
+        // it holds and stays closed to remote writers.
+        for (path, meta) in &keys {
+            assert_eq!(meta.ty, Some(arora_types::value::Type::F32), "{path}");
+            assert!(!meta.editable, "{path}");
+            assert_eq!(meta.min, None);
+        }
 
         // ListMethods returns the registered method names as an array.
         let (tx, rx) = oneshot::channel();
@@ -1472,6 +1583,15 @@ mod tests {
         let shared = SimpleDataStore::new();
         let store = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
         let mut arora = build_in(Box::new(FakeBridge::new()), Box::new(store));
+        // The device's input, said under its own name: the meta is namespaced
+        // exactly as the value will be.
+        arora
+            .store
+            .set_meta(HashMap::from([(
+                Key::from("greeting"),
+                KeyMeta::new().editable(),
+            )]))
+            .unwrap();
 
         // Drive a write through the store pipeline.
         let (tx, rx) = oneshot::channel();

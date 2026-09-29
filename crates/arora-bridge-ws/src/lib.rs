@@ -12,7 +12,8 @@
 //! # Features
 //!
 //! - **Message Types**: Type-safe [`Incoming`] and [`Outgoing`] message enums
-//! - **Registry**: Advertise keys and methods with [`Registry`]
+//! - **Device**: [`Device`] is where everything a client discovers or calls
+//!   comes from, asked as the client asks
 //! - **Server**: Full WebSocket server with [`AroraWSServer`]
 //! - **Bridge**: [`bridge::WsBridge`] drives the server as an Arora [`Bridge`](arora_bridge::Bridge)
 //!
@@ -43,43 +44,44 @@
 //! {"type": "values_changed", "values": {"face/mouth": {"f64": 0.5}}}
 //! ```
 //!
-//! # Methods
+//! # What a client discovers
 //!
-//! `list_methods` and `invoke` answer from two places: the [`Registry`], which
-//! holds the methods the server itself owns, and the device behind the bridge,
-//! whose module functions are listed with their described signatures and called
-//! by name. A method that starts a **run** (a long-running, cancellable one —
-//! `MethodInfo::task`) answers with the run's handle, and `halt` stops it by the
-//! id that handle carried.
+//! Everything comes from the device ([`Device`]), asked at the moment the client
+//! asks: `list_keys` gives the keys it holds with the [`KeyMeta`] its store keeps
+//! for each — the shape, the range, where it rests, whether anything outside the
+//! device may write it — and `list_methods` the functions its modules export.
+//! The server keeps nothing of its own, so a module loaded while the device runs
+//! brings its keys and functions with it.
+//!
+//! A method that starts a **run** (a long-running, cancellable one —
+//! `MethodInfo::task`) answers with the run named, and `halt` stops it by that
+//! run's id.
+//!
+//! A write reaches the device, which refuses a key it writes itself
+//! (`KeyMeta::editable`) rather than letting a client set what the next tick
+//! would undo.
 //!
 //! # Server Example
 //!
 //! ```rust,no_run
-//! use arora_bridge_ws::{AroraWSServer, ServerConfig, MethodInfo, InvokeResult};
+//! use arora_bridge_ws::{AroraWSServer, ServerConfig};
 //! use tokio_util::sync::CancellationToken;
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let server = AroraWSServer::with_port(9000);
 //!
-//!     // A method of the server's own. The device's own methods need no
-//!     // registration: they are listed and called by name through the bridge.
-//!     server.registry().register_method_fn(
-//!         MethodInfo {
-//!             path: "reset".to_string(),
-//!             description: Some("Reset to defaults".to_string()),
-//!             ..Default::default()
-//!         },
-//!         |_args| InvokeResult::ok(),
-//!     ).await;
+//!     // Serving a device means wrapping the server in `bridge::WsBridge` and
+//!     // handing that to the runtime; its keys and functions then answer for
+//!     // themselves. These handlers are the seam underneath, for a server
+//!     // driven without one.
+//!     server.set_write_values_handler(std::sync::Arc::new(|values: std::collections::HashMap<String, arora_bridge_ws::Value>| {
+//!         Box::pin(async move {
+//!             println!("Received {} writes", values.len());
+//!             Ok(())
+//!         }) as _
+//!     })).await;
 //!
-//!     // Handle writes from clients
-//!     server.set_write_values_handler(|values| {
-//!         println!("Received {} writes", values.len());
-//!         Ok(())
-//!     }).await;
-//!
-//!     // Run the server
 //!     let cancel = CancellationToken::new();
 //!     server.run(cancel).await.unwrap();
 //! }
@@ -92,19 +94,18 @@ mod interpreter;
 mod key;
 mod messages;
 mod method;
-mod registry;
 mod server;
 
 pub use handlers::{
-    DeviceMethods, DeviceMethodsHandler, MethodHandler, OnClientConnectedHandler,
-    ReadValuesHandler, WriteValuesHandler, WriteValuesResult,
+    Device, DeviceHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
+    WriteValuesResult,
 };
 pub use key::KeyInfo;
 pub use messages::{Incoming, Outgoing};
 pub use method::{InvokeResult, MethodInfo, MethodParam};
-pub use registry::Registry;
 pub use server::{AroraWSServer, ServerConfig};
 pub use tokio_util::sync::CancellationToken;
 
+pub use arora_types::data::KeyMeta;
 pub use arora_types::keyvalue::{KeyValue, KeyValueField};
 pub use arora_types::value::{Type, Value};

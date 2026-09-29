@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
@@ -35,7 +35,7 @@ arora-types = { path = "../arora-types", version = "3" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-arora = { path = "../arora", version = "10", features = ["studio-bridge"], optional = true }
+arora = { path = "../arora", version = "11", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"

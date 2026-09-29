@@ -27,7 +27,7 @@ use arora_bridge::{
     MethodSignature,
 };
 use arora_msgs_ros2::Ros2Registry;
-use arora_types::data::StateChange;
+use arora_types::data::{KeyMeta, StateChange};
 use arora_types::value::{Type, Value};
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
@@ -46,30 +46,6 @@ use crate::conversions::{
 use crate::profile;
 use crate::qos::Qos;
 use crate::services;
-
-/// An input key exposed as an inbound ROS 2 topic: a message received on
-/// `/{namespace}/keys/{path}` becomes a [`BridgeOp::Update`] for `path`. The
-/// value type selects the `std_msgs` topic type, so it must be declared here
-/// (a ROS 2 topic is typed, and the subscription is created before any message
-/// arrives).
-#[derive(Debug, Clone)]
-pub struct InputKey {
-    pub path: String,
-    pub value_type: Type,
-    /// Delivery profile; `None` takes [`Qos::default_for`] an inbound flow
-    /// (reliable — an input topic carries instructions).
-    pub qos: Option<Qos>,
-}
-
-impl InputKey {
-    pub fn new<S: Into<String>>(path: S, value_type: Type) -> Self {
-        Self {
-            path: path.into(),
-            value_type,
-            qos: None,
-        }
-    }
-}
 
 /// An output published as a **typed** ROS 2 message rather than a `std_msgs`
 /// scalar: a message of `ros_type` (a registered ROS message name, e.g.
@@ -127,14 +103,15 @@ pub struct TypedInput {
 }
 
 /// How to attach to the ROS 2 graph: a `namespace` for the topics, a DDS
-/// `domain_id`, and the input keys to subscribe to. Output keys need no
-/// declaration — [`send_data`](Bridge::send_data) creates a publisher from each
+/// `domain_id`, and the typed conversions a profile adds. The keys themselves
+/// need no declaration here: each key the device's store opens to remote
+/// writers (`KeyMeta::editable`) is subscribed as an input topic typed from its
+/// meta, and [`send_data`](Bridge::send_data) creates a publisher from each
 /// changed value's type on first use.
 #[derive(Debug, Clone)]
 pub struct Ros2BridgeConfig {
     pub namespace: String,
     pub domain_id: u16,
-    pub inputs: Vec<InputKey>,
     /// Input keys subscribed as typed ROS messages (see [`TypedInput`]); a key
     /// not listed here subscribes on the untyped `std_msgs` path.
     pub typed_inputs: Vec<TypedInput>,
@@ -153,23 +130,17 @@ pub struct Ros2BridgeConfig {
 }
 
 impl Ros2BridgeConfig {
-    /// A config with a namespace and domain and no input keys (send-only).
+    /// A config with a namespace and domain: the device's inputs subscribed,
+    /// every changed key published, no typed conversions.
     pub fn new<S: Into<String>>(namespace: S, domain_id: u16) -> Self {
         Self {
             namespace: namespace.into(),
             domain_id,
-            inputs: Vec::new(),
             typed_inputs: Vec::new(),
             includes: Vec::new(),
             outputs: Vec::new(),
             action_bindings: Vec::new(),
         }
-    }
-
-    /// Add an input key to subscribe to.
-    pub fn with_input<S: Into<String>>(mut self, path: S, value_type: Type) -> Self {
-        self.inputs.push(InputKey::new(path, value_type));
-        self
     }
 
     /// Subscribe an input key as a typed ROS message `ros_type` (a registered
@@ -624,7 +595,6 @@ async fn run_node(
     let Ros2BridgeConfig {
         namespace,
         domain_id,
-        inputs,
         typed_inputs,
         outputs,
         includes,
@@ -657,8 +627,8 @@ async fn run_node(
     // and action planes.
     let registry = Arc::new(arora_msgs_ros2::registry());
 
-    // Subscribe to every declared input key; each yields single-key state
-    // changes we turn into `Update` commands.
+    // Every input topic yields single-key state changes we turn into `Update`
+    // commands.
     let mut sub_streams: Vec<StateChangeStream> = Vec::new();
     // Every topic this bridge subscribes to. Publishing on one would hand the
     // device its own command back: the sample re-enters as an inbound update,
@@ -668,17 +638,6 @@ async fn run_node(
     // its own readers, and the Zenoh backend declares its subscribers with no
     // origin filter, so neither middleware saves us from it.)
     let mut subscribed: HashSet<String> = HashSet::new();
-    for input in &inputs {
-        subscribed.insert(topic_name(&namespace, &input.path));
-        let qos = input.qos.unwrap_or(Qos::default_for(profile::Flow::In));
-        match setup_key_subscriber(&mut node, &namespace, &input.path, &input.value_type, qos) {
-            Ok(stream) => sub_streams.push(stream),
-            Err(e) => warn!(
-                "Ros2Bridge could not subscribe to key '{}': {e}",
-                input.path
-            ),
-        }
-    }
     // Typed input keys subscribe as a registered ROS message, decoded against
     // its runtime type into a single-key change — how a device key receives a
     // real ROS4HRI message.
@@ -702,6 +661,19 @@ async fn run_node(
                 "Ros2Bridge could not subscribe to typed key '{}': {e}",
                 input.path
             ),
+        }
+    }
+    // The device's inputs: every key its store opens to remote writers, each on
+    // `/{namespace}/keys/{path}` as the `std_msgs` type of its shape. Asked of
+    // the device rather than configured here, so an input is stated once — in
+    // the store — and every bridge exposes the same set. A typed profile topic
+    // may feed the same key; both are inputs of it.
+    for (path, value_type) in device_inputs(&cmd_tx).await {
+        subscribed.insert(topic_name(&namespace, &path));
+        let qos = Qos::default_for(profile::Flow::In);
+        match setup_key_subscriber(&mut node, &namespace, &path, &value_type, qos) {
+            Ok(stream) => sub_streams.push(stream),
+            Err(e) => warn!("Ros2Bridge could not subscribe to input '{path}': {e}"),
         }
     }
     let mut inbound = futures::stream::select_all(sub_streams);
@@ -819,6 +791,44 @@ async fn run_node(
 /// bindings whose contract does not hold, are logged and skipped (never
 /// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
 /// the bridge then serves no methods.
+/// The keys the device opened to remote writers, each with the shape it holds —
+/// the topics this bridge subscribes. An input the store states no shape for
+/// cannot have a typed topic, and is reported rather than guessed. Empty if the
+/// device never answers (it stopped): the bridge then takes no input.
+async fn device_inputs(cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>) -> Vec<(String, Type)> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if cmd_tx
+        .unbounded_send(BridgeCommand::new(
+            BridgeOp::ListKeys { prefix: None },
+            reply_tx,
+        ))
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let keys: Vec<(String, KeyMeta)> = match reply_rx.await {
+        Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
+            warn!("Ros2Bridge could not decode the device's keys: {e}");
+            Vec::new()
+        }),
+        Ok(Err(e)) => {
+            warn!("Ros2Bridge could not list the device's keys: {e}");
+            Vec::new()
+        }
+        Err(_) => Vec::new(),
+    };
+    keys.into_iter()
+        .filter(|(_, meta)| meta.editable)
+        .filter_map(|(path, meta)| match meta.ty {
+            Some(value_type) => Some((path, value_type)),
+            None => {
+                warn!("Ros2Bridge: '{path}' is an input with no shape in its meta; no topic");
+                None
+            }
+        })
+        .collect()
+}
+
 async fn discover(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     namespace: &str,

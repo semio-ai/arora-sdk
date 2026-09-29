@@ -4,6 +4,19 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.0.0] - 2026-09-29
+
+### Changed
+
+- **Breaking:** the input topics are the device's inputs — each key its store
+  opens to remote writers (`KeyMeta::editable`), typed from its meta — asked of
+  the device at startup. `Ros2BridgeConfig::with_input`, its `inputs` field and
+  `InputKey` are gone: an input is stated once, in the store, and every bridge
+  exposes the same set. An input whose meta states no shape gets no topic, and
+  is reported.
+- **Breaking:** depends on arora-bridge 6, whose `BridgeOp::ListKeys` replies
+  with each key's `KeyMeta`.
+
 ## [7.0.0] - 2026-09-25
 
 ### Changed

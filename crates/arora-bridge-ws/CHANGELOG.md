@@ -4,6 +4,41 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-09-29
+
+### Added
+
+- `list_keys` answers from the device, asked as the client asks: every key it
+  holds, each with the `KeyMeta` its store keeps under `__meta` — the shape, the
+  range, where it rests, what it is for, whether a client may write it. A module
+  loaded while the device runs is listed at once, the same way `list_methods`
+  already worked.
+- A write is the device's to accept: it reaches the keys the device opened in
+  its store and nothing else, and a refusal is the client's answer, naming the
+  path, instead of an acknowledgement sent before the write was applied. Opening
+  a key no longer means mirroring it into a bridge.
+- The control panel lists the keys that are not controls read-only, with the
+  value they held when listed and a refresh, so a device that describes nothing
+  shows itself.
+
+### Removed
+
+- **Breaking:** the `Registry`, and with it `KeyInfo`'s declaration fields and
+  method registration. A bridge relays the device and keeps nothing of its own:
+  keys and their meta come from the store, functions from the modules that export
+  them. A device that wants a method of its own exports it, and it is then
+  reachable over every bridge rather than this one.
+
+### Changed
+
+- **Breaking:** the `DeviceMethods` seam is `Device` and answers for keys as well
+  as methods; `AroraWSServer::set_device` replaces `set_device_methods`.
+- **Breaking:** `KeyInfo` is a path and a `KeyMeta`; `list_keys_resp` carries
+  `{"path": …, "__meta": {…}}` — the name every Arora bridge gives a key's meta,
+  so a key segment called `meta` never collides with it.
+- **Breaking:** `WriteValuesHandler` returns a future, so a write is answered
+  once the device has taken it.
+
 ## [6.0.0] - 2026-09-28
 
 ### Added

@@ -17,14 +17,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::handlers::{
-    DeviceMethodsHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
+    DeviceHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
 };
 use arora_types::value::Value;
 use arora_types::Uuid;
 
 use crate::messages::{Incoming, Outgoing};
 use crate::method::InvokeResult;
-use crate::registry::Registry;
 
 /// Configuration for the WebSocket server.
 #[derive(Clone)]
@@ -35,8 +34,6 @@ pub struct ServerConfig {
     /// unauthenticated, so binding all interfaces is an explicit opt-in via
     /// [`ServerConfig::bind_address`].
     pub bind_address: String,
-    /// Whether to validate written paths against the registered input keys.
-    pub validate_paths: bool,
     /// Whether to serve the built-in control panel on plain HTTP requests.
     pub serve_control_panel: bool,
 }
@@ -46,7 +43,6 @@ impl Default for ServerConfig {
         Self {
             port: 9000,
             bind_address: "127.0.0.1".to_string(),
-            validate_paths: true,
             serve_control_panel: false,
         }
     }
@@ -67,12 +63,6 @@ impl ServerConfig {
         self
     }
 
-    /// Set whether to validate written paths.
-    pub fn validate_paths(mut self, validate: bool) -> Self {
-        self.validate_paths = validate;
-        self
-    }
-
     /// Enable or disable the built-in control panel served on plain HTTP requests.
     pub fn serve_control_panel(mut self, enable: bool) -> Self {
         self.serve_control_panel = enable;
@@ -87,10 +77,9 @@ impl ServerConfig {
 /// the previous one is disconnected.
 pub struct AroraWSServer {
     config: ServerConfig,
-    registry: Arc<Registry>,
     write_values_handler: RwLock<Option<WriteValuesHandler>>,
     read_values_handler: RwLock<Option<ReadValuesHandler>>,
-    device_methods: RwLock<Option<DeviceMethodsHandler>>,
+    device: RwLock<Option<DeviceHandler>>,
     on_client_connected_handler: RwLock<Option<OnClientConnectedHandler>>,
     /// Cancel token for the single active client. When cancelled, the client is disconnected.
     active_client: Arc<RwLock<Option<CancellationToken>>>,
@@ -109,10 +98,9 @@ impl AroraWSServer {
     pub fn new(config: ServerConfig) -> Self {
         Self {
             config,
-            registry: Arc::new(Registry::new()),
             write_values_handler: RwLock::new(None),
             read_values_handler: RwLock::new(None),
-            device_methods: RwLock::new(None),
+            device: RwLock::new(None),
             on_client_connected_handler: RwLock::new(None),
             active_client: Arc::new(RwLock::new(None)),
             is_running: RwLock::new(false),
@@ -136,18 +124,11 @@ impl AroraWSServer {
         self.outbound_tx.subscribe()
     }
 
-    /// Get a reference to the registry.
-    pub fn registry(&self) -> &Arc<Registry> {
-        &self.registry
-    }
-
     /// Set the write-values handler callback.
-    /// This is called whenever a valid WriteValues message is received.
-    pub async fn set_write_values_handler<F>(&self, handler: F)
-    where
-        F: Fn(HashMap<String, Value>) -> Result<(), String> + Send + Sync + 'static,
-    {
-        *self.write_values_handler.write().await = Some(Arc::new(handler));
+    /// This is called whenever a valid WriteValues message is received, and its
+    /// answer is the client's: a write the device refuses is reported.
+    pub async fn set_write_values_handler(&self, handler: WriteValuesHandler) {
+        *self.write_values_handler.write().await = Some(handler);
     }
 
     /// Set the read-values handler callback.
@@ -156,13 +137,13 @@ impl AroraWSServer {
         *self.read_values_handler.write().await = Some(handler);
     }
 
-    /// Set the device behind this server: where `list_methods` and `invoke`
-    /// go for the methods the registry does not own.
-    /// [`WsBridge`](crate::bridge::WsBridge) sets it to the device it bridges,
-    /// so an embedder wiring the bridge gets the device's methods without
-    /// declaring any of them here.
-    pub async fn set_device_methods(&self, device: DeviceMethodsHandler) {
-        *self.device_methods.write().await = Some(device);
+    /// Set the device behind this server: where `list_keys` goes for the keys it
+    /// holds, and `list_methods` / `invoke` for every method the registry does
+    /// not own itself. [`WsBridge`](crate::bridge::WsBridge) sets it to the
+    /// device it bridges, so an embedder wiring the bridge discovers the device
+    /// without declaring any of it here.
+    pub async fn set_device(&self, device: DeviceHandler) {
+        *self.device.write().await = Some(device);
     }
 
     /// Set the handler called when a new client connects.
@@ -190,6 +171,11 @@ impl AroraWSServer {
     /// Get the configured port.
     pub fn port(&self) -> u16 {
         self.config.port
+    }
+
+    /// The address the server binds — loopback unless an embedder opened it.
+    pub fn bind_address(&self) -> &str {
+        &self.config.bind_address
     }
 
     /// Resolves when the serve loop has exited — whether by the external
@@ -242,11 +228,9 @@ impl AroraWSServer {
         // Snapshot the dispatch context once: the seams are wired before the
         // server serves and never change afterwards.
         let dispatch = Dispatch {
-            registry: self.registry.clone(),
             write_values: self.write_values_handler.read().await.clone(),
             read_values: self.read_values_handler.read().await.clone(),
-            device: self.device_methods.read().await.clone(),
-            validate_paths: self.config.validate_paths,
+            device: self.device.read().await.clone(),
         };
         let on_connected = self.on_client_connected_handler.read().await.clone();
 
@@ -342,15 +326,13 @@ impl AroraWSServer {
     }
 }
 
-/// What a connection dispatches an incoming message against: the registry, the
-/// value handlers, and the device behind the bridge.
+/// What a connection dispatches an incoming message against: the value handlers
+/// and the device behind the bridge.
 #[derive(Clone)]
 struct Dispatch {
-    registry: Arc<Registry>,
     write_values: Option<WriteValuesHandler>,
     read_values: Option<ReadValuesHandler>,
-    device: Option<DeviceMethodsHandler>,
-    validate_paths: bool,
+    device: Option<DeviceHandler>,
 }
 
 /// Handle a single WebSocket connection.
@@ -533,39 +515,17 @@ async fn serve_control_panel_http(mut stream: TcpStream) {
 /// to the connection that made it.
 async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
     let Dispatch {
-        registry,
         write_values: write_values_handler,
         read_values: read_values_handler,
         device,
-        validate_paths,
     } = dispatch;
-    let validate_paths = *validate_paths;
     match incoming {
         Incoming::WriteValues { values } => {
-            // Validate paths if enabled
-            if validate_paths {
-                let input_paths = registry.get_input_paths().await;
-                let invalid_paths: Vec<&str> = values
-                    .keys()
-                    .filter(|path| !input_paths.iter().any(|p| p == *path))
-                    .map(|s| s.as_str())
-                    .collect();
-
-                if !invalid_paths.is_empty() {
-                    warn!("Invalid paths in WriteValues: {:?}", invalid_paths);
-                    return Outgoing::WriteValuesResp {
-                        success: false,
-                        message: Some(format!(
-                            "Unknown input path(s): {}",
-                            invalid_paths.join(", ")
-                        )),
-                    };
-                }
-            }
-
-            // Call WriteValues handler if registered
+            // The device decides: a key it computes every step is not a client's
+            // to set, and the refusal is the client's answer rather than a
+            // silent acknowledgement.
             if let Some(handler) = write_values_handler {
-                match handler(values) {
+                match handler(values).await {
                     Ok(()) => {
                         debug!("WriteValues handled successfully");
                         Outgoing::WriteValuesResp {
@@ -574,7 +534,7 @@ async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
                         }
                     }
                     Err(e) => {
-                        error!("WriteValues handler error: {}", e);
+                        warn!("WriteValues refused: {e}");
                         Outgoing::WriteValuesResp {
                             success: false,
                             message: Some(e),
@@ -582,7 +542,6 @@ async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
                     }
                 }
             } else {
-                // No handler registered, just acknowledge
                 debug!("No WriteValues handler registered, acknowledging");
                 Outgoing::WriteValuesResp {
                     success: true,
@@ -606,25 +565,33 @@ async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
         }
 
         Incoming::ListKeys { path } => {
-            let keys = registry.get_keys_filtered(path.as_deref()).await;
+            // The device's keys, as it holds them now, each with what the store
+            // says it is — so a module loaded while the device runs is listed at
+            // once, and nothing has to be mirrored here beforehand.
+            let mut keys = match device {
+                Some(device) => device.keys().await,
+                None => Vec::new(),
+            };
+            if let Some(prefix) = path.as_deref().map(|p| p.trim_end_matches('/')) {
+                keys.retain(|key| {
+                    key.path.starts_with(prefix) || key.path.starts_with(&format!("{prefix}/"))
+                });
+            }
+            keys.sort_by(|left, right| left.path.cmp(&right.path));
             Outgoing::ListKeysResp { keys }
         }
 
         Incoming::ListMethods { path } => {
-            // The registry's own methods, then the device's — a module function
-            // is listed under its declared name, with the signature the device
-            // described, so nothing has to mirror it here.
-            let mut methods = registry.get_methods_filtered(path.as_deref()).await;
-            if let Some(device) = device {
-                let owned: HashSet<String> = methods.iter().map(|m| m.path.clone()).collect();
-                let prefix = path.as_deref().map(|p| p.trim_end_matches('/').to_string());
-                methods.extend(device.methods().await.into_iter().filter(|method| {
-                    !owned.contains(&method.path)
-                        && prefix
-                            .as_ref()
-                            .is_none_or(|prefix| method.path.starts_with(prefix.as_str()))
-                }));
+            // The device's functions, under the names their modules declare and
+            // with the signatures it describes.
+            let mut methods = match device {
+                Some(device) => device.methods().await,
+                None => Vec::new(),
+            };
+            if let Some(prefix) = path.as_deref().map(|p| p.trim_end_matches('/')) {
+                methods.retain(|method| method.path.starts_with(prefix));
             }
+            methods.sort_by(|left, right| left.path.cmp(&right.path));
             Outgoing::ListMethodsResp { methods }
         }
 
@@ -633,14 +600,9 @@ async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
             args,
             request_id,
         } => {
-            // A name the registry owns is the server's own method; anything else
-            // is the device's, called by name on its described signature.
-            let result = if registry.has_method(&method).await {
-                registry.invoke_method(&method, args).await
-            } else if let Some(device) = device {
-                device.invoke(&method, args).await
-            } else {
-                InvokeResult::err(format!("Method not found: {method}"))
+            let result = match device {
+                Some(device) => device.invoke(&method, args).await,
+                None => InvokeResult::err(format!("Method not found: {method}")),
             };
             Outgoing::InvokeResp {
                 success: result.success,
@@ -677,7 +639,6 @@ mod tests {
         let config = ServerConfig::default();
         assert_eq!(config.port, 9000);
         assert_eq!(config.bind_address, "127.0.0.1");
-        assert!(config.validate_paths);
         assert!(!config.serve_control_panel);
     }
 
@@ -685,12 +646,10 @@ mod tests {
     fn test_server_config_builder() {
         let config = ServerConfig::with_port(8080)
             .bind_address("127.0.0.1")
-            .validate_paths(false)
             .serve_control_panel(true);
 
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind_address, "127.0.0.1");
-        assert!(!config.validate_paths);
         assert!(config.serve_control_panel);
     }
 }

@@ -186,6 +186,47 @@ pub enum Value {
 }
 
 impl Value {
+  /// The value's [`Type`]: which variant it is, which is what a consumer needs
+  /// to render it or to check that another value fits the same slot. A compound
+  /// value's own record is [`type_uuid`](Self::type_uuid); this is its shape.
+  pub fn kind(&self) -> Type {
+    match self {
+      Value::Unit => Type::Unit,
+      Value::Boolean(_) => Type::Boolean,
+      Value::U8(_) => Type::U8,
+      Value::U16(_) => Type::U16,
+      Value::U32(_) => Type::U32,
+      Value::U64(_) => Type::U64,
+      Value::I8(_) => Type::I8,
+      Value::I16(_) => Type::I16,
+      Value::I32(_) => Type::I32,
+      Value::I64(_) => Type::I64,
+      Value::F32(_) => Type::F32,
+      Value::F64(_) => Type::F64,
+      Value::String(_) => Type::String,
+      Value::Option(_) => Type::Option,
+      Value::Structure(_) => Type::Structure,
+      Value::Enumeration(_) => Type::Enumeration,
+      Value::ArrayBoolean(_) => Type::ArrayBoolean,
+      Value::ArrayU8(_) => Type::ArrayU8,
+      Value::ArrayU16(_) => Type::ArrayU16,
+      Value::ArrayU32(_) => Type::ArrayU32,
+      Value::ArrayU64(_) => Type::ArrayU64,
+      Value::ArrayI8(_) => Type::ArrayI8,
+      Value::ArrayI16(_) => Type::ArrayI16,
+      Value::ArrayI32(_) => Type::ArrayI32,
+      Value::ArrayI64(_) => Type::ArrayI64,
+      Value::ArrayF32(_) => Type::ArrayF32,
+      Value::ArrayF64(_) => Type::ArrayF64,
+      Value::ArrayString(_) => Type::ArrayString,
+      Value::ArrayValue(_) => Type::ArrayValue,
+      Value::ArrayStructure { .. } => Type::ArrayStructure,
+      Value::ArrayEnumeration { .. } => Type::ArrayEnumeration,
+      Value::KeyValue(_) => Type::KeyValue,
+      Value::Uuid(_) => Type::Uuid,
+    }
+  }
+
   /// Returns the type UUID for this value.
   ///
   /// Primitives map to well-known UUIDs from `ty::mod`. Structures and enumerations

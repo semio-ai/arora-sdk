@@ -1,10 +1,10 @@
 //! The wire, end to end: a client on the socket, a fake runtime behind the
 //! bridge.
 //!
-//! What these pin is what a client can count on — the device's methods listed
-//! and called by name, a run started and halted, and a subscription deciding
-//! which pushes arrive — so the pins survive any reshuffling of the server's
-//! internals.
+//! What these pin is what a client can count on — the device's keys listed with
+//! their meta, a write reaching only the keys the device opened, its methods
+//! called by name, a run started and halted, and a subscription deciding which
+//! pushes arrive — so the pins survive any reshuffling of the server's internals.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,9 +14,7 @@ use arora_behavior::interpreter_module;
 use arora_behavior::{TaskHandle, TaskId};
 use arora_bridge::{Bridge, BridgeOp, Inbound, MethodSignature};
 use arora_bridge_ws::bridge::WsBridge;
-use arora_bridge_ws::{
-    AroraWSServer, CancellationToken, InvokeResult, MethodInfo, ServerConfig, Value,
-};
+use arora_bridge_ws::{AroraWSServer, CancellationToken, KeyMeta, ServerConfig, Type, Value};
 use arora_types::call::{Call, CallResult};
 use arora_types::data::{Key, StateChange};
 use arora_types::record::module::frozen::{Function, Parameter};
@@ -84,30 +82,26 @@ fn handle() -> TaskHandle {
     }
 }
 
-/// A served bridge with a fake runtime behind it: the runtime describes
-/// [`signatures`], answers a spawn with [`handle`], and records every call it
-/// was asked to make.
+/// A served bridge with a fake runtime behind it: the runtime holds a store,
+/// describes [`signatures`], answers a spawn with [`handle`], and records every
+/// call it was asked to make.
 struct Device {
     bridge: WsBridge,
     url: String,
     calls: Arc<Mutex<Vec<Call>>>,
+    store: Arc<Mutex<HashMap<String, Value>>>,
     cancel: CancellationToken,
 }
 
 impl Device {
     async fn serve() -> Self {
+        Self::serving(HashMap::new()).await
+    }
+
+    /// A device whose store holds `meta` for its keys — what the store says each
+    /// key is, which is what a bridge relays.
+    async fn serving(meta: HashMap<String, KeyMeta>) -> Self {
         let server = Arc::new(AroraWSServer::new(ServerConfig::with_port(0)));
-        // A method of the server's own, to pin that it keeps precedence.
-        server
-            .registry()
-            .register_method_fn(
-                MethodInfo {
-                    path: "reset".to_string(),
-                    ..Default::default()
-                },
-                |_args| InvokeResult::ok(),
-            )
-            .await;
         let mut bridge = WsBridge::new(server.clone()).await;
         let listener = server.bind().await.expect("bind an ephemeral port");
         let url = format!("ws://{}", listener.local_addr().expect("the bound address"));
@@ -119,9 +113,17 @@ impl Device {
         });
 
         let calls = Arc::new(Mutex::new(Vec::new()));
+        // The device's own keys, and what its store says about them.
+        let store = Arc::new(Mutex::new(HashMap::from([
+            ("face/mouth".to_string(), Value::F64(0.25)),
+            ("face/blink".to_string(), Value::Boolean(false)),
+            ("arora/time".to_string(), Value::F64(12.0)),
+        ])));
         let mut inbound = bridge.take_inbound();
         tokio::spawn({
             let calls = calls.clone();
+            let store = store.clone();
+            let meta = meta.clone();
             async move {
                 while let Some(event) = inbound.next().await {
                     let Inbound::Command(command) = event else {
@@ -135,6 +137,74 @@ impl Device {
                                     mutated: Vec::new(),
                                 })
                                 .map_err(|e| e.to_string())
+                        }
+                        BridgeOp::ListKeys { .. } => {
+                            // What the runtime answers: each key it holds, with
+                            // the store's meta, the value's own shape filled in
+                            // where the store says nothing.
+                            let store = store.lock().expect("the store");
+                            let mut keys: Vec<(String, KeyMeta)> = store
+                                .iter()
+                                .map(|(path, value)| {
+                                    let mut described = meta.get(path).cloned().unwrap_or_default();
+                                    if described.ty.is_none() {
+                                        described.ty = Some(value.kind());
+                                    }
+                                    (path.clone(), described)
+                                })
+                                .collect();
+                            keys.sort_by(|left, right| left.0.cmp(&right.0));
+                            arora_types::value_serde::to_value(&keys)
+                                .map(|ret| CallResult {
+                                    ret,
+                                    mutated: Vec::new(),
+                                })
+                                .map_err(|e| e.to_string())
+                        }
+                        BridgeOp::Get(keys) => {
+                            let store = store.lock().expect("the store");
+                            Ok(CallResult {
+                                ret: Value::ArrayValue(
+                                    keys.iter()
+                                        .map(|key| {
+                                            Value::Option(
+                                                store.get(&key.path).cloned().map(Box::new),
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                                mutated: Vec::new(),
+                            })
+                        }
+                        BridgeOp::Update(change) => {
+                            // The device refuses a key it did not open, as the
+                            // runtime does, and the refusal is the client's
+                            // answer.
+                            let refused: Vec<String> = change
+                                .set
+                                .keys()
+                                .filter(|key| {
+                                    !meta.get(&key.path).is_some_and(|meta| meta.editable)
+                                })
+                                .map(|key| key.path.clone())
+                                .collect();
+                            if refused.is_empty() {
+                                let mut store = store.lock().expect("the store");
+                                for (key, value) in &change.set {
+                                    if let Some(value) = value {
+                                        store.insert(key.path.clone(), value.clone());
+                                    }
+                                }
+                                Ok(CallResult {
+                                    ret: Value::Unit,
+                                    mutated: Vec::new(),
+                                })
+                            } else {
+                                Err(format!(
+                                    "not an input of this device: {}",
+                                    refused.join(", ")
+                                ))
+                            }
                         }
                         BridgeOp::Call(call) => {
                             calls.lock().expect("the call log").push(call.clone());
@@ -162,12 +232,17 @@ impl Device {
             bridge,
             url,
             calls,
+            store,
             cancel,
         }
     }
 
     fn calls(&self) -> Vec<Call> {
         self.calls.lock().expect("the call log").clone()
+    }
+
+    fn held(&self, path: &str) -> Option<Value> {
+        self.store.lock().expect("the store").get(path).cloned()
     }
 }
 
@@ -249,7 +324,6 @@ async fn the_device_methods_are_listed() {
     assert_eq!(say["params"][0]["required"], true);
 
     assert_eq!(by_name("cos")["task"], false, "cos answers at once");
-    by_name("reset"); // the server's own method is listed too
 }
 
 /// An invoke of a task-shaped method spawns it with the arguments bound to the
@@ -400,5 +474,92 @@ async fn without_a_subscription_every_key_is_pushed() {
     assert_eq!(
         pushed["values"],
         serde_json::json!({"arora/time": {"f64": 1.0}})
+    );
+}
+
+/// `list_keys` is what the device holds, now, each key carrying what its store
+/// says the key is.
+#[tokio::test]
+async fn the_device_keys_are_listed_with_their_meta() {
+    let device = Device::serving(HashMap::from([(
+        "face/mouth".to_string(),
+        KeyMeta::new()
+            .editable()
+            .of_type(Type::F64)
+            .range(0.0, 1.0)
+            .resting_at(Value::F64(0.0))
+            .described("how open the mouth is"),
+    )]))
+    .await;
+    let mut client = Client::connect(&device.url).await;
+
+    client.send(serde_json::json!({"type": "list_keys"})).await;
+    let answer = client.answer().await;
+    let keys = answer["keys"].as_array().expect("the listed keys");
+    let by_path = |path: &str| {
+        keys.iter()
+            .find(|key| key["path"] == path)
+            .unwrap_or_else(|| panic!("{path} is listed among {answer}"))
+            .clone()
+    };
+
+    // A described key arrives with what the store knows, under `__meta`: what a
+    // slider needs.
+    let mouth = by_path("face/mouth");
+    assert_eq!(mouth["__meta"]["min"], 0.0);
+    assert_eq!(mouth["__meta"]["max"], 1.0);
+    assert_eq!(mouth["__meta"]["description"], "how open the mouth is");
+    assert_eq!(mouth["__meta"]["editable"], true);
+
+    // A key nobody described is listed all the same, with the shape of the value
+    // it holds — a module loaded mid-run needs no declaration to be found — and
+    // closed to writes.
+    let blink = by_path("face/blink");
+    assert_eq!(blink["__meta"]["ty"], "bool");
+    assert_eq!(blink["__meta"]["editable"], false);
+
+    // The runtime's own keys are keys: a client renders or subscribes to what it
+    // wants, and nothing is hidden from it.
+    assert_eq!(by_path("arora/time")["__meta"]["ty"], "f64");
+}
+
+/// A client writes the device's inputs and nothing else: a key the device did
+/// not open is refused, and the refusal names the path rather than being
+/// acknowledged and dropped.
+#[tokio::test]
+async fn a_write_reaches_only_the_devices_inputs() {
+    let device = Device::serving(HashMap::from([(
+        "face/mouth".to_string(),
+        KeyMeta::new().editable().of_type(Type::F64),
+    )]))
+    .await;
+    let mut client = Client::connect(&device.url).await;
+
+    client
+        .send(serde_json::json!({
+            "type": "write_values", "values": {"face/mouth": {"f64": 0.5}}
+        }))
+        .await;
+    assert_eq!(client.answer().await["success"], true);
+    assert_eq!(device.held("face/mouth"), Some(Value::F64(0.5)));
+
+    client
+        .send(serde_json::json!({
+            "type": "write_values", "values": {"arora/time": {"f64": 0.0}}
+        }))
+        .await;
+    let refused = client.answer().await;
+    assert_eq!(refused["success"], false, "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .expect("a message")
+            .contains("arora/time"),
+        "the refusal names the path: {refused}"
+    );
+    assert_eq!(
+        device.held("arora/time"),
+        Some(Value::F64(12.0)),
+        "unchanged"
     );
 }

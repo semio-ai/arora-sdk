@@ -13,9 +13,12 @@
 //!   crate stays free of an async runtime. A `futures::Stream` adapter is an
 //!   opt-in extension (a future `stream` feature), not the primary API.
 
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 
-use crate::value::Value;
+use serde::{Deserialize, Serialize};
+
+use crate::value::{Type, Value};
 
 use super::state::{Key, State, StateChange};
 
@@ -87,6 +90,96 @@ impl Subscription {
   }
 }
 
+/// What a key is, beyond the value it currently holds: the range it runs over,
+/// where it rests, what it is for, and whether anything outside the device may
+/// write it.
+///
+/// A value shows its own shape ([`Value::kind`]), so this is what the value
+/// cannot say. It is the store's to keep, because it is a property of the key
+/// rather than of any one reader: every bridge relays the same answer, and a
+/// backend that already knows a key's range (a schema-backed store) surfaces it
+/// without anyone restating it.
+///
+/// **A key is closed to remote writers unless its meta says otherwise.** The
+/// device's own writers — its HAL, its modules, its behavior — are never asked;
+/// `editable` is what every bridge's inbound write is checked against, and a key
+/// nobody described is not a network peer's to set. A device opens its inputs
+/// by saying so, per key or per subtree
+/// ([`set_prefix_meta`](DataStore::set_prefix_meta)).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyMeta {
+  /// The shape the key holds, when it is fixed — an unset key has no value to
+  /// read it from, and a key that is written by one producer has one shape.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub ty: Option<Type>,
+  /// The lowest value it takes, for a numeric key.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub min: Option<f64>,
+  /// The highest value it takes, for a numeric key.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub max: Option<f64>,
+  /// Where it rests: what a reset puts back.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub default: Option<Value>,
+  /// What the key is for, in a sentence, for whoever drives it.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub description: Option<String>,
+  /// Whether a writer outside the device may set it — the device's inputs.
+  /// Closed unless said: an unauthenticated peer on a bridge does not get to set
+  /// a key the device never offered.
+  #[serde(default)]
+  pub editable: bool,
+}
+
+impl KeyMeta {
+  /// Nothing said yet: a key closed to remote writers, of whatever shape its
+  /// value has.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// A remote writer may set it: one of the device's inputs.
+  pub fn editable(mut self) -> Self {
+    self.editable = true;
+    self
+  }
+
+  /// The range it runs over.
+  pub fn range(mut self, min: f64, max: f64) -> Self {
+    self.min = Some(min);
+    self.max = Some(max);
+    self
+  }
+
+  /// Where it rests.
+  pub fn resting_at(mut self, value: Value) -> Self {
+    self.default = Some(value);
+    self
+  }
+
+  /// What it is for.
+  pub fn described(mut self, description: impl Into<String>) -> Self {
+    self.description = Some(description.into());
+    self
+  }
+
+  /// The shape it holds.
+  pub fn of_type(mut self, ty: Type) -> Self {
+    self.ty = Some(ty);
+    self
+  }
+}
+
+/// Whether `prefix` covers `path`: the whole subtree under it, on a segment
+/// boundary — `face` covers `face/mouth` but not `faceplate` — and the empty
+/// prefix covers every key.
+pub fn prefix_covers(prefix: &str, path: &str) -> bool {
+  prefix.is_empty()
+    || path == prefix
+    || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
+}
+
 /// A shared, path-keyed store of [`Value`]s, observable through change
 /// subscriptions. The canonical lean implementation is
 /// [`arora-simple-data-store`](https://docs.rs/arora-simple-data-store); richer
@@ -111,6 +204,46 @@ pub trait DataStore: Send + Sync {
   /// starts from the full picture and stays current from the changes that
   /// follow, without a separate snapshot read that could race them.
   fn subscribe(&self) -> Subscription;
+
+  /// What these keys are, beyond the values they hold: for each, the most
+  /// specific statement the store has — the key's own meta, else the meta of the
+  /// deepest subtree covering it ([`set_prefix_meta`](Self::set_prefix_meta)),
+  /// else `None`. A statement replaces a broader one whole; it does not merge
+  /// with it.
+  ///
+  /// The default answers `None` for every key: a store that keeps no meta is a
+  /// store whose keys are plain and closed to remote writers.
+  fn meta(&self, keys: &[Key]) -> Vec<Option<KeyMeta>> {
+    vec![None; keys.len()]
+  }
+
+  /// Every key the store holds meta for, whether or not it holds a value yet —
+  /// a key can be described before anything writes it.
+  ///
+  /// The default is empty, for the same reason as [`meta`](Self::meta).
+  fn all_meta(&self) -> HashMap<Key, KeyMeta> {
+    HashMap::new()
+  }
+
+  /// Say what these keys are. A device does this as it composes, and again
+  /// whenever its composition changes — a module loaded mid-run says what it
+  /// brought.
+  ///
+  /// The default refuses: a store that cannot keep meta says so, rather than
+  /// accepting it and losing it.
+  fn set_meta(&self, _meta: HashMap<Key, KeyMeta>) -> Result<(), DataError> {
+    Err(DataError::Other("this store keeps no key meta".to_string()))
+  }
+
+  /// Say what every key under these prefixes is, until a more specific statement
+  /// says otherwise — how a device opens a subtree of inputs at once, and, with
+  /// the empty prefix, how a sandbox opens everything. See [`prefix_covers`] for
+  /// what a prefix covers.
+  ///
+  /// The default refuses, as [`set_meta`](Self::set_meta) does.
+  fn set_prefix_meta(&self, _meta: HashMap<String, KeyMeta>) -> Result<(), DataError> {
+    Err(DataError::Other("this store keeps no key meta".to_string()))
+  }
 
   /// A sibling handle onto the **same** storage: reads and writes through the
   /// clone coincide with the original's. Stores share their storage across

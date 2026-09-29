@@ -15,4 +15,4 @@ pub mod state;
 pub mod store;
 
 pub use state::{Change, Key, State, StateChange};
-pub use store::{DataError, DataStore, Slot, Subscription};
+pub use store::{prefix_covers, DataError, DataStore, KeyMeta, Slot, Subscription};

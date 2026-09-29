@@ -41,7 +41,7 @@ pub use arora_bridge_ws as bridge_ws;
 #[cfg(feature = "native")]
 pub use run::{
     local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
-    DeviceCli,
+    serve_local_ws_bridge, DeviceCli,
 };
 pub use runtime::RuntimeError;
 

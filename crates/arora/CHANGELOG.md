@@ -4,6 +4,32 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.0.0] - 2026-09-29
+
+### Added
+
+- `arora --open`: every key is an input, for a sandbox or a bench. Without it the
+  binary's device accepts no remote writes until something opens a key.
+- `serve_local_ws_bridge(Arc<AroraWSServer>)`: serve a server you built — bound,
+  spawned, and cancelled when the returned bridge is dropped, exactly as
+  `local_ws_bridge` does it. The caller keeps the server, so it can reach it at
+  any point in the run. `local_ws_bridge_with` is one line of it.
+
+### Changed
+
+- **Breaking:** `BridgeOp::ListKeys` answers with each key's
+  `KeyMeta` — the store's meta, with the shape of the value it holds filled in
+  where the store says nothing, and every key the store describes even if nothing
+  has written it yet. A bridge relays that instead of keeping its own account of
+  the device's keys.
+- **Breaking:** a `BridgeOp::Update` reaches only the keys the device opened
+  (`KeyMeta::editable`); any other is refused, naming the key. This is every
+  bridge's inbound write — ws, ROS 2, Studio — checked once on the way in, so a
+  device that opens nothing accepts no remote writes. The device's own writers
+  (HAL, modules, behavior) are never checked.
+- **Breaking:** depends on arora-types 3.1, arora-bridge 6 and arora-bridge-ws 7,
+  the last of which this crate re-exports as `arora::bridge_ws`.
+
 ## [10.3.0] - 2026-09-28
 
 ### Added

@@ -21,20 +21,22 @@
 //!   rather than accumulating stale ones — see [`Qos`] for the same rule one
 //!   layer down.
 //! - the inbound stream ([`take_inbound`](arora_bridge::Bridge::take_inbound))
-//!   carries each message received on a configured input topic as a
+//!   carries each message received on an input topic as a
 //!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) command for the Arora
-//!   runtime to apply to its store.
+//!   runtime to apply to its store. The input topics are the keys the device's
+//!   store opens to remote writers (`KeyMeta::editable`), asked of the device at
+//!   startup — an input is stated once, in the store, and not again here.
 //!
 //! # Example
 //!
 //! ```rust,no_run
-//! use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type};
+//! use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig};
 //!
 //! # async fn example() {
-//! let config = Ros2BridgeConfig::new("robot", 0)
-//!     .with_input("face/mouth/open", Type::F64)
-//!     .with_input("enabled", Type::Boolean);
-//! let bridge = Ros2Bridge::new(config).await;
+//! // The device opens its inputs in its store, e.g.
+//! // `store.set_meta([(Key::from("face/mouth/open"), KeyMeta::new().editable().of_type(Type::F64))])`,
+//! // and this bridge subscribes one topic per input.
+//! let bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", 0)).await;
 //! // Hand `bridge` to the Arora runtime as its `Bridge`.
 //! # let _ = bridge;
 //! # }
@@ -61,7 +63,7 @@ mod services;
 // Re-exported so `arora_bridge_ros2::cdr` stays a stable path for consumers.
 pub use arora_msgs_ros2::cdr;
 
-pub use bridge::{InputKey, Ros2Bridge, Ros2BridgeConfig};
+pub use bridge::{Ros2Bridge, Ros2BridgeConfig};
 pub use profile::{ActionBinding, ExposureProfile};
 pub use qos::Qos;
 

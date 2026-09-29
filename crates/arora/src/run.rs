@@ -66,6 +66,12 @@ use crate::Arora;
 pub struct DeviceCli {
     /// Groot behavior-tree file to install as the device's behavior.
     pub groot: Option<std::path::PathBuf>,
+
+    /// Let any bridge write any key. A key is closed to remote writers unless
+    /// the device opens it, so a plain device accepts no writes; this opens them
+    /// all, for a sandbox or a bench — never a device on a network others share.
+    #[arg(long)]
+    pub open: bool,
 }
 
 /// Run the default device: in-process fake HAL, default bridge.
@@ -114,16 +120,35 @@ pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
 /// tablet on the LAN (an explicit choice: the link is unauthenticated), the
 /// control panel served on the same port.
 ///
-/// Everything else is [`local_ws_bridge`]: the bind happens here so an unusable
-/// address fails the call, the serving task is cancelled when the returned
-/// bridge is dropped, and the device's methods are reachable through it.
+/// Everything else is [`local_ws_bridge`]. To keep the server — to reach it at any
+/// point in the run — build it yourself and hand it to
+/// [`serve_local_ws_bridge`].
 #[cfg(feature = "native")]
 pub async fn local_ws_bridge_with(
     config: arora_bridge_ws::ServerConfig,
 ) -> Result<Box<dyn Bridge>> {
-    let port = config.port;
-    let bind_address = config.bind_address.clone();
-    let server = Arc::new(arora_bridge_ws::AroraWSServer::new(config));
+    serve_local_ws_bridge(Arc::new(arora_bridge_ws::AroraWSServer::new(config))).await
+}
+
+/// Serve a WebSocket server you built: bind it, spawn its serving task, and
+/// attach its lifetime to the returned bridge, which cancels the task when
+/// dropped.
+///
+/// The caller keeps the [`AroraWSServer`](arora_bridge_ws::AroraWSServer) — to
+/// disconnect a client, to read its address, to serve it again elsewhere. What
+/// the device *has* needs nothing from it: the bridge lists the device's keys
+/// with the meta its store keeps and describes its functions on demand, so a
+/// module loaded mid-run is discoverable at once.
+///
+/// What a key is — its range, where it rests, whether a client may write it —
+/// the device says to its **store** (`DataStore::set_meta`), and every bridge
+/// relays the same answer.
+#[cfg(feature = "native")]
+pub async fn serve_local_ws_bridge(
+    server: Arc<arora_bridge_ws::AroraWSServer>,
+) -> Result<Box<dyn Bridge>> {
+    let port = server.port();
+    let bind_address = server.bind_address().to_string();
     let bridge = arora_bridge_ws::bridge::WsBridge::new(server.clone()).await;
     // Bind before spawning: an unusable address (port already taken) fails the
     // run here instead of leaving a device serving a bridge nobody can reach.

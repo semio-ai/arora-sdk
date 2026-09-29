@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, RwLock};
 
-use arora_types::data::{DataError, DataStore, Key, Slot, State, StateChange, Subscription};
+use arora_types::data::{
+    prefix_covers, DataError, DataStore, Key, KeyMeta, Slot, State, StateChange, Subscription,
+};
 use arora_types::value::Value;
 
 /// One key's storage cell, shared so a [`Slot`] keeps a direct reference to it.
@@ -23,6 +25,12 @@ type Cell = Arc<RwLock<Option<Value>>>;
 #[derive(Default)]
 struct Inner {
     cells: RwLock<HashMap<Key, Cell>>,
+    /// What each key is, for the keys something has described. Kept beside the
+    /// cells rather than in them: a key is describable before it holds a value,
+    /// and clearing a value says nothing about what the key is.
+    meta: RwLock<HashMap<Key, KeyMeta>>,
+    /// What every key under a prefix is, until a key's own meta says otherwise.
+    prefix_meta: RwLock<HashMap<String, KeyMeta>>,
     subscribers: Mutex<Vec<Sender<StateChange>>>,
 }
 
@@ -100,6 +108,38 @@ impl DataStore for SimpleDataStore {
         if !effective.is_empty() {
             self.inner.notify(effective);
         }
+        Ok(())
+    }
+
+    fn meta(&self, keys: &[Key]) -> Vec<Option<KeyMeta>> {
+        let meta = self.inner.meta.read().unwrap();
+        let prefixes = self.inner.prefix_meta.read().unwrap();
+        keys.iter()
+            .map(|key| {
+                // The most specific statement: the key's own, else the deepest
+                // subtree covering it.
+                meta.get(key).cloned().or_else(|| {
+                    prefixes
+                        .iter()
+                        .filter(|(prefix, _)| prefix_covers(prefix, &key.path))
+                        .max_by_key(|(prefix, _)| prefix.len())
+                        .map(|(_, meta)| meta.clone())
+                })
+            })
+            .collect()
+    }
+
+    fn all_meta(&self) -> HashMap<Key, KeyMeta> {
+        self.inner.meta.read().unwrap().clone()
+    }
+
+    fn set_meta(&self, meta: HashMap<Key, KeyMeta>) -> Result<(), DataError> {
+        self.inner.meta.write().unwrap().extend(meta);
+        Ok(())
+    }
+
+    fn set_prefix_meta(&self, meta: HashMap<String, KeyMeta>) -> Result<(), DataError> {
+        self.inner.prefix_meta.write().unwrap().extend(meta);
         Ok(())
     }
 
@@ -254,6 +294,57 @@ mod tests {
             .set(Some(Value::Boolean(true)))
             .unwrap();
         assert!(sub.try_recv().expect("change").contains(&Key::from("y")));
+    }
+
+    #[test]
+    fn meta_resolves_to_the_most_specific_statement() {
+        let store = SimpleDataStore::new();
+        let keys = [
+            Key::from("face/mouth"),
+            Key::from("face/eyes"),
+            Key::from("faceplate"),
+            Key::from("arora/time"),
+        ];
+        assert_eq!(
+            store.meta(&keys),
+            vec![None; 4],
+            "nothing said: nothing known"
+        );
+
+        store
+            .set_prefix_meta(HashMap::from([(
+                "face".to_string(),
+                KeyMeta::new().editable(),
+            )]))
+            .unwrap();
+        store
+            .set_meta(HashMap::from([(
+                Key::from("face/eyes"),
+                KeyMeta::new().described("the device steers these"),
+            )]))
+            .unwrap();
+        let resolved = store.meta(&keys);
+        assert!(
+            resolved[0].as_ref().unwrap().editable,
+            "under the open subtree"
+        );
+        assert!(
+            !resolved[1].as_ref().unwrap().editable,
+            "a key's own statement replaces the subtree's"
+        );
+        assert_eq!(resolved[2], None, "a prefix covers segments, not letters");
+        assert_eq!(resolved[3], None);
+
+        store
+            .set_prefix_meta(HashMap::from([(String::new(), KeyMeta::new().editable())]))
+            .unwrap();
+        assert!(
+            store.meta(&[Key::from("arora/time")])[0]
+                .as_ref()
+                .unwrap()
+                .editable,
+            "the empty prefix opens everything"
+        );
     }
 
     #[test]

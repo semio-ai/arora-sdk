@@ -22,6 +22,8 @@ use arora_bridge::{Bridge, BridgeOp, Inbound};
 use arora_bridge_ros2::conversions::topic_name;
 use arora_bridge_ros2::msg_types::{self, MessageType};
 use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type, Value};
+use arora_types::call::CallResult;
+use arora_types::data::KeyMeta;
 use futures::StreamExt;
 use rand::RngExt;
 use ros2_client::{
@@ -63,10 +65,42 @@ async fn inbound_topic_becomes_update_command() {
     let domain_id = random_domain_id();
     let namespace = format!("test_in_{domain_id}");
 
-    let config =
-        Ros2BridgeConfig::new(&namespace, domain_id).with_input("face/mouth/open", Type::F64);
-    let mut bridge = Ros2Bridge::new(config).await;
+    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
     let mut inbound = bridge.take_inbound();
+
+    // The device: it opened `face/mouth/open` to remote writers, and hands every
+    // Update to the test. It answers concurrently, because the bridge asks for
+    // the device's inputs before it subscribes them — the publisher below waits
+    // on that subscription.
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(event) = inbound.next().await {
+            let Inbound::Command(cmd) = event else {
+                continue; // DataRequested and other non-command signals
+            };
+            match &cmd.op {
+                BridgeOp::ListKeys { .. } => {
+                    let inputs = vec![(
+                        "face/mouth/open".to_string(),
+                        KeyMeta::new().editable().of_type(Type::F64),
+                    )];
+                    cmd.reply(
+                        arora_types::value_serde::to_value(&inputs)
+                            .map(|ret| CallResult {
+                                ret,
+                                mutated: Vec::new(),
+                            })
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                BridgeOp::Update(change) => {
+                    let _ = updates_tx.send(change.clone());
+                }
+                // DescribeMethods and the rest: this device describes none.
+                _ => {}
+            }
+        }
+    });
 
     let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
     let topic = Name::parse(&topic_name(&namespace, "face/mouth/open")).expect("valid topic name");
@@ -96,27 +130,10 @@ async fn inbound_topic_becomes_update_command() {
         }
     });
 
-    // Await the Update on the inbound stream. The stream also carries the
-    // bridge's startup `DescribeMethods` command (from service discovery) and
-    // the initial `DataRequested(true)` signal, in a timing-dependent order — so
-    // skip everything that is not the Update we published, rather than assuming
-    // the Update is the first command to arrive.
-    let change = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            match inbound.next().await {
-                Some(Inbound::Command(cmd)) => {
-                    if let BridgeOp::Update(change) = cmd.op {
-                        break change;
-                    }
-                    // A non-Update command (e.g. DescribeMethods) — keep waiting.
-                }
-                Some(_) => {} // DataRequested and other non-command signals
-                None => panic!("the inbound stream ended before an Update arrived"),
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for an Update command");
+    let change = tokio::time::timeout(Duration::from_secs(10), updates.recv())
+        .await
+        .expect("timed out waiting for an Update command")
+        .expect("the device task stopped before an Update arrived");
 
     assert_eq!(
         change.set.get("face/mouth/open"),
@@ -786,6 +803,14 @@ async fn a_look_at_action_runs_the_full_lifecycle_over_dds() {
                         mutated: Vec::new(),
                     }));
                 }
+                BridgeOp::ListKeys { .. } => {
+                    // This device opens no inputs: its actions are its whole surface.
+                    let inputs: Vec<(String, KeyMeta)> = Vec::new();
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&inputs).expect("keys encode"),
+                        mutated: Vec::new(),
+                    }));
+                }
                 other => panic!("unexpected runtime command: {other:?}"),
             }
         }
@@ -1168,6 +1193,14 @@ async fn the_bound_look_at_skill_serves_the_standard_contract() {
                     }
                     cmd.reply(Ok(CallResult {
                         ret: Value::Unit,
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::ListKeys { .. } => {
+                    // This device opens no inputs: its actions are its whole surface.
+                    let inputs: Vec<(String, KeyMeta)> = Vec::new();
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&inputs).expect("keys encode"),
                         mutated: Vec::new(),
                     }));
                 }

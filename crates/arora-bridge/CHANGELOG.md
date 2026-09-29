@@ -4,6 +4,15 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-09-29
+
+### Changed
+
+- **Breaking:** `BridgeOp::ListKeys` replies with
+  `Vec<(String, arora_types::data::KeyMeta)>` encoded over the value plane, not
+  an array of paths: a key and what the store says it is, in one round trip, so
+  a bridge relays the device's keys without keeping anything of its own.
+
 ## [5.0.0] - 2026-09-25
 
 ### Changed

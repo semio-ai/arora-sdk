@@ -4,6 +4,17 @@ All notable changes to `arora-simple-data-store`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-09-29
+
+### Added
+
+- Keeps `KeyMeta` for its keys and its subtrees (`meta`, `all_meta`,
+  `set_meta`, `set_prefix_meta`), beside the cells rather than in them: a key can
+  be described before anything writes it, and clearing a value says nothing
+  about what the key is. `meta` answers with the most specific statement.
+  `NamespacedStore` relays both through its namespace, the empty prefix meaning
+  the whole device and never a neighbour.
+
 ## [3.0.0] - 2026-09-25
 
 ### Changed

@@ -17,7 +17,7 @@ use std::time::Duration;
 use arora_bridge::{Bridge, BridgeOp, Inbound};
 use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type, Value};
 use arora_types::call::CallResult;
-use arora_types::data::{Key, StateChange};
+use arora_types::data::{Key, KeyMeta, StateChange};
 use futures::StreamExt;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -30,10 +30,19 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 
-    // Input keys become subscribed topics (inbound commands).
-    let config = Ros2BridgeConfig::new(namespace.clone(), domain_id)
-        .with_input("face/mouth/open", Type::F64)
-        .with_input("enabled", Type::Boolean);
+    // The probe plays the device: it answers `ListKeys` with its two inputs
+    // opened, and the bridge subscribes a topic for each.
+    let config = Ros2BridgeConfig::new(namespace.clone(), domain_id);
+    let inputs: Vec<(String, KeyMeta)> = vec![
+        (
+            "face/mouth/open".to_string(),
+            KeyMeta::new().editable().of_type(Type::F64),
+        ),
+        (
+            "enabled".to_string(),
+            KeyMeta::new().editable().of_type(Type::Boolean),
+        ),
+    ];
 
     let mut bridge = Ros2Bridge::new(config).await;
     let mut inbound = bridge.take_inbound();
@@ -60,10 +69,16 @@ async fn main() {
             }
             maybe = inbound.next() => match maybe {
                 Some(Inbound::Command(cmd)) => {
-                    if let BridgeOp::Update(change) = &cmd.op {
-                        println!("probe: <= INBOUND update from ROS: {:?}", change.set);
-                    }
-                    cmd.reply(Ok(CallResult { ret: Value::Unit, mutated: Vec::new() }));
+                    let ret = match &cmd.op {
+                        BridgeOp::ListKeys { .. } => arora_types::value_serde::to_value(&inputs)
+                            .expect("the inputs encode"),
+                        BridgeOp::Update(change) => {
+                            println!("probe: <= INBOUND update from ROS: {:?}", change.set);
+                            Value::Unit
+                        }
+                        _ => Value::Unit,
+                    };
+                    cmd.reply(Ok(CallResult { ret, mutated: Vec::new() }));
                 }
                 // DataRequested / DeviceInfo signals — not relevant to this probe.
                 Some(_) => {}

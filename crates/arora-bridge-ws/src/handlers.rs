@@ -1,5 +1,6 @@
 //! Callback types the server dispatches incoming messages to.
 
+use crate::key::KeyInfo;
 use crate::method::{InvokeResult, MethodInfo};
 use arora_types::value::Value;
 use arora_types::Uuid;
@@ -13,9 +14,13 @@ use std::sync::Arc;
 pub type WriteValuesResult = Result<(), String>;
 
 /// Handler function type for WriteValues messages.
-/// Called when an external client writes values to keys.
-pub type WriteValuesHandler =
-    Arc<dyn Fn(HashMap<String, Value>) -> WriteValuesResult + Send + Sync>;
+/// Called when an external client writes values to keys; its answer is the
+/// client's, so a write the device refuses is reported rather than acknowledged.
+pub type WriteValuesHandler = Arc<
+    dyn Fn(HashMap<String, Value>) -> Pin<Box<dyn Future<Output = WriteValuesResult> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Handler function type for ReadValues messages.
 /// Called when an external client reads the current values of keys.
@@ -26,25 +31,22 @@ pub type ReadValuesHandler = Arc<
         + Sync,
 >;
 
-/// Handler function type for method invocations.
-pub type MethodHandler = Arc<dyn Fn(HashMap<String, Value>) -> InvokeResult + Send + Sync>;
-
 /// Handler called when a new client connects to this connection.
 /// Receives the connection identifier (e.g., "ws://127.0.0.1:9000").
 pub type OnClientConnectedHandler = Arc<dyn Fn(String) + Send + Sync>;
 
-/// The device behind the server: the methods it exports, and how a client's
-/// `invoke` reaches them.
+/// The device behind the server — everything a client can discover or call.
 ///
-/// The server answers `list_methods` and `invoke` from its [`Registry`] — the
-/// methods the server itself owns — and consults this seam for the rest, so the
-/// device's module functions are callable without anything mirroring their ids
-/// into the registry. [`WsBridge`](crate::bridge::WsBridge) implements it over
-/// the runtime's inbound command stream and installs it on the server it wraps;
-/// a server serving without a bridge simply has none.
+/// A bridge relays the device; it keeps nothing of its own. Keys and their meta
+/// come from the store, functions from the modules that export them, and both
+/// are asked at the moment the client asks, so what a module loaded mid-run
+/// brought is there at once.
 #[async_trait]
-pub trait DeviceMethods: Send + Sync {
-    /// The device's callable methods, each with the parameter names and value
+pub trait Device: Send + Sync {
+    /// The keys the device holds, each with what the store says it is.
+    async fn keys(&self) -> Vec<KeyInfo>;
+
+    /// The device's callable functions, each with the parameter names and value
     /// shapes a client binds arguments to.
     async fn methods(&self) -> Vec<MethodInfo>;
 
@@ -58,4 +60,4 @@ pub trait DeviceMethods: Send + Sync {
 }
 
 /// The device seam as the server holds it.
-pub type DeviceMethodsHandler = Arc<dyn DeviceMethods>;
+pub type DeviceHandler = Arc<dyn Device>;

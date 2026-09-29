@@ -1,39 +1,23 @@
-//! Key metadata types for the WebSocket messages.
+//! A key as a client sees it.
 
-use arora_types::value::{Type, Value};
+use arora_types::data::KeyMeta;
 use serde::{Deserialize, Serialize};
 
-/// Metadata describing a key exposed by the runtime's data layer.
+/// A key of the device: its path, and what the store says it is.
 ///
-/// A key is a hierarchical path into the store (see `arora_types::data::Key`);
-/// its value is an `arora_types::value::Value`. Keys represent controllable
-/// parameters or observable outputs, with optional type/constraint information.
+/// The meta is the store's answer, relayed — the shape the key holds, the range
+/// it runs over, where it rests, what it is for, and whether a client may write
+/// it. A key nobody has described carries the default: the shape of the value it
+/// holds, and closed to writes.
+///
+/// On the wire the meta is `__meta`, the name every Arora bridge gives it, so a
+/// key segment called `meta` never collides with it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyInfo {
-    /// Hierarchical path identifier (e.g., "face/mouth/open", "body/arm/left/rotation")
+    /// Hierarchical path identifier (e.g. `face/mouth/open`).
     pub path: String,
 
-    /// Key kind/category (e.g., "input", "output", "computed")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-
-    /// The arora Type of the values this key accepts/produces
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value_type: Option<Type>,
-
-    /// Minimum value constraint (for numeric types)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min: Option<f64>,
-
-    /// Maximum value constraint (for numeric types)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max: Option<f64>,
-
-    /// Default value
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub default_value: Option<Value>,
-
-    /// Human-readable description
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    /// What the store says this key is.
+    #[serde(rename = "__meta")]
+    pub meta: KeyMeta,
 }

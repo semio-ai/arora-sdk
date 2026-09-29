@@ -4,6 +4,30 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-09-29
+
+### Added
+
+- **`KeyMeta`, and the store seams that carry it**: what a key is beyond the
+  value it holds — the shape, the range it runs over, where it rests, what it is
+  for, and whether a remote writer may set it. `DataStore::meta`, `all_meta`,
+  `set_meta` and `set_prefix_meta` read and set it, each with a default
+  implementation (no meta, and a refusal to keep any), so a store opts in when
+  it has something to say and none is forced. It is the store's because it is a
+  property of the key: every bridge relays the same answer instead of each
+  keeping its own.
+- **A key is closed to remote writers unless its meta opens it**
+  (`KeyMeta::editable`, false by default): a network peer does not get to set a
+  key the device never offered. A device opens a key, or a whole subtree with
+  `set_prefix_meta` — the empty prefix opening everything, for a sandbox. `meta`
+  resolves to the most specific statement, the key's own replacing its
+  subtree's whole; `prefix_covers` is what a prefix covers, on segment
+  boundaries.
+- `Value::kind()`: the value's `Type` — which variant it is. What a consumer
+  needs to render a value or to check that another fits the same slot, and what
+  types a key off the value it holds; `type_uuid()` stays the compound record's
+  own id.
+
 ## [3.0.0] - 2026-09-25
 
 ### Added

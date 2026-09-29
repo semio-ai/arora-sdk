@@ -14,9 +14,11 @@
 //! pushes to the connected clients synchronously. The value vocabulary is
 //! `arora_types::Value`, so the translation is structural, not a conversion.
 //!
-//! The device's **methods** travel the same channel: [`MethodPlane`] describes
-//! them on demand and calls them by name, so a client reaches the device's
-//! module functions without anything registering them on the server.
+//! What a client discovers travels the same channel: [`DevicePlane`] lists the
+//! device's keys and describes its methods on demand, and calls a method by
+//! name, so a client reaches the device itself without anything being
+//! registered on the server ahead of time — including what a module loaded
+//! mid-run brought with it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,15 +28,16 @@ use arora_bridge::{
     MethodSignature,
 };
 use arora_types::call::Call;
-use arora_types::data::{Key, StateChange};
+use arora_types::data::{Key, KeyMeta, StateChange};
 use arora_types::value::{StructureField, Value};
 use arora_types::Uuid;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
 use futures::StreamExt;
 
-use crate::handlers::DeviceMethods;
+use crate::handlers::Device;
 use crate::interpreter;
+use crate::key::KeyInfo;
 use crate::messages::Outgoing;
 use crate::method::{InvokeResult, MethodInfo, MethodParam};
 use crate::server::AroraWSServer;
@@ -57,19 +60,27 @@ impl WsBridge {
     pub async fn new(server: Arc<AroraWSServer>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded::<BridgeCommand>();
 
-        // WriteValues -> Update. The handler is synchronous, so enqueue the
-        // command and acknowledge; the runtime applies it on its next step.
+        // WriteValues -> Update, awaiting the runtime's answer: a key the device
+        // writes itself is refused, and the client is told so rather than
+        // acknowledged.
         let tx = cmd_tx.clone();
         server
-            .set_write_values_handler(move |values: HashMap<String, Value>| {
-                let mut change = StateChange::new();
-                for (path, value) in values {
-                    change.set.insert(Key::from(path), Some(value));
-                }
-                let (reply_tx, _reply_rx) = oneshot::channel();
-                tx.unbounded_send(BridgeCommand::new(BridgeOp::Update(change), reply_tx))
-                    .map_err(|_| "bridge command channel closed".to_string())
-            })
+            .set_write_values_handler(Arc::new(move |values: HashMap<String, Value>| {
+                let tx = tx.clone();
+                Box::pin(async move {
+                    let mut change = StateChange::new();
+                    for (path, value) in values {
+                        change.set.insert(Key::from(path), Some(value));
+                    }
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    tx.unbounded_send(BridgeCommand::new(BridgeOp::Update(change), reply_tx))
+                        .map_err(|_| "the device is gone".to_string())?;
+                    match reply_rx.await {
+                        Ok(result) => result.map(|_| ()),
+                        Err(_) => Err("the device dropped the write".to_string()),
+                    }
+                }) as _
+            }))
             .await;
 
         // ReadValues -> Get, awaiting the runtime's reply.
@@ -94,11 +105,12 @@ impl WsBridge {
             }))
             .await;
 
-        // The method plane: what `list_methods` and `invoke` reach for every name
-        // the server's own registry does not own. It holds a sender, not the
-        // bridge, so it lives on the server while the device owns the bridge.
+        // The device plane: what `list_keys` reaches, and what `list_methods` and
+        // `invoke` reach for every name the server's own registry does not own.
+        // It holds a sender, not the bridge, so it lives on the server while the
+        // device owns the bridge.
         server
-            .set_device_methods(Arc::new(MethodPlane {
+            .set_device(Arc::new(DevicePlane {
                 commands: cmd_tx.clone(),
             }))
             .await;
@@ -110,15 +122,15 @@ impl WsBridge {
     }
 }
 
-/// The device's method plane over the runtime's inbound commands: it describes
-/// the device's methods on demand — so a module loaded mid-run is callable at
-/// once — and turns an `invoke` into the [`Call`] the described signature
-/// defines.
-struct MethodPlane {
+/// The device over the runtime's inbound commands: it lists the keys the device
+/// holds and describes its methods on demand — so what a module loaded mid-run
+/// brought is there at once — and turns an `invoke` into the [`Call`] the
+/// described signature defines.
+struct DevicePlane {
     commands: mpsc::UnboundedSender<BridgeCommand>,
 }
 
-impl MethodPlane {
+impl DevicePlane {
     /// Put `op` to the runtime and await its answer.
     async fn ask(&self, op: BridgeOp) -> Result<Value, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -148,7 +160,28 @@ impl MethodPlane {
 }
 
 #[async_trait]
-impl DeviceMethods for MethodPlane {
+impl Device for DevicePlane {
+    /// The keys the device holds, each with what its store says the key is.
+    async fn keys(&self) -> Vec<KeyInfo> {
+        let listed = match self.ask(BridgeOp::ListKeys { prefix: None }).await {
+            Ok(listed) => listed,
+            Err(e) => {
+                log::warn!("the device did not list its keys: {e}");
+                return Vec::new();
+            }
+        };
+        let keys: Vec<(String, KeyMeta)> = match arora_types::value_serde::from_value(listed) {
+            Ok(keys) => keys,
+            Err(e) => {
+                log::warn!("the device's keys did not decode: {e}");
+                return Vec::new();
+            }
+        };
+        keys.into_iter()
+            .map(|(path, meta)| KeyInfo { path, meta })
+            .collect()
+    }
+
     async fn methods(&self) -> Vec<MethodInfo> {
         self.signatures().await.iter().map(method_info).collect()
     }
