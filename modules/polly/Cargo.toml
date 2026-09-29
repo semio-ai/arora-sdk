@@ -2,6 +2,7 @@
 name = "polly"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [lib]
 # `rlib` beside the `cdylib` so the module's own tests reach its declaration

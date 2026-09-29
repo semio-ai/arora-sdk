@@ -3,7 +3,7 @@ name: behavior-tree-nodes
 id: 3f0aa0c0-6dd5-4cc5-a05e-97a21ec44455
 author: Semio
 description: Core Behavior Tree Nodes
-license: Proprietary
+license: MIT
 version:
   major: 0
   minor: 1

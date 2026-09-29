@@ -3,7 +3,7 @@ name = "test-rust-wasm"
 version = "0.1.0"
 authors = ["Victor Paleologue <victor.paleologue@palaio.eu>"]
 description = "A test module project compiled to wasm"
-license = "Proprietary"
+license = "MIT"
 edition = "2021"
 readme = "readme.md"
 

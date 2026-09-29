@@ -2,7 +2,7 @@
 name = "test-cpp-2"
 version = "0.1.0"
 edition = "2021"
-license = "Proprietary"
+license = "MIT"
 description = "C++ test module 2 — wasm guest that imports test-cpp's types"
 build = "build.rs"
 

@@ -3,7 +3,7 @@ name = "wasi-sdk"
 version = "0.1.0"
 edition = "2021"
 description = "Downloads and locates the WASI SDK toolchain for use from build scripts"
-license = "Proprietary"
+license = "MIT"
 
 [dependencies]
 anyhow = "1"

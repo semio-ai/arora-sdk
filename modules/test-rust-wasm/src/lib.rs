@@ -6,7 +6,7 @@
     name = "test-rust-wasm",
     version = "0.1.0",
     author = "Semio",
-    license = "Proprietary",
+    license = "MIT",
     description = "Test WASM module written in Rust",
     executable_mime = "application/wasm"
 )]

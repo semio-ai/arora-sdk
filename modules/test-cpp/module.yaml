@@ -1,7 +1,7 @@
 id: 23a75559-025c-4be8-8b48-0784e30dc9ec
 author: Semio
 description: Test C++ module
-license: Proprietary
+license: MIT
 name: test-cpp
 version:
   major: 0

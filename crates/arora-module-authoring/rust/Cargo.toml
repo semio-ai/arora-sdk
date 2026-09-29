@@ -5,7 +5,7 @@ edition = "2021"
 description = "Rust source generation for Arora modules (types and bindings from type records)."
 license = "MIT"
 readme = "readme.md"
-include = ["/src", "/tests"]
+include = ["/src", "/tests", "/LICENSE"]
 
 [dependencies]
 arora-module-core = { path = "../core", version = "2" }

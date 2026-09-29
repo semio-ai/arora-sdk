@@ -2,7 +2,7 @@
 name = "arora-integration-tests"
 version = "0.0.0"
 edition = "2021"
-license = "Proprietary"
+license = "MIT"
 publish = false
 description = "End-to-end tests that exercise built modules via arora-cli"
 

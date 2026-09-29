@@ -2,7 +2,7 @@
 name = "test-cpp"
 version = "0.1.0"
 edition = "2021"
-license = "Proprietary"
+license = "MIT"
 description = "C++ test module — wasm guest, built via cargo + cmake + WASI SDK"
 build = "build.rs"
 

@@ -2,7 +2,7 @@
 name = "arora-nao"
 version = "0.1.0"
 edition = "2021"
-license = "Proprietary"
+license = "MIT"
 description = "NAO bridge module — cross-compiled for i686-unknown-linux-musl"
 build = "build.rs"
 

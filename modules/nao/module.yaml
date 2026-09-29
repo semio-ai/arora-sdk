@@ -1,7 +1,7 @@
 id: ed2a9b9b-a2b8-438e-a99c-29e0df09c1d4
 author: Semio
 description: NAO support module
-license: Proprietary
+license: MIT
 name: nao
 version:
   major: 0

@@ -2,7 +2,8 @@
 name = "arora-behavior-tree-types-yaml"
 version = "0.1.1"
 edition = "2021"
-include = ["enumeration/**.yaml", "structure/**.yaml"]
+license = "MIT"
+include = ["enumeration/**.yaml", "structure/**.yaml", "LICENSE"]
 
 [dev-dependencies]
 arora-registry = { path = "../arora-registry" }
