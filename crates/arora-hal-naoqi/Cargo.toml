@@ -1,0 +1,41 @@
+[package]
+name = "arora-hal-naoqi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "NAOqi HAL for Arora: drives NAO and Pepper robots through the qi framework (libqi-rs) as Arora devices"
+
+[lib]
+name = "arora_hal_naoqi"
+
+# The device runner: connects to a robot's NAOqi and runs it as an Arora device.
+[[bin]]
+name = "arora-naoqi"
+path = "src/bin/arora-naoqi.rs"
+required-features = ["runner"]
+
+[features]
+# The arora-naoqi binary: pulls the full arora runtime with the Semio Studio
+# connection. The library (the HAL itself) stays lean without it.
+runner = ["dep:arora", "dep:anyhow"]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+arora-hal = { path = "../arora-hal", version = "4" }
+arora-types = { path = "../arora-types", version = "3" }
+arora = { path = "../arora", version = "11", features = ["studio-bridge"], optional = true }
+async-trait = "0.1"
+futures = "0.3"
+log = "0.4"
+# The Rust implementation of the qi framework (libqi), the NAOqi middleware. The package is
+# `libqi` (the name `qi` is taken on crates.io); the library is used as `qi`. Pinned to a commit
+# until libqi-rs-vibe 0.1.0 is on crates.io, then `qi = { package = "libqi", version = "0.1" }`.
+qi = { package = "libqi", git = "https://github.com/victorpaleologue/libqi-rs-vibe", rev = "3422656ea126a573ba83c005165fd768afe96434" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# rt, time, sync: the sensor sampling and queued-write tasks run on the caller's runtime.
+tokio = { version = "1", features = ["rt", "time", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
