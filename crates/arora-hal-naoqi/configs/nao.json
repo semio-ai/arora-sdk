@@ -1,0 +1,8 @@
+{
+  "url": "tcp://127.0.0.1:9559",
+  "model_family": "nao",
+  "joint_ids": { "mode": "snake_case" },
+  "sensor_period_ms": 50,
+  "joint_speed_fraction": 0.3,
+  "sensors": { "joints": true, "battery": true, "inertial": true, "sonar": true, "touch": true }
+}
