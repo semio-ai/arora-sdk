@@ -177,7 +177,6 @@ dependencies = [
  "arora-types",
  "async-trait",
  "clap 4.6.4",
- "crypto_secretbox",
  "dirs",
  "env_filter 0.1.4",
  "env_logger",
@@ -634,15 +633,16 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "8.0.0"
+version = "8.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c42ed450b75d1ec5cb7bd4a2552200a884a3a21c1cf4f4fe3058f856a06d7d7"
+checksum = "d0405d1666a9db7bf1cfd249a767931ad843b8a783901275a29a7fc6b263ef23"
 dependencies = [
  "arora-bridge",
  "arora-types",
  "async-stream",
  "async-trait",
  "chrono",
+ "crypto_secretbox",
  "firestore",
  "futures",
  "futures-util",
