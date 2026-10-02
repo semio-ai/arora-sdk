@@ -73,12 +73,14 @@ use crate::Arora;
     long_about = "The Arora device runner: a headless device over the fake HAL, serving the \
                   open local bridge (or Semio Studio in a studio-bridge build).\n\n\
                   At start it loads every module directory under its device directory's \
-                  modules/ — the device directory is DEVICE_DIR, else the per-user directory \
-                  of the device DEVICE_LOCAL_ID names (`default` when unset) — then each \
-                  --module directory. A module directory holds header.json (the module's \
-                  header) beside its artifact, the one file with the extension the header's \
-                  executor names: .wasm for wasm, the platform's dynamic library for native. \
-                  A module that cannot be loaded fails the start, naming it."
+                  modules/ — the device directory is DEVICE_DIR; else <IDENTITY_FILE>_dir \
+                  while that deprecated variable is set; else the per-user directory of the \
+                  device DEVICE_LOCAL_ID names (`default` when unset) — then each --module \
+                  directory. A module directory holds header.json (the module's header) \
+                  beside its artifact, the one file with the extension the header's executor \
+                  names: .wasm for wasm, the platform's dynamic library for native. Entries \
+                  whose name starts with `.` (OS metadata) are ignored. A module that cannot \
+                  be loaded fails the start, naming it."
 )]
 pub struct DeviceCli {
     /// Groot behavior-tree file to install as the device's behavior.
@@ -366,13 +368,18 @@ pub(crate) async fn run_builder_with_frontend(
     }
 }
 
-/// Pick the front end for this process: the terminal operator UI when the `tui`
-/// feature is on and stdout is a terminal, otherwise the headless front end.
+/// The standard front end for this process: the terminal operator UI when the
+/// `tui` feature is on and stdout is a terminal, otherwise the headless front
+/// end — what [`run`](crate::AroraBuilder::run) picks when none is injected.
 ///
-/// Building the front end installs the matching log sink, so the run path calls
-/// this before it emits any logs it wants captured.
+/// Building the front end installs the matching log sink, so a binary that
+/// logs before `run` — the `arora` binary logs the module directories it
+/// reads — takes it first and injects it with
+/// [`with_frontend`](crate::AroraBuilder::with_frontend). One per process:
+/// the terminal UI takes the terminal over, and a second headless front end
+/// leaves the first logger in place.
 #[cfg(feature = "native")]
-pub(crate) fn select_frontend() -> Frontend {
+pub fn standard_frontend() -> Frontend {
     #[cfg(feature = "tui")]
     {
         use std::io::IsTerminal;

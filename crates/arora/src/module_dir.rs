@@ -18,7 +18,10 @@
 //! A module directory that cannot be read — a missing or malformed header, no
 //! artifact or several, an executor this runtime has no artifact convention
 //! for — is an error naming the module by its directory's name: a device never
-//! starts without a module it was given.
+//! starts without a module it was given. An entry whose name starts with `.`
+//! is neither a module directory nor an artifact: OS metadata (`.DS_Store`, an
+//! AppleDouble `._x.wasm`) lands beside the files it describes, and is ignored
+//! both under `modules/` and inside a module directory.
 
 use std::collections::HashMap;
 use std::fs;
@@ -47,7 +50,8 @@ pub struct ModuleFiles {
 
 /// Read every module directory under `<device_dir>/modules`, in name order. A
 /// device directory without a `modules/` carries no module; anything there
-/// that is not a directory is not a module directory.
+/// that is not a directory, or whose name starts with `.`, is not a module
+/// directory.
 pub fn in_device_dir(device_dir: &Path) -> Result<Vec<ModuleFiles>> {
     let modules = device_dir.join(MODULES_DIR);
     let mut dirs = match list(&modules) {
@@ -98,6 +102,13 @@ fn read_files(dir: &Path) -> Result<ModuleFiles> {
         .with_context(|| format!("could not read {}", header_path.display()))?;
     let header: Header = serde_json::from_str(&header_text)
         .with_context(|| format!("{} is not a module header", header_path.display()))?;
+    log::info!(
+        "module directory {}: '{}' ({}, executor {})",
+        dir.display(),
+        header.name,
+        header.id,
+        header.executor.name
+    );
     let executor = header.executor.name.as_str();
     let extension = artifact_extension(executor)?;
     let artifact = artifact_in(dir, executor, extension)?;
@@ -147,11 +158,16 @@ fn artifact_in(dir: &Path, executor: &str, extension: &str) -> Result<PathBuf> {
     }
 }
 
-/// The entries of `dir`, sorted by path.
+/// The entries of `dir` whose name does not start with `.`, sorted by path.
 fn list(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut entries: Vec<PathBuf> = fs::read_dir(dir)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<io::Result<_>>()?;
+    entries.retain(|path| {
+        !path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+    });
     entries.sort();
     Ok(entries)
 }
@@ -244,15 +260,40 @@ mod tests {
         fs::remove_dir_all(&device_dir).unwrap();
     }
 
-    /// A device directory with no `modules/` carries no module, and a file
-    /// among the module directories is not one.
+    /// A device directory with no `modules/` carries no module; a file among
+    /// the module directories is not one, nor is a directory whose name
+    /// starts with `.` (OS metadata).
     #[test]
     fn a_device_directory_without_modules_carries_none() {
         let device_dir = scratch("none");
         assert!(in_device_dir(&device_dir).unwrap().is_empty());
-        fs::create_dir_all(device_dir.join(MODULES_DIR)).unwrap();
-        fs::write(device_dir.join(MODULES_DIR).join(".DS_Store"), b"").unwrap();
+        let modules = device_dir.join(MODULES_DIR);
+        fs::create_dir_all(modules.join(".git")).unwrap();
+        fs::create_dir_all(modules.join(".Trashes")).unwrap();
+        fs::write(modules.join(".DS_Store"), b"").unwrap();
+        fs::write(modules.join("notes.txt"), b"").unwrap();
         assert!(in_device_dir(&device_dir).unwrap().is_empty());
+        fs::remove_dir_all(&device_dir).unwrap();
+    }
+
+    /// OS metadata beside the artifact — an AppleDouble `._m.wasm`, a
+    /// `.DS_Store` — is not an artifact: the one `.wasm` is still found.
+    #[test]
+    fn metadata_beside_the_artifact_is_not_an_artifact() {
+        let device_dir = scratch("apple-double");
+        module_dir(
+            &device_dir,
+            "sinus",
+            &json(&header("wasm")),
+            &[
+                ("m.wasm", WASM),
+                ("._m.wasm", b"AppleDouble"),
+                (".DS_Store", b""),
+            ],
+        );
+        let modules = in_device_dir(&device_dir).expect("the sidecar is ignored");
+        assert_eq!(modules.len(), 1);
+        assert_eq!(&*modules[0].executable, WASM);
         fs::remove_dir_all(&device_dir).unwrap();
     }
 
@@ -345,18 +386,24 @@ mod tests {
         fs::remove_dir_all(&device_dir).unwrap();
     }
 
-    /// One module in two directories is refused, naming both.
+    /// One module in two directories is refused, naming both directories and
+    /// the module.
     #[test]
     fn one_module_in_two_directories_is_refused() {
         let device_dir = scratch("twins");
         let header = json(&header("wasm"));
-        module_dir(&device_dir, "one", &header, &[("m.wasm", WASM)]);
-        module_dir(&device_dir, "two", &header, &[("m.wasm", WASM)]);
+        let first = module_dir(&device_dir, "first", &header, &[("m.wasm", WASM)]);
+        let second = module_dir(&device_dir, "second", &header, &[("m.wasm", WASM)]);
         let error = in_device_dir(&device_dir).expect_err("a module in two directories is refused");
         let message = format!("{error:#}");
-        assert!(message.contains("one"), "{message}");
-        assert!(message.contains("two"), "{message}");
-        assert!(message.contains("test-rust-wasm"), "{message}");
+        assert!(
+            message.contains(&format!(
+                "module directories {} and {} both carry module 'test-rust-wasm'",
+                first.display(),
+                second.display()
+            )),
+            "{message}"
+        );
         fs::remove_dir_all(&device_dir).unwrap();
     }
 

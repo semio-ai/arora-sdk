@@ -47,15 +47,23 @@ pub fn of(local_id: &str) -> Result<PathBuf> {
 
 /// The device directory of a run configured from the environment: `DEVICE_DIR`
 /// when set; else, while the deprecated `IDENTITY_FILE` is set, the directory
-/// its identity migrates to (`<IDENTITY_FILE>_dir`); else the per-user
-/// directory of the device `DEVICE_LOCAL_ID` names ([`of`]). The directory
-/// is named, not created: a use creates the subdirectory it writes.
+/// its identity migrates to (`<IDENTITY_FILE>_dir`), with a warning that the
+/// variable is deprecated; else the per-user directory of the device
+/// `DEVICE_LOCAL_ID` names ([`of`]). The directory is named, not created: a
+/// use creates the subdirectory it writes.
 pub fn from_env() -> Result<PathBuf> {
     if let Some(dir) = override_from_env() {
         return Ok(dir);
     }
     if let Some(file) = env_nonempty("IDENTITY_FILE") {
-        return Ok(of_identity_file(Path::new(&file)));
+        let dir = of_identity_file(Path::new(&file));
+        log::warn!(
+            "IDENTITY_FILE is deprecated: DEVICE_DIR names the device directory. This run's \
+             is {}, the directory the identity {} migrates to",
+            dir.display(),
+            file
+        );
+        return Ok(dir);
     }
     of(&local_id_from_env())
 }

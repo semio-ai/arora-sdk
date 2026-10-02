@@ -35,7 +35,12 @@ async fn main() -> anyhow::Result<()> {
             )]))
             .context("the store keeps key meta")?;
     }
-    let mut builder = arora::Arora::builder().with_data_store(Box::new(store));
+    // The front end first: building it installs the log sink, so what the
+    // module loading below says — the directories it reads, a deprecated
+    // variable it honours — is captured like the rest of the run.
+    let mut builder = arora::Arora::builder()
+        .with_data_store(Box::new(store))
+        .with_frontend(arora::standard_frontend());
     // The modules the device carries: its device directory's, then `--module`'s.
     // Each loads at build, where one the engine rejects fails the start.
     for module in cli.modules()? {

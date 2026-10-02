@@ -481,7 +481,18 @@ unambiguous.
 A directory that does not load fails the start, naming the module. The device
 was told to carry it: starting without it would serve a device whose
 `DescribeMethods` and dispatch disagree with what the operator installed,
-which is harder to notice than a start that says what is wrong.
+which is harder to notice than a start that says what is wrong. Two
+exceptions are deliberate: an entry whose name starts with `.` is OS metadata
+(`.DS_Store`, an AppleDouble `._x.wasm` beside its `x.wasm`) — a device
+directory copied through a file manager would otherwise never start — and a
+`modules/` without any directory carries no module.
+
+One module id, one module, refused by the builder: every source of guest
+modules (an embedder's `with_module`, the device directory, `--module`)
+converges in `AroraBuilder::build`, while the engine answers an already-loaded
+id with Ok, which would dispatch the first and describe the last. The device
+directory reader refuses the same case earlier, naming the two directories,
+because the builder sees headers, not where they came from.
 
 ### Predetermined keys are conventions, not wiring
 

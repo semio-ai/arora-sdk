@@ -16,21 +16,28 @@ All notable changes to `arora`. The format follows
   the platform's dynamic library (`.so`, `.dylib`, `.dll`) for `native`. The
   artifact's name is free, so a published artifact directory (the
   `@vizij/animation-module` package's `artifact/`) is a module directory as
-  is. A module the device cannot load — a missing or malformed header, no
-  artifact or several, an executor it does not run, one module in two
-  directories, an artifact the engine rejects — fails the start, naming the
-  module. Loaded modules dispatch like any other and `DescribeMethods` lists
+  is. Entries whose name starts with `.` (OS metadata such as `.DS_Store` or
+  an AppleDouble `._x.wasm`) are neither module directories nor artifacts. A
+  module the device cannot load — a missing or malformed header, no artifact
+  or several, an executor it does not run, one module in two directories, an
+  artifact the engine rejects — fails the start, naming the module. A loaded
+  module's functions are reachable by any call and `DescribeMethods` lists
   their primitive-only signatures. `module_dir::read` and
   `module_dir::in_device_dir` read module directories for an embedder;
   `DeviceCli::modules` reads what the command line names, for `with_module`.
 - `device_dir::from_env()`: the device directory of a run configured from the
   environment — `DEVICE_DIR`, else `<IDENTITY_FILE>_dir` while that deprecated
-  variable is set, else the per-user directory of the device `DEVICE_LOCAL_ID`
-  names. `device_dir` is part of every native build, no longer of the
-  `studio-bridge` feature alone.
+  variable is set (with a deprecation warning), else the per-user directory of
+  the device `DEVICE_LOCAL_ID` names. `device_dir` is part of every native
+  build, no longer of the `studio-bridge` feature alone.
+- `standard_frontend()`: the front end `run` picks when none is injected, for
+  a binary that logs before `run` — the `arora` binary installs it before it
+  reads its module directories, so what the loading says is captured.
 
 ### Changed
 
+- Two guest modules with one id fail the build, naming both; the engine would
+  load the first and the method index describe the last.
 - A guest module the engine cannot load fails the build naming the module (its
   header's name and id) along with the engine's reason, and each guest module
   loaded is logged with its name and id.

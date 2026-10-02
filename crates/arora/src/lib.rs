@@ -50,7 +50,7 @@ pub use arora_bridge_ws as bridge_ws;
 #[cfg(feature = "native")]
 pub use run::{
     local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
-    serve_local_ws_bridge, DeviceCli,
+    serve_local_ws_bridge, standard_frontend, DeviceCli,
 };
 pub use runtime::RuntimeError;
 
@@ -395,7 +395,10 @@ impl AroraBuilder {
     /// instead of the standard pick (terminal UI on an interactive terminal,
     /// headless otherwise) — the seam for an application that brings its own
     /// UI, or for the terminal UI extended with application commands
-    /// ([`tui::commands_frontend`]).
+    /// ([`tui::commands_frontend`]). A binary that needs the front end — and
+    /// the log sink it installs — before `run`, say to log what it loads,
+    /// takes the standard pick itself from [`standard_frontend`] and injects
+    /// it here.
     #[cfg(feature = "native")]
     pub fn with_frontend(mut self, frontend: operator::Frontend) -> Self {
         self.frontend = Some(frontend);
@@ -427,7 +430,7 @@ impl AroraBuilder {
         // sink, so everything after (including bridge resolution) is captured.
         let frontend = match self.frontend.take() {
             Some(frontend) => frontend,
-            None => run::select_frontend(),
+            None => run::standard_frontend(),
         };
         if self.bridges.is_empty() {
             #[cfg(feature = "studio-bridge")]
@@ -463,9 +466,21 @@ impl AroraBuilder {
         // the method index, so `DescribeMethods` lists them — a guest header
         // carries no type versions, so a non-primitive signature (which needs a
         // registry to pin versions) dispatches but stays undiscoverable.
+        //
+        // One module id, one module: every source of guest modules (an
+        // embedder's `with_module`, the device directory, `--module`) converges
+        // here, and the engine answers an already-loaded id with Ok — which
+        // would dispatch the first and describe the last.
+        let mut guest_modules: HashMap<Uuid, String> = HashMap::new();
         for (header, executable) in self.modules {
             let module_id = header.id;
             let module_name = header.name.clone();
+            if let Some(first) = guest_modules.insert(module_id, module_name.clone()) {
+                anyhow::bail!(
+                    "guest modules '{first}' and '{module_name}' both have id {module_id}: a \
+                     device loads one module per id"
+                );
+            }
             for export in &header.exports {
                 let low::ExportSymbol::Function(function) = export;
                 match module_discovery::guest_function_signature(function) {
@@ -999,6 +1014,27 @@ mod module_loading_tests {
         Arora::builder()
             .build()
             .expect("the default device builds with no modules loaded");
+    }
+
+    /// Two guest modules with one id fail the build, naming both: the engine
+    /// would load the first and the method index describe the last.
+    #[test]
+    fn two_guest_modules_with_one_id_fail_the_build() {
+        let first = test_module_header();
+        let mut second = test_module_header();
+        second.name = "test-rust-wasm-again".to_string();
+        let error = Arora::builder()
+            .with_module(first, WASM.to_vec())
+            .with_module(second, WASM.to_vec())
+            .build()
+            .err()
+            .expect("one id, two modules is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("guest modules 'test-rust-wasm' and 'test-rust-wasm-again' both have id"),
+            "{error}"
+        );
     }
 
     /// A module whose executable cannot load fails the whole build, naming the

@@ -112,21 +112,28 @@ A module directory is the layout a module is published in: the
 `@vizij/animation-module` package's `artifact/` — `header.json` beside
 `vizij_animation_module.wasm` — copied to `modules/animation/` is loaded at the
 next start. The artifact's name is free; its extension names it, so a module
-directory holds one artifact. A module the device cannot load — a header it
-cannot read, no artifact or several, an executor it does not run, an artifact
-the engine rejects — fails the start, naming the module. Loaded modules
-dispatch like any other and are listed by `DescribeMethods` under the same
-rule: a function whose parameters and return are all primitives is described,
-any other still dispatches ([`module_discovery`](src/module_discovery.rs)).
+directory holds one artifact. Entries whose name starts with `.` are neither
+module directories nor artifacts: OS metadata (`.DS_Store`, an AppleDouble
+`._x.wasm`) lands beside what it describes and is ignored. A module the device
+cannot load — a header it cannot read, no artifact or several, an executor it
+does not run, one module in two directories, an artifact the engine rejects —
+fails the start, naming the module. A loaded module's functions are reachable
+by any call — in-process (`Arora::call`), over a bridge — and `DescribeMethods`
+lists them under one rule: a function whose parameters and return are all
+primitives is described, any other still dispatches
+([`module_discovery`](src/module_discovery.rs)). A Groot tree the binary
+installs binds no module function: its nodes are the native control nodes.
 [`module_dir`](src/module_dir.rs) reads module directories for an embedder.
 
 The chain down to the bridge's code, in a `studio-bridge` build:
 
 1. [`device_dir`](src/device_dir.rs) resolves the device directory
-   (`device_dir::from_env`): `DEVICE_DIR`, else
-   `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. An embedder whose platform
-   gives it a data directory (Android, a Tauri app) passes its own to
-   `studio::connect_with_device_dir`.
+   (`device_dir::from_env`): `DEVICE_DIR`; else `<IDENTITY_FILE>_dir` while
+   that deprecated variable is set; else
+   `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. The per-user directory
+   needs a home: a container whose user has no passwd entry sets `DEVICE_DIR`.
+   An embedder whose platform gives it a data directory (Android, a Tauri app)
+   passes its own to `studio::connect_with_device_dir`.
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
    and hands it to `DeviceCredentials::in_dir`. arora never writes inside it;
    the files there are the client's.
