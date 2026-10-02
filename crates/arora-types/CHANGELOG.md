@@ -4,6 +4,18 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.3.0] - 2026-10-02
+
+### Added
+
+- `Subscription::map`: a subscription read through a translation of its
+  changes — how a view of a store, such as one namespace of it, derives its
+  feed from the store's own, with no thread relaying the feed and no store
+  knowing the view. The opening state is delivered whatever the translation
+  leaves of it, even nothing: it is the view's own opening state. A later
+  change the translation leaves empty is not delivered, as a write outside the
+  view changes nothing the view holds.
+
 ## [3.2.0] - 2026-10-02
 
 ### Added

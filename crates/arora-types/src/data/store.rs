@@ -13,6 +13,7 @@
 //!   crate stays free of an async runtime. A `futures::Stream` adapter is an
 //!   opt-in extension (a future `stream` feature), not the primary API.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 
@@ -63,30 +64,102 @@ pub trait Slot: Send + Sync {
 /// This is deliberately a plain synchronous channel so `arora-types` needs no
 /// async runtime. Async consumers can poll [`try_recv`](Subscription::try_recv)
 /// from their own loop, or adapt it to a `futures::Stream` (an opt-in extension).
+///
+/// A view of a store — one namespace of it, a renaming of its keys — derives
+/// its own subscription from the store's with [`map`](Subscription::map): the
+/// same feed, each change translated on its way to the subscriber.
 pub struct Subscription {
   rx: Receiver<StateChange>,
+  /// What a derived subscription makes of each change the feed delivers;
+  /// `None` on a store's own subscription, which delivers the feed as it is.
+  translation: Option<Translation>,
+}
+
+/// How a derived subscription reads the feed it is built on (see
+/// [`Subscription::map`]).
+struct Translation {
+  translate: Box<dyn Fn(StateChange) -> StateChange + Send>,
+  /// Whether the opening state has been delivered: the one change delivered
+  /// whatever the translation leaves of it.
+  opened: Cell<bool>,
 }
 
 impl Subscription {
   /// Wrap a receiver. `DataStore` implementations build the channel and keep
   /// the sender side.
   pub fn new(rx: Receiver<StateChange>) -> Self {
-    Self { rx }
+    Self {
+      rx,
+      translation: None,
+    }
+  }
+
+  /// This subscription read through `translate`: every change the feed
+  /// delivers reaches the subscriber as `translate` makes it. It is how a view
+  /// of a store subscribes — a namespaced view keeps the keys under its
+  /// namespace, stripped of it, and leaves the others out — with no thread
+  /// relaying the feed and no store knowing the view.
+  ///
+  /// The opening state is translated like every change and delivered whatever
+  /// is left of it, even nothing: it is the view's own opening state. A later
+  /// change the translation leaves empty is not delivered — a write outside
+  /// the view changes nothing the view holds, so its subscriber has nothing to
+  /// see and is not woken for it.
+  pub fn map(self, translate: impl Fn(StateChange) -> StateChange + Send + 'static) -> Self {
+    let translation = match self.translation {
+      None => Translation {
+        translate: Box::new(translate),
+        opened: Cell::new(false),
+      },
+      // A view of a view: one translation after the other, from where the
+      // feed stands.
+      Some(Translation {
+        translate: inner,
+        opened,
+      }) => Translation {
+        translate: Box::new(move |change| translate(inner(change))),
+        opened,
+      },
+    };
+    Self {
+      rx: self.rx,
+      translation: Some(translation),
+    }
   }
 
   /// Block until the next change (or `None` if the store was dropped).
   pub fn recv(&self) -> Option<StateChange> {
-    self.rx.recv().ok()
+    loop {
+      if let Some(change) = self.deliver(self.rx.recv().ok()?) {
+        return Some(change);
+      }
+    }
   }
 
   /// Take the next change if one is already available, without blocking.
   pub fn try_recv(&self) -> Option<StateChange> {
-    self.rx.try_recv().ok()
+    loop {
+      if let Some(change) = self.deliver(self.rx.try_recv().ok()?) {
+        return Some(change);
+      }
+    }
   }
 
   /// Drain all currently-available changes without blocking.
   pub fn try_iter(&self) -> impl Iterator<Item = StateChange> + '_ {
-    self.rx.try_iter()
+    self.rx.try_iter().filter_map(|change| self.deliver(change))
+  }
+
+  /// What the subscriber gets of a change the feed delivered: the change
+  /// itself, or what the translation makes of it — `None` when that is nothing,
+  /// except for the opening state.
+  fn deliver(&self, change: StateChange) -> Option<StateChange> {
+    let Some(translation) = &self.translation else {
+      return Some(change);
+    };
+    let change = (translation.translate)(change);
+    let opened = translation.opened.replace(true);
+    (!opened || !change.is_empty()).then_some(change)
   }
 }
 
@@ -271,6 +344,7 @@ mod tests {
   use super::*;
   use crate::value::Type;
   use crate::value_serde;
+  use std::sync::mpsc::channel;
 
   /// The wire shape of a key's meta: a field the store did not set is absent,
   /// not null, so a reader tells "no unit" from the absence of `unit`.
@@ -309,5 +383,98 @@ mod tests {
       let value = value_serde::to_value(&meta).unwrap();
       assert_eq!(value_serde::from_value::<KeyMeta>(value).unwrap(), meta);
     }
+  }
+
+  fn change(key: &str) -> StateChange {
+    StateChange::set(key, Value::Boolean(true))
+  }
+
+  /// The keys under `a/`, stripped of it: a namespaced view's translation.
+  fn under_a(change: StateChange) -> StateChange {
+    StateChange {
+      set: change
+        .set
+        .into_iter()
+        .filter_map(|(key, value)| Some((Key::from(key.path.strip_prefix("a/")?), value)))
+        .collect(),
+      unset: change
+        .unset
+        .into_iter()
+        .filter_map(|key| Some(Key::from(key.path.strip_prefix("a/")?)))
+        .collect(),
+    }
+  }
+
+  #[test]
+  fn a_mapped_subscription_delivers_the_translated_changes() {
+    let (tx, rx) = channel();
+    let subscription = Subscription::new(rx).map(under_a);
+    tx.send(change("a/x")).unwrap();
+    assert_eq!(subscription.try_recv(), Some(change("x")));
+    tx.send(change("a/y")).unwrap();
+    tx.send(change("a/z")).unwrap();
+    assert_eq!(
+      subscription.try_iter().collect::<Vec<_>>(),
+      vec![change("y"), change("z")]
+    );
+  }
+
+  #[test]
+  fn the_opening_state_is_delivered_whatever_the_translation_leaves_of_it() {
+    let (tx, rx) = channel();
+    let subscription = Subscription::new(rx).map(under_a);
+    // An opening state with nothing under `a/`.
+    tx.send(change("b/x")).unwrap();
+    assert_eq!(
+      subscription.try_recv(),
+      Some(StateChange::new()),
+      "the view's opening state: empty"
+    );
+    tx.send(change("b/y")).unwrap();
+    assert_eq!(
+      subscription.try_recv(),
+      None,
+      "a later change outside the view is not delivered"
+    );
+    tx.send(change("b/z")).unwrap();
+    tx.send(change("a/x")).unwrap();
+    assert_eq!(
+      subscription.try_recv(),
+      Some(change("x")),
+      "the next change inside the view, past the ones outside it"
+    );
+  }
+
+  #[test]
+  fn recv_waits_past_the_changes_the_translation_empties() {
+    let (tx, rx) = channel();
+    let subscription = Subscription::new(rx).map(under_a);
+    tx.send(StateChange::new()).unwrap();
+    tx.send(change("b/x")).unwrap();
+    tx.send(change("a/x")).unwrap();
+    drop(tx);
+    assert_eq!(
+      subscription.recv(),
+      Some(StateChange::new()),
+      "the opening state"
+    );
+    assert_eq!(subscription.recv(), Some(change("x")));
+    assert_eq!(subscription.recv(), None, "the store is gone");
+  }
+
+  /// A view of a view translates twice, and from where the feed stands: a
+  /// change the first translation empties after the opening state is not the
+  /// second view's opening state.
+  #[test]
+  fn a_view_of_a_view_translates_from_where_the_feed_stands() {
+    let (tx, rx) = channel();
+    let subscription = Subscription::new(rx).map(under_a);
+    tx.send(change("a/a/x")).unwrap();
+    assert_eq!(subscription.try_recv(), Some(change("a/x")));
+    let subscription = subscription.map(under_a);
+    tx.send(change("b/x")).unwrap();
+    assert_eq!(subscription.try_recv(), None);
+    tx.send(change("a/a/y")).unwrap();
+    assert_eq!(subscription.try_recv(), Some(change("y")));
   }
 }

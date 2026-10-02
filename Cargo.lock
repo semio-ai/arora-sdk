@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "arora-simple-data-store"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "arora-types",
 ]
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "arora-types-derive",
  "async-trait",

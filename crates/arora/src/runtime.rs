@@ -1810,6 +1810,60 @@ mod tests {
         );
     }
 
+    /// Two devices over one shared store, each on its own namespace: what a
+    /// device flushes to its remote is its own state under device-relative
+    /// names, and never its neighbour's.
+    #[test]
+    fn devices_sharing_a_store_flush_their_own_namespace_alone() {
+        let shared = SimpleDataStore::new();
+        let (a_tx, mut a_rx) = mpsc::unbounded();
+        let (b_tx, mut b_rx) = mpsc::unbounded();
+        let mut a = build_in_with(
+            Box::new(RecordingBridge {
+                sent: a_tx,
+                requests_data: true,
+            }),
+            Box::new(NamespacedStore::new(Arc::new(shared.clone()), "robotA")),
+            Box::new(WriteKey {
+                key: "greeting",
+                value: Value::String("hi".into()),
+            }),
+        );
+        let mut b = build_in_with(
+            Box::new(RecordingBridge {
+                sent: b_tx,
+                requests_data: true,
+            }),
+            Box::new(NamespacedStore::new(Arc::new(shared.clone()), "robotB")),
+            Box::new(WriteKey {
+                key: "mood",
+                value: Value::String("calm".into()),
+            }),
+        );
+        for _ in 0..3 {
+            a.step(FRAME).expect("step");
+            b.step(FRAME).expect("step");
+        }
+
+        let forwarded = |sent: &mut mpsc::UnboundedReceiver<StateChange>| {
+            let mut keys = std::collections::BTreeSet::new();
+            while let Ok(change) = sent.try_recv() {
+                keys.extend(change.set.keys().map(|key| key.path.clone()));
+                keys.extend(change.unset.iter().map(|key| key.path.clone()));
+            }
+            keys
+        };
+        let own = |key: &str| {
+            std::collections::BTreeSet::from([
+                key.to_string(),
+                built_in::DT.to_string(),
+                built_in::TIME.to_string(),
+            ])
+        };
+        assert_eq!(forwarded(&mut a_rx), own("greeting"));
+        assert_eq!(forwarded(&mut b_rx), own("mood"));
+    }
+
     /// The clock travels outbound with everything else, so a remote can derive
     /// the device's step rate from it; a consumer that does not want it says so
     /// on its own side.
