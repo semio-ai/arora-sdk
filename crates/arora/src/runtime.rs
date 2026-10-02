@@ -1415,8 +1415,6 @@ mod tests {
         );
     }
 
-    // Exercises `ListMethods` (deprecated) alongside `ListKeys`/`DescribeMethods`.
-    #[allow(deprecated)]
     /// A remote write reaches only the keys the device opened: a key nothing
     /// described is refused on the way in, naming it, for every bridge at once;
     /// a key its meta makes an input — its own, or a subtree's — is accepted.
@@ -1468,6 +1466,8 @@ mod tests {
         );
     }
 
+    // Exercises `ListMethods` (deprecated) alongside `ListKeys`/`DescribeMethods`.
+    #[allow(deprecated)]
     #[tokio::test]
     async fn list_keys_enumerates_the_store_by_prefix() {
         let mut arora = build(Box::new(UnregisterBridge));
@@ -1484,6 +1484,14 @@ mod tests {
                 unset: std::collections::HashSet::new(),
             })
             .unwrap();
+        // One of them is described: its unit travels with the rest of its meta.
+        arora
+            .store
+            .set_meta(HashMap::from([(
+                Key::from("face/mouth"),
+                KeyMeta::new().in_unit("fraction"),
+            )]))
+            .expect("the store keeps meta");
 
         // ListKeys with a prefix returns only that subtree, sorted.
         let (tx, rx) = oneshot::channel();
@@ -1508,13 +1516,23 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["face/eyes", "face/mouth"]
         );
-        // Nothing described these keys, so each carries the shape of the value
-        // it holds and stays closed to remote writers.
+        // Each key carries the shape of the value it holds and stays closed to
+        // remote writers: a description that says nothing about either changes
+        // neither.
         for (path, meta) in &keys {
             assert_eq!(meta.ty, Some(arora_types::value::Type::F32), "{path}");
             assert!(!meta.editable, "{path}");
             assert_eq!(meta.min, None);
         }
+        // The described key carries its unit; the other has none to carry.
+        let unit = |path: &str| {
+            keys.iter()
+                .find(|(listed, _)| listed == path)
+                .map(|(_, meta)| meta.unit.clone())
+                .unwrap_or_else(|| panic!("{path} is listed"))
+        };
+        assert_eq!(unit("face/mouth").as_deref(), Some("fraction"));
+        assert_eq!(unit("face/eyes"), None);
 
         // ListMethods returns the registered method names as an array.
         let (tx, rx) = oneshot::channel();

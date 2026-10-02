@@ -4,6 +4,18 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.1.0] - 2026-10-02
+
+### Added
+
+- `list_keys_resp` carries a key's unit under `__meta.unit` (`KeyMeta::unit`,
+  arora-types 3.2), present only when the store says one: a client tells "no
+  unit" from the field's absence rather than from a null.
+
+### Changed
+
+- Depends on arora-types 3.2.
+
 ## [7.0.0] - 2026-09-29
 
 ### Added

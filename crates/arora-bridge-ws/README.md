@@ -39,11 +39,13 @@ right now, each with the `KeyMeta` its store keeps —
 
 ```json
 {"path": "face/mouth", "__meta": {"ty": "f64", "min": 0.0, "max": 1.0,
-                                  "default": {"f64": 0.0}, "editable": true,
+                                  "unit": "fraction", "default": {"f64": 0.0},
+                                  "editable": true,
                                   "description": "how open the mouth is"}}
 ```
 
-— so a slider knows its range without anyone restating it here, and a module
+— so a slider knows its range, and the unit to label it with, without anyone
+restating them here, and a module
 loaded while the device runs is listed at once. A key nobody has described
 carries the default meta: the shape of the value it holds, and closed to writes.
 

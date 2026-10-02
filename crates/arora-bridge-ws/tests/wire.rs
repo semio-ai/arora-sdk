@@ -487,6 +487,7 @@ async fn the_device_keys_are_listed_with_their_meta() {
             .editable()
             .of_type(Type::F64)
             .range(0.0, 1.0)
+            .in_unit("fraction")
             .resting_at(Value::F64(0.0))
             .described("how open the mouth is"),
     )]))
@@ -508,6 +509,7 @@ async fn the_device_keys_are_listed_with_their_meta() {
     let mouth = by_path("face/mouth");
     assert_eq!(mouth["__meta"]["min"], 0.0);
     assert_eq!(mouth["__meta"]["max"], 1.0);
+    assert_eq!(mouth["__meta"]["unit"], "fraction");
     assert_eq!(mouth["__meta"]["description"], "how open the mouth is");
     assert_eq!(mouth["__meta"]["editable"], true);
 
@@ -517,6 +519,9 @@ async fn the_device_keys_are_listed_with_their_meta() {
     let blink = by_path("face/blink");
     assert_eq!(blink["__meta"]["ty"], "bool");
     assert_eq!(blink["__meta"]["editable"], false);
+    // What the store does not say is absent, not null: a unit is there only
+    // when one was given.
+    assert!(blink["__meta"].get("unit").is_none(), "{blink}");
 
     // The runtime's own keys are keys: a client renders or subscribes to what it
     // wants, and nothing is hidden from it.

@@ -90,9 +90,9 @@ impl Subscription {
   }
 }
 
-/// What a key is, beyond the value it currently holds: the range it runs over,
-/// where it rests, what it is for, and whether anything outside the device may
-/// write it.
+/// What a key is, beyond the value it currently holds: the range it runs over
+/// and the unit it is counted in, where it rests, what it is for, and whether
+/// anything outside the device may write it.
 ///
 /// A value shows its own shape ([`Value::kind`]), so this is what the value
 /// cannot say. It is the store's to keep, because it is a property of the key
@@ -119,6 +119,12 @@ pub struct KeyMeta {
   /// The highest value it takes, for a numeric key.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub max: Option<f64>,
+  /// What a numeric key's values are counted in — radians, metres, a
+  /// fraction — named freely for whoever displays or converts them. It is a
+  /// name, not an algebra: Arora relays it as written and computes nothing
+  /// from it.
+  #[serde(skip_serializing_if = "Option::is_none", default)]
+  pub unit: Option<String>,
   /// Where it rests: what a reset puts back.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub default: Option<Value>,
@@ -149,6 +155,12 @@ impl KeyMeta {
   pub fn range(mut self, min: f64, max: f64) -> Self {
     self.min = Some(min);
     self.max = Some(max);
+    self
+  }
+
+  /// What its values are counted in.
+  pub fn in_unit(mut self, unit: impl Into<String>) -> Self {
+    self.unit = Some(unit.into());
     self
   }
 
@@ -252,4 +264,50 @@ pub trait DataStore: Send + Sync {
   /// independent live handle — e.g. one kept aside before handing a store to
   /// a device that takes it by value.
   fn clone_box(&self) -> Box<dyn DataStore>;
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::value::Type;
+  use crate::value_serde;
+
+  /// The wire shape of a key's meta: a field the store did not set is absent,
+  /// not null, so a reader tells "no unit" from the absence of `unit`.
+  #[test]
+  fn key_meta_serializes_its_unit_only_when_set() {
+    let in_fractions = KeyMeta::new()
+      .of_type(Type::F64)
+      .range(0.0, 1.0)
+      .in_unit("fraction");
+    let json = serde_json::to_value(&in_fractions).unwrap();
+    assert_eq!(
+      json,
+      serde_json::json!({
+        "ty": "f64", "min": 0.0, "max": 1.0, "unit": "fraction", "editable": false
+      })
+    );
+    assert_eq!(
+      serde_json::from_value::<KeyMeta>(json).unwrap(),
+      in_fractions
+    );
+
+    let unitless = KeyMeta::new().of_type(Type::F64).range(0.0, 1.0);
+    let json = serde_json::to_value(&unitless).unwrap();
+    assert_eq!(
+      json,
+      serde_json::json!({"ty": "f64", "min": 0.0, "max": 1.0, "editable": false})
+    );
+    assert_eq!(serde_json::from_value::<KeyMeta>(json).unwrap(), unitless);
+  }
+
+  /// The value plane, which carries a `ListKeys` answer from the runtime to its
+  /// bridges, keeps the unit as it keeps every other field.
+  #[test]
+  fn key_meta_round_trips_through_the_value_plane() {
+    for meta in [KeyMeta::new().in_unit("rad"), KeyMeta::new()] {
+      let value = value_serde::to_value(&meta).unwrap();
+      assert_eq!(value_serde::from_value::<KeyMeta>(value).unwrap(), meta);
+    }
+  }
 }

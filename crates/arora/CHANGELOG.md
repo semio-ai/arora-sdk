@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.2.0] - 2026-10-02
+
+### Added
+
+- A `ListKeys` answer carries a key's unit (`KeyMeta::unit`, arora-types 3.2)
+  with the rest of its meta, so every bridge relays it as it relays the range.
+
+### Changed
+
+- Depends on arora-types 3.2.
+
 ## [11.1.0] - 2026-10-02
 
 ### Added

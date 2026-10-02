@@ -1,13 +1,13 @@
 [package]
 name = "arora-bridge-ws"
-version = "7.0.0"
+version = "7.1.0"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "3.1" }
+arora-types = { path = "../arora-types", version = "3.2" }
 arora-bridge = { path = "../arora-bridge", version = "6" }
 # The behavior-tree Status enumeration's well-known id: a method that returns it
 # is a task run, which the method plane spawns and halts instead of calling.

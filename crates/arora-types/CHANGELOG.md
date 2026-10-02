@@ -4,6 +4,16 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.2.0] - 2026-10-02
+
+### Added
+
+- `KeyMeta::unit`, set with `KeyMeta::in_unit`: what a numeric key's values are
+  counted in — radians, metres, a fraction — named freely for whoever displays
+  or converts them. A name, not an algebra: Arora relays it as written and
+  computes nothing from it. On the wire it is `unit`, present only when set, so
+  a reader tells "no unit" from the field's absence rather than from a null.
+
 ## [3.1.1] - 2026-10-02
 
 ### Fixed

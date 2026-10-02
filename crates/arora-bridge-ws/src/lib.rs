@@ -48,8 +48,9 @@
 //!
 //! Everything comes from the device ([`Device`]), asked at the moment the client
 //! asks: `list_keys` gives the keys it holds with the [`KeyMeta`] its store keeps
-//! for each — the shape, the range, where it rests, whether anything outside the
-//! device may write it — and `list_methods` the functions its modules export.
+//! for each — the shape, the range and its unit, where it rests, whether anything
+//! outside the device may write it — and `list_methods` the functions its modules
+//! export.
 //! The server keeps nothing of its own, so a module loaded while the device runs
 //! brings its keys and functions with it.
 //!
