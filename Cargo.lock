@@ -633,9 +633,9 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "8.1.0"
+version = "8.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0405d1666a9db7bf1cfd249a767931ad843b8a783901275a29a7fc6b263ef23"
+checksum = "768aed17a7a7818e950726da4008fede0c0e9d72c48f5a37d311d05eaedd0dd6"
 dependencies = [
  "arora-bridge",
  "arora-types",
