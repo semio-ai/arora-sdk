@@ -31,7 +31,14 @@ cargo build                      # builds arora into target/debug/arora
 
 # or just serve, waiting for a behavior over the bridge
 ./target/debug/arora
+
+# load a module from a directory besides those in the device directory
+./target/debug/arora --module node_modules/@vizij/animation-module/artifact
 ```
+
+At start the device loads every module in its device directory's `modules/`
+(the layout is [below](#where-a-device-keeps-its-data)), then each `--module`
+directory. A module that cannot be loaded fails the start, naming it.
 
 ## Use it as a library
 
@@ -66,8 +73,10 @@ A device-specific Arora is built from the outside, with no fork and no
 per-device feature flag: the [`device` example](examples/device.rs) provides
 its own `Hal` and hands it to `run_with`; swap in a real robot HAL and the
 studio-bridge connector and it is a real device build. `DeviceCli` is the clap
-options the binary parses (the Groot file); flatten it into a larger CLI and
-inject the results through the builder.
+options the binary parses (the Groot file, `--open`, `--module`); flatten it
+into a larger CLI and inject the results through the builder —
+`DeviceCli::modules` reads the modules it names together with the device
+directory's, each for `with_module`.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
 carries the wasmtime and dynamic-library hosts, the operator flow, and the
@@ -84,6 +93,11 @@ directory**, each use in a subdirectory of its own:
 └── devices/
     └── <local id>/                the device directory: DEVICE_LOCAL_ID, `default` when unset;
         │                          DEVICE_DIR replaces this whole path
+        ├── modules/               the modules the device loads at start, in name order
+        │   └── <name>/            a module directory (what --module names elsewhere):
+        │       ├── header.json    the module's header (its low-level Header, as JSON)
+        │       └── *.wasm         its artifact: the one file with the executor's extension —
+        │                          .wasm for wasm, .so / .dylib / .dll for native
         └── studio/                the Studio connection's credentials, kept by
             ├── key                arora-studio-bridge-client's DeviceCredentials
             └── refresh_token
@@ -92,13 +106,26 @@ directory**, each use in a subdirectory of its own:
 The local id tells apart the devices one user runs on one host. It is local
 only: the name a device shows (`DEVICE_NAME`) can change without making it
 another device, and the id Studio knows it by is assigned at its first sign-in.
-Anything else a device keeps goes in a subdirectory of its own beside `studio/`.
+Anything else a device keeps goes in a subdirectory of its own beside these.
+
+A module directory is the layout a module is published in: the
+`@vizij/animation-module` package's `artifact/` — `header.json` beside
+`vizij_animation_module.wasm` — copied to `modules/animation/` is loaded at the
+next start. The artifact's name is free; its extension names it, so a module
+directory holds one artifact. A module the device cannot load — a header it
+cannot read, no artifact or several, an executor it does not run, an artifact
+the engine rejects — fails the start, naming the module. Loaded modules
+dispatch like any other and are listed by `DescribeMethods` under the same
+rule: a function whose parameters and return are all primitives is described,
+any other still dispatches ([`module_discovery`](src/module_discovery.rs)).
+[`module_dir`](src/module_dir.rs) reads module directories for an embedder.
 
 The chain down to the bridge's code, in a `studio-bridge` build:
 
-1. [`device_dir`](src/device_dir.rs) resolves the device directory: `DEVICE_DIR`,
-   else `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. An embedder whose
-   platform gives it a data directory (Android, a Tauri app) passes its own to
+1. [`device_dir`](src/device_dir.rs) resolves the device directory
+   (`device_dir::from_env`): `DEVICE_DIR`, else
+   `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. An embedder whose platform
+   gives it a data directory (Android, a Tauri app) passes its own to
    `studio::connect_with_device_dir`.
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
    and hands it to `DeviceCredentials::in_dir`. arora never writes inside it;

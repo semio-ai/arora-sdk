@@ -18,8 +18,13 @@
 
 /// A device's directory: what the device keeps of its own from one run to the
 /// next, each use in a subdirectory of its own.
-#[cfg(feature = "studio-bridge")]
+#[cfg(feature = "native")]
 pub mod device_dir;
+/// A module directory: a guest module's header beside its artifact, the form a
+/// device carries a module in — under its device directory's `modules/`, or
+/// anywhere `--module` names.
+#[cfg(feature = "native")]
+pub mod module_dir;
 mod module_discovery;
 #[cfg(feature = "native")]
 pub mod operator;
@@ -460,6 +465,7 @@ impl AroraBuilder {
         // registry to pin versions) dispatches but stays undiscoverable.
         for (header, executable) in self.modules {
             let module_id = header.id;
+            let module_name = header.name.clone();
             for export in &header.exports {
                 let low::ExportSymbol::Function(function) = export;
                 match module_discovery::guest_function_signature(function) {
@@ -483,8 +489,13 @@ impl AroraBuilder {
                     ),
                 }
             }
-            load_module_from_parts(&mut engine, header, executable)
-                .map_err(|e| anyhow::anyhow!("failed to load module: {e}"))?;
+            let loaded = load_module_from_parts(&mut engine, header, executable).map_err(|e| {
+                anyhow::anyhow!("failed to load module '{module_name}' ({module_id}): {e}")
+            })?;
+            log::info!(
+                "loaded module '{module_name}' ({module_id}): {} function(s)",
+                loaded.function_ids.len()
+            );
         }
 
         // Register each host-side module so its functions dispatch through the
@@ -990,17 +1001,19 @@ mod module_loading_tests {
             .expect("the default device builds with no modules loaded");
     }
 
-    /// A module whose executable cannot load fails the whole build, rather than
-    /// silently yielding a device with a broken module.
+    /// A module whose executable cannot load fails the whole build, naming the
+    /// module, rather than silently yielding a device with a broken module.
     #[test]
     fn a_module_that_fails_to_load_fails_the_build() {
         let header = test_module_header();
-        let result = Arora::builder()
+        let error = Arora::builder()
             .with_module(header, vec![0xDE, 0xAD, 0xBE, 0xEF]) // not a valid wasm binary
-            .build();
+            .build()
+            .err()
+            .expect("build must fail when a module's executable cannot load");
         assert!(
-            result.is_err(),
-            "build must fail when a module's executable cannot load"
+            error.to_string().contains("module 'test-rust-wasm'"),
+            "{error}"
         );
     }
 }

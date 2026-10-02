@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "11.2.0"
+version = "11.3.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -36,6 +36,10 @@ native = [
     # The helper CLI (`DeviceCli`) a device binary parses; the library itself
     # never reads argv.
     "dep:clap",
+    # The device directory (`arora::device_dir`) and the module directories a
+    # device loads from it (`arora::module_dir`, `header.json` + artifact).
+    "dep:dirs",
+    "dep:serde_json",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
@@ -46,7 +50,6 @@ native = [
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",
-    "dep:dirs",
     "dep:rustls",
 ]
 # The terminal operator UI (`arora::tui`): device header, scrollable log pane,
@@ -82,8 +85,10 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # 8.1 keeps the device's Studio credentials (`credentials::DeviceCredentials`).
 arora-studio-bridge-client = { version = "8.1", optional = true }
 # Headless device-runner deps (native-only, optional). `dirs` finds the per-user
-# directory the device's Arora identity defaults to.
+# directory the device directory defaults to; `serde_json` reads a module
+# directory's `header.json`.
 dirs = { version = "6", optional = true }
+serde_json = { version = "1", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 env_logger = { version = "0.11", optional = true }
 log = "0.4"

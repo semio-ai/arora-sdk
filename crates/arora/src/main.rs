@@ -1,10 +1,12 @@
 //! The default `arora` binary: the device runner, headless (no HAL-attached
 //! display — a head like Vizij embeds [`arora::run_with_hal`] instead).
 //!
-//! It reads its configuration from the environment (Firebase options, Zenoh
-//! endpoints, identity file), loads/saves an encrypted refresh token locally,
-//! connects to Semio Studio over Zenoh, and runs the arora runtime. See
-//! [`arora::run_with_hal`] for the configuration env vars and the full run.
+//! It reads its configuration from the environment (the device directory,
+//! Firebase options, Zenoh endpoints), loads the modules in its device
+//! directory and those `--module` names, connects to Semio Studio over Zenoh
+//! in a `studio-bridge` build (serving the open local bridge otherwise), and
+//! runs the arora runtime. See [`arora::run_with_hal`] for the configuration
+//! env vars and the full run.
 //!
 //! A device-specific build is a thin downstream binary that depends on `arora`
 //! plus its own HAL/bridge crates and calls [`arora::run_with_hal`] /
@@ -34,9 +36,14 @@ async fn main() -> anyhow::Result<()> {
             .context("the store keeps key meta")?;
     }
     let mut builder = arora::Arora::builder().with_data_store(Box::new(store));
+    // The modules the device carries: its device directory's, then `--module`'s.
+    // Each loads at build, where one the engine rejects fails the start.
+    for module in cli.modules()? {
+        builder = builder.with_module(module.header, module.executable);
+    }
     // A Groot file is a behavior-tree option: load it into a behavior-tree
-    // interpreter against the store the device will tick. This binary loads no
-    // host modules, so the function index is empty — the tree's nodes are the
+    // interpreter against the store the device will tick. The tree binds no
+    // module function (its function index is empty): its nodes are the
     // natively-hosted control nodes.
     if let Some(path) = cli.groot {
         let xml = std::fs::read_to_string(&path)

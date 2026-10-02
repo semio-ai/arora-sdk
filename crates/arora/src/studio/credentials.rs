@@ -13,7 +13,6 @@
 //!   that sets it is `<IDENTITY_FILE>_dir`, into which the file is copied with
 //!   its key. The file is neither updated nor removed.
 
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -113,7 +112,7 @@ fn adopt_legacy(credentials: &DeviceCredentials, legacy: &[PathBuf]) -> Result<(
 /// Each case warns that `IDENTITY_FILE` is deprecated, and the file, when
 /// present, that it is no longer read nor updated and can be removed.
 fn identity_file_dir(file: &Path, key_dirs: &[PathBuf]) -> Result<PathBuf> {
-    let dir = with_suffix(file, "_dir");
+    let dir = device_dir::of_identity_file(file);
     warn!(
         "IDENTITY_FILE is deprecated: DEVICE_DIR names the directory holding what the \
          device keeps. The identity IDENTITY_FILE names ({}) migrates to {}",
@@ -154,7 +153,7 @@ fn identity_file_dir(file: &Path, key_dirs: &[PathBuf]) -> Result<PathBuf> {
 /// `dir` once the copy succeeds, so an interrupted migration leaves no `dir`
 /// behind.
 fn migrate_identity_file(file: &Path, dir: &Path, key_dirs: &[PathBuf]) -> Result<()> {
-    let partial = with_suffix(dir, ".partial");
+    let partial = device_dir::with_suffix(dir, ".partial");
     let _ = fs::remove_dir_all(&partial);
     let copied = in_device_dir(&partial)?
         .copy_refresh_token_from(file, key_dirs)
@@ -174,13 +173,6 @@ fn migrate_identity_file(file: &Path, dir: &Path, key_dirs: &[PathBuf]) -> Resul
     fs::rename(&partial, dir)?;
     info!("migrated {} to {}", file.display(), dir.display());
     Ok(())
-}
-
-/// `path` with `suffix` appended to its last component.
-fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = OsString::from(path.as_os_str());
-    name.push(suffix);
-    PathBuf::from(name)
 }
 
 #[cfg(test)]

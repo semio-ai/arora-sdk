@@ -4,6 +4,37 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.3.0] - 2026-10-02
+
+### Added
+
+- **The device loads the modules in its directory.** Every module directory
+  under `<device directory>/modules/` is loaded at start, in name order, and
+  `--module <DIR>` (repeatable) adds one from elsewhere. A module directory is
+  `header.json` — the module's low-level `Header`, as JSON — beside the one
+  file with the extension the header's executor names: `.wasm` for `wasm`,
+  the platform's dynamic library (`.so`, `.dylib`, `.dll`) for `native`. The
+  artifact's name is free, so a published artifact directory (the
+  `@vizij/animation-module` package's `artifact/`) is a module directory as
+  is. A module the device cannot load — a missing or malformed header, no
+  artifact or several, an executor it does not run, one module in two
+  directories, an artifact the engine rejects — fails the start, naming the
+  module. Loaded modules dispatch like any other and `DescribeMethods` lists
+  their primitive-only signatures. `module_dir::read` and
+  `module_dir::in_device_dir` read module directories for an embedder;
+  `DeviceCli::modules` reads what the command line names, for `with_module`.
+- `device_dir::from_env()`: the device directory of a run configured from the
+  environment — `DEVICE_DIR`, else `<IDENTITY_FILE>_dir` while that deprecated
+  variable is set, else the per-user directory of the device `DEVICE_LOCAL_ID`
+  names. `device_dir` is part of every native build, no longer of the
+  `studio-bridge` feature alone.
+
+### Changed
+
+- A guest module the engine cannot load fails the build naming the module (its
+  header's name and id) along with the engine's reason, and each guest module
+  loaded is logged with its name and id.
+
 ## [11.2.0] - 2026-10-02
 
 ### Added

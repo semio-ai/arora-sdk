@@ -188,8 +188,11 @@ through guest wasm.
 ## Modules
 
 A module is a binary (host cdylib, wasm32-wasip1 .wasm, or cross-compiled
-ELF) plus a header, written at export from the module's declaration. The header
-declares:
+ELF) plus a header, written at export from the module's declaration. The
+`arora` device runner loads modules from *module directories* — the header as
+`header.json` beside its artifact — under the device directory's `modules/`
+and from `--module` (see [`crates/arora/readme.md`](../crates/arora/readme.md)).
+The header declares:
 
 - **Types**: `Enumeration`s and `Structure`s, identified by UUID.
 - **Functions**: each has an id, an args struct id, and a return struct id.

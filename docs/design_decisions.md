@@ -461,6 +461,28 @@ through. The alternative, a host module per such method whose function only
 fails, would describe a method under a module that does not implement it;
 every device would repeat it.
 
+### A device carries its modules as module directories
+
+The `arora` runner loads the guest modules under its device directory's
+`modules/` (and any `--module` directory): each a `header.json` beside its
+artifact. An operator installs a module by copying a directory, with no custom
+binary; the embedder path (`AroraBuilder::with_module`) stays what it is, and
+the runner feeds it from the same `load::load_module_from_parts` the CLI and
+the browser runtime use.
+
+The artifact is found by its extension — the one `.wasm` for the `wasm`
+executor, the one dynamic library for `native` — rather than by a fixed name
+or a path in the header. The header carries no path (it is written at export,
+before anyone decides where the artifact lands), and a fixed name would make
+every published artifact directory need a rename; the extension is already
+determined by the executor. One artifact per directory keeps the choice
+unambiguous.
+
+A directory that does not load fails the start, naming the module. The device
+was told to carry it: starting without it would serve a device whose
+`DescribeMethods` and dispatch disagree with what the operator installed,
+which is harder to notice than a start that says what is wrong.
+
 ### Predetermined keys are conventions, not wiring
 
 Behaviors read their inputs from store paths and write outputs back; the
