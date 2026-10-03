@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.4.0] - 2026-10-03
+
+### Changed
+
+- A device answers `ListKeys` and `DescribeMethods` over the Studio bridge: the
+  `studio-bridge` feature depends on `arora-studio-bridge-client` 9 (studio-bridge
+  msgs 6, whose `AroraOp` carries both), so a Studio's `listKeys` and
+  `describeMethods` reach the device's `BridgeOp::ListKeys` and
+  `BridgeOp::DescribeMethods` as every other bridge's do.
+
 ## [11.3.0] - 2026-10-02
 
 ### Added
