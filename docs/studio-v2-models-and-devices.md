@@ -42,12 +42,13 @@ This document gives the full design of Stage 1. It gives an outline of Stages 2 
 
 ## The current state
 
-### What is broken
+### Why Stage 1 exists
 
-- **arora-sdk CI fails on each new run**. `crates/arora-hal-ros2/build.rs` downloads six models from legacy Storage paths at build time. The Studio v2 Storage rules have no rule for `model/…`, so Storage refuses each download with 403. The build script then panics. The last green run on `main` was on 2 Oct 2026, before the v2 cutover. The CI run of semio-ai/arora-sdk#268 on 3 Oct 2026 fails at this step.
-- **Local builds fail** unless the developer sets `ARORA_HAL_ROS2_SKIP_MODELS=1`.
-- **An overrides file cannot set a local model**. `apply_overrides` does not copy `model_glb_path` or `joint_ids`. Thus `arora-ros2 quori overrides.json` cannot use a local GLB.
-- **The legacy model files go away**. Studio plans to delete them near 9 Oct 2026. Even before that, clients cannot read them.
+- **Studio v2 refuses the legacy model paths**. The Studio v2 Storage rules have no rule for `model/…`, so Storage refuses each read with 403. Studio plans to delete the legacy files near 9 Oct 2026.
+- **The build read those paths**. Up to `arora-hal-ros2` 4.0.0, `build.rs` downloaded six models from them at build time. Thus from the v2 cutover on 3 Oct 2026, each CI run failed. A local build failed too, unless `models/` already held the models or the build set `ARORA_HAL_ROS2_SKIP_MODELS=1`.
+- **An overrides file could not set a local model**. Up to `arora-hal-ros2` 4.0.0, `apply_overrides` did not copy `model_glb_path` or `joint_ids`.
+
+`arora-hal-ros2` 4.1.0 contains the Stage 1 changes.
 
 ### What works with Studio v2 unchanged
 
@@ -114,9 +115,9 @@ Stage 1 is a stopgap. A developer supplies the model file by hand only until Sta
 1. **Delete the download code from `build.rs`**. The build needs no network. Delete the build dependencies that only the download uses.
 2. **Keep a default model path, but do not fill it at build time**. The built-in configs keep `crates/arora-hal-ros2/models/<name>.glb` as their default path. The developer puts the GLB there.
 3. **`apply_overrides` copies `model_glb_path` and `joint_ids`**. Then an overrides file can set a local model for a built-in robot.
-4. **Give a clear error when the model file is missing**. The message names the two ways to supply a model: the default path, or `model_glb_path` in a config or overrides file.
-5. **Tests use a synthetic fixture GLB**. The fixture is in the repository. It has `RobotData` joints and no mesh. The tests that read a downloaded model, for example the NAO joint-state test, use it.
-6. **`ARORA_HAL_ROS2_SKIP_MODELS` has no effect after this change**. Delete it from the documentation.
+4. **Give a clear error when the model file is missing**. The message names the two ways to supply a model: the default path, or `model_glb_path` in a config or overrides file. The HAL gives this message when it builds its joint map and when it reads the model for `model_glb`.
+5. **Tests use a synthetic fixture GLB**. Test code builds the fixture (`src/test_fixture.rs`), so a reader can see all of it. It has `RobotData` joints and no mesh. The tests that read a downloaded model, for example the NAO joint-state test, use it.
+6. **`ARORA_HAL_ROS2_SKIP_MODELS` has no effect**. The crate does not read it.
 
 ### Actions outside the code
 
@@ -140,8 +141,9 @@ If the device does not appear in step 3, the trigger did not convert it. The sem
 ### Verification
 
 - arora-sdk CI passes on the Stage 1 change.
-- The implementer runs steps 1 to 3 against the Firebase emulators with a local Studio. This work runs nothing against production or staging.
-- The first run of a developer against production is the live check.
+- The `arora-hal-ros2` unit tests cover step 1. An overrides file sets `model_glb_path`, the fixture GLB gives the joint map, and a missing file gives the clear error.
+- The semio_studio functions test `apps/functions/test/devices.test.mjs` covers steps 2 and 3 on the Firebase emulators. It sends the registration of the bridge client as the device account. Then it verifies that `normalizeLegacyDevice` writes the v2 document, and that the owner can list the device.
+- Stage 1 runs nothing against production or staging. The first run of a developer against production is the live check.
 
 ### Not in Stage 1
 

@@ -24,6 +24,9 @@ pub use ros2_hal::Ros2Hal;
 
 pub mod msgs;
 
+#[cfg(test)]
+mod test_fixture;
+
 pub fn get_now() -> arora_msgs_ros2::builtin_interfaces::Time {
     let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap(); // Dead old devices are not supported
     arora_msgs_ros2::builtin_interfaces::Time {
@@ -73,19 +76,26 @@ mod tests {
         let _g1_config = configs::unitree_g1::create_config();
     }
 
-    /// Round-trips a JointState conversion through the NAO configuration: the
-    /// GLB joint-id mapping turns ROS joint names into Arora keys, and a
-    /// target-position write converts back to a JointState naming the ROS
-    /// joint.
+    /// Round-trips a JointState conversion through the NAO configuration with
+    /// the fixture model: the GLB joint-id mapping turns ROS joint names into
+    /// Arora keys, and a target-position write converts back to a JointState
+    /// naming the ROS joint.
     #[test]
     fn test_nao_config_joint_state_round_trip() {
-        let config = configs::nao::create_config();
+        let mut config = configs::nao::create_config();
+        config.apply_overrides(ROS2RobotConfig {
+            model_glb_path: Some(crate::test_fixture::fixture_glb_path()),
+            ..Default::default()
+        });
         let glb_path = config
             .model_glb_path
-            .expect("NAO config should have a model path");
+            .expect("the override should set the model path");
         let ros_names_to_ids =
-            get_joint_ids_from_glb_file(&glb_path).expect("NAO GLB should parse");
-        assert!(!ros_names_to_ids.is_empty(), "NAO GLB should define joints");
+            get_joint_ids_from_glb_file(&glb_path).expect("the fixture GLB should parse");
+        assert!(
+            !ros_names_to_ids.is_empty(),
+            "the fixture GLB should define joints"
+        );
         let (ros_name, joint_id) = ros_names_to_ids.iter().next().unwrap();
 
         // ROS -> Arora: a JointState reading becomes "<joint_id>.position".

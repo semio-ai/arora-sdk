@@ -731,7 +731,13 @@ impl HalAssets for Ros2Hal {
                 }
                 Err(e) => {
                     error!("Failed to read GLB file {}: {}", glb_path, e);
-                    Err(HalError::Other(format!("Failed to read GLB file: {}", e)))
+                    Err(HalError::Other(
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            crate::config::missing_model_message(glb_path)
+                        } else {
+                            format!("Failed to read GLB file {glb_path}: {e}")
+                        },
+                    ))
                 }
             }
         } else {
@@ -786,46 +792,73 @@ mod tests {
         out
     }
 
+    /// The HAL, or `None` when the ROS 2 environment is not available.
+    ///
+    /// Only the errors of ROS 2 setup (context, node, publisher, subscriber)
+    /// skip. Each other error fails the test: a model that does not parse is a
+    /// `ConfigError`, or an `Other` from an I/O error, and both come before
+    /// any ROS 2 setup.
+    fn hal_or_skip(result: Result<Ros2Hal, ROS2RobotError>) -> Option<Ros2Hal> {
+        match result {
+            Ok(hal) => Some(hal),
+            Err(
+                e @ (ROS2RobotError::InitializationError(_)
+                | ROS2RobotError::PublisherError { .. }
+                | ROS2RobotError::SubscriberError { .. }),
+            ) => {
+                println!("Skipping test - ROS2 environment not available: {e}");
+                None
+            }
+            Err(e) => panic!("the HAL must load its config and model: {e}"),
+        }
+    }
+
     #[tokio::test]
     async fn test_model_glb_with_nao_config() {
-        // Create a NAO configuration
-        let config = nao::create_config();
+        // The NAO configuration, with the fixture model in place of nao.glb.
+        let mut config = nao::create_config();
+        config.model_glb_path = Some(crate::test_fixture::fixture_glb_path());
 
-        // Create a HAL with this config
-        let hal = Ros2Hal::new(config).await;
-
-        // Skip test if ROS2 environment is not available
-        if hal.is_err() {
-            println!("Skipping test - ROS2 environment not available");
+        let Some(hal) = hal_or_skip(Ros2Hal::new(config).await) else {
             return;
-        }
+        };
 
-        let hal = hal.unwrap();
+        let glb_data = hal.model_glb().await.expect("model_glb should succeed");
 
-        // Call model_glb
-        let result = hal.model_glb().await;
-
-        // Assert the result is successful
-        assert!(result.is_ok(), "model_glb should succeed");
-
-        let glb_data = result.unwrap();
-
-        // Assert we got Some data
-        assert!(glb_data.is_some(), "NAO config should return GLB data");
-
-        let bytes = glb_data.unwrap();
-
-        // Check that we got some data
-        assert!(!bytes.is_empty(), "GLB data should not be empty");
-
-        // Check that it starts with the glTF magic number
         assert_eq!(
-            &bytes[0..4],
-            b"glTF",
-            "GLB file should start with 'glTF' magic number"
+            glb_data,
+            Some(crate::test_fixture::fixture_glb_bytes()),
+            "model_glb should serve the configured model file"
         );
+    }
 
-        println!("Successfully retrieved {} bytes of GLB data", bytes.len());
+    #[tokio::test]
+    async fn test_model_glb_with_missing_file_names_both_remedies() {
+        // An `Override` mapping does not read the model when the HAL starts,
+        // so a missing file shows only when something reads the model.
+        let config = ROS2RobotConfig {
+            topics: vec![TopicConfig::new::<msgs::JointState>(
+                "/joint_states",
+                TopicDirection::Subscribe,
+                TopicMapping::JointState {
+                    conversion: JointStateConversion::Standard,
+                },
+            )],
+            joint_ids: JointIdMapping::Override(HashMap::new()),
+            model_glb_path: Some("/no/such/dir/nao.glb".to_string()),
+            ..Default::default()
+        };
+        let Some(hal) = hal_or_skip(Ros2Hal::new(config).await) else {
+            return;
+        };
+
+        let err = hal
+            .model_glb()
+            .await
+            .expect_err("a missing model file is an error")
+            .to_string();
+        assert!(err.contains("/no/such/dir/nao.glb does not exist"), "{err}");
+        assert!(err.contains("model_glb_path"), "{err}");
     }
 
     #[tokio::test]
@@ -873,39 +906,18 @@ mod tests {
 
     #[test]
     fn test_nao_config_has_model_path() {
-        // Test that NAO config has a model path set
+        // The NAO config names the default model path. Nothing fills that path
+        // at build time, so this test checks the path and does not read it.
         let config = nao::create_config();
 
+        let path = config
+            .model_glb_path
+            .expect("NAO config should have a model_glb_path");
+        assert_eq!(path, crate::default_model_path!("nao"));
         assert!(
-            config.model_glb_path.is_some(),
-            "NAO config should have a model_glb_path"
+            path.ends_with("/models/nao.glb"),
+            "NAO config path should end with '/models/nao.glb', got: {path}"
         );
-
-        let path = config.model_glb_path.unwrap();
-        assert!(
-            path.ends_with("nao.glb"),
-            "NAO config path should end with 'nao.glb', got: {}",
-            path
-        );
-
-        // Test that the file exists and can be read
-        let glb_data = std::fs::read(&path);
-        assert!(
-            glb_data.is_ok(),
-            "Should be able to read GLB file at: {}",
-            path
-        );
-
-        let bytes = glb_data.unwrap();
-        assert!(!bytes.is_empty(), "GLB file should not be empty");
-        assert_eq!(
-            &bytes[0..4],
-            b"glTF",
-            "GLB file should start with 'glTF' magic number"
-        );
-
-        println!("NAO model GLB path: {}", path);
-        println!("GLB file size: {} bytes", bytes.len());
     }
 
     /// Creates a HAL, subscribes to its updates, publishes JointState

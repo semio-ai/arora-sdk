@@ -1,5 +1,9 @@
-/// Macro to get the path to a model file at compile time.
-/// Usage: `default_model_path!("nao")` expands to the full path to "$CARGO_MANIFEST_DIR/models/nao.glb"
+/// The default model path of a built-in robot:
+/// `default_model_path!("nao")` expands to `$CARGO_MANIFEST_DIR/models/nao.glb`.
+///
+/// Nothing fills `models/` at build time. To run a built-in robot, put its GLB
+/// at this path, or set `model_glb_path` in a robot config or an overrides file
+/// (`arora-ros2 nao overrides.json`).
 #[macro_export]
 macro_rules! default_model_path {
     ($name:expr) => {

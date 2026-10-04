@@ -4,6 +4,28 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-10-04
+
+### Changed
+
+- The build downloads no robot models and needs no network. Studio v2 refuses
+  the legacy model paths that `build.rs` read. Thus each CI run failed, and so
+  did each local build, unless `models/` already held the models or the build
+  set `ARORA_HAL_ROS2_SKIP_MODELS=1`. The built-in configs keep
+  `models/<name>.glb` as their default model path, and the developer puts the
+  robot's GLB there.
+- `ARORA_HAL_ROS2_SKIP_MODELS` has no effect.
+- A missing model file gives an error that names its path and
+  `model_glb_path`, when the HAL builds its joint map and when it reads the
+  model for `model_glb`.
+
+### Added
+
+- `ROS2RobotConfig::apply_overrides` applies `model_glb_path`, and applies
+  `joint_ids` when the overrides set `Override` or `Extend`. An overrides file
+  can now point a built-in robot at a local model:
+  `arora-ros2 quori overrides.json` with `{ "model_glb_path": "/path/quori.glb" }`.
+
 ## [4.0.0] - 2026-09-29
 
 ### Changed

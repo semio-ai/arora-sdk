@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 license = "MIT"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
@@ -57,15 +57,3 @@ rand = "0.10"
 # `time` (tests only): the DDS round-trip tests sleep and time out around
 # discovery; the HAL itself needs no timers.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-
-# build.rs downloads the robots' GLB models (public Semio Studio assets) into
-# models/. TLS is pinned to the bundled webpki roots so it also works on hosts
-# with no populated OS trust store.
-[build-dependencies]
-bytes = "1"
-reqwest = { version = "0.13", features = [
-  "rustls-no-provider",
-], default-features = false }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-webpki-roots = "1"
-tokio = { version = "1", features = ["macros", "rt"] }

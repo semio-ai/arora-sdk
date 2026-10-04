@@ -64,6 +64,12 @@ impl ROS2RobotConfig {
         Ok(())
     }
 
+    /// Apply the fields an overrides file sets.
+    ///
+    /// A field the overrides leave unset keeps its value: a `None` option, an
+    /// empty topic list, and the default `JointIdMapping::FromGLB`. Thus an
+    /// overrides file can change the joint mapping to `Override` or `Extend`,
+    /// but not back to `FromGLB`.
     pub fn apply_overrides(&mut self, overrides: ROS2RobotConfig) {
         if let Some(domain_id) = overrides.domain_id {
             self.domain_id = Some(domain_id);
@@ -81,6 +87,12 @@ impl ROS2RobotConfig {
         }
         if overrides.software_version.is_some() {
             self.software_version = overrides.software_version;
+        }
+        if overrides.model_glb_path.is_some() {
+            self.model_glb_path = overrides.model_glb_path;
+        }
+        if !matches!(overrides.joint_ids, JointIdMapping::FromGLB) {
+            self.joint_ids = overrides.joint_ids;
         }
     }
 }
@@ -168,12 +180,27 @@ pub enum JointIdMapping {
     Extend(HashMap<String, String>),
 }
 
+/// The error for a robot model file that does not exist. It names the two ways
+/// to supply one, because no build step fills the default path.
+pub(crate) fn missing_model_message(path: &str) -> String {
+    format!(
+        "robot model {path} does not exist. Put the robot's GLB file at this path, \
+         or set `model_glb_path` in a robot config or an overrides file \
+         (`arora-ros2 <robot> <overrides.json>`)"
+    )
+}
+
 /// Extract joint ID mappings from a GLB file.
 pub(crate) fn get_joint_ids_from_glb_file(
     path: &str,
 ) -> Result<HashMap<String, String>, ROS2RobotError> {
-    let file = File::open(path)
-        .map_err(|e| ROS2RobotError::ConfigError(format!("Failed to open {path}: {e}")))?;
+    let file = File::open(path).map_err(|e| {
+        ROS2RobotError::ConfigError(if e.kind() == std::io::ErrorKind::NotFound {
+            missing_model_message(path)
+        } else {
+            format!("Failed to open {path}: {e}")
+        })
+    })?;
     let mut reader = BufReader::new(file);
 
     let mut magic = [0; 4];
@@ -253,7 +280,7 @@ pub(crate) fn get_joint_ids_from_glb_file(
 
 #[cfg(test)]
 mod tests {
-    use crate::default_model_path;
+    use crate::test_fixture::{fixture_glb_path, FIXTURE_JOINTS};
 
     use super::*;
     use std::{collections::HashMap, io::Write};
@@ -433,24 +460,84 @@ mod tests {
     }
 
     #[test]
-    fn test_get_joint_ids_from_glb_file() {
-        let glb_path = default_model_path!("nao");
-        let result = get_joint_ids_from_glb_file(glb_path);
+    fn test_apply_overrides_model_glb_path() {
+        let mut config = create_test_config();
+        config.model_glb_path = Some("/default/nao.glb".to_string());
 
-        assert!(
-            result.is_ok(),
-            "Failed to parse GLB file: {:?}",
-            result.err()
-        );
-        let joint_ids = result.unwrap();
-        assert!(!joint_ids.is_empty(), "Joint IDs should not be empty");
-        println!("Joint IDs: {:?}", joint_ids);
+        config.apply_overrides(ROS2RobotConfig {
+            model_glb_path: Some("/local/nao.glb".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(config.model_glb_path.as_deref(), Some("/local/nao.glb"));
+
+        // An override without a model path keeps the existing one.
+        config.apply_overrides(ROS2RobotConfig::default());
+        assert_eq!(config.model_glb_path.as_deref(), Some("/local/nao.glb"));
+    }
+
+    #[test]
+    fn test_apply_overrides_joint_ids() {
+        let mut config = create_test_config();
+        let mapping = HashMap::from([("HeadYaw".to_string(), "head-yaw-id".to_string())]);
+
+        config.apply_overrides(ROS2RobotConfig {
+            joint_ids: JointIdMapping::Extend(mapping.clone()),
+            ..Default::default()
+        });
+        assert!(matches!(&config.joint_ids, JointIdMapping::Extend(m) if *m == mapping));
+
+        // The default `FromGLB` reads as "not set", so the mapping stays.
+        config.apply_overrides(ROS2RobotConfig::default());
+        assert!(matches!(&config.joint_ids, JointIdMapping::Extend(m) if *m == mapping));
+    }
+
+    #[test]
+    fn test_apply_overrides_from_json_overrides_file() {
+        // The shape of an overrides file the runner reads after a built-in robot.
+        let overrides: ROS2RobotConfig =
+            serde_json::from_str(r#"{ "model_glb_path": "/local/quori.glb" }"#)
+                .expect("an overrides file with only a model path should parse");
+        let mut config = crate::configs::quori::create_config();
+        let topics_before = config.topics.len();
+
+        config.apply_overrides(overrides);
+
+        assert_eq!(config.model_glb_path.as_deref(), Some("/local/quori.glb"));
+        assert_eq!(config.topics.len(), topics_before);
+        assert!(matches!(config.joint_ids, JointIdMapping::FromGLB));
+    }
+
+    #[test]
+    fn test_get_joint_ids_from_glb_file() {
+        let joint_ids =
+            get_joint_ids_from_glb_file(&fixture_glb_path()).expect("the fixture GLB should parse");
+
+        // Only the animated joints: the plain node and the joint that is not
+        // animated are skipped.
+        let expected: HashMap<String, String> = FIXTURE_JOINTS
+            .iter()
+            .map(|(name, id)| (name.to_string(), id.to_string()))
+            .collect();
+        assert_eq!(joint_ids, expected);
     }
 
     #[test]
     fn test_get_joint_ids_from_invalid_file() {
         let result = get_joint_ids_from_glb_file("nonexistent_file.glb");
         assert!(result.is_err(), "Should fail on nonexistent file");
+    }
+
+    #[test]
+    fn test_missing_model_error_names_both_remedies() {
+        let err = get_joint_ids_from_glb_file("/no/such/dir/nao.glb")
+            .expect_err("a missing model file is an error")
+            .to_string();
+        assert!(err.contains("/no/such/dir/nao.glb does not exist"), "{err}");
+        assert!(
+            err.contains("Put the robot's GLB file at this path"),
+            "{err}"
+        );
+        assert!(err.contains("model_glb_path"), "{err}");
     }
 
     #[test]
