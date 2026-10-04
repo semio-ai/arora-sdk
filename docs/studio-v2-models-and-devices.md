@@ -11,8 +11,10 @@
 
 The work has three stages:
 
-1. **Stage 1, quick fix**. arora-sdk builds, passes CI and runs against the live Studio v2 again. Arora development can continue against production. Studio does not change. This stage must be done first and fast.
-2. **Stage 2, device-server rework**. Devices use forward-looking mechanisms: enrollment, a device credential, model resolution from Studio at run time, and private models. This stage needs Studio changes.
+1. **Stage 1, quick fix**. arora-sdk builds, passes CI and runs against the live Studio v2 again. Arora development can continue against production. Studio does not change. This stage must be done first and fast. Stage 1 is a stopgap, not the long-term behavior. Automatic model download returns in Stage 2.
+2. **Stage 2, model resolution and device-server rework**. This stage has two kinds of parts:
+   - **Model resolution in a Semio client**. A Semio client resolves and downloads models from Studio: on a device at start, in a build script, and on a developer's machine. For public models, this part needs no Studio change and no device login.
+   - **Device-server parts**. Enrollment, a device credential, owner-scoped access, and explicit assignment over the bridge. These parts need Studio changes.
 3. **Stage 3, workflow refinements**. Studio screens and flows improve. These changes do not touch the rules.
 
 This document gives the full design of Stage 1. It gives an outline of Stages 2 and 3, with their decisions and open questions. Thus the team can agree on the later stages before work on them starts.
@@ -25,7 +27,9 @@ This document gives the full design of Stage 1. It gives an outline of Stages 2 
 | **Device document** | The Firestore document `devices/{id}`. It records what the device is: its owner, grants, name, family and model reference. The "Data Model" page of the Arora Architecture board calls it the Device Identity. |
 | **Device account** | The anonymous Firebase Authentication user of the device. The device authenticates as this user when it reads or writes Firestore and Storage. Its uid is the id of the device document. The rules let the device write `devices/{id}` only when its uid is equal to `id`. |
 | **Device directory** | The local directory that keeps the data of the device between runs. It holds the refresh token of the device account and the modules. |
-| **Engine Config** | The robot config: the HAL and the settings that a runtime uses. Example: the `arora-hal-ros2` JSON config. |
+| **HAL config** | The configuration of a HAL, for example the `arora-hal-ros2` JSON config (`ROS2RobotConfig`). The "Engine Config" of the "Data Model" board is wider: it also names the modules that a runtime loads. |
+| **Semio client** | A program that reads Studio content: a build script, a CLI, or a device at start. |
+| **Explicit assignment** | A bridge command with which a client tells one device which model and which config to use. |
 | **Engine instance** | One run of arora on a device. |
 | **Session** | A live network of engine instances. A session is specific to the Active Scene of one project. A device is in a maximum of one session at a time. |
 | **Binding** | A Resolved Entity Binding: the association between an engine instance and a project entity. Studio calls this "pairing" today. A binding exists only while its session exists. |
@@ -58,6 +62,12 @@ This document gives the full design of Stage 1. It gives an outline of Stages 2 
   Studio tests prove this chain. The "external consumer read surface" block in the semio_studio file `apps/studio/rules-tests/rules.test.ts` covers the reads. The release artifact tests in `storage-rules.test.ts` cover the bytes. Each public case has a private pair that the rules refuse. The full rules suite passed on the emulator against production `main`: 785 of 785 tests.
 - **Configuration**. The bridge client already contains the Firebase project, the Storage bucket and the emulator hosts, in `FirebaseOptions` and `FirebaseEmulatorOptions`.
 
+### What automatic download needs
+
+- **A public model**. Production has no public model today. The v2 cutover archived the legacy catalogue. The models of third-party robots stay private while Semio settles their legal status. Thus a Semio client that uses no token has nothing to download now.
+- **A place outside this repository**. arora-sdk is a public repository. A model in it, for example through Git LFS, is a published model. The crates that the release workflow publishes to crates.io would also contain it.
+- **An identity for private models**. A Semio client can read a private model only with an identity that has access to it. That identity is the Studio account of a developer, or a device credential after Stage 2.1.
+
 ### What the current device model cannot do
 
 The device account came from the legacy bridge, as a shim. No v2 design chose it. It has these limits:
@@ -74,7 +84,11 @@ The device account came from the legacy bridge, as a shim. No v2 design chose it
 Each decision has its reason.
 
 1. **The work has three stages, and Stage 1 comes first**. Stage 1 clears the blocker for arora development and for arora-sdk CI. It also gives time to agree on Stages 2 and 3 before their work starts.
-2. **Models resolve at run time, never at build time**. Models change after the build. A build also has no owner, so it can get only public assets. Licensed meshes must not be in build output.
+2. **A deployed device resolves its model at run time. A build may depend only on a public model at an exact version**.
+   - A model changes after the build. A device that resolves at start gets the change.
+   - A public release at an exact version, verified by its hash, is reproducible. It changes only when someone changes the pin.
+   - A build never gets a private model, with any identity, because licensed meshes must not be in build output.
+   - A build never resolves a range, because the result would depend on the time of the build.
 3. **A person or an organization owns a device, as with a project. A device is never an organization member**. Membership would give the device all members-only assets and organization projects. It would also give the device the right to create resources in the organization.
 4. **A device can get exactly the assets that a project with the same owner can use** (STUDIO-312).
    - A device that an organization owns gets public assets, assets that the organization owns, and assets granted to the organization.
@@ -82,14 +96,18 @@ Each decision has its reason.
    - A device only receives content. Thus a device has no rung. The entitlement of its owner sets its scope.
 5. **Stage 1 keeps the legacy registration of the bridge client. Stage 2 replaces the device account and self-registration with enrollment**. The device account is a shim with the limits above. Effort goes to its replacement, not to the shim.
 6. **The compatibility check compares only `family`**. Studio uses the same rule to offer a device for a binding.
-7. **The Engine Config names the model of the device**. The model stays with the joint map of the HAL, which depends on it.
+7. **The HAL config names the model of the device**. The model stays with the joint map of the HAL, which depends on it.
 8. **A device encrypts private models in its device directory**.
-9. **The resolver is a new crate. It is the first part of the unified registry**. It does not use the current `ReadableRegistry`. The registry merge replaces `RecordType` and identity by UUID or folder path. The merged registry uses the Studio v2 shape and terms.
+9. **The resolver is a new crate. It is the first part of the unified registry**. It does not use the current `ReadableRegistry`. The registry merge replaces `RecordType` and identity by UUID or folder path. The merged registry uses the Studio v2 shape and terms. The resolver becomes part of `arora-registry` when the registry covers all asset types.
 10. **An operator can grant a private model to one device, but only when one account owns both**. This applies until Stage 2 lets a device use the entitlement of its owner.
+11. **The Studio account of a developer can download models on a development machine, never on a deployed device**. It reads exactly what that person can read, with Studio unchanged. A deployed device acts for its owner (decision 4), not for a person.
+12. **Resolution gives the default model. An explicit assignment over the bridge overrides it**. A client sometimes must set a specific model or config on one device, deterministically. Resolution cannot express that.
 
 ## Stage 1: quick fix
 
 **Goal:** arora-sdk CI passes. A developer builds arora and runs it against the live Studio v2. Studio does not change.
+
+Stage 1 is a stopgap. A developer supplies the model file by hand only until Stage 2.2 downloads models automatically. Stage 2.2 downloads public models with no token. On a development machine, it also downloads the models that the developer can read. CI and releases need no model file: the tests use a fixture, and a release contains no model.
 
 ### Changes in arora-sdk
 
@@ -102,11 +120,11 @@ Each decision has its reason.
 
 ### Actions outside the code
 
-- **A Studio operator gives developers the GLB files from the cutover backup**. NAO and Pepper use licensed meshes, so Semio decides who receives them. Semio does not publish Ur3, Ur5 or G1 again. These stay as local copies.
+- **A Studio operator gives developers the GLB files from the cutover backup**. These models stay private while Semio settles the legal status of third-party robot models. NAO and Pepper use licensed meshes, so Semio decides who receives them. Semio does not publish Ur3, Ur5 or G1 again. These stay as local copies.
 - **The anonymous-account cleanup keeps device accounts**. Before the cleanup runs, add to its keep list each anonymous account whose uid has a device document. After a developer's first run, the device account of that developer is one of them.
-- **Optional, not a blocker:** a Studio operator publishes Quori with a public audience:
+- **Later, not a blocker:** when Semio decides to make a model public, a Studio operator publishes it. For Quori, the steps are:
   1. Create the `@quori` organization.
-  2. Upload the Quori GLB into a project that `@quori` owns. Set `family` to `quori`, which is the exact `model_family` of the Engine Config.
+  2. Upload the Quori GLB into a project that `@quori` owns. Set `family` to `quori`, which is the exact `model_family` of the HAL config.
   3. Publish `@quori/quori` at version 1.0.0 with a public audience.
 
 ### How a developer runs against the live Studio
@@ -129,22 +147,34 @@ If the device does not appear in step 3, the trigger did not convert it. The sem
 
 Model resolution from Studio, the device-directory cache, encryption, `publishedAssetReference` in registration, a change to registration, and all Studio changes.
 
-## Stage 2: device-server rework (outline)
+## Stage 2: model resolution and device-server rework (outline)
 
-**Goal:** devices communicate with Studio through forward-looking mechanisms. Each part below gives what it must do. The Studio half of each part is an open question, not a design.
+**Goal:** a Semio client gets models from Studio, and devices communicate with Studio through forward-looking mechanisms. Each part below gives what it must do. The Studio half of each part is an open question, not a design.
+
+The parts are independent, except where this table names a dependency:
+
+| Part | Needs a Studio change | Needs the device credential | Status |
+|---|---|---|---|
+| 2.1 Enrollment and a device credential | Yes | It supplies the credential | Agreed |
+| 2.2 Model resolution in a Semio client | No | No | Agreed |
+| 2.3 A device uses the entitlement of its owner | Yes | Yes | Agreed |
+| 2.4 Devices that an organization owns | Yes | No | Agreed |
+| 2.5 Explicit assignment over the bridge | Only for Studio to send it | No | Agreed |
+| 2.6 Robot support as data | No | No | Proposed, not agreed |
 
 ### 2.1 Enrollment and a device credential
 
 - A person approves the device and selects its owner, a person or an organization. Studio checks the standing of that person for that owner. A usual pattern is "enter this code on the website", the OAuth device authorization grant.
 - The server creates the device document. The device does not write its own document.
 - The device gets a credential that marks it as a device. The rules can then limit a device to device paths and to content reads. Studio can revoke the credential.
-- This part replaces the device account and self-registration.
+- This part replaces the device account and self-registration. It changes the sign-in and the registration of the bridge client. It keeps the bridge and its connection.
+- No part of model resolution (2.2) waits for this part.
 - **arora-sdk side:** show the enrollment code in the terminal UI and in the headless log. Keep the credential in the device directory. Give the credential to the bridge and to the resolver through one token-source interface.
 - **Coordinate with the bridge client**. semio-ai/arora-sdk#268 moves arora to `arora-studio-bridge-client` 9. The credential change also goes into the bridge client.
 
-### 2.2 Model resolution at run time
+### 2.2 Model resolution in a Semio client
 
-This part does not wait for 2.1. Public models work with Studio unchanged. The resolver first uses no token, then the token-source interface.
+A Semio client resolves and downloads models from Studio. It runs in three places: on a device at start, in a build script, and on a developer's machine. Public models and the Studio account of a developer need no Studio change, so this part does not wait for 2.1. Only the device-credential identity comes later, with 2.1 and 2.3.
 
 - **The resolver crate** changes a reference `{scopedName, range}` into verified bytes:
   - It resolves with the rules of the Studio function `resolveDependency`. A version is `MAJOR.MINOR.PATCH` and 1.0.0 or higher. Deprecated releases and releases without a `primary` content hash are not candidates. The newest candidate in the range is the result.
@@ -152,7 +182,14 @@ This part does not wait for 2.1. Public models work with Studio unchanged. The r
   - It has two backends: Studio v2, and a local file.
   - Its errors name their cause. Reads go to the server, not to a local Firestore cache. Thus a failed read never looks like a missing asset.
   - It does not depend on the asset type. A model is its first use.
-- **The device directory** keeps the result:
+- **Identities**. The resolver uses one of three identities:
+  - No token: public models only.
+  - The Studio account of a developer, on a development machine: the models that this person can read. Signing a person in from a CLI is part of this work.
+  - The device credential, after 2.1: the models that the owner of the device can use (2.3).
+
+  A deployed device never uses the account of a person.
+- **Build time**. A build script can depend on a public model at an exact version, `{scopedName, version}`, with its `contentHash`. The resolver downloads the model, verifies the hash, and caches the model by hash. Later builds then work offline. A build script never resolves a range, and it never downloads a private model.
+- **The device directory** keeps the result of resolution at run time:
 
   ```text
   <device dir>/assets/
@@ -161,14 +198,14 @@ This part does not wait for 2.1. Public models work with Studio unchanged. The r
   └── resolved.json         scopedName → ResolvedRef, the same shape as project.resolved
   ```
 
-  - The device resolves again at each start when it can connect. If it cannot connect, it uses the `ResolvedRef` in `resolved.json`.
+  - The device resolves again at each start when it can connect. If it cannot connect, it uses the `ResolvedRef` in `resolved.json`. An explicit assignment (2.5) takes precedence over resolution.
   - `resolved.json` is a map, not one model slot.
   - The device encrypts private bytes with the scheme of its refresh token (XSalsa20-Poly1305, a key file, permissions for the OS user only). This protects a copy of the cache. It does not protect against a person who controls the OS account.
   - The device decrypts private bytes into memory and gives them to the HAL as bytes.
-- **The Engine Config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override.
-- **Family check:** the device refuses a release when its `family` is different from `model_family`. It uses a release without `family` and logs a warning. Registration takes its family from the Engine Config.
+- **The HAL config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override.
+- **Family check:** the device refuses a release when its `family` is different from `model_family`. It uses a release without `family` and logs a warning. Registration takes its family from the HAL config.
 - **No private model through the bridge:** a device never serves a private model through `HalAssets::model_glb`. The bridge router has no transport-level authentication. No Studio code calls `retrieveGlb` in the bridge client.
-- **The joint map of the HAL** goes behind one interface. A future binding can replace it.
+- **The joint map of the HAL** goes behind one interface. An explicit assignment or a binding (2.5) can replace it.
 - **Registration** writes `publishedAssetReference`. Both device shapes accept this field today.
 
 ### 2.3 A device uses the entitlement of its owner
@@ -179,15 +216,23 @@ Decision 4 needs this part. It depends on 2.1, because the rules must know that 
 
 Enrollment under an organization needs the device list to find such devices. The list rule for devices matches only a direct grant to the caller (`uid() in grants`). A device that an organization owns has no owner grant to a person. Thus the owners and admins of the organization do not see it. This needs a rules change.
 
-### 2.5 The first binding message
+### 2.5 Explicit assignment over the bridge
 
-Studio and the bridge send the joint table of the bound entity when a binding starts. The device then does these steps:
+A client tells one device which model and which config to use. The command goes over the bridge, as a module function of the device. The assignment names the model, as an exact release or as bytes that the client sends, and the config. It overrides resolution until a client clears it. The device keeps the assignment in its device directory, so a restart keeps it. Resolution gives only the default model.
+
+The first use is the binding message. Studio sends the joint table of the bound entity when a binding starts. The device then does these steps:
 
 1. It verifies that the table contains each joint name of the device.
 2. If a name is missing, it refuses the binding and gives the reason.
 3. It puts the table in the HAL until the binding ends.
 
+The content of a binding lasts only while the binding exists. The device does not keep it after a restart.
+
 Then the ids from Studio always match the device, for models in a project, published models and private models of other owners. Also, the device and the project cannot use different releases.
+
+### 2.6 Robot support as data (proposed, not agreed)
+
+The built-in robot configs (NAO, Pepper, Quori, UR3, UR5, G1) move out of `arora-hal-ros2` into configuration data. The HAL config of each robot names its model by reference or by path. The crate then has no robot-specific content. The support for a third-party robot then lives where its licensing allows, not in this public repository. This part is likely in Stage 2, but it is not agreed.
 
 ### Dependencies of Stage 2
 
@@ -211,7 +256,7 @@ These changes do not touch the rules.
   - The hardware and software strings, which no code compares.
 - With dependencies, three statements would apply:
   - The dependencies of a device say what the device is.
-  - A binding says what the device must run.
+  - A binding or an explicit assignment says what the device must run.
   - Compatibility means that the model of the binding satisfies the hardware dependency of the device. Today this means equal `family` values.
 - Matching by explicit asset dependency (STUDIO-325) can replace the family check. The check is in one place.
 
@@ -223,7 +268,7 @@ This section gives the intended model from the "Data Model" board. No stage buil
 - A project entity is "Model + Behavior → Engine". Studio assembles the entity into a behavior package. Studio sends the package with its binding to the engine instance.
 - Thus the session pushes project content to the engine instance. A Studio client that has the project open does the push. A device never needs read access to a project. The person who makes the binding decides.
 - A device can move between sessions during one run. No durable record connects a device to a project. On the board, the only persisted network configuration is the Session Preset.
-- The model of the device describes the hardware. It is also the model that the engine instance uses when it has no binding. When a binding exists, the binding controls the model.
+- The model of the device describes the hardware. It is also the model that the engine instance uses when no binding and no explicit assignment exists. While a binding or an explicit assignment exists, it controls the model.
 - The joint table of Stage 2.5 is the first content of a binding. A later stage adds the behavior package, for example for animation playback on the device (ARORA-70).
 
 ## Operational risks
