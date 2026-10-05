@@ -471,6 +471,24 @@ reader of `arora/dt` would see one frame that long. A running device has no
 clock setter: a jump in `arora/time` would be the same gap seen from the other
 key.
 
+### A remote write is checked once, by the runtime
+
+Every bridge's inbound `Update` reaches the device through the runtime's
+command phase, so that is where it is checked against the store's meta, once
+for every bridge: a key must be open (`editable`), and when its meta states a
+type, the value must be of it (`Value::conforms_to`). A change with any refused
+key writes nothing. The device's own writers — HAL, behavior, modules — are not
+checked: the meta is the device's statement to the outside, not a constraint
+it places on itself.
+
+The type check is exact, with no conversion. A reader of a typed key matches
+on the variant it holds; an `F32` in an `F64` key, or an `ArrayValue` in an
+`ArrayF64` key, would fail that match as surely as a string would. Converting
+on the way in would make the stored variant depend on the sender. A
+`value::Type` names the outer shape only, so the contents of a compound value
+(an option's content, a structure's record) are not checked until a key can
+state a resolved type.
+
 ### The behavior interpreter is a module
 
 Loading and editing behaviors go through the engine's ordinary module-call

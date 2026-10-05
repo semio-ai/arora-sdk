@@ -4,6 +4,12 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-10-06
+
+### Changed
+
+- **Breaking:** depends on arora 12 (the device runner its example binary builds).
+
 ## [4.1.0] - 2026-10-04
 
 ### Changed

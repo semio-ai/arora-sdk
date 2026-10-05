@@ -227,6 +227,24 @@ impl Value {
     }
   }
 
+  /// Whether this value is of `ty` — the check a key's stated shape
+  /// ([`KeyMeta::ty`](crate::data::KeyMeta::ty)) asks of every value written to
+  /// it from outside the device, so that every reader of a typed key can rely on
+  /// the variant it holds.
+  ///
+  /// The value's own variant must be `ty`, exactly: there is no conversion. An
+  /// `F32` is not of `F64`, an `I64` not of `U64`, an `ArrayValue` of floats not
+  /// of `ArrayF64`, and an `Option` not of the type of its content.
+  ///
+  /// A [`Type`] names a value's outer shape only. What a compound value holds —
+  /// an option's content, an `ArrayValue`'s elements, a structure's or an
+  /// enumeration's record and fields, a key-value's entries — is not part of
+  /// it, so it is not checked: `Option(Some(String))` is of `Option`, and a
+  /// structure of any record is of `Structure`.
+  pub fn conforms_to(&self, ty: &Type) -> bool {
+    self.kind() == *ty
+  }
+
   /// Returns the type UUID for this value.
   ///
   /// Primitives map to well-known UUIDs from `ty::mod`. Structures and enumerations
@@ -1325,5 +1343,137 @@ mod tests {
     // All well-known IDs are distinct
     let all_wellknown: Vec<uuid::Uuid> = ty::WELL_KNOWN_IDS.iter().copied().collect();
     assert_eq!(all_wellknown.len(), 29); // 13 primitives + 16 compounds
+  }
+
+  /// One value of every variant, compound ones holding content of another
+  /// type than their own.
+  fn one_of_each() -> Vec<Value> {
+    let id = Uuid::from_u128(1);
+    vec![
+      Value::Unit,
+      Value::Boolean(true),
+      Value::U8(1),
+      Value::U16(1),
+      Value::U32(1),
+      Value::U64(1),
+      Value::I8(-1),
+      Value::I16(-1),
+      Value::I32(-1),
+      Value::I64(-1),
+      Value::F32(0.5),
+      Value::F64(0.5),
+      Value::String("s".into()),
+      Value::Option(Some(Box::new(Value::String("s".into())))),
+      Value::Structure(Structure {
+        id,
+        fields: vec![StructureField {
+          id,
+          value: Box::new(Value::F64(0.5)),
+        }],
+      }),
+      Value::Enumeration(Enumeration {
+        id,
+        variant_id: id,
+        value: Box::new(Value::Unit),
+      }),
+      Value::ArrayBoolean(vec![true]),
+      Value::ArrayU8(vec![1]),
+      Value::ArrayU16(vec![1]),
+      Value::ArrayU32(vec![1]),
+      Value::ArrayU64(vec![1]),
+      Value::ArrayI8(vec![-1]),
+      Value::ArrayI16(vec![-1]),
+      Value::ArrayI32(vec![-1]),
+      Value::ArrayI64(vec![-1]),
+      Value::ArrayF32(vec![0.5]),
+      Value::ArrayF64(vec![0.5]),
+      Value::ArrayString(vec!["s".into()]),
+      Value::ArrayValue(vec![Value::F64(0.5), Value::String("s".into())]),
+      Value::ArrayStructure {
+        id,
+        elements: vec![],
+      },
+      Value::ArrayEnumeration {
+        id,
+        elements: vec![],
+      },
+      Value::KeyValue(KeyValue::default()),
+      Value::Uuid(id),
+    ]
+  }
+
+  /// A value is of its own type and of no other: every pair of distinct
+  /// variants is a mismatch, whatever the values hold.
+  #[test]
+  fn a_value_conforms_to_its_own_type_and_no_other() {
+    let values = one_of_each();
+    for value in &values {
+      for other in &values {
+        assert_eq!(
+          value.conforms_to(&other.kind()),
+          value.kind() == other.kind(),
+          "{value:?} against {:?}",
+          other.kind()
+        );
+      }
+    }
+  }
+
+  /// No conversion: a narrower or wider number, another signedness, the other
+  /// spelling of an array, or a value wrapped in an option is not of the type.
+  #[test]
+  fn a_value_is_not_converted_to_the_type() {
+    let refused = [
+      (Value::String("0.5".into()), Type::F64),
+      (Value::F32(0.5), Type::F64),
+      (Value::F64(0.5), Type::F32),
+      (Value::I64(1), Type::U64),
+      (Value::U8(1), Type::Boolean),
+      (Value::ArrayF32(vec![0.5]), Type::ArrayF64),
+      (Value::ArrayValue(vec![Value::F64(0.5)]), Type::ArrayF64),
+      (Value::ArrayF64(vec![0.5]), Type::ArrayValue),
+      (Value::Option(Some(Box::new(Value::F64(0.5)))), Type::F64),
+      (Value::Option(None), Type::F64),
+      (Value::F64(0.5), Type::Option),
+      (Value::Uuid(Uuid::from_u128(1)), Type::String),
+    ];
+    for (value, ty) in refused {
+      assert!(!value.conforms_to(&ty), "{value:?} is not of {ty:?}");
+    }
+  }
+
+  /// A compound value is of its outer shape whatever it holds: the type does
+  /// not say what an option, an array of values or a structure contains.
+  #[test]
+  fn a_compound_value_conforms_whatever_it_holds() {
+    let id = Uuid::from_u128(7);
+    let accepted = [
+      (Value::Option(None), Type::Option),
+      (Value::Option(Some(Box::new(Value::I8(1)))), Type::Option),
+      (Value::ArrayValue(vec![]), Type::ArrayValue),
+      (
+        Value::ArrayValue(vec![Value::Boolean(true), Value::Unit]),
+        Type::ArrayValue,
+      ),
+      (
+        Value::Structure(Structure { id, fields: vec![] }),
+        Type::Structure,
+      ),
+      (
+        Value::ArrayStructure {
+          id,
+          elements: vec![],
+        },
+        Type::ArrayStructure,
+      ),
+    ];
+    for (value, ty) in accepted {
+      assert!(value.conforms_to(&ty), "{value:?} is of {ty:?}");
+    }
+    // The outer shape still decides between compound types.
+    let structure = Value::Structure(Structure { id, fields: vec![] });
+    assert!(!structure.conforms_to(&Type::Enumeration));
+    assert!(!structure.conforms_to(&Type::ArrayStructure));
+    assert!(!structure.conforms_to(&Type::KeyValue));
   }
 }

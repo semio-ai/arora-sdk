@@ -4,6 +4,12 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-10-06
+
+### Changed
+
+- **Breaking:** depends on arora 12 (the device runner its example binary builds).
+
 ## [3.0.0] - 2026-09-29
 
 ### Changed

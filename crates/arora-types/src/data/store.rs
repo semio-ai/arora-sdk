@@ -177,7 +177,8 @@ impl Subscription {
 ///
 /// **A key is closed to remote writers unless its meta says otherwise.** The
 /// device's own writers — its HAL, its modules, its behavior — are never asked;
-/// `editable` is what every bridge's inbound write is checked against, and a key
+/// `editable` (and `ty`, when stated) is what every bridge's inbound write is
+/// checked against, and a key
 /// nobody described is not a network peer's to set. A device opens its inputs
 /// by saying so, per key or per subtree
 /// ([`set_prefix_meta`](DataStore::set_prefix_meta)).
@@ -186,6 +187,9 @@ impl Subscription {
 pub struct KeyMeta {
   /// The shape the key holds, when it is fixed — an unset key has no value to
   /// read it from, and a key that is written by one producer has one shape.
+  /// A write from outside the device whose value is not of this type
+  /// ([`Value::conforms_to`]) is refused; the device's own writers are not
+  /// checked.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub ty: Option<Type>,
   /// The lowest value it takes, for a numeric key.

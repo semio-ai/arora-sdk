@@ -51,7 +51,9 @@ carries the default meta: the shape of the value it holds, and closed to writes.
 
 A write reaches the device, which accepts it only for the keys it opened
 (`editable: true`, by key or by subtree in its store) and refuses the rest,
-naming the path. A device that opens nothing accepts no writes: a client on an
+naming the path. A key whose meta states a `ty` takes only values of that
+type: `{"f32": 0.5}` sent to an `f64` key is refused, naming the key and both
+types. A refused write writes none of its keys. A device that opens nothing accepts no writes: a client on an
 unauthenticated link does not get to set a key the device never offered.
 
 ## Methods and runs
