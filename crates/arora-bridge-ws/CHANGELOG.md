@@ -4,6 +4,14 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.1] - 2026-10-06
+
+### Changed
+
+- The control panel writes a key as the variant its meta states (`f32`, `i32`,
+  `u8`, …), integers rounded, rather than as `f64` for every numeric key: a
+  device refuses a write that is not of its key's type.
+
 ## [7.2.0] - 2026-10-05
 
 ### Changed

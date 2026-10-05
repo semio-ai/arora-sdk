@@ -21,8 +21,9 @@ arora-types = { path = "../arora-types", version = "3" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates
 # (arora-hal, arora-bridge, …) itself for whatever it composes.
-# 11.6: the client operations of `LocalCaller` (invoke, spawn, halt,
-# list_keys, describe_methods).
+# 12: the client operations of `LocalCaller` (invoke, spawn, halt,
+# list_keys, describe_methods), and `Arora`/`AroraBuilder` as this crate's
+# surface carries them.
 arora = { path = "../arora", version = "12", default-features = false }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's
 # client form (`arora_bridge::client`).

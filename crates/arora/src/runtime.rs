@@ -325,10 +325,16 @@ fn apply_command(
             // whose meta states a type takes only values of that type, so every
             // reader of a typed key can rely on its type. An unset, or a set to
             // no value, holds no value to check.
+            // Each key once, though a change may both set and unset it.
             let keys: Vec<Key> = change
                 .set
                 .keys()
-                .chain(change.unset.iter())
+                .chain(
+                    change
+                        .unset
+                        .iter()
+                        .filter(|key| !change.set.contains_key(*key)),
+                )
                 .cloned()
                 .collect();
             let metas = store.meta(&keys);
@@ -1621,6 +1627,17 @@ mod tests {
         assert!(error.contains("face/label"), "{error}");
         assert!(!error.contains("face/mouth"), "{error}");
         assert_eq!(arora.store.read(&[Key::from("face/mouth")])[0], None);
+
+        // A key both set and unset is named once.
+        let error = apply(BridgeOp::Update(StateChange {
+            set: HashMap::from([(Key::from("face/mouth"), Some(Value::Boolean(true)))]),
+            unset: std::collections::HashSet::from([Key::from("face/mouth")]),
+        }))
+        .expect_err("ill-typed");
+        assert_eq!(
+            error,
+            "not of the key's declared type: face/mouth (expected F64, got Boolean)"
+        );
 
         // A closed key is refused as closed, whatever its value.
         let error =
