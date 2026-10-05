@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.5.0] - 2026-10-05
+
+### Changed
+
+- **A device reaches a bridge that authenticates it.** The `studio-bridge`
+  feature depends on `arora-studio-bridge-client` 9.1 and connects with the
+  device's Studio credentials: over a TLS endpoint (`STUDIO_BRIDGE_ENDPOINT=tls/…`)
+  the client obtains from Studio a certificate whose Common Name is the
+  device's principal, keeps it with its key in the device directory's `studio/`
+  subdirectory, and renews it while it runs. Over `tcp/` nothing changes.
+
 ## [11.4.0] - 2026-10-03
 
 ### Changed
