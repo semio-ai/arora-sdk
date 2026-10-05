@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "11.5.0"
+version = "11.6.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -254,8 +254,9 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "6.0.0"
+version = "6.1.0"
 dependencies = [
+ "arora-behavior",
  "arora-types",
  "async-trait",
  "futures",
@@ -290,10 +291,9 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ws"
-version = "7.1.0"
+version = "7.2.0"
 dependencies = [
  "arora-behavior",
- "arora-behavior-tree-types",
  "arora-bridge",
  "arora-types",
  "async-trait",
@@ -714,9 +714,11 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "8.0.0"
+version = "8.1.0"
 dependencies = [
  "arora",
+ "arora-behavior",
+ "arora-bridge",
  "arora-engine",
  "arora-types",
  "console_error_panic_hook",

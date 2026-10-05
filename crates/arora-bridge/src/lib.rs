@@ -35,6 +35,13 @@
 //! runtime can depend on the *interface* without depending on `studio-bridge`.
 //! studio-bridge keeps its device-client implementations and implements this
 //! trait on them.
+//!
+//! # The client side
+//!
+//! [`Caller`] carries a call to a device, and [`client`] holds what any client
+//! of a device needs beyond single ops — calling a method by name, starting and
+//! halting a run, and the shapes a client reads keys and methods in — so a
+//! remote over a bridge and an in-process caller speak them alike.
 
 use std::pin::Pin;
 
@@ -47,6 +54,8 @@ use arora_types::data::{Key, StateChange};
 use arora_types::record::module::frozen::Function;
 use arora_types::Uuid;
 use serde::{Deserialize, Serialize};
+
+pub mod client;
 
 /// The full, self-describing signature of one callable module method — one entry
 /// of what [`BridgeOp::DescribeMethods`] returns, superseding the name-only

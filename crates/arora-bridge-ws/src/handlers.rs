@@ -1,7 +1,8 @@
 //! Callback types the server dispatches incoming messages to.
 
-use crate::key::KeyInfo;
-use crate::method::{InvokeResult, MethodInfo};
+use crate::method::InvokeResult;
+use arora_bridge::client::KeyInfo;
+use arora_bridge::client::MethodInfo;
 use arora_types::value::Value;
 use arora_types::Uuid;
 use async_trait::async_trait;

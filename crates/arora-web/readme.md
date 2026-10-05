@@ -22,6 +22,11 @@ class AroraRuntime {
   readonly behaviorError?: string;        // the behavior's standing error; undefined while healthy
   behaviorErrorChanged(): Promise<string | undefined>; // resolves on the next standing-error change
   call(callJson: string): Promise<string>; // in-process Call, applied by the next step; resolves to result JSON
+  invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown>; // by name; a value, or a run's handle
+  spawn(callJson: string): Promise<unknown>; // starts a task run; resolves to its handle
+  halt(runId: string): Promise<void>;     // stops the run its handle's `run` names
+  listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>;
+  describeMethods(prefix?: string): Promise<unknown[]>; // as a bridge lists methods, plus each one's `module` id
   setValue(path: string, valueJson: string): void;
   writeValues(valuesJson: string): void;
   readValues(paths: string[]): Record<string, unknown>;
@@ -48,16 +53,30 @@ the loop ends at its next step boundary, the run promise resolves, and
 unavailable. The rest of the surface keeps working while the
 device runs, because none of it touches the stepping device: `setValue`/
 `readValues`/`snapshot` work on a sibling handle of the store, `drainChanges`
-on its subscription, and `call` goes through the device's in-process
-`arora::Caller` — enqueued at once, applied at the next step's event phase
-exactly like a remote's call, resolved on that step's reply. The device must
-be stepping (`run()` or your own `step` calls) for a `call` to land.
+on its subscription, and the client operations — `call`, `invoke`, `spawn`,
+`halt`, `listKeys`, `describeMethods`, the ones a remote client has over a
+bridge — go through the device's in-process `arora::LocalCaller`: queued
+before the method returns, applied at the next step's event phase exactly like
+a remote's, resolved on that step's reply. A page that calls and then
+`step()`s in the same turn has the operation applied by that step. `invoke`
+reads the method's signature on one step and applies its call on the next. The
+device must be stepping (`run()` or your own `step` calls) for an operation to
+land.
+
+`invoke` names a method by the bare name its module exports; when two modules
+export one name, pass the module id (`describeMethods` gives each method's
+`module`) — without it the promise rejects naming those modules. A task-shaped
+method (one returning the behavior `Status`) is spawned as a run: like
+`spawn`, it resolves to the run's handle, an Arora key-value whose `run` field
+is the id `halt` takes and whose `status` field is the key reporting how the
+run goes and ends — the same handle a bridge answers with.
 
 A downstream device (e.g. Vizij) composes its own `arora::Arora` with
 `arora::AroraBuilder` — the HAL, bridge, and store seams are trait objects that
 cannot cross the JS boundary — and wraps it with `AroraWeb::from`, reusing the
 same JS surface. The `store_json` module exposes the Value↔JSON accessors over
-any store for wrappers that add their own methods.
+any store for wrappers that add their own methods, and `AroraWeb::caller` the
+typed client operations.
 
 ## Engine / BehaviorTreeRunner JS surface (see [src/lib.rs](src/lib.rs)):
 

@@ -4,8 +4,8 @@
 //! speak the Arora data-layer vocabulary: values are written to and read from
 //! **keys** (hierarchical paths into the store).
 
-use crate::key::KeyInfo;
-use crate::method::MethodInfo;
+use arora_bridge::client::KeyInfo;
+use arora_bridge::client::MethodInfo;
 use arora_types::value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

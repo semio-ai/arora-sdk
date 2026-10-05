@@ -23,23 +23,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use arora_bridge::client::{self, KeyInfo, MethodInfo};
 use arora_bridge::{
     Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
     MethodSignature,
 };
-use arora_types::call::Call;
 use arora_types::data::{Key, KeyMeta, StateChange};
-use arora_types::value::{StructureField, Value};
+use arora_types::value::Value;
 use arora_types::Uuid;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
 use futures::StreamExt;
 
 use crate::handlers::Device;
-use crate::interpreter;
-use crate::key::KeyInfo;
 use crate::messages::Outgoing;
-use crate::method::{InvokeResult, MethodInfo, MethodParam};
+use crate::method::InvokeResult;
 use crate::server::AroraWSServer;
 
 /// The WebSocket server as an Arora [`Bridge`].
@@ -124,7 +122,7 @@ impl WsBridge {
 
 /// The device over the runtime's inbound commands: it lists the keys the device
 /// holds and describes its methods on demand — so what a module loaded mid-run
-/// brought is there at once — and turns an `invoke` into the [`Call`] the
+/// brought is there at once — and turns an `invoke` into the call the
 /// described signature defines.
 struct DevicePlane {
     commands: mpsc::UnboundedSender<BridgeCommand>,
@@ -183,31 +181,34 @@ impl Device for DevicePlane {
     }
 
     async fn methods(&self) -> Vec<MethodInfo> {
-        self.signatures().await.iter().map(method_info).collect()
+        self.signatures()
+            .await
+            .iter()
+            .map(client::method_info)
+            .collect()
     }
 
     async fn invoke(&self, method: &str, args: HashMap<String, Value>) -> InvokeResult {
         let signatures = self.signatures().await;
-        let Some(signature) = signatures.iter().find(|s| s.name == method) else {
-            return InvokeResult::err(format!("Method not found: {method}"));
+        // The wire names a method by its bare name, so a name several modules
+        // export fails, naming them, rather than reaching one of them.
+        let signature = match client::find_method(&signatures, method, None) {
+            Ok(signature) => signature,
+            Err(message) => return InvokeResult::err(message),
         };
-        let call = match call_of(signature, args) {
+        let call = match client::call_of(signature, args) {
             Ok(call) => call,
             Err(message) => return InvokeResult::err(message),
         };
         // A task-shaped method starts a run: the spawn answers at once with the
         // run's handle, and the run reports on the handle's status key. Anything
         // else answers with its return value.
-        let task = interpreter::task_shaped(&signature.function.return_ty);
-        let call = if task {
-            interpreter::spawn(&call)
-        } else {
-            call
-        };
+        let task = client::task_shaped(&signature.function);
+        let call = if task { client::spawn(&call) } else { call };
         match self.ask(BridgeOp::Call(call)).await {
             Ok(Value::Unit) => InvokeResult::ok(),
-            Ok(value) if task => match interpreter::run_of(&value) {
-                Ok(run) => InvokeResult::ok_with_value(interpreter::run_value(&run)),
+            Ok(value) if task => match client::run_value(&value) {
+                Ok(run) => InvokeResult::ok_with_value(run),
                 // The run did start: answer with the handle as it came rather
                 // than telling the client it failed.
                 Err(e) => {
@@ -221,71 +222,10 @@ impl Device for DevicePlane {
     }
 
     async fn halt(&self, run: Uuid) -> InvokeResult {
-        match self.ask(BridgeOp::Call(interpreter::halt(run))).await {
+        match self.ask(BridgeOp::Call(client::halt(run))).await {
             Ok(_) => InvokeResult::ok(),
             Err(message) => InvokeResult::err(message),
         }
-    }
-}
-
-/// Bind `args` by parameter name onto the parameter ids `signature` declares.
-///
-/// An argument the signature does not name fails the call rather than being
-/// dropped, so a client that misspells a parameter learns it. A parameter no
-/// argument names is left out, and whether it may be is the function's business:
-/// an optional parameter reads as absent, a required one fails the call naming
-/// itself.
-fn call_of(signature: &MethodSignature, args: HashMap<String, Value>) -> Result<Call, String> {
-    let function = &signature.function;
-    let mut fields = Vec::with_capacity(args.len());
-    for (name, value) in args {
-        let Some(id) = function.parameter_id(&name) else {
-            return Err(format!("{} has no parameter '{name}'", signature.name));
-        };
-        fields.push(StructureField {
-            id: *id,
-            value: Box::new(value),
-        });
-    }
-    // Declaration order, so the call reads like the signature.
-    fields.sort_by_key(|field| {
-        function
-            .parameter_ordering
-            .iter()
-            .position(|id| *id == field.id)
-            .unwrap_or(usize::MAX)
-    });
-    Ok(Call {
-        module_id: Some(signature.module_id),
-        id: signature.id,
-        args: fields,
-    })
-}
-
-/// A described signature as a client reads it: the method's name, its parameters
-/// in declaration order with the value shape and optionality of each, and
-/// whether calling it starts a run.
-fn method_info(signature: &MethodSignature) -> MethodInfo {
-    let function = &signature.function;
-    MethodInfo {
-        path: signature.name.clone(),
-        params: function
-            .parameter_ordering
-            .iter()
-            .filter_map(|id| {
-                let parameter = function.parameter(id)?;
-                Some(MethodParam {
-                    name: parameter.name.clone(),
-                    param_type: interpreter::value_type(&parameter.ty),
-                    required: !parameter.ty.is_option(),
-                    default_value: None,
-                    description: None,
-                })
-            })
-            .collect(),
-        return_type: Some(interpreter::value_type(&function.return_ty)),
-        description: None,
-        task: interpreter::task_shaped(&function.return_ty),
     }
 }
 

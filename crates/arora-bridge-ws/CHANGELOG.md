@@ -4,6 +4,20 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.0] - 2026-10-05
+
+### Changed
+
+- `invoke` of a method name several modules export fails, naming those
+  modules, instead of calling one of them. The `invoke` message names a method
+  by its bare name only, so such a method is unreachable over this wire;
+  `list_methods` lists it once per module.
+- `KeyInfo`, `MethodInfo` and `MethodParam` are `arora_bridge::client`'s,
+  re-exported at the same paths: every client of a device reads keys and
+  methods in these shapes. Calling by name and starting and halting runs use
+  `arora_bridge::client` likewise.
+- Depends on arora-bridge 6.1; no longer on arora-behavior-tree-types.
+
 ## [7.1.0] - 2026-10-02
 
 ### Added

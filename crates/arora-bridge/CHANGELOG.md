@@ -4,6 +4,24 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-10-05
+
+### Added
+
+- `client`: what any client of a device needs beyond single ops, whatever
+  carries it to the device — `find_method` (the signature a bare method name
+  designates; a name several modules export designates nothing until the module
+  is named, and the error names those modules), `call_of` (bind arguments by
+  parameter name), `task_shaped`, `spawn` and `halt` (start and stop a task run
+  through the interpreter module), `run_value` (the run a spawn answers with, as
+  named fields), and the shapes a client reads: `KeyInfo`, `MethodInfo`,
+  `MethodParam`, `method_info`.
+
+### Changed
+
+- Depends on arora-behavior 9 (the interpreter module's ABI `client` speaks;
+  none of its types appear in this crate's API) and arora-types 3.2.
+
 ## [6.0.0] - 2026-09-29
 
 ### Changed

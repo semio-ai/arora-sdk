@@ -91,19 +91,19 @@
 /// The WS server as an Arora `Bridge`.
 pub mod bridge;
 pub mod handlers;
-mod interpreter;
-mod key;
 mod messages;
 mod method;
 mod server;
 
+/// The shapes a client is answered with — a key with its meta, a method by
+/// name — are every client's, so they are `arora_bridge::client`'s.
+pub use arora_bridge::client::{KeyInfo, MethodInfo, MethodParam};
 pub use handlers::{
     Device, DeviceHandler, OnClientConnectedHandler, ReadValuesHandler, WriteValuesHandler,
     WriteValuesResult,
 };
-pub use key::KeyInfo;
 pub use messages::{Incoming, Outgoing};
-pub use method::{InvokeResult, MethodInfo, MethodParam};
+pub use method::InvokeResult;
 pub use server::{AroraWSServer, ServerConfig};
 pub use tokio_util::sync::CancellationToken;
 

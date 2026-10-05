@@ -4,6 +4,27 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.1.0] - 2026-10-05
+
+### Added
+
+- `AroraRuntime` has the client operations a remote client has over a bridge,
+  beside `call`: `invoke(method, argsJson, moduleId?)` (resolves to the return
+  value, or for a task-shaped method to the run's handle), `spawn(callJson)`
+  (resolves to the run's handle: `run`, `status`, `feedback`, `result`,
+  `update`, as a bridge answers it), `halt(runId)`, `listKeys(prefix?)` (an
+  array of `{path, __meta}`) and `describeMethods(prefix?)` (each method as a
+  bridge lists it, plus its `module` id).
+- `AroraWeb::caller`: the device's `LocalCaller`, for a Rust crate wrapping
+  the device that wants the typed operations.
+
+### Changed
+
+- Every client operation, `call` included, is queued on the device before the
+  method returns, so a page that calls and then `step()`s in the same turn has
+  it applied by that step.
+- Depends on arora 11.6, arora-bridge 6.1 and arora-behavior 9.
+
 ## [8.0.0] - 2026-09-29
 
 ### Changed

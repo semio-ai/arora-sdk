@@ -30,9 +30,11 @@ const SAY_TEXT: Uuid = Uuid::from_u128(0x5a13);
 const COS: Uuid = Uuid::from_u128(0x0c51);
 const COS_ANGLE: Uuid = Uuid::from_u128(0x0c52);
 const RUN: Uuid = Uuid::from_u128(0x41);
+const OTHER_MODULE: Uuid = Uuid::from_u128(0x0e11);
 
 /// `say(text: String) -> Status` — task-shaped, because a behavior status is
-/// what a run reports — and `cos(angle: f32) -> f32`, which answers at once.
+/// what a run reports — and `cos(angle: f32) -> f32`, which answers at once;
+/// and `stop()`, which two modules export.
 fn signatures() -> Vec<MethodSignature> {
     let parameter = |name: &str, kind: PrimitiveKind| Parameter {
         name: name.to_string(),
@@ -41,7 +43,7 @@ fn signatures() -> Vec<MethodSignature> {
     };
     let status = FrozenTy::FrozenScalar(FrozenScalar {
         reference: FrozenReference {
-            id: arora_behavior_tree_types::STATUS_ENUMERATION_ID,
+            id: arora_behavior::STATUS_ENUMERATION_ID,
             version: Version::parse("1.0.0").expect("a valid version"),
         },
     });
@@ -66,7 +68,23 @@ fn signatures() -> Vec<MethodSignature> {
                 return_ty: FrozenTy::from(PrimitiveKind::F32),
             },
         },
+        stop(SAY_MODULE, 0x5a14),
+        stop(OTHER_MODULE, 0x0e12),
     ]
+}
+
+/// `stop()` as `module` exports it.
+fn stop(module: Uuid, id: u128) -> MethodSignature {
+    MethodSignature {
+        module_id: module,
+        id: Uuid::from_u128(id),
+        name: "stop".to_string(),
+        function: Function {
+            parameters: HashMap::new(),
+            parameter_ordering: Vec::new(),
+            return_ty: FrozenTy::from(PrimitiveKind::Unit),
+        },
+    }
 }
 
 /// The run `say` spawns: the handle a client gets back, and halts by its id.
@@ -398,6 +416,24 @@ async fn a_plain_method_answers_with_its_value() {
     let call = &device.calls()[0];
     assert_eq!(call.id, COS, "called, not spawned");
     assert_eq!(call.args[0].id, COS_ANGLE);
+}
+
+/// A name two modules export reaches neither: the invoke fails naming both
+/// modules, and nothing is called.
+#[tokio::test]
+async fn a_name_two_modules_export_is_refused_naming_them() {
+    let device = Device::serve().await;
+    let mut client = Client::connect(&device.url).await;
+
+    client
+        .send(serde_json::json!({"type": "invoke", "method": "stop"}))
+        .await;
+    let answer = client.answer().await;
+    assert_eq!(answer["success"], false, "{answer}");
+    let message = answer["message"].as_str().expect("a message");
+    assert!(message.contains(&SAY_MODULE.to_string()), "{message}");
+    assert!(message.contains(&OTHER_MODULE.to_string()), "{message}");
+    assert!(device.calls().is_empty(), "nothing is called");
 }
 
 /// A misspelled parameter fails the call instead of being dropped.

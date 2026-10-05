@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ws"
-version = "7.1.0"
+version = "7.2.0"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
 license = "MIT"
@@ -8,10 +8,9 @@ repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "3.2" }
-arora-bridge = { path = "../arora-bridge", version = "6" }
-# The behavior-tree Status enumeration's well-known id: a method that returns it
-# is a task run, which the method plane spawns and halts instead of calling.
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
+# 6.1: the client conventions (`arora_bridge::client`) — calling by name,
+# spawning and halting runs — and the key and method shapes clients read.
+arora-bridge = { path = "../arora-bridge", version = "6.1" }
 async-trait = "0.1"
 futures = "0.3"
 futures-util = "0.3"
@@ -23,7 +22,6 @@ tokio-tungstenite = "0.24"
 tokio-util = "0.7"
 
 [dev-dependencies]
-# The crate that DEFINES the interpreter-module ABI the method plane speaks over
-# the value plane. A dev-dependency only: the ABI-pin test asserts the ids and
-# encodings match, without a runtime engine dependency.
+# The interpreter module's ABI and run handle, which the wire tests' fake
+# runtime answers a spawn with.
 arora-behavior = { path = "../arora-behavior", version = "9" }

@@ -65,10 +65,17 @@ pub use arora_behavior_tree::ModuleFunction;
 use crate::runtime::EndpointInbound;
 use anyhow::Result;
 use arora_behavior::{interpreter_module, BehaviorInterpreter};
+/// Re-exported so an embedder holding a [`LocalCaller`] can name the run handle
+/// [`spawn`](LocalCaller::spawn) and [`invoke`](LocalCaller::invoke) answer
+/// with and the run id [`halt`](LocalCaller::halt) takes.
+pub use arora_behavior::{TaskHandle, TaskId};
 /// Re-exported so an embedder holding a device's [`LocalCaller`] (or any other
 /// caller) can name the trait its `call` comes from.
 pub use arora_bridge::Caller;
-use arora_bridge::{Bridge, BridgeCommand, BridgeError, BridgeOp, Inbound};
+/// Re-exported so an embedder holding a [`LocalCaller`] can name what
+/// [`describe_methods`](LocalCaller::describe_methods) answers with.
+pub use arora_bridge::MethodSignature;
+use arora_bridge::{client, Bridge, BridgeCommand, BridgeError, BridgeOp, Inbound};
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
@@ -80,15 +87,17 @@ pub use arora_engine::module::{FunctionDescription, HostModule, ModuleBuilder};
 use arora_hal::{FakeHal, Hal, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
-use arora_types::data::{DataStore, Subscription};
+use arora_types::data::{DataStore, KeyMeta, Subscription};
 use arora_types::module::low::{self, Header};
 use arora_types::record::module::frozen::ExportKind;
+use arora_types::value::Value;
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::rc::Rc;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -240,43 +249,165 @@ impl Arora {
     }
 }
 
-/// The in-process [`Caller`]: dispatch [`Call`]s into the device from the same
+/// The in-process client of a device: everything a remote client asks of it
+/// over a bridge — calling a function, listing its keys, describing its
+/// methods, invoking one by name, starting and halting a run — from the same
 /// process, including while [`run`](Arora::run) owns it. Obtained from
 /// [`Arora::caller`]; clones freely, every clone reaching the same device.
 ///
-/// A call is enqueued before [`call`](Caller::call) returns — the future is
-/// only the reply — and applied at the next step's event phase, the same path
-/// and ordering as a remote's Call. A caller can therefore fire and step the
-/// device in the same breath without touching the future (a JS Promise, for
-/// one, is first polled a microtask later). [`Arora::call`] is the synchronous
-/// counterpart for an embedder holding the device between steps.
+/// Each operation is the [`BridgeOp`] a remote sends, put on the device's
+/// inbound queue **before the method returns** — the future is only the reply —
+/// and applied at the next step's event phase, the same path and ordering as a
+/// remote's. A caller can therefore fire and step the device in the same breath
+/// without touching the future (a JS Promise, for one, is first polled a
+/// microtask later). [`invoke`](Self::invoke) is the one operation that takes
+/// two steps: it reads the method's signature on one, and its call is applied
+/// on the next. [`Arora::call`] is the synchronous counterpart of
+/// [`call`](Caller::call) for an embedder holding the device between steps.
+///
+/// Every future resolves to a [`CallError::Generic`] when the device is gone
+/// (dropped before answering) or refuses the operation, carrying its message.
 #[derive(Clone)]
 pub struct LocalCaller {
     tx: mpsc::UnboundedSender<Inbound>,
 }
 
-impl Caller for LocalCaller {
-    fn call(&self, call: Call) -> arora_bridge::CallFuture<'_> {
+impl LocalCaller {
+    /// Put `op` on the device's inbound queue now, and await its reply.
+    fn ask(
+        &self,
+        op: BridgeOp,
+    ) -> impl Future<Output = Result<CallResult, CallError>> + Send + 'static {
         let (tx, rx) = oneshot::channel();
         let sent = self
             .tx
-            .unbounded_send(Inbound::Command(BridgeCommand::new(
-                BridgeOp::Call(call),
-                tx,
-            )))
-            .map_err(|_| CallError::Generic {
-                message: "the device is gone".to_string(),
-            });
-        Box::pin(async move {
+            .unbounded_send(Inbound::Command(BridgeCommand::new(op, tx)))
+            .map_err(|_| generic("the device is gone"));
+        async move {
             sent?;
             match rx.await {
                 Ok(Ok(result)) => Ok(result),
                 Ok(Err(message)) => Err(CallError::Generic { message }),
-                Err(_) => Err(CallError::Generic {
-                    message: "the device dropped the call".to_string(),
-                }),
+                Err(_) => Err(generic("the device dropped the request")),
             }
-        })
+        }
+    }
+
+    /// The device's keys under `prefix` (every key when `None`), sorted by path,
+    /// each with what its store says it is: every key that holds a value or that
+    /// the store has meta for. A key nothing has described carries the default
+    /// meta, whose only statement is the shape of the value it holds.
+    pub fn list_keys(
+        &self,
+        prefix: Option<String>,
+    ) -> impl Future<Output = Result<Vec<(String, KeyMeta)>, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::ListKeys { prefix });
+        async move {
+            arora_types::value_serde::from_value(reply.await?.ret)
+                .map_err(|e| generic(format!("the listed keys did not decode: {e}")))
+        }
+    }
+
+    /// The device's callable methods whose name starts with `prefix` (all of
+    /// them when `None`), sorted by name, each with its full signature: the
+    /// module and function ids a [`Call`] targets, and the parameters and return
+    /// type. Those are the methods its modules and its behavior interpreter
+    /// describe.
+    pub fn describe_methods(
+        &self,
+        prefix: Option<String>,
+    ) -> impl Future<Output = Result<Vec<MethodSignature>, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::DescribeMethods { prefix });
+        async move {
+            arora_types::value_serde::from_value(reply.await?.ret)
+                .map_err(|e| generic(format!("the described methods did not decode: {e}")))
+        }
+    }
+
+    /// Call the method named `method`, with `args` by parameter name, as a
+    /// remote client invokes it over a bridge.
+    ///
+    /// A plain method answers with its return value ([`Invoked::Returned`]). A
+    /// task-shaped one — returning the behavior `Status` — is spawned as a run
+    /// instead and answers at once with its handle ([`Invoked::Started`]); the
+    /// run reports on the handle's status key, and [`halt`](Self::halt) stops
+    /// it.
+    ///
+    /// Names are the bare names modules export, so two modules may share one:
+    /// pass the exporting module's id in `module` to choose. A name more than
+    /// one module exports, with no `module`, fails naming those modules rather
+    /// than calling any of them. An argument the signature does not declare
+    /// fails the call; a required parameter no argument names fails it in the
+    /// callee.
+    ///
+    /// The method's signature is read on the next step and its call applied on
+    /// the step after.
+    pub fn invoke(
+        &self,
+        method: &str,
+        args: HashMap<String, Value>,
+        module: Option<Uuid>,
+    ) -> impl Future<Output = Result<Invoked, CallError>> + Send + 'static {
+        let described = self.describe_methods(Some(method.to_string()));
+        let caller = self.clone();
+        let method = method.to_string();
+        async move {
+            let signatures = described.await?;
+            let signature = client::find_method(&signatures, &method, module).map_err(generic)?;
+            let call = client::call_of(signature, args).map_err(generic)?;
+            if client::task_shaped(&signature.function) {
+                caller.spawn(call).await.map(Invoked::Started)
+            } else {
+                caller
+                    .ask(BridgeOp::Call(call))
+                    .await
+                    .map(|result| Invoked::Returned(result.ret))
+            }
+        }
+    }
+
+    /// Start `call` as a task run, concurrently with every other run, answering
+    /// with its handle: the run's id, the key that reports its status, and the
+    /// keys carrying its feedback and result and steering it. The device's
+    /// behavior interpreter hosts the run; one that hosts none refuses.
+    pub fn spawn(
+        &self,
+        call: Call,
+    ) -> impl Future<Output = Result<TaskHandle, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Call(client::spawn(&call)));
+        async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
+    }
+
+    /// Stop the run `run` names: it ends `Failure` on the step after the halt is
+    /// applied. Idempotent — halting a finished or unknown run is a clean no-op.
+    pub fn halt(
+        &self,
+        run: TaskId,
+    ) -> impl Future<Output = Result<(), CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Call(client::halt(run.0)));
+        async move { reply.await.map(|_| ()) }
+    }
+}
+
+impl Caller for LocalCaller {
+    fn call(&self, call: Call) -> arora_bridge::CallFuture<'_> {
+        Box::pin(self.ask(BridgeOp::Call(call)))
+    }
+}
+
+/// What a [`LocalCaller::invoke`] answered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Invoked {
+    /// A plain method's return value.
+    Returned(Value),
+    /// A task-shaped method's run, started: follow it on its status key, stop it
+    /// with [`LocalCaller::halt`] by its id.
+    Started(TaskHandle),
+}
+
+fn generic(message: impl Into<String>) -> CallError {
+    CallError::Generic {
+        message: message.into(),
     }
 }
 
@@ -1245,5 +1376,252 @@ mod host_module_tests {
             .err()
             .expect("the build is refused");
         assert!(error.to_string().contains("described by module"), "{error}");
+    }
+}
+
+/// The [`LocalCaller`]'s client operations on a device built and stepped in
+/// process: each is enqueued when the method returns and answered by the steps
+/// that follow.
+#[cfg(test)]
+mod caller_tests {
+    use super::*;
+    use arora_behavior::Status;
+    use arora_types::data::Key;
+    use arora_types::record::module::frozen::{Function, Parameter};
+    use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
+    use arora_types::record::{FrozenReference, Version};
+    use std::pin::pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    const TOOLS: Uuid = Uuid::from_u128(0x7001);
+    const DOUBLE: Uuid = Uuid::from_u128(0x7002);
+    const DOUBLE_X: Uuid = Uuid::from_u128(0x7003);
+    const WAVE: Uuid = Uuid::from_u128(0x7004);
+    const TOOLS_STOP: Uuid = Uuid::from_u128(0x7005);
+    const PLAYER: Uuid = Uuid::from_u128(0x7101);
+    const PLAYER_STOP: Uuid = Uuid::from_u128(0x7102);
+
+    /// Step `arora` until `future` resolves, polling it after each step.
+    fn settle<T>(arora: &mut Arora, future: impl Future<Output = T>) -> T {
+        let mut future = pin!(future);
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        for _ in 0..8 {
+            arora.step(Duration::from_millis(10)).expect("step");
+            if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+                return output;
+            }
+        }
+        panic!("no answer after eight steps");
+    }
+
+    fn signature(parameters: &[(Uuid, &str)], return_ty: FrozenTy) -> Function {
+        Function {
+            parameters: parameters
+                .iter()
+                .map(|(id, name)| {
+                    (
+                        *id,
+                        Parameter {
+                            name: name.to_string(),
+                            ty: FrozenTy::from(PrimitiveKind::F64),
+                            mutable: false,
+                        },
+                    )
+                })
+                .collect(),
+            parameter_ordering: parameters.iter().map(|(id, _)| *id).collect(),
+            return_ty,
+        }
+    }
+
+    fn status() -> FrozenTy {
+        FrozenTy::FrozenScalar(FrozenScalar {
+            reference: FrozenReference {
+                id: arora_behavior::STATUS_ENUMERATION_ID,
+                version: Version::parse("1.0.0").expect("a valid version"),
+            },
+        })
+    }
+
+    fn answer(ret: Value) -> Result<CallResult, CallError> {
+        Ok(CallResult {
+            ret,
+            mutated: Vec::new(),
+        })
+    }
+
+    /// A device whose `tools` module exports `double(x: f64) -> f64`, the
+    /// task-shaped `wave() -> Status` (running until halted) and `stop()`, and
+    /// whose `player` module exports a `stop()` of its own.
+    fn device() -> Arora {
+        let tools = ModuleBuilder::new(TOOLS)
+            .described_function(
+                DOUBLE,
+                "double",
+                signature(&[(DOUBLE_X, "x")], FrozenTy::from(PrimitiveKind::F64)),
+                |call| match call.args.first().map(|field| field.value.as_ref()) {
+                    Some(Value::F64(x)) => answer(Value::F64(2.0 * x)),
+                    other => Err(generic(format!("double takes an f64, not {other:?}"))),
+                },
+            )
+            .described_function(WAVE, "wave", signature(&[], status()), |_call| {
+                answer(Status::Running.into())
+            })
+            .described_function(
+                TOOLS_STOP,
+                "stop",
+                signature(&[], FrozenTy::from(PrimitiveKind::Unit)),
+                |_call| answer(Value::String("tools stopped".to_string())),
+            )
+            .build();
+        let player = ModuleBuilder::new(PLAYER)
+            .described_function(
+                PLAYER_STOP,
+                "stop",
+                signature(&[], FrozenTy::from(PrimitiveKind::Unit)),
+                |_call| answer(Value::String("player stopped".to_string())),
+            )
+            .build();
+        Arora::builder()
+            .with_host_module(tools)
+            .with_host_module(player)
+            .build()
+            .expect("build the device")
+    }
+
+    #[test]
+    fn list_keys_reports_a_key_with_its_meta() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let key = Key::from("face/mouth");
+        arora
+            .store()
+            .set_meta(HashMap::from([(
+                key.clone(),
+                KeyMeta::new().editable().in_unit("fraction"),
+            )]))
+            .expect("describe the key");
+
+        let keys = settle(&mut arora, caller.list_keys(Some("face/".to_string())))
+            .expect("the device lists its keys");
+        assert_eq!(keys.len(), 1, "{keys:?}");
+        let (path, meta) = &keys[0];
+        assert_eq!(path, "face/mouth");
+        assert!(meta.editable);
+        assert_eq!(meta.unit.as_deref(), Some("fraction"));
+    }
+
+    #[test]
+    fn describe_methods_lists_a_host_module_s_described_function() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let methods = settle(&mut arora, caller.describe_methods(Some("dou".to_string())))
+            .expect("the device describes its methods");
+        assert_eq!(methods.len(), 1, "{methods:?}");
+        assert_eq!(methods[0].module_id, TOOLS);
+        assert_eq!(methods[0].id, DOUBLE);
+        assert_eq!(methods[0].name, "double");
+        assert_eq!(methods[0].function.parameter_ordering, vec![DOUBLE_X]);
+    }
+
+    #[test]
+    fn invoking_a_plain_function_returns_its_value() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let invoked = settle(
+            &mut arora,
+            caller.invoke(
+                "double",
+                HashMap::from([("x".to_string(), Value::F64(2.5))]),
+                None,
+            ),
+        )
+        .expect("double answers");
+        assert_eq!(invoked, Invoked::Returned(Value::F64(5.0)));
+
+        let error = settle(
+            &mut arora,
+            caller.invoke(
+                "double",
+                HashMap::from([("y".to_string(), Value::F64(2.5))]),
+                None,
+            ),
+        )
+        .expect_err("double has no parameter y");
+        assert!(error.to_string().contains("'y'"), "{error}");
+    }
+
+    /// A task-shaped method starts a run: its status key reads Running once a
+    /// step has ticked it, and a halt ends it.
+    #[test]
+    fn invoking_a_task_shaped_method_starts_a_run_a_halt_ends() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let Invoked::Started(handle) =
+            settle(&mut arora, caller.invoke("wave", HashMap::new(), None)).expect("wave starts")
+        else {
+            panic!("wave is task-shaped");
+        };
+        arora.step(Duration::from_millis(10)).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
+
+        settle(&mut arora, caller.halt(handle.id)).expect("the halt is applied");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(failure)],
+            "a halted run ends Failure"
+        );
+    }
+
+    /// `spawn` takes a call by ids and answers with the run's handle.
+    #[test]
+    fn spawn_starts_a_run_from_a_call() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let handle = settle(
+            &mut arora,
+            caller.spawn(Call {
+                module_id: Some(TOOLS),
+                id: WAVE,
+                args: Vec::new(),
+            }),
+        )
+        .expect("the run starts");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
+    }
+
+    /// A name two modules export calls neither until the module is named, and
+    /// the refusal names both.
+    #[test]
+    fn invoking_a_shared_name_needs_its_module() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let error = settle(&mut arora, caller.invoke("stop", HashMap::new(), None))
+            .expect_err("stop is ambiguous");
+        let message = error.to_string();
+        assert!(message.contains(&TOOLS.to_string()), "{message}");
+        assert!(message.contains(&PLAYER.to_string()), "{message}");
+
+        let invoked = settle(
+            &mut arora,
+            caller.invoke("stop", HashMap::new(), Some(PLAYER)),
+        )
+        .expect("the module disambiguates");
+        assert_eq!(
+            invoked,
+            Invoked::Returned(Value::String("player stopped".to_string()))
+        );
     }
 }

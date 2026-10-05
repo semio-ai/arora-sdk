@@ -4,6 +4,26 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.6.0] - 2026-10-05
+
+### Added
+
+- `LocalCaller` has every operation a remote client has over a bridge, beside
+  `call`: `list_keys` and `describe_methods` (introspection), `invoke` (call a
+  method by name with arguments by parameter name; a task-shaped method is
+  spawned and answers with its run's handle, `Invoked::Started`; an optional
+  module id chooses among modules exporting one name, which otherwise fails
+  naming them), `spawn` (start a call as a concurrent task run) and `halt`.
+  Each sends the `BridgeOp` a remote sends, queued before the method returns
+  and applied at the next step, in order with every other inbound op; `invoke`
+  reads the signature on one step and applies its call on the next.
+- Re-exports `TaskHandle`, `TaskId` and `MethodSignature`, which those
+  operations answer with and take.
+
+### Changed
+
+- Depends on arora-bridge 6.1.
+
 ## [11.5.0] - 2026-10-05
 
 ### Changed

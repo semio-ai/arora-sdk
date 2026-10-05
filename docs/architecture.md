@@ -20,7 +20,7 @@ arora-sdk/
 │   ├── arora-behavior-tree         behavior-tree interpreter
 │   ├── arora-behavior-tree-types       BT primitive types
 │   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records
-│   ├── arora-bridge           Bridge seam + in-process FakeBridge
+│   ├── arora-bridge           Bridge seam, client conventions + in-process FakeBridge
 │   ├── arora-bridge-ws        WebSocket bridge
 │   ├── arora-bridge-ros2      ROS 2 bridge
 │   ├── arora-hal              HAL seam + FakeHal

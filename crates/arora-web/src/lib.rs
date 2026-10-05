@@ -57,9 +57,53 @@ fn install_panic_hook() {
 // The browser device
 // =============================================================================
 
-use arora::{Arora, AroraBuilder, Caller, LocalCaller};
+use arora::{Arora, AroraBuilder, Caller, Invoked, LocalCaller, TaskId};
+use arora_bridge::client::{self, KeyInfo};
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
+use std::future::Future;
 use std::time::Duration;
+
+/// Hand `future` to JavaScript as a Promise, having polled it once already.
+///
+/// Every device operation goes on the device's inbound queue at its future's
+/// first poll; a `future_to_promise` alone would first poll it a microtask
+/// later. Polling once here means the operation is queued before the method
+/// returns, so a page that calls and then `step()`s in the same turn has it
+/// applied by that step. A future that is already done settles the promise
+/// at once.
+fn promise(future: impl Future<Output = Result<JsValue, JsValue>> + 'static) -> js_sys::Promise {
+    let mut future = Box::pin(future);
+    let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
+    match future.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(Ok(value)) => js_sys::Promise::resolve(&value),
+        std::task::Poll::Ready(Err(error)) => js_sys::Promise::reject(&error),
+        std::task::Poll::Pending => wasm_bindgen_futures::future_to_promise(future),
+    }
+}
+
+/// Serialize to a plain JS value — objects as objects, not `Map`s — the form
+/// every structured answer of this surface takes.
+fn to_js(value: &impl serde::Serialize) -> Result<JsValue, JsValue> {
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))
+}
+
+/// Serialize an Arora [`Value`] to the plain JS form of its JSON, e.g.
+/// `{"f32": 0.75}`.
+fn value_to_js(value: &Value) -> Result<JsValue, JsValue> {
+    let json = serde_json::to_value(value)
+        .map_err(|e| JsValue::from_str(&format!("serialize value failed: {e}")))?;
+    to_js(&json)
+}
+
+/// A run handle as a client reads it — the value `invoke` of a task-shaped
+/// method and `spawn` answer with, the same one a bridge answers with.
+fn run_to_js(handle: &arora::TaskHandle) -> Result<JsValue, JsValue> {
+    let spawned = arora_behavior::interpreter_module::encode_spawn_result(handle);
+    let run = client::run_value(&spawned).map_err(|e| JsValue::from_str(&e))?;
+    value_to_js(&run)
+}
 
 /// Value↔JSON accessors over a device's [`DataStore`] and change
 /// [`Subscription`] — the store surface every browser device shares. Values
@@ -175,8 +219,17 @@ pub mod store_json {
 /// device to [`Arora::run`] until [`stop`](AroraWeb::stop) reclaims it.
 /// Either way the rest of the surface stays
 /// live: `setValue`/`readValues`/`snapshot` work on a sibling handle of the
-/// store, `drainChanges` on its subscription, and `call` on the device's
-/// in-process [`Caller`] — none of them touch the stepping device.
+/// store, `drainChanges` on its subscription, and the client operations —
+/// `call`, `invoke`, `spawn`, `halt`, `listKeys`, `describeMethods` — on the
+/// device's in-process [`LocalCaller`], the same operations a remote client has
+/// over a bridge. None of them touch the stepping device: each is queued
+/// before the method returns and applied by the next step, so the device must
+/// be stepping (a `run()` loop, or your own `step` calls) for its promise to
+/// settle.
+///
+/// Every method is an ordinary Rust method too, for a Rust crate that wraps
+/// this device in its own `wasm_bindgen` type; [`caller`](Self::caller) hands
+/// such a crate the typed operations.
 #[wasm_bindgen(js_name = AroraRuntime)]
 pub struct AroraWeb {
     // The device parks here between manual steps; `run` takes it out and
@@ -346,15 +399,16 @@ impl AroraWeb {
     }
 
     /// Dispatch a [`Call`] into the device through its in-process caller. The
-    /// promise resolves after the step that applies it — the device must be
-    /// stepping (a `run()` loop, or your own `step` calls) for it to land.
-    /// `call_json` is an `arora_types::call::Call` as JSON; the result is the
-    /// `CallResult` as JSON.
+    /// call is queued before this returns, and the promise resolves after the
+    /// step that applies it — the device must be stepping (a `run()` loop, or
+    /// your own `step` calls) for it to land. `call_json` is an
+    /// `arora_types::call::Call` as JSON; the result is the `CallResult` as a
+    /// JSON string.
     pub fn call(&self, call_json: &str) -> js_sys::Promise {
         let parsed: Result<Call, _> = serde_json::from_str(call_json)
             .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));
         let caller = self.caller.clone();
-        wasm_bindgen_futures::future_to_promise(async move {
+        promise(async move {
             let result = caller
                 .call(parsed?)
                 .await
@@ -362,6 +416,134 @@ impl AroraWeb {
             let json = serde_json::to_string(&result)
                 .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))?;
             Ok(JsValue::from_str(&json))
+        })
+    }
+
+    /// Call the device's method named `method` with arguments by parameter
+    /// name, as a remote client invokes it over a bridge.
+    ///
+    /// `args_json` is a JSON object mapping each parameter name to an Arora
+    /// [`Value`] in the JSON form `call` takes, e.g. `{"x": {"f64": 2.5}}`. The
+    /// promise resolves to the return value, as a plain JS value of that JSON
+    /// form. A task-shaped method — one returning the behavior `Status` — is
+    /// spawned as a run instead, and resolves at once to the run's handle, the
+    /// value [`spawn`](Self::spawn) answers with.
+    ///
+    /// Names are the bare names modules export, so two modules may share one:
+    /// `module_id` (a uuid string) names the exporting module to choose. A name
+    /// more than one module exports, without `module_id`, rejects naming those
+    /// modules. An argument the method does not declare rejects too.
+    ///
+    /// Queued before this returns, like every operation; it reads the method's
+    /// signature on the next step and applies its call on the step after.
+    pub fn invoke(
+        &self,
+        method: &str,
+        args_json: &str,
+        module_id: Option<String>,
+    ) -> js_sys::Promise {
+        let args: Result<HashMap<String, Value>, _> = serde_json::from_str(args_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid args json: {e}")));
+        let module = module_id
+            .map(|id| {
+                Uuid::parse_str(&id)
+                    .map_err(|e| JsValue::from_str(&format!("'{id}' is not a module id: {e}")))
+            })
+            .transpose();
+        let caller = self.caller.clone();
+        let method = method.to_string();
+        promise(async move {
+            let invoked = caller
+                .invoke(&method, args?, module?)
+                .await
+                .map_err(|e| JsValue::from_str(&format!("invoke {method} failed: {e}")))?;
+            match invoked {
+                Invoked::Returned(value) => value_to_js(&value),
+                Invoked::Started(handle) => run_to_js(&handle),
+            }
+        })
+    }
+
+    /// Start `call_json` (an `arora_types::call::Call` as JSON) as a task run,
+    /// concurrently with every other run. The promise resolves to the run's
+    /// handle, in the JSON form of an Arora key-value with named fields: `run`
+    /// (the run id, which [`halt`](Self::halt) takes), `status` (the key that
+    /// reports how the run goes and ends), and `feedback`, `result` and
+    /// `update` (the keys carrying its progress, its result, and what steers
+    /// it). Queued before this returns; applied by the next step.
+    pub fn spawn(&self, call_json: &str) -> js_sys::Promise {
+        let parsed: Result<Call, _> = serde_json::from_str(call_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));
+        let caller = self.caller.clone();
+        promise(async move {
+            let handle = caller
+                .spawn(parsed?)
+                .await
+                .map_err(|e| JsValue::from_str(&format!("spawn failed: {e}")))?;
+            run_to_js(&handle)
+        })
+    }
+
+    /// Stop the run `run_id` names (the `run` of its handle, a uuid string):
+    /// it ends `Failure` on the step after the halt is applied. Idempotent —
+    /// halting a finished or unknown run resolves all the same. Queued before
+    /// this returns; applied by the next step.
+    pub fn halt(&self, run_id: &str) -> js_sys::Promise {
+        let run = Uuid::parse_str(run_id)
+            .map_err(|e| JsValue::from_str(&format!("'{run_id}' is not a run id: {e}")));
+        let caller = self.caller.clone();
+        promise(async move {
+            caller
+                .halt(TaskId(run?))
+                .await
+                .map_err(|e| JsValue::from_str(&format!("halt failed: {e}")))?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// The device's keys whose path starts with `prefix` (all of them when
+    /// absent), sorted by path. The promise resolves to an array of
+    /// `{path, __meta}` objects: each key with what its store says it is — the
+    /// shape it holds, its range and unit, where it rests, whether a client may
+    /// write it — as every Arora bridge lists keys. Queued before this returns;
+    /// applied by the next step.
+    #[wasm_bindgen(js_name = listKeys)]
+    pub fn list_keys(&self, prefix: Option<String>) -> js_sys::Promise {
+        let listed = self.caller.list_keys(prefix);
+        promise(async move {
+            let keys: Vec<KeyInfo> = listed
+                .await
+                .map_err(|e| JsValue::from_str(&format!("listKeys failed: {e}")))?
+                .into_iter()
+                .map(|(path, meta)| KeyInfo { path, meta })
+                .collect();
+            to_js(&keys)
+        })
+    }
+
+    /// The device's callable methods whose name starts with `prefix` (all of
+    /// them when absent), sorted by name. The promise resolves to an array of
+    /// method descriptions, as a bridge lists methods — `path` (the name),
+    /// `params` (each `name`, `param_type`, `required`, in declaration order),
+    /// `return_type`, `task` (whether invoking it starts a run) — plus `module`,
+    /// the exporting module's id, which [`invoke`](Self::invoke) takes when two
+    /// modules export one name. Queued before this returns; applied by the next
+    /// step.
+    #[wasm_bindgen(js_name = describeMethods)]
+    pub fn describe_methods(&self, prefix: Option<String>) -> js_sys::Promise {
+        let described = self.caller.describe_methods(prefix);
+        promise(async move {
+            let signatures = described
+                .await
+                .map_err(|e| JsValue::from_str(&format!("describeMethods failed: {e}")))?;
+            let mut methods = Vec::with_capacity(signatures.len());
+            for signature in &signatures {
+                let mut method = serde_json::to_value(client::method_info(signature))
+                    .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))?;
+                method["module"] = serde_json::Value::String(signature.module_id.to_string());
+                methods.push(method);
+            }
+            to_js(&methods)
         })
     }
 
@@ -395,6 +577,15 @@ impl AroraWeb {
     #[wasm_bindgen(js_name = drainChanges)]
     pub fn drain_changes(&self) -> Result<JsValue, JsValue> {
         store_json::drain_changes(&self.changes)
+    }
+}
+
+impl AroraWeb {
+    /// The device's in-process caller: the typed operations behind `call`,
+    /// `invoke`, `spawn`, `halt`, `listKeys` and `describeMethods`, for a Rust
+    /// crate that wraps this device and wants them unserialized.
+    pub fn caller(&self) -> LocalCaller {
+        self.caller.clone()
     }
 }
 
