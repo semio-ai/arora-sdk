@@ -189,7 +189,8 @@ pub struct KeyMeta {
   /// read it from, and a key that is written by one producer has one shape.
   /// A write from outside the device whose value is not of this type
   /// ([`Value::conforms_to`]) is refused; the device's own writers are not
-  /// checked.
+  /// checked. Stated on a prefix, it holds for every key under it that has no
+  /// meta of its own.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub ty: Option<Type>,
   /// The lowest value it takes, for a numeric key.

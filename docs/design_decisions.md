@@ -486,8 +486,7 @@ on the variant it holds; an `F32` in an `F64` key, or an `ArrayValue` in an
 `ArrayF64` key, would fail that match as surely as a string would. Converting
 on the way in would make the stored variant depend on the sender. A
 `value::Type` names the outer shape only, so the contents of a compound value
-(an option's content, a structure's record) are not checked until a key can
-state a resolved type.
+(an option's content, a structure's record) are not checked.
 
 ### The behavior interpreter is a module
 

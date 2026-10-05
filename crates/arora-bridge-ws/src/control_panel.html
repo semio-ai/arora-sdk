@@ -799,9 +799,15 @@
           if (!ws || ws.readyState !== 1) {
             return;
           }
+          // A value travels as the variant its key states: the device takes
+          // no other. An integer key gets the slider's value rounded.
           const payload = {};
           for (const path of Object.keys(pending)) {
-            payload[path] = { f64: pending[path] };
+            const control = getControlByPath(path);
+            const meta = (control && control.key.__meta) || {};
+            const ty = String(meta.ty || "f64");
+            const value = ty.startsWith("f") ? pending[path] : Math.round(pending[path]);
+            payload[path] = { [ty]: value };
           }
           const keys = Object.keys(payload);
           if (!keys.length) {
