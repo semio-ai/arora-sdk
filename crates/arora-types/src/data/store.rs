@@ -58,8 +58,10 @@ pub trait Slot: Send + Sync {
 }
 
 /// A feed of changes from a [`DataStore`], obtained from
-/// [`DataStore::subscribe`]. A subscription's first change is the store's
-/// whole current state; every change applied after it was created follows.
+/// [`DataStore::subscribe`] or [`DataStore::subscribe_prefix`]. A
+/// subscription's first change is the current state of the keys it covers —
+/// the whole store, or the subtree under the prefix; every change to them
+/// applied after it was created follows.
 ///
 /// This is deliberately a plain synchronous channel so `arora-types` needs no
 /// async runtime. Async consumers can poll [`try_recv`](Subscription::try_recv)
@@ -265,6 +267,22 @@ pub fn prefix_covers(prefix: &str, path: &str) -> bool {
     || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
 }
 
+/// What `change` holds of the keys under `prefix`.
+fn keep_under(prefix: &str, change: StateChange) -> StateChange {
+  let covered = |key: &Key| prefix_covers(prefix, &key.path);
+  if change.set.keys().chain(&change.unset).all(covered) {
+    return change;
+  }
+  StateChange {
+    set: change
+      .set
+      .into_iter()
+      .filter(|(key, _)| covered(key))
+      .collect(),
+    unset: change.unset.into_iter().filter(covered).collect(),
+  }
+}
+
 /// A shared, path-keyed store of [`Value`]s, observable through change
 /// subscriptions. The canonical lean implementation is
 /// [`arora-simple-data-store`](https://docs.rs/arora-simple-data-store); richer
@@ -289,6 +307,29 @@ pub trait DataStore: Send + Sync {
   /// starts from the full picture and stays current from the changes that
   /// follow, without a separate snapshot read that could race them.
   fn subscribe(&self) -> Subscription;
+
+  /// Subscribe to the changes of the keys under `prefix`: the subtree
+  /// [`prefix_covers`] says it covers. A prefix is a key path with no trailing
+  /// `/` — `face` covers `face` and `face/mouth` — and the empty prefix covers
+  /// every key. Each call yields an independent
+  /// [`Subscription`], whose first change is the current state of those keys,
+  /// even when there are none. A later change is delivered with what it holds
+  /// of them, under their full paths, and not at all when it touches none of
+  /// them.
+  ///
+  /// The default reads [`subscribe`](Self::subscribe)'s feed through
+  /// [`Subscription::map`]: correct for every store, though the store still
+  /// sends the subscriber every change and the subscriber discards the keys
+  /// outside the prefix. A store that keeps each subscriber's prefix overrides
+  /// it and sends the subscriber the keys under it alone, so subscribers to
+  /// disjoint subtrees — the views of several devices over one store — are
+  /// each cloned their own keys and none of the others'.
+  fn subscribe_prefix(&self, prefix: &str) -> Subscription {
+    let prefix = prefix.to_owned();
+    self
+      .subscribe()
+      .map(move |change| keep_under(&prefix, change))
+  }
 
   /// What these keys are, beyond the values they hold: for each, the most
   /// specific statement the store has — the key's own meta, else the meta of the

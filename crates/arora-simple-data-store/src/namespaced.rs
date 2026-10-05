@@ -63,6 +63,16 @@ impl NamespacedStore {
     fn relative(&self, key: &Key) -> Option<Key> {
         relative(&self.namespace, key)
     }
+
+    /// The inner form of a subtree of the device: the empty prefix is the whole
+    /// device — its namespace — and never a neighbour's.
+    fn prefixed_subtree(&self, prefix: &str) -> String {
+        if prefix.is_empty() {
+            self.namespace.clone()
+        } else {
+            format!("{}/{prefix}", self.namespace)
+        }
+    }
 }
 
 /// The device-relative form of `key` under `namespace`: its path past
@@ -128,14 +138,7 @@ impl DataStore for NamespacedStore {
     fn set_prefix_meta(&self, meta: HashMap<String, KeyMeta>) -> Result<(), DataError> {
         self.inner.set_prefix_meta(
             meta.into_iter()
-                .map(|(prefix, meta)| {
-                    let prefixed = if prefix.is_empty() {
-                        self.namespace.clone()
-                    } else {
-                        format!("{}/{prefix}", self.namespace)
-                    };
-                    (prefixed, meta)
-                })
+                .map(|(prefix, meta)| (self.prefixed_subtree(&prefix), meta))
                 .collect(),
         )
     }
@@ -172,10 +175,22 @@ impl DataStore for NamespacedStore {
     /// keys under `<namespace>/`, stripped of it, the opening state included.
     /// A change that touches no key of the device is not delivered, so a
     /// neighbour's writes neither reach nor wake this device.
+    ///
+    /// The feed is the inner store's subscription to the namespace's subtree
+    /// ([`DataStore::subscribe_prefix`]), so a store that routes by prefix, as
+    /// [`SimpleDataStore`](crate::SimpleDataStore) does, never sends this view a
+    /// neighbour's keys.
     fn subscribe(&self) -> Subscription {
+        self.subscribe_prefix("")
+    }
+
+    /// The device's keys under `prefix`, the empty prefix being the whole
+    /// device: the inner store's subscription to `<namespace>/<prefix>`, its
+    /// keys stripped of `<namespace>/`.
+    fn subscribe_prefix(&self, prefix: &str) -> Subscription {
         let namespace = self.namespace.clone();
         self.inner
-            .subscribe()
+            .subscribe_prefix(&self.prefixed_subtree(prefix))
             .map(move |change| confine(&namespace, change))
     }
 
@@ -366,6 +381,131 @@ mod tests {
             a.snapshot().storage,
             HashMap::from([(Key::from("battery_level"), Some(Value::Boolean(true)))])
         );
+    }
+
+    /// The prefixes the shared store keeps for its subscribers.
+    fn subscriber_prefixes(shared: &SimpleDataStore) -> Vec<String> {
+        let subscribers = shared.inner.subscribers.lock().unwrap();
+        subscribers.iter().map(|sub| sub.prefix.clone()).collect()
+    }
+
+    /// A view subscribes the store to its namespace's subtree, and a view of a
+    /// view to the subtree of both: the store sends each view its own keys and
+    /// never a neighbour's.
+    #[test]
+    fn a_view_subscribes_the_store_to_its_namespace() {
+        let shared = SimpleDataStore::new();
+        let a = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
+        let arm = NamespacedStore::new(Arc::new(a.clone()), "arm");
+        let _a_changes = a.subscribe();
+        let arm_changes = arm.subscribe();
+        let arm_joints = arm.subscribe_prefix("joints");
+        assert_eq!(
+            subscriber_prefixes(&shared),
+            ["robotA", "robotA/arm", "robotA/arm/joints"]
+        );
+
+        arm_changes.try_recv().expect("opening state");
+        a.write(StateChange::from(vec![
+            ("arm/joints/elbow", Value::Boolean(true)),
+            ("head", Value::Boolean(true)),
+        ]))
+        .unwrap();
+        assert_eq!(
+            arm_changes.try_recv(),
+            Some(StateChange::set("joints/elbow", Value::Boolean(true))),
+            "the arm's keys, relative to the arm"
+        );
+        assert_eq!(
+            arm_joints.try_recv(),
+            Some(StateChange::new()),
+            "the subtree's opening state: empty"
+        );
+        assert_eq!(
+            arm_joints.try_recv(),
+            Some(StateChange::set("joints/elbow", Value::Boolean(true))),
+            "a subtree of the view, under the view's names"
+        );
+        arm.write(StateChange::set("wrist", Value::Boolean(true)))
+            .unwrap();
+        assert_eq!(arm_joints.try_recv(), None, "outside the subtree");
+    }
+
+    /// A store that keeps no subscriber prefix: everything forwarded to a
+    /// [`SimpleDataStore`] but `subscribe_prefix`, which is left to the
+    /// trait's default.
+    #[derive(Clone)]
+    struct Unrouted(SimpleDataStore);
+
+    impl DataStore for Unrouted {
+        fn read(&self, keys: &[Key]) -> Vec<Option<Value>> {
+            self.0.read(keys)
+        }
+        fn write(&self, changes: StateChange) -> Result<(), DataError> {
+            self.0.write(changes)
+        }
+        fn snapshot(&self) -> State {
+            self.0.snapshot()
+        }
+        fn slot(&self, key: &Key) -> Box<dyn Slot> {
+            self.0.slot(key)
+        }
+        fn subscribe(&self) -> Subscription {
+            self.0.subscribe()
+        }
+        fn clone_box(&self) -> Box<dyn DataStore> {
+            Box::new(self.clone())
+        }
+    }
+
+    /// Over a store that keeps the trait's default `subscribe_prefix`, a view
+    /// shows the same feed: the store sends it every change and the view keeps
+    /// its own keys.
+    #[test]
+    fn a_view_over_an_unrouted_store_shows_its_namespace_alone() {
+        let shared = Unrouted(SimpleDataStore::new());
+        shared
+            .write(StateChange::from(vec![
+                ("robotA", Value::Boolean(true)),
+                ("robotA/battery_level", Value::Boolean(true)),
+                ("robotAlpha/battery_level", Value::Boolean(true)),
+            ]))
+            .unwrap();
+        let a = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
+        let b = NamespacedStore::new(Arc::new(shared.clone()), "robotB");
+        let a_changes = a.subscribe();
+        assert_eq!(
+            subscriber_prefixes(&shared.0),
+            [""],
+            "the store is asked for everything"
+        );
+        assert_eq!(
+            a_changes.try_recv(),
+            Some(StateChange::set("battery_level", Value::Boolean(true)))
+        );
+
+        b.write(StateChange::set("battery_level", Value::Boolean(false)))
+            .unwrap();
+        assert_eq!(a_changes.try_recv(), None, "a neighbour's write");
+        a.write(StateChange::set("battery_level", Value::Boolean(false)))
+            .unwrap();
+        assert_eq!(
+            a_changes.try_recv(),
+            Some(StateChange::set("battery_level", Value::Boolean(false)))
+        );
+
+        let under_a = shared.subscribe_prefix("robotA");
+        assert_eq!(
+            under_a.try_recv(),
+            Some(StateChange::from(vec![
+                ("robotA", Value::Boolean(true)),
+                ("robotA/battery_level", Value::Boolean(false)),
+            ])),
+            "the default keeps the subtree, under full paths"
+        );
+        b.write(StateChange::set("battery_level", Value::Boolean(true)))
+            .unwrap();
+        assert_eq!(under_a.try_recv(), None);
     }
 
     /// The empty prefix on a view is the device, not the store: a neighbour's

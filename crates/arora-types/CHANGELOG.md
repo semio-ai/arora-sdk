@@ -4,6 +4,19 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.4.0] - 2026-10-06
+
+### Added
+
+- `DataStore::subscribe_prefix`: a subscription to the keys under a prefix —
+  the subtree `prefix_covers` says it covers, the empty prefix being the whole
+  store. It opens on the current state of those keys and delivers a later
+  change with what it holds of them, under their full paths, and not at all
+  when it touches none of them. Provided: the default reads `subscribe`'s feed
+  through `Subscription::map`, so every store keeps working; a store that keeps
+  each subscriber's prefix overrides it to send a subscriber its own keys
+  alone.
+
 ## [3.3.0] - 2026-10-02
 
 ### Added

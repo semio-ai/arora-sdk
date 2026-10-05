@@ -1,9 +1,13 @@
 [package]
 name = "arora-simple-data-store"
-version = "3.1.1"
+version = "3.2.0"
 edition = "2021"
 description = "A simple hashmap-backed implementation of the arora-types DataStore."
 license = "MIT"
 
 [dependencies]
-arora-types = { path = "../arora-types", version = "3.3" }
+arora-types = { path = "../arora-types", version = "3.4" }
+
+[[bench]]
+name = "namespaced_fanout"
+harness = false
