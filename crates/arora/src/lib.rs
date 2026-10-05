@@ -593,10 +593,11 @@ impl AroraBuilder {
         // Load each guest module into the engine so its exported functions
         // dispatch through the engine's `CallBridge`. Done before the store and
         // seams are wired: a module that fails to load fails the whole build.
-        // Its exports whose parameters and return are all primitives also join
-        // the method index, so `DescribeMethods` lists them — a guest header
-        // carries no type versions, so a non-primitive signature (which needs a
-        // registry to pin versions) dispatches but stays undiscoverable.
+        // Its exports whose parameters and return are all primitives or
+        // optionals over a scalar primitive also join the method index, so `DescribeMethods`
+        // lists them — a guest header carries no type versions, so a signature
+        // naming a record (which needs a registry to pin its version), a map
+        // or a fixed-length array dispatches but stays undiscoverable.
         //
         // One module id, one module: every source of guest modules (an
         // embedder's `with_module`, the device directory, `--module`) converges
@@ -627,9 +628,10 @@ impl AroraBuilder {
                         );
                     }
                     None => log::warn!(
-                        "guest module {module_id} export '{}' ({}) has non-primitive parameter \
-                         or return types; it dispatches but is not discoverable via \
-                         DescribeMethods (no type registry to pin versions)",
+                        "guest module {module_id} export '{}' ({}) has a parameter or return \
+                         type that is neither a primitive nor an optional over a scalar \
+                         primitive; it \
+                         dispatches but DescribeMethods does not list it",
                         function.name,
                         function.id
                     ),
@@ -915,14 +917,14 @@ mod module_loading_tests {
         assert_eq!(result.ret, Value::Boolean(true));
     }
 
-    /// A loaded guest module's primitive-typed exports join the method index
-    /// with frozen signatures, so `DescribeMethods` lists them — the guest
-    /// counterpart of `described_host_functions_join_the_method_index`
-    /// (ARORA-83). The test module exports only primitives, so all of them are
-    /// discoverable.
+    /// A loaded guest module's exports join the method index with frozen
+    /// signatures, so `DescribeMethods` lists them — the guest counterpart of
+    /// `described_host_functions_join_the_method_index`. The test module's
+    /// exports take and return primitives and optionals over a scalar
+    /// primitive only, so all of them are discoverable.
     #[test]
-    fn guest_module_primitive_exports_join_the_method_index() {
-        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+    fn guest_module_exports_join_the_method_index() {
+        use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
 
         let header = test_module_header();
         let module_id = header.id;
@@ -958,6 +960,141 @@ mod module_loading_tests {
         // `add(a: f32, b: f32) -> f32`: two f32 parameters in order.
         let add = by_name("add").expect("add joined the method index");
         assert_eq!(add.function.parameter_ordering.len(), 2);
+
+        // `window(start_ns: u64, end_ns: Option<u64>) -> Option<u64>`.
+        let optional_u64 = FrozenTy::FrozenOption(FrozenOption {
+            element: Box::new(FrozenTy::from(PrimitiveKind::U64)),
+        });
+        let window = by_name("window").expect("window joined the method index");
+        let parameter =
+            |index: usize| &window.function.parameters[&window.function.parameter_ordering[index]];
+        assert_eq!(parameter(0).name, "start_ns");
+        assert_eq!(parameter(0).ty, FrozenTy::from(PrimitiveKind::U64));
+        assert_eq!(parameter(1).name, "end_ns");
+        assert_eq!(parameter(1).ty, optional_u64);
+        assert_eq!(window.function.return_ty, optional_u64);
+
+        // `greet(name: Option<String>) -> String`.
+        let greet = by_name("greet").expect("greet joined the method index");
+        let name = &greet.function.parameters[&greet.function.parameter_ordering[0]];
+        assert_eq!(
+            name.ty,
+            FrozenTy::FrozenOption(FrozenOption {
+                element: Box::new(FrozenTy::from(PrimitiveKind::String)),
+            })
+        );
+    }
+
+    /// A guest export is described with the signature its module's record
+    /// declares for it: what a host module registering the same declaration
+    /// would describe.
+    #[test]
+    fn a_guest_export_is_described_as_its_module_record_declares_it() {
+        use arora_types::record::module::frozen::ExportKind;
+
+        let header = test_module_header();
+        let record = test_rust_wasm::test_rust_wasm::record(Uuid::nil());
+        assert_eq!(header.exports.len(), record.exports.len());
+        for export in &header.exports {
+            let low::ExportSymbol::Function(function) = export;
+            let ExportKind::Function(declared) = &record.exports[&function.id].kind;
+            assert_eq!(
+                module_discovery::guest_function_signature(function).as_ref(),
+                Some(declared),
+                "{}",
+                function.name
+            );
+        }
+    }
+
+    /// A guest function taking and returning an optional is listed by
+    /// `DescribeMethods` — its signature intact across the value plane — and
+    /// `invoke` calls it with the optional present, absent, or explicitly
+    /// `None`.
+    #[test]
+    fn invoke_calls_a_guest_function_with_an_optional_present_or_absent() {
+        use arora_bridge::client::method_info;
+        use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
+        use arora_types::value::Type;
+
+        let mut arora = Arora::builder()
+            .with_module(test_module_header(), WASM.to_vec())
+            .build()
+            .expect("build a device with a loaded wasm module");
+        let caller = arora.caller();
+
+        let methods = caller_tests::settle(
+            &mut arora,
+            caller.describe_methods(Some("window".to_string())),
+        )
+        .expect("the device describes its methods");
+        assert_eq!(methods.len(), 1, "{methods:?}");
+        let optional_u64 = FrozenTy::FrozenOption(FrozenOption {
+            element: Box::new(FrozenTy::from(PrimitiveKind::U64)),
+        });
+        assert_eq!(methods[0].function.return_ty, optional_u64);
+        let info = method_info(&methods[0]);
+        let params: Vec<_> = info
+            .params
+            .iter()
+            .map(|p| (p.name.as_str(), p.param_type.clone(), p.required))
+            .collect();
+        assert_eq!(
+            params,
+            vec![
+                ("start_ns", Type::U64, true),
+                ("end_ns", Type::Option, false)
+            ]
+        );
+
+        let mut window = |args: Vec<(&str, Value)>| {
+            let args = args
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value))
+                .collect();
+            caller_tests::settle(&mut arora, caller.invoke("window", args, None))
+                .expect("window answers")
+        };
+        let some = |value| Value::Option(Some(Box::new(Value::U64(value))));
+        assert_eq!(
+            window(vec![("start_ns", Value::U64(10)), ("end_ns", some(40))]),
+            Invoked::Returned(some(30))
+        );
+        assert_eq!(
+            window(vec![("start_ns", Value::U64(10))]),
+            Invoked::Returned(Value::Option(None))
+        );
+        assert_eq!(
+            window(vec![
+                ("start_ns", Value::U64(10)),
+                ("end_ns", Value::Option(None))
+            ]),
+            Invoked::Returned(Value::Option(None))
+        );
+        assert_eq!(
+            window(vec![
+                ("start_ns", Value::U64(10)),
+                ("end_ns", Value::U64(40))
+            ]),
+            Invoked::Returned(some(30)),
+            "a present optional may also be sent bare"
+        );
+
+        let mut greet = |args: HashMap<String, Value>| {
+            caller_tests::settle(&mut arora, caller.invoke("greet", args, None))
+                .expect("greet answers")
+        };
+        assert_eq!(
+            greet(HashMap::from([(
+                "name".to_string(),
+                Value::Option(Some(Box::new(Value::String("Ada".to_string()))))
+            )])),
+            Invoked::Returned(Value::String("hello, Ada".to_string()))
+        );
+        assert_eq!(
+            greet(HashMap::new()),
+            Invoked::Returned(Value::String("hello".to_string()))
+        );
     }
 
     /// Dispatch is always module-scoped: a call naming no module is refused.
@@ -1403,7 +1540,7 @@ mod caller_tests {
     const PLAYER_STOP: Uuid = Uuid::from_u128(0x7102);
 
     /// Step `arora` until `future` resolves, polling it after each step.
-    fn settle<T>(arora: &mut Arora, future: impl Future<Output = T>) -> T {
+    pub(super) fn settle<T>(arora: &mut Arora, future: impl Future<Output = T>) -> T {
         let mut future = pin!(future);
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
         for _ in 0..8 {

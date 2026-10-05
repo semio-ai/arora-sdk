@@ -37,6 +37,27 @@ pub mod test_rust_wasm {
     pub fn text(#[param(id = "64351cbc-d84b-4df3-bd52-fd23edd943cf")] length: u32) -> String {
         "x".repeat(length as usize)
     }
+
+    /// The length of the window from `start_ns` to `end_ns`, or `None` when it
+    /// is open-ended (no `end_ns`).
+    #[export(id = "66878cab-6396-480f-86f2-559dd534215e")]
+    pub fn window(
+        #[param(id = "0f4a5b8a-df7d-4ff9-98fc-123e53f7783a")] start_ns: u64,
+        #[param(id = "3ccec224-b34c-415f-96d6-25a85e412ef3")] end_ns: Option<u64>,
+    ) -> Option<u64> {
+        end_ns.map(|end_ns| end_ns.saturating_sub(start_ns))
+    }
+
+    /// A greeting, naming `name` when there is one.
+    #[export(id = "c82c6987-656f-4fb1-9191-ec7a5cd6832b")]
+    pub fn greet(
+        #[param(id = "04cd4cb8-b7ab-40b5-84ae-0174fead4bba")] name: Option<String>,
+    ) -> String {
+        match name {
+            Some(name) => format!("hello, {name}"),
+            None => "hello".to_string(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -48,5 +69,9 @@ mod tests {
         ping();
         assert!(succeed());
         assert_eq!(add(2.0, 3.0), 5.0);
+        assert_eq!(window(10, Some(40)), Some(30));
+        assert_eq!(window(10, None), None);
+        assert_eq!(greet(Some("Ada".to_string())), "hello, Ada");
+        assert_eq!(greet(None), "hello");
     }
 }

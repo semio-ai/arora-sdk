@@ -4,6 +4,19 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.7.0] - 2026-10-06
+
+### Added
+
+- `DescribeMethods` lists a guest (wasm) module's functions that take or
+  return an optional over a scalar primitive (`Option<u64>`, `Option<String>`),
+  with the parameter or return typed as a `FrozenOption` over the primitive —
+  the signature the module's record declares for it. `LocalCaller::invoke` and
+  remote clients call them by name; an optional argument may be left out,
+  which the guest reads as `None`. A function naming a record type, a map or a fixed-length array still
+  dispatches without being listed: a record needs a type registry to pin its
+  version.
+
 ## [11.6.1] - 2026-10-06
 
 ### Changed
