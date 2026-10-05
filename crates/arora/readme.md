@@ -120,7 +120,8 @@ does not run, one module in two directories, an artifact the engine rejects —
 fails the start, naming the module. A loaded module's functions are reachable
 by any call — in-process (`Arora::call`), over a bridge — and `DescribeMethods`
 lists them under one rule: a function whose parameters and return are all
-primitives is described, any other still dispatches
+primitives or optionals over a scalar primitive is described; any other — one
+naming a record type, a map or a fixed-length array — still dispatches
 ([`module_discovery`](src/module_discovery.rs)). A Groot tree the binary
 installs binds no module function: its nodes are the native control nodes.
 [`module_dir`](src/module_dir.rs) reads module directories for an embedder.
