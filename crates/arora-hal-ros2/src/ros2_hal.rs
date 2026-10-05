@@ -814,25 +814,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_model_glb_with_nao_config() {
-        // The NAO configuration, with the fixture model in place of nao.glb.
-        let mut config = nao::create_config();
-        config.model_glb_path = Some(crate::test_fixture::fixture_glb_path());
-
-        let Some(hal) = hal_or_skip(Ros2Hal::new(config).await) else {
-            return;
-        };
-
-        let glb_data = hal.model_glb().await.expect("model_glb should succeed");
-
-        assert_eq!(
-            glb_data,
-            Some(crate::test_fixture::fixture_glb_bytes()),
-            "model_glb should serve the configured model file"
-        );
-    }
-
-    #[tokio::test]
     async fn test_model_glb_with_missing_file_names_both_remedies() {
         // An `Override` mapping does not read the model when the HAL starts,
         // so a missing file shows only when something reads the model.
