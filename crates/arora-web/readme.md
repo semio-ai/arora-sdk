@@ -22,8 +22,8 @@ class AroraRuntime {
   readonly behaviorError?: string;        // the behavior's standing error; undefined while healthy
   behaviorErrorChanged(): Promise<string | undefined>; // resolves on the next standing-error change
   call(callJson: string): Promise<string>; // in-process Call, applied by the next step; resolves to result JSON
-  invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown>; // by name; a value, or a run's handle
-  spawn(callJson: string): Promise<unknown>; // starts a task run; resolves to its handle
+  invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown | Run>; // by name; a Value's JSON, or a run's handle
+  spawn(callJson: string): Promise<Run>;  // starts a task run; resolves to its handle
   halt(runId: string): Promise<void>;     // stops the run its handle's `run` names
   listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>;
   describeMethods(prefix?: string): Promise<unknown[]>; // as a bridge lists methods, plus each one's `module` id
@@ -33,6 +33,9 @@ class AroraRuntime {
   snapshot(): Record<string, unknown>;
   drainChanges(): Record<string, unknown>; // first drain = the store's whole state
 }
+
+// A run's handle: its id, and the paths of the keys that follow and steer it.
+type Run = { run: string; status: string; feedback: string[]; result: string[]; update: string[] };
 
 class AroraRuntimeBuilder {
   constructor();
@@ -67,9 +70,10 @@ land.
 export one name, pass the module id (`describeMethods` gives each method's
 `module`) — without it the promise rejects naming those modules. A task-shaped
 method (one returning the behavior `Status`) is spawned as a run: like
-`spawn`, it resolves to the run's handle, an Arora key-value whose `run` field
-is the id `halt` takes and whose `status` field is the key reporting how the
-run goes and ends — the same handle a bridge answers with.
+`spawn`, it resolves to the run's handle, a plain object
+`{ run, status, feedback, result, update }`: `run` is the id `halt` takes,
+`status` the path of the key reporting how the run goes and ends, and the rest
+the paths of the keys carrying its progress, its result, and what steers it.
 
 A downstream device (e.g. Vizij) composes its own `arora::Arora` with
 `arora::AroraBuilder` — the HAL, bridge, and store seams are trait objects that

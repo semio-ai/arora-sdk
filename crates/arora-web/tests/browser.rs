@@ -240,15 +240,19 @@ async fn invoke_answers_a_value_or_starts_a_run() {
     yield_to_tasks().await;
     web.step(10.0).expect("step");
     let handle = json(JsFuture::from(started).await.expect("wave starts"));
-    let fields = &handle["keyvalue"]["fields"];
-    let run = fields["run"]["value"]["str"]
+    // A plain object, keys as paths.
+    let run = handle["run"]
         .as_str()
         .unwrap_or_else(|| panic!("the handle names its run: {handle}"))
         .to_string();
-    let status_key = fields["status"]["value"]["str"]
+    assert!(Uuid::parse_str(&run).is_ok(), "{handle}");
+    let status_key = handle["status"]
         .as_str()
         .unwrap_or_else(|| panic!("the handle names its status key: {handle}"))
         .to_string();
+    for keys in ["feedback", "result", "update"] {
+        assert!(handle[keys].is_array(), "{keys} is a path array: {handle}");
+    }
 
     web.step(10.0).expect("step");
     let read = |web: &AroraWeb| {

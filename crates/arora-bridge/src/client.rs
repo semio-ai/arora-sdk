@@ -15,7 +15,7 @@
 //!   [`task_shaped`]: it reports `Running`/`Success`/`Failure` across ticks, so
 //!   the device hosts it as a task run rather than answering it at once. A
 //!   client starts one by wrapping its call in [`spawn`], reads the run a spawn
-//!   answers with through [`run_value`], and stops it with [`halt`]. These speak
+//!   answers with through [`run_of`], and stops it with [`halt`]. These speak
 //!   the interpreter module's ABI (`arora_behavior::interpreter_module`) over
 //!   the value plane.
 //! - **What a client reads back.** [`KeyInfo`] is a key with what its store says
@@ -218,7 +218,7 @@ pub fn task_shaped(function: &Function) -> bool {
 }
 
 /// The call that spawns `call` as a task run. It answers with the run's
-/// handle (read it with [`run_value`]).
+/// handle (read it with [`run_of`]).
 ///
 /// A client's run is concurrent: two spawns are two runs, and the device's
 /// behavior is what arbitrates between them.
@@ -232,27 +232,56 @@ pub fn halt(run: Uuid) -> Call {
     interpreter_module::encode_halt(TaskId(run))
 }
 
-/// The run a [`spawn`] answered with, as a client reads it: a key-value with
-/// named fields, like everything else a by-name client is given — keys as
-/// paths. `run` is the run's id (a string), which [`halt`] takes; `status` the
-/// key that says how it is going and how it ended; `feedback`, `result` and
-/// `update` the keys carrying its progress, its result, and what an observer may
-/// write to steer it.
+/// A run as a client reads it: named fields, keys as paths — the form a by-name
+/// client is given everything in.
 ///
-/// Fails when `spawned` is not a run handle.
-pub fn run_value(spawned: &Value) -> Result<Value, String> {
+/// Read it out of what a [`spawn`] answered with [`run_of`]. Serialized, it is
+/// `{"run": "<uuid>", "status": "<path>", "feedback": [...], "result": [...],
+/// "update": [...]}`; [`to_value`](Self::to_value) gives it as a value-plane
+/// key-value with the same field names, for a client whose answers travel as
+/// [`Value`]s.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    /// The run's id, which [`halt`] takes.
+    pub run: Uuid,
+    /// The key that says how the run is going and how it ended: a behavior
+    /// `Status`, `Running` until it ends.
+    pub status: String,
+    /// The keys carrying the run's progress while it runs.
+    pub feedback: Vec<String>,
+    /// The keys carrying its result, written when it ends.
+    pub result: Vec<String>,
+    /// The keys an observer may write to steer it — a moving target, say.
+    pub update: Vec<String>,
+}
+
+impl Run {
+    /// The run as a value-plane key-value, its fields named as this struct's:
+    /// `run` (the id as a string), `status`, and the `feedback`, `result` and
+    /// `update` paths as string arrays.
+    pub fn to_value(&self) -> Value {
+        KeyValue::from(vec![
+            KeyValueField::new("run", Value::String(self.run.to_string())),
+            KeyValueField::new("status", Value::String(self.status.clone())),
+            KeyValueField::new("feedback", Value::ArrayString(self.feedback.clone())),
+            KeyValueField::new("result", Value::ArrayString(self.result.clone())),
+            KeyValueField::new("update", Value::ArrayString(self.update.clone())),
+        ])
+        .as_value()
+    }
+}
+
+/// The run a [`spawn`] answered with. Fails when `spawned` is not a run handle.
+pub fn run_of(spawned: &Value) -> Result<Run, String> {
     let handle = interpreter_module::decode_spawn_result(spawned)?;
-    let paths = |keys: &[Key]| {
-        Value::ArrayString(keys.iter().map(|key| key.path.clone()).collect::<Vec<_>>())
-    };
-    Ok(KeyValue::from(vec![
-        KeyValueField::new("run", Value::String(handle.id.0.to_string())),
-        KeyValueField::new("status", Value::String(handle.status.path.clone())),
-        KeyValueField::new("feedback", paths(&handle.feedback)),
-        KeyValueField::new("result", paths(&handle.result)),
-        KeyValueField::new("update", paths(&handle.update)),
-    ])
-    .as_value())
+    let paths = |keys: Vec<Key>| keys.into_iter().map(|key| key.path).collect();
+    Ok(Run {
+        run: handle.id.0,
+        status: handle.status.path,
+        feedback: paths(handle.feedback),
+        result: paths(handle.result),
+        update: paths(handle.update),
+    })
 }
 
 /// The value-plane shape of a frozen type: which [`Value`] a client sends for a
@@ -431,9 +460,21 @@ mod tests {
             result: vec![Key::from("arora/tasks/m/f/5/result")],
             update: vec![Key::from("arora/tasks/m/f/5/target")],
         };
-        let Value::KeyValue(fields) =
-            run_value(&interpreter_module::encode_spawn_result(&handle)).expect("the run decodes")
-        else {
+        let read =
+            run_of(&interpreter_module::encode_spawn_result(&handle)).expect("the run decodes");
+        assert_eq!(
+            read,
+            Run {
+                run,
+                status: "arora/tasks/m/f/5/status".to_string(),
+                feedback: vec!["arora/tasks/m/f/5/feedback".to_string()],
+                result: vec!["arora/tasks/m/f/5/result".to_string()],
+                update: vec!["arora/tasks/m/f/5/target".to_string()],
+            }
+        );
+        assert_eq!(halt(read.run), handle.stop);
+
+        let Value::KeyValue(fields) = read.to_value() else {
             panic!("a run reads as a key-value");
         };
         let field = |name: &str| {
@@ -445,14 +486,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("the run carries {name}"))
         };
         assert_eq!(field("run"), Value::String(run.to_string()));
-        assert_eq!(field("status"), Value::String(handle.status.path.clone()));
-        assert_eq!(
-            field("update"),
-            Value::ArrayString(vec!["arora/tasks/m/f/5/target".to_string()])
-        );
-        assert_eq!(halt(run), handle.stop);
+        assert_eq!(field("status"), Value::String(read.status.clone()));
+        assert_eq!(field("update"), Value::ArrayString(read.update.clone()));
 
-        assert!(run_value(&Value::Unit).is_err());
+        assert!(run_of(&Value::Unit).is_err());
     }
 
     /// Spawning wraps the call in the interpreter's spawn, concurrently.

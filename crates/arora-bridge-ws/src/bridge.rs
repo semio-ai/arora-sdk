@@ -207,8 +207,8 @@ impl Device for DevicePlane {
         let call = if task { client::spawn(&call) } else { call };
         match self.ask(BridgeOp::Call(call)).await {
             Ok(Value::Unit) => InvokeResult::ok(),
-            Ok(value) if task => match client::run_value(&value) {
-                Ok(run) => InvokeResult::ok_with_value(run),
+            Ok(value) if task => match client::run_of(&value) {
+                Ok(run) => InvokeResult::ok_with_value(run.to_value()),
                 // The run did start: answer with the handle as it came rather
                 // than telling the client it failed.
                 Err(e) => {

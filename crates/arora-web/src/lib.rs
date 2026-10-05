@@ -97,12 +97,12 @@ fn value_to_js(value: &Value) -> Result<JsValue, JsValue> {
     to_js(&json)
 }
 
-/// A run handle as a client reads it — the value `invoke` of a task-shaped
-/// method and `spawn` answer with, the same one a bridge answers with.
+/// A run handle as a client reads it — the plain object `invoke` of a
+/// task-shaped method and `spawn` answer with: `arora_bridge::client::Run`.
 fn run_to_js(handle: &arora::TaskHandle) -> Result<JsValue, JsValue> {
     let spawned = arora_behavior::interpreter_module::encode_spawn_result(handle);
-    let run = client::run_value(&spawned).map_err(|e| JsValue::from_str(&e))?;
-    value_to_js(&run)
+    let run = client::run_of(&spawned).map_err(|e| JsValue::from_str(&e))?;
+    to_js(&run)
 }
 
 /// Value↔JSON accessors over a device's [`DataStore`] and change
@@ -427,7 +427,7 @@ impl AroraWeb {
     /// promise resolves to the return value, as a plain JS value of that JSON
     /// form. A task-shaped method — one returning the behavior `Status` — is
     /// spawned as a run instead, and resolves at once to the run's handle, the
-    /// value [`spawn`](Self::spawn) answers with.
+    /// plain object [`spawn`](Self::spawn) answers with.
     ///
     /// Names are the bare names modules export, so two modules may share one:
     /// `module_id` (a uuid string) names the exporting module to choose. A name
@@ -466,11 +466,12 @@ impl AroraWeb {
 
     /// Start `call_json` (an `arora_types::call::Call` as JSON) as a task run,
     /// concurrently with every other run. The promise resolves to the run's
-    /// handle, in the JSON form of an Arora key-value with named fields: `run`
-    /// (the run id, which [`halt`](Self::halt) takes), `status` (the key that
-    /// reports how the run goes and ends), and `feedback`, `result` and
-    /// `update` (the keys carrying its progress, its result, and what steers
-    /// it). Queued before this returns; applied by the next step.
+    /// handle, a plain object `{run, status, feedback, result, update}`: `run`
+    /// the run id (a uuid string, which [`halt`](Self::halt) takes), `status`
+    /// the path of the key that reports how the run goes and ends, and
+    /// `feedback`, `result` and `update` the paths of the keys carrying its
+    /// progress, its result, and what steers it. Queued before this returns;
+    /// applied by the next step.
     pub fn spawn(&self, call_json: &str) -> js_sys::Promise {
         let parsed: Result<Call, _> = serde_json::from_str(call_json)
             .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));

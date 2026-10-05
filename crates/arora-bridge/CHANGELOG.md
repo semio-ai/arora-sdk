@@ -13,8 +13,9 @@ All notable changes to `arora-bridge`. The format follows
   designates; a name several modules export designates nothing until the module
   is named, and the error names those modules), `call_of` (bind arguments by
   parameter name), `task_shaped`, `spawn` and `halt` (start and stop a task run
-  through the interpreter module), `run_value` (the run a spawn answers with, as
-  named fields), and the shapes a client reads: `KeyInfo`, `MethodInfo`,
+  through the interpreter module), `run_of` and `Run` (the run a spawn answers
+  with, as named fields with keys as paths; `Run::to_value` gives it as a
+  value-plane key-value), and the shapes a client reads: `KeyInfo`, `MethodInfo`,
   `MethodParam`, `method_info`.
 
 ### Changed

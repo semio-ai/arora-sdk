@@ -11,8 +11,8 @@ All notable changes to `arora-web`. The format follows
 - `AroraRuntime` has the client operations a remote client has over a bridge,
   beside `call`: `invoke(method, argsJson, moduleId?)` (resolves to the return
   value, or for a task-shaped method to the run's handle), `spawn(callJson)`
-  (resolves to the run's handle: `run`, `status`, `feedback`, `result`,
-  `update`, as a bridge answers it), `halt(runId)`, `listKeys(prefix?)` (an
+  (resolves to the run's handle, a plain object `{run, status, feedback,
+  result, update}`: the run id and the keys' paths), `halt(runId)`, `listKeys(prefix?)` (an
   array of `{path, __meta}`) and `describeMethods(prefix?)` (each method as a
   bridge lists it, plus its `module` id).
 - `AroraWeb::caller`: the device's `LocalCaller`, for a Rust crate wrapping
