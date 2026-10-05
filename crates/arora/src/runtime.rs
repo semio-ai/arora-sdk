@@ -1786,6 +1786,26 @@ mod tests {
         );
     }
 
+    /// A start beyond the clock's `u64` nanoseconds saturates, and the clock
+    /// stays there rather than wrapping.
+    #[test]
+    fn a_start_beyond_the_clock_s_range_saturates() {
+        let store = SimpleDataStore::new();
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_start_time(Duration::MAX)
+            .build()
+            .expect("arora builds");
+        arora.step(FRAME).expect("step");
+        assert_eq!(
+            published_clock(&store),
+            (
+                Some(Value::U64(u64::MAX)),
+                Some(Value::U64(FRAME.as_nanos() as u64))
+            )
+        );
+    }
+
     /// Two devices started at the same time and stepped with the same `dt`s
     /// read the same `arora/time` at every step: the timeline a late device
     /// joins is the one its peers are on.

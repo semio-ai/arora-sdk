@@ -483,6 +483,9 @@ impl AroraBuilder {
     ///
     /// The clock is set here only: a built device has no setter, and only its
     /// steps move it. Default: zero.
+    ///
+    /// The clock counts `u64` nanoseconds (~584 years): a start beyond that
+    /// saturates at `u64::MAX`, where `arora/time` stays.
     pub fn with_start_time(mut self, start: Duration) -> Self {
         self.start_time = start;
         self

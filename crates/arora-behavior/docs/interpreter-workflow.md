@@ -80,7 +80,7 @@ There is **no separate "time update" method**. Timing is *data*, not a tick argu
 
 | Key | Meaning | Constant |
 |---|---|---|
-| `arora/time` | monotonic nanoseconds since start (`U64`) | [`built_in.rs:26`](../src/built_in.rs#L26) |
+| `arora/time` | monotonic nanoseconds on the runtime's timeline, from its start time (zero unless set) (`U64`) | [`built_in.rs:26`](../src/built_in.rs#L26) |
 | `arora/dt` | nanoseconds elapsed since the previous step (`U64`) | [`built_in.rs:31`](../src/built_in.rs#L31) |
 
 An interpreter that needs elapsed time reads `arora/dt` from `ctx.store` like any other slot ([`lib.rs:33-35`](../src/lib.rs#L33-L35), [`built_in.rs:1-16`](../src/built_in.rs#L1-L16)). The runtime publishes them in phase 1 of the step, before sensors, events, or the behavior touch the store ([`arora/src/runtime.rs:207-218`](../../arora/src/runtime.rs#L207-L218)).
