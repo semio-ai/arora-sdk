@@ -22,11 +22,13 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 use arora_buffers::serde_uuid::serialize as serialize_value;
-use arora_types::module::low::ModuleDefinition;
+use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
+use crate::compiled::{Code, CompiledModule};
 use crate::engine::EngineRef;
+use crate::load::module_definition_from_parts;
 use crate::module::{DispatchError, Module};
 
 /// State shared between a [`BrowserExecutor`] and asynchronous module
@@ -118,6 +120,32 @@ impl BrowserExecutor {
     }
 }
 
+impl BrowserExecutor {
+    /// Instantiate `module` synchronously (`new WebAssembly.Instance`), with
+    /// imports bound to this executor's Arora engine.
+    fn instantiate(
+        &self,
+        module: &WebAssembly::Module,
+    ) -> Result<PreparedInstance, LoadModuleError> {
+        let engine_ptr = self.shared.engine.get().ok_or_else(|| {
+            LoadModuleError::Internal("BrowserExecutor: set_engine not called".into())
+        })?;
+        let (imports, parts) = build_imports(engine_ptr)?;
+        let instance = WebAssembly::Instance::new(module, &imports)
+            .map_err(|e| LoadModuleError::Internal(format!("WebAssembly.Instance: {:?}", e)))?;
+        Ok(parts.with_instance(instance))
+    }
+}
+
+/// Compile `executable` synchronously (`new WebAssembly.Module`), subject to
+/// the browser's limit on synchronous compilation on the main thread (8 MB in
+/// Chrome).
+pub(crate) fn compile(executable: &[u8]) -> Result<WebAssembly::Module, LoadModuleError> {
+    let bytes_view = Uint8Array::from(executable);
+    WebAssembly::Module::new(&bytes_view.into())
+        .map_err(|e| LoadModuleError::Internal(format!("WebAssembly.Module: {:?}", e)))
+}
+
 impl Default for BrowserExecutor {
     fn default() -> Self {
         Self::new()
@@ -148,77 +176,31 @@ impl Executor for BrowserExecutor {
             .remove(&module_definition.header.id);
         let prepared = match prepared {
             Some(p) => p,
-            None => {
-                let engine_ptr = self.shared.engine.get().ok_or_else(|| {
-                    LoadModuleError::Internal("BrowserExecutor: set_engine not called".into())
-                })?;
-                let bytes_view = Uint8Array::from(module_definition.executable.as_ref());
-                let module = WebAssembly::Module::new(&bytes_view.into()).map_err(|e| {
-                    LoadModuleError::Internal(format!("WebAssembly.Module: {:?}", e))
-                })?;
-                let (imports, parts) = build_imports(engine_ptr)?;
-                let instance = WebAssembly::Instance::new(&module, &imports).map_err(|e| {
-                    LoadModuleError::Internal(format!("WebAssembly.Instance: {:?}", e))
-                })?;
-                parts.with_instance(instance)
-            }
+            None => self.instantiate(&compile(&module_definition.executable)?)?,
         };
-        let PreparedInstance {
-            instance,
-            dispatch_cb,
-            dispatch_indirect_cb,
-            wasi_keepalive,
-            late,
-        } = prepared;
+        bind_exports(prepared, &module_definition.header.exports)
+    }
 
-        // Pull exports.
-        let exports = instance.exports();
-        let memory: WebAssembly::Memory = Reflect::get(&exports, &"memory".into())
-            .map_err(js_to_load_err)?
-            .dyn_into()
-            .map_err(|_| LoadModuleError::Internal("guest does not export 'memory'".into()))?;
-        let malloc: Function = Reflect::get(&exports, &"arora_buffer_alloc".into())
-            .map_err(js_to_load_err)?
-            .dyn_into()
-            .map_err(|_| {
-                LoadModuleError::Internal("guest does not export 'arora_buffer_alloc'".into())
-            })?;
-        let free: Function = Reflect::get(&exports, &"arora_buffer_free".into())
-            .map_err(js_to_load_err)?
-            .dyn_into()
-            .map_err(|_| {
-                LoadModuleError::Internal("guest does not export 'arora_buffer_free'".into())
-            })?;
-
-        let mut arora_functions = HashMap::new();
-        for export in &module_definition.header.exports {
-            let id = *export.id();
-            let symbol = format!("arora_function_{}", id.to_string().replace('-', "_"));
-            let f: Function = Reflect::get(&exports, &symbol.clone().into())
-                .map_err(js_to_load_err)?
-                .dyn_into()
-                .map_err(|_| {
-                    LoadModuleError::Internal(format!("guest missing export '{}'", symbol))
-                })?;
-            arora_functions.insert(id, f);
+    fn load_compiled_module(
+        &mut self,
+        module: &CompiledModule,
+    ) -> Result<Box<dyn Module>, LoadModuleError> {
+        match &module.code {
+            Code::Browser(compiled) => {
+                // An instance staged for this id by `SharedLoader::prepare` is
+                // the one to load, as `load_module` does.
+                let staged = self.shared.prepared.borrow_mut().remove(&module.header.id);
+                let prepared = match staged {
+                    Some(p) => p,
+                    None => self.instantiate(compiled)?,
+                };
+                bind_exports(prepared, &module.header.exports)
+            }
+            Code::Executable(executable) => self.load_module(module_definition_from_parts(
+                module.header.clone(),
+                executable.as_ref().into(),
+            )),
         }
-
-        *late.borrow_mut() = Some(LateBound {
-            memory: memory.clone(),
-            malloc: malloc.clone(),
-        });
-
-        Ok(Box::new(BrowserModule {
-            _instance: instance,
-            memory,
-            malloc,
-            free,
-            arora_functions,
-            _dispatch_cb: dispatch_cb,
-            _dispatch_indirect_cb: dispatch_indirect_cb,
-            _wasi_keepalive: wasi_keepalive,
-            _late: late,
-        }))
     }
 
     fn unload_module(&mut self, _module_id: Uuid) -> Result<(), UnloadModuleError> {
@@ -226,6 +208,68 @@ impl Executor for BrowserExecutor {
         // engine; nothing else to do.
         Ok(())
     }
+}
+
+/// Bind a guest instance's memory, allocator and the functions its header
+/// declares (`declared`), completing a module load.
+fn bind_exports(
+    prepared: PreparedInstance,
+    declared: &[ExportSymbol],
+) -> Result<Box<dyn Module>, LoadModuleError> {
+    let PreparedInstance {
+        instance,
+        dispatch_cb,
+        dispatch_indirect_cb,
+        wasi_keepalive,
+        late,
+    } = prepared;
+
+    // Pull exports.
+    let exports = instance.exports();
+    let memory: WebAssembly::Memory = Reflect::get(&exports, &"memory".into())
+        .map_err(js_to_load_err)?
+        .dyn_into()
+        .map_err(|_| LoadModuleError::Internal("guest does not export 'memory'".into()))?;
+    let malloc: Function = Reflect::get(&exports, &"arora_buffer_alloc".into())
+        .map_err(js_to_load_err)?
+        .dyn_into()
+        .map_err(|_| {
+            LoadModuleError::Internal("guest does not export 'arora_buffer_alloc'".into())
+        })?;
+    let free: Function = Reflect::get(&exports, &"arora_buffer_free".into())
+        .map_err(js_to_load_err)?
+        .dyn_into()
+        .map_err(|_| {
+            LoadModuleError::Internal("guest does not export 'arora_buffer_free'".into())
+        })?;
+
+    let mut arora_functions = HashMap::new();
+    for export in declared {
+        let id = *export.id();
+        let symbol = format!("arora_function_{}", id.to_string().replace('-', "_"));
+        let f: Function = Reflect::get(&exports, &symbol.clone().into())
+            .map_err(js_to_load_err)?
+            .dyn_into()
+            .map_err(|_| LoadModuleError::Internal(format!("guest missing export '{}'", symbol)))?;
+        arora_functions.insert(id, f);
+    }
+
+    *late.borrow_mut() = Some(LateBound {
+        memory: memory.clone(),
+        malloc: malloc.clone(),
+    });
+
+    Ok(Box::new(BrowserModule {
+        _instance: instance,
+        memory,
+        malloc,
+        free,
+        arora_functions,
+        _dispatch_cb: dispatch_cb,
+        _dispatch_indirect_cb: dispatch_indirect_cb,
+        _wasi_keepalive: wasi_keepalive,
+        _late: late,
+    }))
 }
 
 struct LateBound {

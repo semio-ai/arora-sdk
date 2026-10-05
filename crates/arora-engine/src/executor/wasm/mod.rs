@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use bytes::Buf;
@@ -18,6 +19,8 @@ use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
+use crate::compiled::{Code, CompiledModule};
+use crate::load::module_definition_from_parts;
 use crate::{
     engine::EngineRef,
     executor::wasm::guest::AroraBuffer,
@@ -56,24 +59,76 @@ struct HostState {
     malloc: Option<TypedFunc<(u32,), u32>>,
 }
 
+/// The wasmtime engine every WebAssembly module compiles on and every instance
+/// runs in: one per process, created on first use.
+///
+/// A `wasmtime::Module` instantiates only in a store of the engine that
+/// compiled it, so a module compiled once can serve every device only if every
+/// device runs on that engine. Each instance still has a store of its own, so
+/// guests share no state; the engine holds compiled code and the instance
+/// allocator. A failure to create it is kept: every later executor and
+/// compilation fails with it.
+fn engine() -> Result<&'static WasmEngine, LoadModuleError> {
+    static ENGINE: OnceLock<Result<WasmEngine, String>> = OnceLock::new();
+    ENGINE
+        .get_or_init(|| {
+            let mut config = Config::new();
+            config.debug_info(cfg!(debug_assertions));
+            config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+            config.allocation_strategy(wasmtime::InstanceAllocationStrategy::pooling());
+            WasmEngine::new(&config).map_err(|e| format!("{e:#}"))
+        })
+        .as_ref()
+        .map_err(|e| {
+            LoadModuleError::Internal(format!("failed to create the wasmtime engine: {e}"))
+        })
+}
+
+/// Compile `executable` on the process-wide [`engine`].
+pub(crate) fn compile(executable: &[u8]) -> Result<WasmModule, LoadModuleError> {
+    WasmModule::new(engine()?, executable).map_err(|_| LoadModuleError::MalformedExecutable)
+}
+
 pub struct WebAssemblyExecutor {
-    engine: WasmEngine,
     arora_engine: Option<EngineRef>,
 }
 
 impl WebAssemblyExecutor {
+    /// An executor on the process-wide wasmtime engine, which this creates if
+    /// no executor has yet. Fails if the engine cannot be created.
     pub fn new() -> Result<Self, InitializationError> {
-        let mut config = Config::new();
-        // config.async_support(true);
-        config.debug_info(cfg!(debug_assertions));
-        config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-        config.allocation_strategy(wasmtime::InstanceAllocationStrategy::pooling());
-        // config.profiler(wasmtime::ProfilingStrategy::VTune).unwrap();
+        engine().map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Self { arora_engine: None })
+    }
 
-        Ok(Self {
-            engine: WasmEngine::new(&config).map_err(anyhow::Error::from)?,
-            arora_engine: None,
-        })
+    /// Instantiate `module` in a store of its own, linked to this executor's
+    /// Arora engine, and look up the `exports` the header declares.
+    fn instantiate(
+        &self,
+        exports: &[ExportSymbol],
+        module: WasmModule,
+    ) -> Result<Box<dyn Module>, LoadModuleError> {
+        let arora_engine = self.arora_engine.ok_or_else(|| {
+            LoadModuleError::Internal("WebAssemblyExecutor: set_engine not called".into())
+        })?;
+        let engine = module.engine().clone();
+        let state = HostState {
+            wasi: WasiCtxBuilder::new().inherit_stdio().build_p1(),
+            engine: EnginePtr(arora_engine),
+            malloc: None,
+        };
+
+        let store = Store::new(&engine, state);
+
+        let mut linker = Linker::new(&engine);
+        wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s: &mut HostState| &mut s.wasi)
+            .map_err(|err| {
+                LoadModuleError::Internal(format!("failed to map to wasm linker: {}", err))
+            })?;
+
+        let module = WebAssemblyModule::new(exports, module, store, linker)
+            .map_err(|err| LoadModuleError::Internal(format!("failed to instantiate: {err:#}")))?;
+        Ok(Box::new(module))
     }
 }
 
@@ -90,26 +145,21 @@ impl Executor for WebAssemblyExecutor {
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn Module>, LoadModuleError> {
-        let module = WasmModule::new(&self.engine, &module_definition.executable)
-            .map_err(|_| LoadModuleError::MalformedExecutable)?;
-        let state = HostState {
-            wasi: WasiCtxBuilder::new().inherit_stdio().build_p1(),
-            engine: EnginePtr(self.arora_engine.unwrap()),
-            malloc: None,
-        };
+        let module = compile(&module_definition.executable)?;
+        self.instantiate(&module_definition.header.exports, module)
+    }
 
-        let store = Store::new(&self.engine, state);
-
-        let mut linker = Linker::new(&self.engine);
-        wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s: &mut HostState| &mut s.wasi)
-            .map_err(|err| {
-                LoadModuleError::Internal(format!("failed to map to wasm linker: {}", err))
-            })?;
-
-        Ok(Box::new(
-            WebAssemblyModule::new(module_definition.header.exports, module, store, linker)
-                .unwrap(),
-        ))
+    fn load_compiled_module(
+        &mut self,
+        module: &CompiledModule,
+    ) -> Result<Box<dyn Module>, LoadModuleError> {
+        match &module.code {
+            Code::Wasmtime(compiled) => self.instantiate(&module.header.exports, compiled.clone()),
+            Code::Executable(executable) => self.load_module(module_definition_from_parts(
+                module.header.clone(),
+                executable.as_ref().into(),
+            )),
+        }
     }
 
     fn unload_module(&mut self, _: Uuid) -> Result<(), UnloadModuleError> {
@@ -210,7 +260,7 @@ impl WebAssemblyModule {
     }
 
     pub fn new(
-        exports: Vec<ExportSymbol>,
+        exports: &[ExportSymbol],
         module: WasmModule,
         mut store: Store<HostState>,
         mut linker: Linker<HostState>,
@@ -242,7 +292,9 @@ impl WebAssemblyModule {
             arora_functions.insert(*export.id(), arora_function);
         }
 
-        let memory = instance.get_memory(&mut store, "memory").unwrap();
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| anyhow::anyhow!("guest does not export 'memory'"))?;
         store.data_mut().malloc = Some(arora_buffer_alloc.clone());
 
         Ok(Self {

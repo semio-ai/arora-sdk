@@ -4,6 +4,23 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.8.0] - 2026-10-06
+
+### Added
+
+- `AroraBuilder::with_compiled_module(&CompiledModule)`: load a guest module
+  compiled once into any number of devices. Each device instantiates the
+  compiled code instead of compiling the executable, and the module goes
+  through the checks `with_module` does at `build` (one module per id, its
+  primitive-typed exports joining the method index).
+- Re-exports `arora_engine::compiled::CompiledModule`.
+
+### Changed
+
+- `with_module` compiles its module at `build`, for that device alone, then
+  loads it as `with_compiled_module` does.
+- Depends on arora-engine 5.2.
+
 ## [11.7.0] - 2026-10-06
 
 ### Added

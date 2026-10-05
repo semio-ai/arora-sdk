@@ -17,6 +17,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use arora_engine::call::CallBridge;
+use arora_engine::compiled::CompiledModule;
 use arora_engine::engine::EngineBuilder;
 use arora_engine::executor::browser::BrowserExecutor;
 use arora_engine::load::load_module_from_parts;
@@ -127,6 +128,37 @@ async fn prepares_asynchronously_then_dispatches() {
     assert_eq!(loaded.id, module_id);
 
     let result = engine
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: id(SUCCEED),
+            args: vec![],
+        })
+        .expect("dispatch succeed()");
+    assert_eq!(result.ret, Value::Boolean(true));
+}
+
+/// One compiled `WebAssembly.Module` loads into several engines, each with an
+/// instance of its own: dropping one engine leaves the other dispatching.
+#[wasm_bindgen_test]
+fn a_compiled_module_loads_into_several_engines() {
+    console_error_panic_hook::set_once();
+    let header = header();
+    let module_id = header.id;
+    let compiled = CompiledModule::new(header, WASM).expect("compile test-rust-wasm");
+    let engine = || {
+        let mut engine = EngineBuilder::new()
+            .add_executor(BrowserExecutor::new())
+            .build();
+        engine
+            .load_compiled_module(&compiled)
+            .expect("load the compiled module");
+        engine
+    };
+
+    let first = engine();
+    let mut second = engine();
+    drop(first);
+    let result = second
         .arora_call(Call {
             module_id: Some(module_id),
             id: id(SUCCEED),

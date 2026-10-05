@@ -4,6 +4,20 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.2.0] - 2026-10-05
+
+### Added
+
+- `CompiledModule` (`new CompiledModule(headerJson, executable)`): a guest
+  module compiled once, and `AroraRuntimeBuilder.withCompiledModule(module)`,
+  which loads it into a device as `withModule` loads one from its bytes. Each
+  device built from it instantiates the compiled `WebAssembly.Module` instead
+  of compiling the bytes.
+
+### Changed
+
+- Depends on arora 11.8.
+
 ## [8.1.0] - 2026-10-05
 
 ### Added

@@ -199,6 +199,26 @@ the `wasmtime-host` and `native-host` features (both default-on for native
 builds). On `wasm32-*`, the defaults are off and the browser executor takes
 over.
 
+### A guest module compiles once; each engine instantiates it
+
+Compiled code is shareable on both WebAssembly hosts, and only an instance
+holds a guest's state: a `WebAssembly.Module` instantiates any number of
+times, and a `wasmtime::Module` instantiates in any store of the engine that
+compiled it. So `CompiledModule` holds the compiled code, and an engine's
+`load_compiled_module` creates an instance of it; a device builder that loads
+one into N devices compiles once, not N times. Loading a module from its bytes
+is the same path with the compilation in front.
+
+Natively, every `WebAssemblyExecutor` in a process shares one wasmtime engine,
+created on first use, rather than one each: a module compiled for one engine
+cannot be instantiated in another, so per-executor engines would rule out
+sharing. Each instance keeps its own `Store`, so guests share no state. The
+pooling allocator is process-wide with it: it reserves address space for all
+its slots when the engine is created, so one engine per device would bound the
+devices a process holds by its address space, and one engine bounds instead
+the guest instances running at once — 1000 on 64-bit targets, 100 on 32-bit,
+wasmtime's defaults.
+
 ### `arora-web` is a separate crate
 
 The wasm-bindgen JS surface lives in `crates/arora-web`, not inside

@@ -4,6 +4,42 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.2.0] - 2026-10-05
+
+### Added
+
+- `compiled::CompiledModule`: a guest module compiled once, to load into any
+  number of engines with `Engine::load_compiled_module`. Each engine
+  instantiates the compiled code — an instance of its own, with its own memory
+  — instead of compiling the executable. `CompiledModule::new(header,
+  executable)` compiles a `"wasm"` module, to a `wasmtime::Module` natively and
+  to a `WebAssembly.Module` on `wasm32`; a module for another executor keeps
+  its bytes, which that executor loads as it loads a `ModuleDefinition`.
+  Cloning it shares the compiled code; natively it is `Send + Sync`.
+- `Executor::load_compiled_module`, which `Engine::load_compiled_module` calls.
+  Its default hands the module's bytes to `load_module`, so an executor that
+  loads its executable as it is needs no change; the WebAssembly executors
+  instantiate the compiled code.
+
+### Changed
+
+- Every `WebAssemblyExecutor` in a process compiles and instantiates on one
+  wasmtime engine instead of an engine each, created by the first executor or
+  `"wasm"` compilation: a `wasmtime::Module` instantiates only on the engine
+  that compiled it, so one engine is what lets devices share a compiled
+  module. Each instance keeps a store of its own. The engine's pooling
+  allocator reserves address space for all its slots when it is created, so
+  where an engine per executor bounded the number of executors a process
+  could create, one engine bounds the guest instances a process runs at once:
+  1000 on 64-bit targets, 100 on 32-bit. A failure to create the engine is
+  kept, and every later executor and compilation fails with it.
+
+### Fixed
+
+- `WebAssemblyExecutor` fails to load a module that does not export what its
+  header declares, or exports no `memory`, with an error naming what is
+  missing, instead of panicking; so does loading before `set_engine`.
+
 ## [5.1.0] - 2026-09-28
 
 ### Added

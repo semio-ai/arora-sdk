@@ -622,6 +622,17 @@ impl AroraWebBuilder {
         Ok(())
     }
 
+    /// Load a guest module compiled ahead into the device's engine, as
+    /// `withModule` loads one from its bytes. The device instantiates the
+    /// compiled `WebAssembly.Module` instead of compiling the bytes, so devices
+    /// built from one `CompiledModule` compile it once between them.
+    /// Repeatable — each call loads one module.
+    #[wasm_bindgen(js_name = withCompiledModule)]
+    pub fn with_compiled_module(&mut self, module: &CompiledModule) {
+        let inner = std::mem::take(&mut self.inner);
+        self.inner = inner.with_compiled_module(&module.inner);
+    }
+
     /// Build the device. The builder resets to its defaults, ready to
     /// assemble another.
     pub fn build(&mut self) -> Result<AroraWeb, JsValue> {
@@ -629,6 +640,32 @@ impl AroraWebBuilder {
             .build()
             .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
         Ok(AroraWeb::from(arora))
+    }
+}
+
+/// A guest module compiled once, to load into any number of devices with
+/// `AroraRuntimeBuilder.withCompiledModule`: each device instantiates it —
+/// its own memory and state — without compiling it again.
+#[wasm_bindgen]
+pub struct CompiledModule {
+    inner: arora::CompiledModule,
+}
+
+#[wasm_bindgen]
+impl CompiledModule {
+    /// Compile a guest module. `header_json` is the module's low-level header
+    /// as JSON; `executable` its wasm bytes. Compiles synchronously
+    /// (`new WebAssembly.Module`), which Chrome rejects above 8 MB on the main
+    /// thread. Fails on an invalid header or an executable that does not
+    /// compile.
+    #[wasm_bindgen(constructor)]
+    pub fn new(header_json: &str, executable: &[u8]) -> Result<CompiledModule, JsValue> {
+        install_panic_hook();
+        let header: Header = serde_json::from_str(header_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
+        let inner = arora::CompiledModule::new(header, executable)
+            .map_err(|e| JsValue::from_str(&format!("module does not compile: {e}")))?;
+        Ok(CompiledModule { inner })
     }
 }
 

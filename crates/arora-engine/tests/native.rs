@@ -4,6 +4,7 @@
 #![cfg(all(not(target_arch = "wasm32"), feature = "native-host"))]
 
 use arora_engine::call::CallBridge;
+use arora_engine::compiled::CompiledModule;
 use arora_engine::engine::{Engine, EngineBuilder};
 use arora_engine::executor::native::NativeExecutor;
 use arora_types::call::Call;
@@ -78,4 +79,38 @@ fn call_returns_the_guest_result() {
         })
         .expect("call");
     assert_eq!(result.ret, Value::String("x".repeat(200)));
+}
+
+/// A compiled module for an executor that loads its executable as it is (here
+/// a native library) keeps its bytes, and each engine loads them through that
+/// executor.
+#[test]
+fn a_compiled_native_module_loads_into_several_engines() {
+    let header = test_rust_wasm::test_rust_wasm::header(Executor {
+        name: "native".to_string(),
+        min_version: None,
+        max_version: None,
+    });
+    let module_id = header.id;
+    let compiled = CompiledModule::new(header, &std::fs::read(DYLIB).expect("guest library"))
+        .expect("a native module keeps its bytes");
+    for _ in 0..2 {
+        let mut engine = EngineBuilder::new()
+            .add_executor(NativeExecutor::new())
+            .build();
+        engine
+            .load_compiled_module(&compiled)
+            .expect("the compiled module loads");
+        let result = engine
+            .arora_call(Call {
+                module_id: Some(module_id),
+                id: TEXT,
+                args: vec![StructureField {
+                    id: TEXT_LENGTH,
+                    value: Box::new(Value::U32(3)),
+                }],
+            })
+            .expect("call");
+        assert_eq!(result.ret, Value::String("xxx".to_string()));
+    }
 }
