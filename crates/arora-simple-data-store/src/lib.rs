@@ -12,7 +12,7 @@ pub use namespaced::NamespacedStore;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 
 use arora_types::data::{
     prefix_covers, DataError, DataStore, Key, KeyMeta, Slot, State, StateChange, Subscription,
@@ -31,18 +31,60 @@ struct Inner {
     meta: RwLock<HashMap<Key, KeyMeta>>,
     /// What every key under a prefix is, until a key's own meta says otherwise.
     prefix_meta: RwLock<HashMap<String, KeyMeta>>,
-    subscribers: Mutex<Vec<Sender<StateChange>>>,
+    subscribers: Mutex<Vec<Subscriber>>,
+}
+
+/// Where a subscription's changes go, and which keys it asked for.
+struct Subscriber {
+    /// The subtree it is sent ([`prefix_covers`]).
+    prefix: String,
+    tx: Sender<StateChange>,
+    /// Gone once the [`Subscription`] is dropped: a subscriber is pruned at
+    /// the next change, whether or not the change is under its prefix.
+    alive: Weak<()>,
+}
+
+impl Subscriber {
+    /// What `change` holds of this subscriber's keys, cloned for it alone.
+    fn part_of(&self, change: &StateChange) -> StateChange {
+        let covered = |key: &Key| prefix_covers(&self.prefix, &key.path);
+        // A change wholly under the prefix is cloned as it is, without
+        // rebuilding its maps.
+        if change.set.keys().chain(&change.unset).all(covered) {
+            return change.clone();
+        }
+        StateChange {
+            set: change
+                .set
+                .iter()
+                .filter(|(key, _)| covered(key))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            unset: change
+                .unset
+                .iter()
+                .filter(|key| covered(key))
+                .cloned()
+                .collect(),
+        }
+    }
 }
 
 impl Inner {
-    /// Broadcast a change to live subscribers, pruning ones whose receiver was
-    /// dropped.
+    /// Send each subscriber what a change holds of its keys, and nothing to one
+    /// it holds none of; prune the subscribers whose subscription was dropped.
     fn notify(&self, change: StateChange) {
         if change.is_empty() {
             return;
         }
         let mut subs = self.subscribers.lock().unwrap();
-        subs.retain(|tx| tx.send(change.clone()).is_ok());
+        subs.retain(|sub| {
+            if sub.alive.strong_count() == 0 {
+                return false;
+            }
+            let part = sub.part_of(&change);
+            part.is_empty() || sub.tx.send(part).is_ok()
+        });
     }
 }
 
@@ -165,20 +207,46 @@ impl DataStore for SimpleDataStore {
     }
 
     fn subscribe(&self) -> Subscription {
+        self.subscribe_prefix("")
+    }
+
+    /// Keeps the subscriber's prefix and sends it the keys under it alone:
+    /// each key of a change is cloned once per subscriber covering it, and a
+    /// subscriber covering none of a change's keys is not sent the change.
+    fn subscribe_prefix(&self, prefix: &str) -> Subscription {
         let (tx, rx) = channel();
-        // The current state, as the subscription's first change: whoever
-        // attaches sees everything the store holds, then stays current from
-        // what follows. Taken while holding the subscriber list so a
-        // concurrent write lands either in this snapshot or in a later
+        // The current state under `prefix`, as the subscription's first
+        // change: whoever attaches sees everything the store holds there, then
+        // stays current from what follows. Taken while holding the subscriber
+        // list so a concurrent write lands either in this state or in a later
         // change, never in neither.
         let mut subscribers = self.inner.subscribers.lock().unwrap();
-        let mut initial = StateChange::new();
-        for (key, value) in self.snapshot().storage {
-            initial.set.insert(key, value);
-        }
-        let _ = tx.send(initial);
-        subscribers.push(tx);
-        Subscription::new(rx)
+        let opening = StateChange {
+            set: self
+                .inner
+                .cells
+                .read()
+                .unwrap()
+                .iter()
+                .filter(|(key, _)| prefix_covers(prefix, &key.path))
+                .map(|(key, cell)| (key.clone(), cell.read().unwrap().clone()))
+                .collect(),
+            unset: Default::default(),
+        };
+        let _ = tx.send(opening);
+        let alive = Arc::new(());
+        subscribers.push(Subscriber {
+            prefix: prefix.to_owned(),
+            tx,
+            alive: Arc::downgrade(&alive),
+        });
+        // The subscription holds `alive` and passes every change through as
+        // it is: the store sends no empty change after the opening state, so
+        // the translation's rule on empty changes withholds nothing.
+        Subscription::new(rx).map(move |change| {
+            let _alive = &alive;
+            change
+        })
     }
 }
 
@@ -282,6 +350,93 @@ mod tests {
             .try_recv()
             .expect("change")
             .contains(&Key::from("later")));
+    }
+
+    /// A store's own subscription passes on what the store sent it as it is,
+    /// so what it delivers is what was cloned for it: the keys under its
+    /// prefix, on a segment boundary, and nothing of a change that holds none
+    /// of them.
+    #[test]
+    fn a_prefixed_subscriber_is_sent_its_subtree_alone() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::from(vec![
+                ("a", Value::Boolean(true)),
+                ("a/x", Value::Boolean(true)),
+                ("ab/x", Value::Boolean(true)),
+                ("b/x", Value::Boolean(true)),
+            ]))
+            .unwrap();
+
+        let sub = store.subscribe_prefix("a");
+        assert_eq!(
+            sub.try_recv(),
+            Some(StateChange::from(vec![
+                ("a", Value::Boolean(true)),
+                ("a/x", Value::Boolean(true)),
+            ])),
+            "the opening state of the subtree alone"
+        );
+
+        store
+            .write(StateChange::from(vec![
+                ("a/x", Value::Boolean(false)),
+                ("ab/x", Value::Boolean(false)),
+                ("b/x", Value::Boolean(false)),
+            ]))
+            .unwrap();
+        assert_eq!(
+            sub.try_recv(),
+            Some(StateChange::set("a/x", Value::Boolean(false))),
+            "the part of the change under the prefix, under its full path"
+        );
+
+        store
+            .write(StateChange::set("b/x", Value::Boolean(true)))
+            .unwrap();
+        store
+            .slot(&Key::from("ab/x"))
+            .set(Some(Value::Boolean(true)))
+            .unwrap();
+        assert_eq!(sub.try_recv(), None, "nothing is sent for other keys");
+
+        store
+            .write(StateChange {
+                set: HashMap::new(),
+                unset: [Key::from("a/x"), Key::from("b/x")].into_iter().collect(),
+            })
+            .unwrap();
+        assert_eq!(
+            sub.try_recv(),
+            Some(StateChange {
+                set: HashMap::new(),
+                unset: [Key::from("a/x")].into_iter().collect(),
+            }),
+            "unsets are routed like sets"
+        );
+    }
+
+    /// A dropped subscription is pruned at the next change, even one outside
+    /// its prefix: a subtree nobody writes again does not keep it alive.
+    #[test]
+    fn a_dropped_subscriber_is_pruned_at_the_next_change() {
+        let store = SimpleDataStore::new();
+        let subscribers = || store.inner.subscribers.lock().unwrap().len();
+        let a = store.subscribe_prefix("a");
+        let b = store.subscribe_prefix("b");
+        assert_eq!(subscribers(), 2);
+
+        drop(a);
+        assert_eq!(subscribers(), 2, "pruned on a change, not on drop");
+        store
+            .write(StateChange::set("b/x", Value::Boolean(true)))
+            .unwrap();
+        assert_eq!(subscribers(), 1, "pruned at a change outside its prefix");
+        assert_eq!(
+            b.try_iter().count(),
+            2,
+            "the opening state, then the change"
+        );
     }
 
     #[test]

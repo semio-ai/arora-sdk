@@ -152,7 +152,9 @@ loop:
   a device-relative view into a shared backend: this is how one process (e.g.
   Semio Studio) spawns many instances over one mutualized blackboard, each
   built with `Arora::builder().with_data_store(…)` over its own `<device>/`
-  prefix.
+  prefix. A view's change feed is the store's subscription to that prefix
+  (`DataStore::subscribe_prefix`), which `SimpleDataStore` routes: each device
+  is sent its own keys and none of its neighbours'.
 - **HAL** — `arora_hal::Hal`, the device boundary. A robot HAL talks to
   hardware; a simulator or a renderer (e.g. a Vizij rig-instrumented face) is
   just another implementation.
