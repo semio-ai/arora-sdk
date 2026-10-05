@@ -4,7 +4,9 @@ mod fake_naoqi;
 
 use std::time::Duration;
 
+use arora_behavior::Status;
 use arora_hal::{Hal, UpdatesStream};
+use arora_hal_naoqi::say::{self, naoqi_say};
 use arora_hal_naoqi::{keys, NaoqiHal, NaoqiRobotConfig};
 use arora_types::data::{Key, StateChange};
 use arora_types::value::Value;
@@ -58,20 +60,6 @@ async fn wait_for_change(
     })
     .await
     .expect("no update matched in time")
-}
-
-async fn wait_for_unset(feed: &mut UpdatesStream, key: &str) {
-    let key = Key::from(key);
-    timeout(TIMEOUT, async {
-        while let Some(change) = feed.next().await {
-            if change.unset.contains(&key) {
-                return;
-            }
-        }
-        panic!("the updates feed ended");
-    })
-    .await
-    .unwrap_or_else(|_| panic!("{key:?} was not unset in time"))
 }
 
 fn f64_of(value: &Option<Value>) -> Option<f64> {
@@ -227,17 +215,41 @@ async fn writes_joint_targets_and_stiffness() {
     );
 }
 
-#[tokio::test]
-async fn try_send_speaks_without_blocking_and_unsets_the_text() {
+/// The `Say` leaf speaks in the robot's voice: running while `ALTextToSpeech.say` has not
+/// returned, then succeeding while ticked, the sentence said once; ticked again after a
+/// halt, it speaks again.
+#[tokio::test(flavor = "multi_thread")]
+async fn say_speaks_in_the_robots_voice() {
     let (robot, hal) = start().await;
-    let mut feed = hal.updates();
-    hal.try_send(&StateChange::set(keys::TEXT, Value::from("hello")));
-    wait_for_unset(&mut feed, keys::TEXT).await;
+    say::install(hal.voice());
+    let mut viseme = String::new();
+    let mut tick = || naoqi_say::say("hello".to_string(), String::new(), &mut viseme);
+    assert_eq!(tick(), Status::Running);
+    timeout(TIMEOUT, async {
+        while tick() != Status::Success {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the sentence is said");
+    assert_eq!(tick(), Status::Success, "latched while ticked");
     assert_eq!(robot.said.lock().unwrap().as_slice(), ["hello".to_string()]);
-    // The same text can be said again.
-    hal.try_send(&StateChange::set(keys::TEXT, Value::from("hello")));
-    wait_for_unset(&mut feed, keys::TEXT).await;
-    assert_eq!(robot.said.lock().unwrap().len(), 2);
+    assert_eq!(viseme, say::SILENCE_VISEME);
+
+    // Halted, then ticked again: a new utterance.
+    tokio::time::sleep(say::IDLE_STOP + Duration::from_millis(50)).await;
+    let mut viseme = String::new();
+    assert_eq!(
+        naoqi_say::say("hello".to_string(), String::new(), &mut viseme),
+        Status::Running
+    );
+    timeout(TIMEOUT, async {
+        while robot.said.lock().unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the sentence is said again");
 }
 
 #[tokio::test]

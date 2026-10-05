@@ -17,7 +17,15 @@ pub type AngleCommands = Arc<Mutex<Vec<(Vec<String>, Vec<f32>, f32)>>>;
 /// The `setStiffnesses` commands received: names and stiffnesses.
 pub type StiffnessCommands = Arc<Mutex<Vec<(Vec<String>, Vec<f32>)>>>;
 
-pub const JOINTS: [&str; 3] = ["HeadYaw", "HeadPitch", "LShoulderPitch"];
+pub const JOINTS: [&str; 7] = [
+    "HeadYaw",
+    "HeadPitch",
+    "LShoulderPitch",
+    "LWristYaw",
+    "RWristYaw",
+    "LHand",
+    "RHand",
+];
 
 pub struct FakeNaoqi {
     /// The node hosting the fake robot; the services live as long as it does.
@@ -303,6 +311,7 @@ fn altexttospeech(said: Arc<Mutex<Vec<String>>>) -> AnyObject {
             Ok(())
         }
     });
+    builder.add_method("stopAll", |(): ()| async move { Ok(()) });
     AnyObject::new(builder.build())
 }
 

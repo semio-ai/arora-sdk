@@ -305,8 +305,8 @@ What does exist:
 Verdict: a NAO walking in MuJoCo is 4–6 engineer-days of porting and in-sim
 tuning of a classical engine, without a learned policy. The `arora-hal-mujoco`
 crate and the module pattern here apply unchanged; only the policy body
-differs. The SDK's own `modules/nao` targets the real robot's NAOqi through
-libqi and is unrelated to simulation.
+differs. The SDK's `arora-hal-naoqi` drives the real robot through NAOqi and
+is unrelated to simulation.
 
 ## Routes considered and not taken
 

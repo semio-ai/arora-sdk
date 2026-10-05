@@ -25,8 +25,8 @@ out shipping the workspace itself on crates.io without further work.
 ### `-Z bindeps` (artifact dependencies) over recursive cargo
 
 Host code generators (`arora-module-cli`, `arora-module-cpp`) and cross-target
-static libraries (`arora-buffers`, `arora-util` built for `wasm32-wasip1` or
-`i686-unknown-linux-musl`) are pulled into consumer crates via cargo's
+static libraries (`arora-buffers`, `arora-util` built for `wasm32-wasip1`)
+are pulled into consumer crates via cargo's
 artifact dependencies:
 
 ```toml
@@ -69,7 +69,8 @@ own caching properly.
   workspace. This is the canonical spelling; `cargo-features = ["bindeps"]`
   inside an individual `Cargo.toml` is **not** sufficient for bindeps.
 - `[target.i686-unknown-linux-musl]` pins the Homebrew cross-compiler
-  binaries on macOS (`brew install messense/macos-cross-toolchains/...`).
+  binaries on macOS (`brew install messense/macos-cross-toolchains/...`)
+  for the NAO cross-build of `arora-naoqi`.
 - `[target.wasm32-unknown-unknown]` sets `getrandom_backend="wasm_js"` so the
   browser engine build (`arora-web`) selects getrandom's WebCrypto backend.
 
@@ -96,12 +97,12 @@ manifests have since been removed.)
 
 For cross-compiling C++ from a host cargo build script, cmake-rs reads the
 build script's `TARGET` and synthesises flags like `--target=arm64-apple-macosx`
-and `CMAKE_OSX_ARCHITECTURES=arm64`. Those are fatal for wasm and i686 cross
+and `CMAKE_OSX_ARCHITECTURES=arm64`. Those are fatal for wasm cross
 builds, so each C++ module's `build.rs` calls
 
 ```rust
 cmake::Config::new(...)
-  .target("wasm32-wasi") // or "i686-unknown-linux-musl"
+  .target("wasm32-wasi")
   .host("wasm32-wasi")
   .no_default_flags(true)
   ...
@@ -158,19 +159,14 @@ scripts.
 defaults to `wasm32-wasip1`, matching the Rust side. No suitable crates.io
 crate exists (`lucet-wasi-sdk` is unmaintained since 2020).
 
-### NAO is opt-in
+### NAO through a Rust HAL, not a C++ module
 
-The NAO module (`modules/nao`) cross-compiles to
-`i686-unknown-linux-musl` and depends on a Homebrew cross-toolchain that is
-not universally installed. It is excluded from `default-members` in the
-workspace `Cargo.toml`. CI does not build it. Users with the cross-toolchain
-can build it explicitly with `cargo build -p arora-nao`.
-
-### libqi fetched via FetchContent
-
-`modules/nao/CMakeLists.txt` fetches libqi from
-`github.com/semio-ai/libqi.git` via CMake `FetchContent` (pinned commit).
-This pulls Boost and OpenSSL transitively — expect ~10 min on a cold build.
+The NAO is served by `crates/arora-hal-naoqi`, a HAL over the pure-Rust
+`libqi-vibe` crate, rather than by a C++ module linking libqi. There is no
+C++ cross-build: the HAL builds for the host with the workspace, and the
+cross-build of its `arora-naoqi` runner to `i686-unknown-linux-musl` for the
+robot is opt-in and not run in CI. See
+[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).
 
 ## Engine architecture
 

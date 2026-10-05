@@ -3,8 +3,6 @@
 //! Keys follow the `entity.component` grammar of Arora: joints are entities named after
 //! their NAOqi name in snake case (`head_yaw`), the other entities are fixed.
 
-/// The text to say (`ALTextToSpeech.say`); unset by the HAL once spoken.
-pub const TEXT: &str = "text";
 /// The battery charge, from 0 to 1.
 pub const BATTERY_CHARGE: &str = "battery.charge";
 /// The battery current in amperes, positive when charging.

@@ -3,7 +3,6 @@ resolver = "2"
 
 members = [
   "crates/arora",
-  "modules/nao",
   "modules/polly",
   "crates/arora-web",
   "modules/test-behavior-tree-nodes",

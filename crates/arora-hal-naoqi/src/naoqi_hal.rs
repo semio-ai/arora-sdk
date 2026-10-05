@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use arora_behavior::Status;
 use arora_hal::{Hal, HalDescription, HalResult, UpdatesStream};
 use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
@@ -26,8 +27,9 @@ type Node = qi::node::Node<qi::service_directory::Client>;
 /// Sensors are sampled from `ALMemory` by a task at the configured period and touch events
 /// are received through `ALMemory` signals; both feed the current state and the `updates()`
 /// subscribers. Writes turn keys into NAOqi calls (`ALMotion.setAngles`,
-/// `ALTextToSpeech.say`, `ALLeds.fadeRGB`...): `write()` awaits them, `try_send` hands them
-/// to the queued-write task so the caller never waits on the robot.
+/// `ALLeds.fadeRGB`...): `write()` awaits them, `try_send` hands them to the queued-write
+/// task so the caller never waits on the robot. Speech is not a key: the robot's
+/// [`voice`](NaoqiHal::voice) speaks the behavior tree's `Say` leaves ([`crate::say`]).
 pub struct NaoqiHal {
     inner: Arc<Inner>,
     /// Feeds the queued-write task; dropping it (with the HAL) closes the channel, and the
@@ -35,6 +37,8 @@ pub struct NaoqiHal {
     outbound: UnboundedSender<StateChange>,
     /// The sampling and event tasks, aborted with the HAL.
     tasks: Vec<AbortHandle>,
+    /// The runtime the HAL's tasks run on, where its voice speaks.
+    runtime: tokio::runtime::Handle,
 }
 
 struct Inner {
@@ -210,7 +214,73 @@ impl NaoqiHal {
             inner,
             outbound,
             tasks,
+            runtime: tokio::runtime::Handle::current(),
         })
+    }
+
+    /// The robot's voice (`ALTextToSpeech`), for the `Say` leaves: hand it to
+    /// [`say::install`](crate::say::install).
+    pub fn voice(&self) -> Voice {
+        Voice {
+            tts: self.inner.tts.clone(),
+            runtime: self.runtime.clone(),
+        }
+    }
+}
+
+/// A NAOqi robot's voice: says a sentence without waiting for it, stops what it says.
+#[derive(Clone)]
+pub struct Voice {
+    tts: AnyObject,
+    runtime: tokio::runtime::Handle,
+}
+
+impl Voice {
+    /// Start saying `text`; the returned utterance tells when it has been said.
+    pub(crate) fn say(&self, text: String) -> Utterance {
+        let utterance = Utterance::default();
+        let done = utterance.clone();
+        let tts = self.tts.clone();
+        self.runtime.spawn(async move {
+            // `say` returns once the sentence is spoken, or stopped.
+            let said = match tts.call::<(), _, _>("say", text.clone()).await {
+                Ok(()) => {
+                    debug!("Said \"{text}\"");
+                    true
+                }
+                Err(error) => {
+                    warn!("ALTextToSpeech.say(\"{text}\") failed: {error}");
+                    false
+                }
+            };
+            *lock(&done.0) = Some(said);
+        });
+        utterance
+    }
+
+    /// Stop what the robot is saying.
+    pub(crate) fn stop(&self) {
+        let tts = self.tts.clone();
+        self.runtime.spawn(async move {
+            if let Err(error) = tts.call::<(), _, _>("stopAll", ()).await {
+                warn!("ALTextToSpeech.stopAll failed: {error}");
+            }
+        });
+    }
+}
+
+/// A sentence handed to the robot's voice: under way until `ALTextToSpeech.say` returns.
+#[derive(Clone, Default)]
+pub(crate) struct Utterance(Arc<Mutex<Option<bool>>>);
+
+impl Utterance {
+    /// `Running` while under way, then `Success` when said, `Failure` when refused.
+    pub(crate) fn status(&self) -> Status {
+        match *lock(&self.0) {
+            None => Status::Running,
+            Some(true) => Status::Success,
+            Some(false) => Status::Failure,
+        }
     }
 }
 
@@ -403,7 +473,6 @@ impl Inner {
     async fn write(self: &Arc<Self>, changes: StateChange) -> Result<(), NaoqiRobotError> {
         let mut joint_targets: Vec<(String, f32)> = Vec::new();
         let mut stiffness_targets: Vec<(String, f32)> = Vec::new();
-        let mut text = None;
         let mut led_colors: Vec<(String, i32)> = Vec::new();
         let mut led_intensities: Vec<(String, f32)> = Vec::new();
         let mut base_velocity = None;
@@ -415,10 +484,6 @@ impl Inner {
             let entity = key.get_entity();
             let attributes = key.get_attributes();
             match (entity, attributes.as_slice()) {
-                (keys::TEXT, []) => match value {
-                    Value::String(sentence) => text = Some(sentence.clone()),
-                    other => warn!("Ignoring a non-string text: {other}"),
-                },
                 (joint, [keys::TARGET_POSITION]) => {
                     if let Some(name) = self.joints.naoqi_name(joint) {
                         match arora_f64(value) {
@@ -496,21 +561,6 @@ impl Inner {
             {
                 failures.push(format!("ALMotion.setStiffnesses: {error}"));
             }
-        }
-        if let Some(sentence) = text {
-            // Saying blocks until the sentence is spoken: it runs on its own, and the key is
-            // unset once spoken so that the same sentence can be said again.
-            let inner = Arc::clone(self);
-            tokio::spawn(async move {
-                match inner.tts.call::<(), _, _>("say", sentence).await {
-                    Ok(()) => {
-                        let mut change = StateChange::new();
-                        change.unset.insert(Key::from(keys::TEXT));
-                        inner.publish(change);
-                    }
-                    Err(error) => warn!("ALTextToSpeech.say failed: {error}"),
-                }
-            });
         }
         if let Some(leds) = &self.leds {
             for (group, rgb) in led_colors {

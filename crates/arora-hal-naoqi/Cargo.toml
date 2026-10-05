@@ -17,13 +17,19 @@ required-features = ["runner"]
 [features]
 # The arora-naoqi binary: pulls the full arora runtime with the Semio Studio
 # connection. The library (the HAL itself) stays lean without it.
-runner = ["dep:arora", "dep:anyhow"]
+runner = ["dep:arora", "dep:anyhow", "dep:arora-simple-data-store", "dep:blackboard", "tokio/macros", "tokio/rt-multi-thread"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
+arora-behavior = { path = "../arora-behavior", version = "9.1" }
 arora-hal = { path = "../arora-hal", version = "4" }
+arora-module = { path = "../arora-module", version = "2.1" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1", optional = true }
+# The default tree's Equals and Assign leaves, from the policy-modules example until they
+# move to a crate of their own with the say contract.
+blackboard = { path = "../../examples/policy-modules/modules/blackboard", optional = true }
 arora-types = { path = "../arora-types", version = "3" }
-arora = { path = "../arora", version = "11", features = ["studio-bridge"], optional = true }
+arora = { path = "../arora", version = "11.6", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -37,4 +43,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt", "time", "sync"] }
 
 [dev-dependencies]
+# The device test: the default tree on the Arora runtime, without the Studio connection.
+arora = { path = "../arora", version = "11.6" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1" }
+blackboard = { path = "../../examples/policy-modules/modules/blackboard" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

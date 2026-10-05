@@ -1,10 +1,13 @@
 [package]
 name = "blackboard"
 description = "Behavior leaves over the store's strings: test a value, assign one — how a tree switches on a request written from outside"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
+# Spelled out rather than inherited from the policy-modules workspace: the NAOqi device
+# (crates/arora-hal-naoqi), in the main workspace, depends on this crate by path, and a
+# path dependency cannot inherit from a workspace it is not built in.
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Semio"]
 
 [lib]
 # The `cdylib` is the wasm guest; the `rlib` carries the declaration and runs
@@ -12,5 +15,5 @@ authors.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-arora-behavior.workspace = true
-arora-module.workspace = true
+arora-behavior = { path = "../../../../crates/arora-behavior", version = "9" }
+arora-module = { path = "../../../../crates/arora-module", version = "2" }

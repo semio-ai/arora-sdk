@@ -398,9 +398,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arora",
+ "arora-behavior",
  "arora-hal",
+ "arora-module",
+ "arora-simple-data-store",
  "arora-types",
  "async-trait",
+ "blackboard",
  "futures",
  "libqi-vibe",
  "log",
@@ -594,18 +598,6 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.8.26",
  "thiserror 2.0.19",
-]
-
-[[package]]
-name = "arora-nao"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arora-buffers",
- "arora-module-cli",
- "arora-module-cpp",
- "arora-util",
- "cmake",
 ]
 
 [[package]]
@@ -1524,6 +1516,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "blackboard"
+version = "0.1.0"
+dependencies = [
+ "arora-behavior",
+ "arora-module",
 ]
 
 [[package]]
