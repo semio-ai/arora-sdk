@@ -19,9 +19,10 @@
 /// behaviors must not write their own keys under this prefix.
 pub const PREFIX: &str = "arora/";
 
-/// Monotonic **nanoseconds** since the runtime started, as a
-/// [`U64`](arora_types::value::Value::U64) value. The runtime advances it by the
-/// step's `dt` before each tick. Integer nanoseconds are exact (no float drift
+/// Monotonic **nanoseconds** on the runtime's timeline, as a
+/// [`U64`](arora_types::value::Value::U64) value: from the time the runtime
+/// starts at (zero unless its builder sets one), advanced by the step's `dt`
+/// before each tick. Integer nanoseconds are exact (no float drift
 /// over a long run) and give ~584 years of range before `u64` overflows.
 pub const TIME: &str = "arora/time";
 

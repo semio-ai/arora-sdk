@@ -94,7 +94,7 @@ The ordering encodes a per-key precedence — **behavior ▸ bridge ▸ HAL ▸ 
 
 ## Wiring a device together
 
-Everything is assembled by [`AroraBuilder`](../src/lib.rs#L263-L498) — fluent setters (`with_data_store`, `with_hal`, `with_bridge`, `with_behavior_interpreter`, `with_module`, `with_host_module`) and a `build()` that defaults the store to `SimpleDataStore` and the HAL to `FakeHal`, merges the bridge inbound streams, and registers the interpreter-as-module. The `run_with*` family in [`run.rs`](../src/run.rs) is sugar over the builder, differing only in which seams the caller supplies versus defaults ([`run.rs:1-29`](../src/run.rs#L1-L29)). A device-specific binary is typically just a custom `Hal`/`Bridge` plus one `run_with(...)` call — see [`examples/device.rs`](../examples/device.rs).
+Everything is assembled by [`AroraBuilder`](../src/lib.rs#L263-L498) — fluent setters (`with_data_store`, `with_hal`, `with_start_time`, `with_bridge`, `with_behavior_interpreter`, `with_module`, `with_host_module`) and a `build()` that defaults the store to `SimpleDataStore` and the HAL to `FakeHal`, merges the bridge inbound streams, and registers the interpreter-as-module. The `run_with*` family in [`run.rs`](../src/run.rs) is sugar over the builder, differing only in which seams the caller supplies versus defaults ([`run.rs:1-29`](../src/run.rs#L1-L29)). A device-specific binary is typically just a custom `Hal`/`Bridge` plus one `run_with(...)` call — see [`examples/device.rs`](../examples/device.rs).
 
 ## Same loop, native and browser
 

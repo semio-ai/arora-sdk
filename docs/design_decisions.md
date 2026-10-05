@@ -463,6 +463,14 @@ host paces — natively from `run`'s metronome, in the browser from
 (`arora/time`, `arora/dt`) to the store before the behavior ticks, so time is
 data like everything else.
 
+The clock starts where the builder sets it (`with_start_time`, zero by
+default), and only steps move it afterwards. A device that joins peers which
+have already run takes their timeline with an ordinary first frame, because a
+catch-up step would publish an `arora/dt` spanning the whole gap, and every
+reader of `arora/dt` would see one frame that long. A running device has no
+clock setter: a jump in `arora/time` would be the same gap seen from the other
+key.
+
 ### The behavior interpreter is a module
 
 Loading and editing behaviors go through the engine's ordinary module-call

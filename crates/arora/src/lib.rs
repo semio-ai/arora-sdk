@@ -101,6 +101,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
+use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -438,6 +439,7 @@ fn generic(message: impl Into<String>) -> CallError {
 pub struct AroraBuilder {
     store: Option<Box<dyn DataStore>>,
     hal: Option<Box<dyn Hal>>,
+    start_time: Duration,
     bridges: Vec<Box<dyn Bridge>>,
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
@@ -468,6 +470,21 @@ impl AroraBuilder {
     /// in-process [`FakeHal`].
     pub fn with_hal(mut self, hal: Box<dyn Hal>) -> Self {
         self.hal = Some(hal);
+        self
+    }
+
+    /// Start the device's clock at `start` instead of zero: the time it reads
+    /// before its first step. The first [`step`](Arora::step)`(dt)` then
+    /// publishes `arora/time = start + dt` and `arora/dt = dt`, so a device that
+    /// joins peers which have already run for `start` takes their timeline with
+    /// an ordinary first frame, rather than with one step whose `dt` spans the
+    /// whole of `start`. Devices started at the same time and stepped with the
+    /// same `dt`s read the same `arora/time` at every step.
+    ///
+    /// The clock is set here only: a built device has no setter, and only its
+    /// steps move it. Default: zero.
+    pub fn with_start_time(mut self, start: Duration) -> Self {
+        self.start_time = start;
         self
     }
 
@@ -877,7 +894,7 @@ impl AroraBuilder {
             data_requested: vec![false; endpoints],
             caller_tx,
             store_changes,
-            clock: Clock::default(),
+            clock: Clock::starting_at(self.start_time),
             behavior_error: watch::Sender::new(None),
         })
     }
