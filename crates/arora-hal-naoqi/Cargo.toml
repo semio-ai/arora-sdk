@@ -28,9 +28,9 @@ async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
 # The Rust implementation of the qi framework (libqi), the NAOqi middleware. The package is
-# `libqi` (the name `qi` is taken on crates.io); the library is used as `qi`. Pinned to a commit
-# until libqi-rs-vibe 0.1.0 is on crates.io, then `qi = { package = "libqi", version = "0.1" }`.
-qi = { package = "libqi", git = "https://github.com/victorpaleologue/libqi-rs-vibe", rev = "3422656ea126a573ba83c005165fd768afe96434" }
+# `libqi-vibe`; the library is used as `qi`. Pinned to a commit until libqi-vibe 0.1.0 is on
+# crates.io, then `qi = { package = "libqi-vibe", version = "0.1" }`.
+qi = { package = "libqi-vibe", git = "https://github.com/victorpaleologue/libqi-rs-vibe", rev = "39a661bd048482a952fe31c85ac1ce697e414cc0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
