@@ -87,7 +87,7 @@ sequenceDiagram
 | 3 events | `apply_events` / `apply_command` | apply bridge/caller events after sensors; `Get`→read, `Update`→write, `Call`→engine, then reply on the command channel | [`runtime.rs:250`](../src/runtime.rs#L250) / [`:282`](../src/runtime.rs#L282) |
 | 4 behavior | `tick_behavior` | tick the one interpreter **last** (its writes win); `Done`→drop, `Err`→standing `behavior_error`, device keeps running | [`runtime.rs:391`](../src/runtime.rs#L391) |
 | 5 flush | `flush` | drain the store subscription, coalesce into one `StateChange` (later write wins) | [`runtime.rs:427`](../src/runtime.rs#L427) |
-| 6a HAL out | `write_hal` | `hal.try_send(out)` minus keys the hardware itself just reported | [`runtime.rs:448`](../src/runtime.rs#L448) |
+| 6a HAL out | `write_hal` | `hal.try_send(out)` minus keys the hardware itself just reported; `out` is lent as is when there are none, so a HAL that reports nothing costs no copy | [`runtime.rs:448`](../src/runtime.rs#L448) |
 | 6b bridges out | `write_bridges` | fan the same change to every bridge whose endpoint asked for data | [`runtime.rs:469`](../src/runtime.rs#L469) |
 
 The ordering encodes a per-key precedence — **behavior ▸ bridge ▸ HAL ▸ previous frame**, newest write wins within each tier ([`runtime.rs:486-492`](../src/runtime.rs#L486-L492)). Because the behavior is ticked last, it always sees the freshest clock, sensor, and command values, and its writes are the frame's final word.
