@@ -4,7 +4,7 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [11.6.1] - 2026-10-05
+## [11.6.1] - 2026-10-06
 
 ### Changed
 
