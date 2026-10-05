@@ -318,26 +318,47 @@ fn apply_command(
             })
         }
         BridgeOp::Update(change) => {
-            // Every bridge's inbound write passes here, so this is where a key
-            // the device never opened is refused — once, for all of them. A key
-            // is closed unless its meta says it is an input.
+            // Every bridge's inbound write passes here, so this is where it is
+            // checked against the store's meta — once, for all of them, and for
+            // the whole change: a change with any refused key writes nothing.
+            // A key is closed unless its meta says it is an input, and a key
+            // whose meta states a type takes only values of that type, so every
+            // reader of a typed key can rely on its type. An unset, or a set to
+            // no value, holds no value to check.
             let keys: Vec<Key> = change
                 .set
                 .keys()
                 .chain(change.unset.iter())
                 .cloned()
                 .collect();
-            let refused: Vec<String> = store
-                .meta(&keys)
-                .into_iter()
+            let metas = store.meta(&keys);
+            let refused: Vec<String> = metas
+                .iter()
                 .zip(&keys)
                 .filter(|(meta, _)| !meta.as_ref().is_some_and(|meta| meta.editable))
                 .map(|(_, key)| key.path.clone())
                 .collect();
+            let mut ill_typed: Vec<String> = metas
+                .iter()
+                .zip(&keys)
+                .filter_map(|(meta, key)| {
+                    let expected = meta.as_ref()?.ty.as_ref()?;
+                    let value = change.set.get(key)?.as_ref()?;
+                    (!value.conforms_to(expected)).then(|| {
+                        format!("{} (expected {expected}, got {})", key.path, value.kind())
+                    })
+                })
+                .collect();
+            ill_typed.sort();
             if !refused.is_empty() {
                 Err(format!(
                     "not an input of this device: {}",
                     refused.join(", ")
+                ))
+            } else if !ill_typed.is_empty() {
+                Err(format!(
+                    "not of the key's declared type: {}",
+                    ill_typed.join(", ")
                 ))
             } else {
                 match store.write(change.clone()) {
@@ -879,6 +900,7 @@ mod tests {
     use arora_bridge::{BridgeResult, DeviceInfo, FakeBridge, InboundStream};
     use arora_hal::FakeHal;
     use arora_simple_data_store::{NamespacedStore, SimpleDataStore};
+    use arora_types::value::Type;
     use async_trait::async_trait;
     use futures::channel::{mpsc, oneshot};
     use futures::stream;
@@ -1493,6 +1515,201 @@ mod tests {
             apply(write("arora/time")).await.unwrap().is_err(),
             "outside the opened subtree"
         );
+    }
+
+    /// A remote write to a typed key takes only values of that type: any other
+    /// is refused with the key, the type it states and the type it was sent,
+    /// and the change writes nothing — not even its conforming keys. A value of
+    /// the key's type, an unset, a set to no value, and any value for a key
+    /// whose meta states no type are accepted. A closed key is refused as one,
+    /// whatever its value.
+    #[tokio::test]
+    async fn a_remote_write_takes_only_the_declared_type() {
+        let mut arora = build(Box::new(UnregisterBridge));
+        let input = |ty: Type| KeyMeta::new().editable().of_type(ty);
+        arora
+            .store
+            .set_meta(HashMap::from([
+                (Key::from("face/mouth"), input(Type::F64)),
+                (Key::from("face/label"), input(Type::String)),
+                (Key::from("face/lids"), input(Type::ArrayF64)),
+                (Key::from("face/mood"), input(Type::Option)),
+                (Key::from("face/pose"), input(Type::Structure)),
+                (Key::from("face/free"), KeyMeta::new().editable()),
+                (Key::from("face/time"), KeyMeta::new().of_type(Type::F64)),
+            ]))
+            .expect("the store keeps meta");
+        let set = |pairs: Vec<(&str, Option<Value>)>| {
+            BridgeOp::Update(StateChange {
+                set: pairs
+                    .into_iter()
+                    .map(|(path, value)| (Key::from(path), value))
+                    .collect(),
+                unset: std::collections::HashSet::new(),
+            })
+        };
+        let mut apply = |op| {
+            let (tx, mut rx) = oneshot::channel();
+            apply_command(
+                &*arora.store,
+                &arora.function_index,
+                &mut arora.engine,
+                BridgeCommand::new(op, tx),
+            )
+            .unwrap();
+            rx.try_recv()
+                .expect("replied at once")
+                .expect("a reply")
+                .map(|_| ())
+        };
+        let f64 = |v: f64| Some(Value::F64(v));
+
+        // Each kind of mismatch is refused, naming the key and both types.
+        let mismatches = [
+            ("face/mouth", Value::String("0.5".into()), "F64", "String"),
+            ("face/mouth", Value::F32(0.5), "F64", "F32"),
+            (
+                "face/mouth",
+                Value::Option(Some(Box::new(Value::F64(0.5)))),
+                "F64",
+                "Option",
+            ),
+            (
+                "face/lids",
+                Value::ArrayValue(vec![Value::F64(0.5)]),
+                "ArrayF64",
+                "ArrayValue",
+            ),
+            (
+                "face/lids",
+                Value::ArrayF32(vec![0.5]),
+                "ArrayF64",
+                "ArrayF32",
+            ),
+            (
+                "face/mood",
+                Value::String("calm".into()),
+                "Option",
+                "String",
+            ),
+            (
+                "face/pose",
+                Value::Enumeration(arora_types::value::Enumeration {
+                    id: Uuid::from_u128(1),
+                    variant_id: Uuid::from_u128(2),
+                    value: Box::new(Value::Unit),
+                }),
+                "Structure",
+                "Enumeration",
+            ),
+        ];
+        for (path, value, expected, got) in mismatches {
+            let error = apply(set(vec![(path, Some(value.clone()))]))
+                .expect_err(&format!("{value:?} into {path}"));
+            assert!(
+                error.contains(&format!("{path} (expected {expected}, got {got})")),
+                "{error}"
+            );
+        }
+
+        // One ill-typed key refuses the whole change.
+        let error = apply(set(vec![
+            ("face/mouth", f64(0.5)),
+            ("face/label", Some(Value::Boolean(true))),
+        ]))
+        .expect_err("one key is ill-typed");
+        assert!(error.contains("face/label"), "{error}");
+        assert!(!error.contains("face/mouth"), "{error}");
+        assert_eq!(arora.store.read(&[Key::from("face/mouth")])[0], None);
+
+        // A closed key is refused as closed, whatever its value.
+        let error =
+            apply(set(vec![("face/time", Some(Value::Boolean(true)))])).expect_err("closed");
+        assert!(error.contains("not an input"), "{error}");
+
+        // Values of the key's type are written, compound ones whatever they hold.
+        apply(set(vec![
+            ("face/mouth", f64(0.5)),
+            ("face/label", Some(Value::String("hi".into()))),
+            ("face/lids", Some(Value::ArrayF64(vec![0.1, 0.2]))),
+            (
+                "face/mood",
+                Some(Value::Option(Some(Box::new(Value::String("calm".into()))))),
+            ),
+            (
+                "face/pose",
+                Some(Value::Structure(arora_types::value::Structure {
+                    id: Uuid::from_u128(3),
+                    fields: vec![],
+                })),
+            ),
+            ("face/free", Some(Value::Boolean(true))),
+        ]))
+        .expect("conforming values are written");
+        assert_eq!(arora.store.read(&[Key::from("face/mouth")])[0], f64(0.5));
+
+        // An unset, or a set to no value, holds nothing to check.
+        apply(set(vec![("face/label", None)])).expect("a set to no value");
+        apply(BridgeOp::Update(StateChange {
+            set: HashMap::new(),
+            unset: std::collections::HashSet::from([Key::from("face/mouth")]),
+        }))
+        .expect("an unset");
+        assert_eq!(arora.store.read(&[Key::from("face/mouth")])[0], None);
+    }
+
+    /// A bridge whose inbound stream delivers one command, then stays open.
+    struct OneCommand(Option<BridgeCommand>);
+
+    #[async_trait]
+    impl Bridge for OneCommand {
+        fn take_inbound(&mut self) -> InboundStream {
+            let command = self.0.take().expect("the inbound is taken once");
+            Box::pin(stream::once(async { Inbound::Command(command) }).chain(stream::pending()))
+        }
+        fn try_send(&mut self, _change: &StateChange) {}
+        async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(None)
+        }
+        async fn update_device_info(
+            &self,
+            info: Option<DeviceInfo>,
+        ) -> BridgeResult<Option<DeviceInfo>> {
+            Ok(info)
+        }
+    }
+
+    /// What a remote receives for an ill-typed write: the reply its bridge
+    /// relays, an error naming the key and the type it states, answered by the
+    /// step that applies the command.
+    #[test]
+    fn a_remote_is_answered_with_the_type_its_write_missed() {
+        let store = SimpleDataStore::new();
+        store
+            .set_meta(HashMap::from([(
+                Key::from("face/mouth"),
+                KeyMeta::new().editable().of_type(Type::F64),
+            )]))
+            .expect("the store keeps meta");
+        let (tx, mut rx) = oneshot::channel();
+        let command = BridgeCommand::new(
+            BridgeOp::Update(StateChange::set("face/mouth", Value::String("wide".into()))),
+            tx,
+        );
+        let mut arora = build_in(Box::new(OneCommand(Some(command))), Box::new(store.clone()));
+
+        arora.step(FRAME).expect("step");
+
+        let error = rx
+            .try_recv()
+            .expect("answered by the step")
+            .expect("a reply")
+            .expect_err("refused");
+        assert_eq!(
+            error,
+            "not of the key's declared type: face/mouth (expected F64, got String)"
+        );
+        assert_eq!(store.read(&[Key::from("face/mouth")])[0], None);
     }
 
     // Exercises `ListMethods` (deprecated) alongside `ListKeys`/`DescribeMethods`.

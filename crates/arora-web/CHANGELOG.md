@@ -4,6 +4,14 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-10-06
+
+### Changed
+
+- **Breaking:** depends on arora 12, whose `Arora` and `AroraBuilder` this
+  crate's surface carries. A device's bridges refuse a write whose value is
+  not of the type its key's meta states.
+
 ## [8.2.0] - 2026-10-05
 
 ### Added

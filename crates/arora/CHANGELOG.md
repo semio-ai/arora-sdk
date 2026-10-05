@@ -4,6 +4,22 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.0.0] - 2026-10-06
+
+### Changed
+
+- **Breaking: a remote write must be of the type its key states.** A bridge
+  `Update` whose value for a key is not of the type the key's meta states
+  (`KeyMeta::ty`, checked with `Value::conforms_to`) is refused, beside the
+  check that the key is an input, and writes nothing: the change is applied
+  whole or not at all. The refusal names each such key with the type it
+  states and the type it was sent — `not of the key's declared type:
+  face/mouth (expected F64, got String)`. There is no conversion: an `F32`
+  sent to an `F64` key is refused. An unset, a set to no value, and a key
+  whose meta states no type are not checked. The device's own writers (its
+  HAL, behavior and modules) are not checked either.
+- Depends on arora-types 3.5.
+
 ## [11.9.0] - 2026-10-06
 
 ### Added

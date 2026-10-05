@@ -4,6 +4,17 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.5.0] - 2026-10-06
+
+### Added
+
+- `Value::conforms_to(&Type)`: whether a value is of a type — its own variant,
+  exactly, with no conversion (an `F32` is not of `F64`, an `ArrayValue` of
+  floats not of `ArrayF64`, an `Option` not of its content's type). A `Type`
+  names the outer shape only, so what a compound value holds is not checked.
+  It is the check a key's stated type (`KeyMeta::ty`) asks of a value written
+  to it from outside the device.
+
 ## [3.4.0] - 2026-10-06
 
 ### Added
