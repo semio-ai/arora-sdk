@@ -76,10 +76,12 @@ pub use arora_bridge::Caller;
 /// [`describe_methods`](LocalCaller::describe_methods) answers with.
 pub use arora_bridge::MethodSignature;
 use arora_bridge::{client, Bridge, BridgeCommand, BridgeError, BridgeOp, Inbound};
+/// Re-exported so an embedder can compile a guest module once and load it into
+/// any number of devices with [`AroraBuilder::with_compiled_module`].
+pub use arora_engine::compiled::CompiledModule;
 use arora_engine::engine::{EngineBuilder, PinnedEngine};
 #[cfg(feature = "native")]
 use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
-use arora_engine::load::load_module_from_parts;
 /// Re-exported so an embedder can assemble a host-side module — a set of
 /// in-process functions under a module id — and inject it with
 /// [`AroraBuilder::with_host_module`].
@@ -405,6 +407,23 @@ pub enum Invoked {
     Started(TaskHandle),
 }
 
+/// A guest module as the builder holds it until [`build`](AroraBuilder::build).
+enum GuestModule {
+    /// Its header and executable, compiled at build for the one device.
+    Source(Header, Box<[u8]>),
+    /// Compiled ahead, possibly shared with other devices.
+    Compiled(CompiledModule),
+}
+
+impl GuestModule {
+    fn header(&self) -> &Header {
+        match self {
+            GuestModule::Source(header, _) => header,
+            GuestModule::Compiled(compiled) => compiled.header(),
+        }
+    }
+}
+
 fn generic(message: impl Into<String>) -> CallError {
     CallError::Generic {
         message: message.into(),
@@ -422,7 +441,7 @@ pub struct AroraBuilder {
     bridges: Vec<Box<dyn Bridge>>,
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
-    modules: Vec<(Header, Box<[u8]>)>,
+    modules: Vec<GuestModule>,
     host_modules: Vec<HostModule>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
@@ -495,7 +514,27 @@ impl AroraBuilder {
     /// For functions the engine hosts in-process (Rust closures rather than a
     /// loadable executable), use [`with_host_module`](Self::with_host_module).
     pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
-        self.modules.push((header, executable.into()));
+        self.modules
+            .push(GuestModule::Source(header, executable.into()));
+        self
+    }
+
+    /// Load a module compiled ahead into the device's engine, as
+    /// [`with_module`](Self::with_module) loads one from its bytes: the same
+    /// checks at [`build`](Self::build), the same dispatch once loaded. The
+    /// device instantiates the compiled code — its own instance, with its own
+    /// memory — instead of compiling the executable, so devices built from one
+    /// [`CompiledModule`] compile it once between them. Repeatable — each call
+    /// loads one module.
+    ///
+    /// ```ignore
+    /// let animation = arora::CompiledModule::new(header, &wasm)?;
+    /// let devices = (0..n)
+    ///     .map(|_| Arora::builder().with_compiled_module(&animation).build())
+    ///     .collect::<Result<Vec<_>, _>>()?;
+    /// ```
+    pub fn with_compiled_module(mut self, module: &CompiledModule) -> Self {
+        self.modules.push(GuestModule::Compiled(module.clone()));
         self
     }
 
@@ -604,7 +643,8 @@ impl AroraBuilder {
         // here, and the engine answers an already-loaded id with Ok — which
         // would dispatch the first and describe the last.
         let mut guest_modules: HashMap<Uuid, String> = HashMap::new();
-        for (header, executable) in self.modules {
+        for module in self.modules {
+            let header = module.header();
             let module_id = header.id;
             let module_name = header.name.clone();
             if let Some(first) = guest_modules.insert(module_id, module_name.clone()) {
@@ -637,13 +677,20 @@ impl AroraBuilder {
                     ),
                 }
             }
-            let loaded = load_module_from_parts(&mut engine, header, executable).map_err(|e| {
-                anyhow::anyhow!("failed to load module '{module_name}' ({module_id}): {e}")
-            })?;
-            log::info!(
-                "loaded module '{module_name}' ({module_id}): {} function(s)",
-                loaded.function_ids.len()
-            );
+            let function_count = header.exports.len();
+            // A module given as bytes compiles here, for this device alone.
+            let compiled = match module {
+                GuestModule::Source(header, executable) => {
+                    CompiledModule::new(header, &executable).map_err(Into::into)
+                }
+                GuestModule::Compiled(compiled) => Ok(compiled),
+            };
+            compiled
+                .and_then(|compiled| engine.load_compiled_module(&compiled))
+                .map_err(|e| {
+                    anyhow::anyhow!("failed to load module '{module_name}' ({module_id}): {e}")
+                })?;
+            log::info!("loaded module '{module_name}' ({module_id}): {function_count} function(s)");
         }
 
         // Register each host-side module so its functions dispatch through the
@@ -1301,6 +1348,125 @@ mod module_loading_tests {
             error
                 .to_string()
                 .contains("guest modules 'test-rust-wasm' and 'test-rust-wasm-again' both have id"),
+            "{error}"
+        );
+    }
+
+    /// Devices built from one compiled module each instantiate it and dispatch
+    /// it on their own: dropping one leaves the others running, and the
+    /// compiled module still builds new devices afterwards.
+    #[test]
+    fn devices_share_one_compiled_module() {
+        let header = test_module_header();
+        let module_id = header.id;
+        let compiled = CompiledModule::new(header, WASM).expect("the test guest compiles");
+        let build = || {
+            Arora::builder()
+                .with_compiled_module(&compiled)
+                .build()
+                .expect("build a device from the compiled module")
+        };
+        let succeed = |arora: &mut Arora| {
+            arora
+                .call(Call {
+                    module_id: Some(module_id),
+                    id: Uuid::parse_str(SUCCEED).expect("valid uuid"),
+                    args: Vec::new(),
+                })
+                .expect("call succeed() on the compiled module")
+                .ret
+        };
+
+        let first = build();
+        let mut second = build();
+        drop(first);
+        assert_eq!(succeed(&mut second), Value::Boolean(true));
+        let mut third = build();
+        assert_eq!(succeed(&mut third), Value::Boolean(true));
+        assert_eq!(succeed(&mut second), Value::Boolean(true));
+    }
+
+    /// A compiled module goes through the checks a module given as bytes does:
+    /// its exports join the method index, and its id may not repeat another
+    /// guest module's.
+    #[test]
+    fn a_compiled_module_is_checked_as_a_module_given_as_bytes() {
+        let compiled =
+            CompiledModule::new(test_module_header(), WASM).expect("the test guest compiles");
+        let arora = Arora::builder()
+            .with_compiled_module(&compiled)
+            .build()
+            .expect("build a device from the compiled module");
+        assert!(
+            arora
+                .function_index
+                .values()
+                .any(|f| f.function_name == "cos"),
+            "the compiled module's exports join the method index"
+        );
+
+        let mut again = test_module_header();
+        again.name = "test-rust-wasm-again".to_string();
+        let error = Arora::builder()
+            .with_compiled_module(&compiled)
+            .with_module(again, WASM.to_vec())
+            .build()
+            .err()
+            .expect("one id, two modules is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("guest modules 'test-rust-wasm' and 'test-rust-wasm-again' both have id"),
+            "{error}"
+        );
+    }
+
+    /// A compiled module loads into a device built on another thread than the
+    /// one that compiled it.
+    #[test]
+    fn a_compiled_module_loads_on_another_thread() {
+        let compiled =
+            CompiledModule::new(test_module_header(), WASM).expect("the test guest compiles");
+        std::thread::spawn(move || {
+            Arora::builder()
+                .with_compiled_module(&compiled)
+                .build()
+                .expect("build a device from the compiled module");
+        })
+        .join()
+        .expect("the device builds on its own thread");
+    }
+
+    /// A module whose header declares a function its executable does not
+    /// export fails the build, naming the missing export.
+    #[test]
+    fn a_header_declaring_a_missing_export_fails_the_build() {
+        let mut header = test_module_header();
+        let low::ExportSymbol::Function(mut missing) = header.exports[0].clone();
+        missing.id = Uuid::from_u128(0x278);
+        header.exports.push(low::ExportSymbol::Function(missing));
+        let error = Arora::builder()
+            .with_module(header, WASM.to_vec())
+            .build()
+            .err()
+            .expect("a missing export is refused");
+        assert!(
+            error.to_string().contains("failed to find function export"),
+            "{error}"
+        );
+    }
+
+    /// An executable that is not WebAssembly fails to compile, before any
+    /// device is built from it.
+    #[test]
+    fn a_malformed_executable_does_not_compile() {
+        let error = CompiledModule::new(test_module_header(), &[0xDE, 0xAD, 0xBE, 0xEF])
+            .expect_err("not a valid wasm binary");
+        assert!(
+            matches!(
+                error,
+                arora_engine::executor::LoadModuleError::MalformedExecutable
+            ),
             "{error}"
         );
     }

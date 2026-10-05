@@ -40,9 +40,20 @@ type Run = { run: string; status: string; feedback: string[]; result: string[]; 
 class AroraRuntimeBuilder {
   constructor();
   withModule(headerJson: string, executable: Uint8Array): void; // repeatable
+  withCompiledModule(module: CompiledModule): void;              // repeatable
   build(): AroraRuntime;
 }
+
+// A guest module compiled once (sync compile, < 8 MB in Chrome), for any number of devices.
+class CompiledModule {
+  constructor(headerJson: string, executable: Uint8Array);
+}
 ```
+
+`withModule` compiles the module's bytes when the device is built, for that
+device alone. Several devices running one module share its compilation by
+loading one `CompiledModule` each with `withCompiledModule`: each device still
+gets its own instance, with its own memory and state.
 
 Values cross the JS boundary as JSON in the Arora `Value` vocabulary, e.g.
 `{"f32": 0.75}`. `drainChanges` is the poll-based counterpart to a store
