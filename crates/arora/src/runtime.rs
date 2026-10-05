@@ -133,17 +133,29 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// The built-in clock: monotonic nanoseconds since the device started, advanced by
-/// each step's `dt`. Zero at build.
+/// The built-in clock: monotonic nanoseconds on the device's timeline, advanced
+/// by each step's `dt`. It starts where the builder set it
+/// ([`with_start_time`](crate::AroraBuilder::with_start_time)), zero by default,
+/// and only a step moves it afterwards.
 #[derive(Default)]
 pub struct Clock {
     time_ns: u64,
 }
 
+impl Clock {
+    /// A clock that reads `start` before its first step. A start past `u64`
+    /// nanoseconds (~584 years) saturates, as the clock itself does.
+    pub(crate) fn starting_at(start: Duration) -> Self {
+        Self {
+            time_ns: u64::try_from(start.as_nanos()).unwrap_or(u64::MAX),
+        }
+    }
+}
+
 /// The frame clock values a step publishes into the built-in keys before anything
 /// else runs.
 pub struct ClockValues {
-    /// Monotonic nanoseconds since the device started, after this step's `dt`.
+    /// Monotonic nanoseconds on the device's timeline, after this step's `dt`.
     pub time_ns: u64,
     /// Nanoseconds elapsed since the previous step (this step's `dt`).
     pub dt_ns: u64,
@@ -1730,6 +1742,82 @@ mod tests {
             store.read(&[Key::from(built_in::TIME)]),
             vec![Some(Value::U64(20_000_000))]
         );
+    }
+
+    /// Read the built-in clock keys a device published: `(arora/time, arora/dt)`.
+    fn published_clock(store: &SimpleDataStore) -> (Option<Value>, Option<Value>) {
+        let mut read = store
+            .read(&[Key::from(built_in::TIME), Key::from(built_in::DT)])
+            .into_iter();
+        (read.next().flatten(), read.next().flatten())
+    }
+
+    /// A device started at T joins the timeline at T: nothing is published
+    /// before its first step, which publishes `T + dt` with an ordinary `dt`,
+    /// and the steps after it count on from there.
+    #[test]
+    fn a_device_started_at_a_time_steps_on_from_it() {
+        let start = Duration::from_secs(90);
+        let store = SimpleDataStore::new();
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_start_time(start)
+            .build()
+            .expect("arora builds");
+        assert_eq!(published_clock(&store), (None, None));
+
+        arora.step(FRAME).expect("step");
+        let first = (start + FRAME).as_nanos() as u64;
+        assert_eq!(
+            published_clock(&store),
+            (
+                Some(Value::U64(first)),
+                Some(Value::U64(FRAME.as_nanos() as u64))
+            )
+        );
+
+        arora.step(Duration::from_millis(4)).expect("step");
+        assert_eq!(
+            published_clock(&store),
+            (
+                Some(Value::U64(first + 4_000_000)),
+                Some(Value::U64(4_000_000))
+            )
+        );
+    }
+
+    /// Two devices started at the same time and stepped with the same `dt`s
+    /// read the same `arora/time` at every step: the timeline a late device
+    /// joins is the one its peers are on.
+    #[test]
+    fn devices_started_at_one_time_step_in_lockstep() {
+        let start = Duration::from_millis(12_345);
+        let device = || {
+            let store = SimpleDataStore::new();
+            let arora = Arora::builder()
+                .with_data_store(Box::new(store.clone()))
+                .with_start_time(start)
+                .build()
+                .expect("arora builds");
+            (arora, store)
+        };
+        let (mut a, a_store) = device();
+        let (mut b, b_store) = device();
+
+        let mut elapsed = start;
+        for dt in [
+            FRAME,
+            Duration::from_millis(3),
+            Duration::from_micros(16_667),
+            FRAME,
+        ] {
+            a.step(dt).expect("step");
+            b.step(dt).expect("step");
+            elapsed += dt;
+            let expected = Some(Value::U64(elapsed.as_nanos() as u64));
+            assert_eq!(published_clock(&a_store).0, expected);
+            assert_eq!(published_clock(&b_store).0, expected);
+        }
     }
 
     /// A bridge that forwards every `try_send` payload down a channel, and is

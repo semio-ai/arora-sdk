@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.9.0] - 2026-10-06
+
+### Added
+
+- `AroraBuilder::with_start_time(Duration)`: the time the device's clock reads
+  before its first step, zero by default. The first `step(dt)` publishes
+  `arora/time = start + dt` and `arora/dt = dt`, so a device that joins peers
+  which have already run takes their timeline with an ordinary first frame;
+  devices started at one time and stepped with the same `dt`s read the same
+  `arora/time` at every step. The clock is set at build only.
+
 ## [11.8.0] - 2026-10-06
 
 ### Added
