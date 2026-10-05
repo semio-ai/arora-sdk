@@ -20,6 +20,14 @@ All notable changes to `arora`. The format follows
   through the interpreter module. The `arora` binary's Groot option covers a
   device with no modules; a device that loads modules needs the index the
   builder assembled.
+- `AroraBuilder::with_groot` hands the builder a Groot tree, which `build`
+  resolves against the method index it assembled and installs, failing the
+  build when the tree does not load. A device run through
+  `AroraBuilder::run` has no built device to call `load_groot` on; this is
+  how its tree reaches modules' leaves.
+- `AroraBuilder::with_step_period` sets the step period `run` drives the
+  device at (default `Arora::DEFAULT_STEP_PERIOD`), for a behavior sampled
+  at a fixed control rate.
 
 ## [11.7.0] - 2026-10-06
 

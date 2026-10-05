@@ -442,6 +442,9 @@ pub struct AroraBuilder {
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<(Header, Box<[u8]>)>,
     host_modules: Vec<HostModule>,
+    groot: Option<String>,
+    #[cfg(feature = "native")]
+    step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
 }
@@ -578,6 +581,27 @@ impl AroraBuilder {
     /// ```
     pub fn with_host_module(mut self, module: HostModule) -> Self {
         self.host_modules.push(module);
+        self
+    }
+
+    /// Install a Groot behavior tree as the device's behavior once it is
+    /// built: [`build`](AroraBuilder::build) resolves its tags against the
+    /// method index it assembled — the control nodes and every loaded
+    /// module's exports — and loads it as [`Arora::load_groot`] does, failing
+    /// the build if the tree does not parse, names an unknown function, or
+    /// does not load. What a device run through [`run`](AroraBuilder::run)
+    /// uses, since `run` builds the device itself.
+    pub fn with_groot(mut self, xml: impl Into<String>) -> Self {
+        self.groot = Some(xml.into());
+        self
+    }
+
+    /// The target time between steps for [`run`](AroraBuilder::run); default
+    /// [`Arora::DEFAULT_STEP_PERIOD`]. A device whose behavior runs at a fixed
+    /// control rate — a control policy sampled at 50 Hz — steps at that rate.
+    #[cfg(feature = "native")]
+    pub fn with_step_period(mut self, period: std::time::Duration) -> Self {
+        self.step_period = Some(period);
         self
     }
 
@@ -882,7 +906,7 @@ impl AroraBuilder {
             .build();
         engine.register_module(module.id(), Box::new(module));
 
-        Ok(Arora {
+        let mut arora = Arora {
             store,
             engine,
             function_index,
@@ -897,7 +921,11 @@ impl AroraBuilder {
             store_changes,
             clock: Clock::default(),
             behavior_error: watch::Sender::new(None),
-        })
+        };
+        if let Some(xml) = self.groot {
+            arora.load_groot(&xml)?;
+        }
+        Ok(arora)
     }
 }
 
@@ -1062,6 +1090,59 @@ mod module_loading_tests {
             vec![Some(Value::F32(1.0))],
             "cos(0) written back to the bound key"
         );
+    }
+
+    /// A tree handed to the builder is resolved against the index `build`
+    /// assembled and ticks from the first step — what a device run through
+    /// `run` needs, having no built device to load it into.
+    #[test]
+    fn with_groot_installs_the_tree_at_build() {
+        use arora_types::data::{Key, StateChange};
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("angle", Value::F32(0.0)))
+            .expect("seed the input");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .with_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <cos angle="{angle}" res="{cosine}"/>
+                   </BehaviorTree></root>"#,
+            )
+            .build()
+            .expect("the tree resolves against the declared module");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("cosine")]),
+            vec![Some(Value::F32(1.0))],
+            "cos(0) written back to the bound key"
+        );
+    }
+
+    /// A tree naming a function no module exports fails the build, rather
+    /// than leaving a device that idles.
+    #[test]
+    fn with_groot_fails_the_build_on_an_unknown_leaf() {
+        let result = Arora::builder()
+            .with_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <NoSuchLeaf/>
+                   </BehaviorTree></root>"#,
+            )
+            .build();
+        assert!(result.is_err(), "an unknown leaf fails the build");
     }
 
     /// A loaded guest module's exports join the method index with frozen
