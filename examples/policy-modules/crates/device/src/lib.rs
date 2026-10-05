@@ -14,6 +14,7 @@
 
 pub mod studio;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,8 +24,8 @@ use arora_hal::HalDescription;
 use arora_hal_mujoco::{Clock, ImuSpec, JointSpec, MujocoHal, MujocoHalConfig, SimHandle};
 use arora_policy::projected_gravity;
 use arora_simple_data_store::SimpleDataStore;
-use arora_types::data::{DataStore, Key, StateChange};
-use arora_types::value::Value;
+use arora_types::data::{DataStore, Key, KeyMeta, StateChange};
+use arora_types::value::{Type, Value};
 use microduck_policies::microduck_policies::Module as Policies;
 
 pub use studio::StudioModel;
@@ -299,6 +300,17 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         "command.behavior",
         Value::String("walk".to_string()),
     ))?;
+    // What a client may write: the commands the trees read and the
+    // simulator's reset. Every other key is the device's own.
+    let input = |ty| KeyMeta::new().of_type(ty).editable();
+    store.set_meta(HashMap::from([
+        (Key::from("command.vx"), input(Type::F64)),
+        (Key::from("command.vy"), input(Type::F64)),
+        (Key::from("command.vyaw"), input(Type::F64)),
+        (Key::from("command.head"), KeyMeta::new().editable()),
+        (Key::from("command.behavior"), input(Type::String)),
+        (Key::from("sim/reset"), input(Type::Boolean)),
+    ]))?;
 
     let mut builder = Arora::builder()
         .with_data_store(Box::new(store))

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use arora_hal_mujoco::Clock;
 use arora_types::data::{Key, StateChange};
-use arora_types::value::Value;
+use arora_types::value::{Type, Value};
 use policy_device::{default_model, tree_path, Command, Device, DeviceConfig, Executor, Speech};
 
 fn device(tree: &str, executor: Executor, command: Command) -> Device {
@@ -235,4 +235,32 @@ fn each_phase_is_announced_once() {
         vec!["Time to sit down."],
         "said once, held quiet"
     );
+}
+
+/// A client writes the commands and the reset, typed; the joints and
+/// everything else the device publishes are closed to it.
+#[test]
+fn a_client_may_write_the_commands_only() {
+    let mut device = device("interactive", Executor::Native, Command::default());
+    device.run_for(0.1).unwrap();
+    let joint = format!("{}.position", microduck_policies::JOINT_NAMES[0]);
+    let keys = [
+        "command.vx",
+        "command.vy",
+        "command.vyaw",
+        "command.head",
+        "command.behavior",
+        "sim/reset",
+        joint.as_str(),
+        "speech.viseme",
+    ];
+    let meta = device.store().meta(&keys.map(Key::from));
+    let editable: Vec<&str> = keys
+        .iter()
+        .zip(&meta)
+        .filter(|(_, meta)| meta.as_ref().is_some_and(|meta| meta.editable))
+        .map(|(key, _)| *key)
+        .collect();
+    assert_eq!(editable, &keys[..6]);
+    assert_eq!(meta[0].as_ref().unwrap().ty, Some(Type::F64));
 }
