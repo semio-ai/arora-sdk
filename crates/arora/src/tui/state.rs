@@ -587,7 +587,7 @@ mod tests {
         let (mut state, mut rx) = command_state(vec![('r', "reset", None)]);
         state.handle_key(key(KeyCode::Char('r')));
         assert_eq!(
-            rx.try_next().unwrap().unwrap(),
+            rx.try_recv().unwrap(),
             TuiCommandEvent {
                 key: 'r',
                 input: None
@@ -600,13 +600,13 @@ mod tests {
     fn prompted_command_fires_with_the_typed_answer() {
         let (mut state, mut rx) = command_state(vec![('g', "load GLB", Some("GLB path"))]);
         state.handle_key(key(KeyCode::Char('g')));
-        assert!(rx.try_next().is_err(), "nothing fired yet");
+        assert!(rx.try_recv().is_err(), "nothing fired yet");
         for c in "face.glb".chars() {
             state.handle_key(key(KeyCode::Char(c)));
         }
         state.handle_key(key(KeyCode::Enter));
         assert_eq!(
-            rx.try_next().unwrap().unwrap(),
+            rx.try_recv().unwrap(),
             TuiCommandEvent {
                 key: 'g',
                 input: Some("face.glb".into())
@@ -620,7 +620,7 @@ mod tests {
         let (mut state, mut rx) = command_state(vec![('g', "load GLB", Some("GLB path"))]);
         state.handle_key(key(KeyCode::Char('g')));
         state.handle_key(key(KeyCode::Enter));
-        assert!(rx.try_next().is_err(), "cancelled: nothing fired");
+        assert!(rx.try_recv().is_err(), "cancelled: nothing fired");
         assert!(state.prompts.is_empty());
     }
 
@@ -631,7 +631,7 @@ mod tests {
         state.prompts.push_back(prompt);
         state.handle_key(key(KeyCode::Char('g')));
         assert_eq!(state.input, "g", "the key typed into the prompt");
-        assert!(rx.try_next().is_err(), "no command fired");
+        assert!(rx.try_recv().is_err(), "no command fired");
         assert_eq!(state.prompts.len(), 1);
     }
 
@@ -640,7 +640,7 @@ mod tests {
         let (mut state, mut rx) = command_state(vec![('q', "quirk", None)]);
         state.handle_key(key(KeyCode::Char('q')));
         assert!(state.quit_requested);
-        assert!(rx.try_next().is_err(), "no command fired");
+        assert!(rx.try_recv().is_err(), "no command fired");
     }
 
     #[test]

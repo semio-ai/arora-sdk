@@ -690,7 +690,7 @@ impl Engine {
         let header: Header = serde_json::from_str(header_json)
             .map_err(|e| JsValue::from_str(&format!("invalid header json: {e}")))?;
         let header_json_str = header_json.to_string();
-        let loaded = load_module_from_parts(&mut *self.inner, header, executable)
+        let loaded = load_module_from_parts(&mut self.inner, header, executable)
             .map_err(|e| JsValue::from_str(&format!("load_module failed: {e}")))?;
         for fn_id in &loaded.function_ids {
             self.function_module.insert(*fn_id, loaded.id);
@@ -1084,7 +1084,7 @@ impl BehaviorTreeRunner {
             );
         }
 
-        let result = load_module_from_parts(&mut *self.inner, header, executable)
+        let result = load_module_from_parts(&mut self.inner, header, executable)
             .map_err(|e| JsValue::from_str(&format!("load failed: {e}")))?;
         self.module_headers.insert(result.id, header_json_str);
         Ok(result.id.to_string())
