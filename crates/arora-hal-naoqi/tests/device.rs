@@ -87,18 +87,32 @@ async fn the_ready_tree_speaks_moves_the_hands_and_plays_again_on_request() {
     for joint in ["LWristYaw", "RWristYaw", "LHand", "RHand"] {
         assert!(moved.iter().any(|name| name == joint), "{joint} moved");
     }
-    let stiffened = robot.set_stiffnesses.lock().unwrap().clone();
-    let last_stiffness = stiffened
-        .iter()
-        .rev()
-        .find_map(|(names, values)| {
-            names
-                .iter()
-                .position(|name| name == "LHand")
-                .map(|index| values[index])
-        })
-        .expect("the hand was stiffened");
-    assert_eq!(last_stiffness, 0.0, "the hands are relaxed once over");
+    // The relaxing stiffness leaves in the step that hands the request back, through the
+    // HAL's queued writes: it reaches the robot shortly after the store reads `idle`.
+    let last_hand_stiffness = || {
+        robot
+            .set_stiffnesses
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|(names, values)| {
+                names
+                    .iter()
+                    .position(|name| name == "LHand")
+                    .map(|index| values[index])
+            })
+    };
+    let relaxed_by = std::time::Instant::now() + Duration::from_secs(5);
+    while last_hand_stiffness() != Some(0.0) && std::time::Instant::now() < relaxed_by {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(last_hand_stiffness().is_some(), "the hand was stiffened");
+    assert_eq!(
+        last_hand_stiffness(),
+        Some(0.0),
+        "the hands are relaxed once over"
+    );
 
     // Requested again, after a pause: it speaks again.
     std::thread::sleep(say::IDLE_STOP + Duration::from_millis(50));
