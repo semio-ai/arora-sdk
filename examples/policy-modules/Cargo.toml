@@ -40,7 +40,7 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
-arora = { path = "../../crates/arora", version = "11.6" }
+arora = { path = "../../crates/arora", version = "11.8" }
 arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
 arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.1" }
 arora-bridge = { path = "../../crates/arora-bridge", version = "6" }
