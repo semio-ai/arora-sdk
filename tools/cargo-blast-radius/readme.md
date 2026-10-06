@@ -130,9 +130,30 @@ checkout needs enough history for the merge base (`fetch-depth: 0`).
 
 ## Prior art
 
-[determinator](https://docs.rs/determinator) (guppy) does feature-aware
-selection with path rules. [cargo-delta](https://github.com/tekian/cargo-delta)
-and [cargo-rail](https://github.com/loadingalias/cargo-rail) are similar
-graph-based selectors. None of them check their file mapping against cargo's
-dep-info, and this tool needs artifact-dependency edges, which it reads
-straight from `cargo metadata`.
+All three tools below were run on this repository (October 2026). The cases
+were edits to a crate's source, to `arora-engine/wit/arora-module.wit`, to
+`libs/cpp`, to `modules/test-cpp/records`, to `.cargo/config.toml` and to a
+doc page.
+
+- [cargo-delta](https://github.com/tekian/cargo-delta) maps files to crates by
+  parsing the source (`mod`, `#[path]`, `include_str!`) and diffs `Cargo.lock`
+  per package. It got source edits right, but treats a file it cannot attribute
+  as affecting nothing. The WIT, `libs/cpp`, records and `.cargo/config.toml`
+  edits all selected nothing. `delta.toml` trip wires can fix each case, but
+  nothing says which ones are missing.
+- [cargo-rail](https://github.com/loadingalias/cargo-rail) checks against
+  cargo's records too. It runs a build under a rustc wrapper, records
+  dep-info and `rerun-if-changed`, and widens scope wherever that record is
+  incomplete. It is a larger engine (compiler cache, releases, split/sync),
+  pre-1.0, and needs rustc ≥ 1.98.1, newer than this repository's pinned
+  nightly. On this workspace its record stays incomplete (cross-target bindeps
+  invocations, directory reads by build scripts, members `cargo test` does not
+  build), so any file outside a crate, docs included, selects everything.
+- [determinator](https://github.com/guppy-rs/guppy/tree/main/tools/determinator)
+  (guppy) is a feature-aware library with path rules. It has no CLI, and its
+  documentation says `rerun-if-changed` inputs must be repeated as rules by
+  hand.
+
+Coverage-based selectors ([cargo-difftests](https://github.com/dnbln/cargo-difftests),
+[cargo-affected](https://github.com/max-sixty/cargo-affected)) pick individual
+tests instead of packages.
