@@ -96,7 +96,7 @@ jobs:
       # here, in a real headless browser, so regressions in the browser host
       # are caught at the engine level rather than downstream.
       - name: Install the wasm32-unknown-unknown target and wasm-pack
-        if: steps.affected.outputs.test-arora-engine || steps.affected.outputs.test-arora || steps.affected.outputs.build-arora-web
+        if: steps.affected.outputs.test-arora-engine || steps.affected.outputs.test-arora || steps.affected.outputs.test-arora-web
         run: |
           rustup target add wasm32-unknown-unknown
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
@@ -126,6 +126,7 @@ jobs:
 
       # arora-web's JS surface over the browser runtime.
       - name: arora-web browser test (headless Firefox)
+        if: steps.affected.outputs.test-arora-web
         run: wasm-pack test --headless --firefox crates/arora-web --test browser
 
   markdown-link-check:
