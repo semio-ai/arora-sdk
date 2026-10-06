@@ -107,16 +107,14 @@ CXX_i686_unknown_linux_musl=i686-unknown-linux-musl-g++ \
 AR_i686_unknown_linux_musl=i686-unknown-linux-musl-ar \
 cargo build --release -p arora-hal-naoqi --features runner --bin arora-naoqi \
   --target i686-unknown-linux-musl
+
+# Strip the debug information the release profile keeps: over 300 MB down to about 45 MB.
+i686-unknown-linux-musl-strip target/i686-unknown-linux-musl/release/arora-naoqi
 ```
 
 The binary is `target/i686-unknown-linux-musl/release/arora-naoqi`: a statically linked
 32-bit ELF. The first build takes a while (half an hour on an M1, mostly `aws-lc-sys` and
-`wasmtime`). The release profile keeps debug information (over 300 MB); strip it before
-copying it to the robot (about 45 MB):
-
-```sh
-i686-unknown-linux-musl-strip target/i686-unknown-linux-musl/release/arora-naoqi
-```
+`wasmtime`).
 
 On an Intel Mac, point
 `CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER` at `/usr/local/bin/i686-unknown-linux-musl-gcc`
