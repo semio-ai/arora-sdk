@@ -10,9 +10,3 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = "0.58"
-
-# The WIT world `wit_bindgen::generate!` reads lives in arora-engine, which this
-# guest does not depend on; for CI selection (tools/cargo-blast-radius) an edit
-# there selects this module.
-[package.metadata.blast-radius]
-inputs = ["../../crates/arora-engine/wit"]

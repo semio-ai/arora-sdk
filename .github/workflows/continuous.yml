@@ -40,24 +40,17 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      # A pull request builds and tests only the packages its diff can reach
-      # through the dependency graph (normal, build, artifact and dev edges,
-      # Cargo.lock entries included); main runs everything. A file in no
-      # package selects everything unless `[workspace.metadata.blast-radius]`
-      # in Cargo.toml ignores it. See tools/cargo-blast-radius/readme.md.
+      # A pull request builds and tests only the members its diff can reach
+      # through cargo's dependency graph; main runs everything. The rules
+      # (ignored files, inputs read across packages) live in the script.
       - name: Select the packages this change affects
         id: affected
         env:
           EVENT: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
         run: |
-          cargo build -q --release --locked --manifest-path tools/cargo-blast-radius/Cargo.toml
-          if [ "$EVENT" = pull_request ]; then
-            changes=(--base "origin/$BASE_REF")
-          else
-            changes=(--all)
-          fi
-          tools/cargo-blast-radius/target/release/cargo-blast-radius "${changes[@]}" --format github >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = pull_request ]; then base="origin/$BASE_REF"; else base=--all; fi
+          .github/scripts/list_modified_targets.sh "$base" >> "$GITHUB_OUTPUT"
 
       # `cargo test --release` builds the wasm32-wasip1 guests automatically
       # via the integration-test crate's artifact
@@ -70,10 +63,10 @@ jobs:
       # Every file cargo tracked as an input of what was just built (rustc
       # dep-info, build-script rerun-if-changed) must select the package that
       # read it; otherwise the selection above could skip a package a change
-      # reaches. On failure it names the file and the `inputs` entry to add.
+      # reaches. On failure it names the file and the INPUTS line to add.
       - name: Verify the selection covers every tracked input
         if: steps.affected.outputs.any == 'true'
-        run: tools/cargo-blast-radius/target/release/cargo-blast-radius verify
+        run: .github/scripts/list_modified_targets.sh verify
 
       # The ROS 2 bridge's Zenoh backend is off by default and exclusive with
       # DDS, so the workspace run never builds it. Its unit tests need no ROS;

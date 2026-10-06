@@ -89,20 +89,3 @@ debug = 1
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
 
-
-# CI selection (tools/cargo-blast-radius): a changed file selects the packages
-# that list it as an input, else nothing when it matches `ignore`, else the
-# package whose directory holds it, else — a file in no package — everything.
-# `cargo blast-radius verify` checks after each CI build that no file cargo
-# tracked as an input is ignored or reaches only packages that do not read it.
-[workspace.metadata.blast-radius]
-ignore = [
-  "**/*.md",
-  "LICENSE",
-  "docs/**",
-  "examples/**",
-  ".vscode/**",
-  ".gitignore",
-  ".github/workflows/release.yml",
-  ".github/workflows/markdown-link-check-config.json",
-]

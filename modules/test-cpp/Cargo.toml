@@ -30,8 +30,3 @@ arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target 
 # The build.rs reads the records/ directory populated by this crate's
 # build script — declared here purely to force build-order so a cold
 # `cargo build --workspace` works without prior builds.
-
-# Files outside this package the build reads (see build.rs), for CI selection
-# (tools/cargo-blast-radius): an edit there selects this module.
-[package.metadata.blast-radius]
-inputs = ["../../libs/cpp"]

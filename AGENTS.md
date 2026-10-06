@@ -176,17 +176,16 @@ cargo build -vv -p <module-name>
 
 ### CI Selection
 
-On a pull request, CI builds and tests only the packages the diff can reach
-([`tools/cargo-blast-radius`](tools/cargo-blast-radius/readme.md)). A file in no
-package selects everything unless `[workspace.metadata.blast-radius] ignore`
-in the root `Cargo.toml` lists it. When a package reads a file outside its own
+On a pull request, CI builds and tests only the members the diff can reach
+([`.github/scripts/list_modified_targets.sh`](.github/scripts/list_modified_targets.sh),
+over `cargo metadata`). A file in no package selects everything unless the
+script's `IGNORE` lists it. When a package reads a file outside its own
 directory (a build script reading `libs/cpp`, `wit_bindgen` reading
-arora-engine's WIT), print `cargo:rerun-if-changed` for it and list it under
-`[package.metadata.blast-radius] inputs`. The `verify` step fails otherwise and
-names the entry to add.
+arora-engine's WIT), print `cargo:rerun-if-changed` for it and add it to the
+script's `INPUTS`. The `verify` step fails otherwise and names the line to add.
 
 ```bash
-cargo run -q --manifest-path tools/cargo-blast-radius/Cargo.toml -- --base origin/main
+.github/scripts/list_modified_targets.sh origin/main   # what this branch selects
 ```
 
 ### Cross-Compilation
