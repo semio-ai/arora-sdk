@@ -18,12 +18,11 @@ C++ modules each carry their own `CMakeLists.txt` invoked from a
 ### Prerequisites
 
 - Rust nightly with the standard toolchain. The pinned `rust-toolchain.toml`
-  also requests the `wasm32-wasip1` and `wasm32-wasip2` targets. (The NAO
-  cross-build's `i686-unknown-linux-musl` is a linker toolchain, not a rustup
-  target — see the NAO prerequisite below.)
+  also requests the `wasm32-wasip1` and `wasm32-wasip2` targets.
 - A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
   Linux).
-- For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`.
+- For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`
+  and `rustup target add i686-unknown-linux-musl`.
 - The WASI SDK is downloaded automatically by `crates/wasi-sdk` into
   `target/wasi-sdk-33/` on first use; no manual install needed.
 
@@ -46,15 +45,10 @@ This produces:
   (`test-behavior-tree-nodes` is test-only now: the basic control nodes moved
   native into `arora-behavior-tree`.)
 
-The NAO module is opt-in and requires the i686-unknown-linux-musl cross-toolchain:
-
-```bash
-cargo build -p arora-nao
-```
-
-It cross-compiles to `i686-unknown-linux-musl`, producing
-`target/debug/modules/libnao.so` linked against libqi (fetched via CMake
-`FetchContent` on first build; expect ~10 min cold).
+The NAO HAL (`crates/arora-hal-naoqi`) is pure Rust and builds for the host
+with the workspace. Running its `arora-naoqi` runner (feature `runner`) on the
+robot takes an opt-in cross-build to `i686-unknown-linux-musl`; see
+[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).
 
 ### Testing
 
@@ -131,10 +125,6 @@ flowchart TD
     polly[polly libpolly]
   end
 
-  subgraph nao_module [NAO module - opt-in]
-    nao[arora-nao libnao.so i686-musl]
-  end
-
   subgraph wasm_guests [wasm guests wasip1 and wasip2]
     tcpp[test-cpp.wasm]
     tcpp2[test-cpp-2.wasm]
@@ -182,12 +172,6 @@ flowchart TD
   tcpp2 -->|bindep staticlib wasm| util
   tcpp2 -->|build.rs| wasi
   tcpp2 -->|records before| tcpp
-
-  nao -->|bindep bin| mcli
-  nao -->|bindep bin| mcpp
-  nao -->|bindep staticlib i686-musl| buffers
-  nao -->|bindep staticlib i686-musl| util
-  nao --> qistub
 
   itest -->|bindep bin| cli
   itest -->|bindep cdylib wasm| btn
@@ -239,10 +223,11 @@ What the integration test crate actually declares as artifact dependencies
 
 ### Build flags & options
 
-- `cargo build -p arora-nao` — builds the NAO cross-compile (opt-in; requires
-  i686-unknown-linux-musl toolchain). NAO is excluded from `default-members`,
-  so a bare `cargo build` skips it; `cargo build --workspace` includes it and
-  needs that toolchain.
+- `cargo build --release -p arora-hal-naoqi --features runner --bin arora-naoqi
+  --target i686-unknown-linux-musl` — cross-builds the NAO runner (opt-in;
+  needs the i686-unknown-linux-musl toolchain and the `CC_`/`CXX_`/`AR_`
+  variables given in the
+  [HAL readme](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao)).
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 

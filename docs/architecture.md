@@ -26,6 +26,7 @@ arora-sdk/
 │   ├── arora-hal              HAL seam + FakeHal
 │   ├── arora-hal-ros2         ROS 2 HAL
 │   ├── arora-hal-restful      RESTful HAL
+│   ├── arora-hal-naoqi        NAOqi HAL over libqi-vibe; arora-naoqi runner
 │   ├── arora-simple-data-store  trivial owned DataStore
 │   ├── arora-web              browser runtime: the AroraRuntime JS device
 │   │                          over arora + the JS engine surface
@@ -44,8 +45,7 @@ arora-sdk/
 │   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
 │   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
-│   ├── transcribe             speech-to-text module
-│   └── nao                    cross-built i686-musl cdylib (opt-in)
+│   └── transcribe             speech-to-text module
 ├── libs/
 │   └── cpp/                   shared C++ helpers used by C++ modules
 ├── tests/                arora-integration-tests crate; end-to-end smoke tests
@@ -55,8 +55,8 @@ arora-sdk/
 │   └── dispatch.md            direct vs indirect dispatch; how BTs use it
 ├── examples/
 ├── wit/                  arora:module WIT world for component guests
-├── .cargo/config.toml    unstable flags + i686-musl cross settings
-├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2 + i686-musl
+├── .cargo/config.toml    unstable flags + i686-musl cross linker (NAO runner)
+├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2
 ├── Cargo.toml            workspace root
 └── .github/workflows/    CI
 ```
@@ -88,7 +88,6 @@ graph TB
         rust_component["Rust → wasm32-wasip2 component\ntest-rust-component"]
         cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2"]
         native_cdylib["Native cdylib\npolly"]
-        cross_cdylib["Cross-compiled cdylib\nnao · i686-musl · opt-in"]
     end
 
     fe --> eng
@@ -238,7 +237,7 @@ edits to generated files are lost — change the YAML (including `imports:` and
 `cargo` drives the build. A bare `cargo build` covers the workspace
 `default-members` (engine, host tools, host builds of the Rust modules, the
 integration-test crate); `cargo build --workspace` additionally builds the
-heavier `test-cpp` / `test-cpp-2` / `nao` members, which `default-members`
+heavier `test-cpp` / `test-cpp-2` members, which `default-members`
 excludes. Cross-target artefacts are expressed as artifact dependencies
 (`-Z bindeps`):
 
@@ -246,7 +245,7 @@ excludes. Cross-target artefacts are expressed as artifact dependencies
   `artifact = "bin"`. Cargo exports `CARGO_BIN_FILE_<DEP>` (bin target names
   keep their dashes, so this short convenience name is set).
 - **Cross-target staticlibs** (`arora-buffers`, `arora-util` for
-  `wasm32-wasip1` or `i686-unknown-linux-musl`) — `build-dependencies`
+  `wasm32-wasip1`) — `build-dependencies`
   with `artifact = "staticlib", target = "..."`. Cargo exports
   `CARGO_STATICLIB_DIR_<DEP>` and `CARGO_STATICLIB_FILE_<DEP>_<lib>` (lib
   name, dashes→underscores). The bare `CARGO_STATICLIB_FILE_<DEP>` is **not**
@@ -330,6 +329,6 @@ how direct and indirect dispatch work and how behavior trees use them.
   frees disk space first (the multi-target builds need ~35 GB).
 - **`markdown-link-check`**: link-checks the markdown.
 
-The NAO cross-build is not exercised in CI; it is excluded from
-`default-members` and depends on a Homebrew formula not available on the CI
-image. Build explicitly with `cargo build -p arora-nao`.
+The NAO cross-build of `arora-naoqi` is not exercised in CI; it depends on a
+Homebrew formula not available on the CI image. See
+[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).

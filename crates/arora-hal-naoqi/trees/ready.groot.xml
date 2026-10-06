@@ -1,0 +1,37 @@
+<root main_tree_to_execute="MainTree">
+  <!-- The default behavior of arora-naoqi. While command.behavior is "ready",
+       the robot says "Arora is ready" as its hands play a gesture: the wrists
+       rotate slightly back and forth, the hands open and close. Once both are
+       over, the branch hands the request back ("idle") and the robot rests
+       until command.behavior is "ready" again: the runner starts it there, and
+       its terminal UI's `r` key, a Studio binding or any bridge client sets
+       it anew.
+
+       Say is wrapped in a Fallback with Succeed: a voice that cannot speak
+       leaves the gesture to play out. Leaves: Say (naoqi-say), HandsReady
+       (naoqi-gestures), Equals and Assign (blackboard). -->
+  <BehaviorTree ID="MainTree">
+    <Fallback>
+      <Sequence>
+        <Equals value="{command.behavior}" expected="ready" />
+        <Parallel>
+          <HandsReady dt_ns="{arora/dt}"
+                      l_wrist_yaw="{l_wrist_yaw.target_position}"
+                      r_wrist_yaw="{r_wrist_yaw.target_position}"
+                      l_hand="{l_hand.target_position}"
+                      r_hand="{r_hand.target_position}"
+                      l_wrist_yaw_stiffness="{l_wrist_yaw.target_stiffness}"
+                      r_wrist_yaw_stiffness="{r_wrist_yaw.target_stiffness}"
+                      l_hand_stiffness="{l_hand.target_stiffness}"
+                      r_hand_stiffness="{r_hand.target_stiffness}" />
+          <Fallback>
+            <Say text="Arora is ready" voice="" viseme="{speech.viseme}" />
+            <Succeed />
+          </Fallback>
+        </Parallel>
+        <Assign value="idle" target="{command.behavior}" />
+      </Sequence>
+      <Succeed />
+    </Fallback>
+  </BehaviorTree>
+</root>

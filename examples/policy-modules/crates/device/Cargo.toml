@@ -1,0 +1,46 @@
+[package]
+name = "policy-device"
+description = "Microduck in MuJoCo, driven by Arora: the policy module (wasm or in-process), a behavior tree, and the local bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "policy-device"
+path = "src/main.rs"
+
+[features]
+# Serve through Semio Studio instead of the open local bridge (the `arora`
+# crate's Studio connection: sign-in, device registration, the Zenoh link).
+studio = ["arora/studio-bridge"]
+# Speak on board with Piper. libpiper and espeak-ng are GPLv3: a binary built
+# with this feature is GPL-affected, so it is opt-in.
+piper = ["dep:say-piper"]
+
+[dependencies]
+anyhow.workspace = true
+arora.workspace = true
+arora-hal.workspace = true
+arora-hal-mujoco = { path = "../arora-hal-mujoco", version = "0.1" }
+arora-policy = { path = "../arora-policy", version = "0.1" }
+arora-simple-data-store.workspace = true
+arora-types.workspace = true
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log.workspace = true
+serde_json = "1"
+# The policy module twice over: its library (the declaration: ids, header,
+# signatures, and the in-process functions) and its wasm32-wasip1 build (the
+# guest the device loads), both from one dependency.
+microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The blackboard leaves the interactive tree switches with, the same way.
+blackboard = { path = "../../modules/blackboard", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The voice's providers, host modules only (a speaker is the host's).
+say-piper = { path = "../../modules/say-piper", version = "0.1", optional = true }
+say-silent = { path = "../../modules/say-silent", version = "0.1" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+# The silent voice's log, read by the speech test.
+say-silent = { path = "../../modules/say-silent", version = "0.1" }
