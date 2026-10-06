@@ -571,7 +571,24 @@ fn flush(changes: &Subscription) -> StateChange {
 /// not told what it just reported. The bridges are (a remote wants sensor
 /// state); and a key the behavior overwrote after the reading goes to the HAL
 /// with the behavior's value, since that no longer matches the reading.
+///
+/// The HAL is lent `out` itself when no reading is a frame-final value — always
+/// the case for a HAL that reports nothing — so such a frame copies nothing;
+/// only a frame with keys to leave out builds the HAL a change of its own.
+/// Telling the two apart costs a lookup per reading, not per outbound key.
 fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
+    let reported_back = sensor_applied
+        .set
+        .iter()
+        .any(|(key, value)| out.set.get(key) == Some(value))
+        || sensor_applied
+            .unset
+            .iter()
+            .any(|key| out.unset.contains(key));
+    if !reported_back {
+        hal.try_send(out);
+        return;
+    }
     let mut for_hal = StateChange::new();
     for (key, value) in &out.set {
         if sensor_applied.set.get(key) == Some(value) {
@@ -1899,5 +1916,114 @@ mod tests {
             forwarded_keys.iter().any(|k| k.as_str() == built_in::DT),
             "the clock travels outbound like any other state, got {forwarded_keys:?}"
         );
+    }
+
+    /// A HAL that forwards, for each push, the address of the change it was
+    /// handed and a copy of it — so a test can tell a lent change from one
+    /// built for the HAL, and read what reached it.
+    struct LendingProbe {
+        sent: mpsc::UnboundedSender<(usize, StateChange)>,
+    }
+
+    #[async_trait]
+    impl Hal for LendingProbe {
+        async fn describe(&self) -> arora_hal::HalDescription {
+            arora_hal::HalDescription::default()
+        }
+        async fn read(&self, keys: &[Key]) -> arora_hal::HalResult<Vec<Option<Value>>> {
+            Ok(vec![None; keys.len()])
+        }
+        async fn read_all(&self) -> arora_hal::HalResult<arora_types::data::State> {
+            Ok(Default::default())
+        }
+        async fn write(&self, _changes: StateChange) -> arora_hal::HalResult<()> {
+            Ok(())
+        }
+        fn try_send(&self, changes: &StateChange) {
+            let address = changes as *const StateChange as usize;
+            let _ = self.sent.unbounded_send((address, changes.clone()));
+        }
+        fn updates(&self) -> arora_hal::UpdatesStream {
+            Box::pin(stream::pending())
+        }
+    }
+
+    fn change(set: &[(&str, f64)], unset: &[&str]) -> StateChange {
+        StateChange {
+            set: set
+                .iter()
+                .map(|(key, value)| (Key::from(*key), Some(Value::F64(*value))))
+                .collect(),
+            unset: unset.iter().map(|key| Key::from(*key)).collect(),
+        }
+    }
+
+    /// A frame where the HAL reported nothing hands the HAL the outbound change
+    /// itself: the HAL receives the very change the frame flushed, not a copy.
+    #[test]
+    fn a_hal_that_reported_nothing_is_lent_the_outbound_change() {
+        let (sent, mut received) = mpsc::unbounded();
+        let hal = LendingProbe { sent };
+        let out = change(&[("face/mouth", 0.5), ("face/eyes", 0.1)], &["face/brow"]);
+
+        write_hal(&hal, &out, &StateChange::new());
+
+        let (address, got) = received.try_recv().expect("the HAL was written to");
+        assert_eq!(
+            address, &out as *const StateChange as usize,
+            "lent, not copied"
+        );
+        assert_eq!(got, out);
+    }
+
+    /// A reading the behavior overwrote is no longer the HAL's own report, so
+    /// there is nothing to leave out and the change is lent as well.
+    #[test]
+    fn a_reading_overwritten_this_frame_leaves_the_change_lent() {
+        let (sent, mut received) = mpsc::unbounded();
+        let hal = LendingProbe { sent };
+        let out = change(&[("arm/target", 0.8), ("face/mouth", 0.5)], &[]);
+        let reported = change(&[("arm/target", 0.2)], &[]);
+
+        write_hal(&hal, &out, &reported);
+
+        let (address, got) = received.try_recv().expect("the HAL was written to");
+        assert_eq!(
+            address, &out as *const StateChange as usize,
+            "lent, not copied"
+        );
+        assert_eq!(got, out);
+    }
+
+    /// The HAL is not told what it just reported: a reading that is still the
+    /// frame-final value — set or unset — is left out of what the HAL receives,
+    /// and every other key reaches it.
+    #[test]
+    fn the_hal_is_not_told_what_it_reported() {
+        let (sent, mut received) = mpsc::unbounded();
+        let hal = LendingProbe { sent };
+        let out = change(
+            &[("arm/position", 0.2), ("face/mouth", 0.5)],
+            &["arm/fault"],
+        );
+        let reported = change(&[("arm/position", 0.2)], &["arm/fault"]);
+
+        write_hal(&hal, &out, &reported);
+
+        let (_, got) = received.try_recv().expect("the HAL was written to");
+        assert_eq!(got, change(&[("face/mouth", 0.5)], &[]));
+    }
+
+    /// When the frame changed nothing but the HAL's own reports, the HAL is
+    /// not written to at all.
+    #[test]
+    fn a_frame_of_only_readings_is_not_written_back() {
+        let (sent, mut received) = mpsc::unbounded();
+        let hal = LendingProbe { sent };
+        let out = change(&[("arm/position", 0.2)], &[]);
+
+        write_hal(&hal, &out, &out.clone());
+
+        assert!(received.try_recv().is_err(), "nothing to tell the HAL");
     }
 }

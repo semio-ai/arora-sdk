@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.6.1] - 2026-10-06
+
+### Changed
+
+- A step lends its outbound change to the HAL instead of copying it when no
+  key has to be left out — none of the HAL's own readings is still a
+  frame-final value, which is every frame of a HAL that reports nothing. Only
+  a frame that has readings to leave out builds the HAL a change of its own.
+  What the HAL receives is unchanged.
+
 ## [11.6.0] - 2026-10-05
 
 ### Added

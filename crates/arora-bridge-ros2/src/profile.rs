@@ -49,7 +49,7 @@ pub struct FieldRoute {
 /// out over device keys.
 #[derive(Debug, Clone)]
 pub struct Endpoint {
-    /// Absolute ROS topic name, e.g. `/robot_face/expression`.
+    /// Absolute ROS topic name, e.g. `/robot_face/look_at`.
     pub topic: String,
     /// Registered ROS message name, e.g. `hri_msgs/Expression`.
     pub ros_type: String,
@@ -118,8 +118,10 @@ impl ExposureProfile {
     /// The ROS4HRI face surface, under PAL's `/robot_face/*` names, out of
     /// the box:
     ///
-    /// - expression commands (`hri_msgs/Expression`) fan out to the
-    ///   `standard/ros4hri/expression/*` keys the face standard reads;
+    /// - expression commands (`interaction_skills/SetExpression` on
+    ///   `/skill/set_expression`) fan out, from the `hri_msgs/Expression`
+    ///   they carry, to the `standard/ros4hri/expression/*` keys the face
+    ///   standard reads;
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
     /// - a streamed viseme lands as its ROS4HRI code on
@@ -161,15 +163,15 @@ impl ExposureProfile {
     pub fn ros4hri() -> Self {
         let expression_routes = vec![
             FieldRoute {
-                field: "expression".into(),
+                field: "expression.expression".into(),
                 key: "standard/ros4hri/expression/name".into(),
             },
             FieldRoute {
-                field: "valence".into(),
+                field: "expression.valence".into(),
                 key: "standard/ros4hri/expression/valence".into(),
             },
             FieldRoute {
-                field: "arousal".into(),
+                field: "expression.arousal".into(),
                 key: "standard/ros4hri/expression/arousal".into(),
             },
         ];
@@ -221,8 +223,8 @@ impl ExposureProfile {
             name: "ros4hri".into(),
             endpoints: vec![
                 endpoint(
-                    "/robot_face/expression",
-                    "hri_msgs/Expression",
+                    "/skill/set_expression",
+                    "interaction_skills/SetExpression",
                     Flow::In,
                     &expression_routes,
                 ),
@@ -413,7 +415,7 @@ mod tests {
         let profile = ExposureProfile::ros4hri();
         let topics: Vec<&str> = profile.endpoints.iter().map(|e| e.topic.as_str()).collect();
         for expected in [
-            "/robot_face/expression",
+            "/skill/set_expression",
             "/robot_face/look_at",
             "/tts/viseme",
             "/tts/visemes",

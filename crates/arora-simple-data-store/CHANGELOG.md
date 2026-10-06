@@ -4,6 +4,27 @@ All notable changes to `arora-simple-data-store`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.2.0] - 2026-10-06
+
+### Added
+
+- `SimpleDataStore` routes changes by subscriber prefix
+  (`DataStore::subscribe_prefix`): it keeps each subscriber's prefix and sends
+  it the keys under it alone, cloning each key once per subscriber covering it,
+  and nothing when a change holds none of them. `subscribe` is the empty
+  prefix. A dropped subscription is pruned at the next change to the store.
+- `NamespacedStore::subscribe_prefix`: the device's keys under a prefix, the
+  inner store's subscription to `<namespace>/<prefix>`.
+
+### Changed
+
+- `NamespacedStore` subscribes the inner store to its namespace's subtree, so
+  over a `SimpleDataStore` a device's feed is sent its own keys and never a
+  neighbour's: N devices each writing K keys a frame cost on the order of
+  N · K key copies instead of N² · K. Over a store that keeps the trait's
+  default, the view's feed is unchanged.
+- Depends on arora-types 3.4 (`DataStore::subscribe_prefix`).
+
 ## [3.1.1] - 2026-10-02
 
 ### Fixed
