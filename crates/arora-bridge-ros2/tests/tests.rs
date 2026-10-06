@@ -265,13 +265,6 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     let expr_publisher = pub_node
         .create_publisher::<hri_msgs::Expression>(&expr_topic, None)
         .expect("create expression publisher");
-    let gaze_topic = pub_node
-        .create_topic(
-            &Name::parse("/expressive_face/look_at").expect("valid topic name"),
-            ros2_client::MessageTypeName::new("geometry_msgs", "PointStamped"),
-            &DEFAULT_PUBLISHER_QOS,
-        )
-        .expect("create look_at topic");
     let gaze_publisher = pub_node
         .create_publisher::<geometry_msgs::PointStamped>(&gaze_topic, None)
         .expect("create look_at publisher");
