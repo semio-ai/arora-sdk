@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Which workspace members a change can affect, so CI tests only those.
 #
-#   list_modified_targets.sh <base-ref>   key=value lines for $GITHUB_OUTPUT (report on stderr)
+#   list_modified_targets.sh <base-ref>   key=value lines for $GITHUB_OUTPUT (report on stderr):
+#                            any, test-args, and test-<member>=true / build-<member>=true
+#                            for each selected member (absent, so false, otherwise)
 #   list_modified_targets.sh --all        everything (main)
 #   list_modified_targets.sh verify       after a build: check the rules below against the
 #                            inputs cargo recorded (rustc dep-info, build-script
@@ -142,3 +144,5 @@ echo "any=$([[ -n $args ]] && echo true || echo false)"
 echo "build=$(jq -c .build <<<"$result")"
 echo "test=$(jq -c .test <<<"$result")"
 echo "test-args=$args"
+# One flag per selected member: `if: steps.affected.outputs.test-arora-engine`.
+jq -r '(.build[] | "build-\(.)=true"), (.test[] | "test-\(.)=true")' <<<"$result"

@@ -72,7 +72,7 @@ jobs:
       # DDS, so the workspace run never builds it. Its unit tests need no ROS;
       # the live one against a real subscriber is `#[ignore]`d and documented.
       - name: Test the ROS 2 bridge on the Zenoh backend
-        if: contains(fromJSON(steps.affected.outputs.test), 'arora-bridge-ros2') || contains(fromJSON(steps.affected.outputs.test), 'arora-msgs-ros2')
+        if: steps.affected.outputs.test-arora-bridge-ros2 || steps.affected.outputs.test-arora-msgs-ros2
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
       # Lint in this job rather than a parallel one: the test build above has
@@ -95,27 +95,25 @@ jobs:
       # it never gets exercised by the native build above. Build and run it
       # here, in a real headless browser, so regressions in the browser host
       # are caught at the engine level rather than downstream.
-      - name: Install wasm32-unknown-unknown target
-        if: contains(fromJSON(steps.affected.outputs.test), 'arora-engine') || contains(fromJSON(steps.affected.outputs.test), 'arora') || contains(fromJSON(steps.affected.outputs.build), 'arora-web')
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        if: contains(fromJSON(steps.affected.outputs.test), 'arora-engine') || contains(fromJSON(steps.affected.outputs.test), 'arora') || contains(fromJSON(steps.affected.outputs.build), 'arora-web')
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install the wasm32-unknown-unknown target and wasm-pack
+        if: steps.affected.outputs.test-arora-engine || steps.affected.outputs.test-arora || steps.affected.outputs.build-arora-web
+        run: |
+          rustup target add wasm32-unknown-unknown
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       # geckodriver + firefox are preinstalled on ubuntu-latest.
       # --no-default-features drops the wasmtime/native hosts so `arora` builds
       # for wasm32; the test loads the test-rust-wasm guest through
       # BrowserExecutor and dispatches it (see crates/arora/tests/browser.rs).
       - name: Browser executor test (headless Firefox)
-        if: contains(fromJSON(steps.affected.outputs.test), 'arora-engine')
+        if: steps.affected.outputs.test-arora-engine
         run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
 
       # The run loop's cadence rides a JS timer on wasm32 and Tokio's natively,
       # with the same guarantees either way; the native run above covers the
       # latter, this the former.
       - name: Metronome cadence test (headless Firefox)
-        if: contains(fromJSON(steps.affected.outputs.test), 'arora')
+        if: steps.affected.outputs.test-arora
         run: wasm-pack test --headless --firefox crates/arora --no-default-features --lib
 
       # The opinionated `arora` runtime must also compile for the browser:
@@ -123,7 +121,7 @@ jobs:
       # browser engine host and the Tokio-free runtime. Building it here guards
       # the whole wasm runtime path against regressions.
       - name: Build arora-web for wasm32 (opinionated runtime)
-        if: contains(fromJSON(steps.affected.outputs.build), 'arora-web')
+        if: steps.affected.outputs.build-arora-web
         run: cargo build -p arora-web --target wasm32-unknown-unknown
 
   markdown-link-check:
