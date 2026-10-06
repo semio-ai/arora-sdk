@@ -49,7 +49,7 @@ pub struct FieldRoute {
 /// out over device keys.
 #[derive(Debug, Clone)]
 pub struct Endpoint {
-    /// Absolute ROS topic name, e.g. `/robot_face/expression`.
+    /// Absolute ROS topic name, e.g. `/robot_face/look_at`.
     pub topic: String,
     /// Registered ROS message name, e.g. `hri_msgs/Expression`.
     pub ros_type: String,
@@ -116,10 +116,12 @@ pub struct ExposureProfile {
 
 impl ExposureProfile {
     /// The ROS4HRI face surface, serving both incumbent name sets — PAL
-    /// (`/robot_face/*`) and IIIA (`/robot_face/*`) — out of the box:
+    /// (`/robot_face/*`) and IIIA (`/expressive_face/*`) — out of the box:
     ///
-    /// - expression commands (`hri_msgs/Expression`) fan out to the
-    ///   `standard/ros4hri/expression/*` keys the face standard reads;
+    /// - expression commands (`interaction_skills/SetExpression` on
+    ///   `/skill/set_expression`) fan out, from the `hri_msgs/Expression`
+    ///   they carry, to the `standard/ros4hri/expression/*` keys the face
+    ///   standard reads;
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
     /// - a streamed viseme lands as its ROS4HRI code on
@@ -421,6 +423,7 @@ mod tests {
         for expected in [
             "/skill/set_expression",
             "/robot_face/look_at",
+            "/expressive_face/look_at",
             "/tts/viseme",
             "/tts/visemes",
             "/robot_face/speech",
