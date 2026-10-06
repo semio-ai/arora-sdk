@@ -115,8 +115,8 @@ pub struct ExposureProfile {
 }
 
 impl ExposureProfile {
-    /// The ROS4HRI face surface, serving both incumbent name sets — PAL
-    /// (`/robot_face/*`) — out of the box:
+    /// The ROS4HRI face surface, under PAL's `/robot_face/*` names, out of
+    /// the box:
     ///
     /// - expression commands (`hri_msgs/Expression`) fan out to the
     ///   `standard/ros4hri/expression/*` keys the face standard reads;
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn ros4hri_preset_serves_both_name_sets() {
+    fn ros4hri_preset_serves_the_face_topics() {
         let profile = ExposureProfile::ros4hri();
         let topics: Vec<&str> = profile.endpoints.iter().map(|e| e.topic.as_str()).collect();
         for expected in [
@@ -522,15 +522,16 @@ mod tests {
         assert!(profile
             .coverage(keys.iter().map(String::as_str), ["look_at", "say"])
             .is_empty());
-        // Dropping the gaze target surfaces exactly the look_at holes.
+        // Dropping the gaze target surfaces exactly the look_at hole.
         let partial: Vec<&str> = keys
             .iter()
             .map(String::as_str)
             .filter(|k| !k.ends_with("gaze/target"))
             .collect();
         let missing = profile.coverage(partial, ["look_at", "say"]);
-        assert_eq!(missing.len(), 2, "{missing:?}");
-        assert!(missing.iter().all(|m| m.contains("gaze/target")));
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert!(missing[0].contains("/robot_face/look_at"));
+        assert!(missing[0].contains("gaze/target"));
         // A device serving neither skill method misses the whole skill plane.
         let missing = profile.coverage(keys.iter().map(String::as_str), []);
         assert_eq!(missing.len(), 2, "{missing:?}");
