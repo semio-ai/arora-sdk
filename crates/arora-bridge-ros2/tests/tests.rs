@@ -243,7 +243,7 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
 
 /// Enabling the `ros4hri` exposure profile is all the wiring a face device
 /// needs (ARORA-86): a typed publisher on an absolute incumbent topic — here
-/// the expression skill topic, the IIIA look_at alias, and both shapes a TTS
+/// the expression skill topic, the PAL look_at topic, and both shapes a TTS
 /// node streams a viseme in — fans out onto the `standard/ros4hri/*` keys the
 /// face standard reads, fields routed by name, the gaze point coerced to the
 /// store's vec3 form, and the sequence indexed at its first element.
@@ -283,7 +283,7 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
         .expect("create expression publisher");
     let gaze_topic = pub_node
         .create_topic(
-            &Name::parse("/expressive_face/look_at").expect("valid topic name"),
+            &Name::parse("/robot_face/look_at").expect("valid topic name"),
             ros2_client::MessageTypeName::new("geometry_msgs", "PointStamped"),
             &DEFAULT_PUBLISHER_QOS,
         )

@@ -4,6 +4,15 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-10-06
+
+### Removed
+
+- **Breaking:** the ROS4HRI preset no longer serves IIIA's
+  `/expressive_face/look_at`; a gaze point comes in on PAL's
+  `/robot_face/look_at` or through the `/skill/look_at` action. The preset
+  serves PAL's `/robot_face/*` names only.
+
 ## [9.0.0] - 2026-10-06
 
 ### Changed

@@ -164,11 +164,10 @@ fan-out over device keys, glob includes (`*` one segment, `**` the rest)
 whose prefix rewrites expose bulk keys on the scalar plane under absolute
 names, and **action bindings** that serve a device task-run method as a
 standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
-the ROS4HRI face surface for both incumbent name sets — PAL (`/robot_face/*`)
-and IIIA (`/expressive_face/*`): expression commands — an
-`interaction_skills/SetExpression` on `/skill/set_expression` — fan out to
-`standard/ros4hri/expression/*`, `look_at` points land as the gaze target
-(vec3) and frame, a streamed viseme lands as its ROS4HRI code on
+the ROS4HRI face surface under PAL's names (`/robot_face/*`): expression
+commands — an `interaction_skills/SetExpression` on `/skill/set_expression` —
+fan out to `standard/ros4hri/expression/*`, `look_at` points land as the gaze
+target (vec3) and frame, a streamed viseme lands as its ROS4HRI code on
 `standard/ros4hri/viseme` — from either shape a TTS node publishes it in, one
 `hri_msgs/Viseme` on `/tts/viseme` or an `hri_msgs/Visemes` on `/tts/visemes`,
 both carrying the shape at the audio playhead — and the two standard skills
