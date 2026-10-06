@@ -131,6 +131,9 @@ impl NaoqiHal {
                 None
             }
         };
+        if config.disable_autonomous_life {
+            disable_autonomous_life(&node).await;
+        }
         let description = describe(&config, &node, &memory).await;
         let names: Vec<String> = motion
             .call("getBodyNames", "Body".to_string())
@@ -281,6 +284,35 @@ impl Utterance {
             Some(true) => Status::Success,
             Some(false) => Status::Failure,
         }
+    }
+}
+
+/// Turns Autonomous Life off, so that the robot's own life does not move the joints the
+/// device drives. A robot without the service, or a refusal, leaves it as it is, warned.
+async fn disable_autonomous_life(node: &Node) {
+    let life = match node.service("ALAutonomousLife").await {
+        Ok(life) => life,
+        Err(error) => {
+            warn!("ALAutonomousLife is not available, Autonomous Life is left as is: {error}");
+            return;
+        }
+    };
+    let state: String = match life.call::<String, _, _>("getState", ()).await {
+        Ok(state) => state,
+        Err(error) => {
+            warn!("ALAutonomousLife.getState failed, Autonomous Life is left as is: {error}");
+            return;
+        }
+    };
+    if state == "disabled" {
+        return;
+    }
+    match life
+        .call::<(), _, _>("setState", "disabled".to_string())
+        .await
+    {
+        Ok(()) => info!("Autonomous Life turned off (it was {state})"),
+        Err(error) => warn!("ALAutonomousLife.setState(\"disabled\") failed: {error}"),
     }
 }
 

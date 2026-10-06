@@ -38,6 +38,8 @@ pub struct FakeNaoqi {
     pub set_stiffnesses: StiffnessCommands,
     pub leds: Arc<Mutex<Vec<(String, i32, f32)>>>,
     pub move_toward: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+    /// The Autonomous Life state, `solitary` until set.
+    pub life_state: Arc<Mutex<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -102,6 +104,7 @@ impl FakeNaoqi {
         let set_stiffnesses = Arc::new(Mutex::new(Vec::new()));
         let leds = Arc::new(Mutex::new(Vec::new()));
         let move_toward = Arc::new(Mutex::new(Vec::new()));
+        let life_state = Arc::new(Mutex::new("solitary".to_string()));
 
         let mut init = qi::node::init();
         init.add_service_object("ALMemory", almemory(memory.clone(), events.clone()));
@@ -118,6 +121,7 @@ impl FakeNaoqi {
         init.add_service_object("ALLeds", alleds(leds.clone()));
         init.add_service_object("ALSystem", alsystem());
         init.add_service_object("ALRobotModel", alrobotmodel());
+        init.add_service_object("ALAutonomousLife", alautonomouslife(life_state.clone()));
         init.bind("tcp://127.0.0.1:0".parse().unwrap());
         let node = init
             .host_space()
@@ -142,6 +146,7 @@ impl FakeNaoqi {
             set_stiffnesses,
             leds,
             move_toward,
+            life_state,
         }
     }
 
@@ -331,6 +336,23 @@ fn alleds(leds: Arc<Mutex<Vec<(String, i32, f32)>>>) -> AnyObject {
         "setIntensity",
         |(_group, _intensity): (String, f32)| async move { Ok(()) },
     );
+    AnyObject::new(builder.build())
+}
+
+fn alautonomouslife(state: Arc<Mutex<String>>) -> AnyObject {
+    let mut builder = ObjectBuilder::new();
+    let get_state = state.clone();
+    builder.add_method("getState", move |(): ()| {
+        let state = get_state.clone();
+        async move { Ok(lock(&state).clone()) }
+    });
+    builder.add_method("setState", move |new_state: String| {
+        let state = state.clone();
+        async move {
+            *lock(&state) = new_state;
+            Ok(())
+        }
+    });
     AnyObject::new(builder.build())
 }
 

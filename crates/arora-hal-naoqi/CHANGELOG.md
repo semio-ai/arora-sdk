@@ -19,6 +19,9 @@ All notable changes to `arora-hal-naoqi`. The format follows
   `touch.hand.*`, `bumper.*`, `chest_button`.
 - Commanded keys: `<joint>.target_position`, `<joint>.target_stiffness`,
   `led.<group>.color`, `led.<group>.intensity`, `velocity.{x,y}`, `rotation.z`.
+- Autonomous Life is turned off when the HAL connects (`ALAutonomousLife.setState`), so
+  that the robot's own life does not move the joints the device drives;
+  `disable_autonomous_life: false` in the configuration keeps it on.
 - Behavior leaves as host modules: `say` (the trees' speech contract, in the robot's
   voice through `ALTextToSpeech`; `NaoqiHal::voice` and `say::install`) and
   `gestures::hands_ready`.

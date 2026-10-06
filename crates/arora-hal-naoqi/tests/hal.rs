@@ -79,6 +79,21 @@ async fn describes_the_robot() {
 }
 
 #[tokio::test]
+async fn turns_autonomous_life_off_when_connecting() {
+    let (robot, _hal) = start().await;
+    assert_eq!(*robot.life_state.lock().unwrap(), "disabled");
+}
+
+#[tokio::test]
+async fn leaves_autonomous_life_on_when_configured_to() {
+    let robot = FakeNaoqi::start().await;
+    let mut config = NaoqiRobotConfig::with_url(&robot.url);
+    config.disable_autonomous_life = false;
+    let _hal = NaoqiHal::new(config).await.expect("connect the HAL");
+    assert_eq!(*robot.life_state.lock().unwrap(), "solitary");
+}
+
+#[tokio::test]
 async fn reports_sensors_as_keys() {
     let (robot, hal) = start().await;
     let mut feed = hal.updates();

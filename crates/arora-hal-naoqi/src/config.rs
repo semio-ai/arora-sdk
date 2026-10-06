@@ -39,6 +39,10 @@ pub struct NaoqiRobotConfig {
     /// Which sensor families are sampled.
     #[serde(default)]
     pub sensors: SensorsConfig,
+    /// Turn Autonomous Life off when connecting (`ALAutonomousLife.setState("disabled")`),
+    /// so that the robot's own life does not move the joints Arora drives.
+    #[serde(default = "default_true")]
+    pub disable_autonomous_life: bool,
 }
 
 fn default_url() -> String {
@@ -66,6 +70,7 @@ impl Default for NaoqiRobotConfig {
             sensor_period_ms: default_sensor_period_ms(),
             joint_speed_fraction: default_joint_speed_fraction(),
             sensors: SensorsConfig::default(),
+            disable_autonomous_life: true,
         }
     }
 }
@@ -133,6 +138,9 @@ impl NaoqiRobotConfig {
             self.joint_speed_fraction = overrides.joint_speed_fraction;
         }
         self.sensors = overrides.sensors;
+        if !overrides.disable_autonomous_life {
+            self.disable_autonomous_life = false;
+        }
     }
 }
 
@@ -196,6 +204,15 @@ mod tests {
         assert_eq!(config.url, "tcp://nao.local:9559");
         assert_eq!(config.password.as_deref(), Some("secret"));
         assert_eq!(config.sensor_period_ms, 50);
+        assert!(
+            config.disable_autonomous_life,
+            "Autonomous Life is turned off by default"
+        );
+        config.apply_overrides(
+            serde_json::from_str(r#"{"disable_autonomous_life": false}"#).unwrap(),
+        );
+        assert!(!config.disable_autonomous_life, "an override keeps it on");
+        assert_eq!(config.password.as_deref(), Some("secret"));
     }
 
     #[test]
