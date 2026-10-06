@@ -331,4 +331,4 @@ how direct and indirect dispatch work and how behavior trees use them.
 
 The NAO cross-build of `arora-naoqi` is not exercised in CI; it depends on a
 Homebrew formula not available on the CI image. See
-[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).
+[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).

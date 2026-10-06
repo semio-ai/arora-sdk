@@ -3,11 +3,23 @@
 NAO and Pepper robots as Arora devices, over their NAOqi middleware.
 
 The HAL talks to the robot with [`libqi-vibe`](https://crates.io/crates/libqi-vibe), a Rust
-implementation of the `qi` framework: no C++ SDK. The `arora-naoqi` runner can run on the
-robot itself (cross-compiled, below) or on any computer that reaches the robot's NAOqi over
-TCP (port 9559).
+implementation of the `qi` framework: no C++ SDK. Its `arora-naoqi` runner works two ways:
+
+- **From your computer**, the quickest way to try it: it builds like any Rust program and
+  drives the robot over the network, through NAOqi's port 9559.
+  [Try it on a NAO](#try-it-on-a-nao).
+- **On the robot itself**, where the device runs on its own, with no computer attached.
+  [Deploy it on the robot](#deploy-it-on-the-robot).
+
+The second way is the remarkable one. Arora is written in Rust, so the whole device (the
+runtime, its behavior trees, its WebAssembly modules, its Semio Studio connection)
+cross-compiles to a single static binary for the NAO's own computer, a 32-bit Intel Atom,
+with nothing to install on the robot. That is rare in the robotics ecosystem: today's
+stacks, ROS 2 and the Python AI tooling among them, seldom run on the NAO's on-board
+computer, and stay on a separate machine that drives the robot over the network.
 
 - [Try it on a NAO](#try-it-on-a-nao)
+- [Deploy it on the robot](#deploy-it-on-the-robot)
 - [The default behavior](#the-default-behavior)
 - [Semio Studio](#semio-studio)
 - [Keys](#keys)
@@ -18,27 +30,67 @@ TCP (port 9559).
 
 What you get: the robot says "Arora is ready" while its wrists rotate slightly and its hands
 open and close; the terminal UI plays it again when you press `r`; the device appears in
-your Semio Studio account.
+your Semio Studio account. `arora-naoqi` runs on your computer and drives the robot over
+the network: nothing to cross-compile, nothing to install on the robot.
 
 ### 1. Prepare the robot
 
 1. Connect the NAO to your network and note its IP address: press its chest button once and
-   it says it.
-2. Check that you can log in: `ssh nao@<nao-ip>` (the password is the robot's, `nao` unless
-   it was changed).
-3. Sit the robot down, or let it crouch in its rest posture: the default behavior stiffens
+   it says it. From your computer, `nc -z <nao-ip> 9559` checks that its NAOqi answers.
+2. Sit the robot down, or let it crouch in its rest posture: the default behavior stiffens
    only the wrists and hands, nothing that holds the robot up.
-4. Turn Autonomous Life off, so that it does not move the arms while Arora does. On the
-   robot:
 
-   ```sh
-   qicli call ALAutonomousLife.setState disabled
-   ```
+There is no need to turn Autonomous Life off: the HAL does it when it connects, so that the
+robot's own life does not move the joints Arora drives. Turning it off can send the robot
+to its rest posture, one more reason to sit it down first. To keep Autonomous Life on, set
+`"disable_autonomous_life": false` in the configuration (see [Use it](#3-use-it)).
 
-5. For Semio Studio, the robot needs Internet access and the right date (TLS checks
-   certificates against it): `date` on the robot should print the current time.
+### 2. Run it from your computer
 
-### 2. Cross-compile `arora-naoqi` for the NAO
+You need Rust, installed with [rustup](https://rustup.rs): the repository pins its nightly
+toolchain (`rust-toolchain.toml`), which rustup fetches on the first build. Then, from the
+repository root, on macOS or Linux:
+
+```sh
+cargo run --release -p arora-hal-naoqi --features runner --bin arora-naoqi -- tcp://<nao-ip>:9559
+```
+
+The first build takes a while (about ten minutes); the next runs start at once. For Semio
+Studio, your computer needs Internet access.
+
+A robot that requires NAOqi authentication takes its credentials from a JSON file given
+after the address: `{"user": "nao", "password": "<password>"}`.
+
+### 3. Use it
+
+The terminal UI asks three questions first (see [Semio Studio](#semio-studio)): your Studio
+owner UID, a device name, a model family (`nao`). Leave the owner empty to run without
+Studio. Then the device starts, the robot says "Arora is ready" with its hands, and:
+
+| Key | Does |
+|---|---|
+| `r` | plays the default behavior again |
+| `PgUp` / `PgDn` / `End`, mouse wheel | scroll the logs, follow them again |
+| `q`, `Ctrl-C` | stop the device |
+
+More logs: set `RUST_LOG=debug` before the command. Without a terminal (`nohup`, a
+service), the runner is headless: it takes the Studio answers from `DEVICE_OWNERS`,
+`DEVICE_NAME` and `MODEL_FAMILY`, and connects to Studio only when `DEVICE_OWNERS` is set.
+
+Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; a JSON
+configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling period, joint
+speed, sensor families, Autonomous Life) can replace the address, and a second JSON file
+overrides it.
+
+## Deploy it on the robot
+
+Once it works from your computer, deploy it: the same device, cross-compiled, runs on the
+NAO itself, without your computer. The robot needs SSH access (`ssh nao@<nao-ip>`, the
+password is the robot's, `nao` unless it was changed) and, for Semio Studio, Internet
+access and the right date (TLS checks certificates against it: `date` on the robot should
+print the current time).
+
+### 1. Cross-compile `arora-naoqi` for the NAO
 
 The NAO's computer is a 32-bit Atom: the target is `i686-unknown-linux-musl`, a static
 binary that needs nothing from the robot's system. On a Mac, from the repository root:
@@ -71,44 +123,21 @@ On an Intel Mac, point
 (`.cargo/config.toml` names the Apple Silicon path). On Linux, any
 `i686-linux-musl` cross toolchain does, with the same variables pointing at it.
 
-### 3. Copy it to the robot
+### 2. Copy it to the robot
 
 ```sh
 scp target/i686-unknown-linux-musl/release/arora-naoqi nao@<nao-ip>:~/
 ```
 
-### 4. Run it
+### 3. Run it on the robot
 
 ```sh
 ssh -t nao@<nao-ip>   # -t: the terminal UI needs a terminal
 ./arora-naoqi tcp://127.0.0.1:9559
 ```
 
-The terminal UI asks three questions first (see [Semio Studio](#semio-studio)): your Studio
-owner UID, a device name, a model family (`nao`). Leave the owner empty to run without
-Studio. Then the device starts, the robot says "Arora is ready" with its hands, and:
-
-| Key | Does |
-|---|---|
-| `r` | plays the default behavior again |
-| `PgUp` / `PgDn` / `End`, mouse wheel | scroll the logs, follow them again |
-| `q`, `Ctrl-C` | stop the device |
-
-More logs: `RUST_LOG=debug ./arora-naoqi tcp://127.0.0.1:9559`. Without a terminal
-(`nohup`, a service), the runner is headless: it takes the Studio answers from
-`DEVICE_OWNERS`, `DEVICE_NAME` and `MODEL_FAMILY`, and connects to Studio only when
-`DEVICE_OWNERS` is set.
-
-To try it before cross-compiling, run the same device on your computer, against the robot
-over the network:
-
-```sh
-cargo run --release -p arora-hal-naoqi --features runner --bin arora-naoqi -- tcp://<nao-ip>:9559
-```
-
-Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; a JSON
-configuration (`configs/nao.json`: joint ids, sampling period, joint speed, sensor
-families) can replace the address, and a second JSON file overrides it.
+The device then behaves as [from your computer](#3-use-it). To leave it running after you
+log out, run it headless with `nohup` and the Studio variables.
 
 ## The default behavior
 
@@ -149,9 +178,11 @@ Studio user ids (UIDs).
    The robot is now in your device list in Studio, where you bind it to a robot model and
    drive it.
 
-The device's identity (its Studio credentials) is kept on the robot under
-`~/.local/share/semio/arora/devices/default/studio/`; the next runs reuse it without
-asking again. To register the robot afresh, delete that directory, or give the run another
+The device's identity (its Studio credentials) is kept on the machine that runs
+`arora-naoqi`, under `semio/arora/devices/default/studio/` in its user data directory:
+`~/.local/share` on Linux and on the robot, `~/Library/Application Support` on macOS. The
+next runs reuse it without asking again; a device run from your computer, then deployed on
+the robot, registers twice. To register the robot afresh, delete that directory, or give the run another
 identity with `DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`).
 
 ## Keys
@@ -212,7 +243,8 @@ simulated NAOqi. NAOqi 2.1 is older, and this HAL has not run on it yet:
   the logs at `RUST_LOG=debug` show where the handshake stops: please report them.
 - **The kernel.** NAO's NAOqi 2.1 system runs Linux 2.6.33; Rust's standard library
   targets 3.2 and later. The static musl binary is expected to run, untested. If it does
-  not start on the robot, run it on a computer instead (above).
+  not start on the robot, [run it from a computer](#2-run-it-from-your-computer)
+  instead.
 - **Joints and services.** The HAL discovers the joints with `ALMotion.getBodyNames` and
   uses `ALMotion.setAngles`, `setStiffnesses`, `ALTextToSpeech.say` and `stopAll`, all
   present in NAOqi 2.1.

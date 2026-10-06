@@ -46,9 +46,11 @@ This produces:
   native into `arora-behavior-tree`.)
 
 The NAO HAL (`crates/arora-hal-naoqi`) is pure Rust and builds for the host
-with the workspace. Running its `arora-naoqi` runner (feature `runner`) on the
-robot takes an opt-in cross-build to `i686-unknown-linux-musl`; see
-[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).
+with the workspace. Its `arora-naoqi` runner (feature `runner`) runs on the
+host against the robot over the network, with no cross-build; running it on the
+robot takes an opt-in cross-build to `i686-unknown-linux-musl`. See
+[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao) and
+[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
 
 ### Testing
 
@@ -223,11 +225,14 @@ What the integration test crate actually declares as artifact dependencies
 
 ### Build flags & options
 
+- `cargo run --release -p arora-hal-naoqi --features runner --bin arora-naoqi --
+  tcp://<nao-ip>:9559` — builds the NAO runner for the host and drives the robot
+  over the network.
 - `cargo build --release -p arora-hal-naoqi --features runner --bin arora-naoqi
   --target i686-unknown-linux-musl` — cross-builds the NAO runner (opt-in;
   needs the i686-unknown-linux-musl toolchain and the `CC_`/`CXX_`/`AR_`
   variables given in the
-  [HAL readme](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao)).
+  [HAL readme](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot)).
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 

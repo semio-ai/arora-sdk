@@ -166,7 +166,7 @@ The NAO is served by `crates/arora-hal-naoqi`, a HAL over the pure-Rust
 C++ cross-build: the HAL builds for the host with the workspace, and the
 cross-build of its `arora-naoqi` runner to `i686-unknown-linux-musl` for the
 robot is opt-in and not run in CI. See
-[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao).
+[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
 
 ## Engine architecture
 
