@@ -1,0 +1,17 @@
+[package]
+name = "cargo-blast-radius"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Which packages of a Cargo workspace a change can reach — and a check, against cargo's own dep-info, that the answer misses nothing"
+publish = false
+
+# Standalone: not a member of the surrounding workspace, so it builds on stable
+# and can be lifted into its own repository unchanged.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+globset = "0.4"
+serde_json = "1"
+toml = "0.8"

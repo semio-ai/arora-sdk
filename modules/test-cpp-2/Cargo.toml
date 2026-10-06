@@ -21,3 +21,8 @@ arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target 
 # path; we depend on its lib so cargo will build it (and therefore run its
 # build.rs) before us. The artifact itself is unused.
 test-cpp = { path = "../test-cpp" }
+
+# Files outside this package the build reads (see build.rs), for CI selection
+# (tools/cargo-blast-radius): an edit there selects this module.
+[package.metadata.blast-radius]
+inputs = ["../../libs/cpp"]

@@ -174,6 +174,21 @@ Or set verbosity:
 cargo build -vv -p <module-name>
 ```
 
+### CI Selection
+
+On a pull request, CI builds and tests only the packages the diff can reach
+([`tools/cargo-blast-radius`](tools/cargo-blast-radius/readme.md)). A file in no
+package selects everything unless `[workspace.metadata.blast-radius] ignore`
+in the root `Cargo.toml` lists it. When a package reads a file outside its own
+directory (a build script reading `libs/cpp`, `wit_bindgen` reading
+arora-engine's WIT), print `cargo:rerun-if-changed` for it and list it under
+`[package.metadata.blast-radius] inputs`. The `verify` step fails otherwise and
+names the entry to add.
+
+```bash
+cargo run -q --manifest-path tools/cargo-blast-radius/Cargo.toml -- --base origin/main
+```
+
 ### Cross-Compilation
 
 The workspace handles cross-compilation via artifact dependencies:

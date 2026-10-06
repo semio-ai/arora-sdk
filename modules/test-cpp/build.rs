@@ -36,6 +36,10 @@ fn main() -> Result<()> {
 
     let workspace_root = workspace_root(&manifest_dir)?;
     let arora_cpp_source = workspace_root.join("libs").join("cpp");
+    // The cmake build below reads this, outside the package: declare it so
+    // cargo rebuilds on an edit (and CI selection, checked against cargo's
+    // records, sees it).
+    println!("cargo:rerun-if-changed={}", arora_cpp_source.display());
     let arora_include_dir = workspace_root.join("target").join("include");
 
     // Build via cmake. We must override target/host flags: cmake-rs picks up

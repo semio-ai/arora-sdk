@@ -28,3 +28,8 @@ arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact 
 # linking, so cargo builds these for the NAO target.
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "i686-unknown-linux-musl" }
 arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "i686-unknown-linux-musl" }
+
+# Files outside this package the build reads (see build.rs), for CI selection
+# (tools/cargo-blast-radius): an edit there selects this module.
+[package.metadata.blast-radius]
+inputs = ["../../libs/cpp", "../../crates/arora-behavior-tree-types-yaml/records"]

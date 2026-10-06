@@ -30,6 +30,11 @@ fn main() -> Result<()> {
         .join("arora-behavior-tree-types-yaml")
         .join("records");
     let arora_cpp_source = workspace_root.join("libs").join("cpp");
+    // The cmake build below reads these, outside this package: declare them
+    // so cargo rebuilds on an edit (and CI selection, checked against cargo's
+    // records, sees them).
+    println!("cargo:rerun-if-changed={}", arora_cpp_source.display());
+    println!("cargo:rerun-if-changed={}", behavior_tree_include.display());
     let arora_include_dir = workspace_root.join("target").join("include");
     let toolchain_file = manifest_dir.join("mac-homebrew-i686.toolchain.cmake");
 
