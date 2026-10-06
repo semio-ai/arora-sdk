@@ -53,7 +53,7 @@ reserved **built-in keys** a behavior can rely on:
 
 | Key | Value | Meaning |
 |---|---|---|
-| `arora/time` | `U64` | monotonic **nanoseconds** since the runtime started |
+| `arora/time` | `U64` | monotonic **nanoseconds** on the runtime's timeline, from the time it starts at (zero unless its builder sets one) |
 | `arora/dt` | `U64` | **nanoseconds** elapsed since the previous step |
 
 A behavior that paces itself — an animation module, a graph time node — reads

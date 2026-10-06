@@ -17,7 +17,7 @@ is where they are (re)typed by hand.
 | `crates/arora/src/lib.rs` (builder) | registers the interpreter as a `HostModule` | — | — | uses the consts above |
 | `crates/arora-behavior-tree/src/schema.rs` | `_RET_PARAM_ID` | Rust const | — | yes |
 | `crates/arora-behavior-tree` | generated **types** only (`Status`, `TickId`) from `declare_*` factories | Rust factories | `build.rs` → `src/arora_generated/` | — |
-| `crates/arora/src/module_discovery.rs` | freezes a guest header's primitive-only exports into `frozen::Function` for `DescribeMethods` | — | — | — |
+| `crates/arora/src/module_discovery.rs` | freezes a guest header's primitive and optional-scalar-primitive exports into `frozen::Function` for `DescribeMethods` | — | — | — |
 | `crates/arora-bridge-ros2/src/services.rs`, `actions.rs` | consumes `frozen::Function` (parameters, ordering, return) to synthesize ROS services/actions | — | — | — |
 | `crates/arora-module-authoring/{core,rust,cpp,cli}` | the generator: YAML → registry → assets → Rust/C++ sources + stripped header | — | — | — |
 | `tests/` (integration) | loads built artifacts through `arora-cli` with their headers | — | — | — |

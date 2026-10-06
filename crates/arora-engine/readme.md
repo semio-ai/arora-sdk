@@ -21,6 +21,17 @@ Both expose the same ABI to guests (`arora_buffer_alloc`/`free`,
 `arora_function_<uuid>` exports, `arora_dispatch` / `arora_dispatch_indirect`
 imports), so a module compiled once runs in either host.
 
+### Compiling a module once
+
+[`Engine::load_module`](src/engine.rs) compiles the module's executable for
+the engine that loads it. A module that several engines load — one per
+device, say — compiles once as a [`CompiledModule`](src/compiled.rs), which
+each engine loads with `Engine::load_compiled_module`: it instantiates the
+compiled code, with an instance (memory, globals) of its own, and compiles
+nothing. Natively, every `WebAssemblyExecutor` in the process runs on one
+wasmtime engine, the one a compiled module belongs to; in the browser, a
+`WebAssembly.Module` instantiates anywhere.
+
 ## Native Executor
 
 A [`native::NativeExecutor`](src/executor/native.rs) is available and is

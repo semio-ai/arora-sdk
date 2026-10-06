@@ -4,6 +4,47 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.9.0] - 2026-10-06
+
+### Added
+
+- `AroraBuilder::with_start_time(Duration)`: the time the device's clock reads
+  before its first step, zero by default. The first `step(dt)` publishes
+  `arora/time = start + dt` and `arora/dt = dt`, so a device that joins peers
+  which have already run takes their timeline with an ordinary first frame;
+  devices started at one time and stepped with the same `dt`s read the same
+  `arora/time` at every step. The clock is set at build only.
+
+## [11.8.0] - 2026-10-06
+
+### Added
+
+- `AroraBuilder::with_compiled_module(&CompiledModule)`: load a guest module
+  compiled once into any number of devices. Each device instantiates the
+  compiled code instead of compiling the executable, and the module goes
+  through the checks `with_module` does at `build` (one module per id, its
+  primitive-typed exports joining the method index).
+- Re-exports `arora_engine::compiled::CompiledModule`.
+
+### Changed
+
+- `with_module` compiles its module at `build`, for that device alone, then
+  loads it as `with_compiled_module` does.
+- Depends on arora-engine 5.2.
+
+## [11.7.0] - 2026-10-06
+
+### Added
+
+- `DescribeMethods` lists a guest (wasm) module's functions that take or
+  return an optional over a scalar primitive (`Option<u64>`, `Option<String>`),
+  with the parameter or return typed as a `FrozenOption` over the primitive —
+  the signature the module's record declares for it. `LocalCaller::invoke` and
+  remote clients call them by name; an optional argument may be left out,
+  which the guest reads as `None`. A function naming a record type, a map or a fixed-length array still
+  dispatches without being listed: a record needs a type registry to pin its
+  version.
+
 ## [11.6.1] - 2026-10-06
 
 ### Changed

@@ -141,11 +141,12 @@ async fn inbound_topic_becomes_update_command() {
     );
 }
 
-/// A typed ROS 2 publisher sending an `hri_msgs/Expression` lands the device's
-/// key as a structured value — the ROS4HRI inbound acceptance criterion
+/// A typed ROS 2 publisher sending an `interaction_skills/SetExpression`, the
+/// `hri_msgs/Expression` it wraps included, lands the device's key as a
+/// structured value — the ROS4HRI inbound acceptance criterion
 /// (ARORA-85). The bridge subscribes raw and decodes the CDR against the
 /// message's runtime type; the decoded value is byte-exact with the same
-/// Expression built through the seeded bridge.
+/// SetExpression built through the seeded bridge.
 #[tokio::test]
 #[serial]
 #[cfg_attr(
@@ -154,7 +155,7 @@ async fn inbound_topic_becomes_update_command() {
               To run locally, ensure a multicast-capable interface and use `--ignored`."
 )]
 async fn a_typed_hri_expression_publisher_lands_the_device_key() {
-    use arora_msgs_ros2::{builtin_interfaces, hri_msgs, std_msgs};
+    use arora_msgs_ros2::{builtin_interfaces, hri_msgs, interaction_skills, std_msgs, std_skills};
     use arora_types::value_serde::bridge::to_value_seeded;
     use arora_types::AroraType;
 
@@ -162,34 +163,45 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
     let domain_id = random_domain_id();
     let namespace = format!("test_hri_in_{domain_id}");
 
-    let make_expr = || hri_msgs::Expression {
-        header: std_msgs::Header {
-            stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
-            frame_id: "face".into(),
+    let make_expr = || interaction_skills::SetExpression {
+        meta: std_skills::Meta {
+            caller: "test".into(),
+            priority: std_skills::Meta::NORMAL_PRIORITY,
         },
-        expression: "happy".into(),
-        valence: 0.8,
-        arousal: 0.2,
-        confidence: 1.0,
+        expression: hri_msgs::Expression {
+            header: std_msgs::Header {
+                stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                frame_id: "face".into(),
+            },
+            expression: "happy".into(),
+            valence: 0.8,
+            arousal: 0.2,
+            confidence: 1.0,
+        },
     };
 
     let config = Ros2BridgeConfig::new(&namespace, domain_id)
-        .with_typed_input("expression", "hri_msgs/Expression");
+        .with_typed_input("expression", "interaction_skills/SetExpression");
+
     let mut bridge = Ros2Bridge::new(config).await;
     let mut inbound = bridge.take_inbound();
 
     let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
+
     let topic = Name::parse(&topic_name(&namespace, "expression")).expect("valid topic name");
+
     let pub_topic = pub_node
         .create_topic(
             &topic,
-            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            ros2_client::MessageTypeName::new("interaction_skills", "SetExpression"),
             &DEFAULT_PUBLISHER_QOS,
         )
         .expect("create topic");
+
     let publisher = pub_node
-        .create_publisher::<hri_msgs::Expression>(&pub_topic, None)
+        .create_publisher::<interaction_skills::SetExpression>(&pub_topic, None)
         .expect("create publisher");
+
     tokio::time::timeout(
         Duration::from_secs(30),
         publisher.wait_for_subscription(&pub_node),
@@ -222,14 +234,16 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
     .await
     .expect("timed out waiting for the expression Update command");
 
-    let (ty, reg) = <hri_msgs::Expression as AroraType>::arora_type_with_registry();
-    let expected = to_value_seeded(&make_expr(), &ty, &reg).expect("expression to value");
+    let (ty, reg) = <interaction_skills::SetExpression as AroraType>::arora_type_with_registry();
+
+    let expected = to_value_seeded(&make_expr(), &ty, &reg).expect("SetExpression to value");
+
     assert_eq!(change.set.get("expression"), Some(&Some(expected)));
 }
 
 /// Enabling the `ros4hri` exposure profile is all the wiring a face device
 /// needs (ARORA-86): a typed publisher on an absolute incumbent topic — here
-/// the PAL expression alias, the IIIA look_at alias, and both shapes a TTS
+/// the expression skill topic, the PAL look_at topic, and both shapes a TTS
 /// node streams a viseme in — fans out onto the `standard/ros4hri/*` keys the
 /// face standard reads, fields routed by name, the gaze point coerced to the
 /// store's vec3 form, and the sequence indexed at its first element.
@@ -242,7 +256,9 @@ async fn a_typed_hri_expression_publisher_lands_the_device_key() {
 )]
 async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     use arora_bridge_ros2::ExposureProfile;
-    use arora_msgs_ros2::{builtin_interfaces, geometry_msgs, hri_msgs, std_msgs};
+    use arora_msgs_ros2::{
+        builtin_interfaces, geometry_msgs, hri_msgs, interaction_skills, std_msgs, std_skills,
+    };
 
     let _ = env_logger::try_init();
     let domain_id = random_domain_id();
@@ -257,17 +273,17 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
 
     let expr_topic = pub_node
         .create_topic(
-            &Name::parse("/robot_face/expression").expect("valid topic name"),
-            ros2_client::MessageTypeName::new("hri_msgs", "Expression"),
+            &Name::parse("/skill/set_expression").expect("valid topic name"),
+            ros2_client::MessageTypeName::new("interaction_skills", "SetExpression"),
             &DEFAULT_PUBLISHER_QOS,
         )
         .expect("create expression topic");
     let expr_publisher = pub_node
-        .create_publisher::<hri_msgs::Expression>(&expr_topic, None)
+        .create_publisher::<interaction_skills::SetExpression>(&expr_topic, None)
         .expect("create expression publisher");
     let gaze_topic = pub_node
         .create_topic(
-            &Name::parse("/expressive_face/look_at").expect("valid topic name"),
+            &Name::parse("/robot_face/look_at").expect("valid topic name"),
             ros2_client::MessageTypeName::new("geometry_msgs", "PointStamped"),
             &DEFAULT_PUBLISHER_QOS,
         )
@@ -323,15 +339,21 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     tokio::spawn(async move {
         loop {
             let _ = expr_publisher
-                .async_publish(hri_msgs::Expression {
-                    header: std_msgs::Header {
-                        stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
-                        frame_id: "face".into(),
+                .async_publish(interaction_skills::SetExpression {
+                    meta: std_skills::Meta {
+                        caller: "test".into(),
+                        priority: std_skills::Meta::NORMAL_PRIORITY,
                     },
-                    expression: "happy".into(),
-                    valence: 0.8,
-                    arousal: 0.2,
-                    confidence: 1.0,
+                    expression: hri_msgs::Expression {
+                        header: std_msgs::Header {
+                            stamp: builtin_interfaces::Time { sec: 0, nanosec: 0 },
+                            frame_id: "face".into(),
+                        },
+                        expression: "happy".into(),
+                        valence: 0.8,
+                        arousal: 0.2,
+                        confidence: 1.0,
+                    },
                 })
                 .await;
             let _ = gaze_publisher

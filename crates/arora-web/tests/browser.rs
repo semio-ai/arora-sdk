@@ -15,7 +15,7 @@ use arora_types::record::module::frozen::{Function, Parameter};
 use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
 use arora_types::record::{FrozenReference, Version};
 use arora_types::value::Value;
-use arora_web::{AroraWeb, Engine};
+use arora_web::{AroraWeb, AroraWebBuilder, CompiledModule, Engine};
 use uuid::Uuid;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
@@ -92,6 +92,30 @@ async fn prepare_load_and_ping_test_rust_wasm() {
         .map_err(jsval_to_string)
         .expect("call(ping) succeeded");
     assert!(!result.is_empty(), "result was empty");
+}
+
+/// Devices built with `withCompiledModule` from one `CompiledModule` each run
+/// the module: a call reaches it on every device.
+#[wasm_bindgen_test]
+async fn devices_share_one_compiled_module() {
+    let compiled = CompiledModule::new(&header_json(), WASM_BYTES)
+        .map_err(jsval_to_string)
+        .expect("the test guest compiles");
+    let call_json = format!(
+        r#"{{"module_id":"{}","id":"{PING_FN_ID}","args":[]}}"#,
+        header().id
+    );
+    for _ in 0..2 {
+        let mut builder = AroraWebBuilder::new();
+        builder.with_compiled_module(&compiled);
+        let web = builder.build().map_err(jsval_to_string).expect("build");
+        let pinged = web.call(&call_json);
+        web.step(10.0).expect("step");
+        JsFuture::from(pinged)
+            .await
+            .map_err(jsval_to_string)
+            .expect("ping answers");
+    }
 }
 
 // =============================================================================

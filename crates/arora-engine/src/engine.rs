@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     call::{serialize_to_arg, CallBridge, CallError, Callable, CallableId, CallableRegistry},
+    compiled::CompiledModule,
     executor::{self, Executor},
     module::{DispatchError, Module},
     schema::module::low::ModuleDefinition,
@@ -128,6 +129,25 @@ impl Engine {
         self.modules
             .insert(module_id, executor.load_module(module_definition)?);
 
+        Ok(())
+    }
+
+    /// Load a [`Module`] from `module`, compiled ahead: the executor its header
+    /// names instantiates the compiled code instead of compiling the
+    /// executable, so loading one [`CompiledModule`] into many engines compiles
+    /// it once. Otherwise as [`load_module`](Self::load_module): an id already
+    /// loaded is answered with Ok and left as it is.
+    pub fn load_compiled_module(&mut self, module: &CompiledModule) -> Result<(), LoadModuleError> {
+        let module_id = module.header().id;
+        if self.modules.contains_key(&module_id) {
+            return Ok(());
+        }
+        let executor = self
+            .executors
+            .get_mut(module.header().executor.name.as_str())
+            .ok_or(LoadModuleError::ExecutorNotFound)?;
+        self.modules
+            .insert(module_id, executor.load_compiled_module(module)?);
         Ok(())
     }
 

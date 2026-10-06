@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "11.6.1"
+version = "11.9.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "8.1.0"
+version = "10.0.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "5.1.0"
+version = "5.2.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "arora",
  "arora-behavior",

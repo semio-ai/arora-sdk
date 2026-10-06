@@ -124,6 +124,10 @@ jobs:
         if: steps.affected.outputs.build-arora-web
         run: cargo build -p arora-web --target wasm32-unknown-unknown
 
+      # arora-web's JS surface over the browser runtime.
+      - name: arora-web browser test (headless Firefox)
+        run: wasm-pack test --headless --firefox crates/arora-web --test browser
+
   markdown-link-check:
     runs-on: ubuntu-latest
     steps:

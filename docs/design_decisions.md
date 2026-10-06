@@ -199,6 +199,26 @@ the `wasmtime-host` and `native-host` features (both default-on for native
 builds). On `wasm32-*`, the defaults are off and the browser executor takes
 over.
 
+### A guest module compiles once; each engine instantiates it
+
+Compiled code is shareable on both WebAssembly hosts, and only an instance
+holds a guest's state: a `WebAssembly.Module` instantiates any number of
+times, and a `wasmtime::Module` instantiates in any store of the engine that
+compiled it. So `CompiledModule` holds the compiled code, and an engine's
+`load_compiled_module` creates an instance of it; a device builder that loads
+one into N devices compiles once, not N times. Loading a module from its bytes
+is the same path with the compilation in front.
+
+Natively, every `WebAssemblyExecutor` in a process shares one wasmtime engine,
+created on first use, rather than one each: a module compiled for one engine
+cannot be instantiated in another, so per-executor engines would rule out
+sharing. Each instance keeps its own `Store`, so guests share no state. The
+pooling allocator is process-wide with it: it reserves address space for all
+its slots when the engine is created, so one engine per device would bound the
+devices a process holds by its address space, and one engine bounds instead
+the guest instances running at once — 1000 on 64-bit targets, 100 on 32-bit,
+wasmtime's defaults.
+
 ### `arora-web` is a separate crate
 
 The wasm-bindgen JS surface lives in `crates/arora-web`, not inside
@@ -442,6 +462,14 @@ host paces — natively from `run`'s metronome, in the browser from
 `requestAnimationFrame`. Each step publishes the built-in clock keys
 (`arora/time`, `arora/dt`) to the store before the behavior ticks, so time is
 data like everything else.
+
+The clock starts where the builder sets it (`with_start_time`, zero by
+default), and only steps move it afterwards. A device that joins peers which
+have already run takes their timeline with an ordinary first frame, because a
+catch-up step would publish an `arora/dt` spanning the whole gap, and every
+reader of `arora/dt` would see one frame that long. A running device has no
+clock setter: a jump in `arora/time` would be the same gap seen from the other
+key.
 
 ### The behavior interpreter is a module
 

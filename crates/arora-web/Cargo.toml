@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "8.1.0"
+version = "8.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -21,9 +21,8 @@ arora-types = { path = "../arora-types", version = "3" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates
 # (arora-hal, arora-bridge, …) itself for whatever it composes.
-# 11.6: the client operations of `LocalCaller` (invoke, spawn, halt,
-# list_keys, describe_methods).
-arora = { path = "../arora", version = "11.6", default-features = false }
+# 11.8: `CompiledModule` and `AroraBuilder::with_compiled_module`.
+arora = { path = "../arora", version = "11.8", default-features = false }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's
 # client form (`arora_bridge::client`).
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
