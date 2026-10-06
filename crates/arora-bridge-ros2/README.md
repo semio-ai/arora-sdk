@@ -165,7 +165,8 @@ whose prefix rewrites expose bulk keys on the scalar plane under absolute
 names, and **action bindings** that serve a device task-run method as a
 standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
 the ROS4HRI face surface for both incumbent name sets — PAL (`/robot_face/*`)
-and IIIA (`/expressive_face/*`): expression commands fan out to
+and IIIA (`/expressive_face/*`): expression commands — an
+`interaction_skills/SetExpression` on `/skill/set_expression` — fan out to
 `standard/ros4hri/expression/*`, `look_at` points land as the gaze target
 (vec3) and frame, a streamed viseme lands as its ROS4HRI code on
 `standard/ros4hri/viseme` — from either shape a TTS node publishes it in, one
