@@ -119,6 +119,10 @@ impl RestfulHal {
 impl Inner {
     /// Plan the HTTP requests for the joint-position targets in `changes`.
     ///
+    /// A target is a key whose first attribute is `target_position` or
+    /// `target_velocity`, its entity being the joint's name; its measured value
+    /// is mirrored under the same key with `position` or `velocity` instead.
+    ///
     /// Returns the resulting state changes (the targets plus their mirrored
     /// measured values) and one `(url, payload)` request per matching
     /// POST endpoint. Both are empty when the changes carry no joint targets.

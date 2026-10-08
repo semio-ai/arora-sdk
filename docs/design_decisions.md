@@ -539,6 +539,42 @@ id with Ok, which would dispatch the first and describe the last. The device
 directory reader refuses the same case earlier, naming the two directories,
 because the builder sees headers, not where they came from.
 
+### Keys are paths; attributes are a convention
+
+A key (`arora_types::data::Key`) is a path of `/`-separated segments, and that
+is all of its structure. A trailing `.attribute` on the last segment
+(`head_yaw.target_position`) is a naming convention that means something only
+to the consumers that adopt it: the HALs name a joint's setpoint and sensed
+value that way, and a behavior graph's `Select` writes the path into a value as
+attributes. Stores, bridges, subscriptions and key meta give `.` no meaning; it
+is one more character of the name. A consumer that adopts the convention states
+it as its own naming contract, as each HAL does.
+
+Most keys carry no attribute: the runtime's clock (`arora/time`, `arora/dt`),
+the exposure profiles' keys (`standard/ros4hri/expression/…`), Vizij's face
+(`display/face/compressed`), an animation instance's `animation/<instance>/<k>`.
+And the layers where keys meet the outside — transports, ACLs, subscriptions —
+work on paths. Components read by every layer would fit the HALs' joints, make
+every other key a degenerate entity, and give each layer that translates them a
+second spelling of one name: a transport that maps the attribute separator onto
+its own path separator makes `arora/time` and `arora.time` one name on the
+wire, so a grant or a subscription on either covers the other.
+
+So:
+
+- A bridge carries a key as its path (`arora-bridge-ros2`'s default topic is
+  `/{namespace}/keys/{path}`) and translates no `.`; a key exposed under
+  another name gets it from configuration (an exposure profile), not from its
+  attributes. A key meant to travel keeps to the characters its transports
+  carry (a ROS 2 topic name has no `.`).
+- Prefix meta and prefix subscriptions cover subtrees on `/` boundaries
+  (`prefix_covers`): `face` covers `face/mouth`, and `robot/joint1` does not
+  cover `robot/joint1.position` — an attribute is part of the last segment's
+  name, not a level below it.
+- `Key`'s attribute helpers (`get_entity`, `get_attributes`, `get_component`,
+  `with_component`, `from_parts`) serve the consumers of the convention. Code
+  that does not adopt it ignores them, and a key it names needs no attribute.
+
 ### Predetermined keys are conventions, not wiring
 
 Behaviors read their inputs from store paths and write outputs back; the
