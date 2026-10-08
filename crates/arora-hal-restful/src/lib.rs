@@ -7,9 +7,14 @@
 //! JSON file deserializes to [`RESTfulRobotConfig`] (see
 //! `configs/hackerbot.json` for a sample).
 //!
-//! Keys follow hierarchical paths like `head_yaw.target_position`; values are
-//! from the arora-types [`Value`](arora_types::value::Value) enum; state
-//! changes are applied as sets and unsets.
+//! Its naming contract for joints is the HALs' convention, an attribute on the
+//! key's last segment ([`Key::get_component`](arora_types::data::Key::get_component)),
+//! `<joint>` being the joint's name: a `<joint>.target_position` write becomes
+//! a request to the robot's joint-position endpoint, at the speed a
+//! `<joint>.target_velocity` in the same change sets, and both are mirrored as
+//! `<joint>.position` and `<joint>.velocity`. Any other key is held as written.
+//! Values are from the arora-types [`Value`](arora_types::value::Value) enum;
+//! state changes are applied as sets and unsets.
 
 mod config;
 pub use config::{EndpointConfig, EndpointMapping, RESTfulRobotConfig};

@@ -101,19 +101,53 @@ impl IntoIterator for State {
   }
 }
 
-/// Path to a variable in a state.
+/// The name of a variable in a state: a path of segments separated by `/`.
 ///
-/// It is composed of a first set of segments separated by slashes ('/'),
-/// determining the namespaces and the entity identifier, followed by a second
-/// set of segments separated by dots ('.'), determining the attribute to access
-/// on the entity. The entity identifier is the only mandatory segment.
+/// The segments before the last are its namespaces; the last segment names the
+/// variable. A key is one whole name: stores, bridges, subscriptions and key
+/// meta compare it as a string and divide it at `/` only. A prefix covers the
+/// keys under it on a `/` boundary ([`prefix_covers`](crate::data::prefix_covers)),
+/// and a bridge carries the path without reading or rewriting its `.`s.
 ///
-/// Only alphanumeric characters, underscores and emojis are allowed.
+/// A trailing `.attribute` on the last segment (`head_yaw.target_position`) is
+/// a naming convention some consumers use, not part of a key's structure:
 ///
-/// Examples:
-/// - `"robot1/joint1.position"` → namespace `["robot1"]`, entity `"joint1"`, attributes `["position"]`
-/// - `"self/battery_level"` → namespace `["self"]`, entity `"battery_level"`, attributes `[]`
-/// - `"camera_front.resolution.width"` → namespace `[]`, entity `"camera_front"`, attributes `["resolution", "width"]`
+/// - The HALs name a joint's values that way — `<joint>.target_position` is a
+///   setpoint written to the hardware, `<joint>.position` what is sensed back.
+/// - A selector ([`select`](Self::select)) is a key whose attributes are the
+///   path into a value.
+///
+/// [`get_entity`](Self::get_entity), [`get_attributes`](Self::get_attributes),
+/// [`get_component`](Self::get_component), [`with_component`](Self::with_component)
+/// and [`from_parts`](Self::from_parts) read and build names in that
+/// convention. A key with no attribute is as complete as one with: the
+/// runtime's clock (`arora/time`, `arora/dt`) and most keys a device exposes
+/// carry none. To a store or a bridge, `.` is one more character of the name,
+/// so `arora/time` and `arora.time` are two unrelated keys.
+///
+/// `Key` accepts any string; it validates nothing. A transport may carry fewer
+/// characters than a key can hold (a ROS 2 topic name has no `.`), so a key
+/// meant to travel keeps to the characters its transports carry.
+///
+/// ```
+/// use arora_types::data::Key;
+///
+/// // A path with no attribute: the common case.
+/// let time = Key::new("arora/time");
+/// assert_eq!(time.get_namespace(), vec!["arora"]);
+/// assert_eq!(time.get_entity(), "time");
+/// assert!(time.get_attributes().is_empty());
+///
+/// let frame = Key::new("display/face/compressed");
+/// assert_eq!(frame.get_namespace(), vec!["display", "face"]);
+/// assert_eq!(frame.get_entity(), "compressed");
+///
+/// // The HALs' joint convention: an attribute on the last segment.
+/// let target = Key::new("head_yaw.target_position");
+/// assert_eq!(target.get_entity(), "head_yaw");
+/// assert_eq!(target.get_component(), Some("target_position"));
+/// assert_eq!(target.with_component("position").get_path(), "head_yaw.position");
+/// ```
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct Key {
@@ -142,14 +176,17 @@ impl crate::AroraType for Key {
 }
 
 impl Key {
+  /// The key named by `path`, as it is.
   pub fn new<S: Into<String>>(path: S) -> Self {
     Key { path: path.into() }
   }
 
+  /// The whole name.
   pub fn get_path(&self) -> &str {
     &self.path
   }
 
+  /// The segments before the last `/`; empty for a key with no `/`.
   pub fn get_namespace(&self) -> Vec<&str> {
     let parts: Vec<&str> = self.path.split('/').collect();
     if parts.len() <= 1 {
@@ -158,6 +195,9 @@ impl Key {
     parts[..parts.len() - 1].to_vec()
   }
 
+  /// The last segment up to its first `.`: the whole last segment of a key
+  /// with no attribute (`time` in `arora/time`), the name before the
+  /// attributes otherwise (`head_yaw` in `head_yaw.target_position`).
   pub fn get_entity(&self) -> &str {
     if self.path.is_empty() {
       return "";
@@ -169,10 +209,16 @@ impl Key {
       .expect("entity should be present")
   }
 
+  /// The first attribute, the one the HALs' joint convention reads
+  /// (`target_position` in `head_yaw.target_position`); `None` for a key with
+  /// no attribute.
   pub fn get_component(&self) -> Option<&str> {
     self.get_attributes().into_iter().next()
   }
 
+  /// The `.`-separated segments after the path's first `.`; empty for a key
+  /// with no `.`. The convention puts attributes on the last segment only: a
+  /// `.` in a namespace segment starts the attributes there, `/`s included.
   pub fn get_attributes(&self) -> Vec<&str> {
     let entity_attrs_parts: Vec<&str> = self.path.split('.').collect();
     if entity_attrs_parts.len() <= 1 {
@@ -181,6 +227,9 @@ impl Key {
     entity_attrs_parts[1..].to_vec()
   }
 
+  /// The key `<namespace…>/<entity>.<attribute…>`: namespaces joined by `/`,
+  /// attributes by `.`, each separator present only when its side is not
+  /// empty. `from_parts(["arora"], "time", [] as [&str; 0])` is `arora/time`.
   pub fn from_parts<N, E, A>(namespace: N, entity: E, attributes: A) -> Self
   where
     N: IntoIterator,
@@ -216,6 +265,9 @@ impl Key {
     Key { path }
   }
 
+  /// This key with its first attribute replaced by `component`, or with
+  /// `component` as its attribute if it has none: `head_yaw.target_position`
+  /// becomes `head_yaw.position`, `arora/time` becomes `arora/time.position`.
   pub fn with_component<C: Into<String>>(self, component: C) -> Self {
     let mut attributes: Vec<String> = self
       .get_attributes()
@@ -232,7 +284,8 @@ impl Key {
 
   /// Read this key's attribute sub-path out of `value`: descend one level per
   /// attribute (the dot-separated segments). An empty attribute path returns
-  /// `value` unchanged.
+  /// `value` unchanged. A selector names no variable, so its entity is empty
+  /// and it is attributes alone: `.<field>.<index>`.
   ///
   /// A [`Value::Structure`] field is matched by **id** (the attribute parses as
   /// a UUID — authored names are resolved to ids upstream), a

@@ -141,11 +141,13 @@ impl FakeInner {
 
 /// An in-memory fake [`Hal`] for tests and simulators.
 ///
-/// Echoes writes back as state, and fakes joint actuation by mirroring any
-/// `*.target_position` write to the corresponding `*.position` (so a consumer
-/// that writes a target sees the measured position follow). Cheaply cloneable;
-/// clones share the same state. (Backed by [`State`](arora_types::data::State),
-/// the trivial owned state type.)
+/// Its naming contract is the HALs' joint convention, an attribute on the
+/// key's last segment ([`Key::get_component`]): a `<joint>.target_position`
+/// write is a setpoint, held and sensed back as `<joint>.position`, so a
+/// consumer that writes a target sees the measured position follow. Every
+/// other key is ignored, the way hardware ignores what it has no actuator for.
+/// Cheaply cloneable; clones share the same state. (Backed by [`State`], the
+/// trivial owned state type.)
 #[derive(Clone, Default)]
 pub struct FakeHal {
     inner: Arc<Mutex<FakeInner>>,
@@ -169,11 +171,12 @@ impl FakeHal {
         self.inner.lock().unwrap().model_glb = Some(glb);
     }
 
-    /// Apply a write synchronously. The fake deals only in setpoints — the
-    /// `*.target_position` keys — and ignores every other key in the change,
-    /// the way hardware ignores what it has no actuator for. Each setpoint is
-    /// held and sensed back as the matching `*.position`, the fake's joint
-    /// actuation. Shared by [`Hal::write`] and [`Hal::try_send`].
+    /// Apply a write synchronously. The fake deals only in setpoints — the keys
+    /// whose first attribute is `target_position` — and ignores every other key
+    /// in the change, the way hardware ignores what it has no actuator for.
+    /// Each setpoint is held and sensed back under the same key with
+    /// `position` as its attribute, the fake's joint actuation. Shared by
+    /// [`Hal::write`] and [`Hal::try_send`].
     fn apply_write(&self, changes: &StateChange) {
         let mut setpoints = StateChange::new();
         let mut sensed = StateChange::new();

@@ -13,6 +13,11 @@ use crate::{
     ROS2RobotError,
 };
 
+/// Builds a ROS 2 message from the keys of an Arora `StateChange` it reads.
+///
+/// The joint commands read the root-namespace keys whose first attribute is
+/// `target_position`, the key's entity being the joint's Arora id; `None` when
+/// the change holds none of the keys the message reads.
 pub trait FromStateChange: Sized {
     fn from_state_change(
         state_change: &StateChange,
