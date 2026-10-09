@@ -12,17 +12,21 @@ All notable changes to `arora`. The format follows
   `studio-bridge` feature depends on `arora-studio-bridge-client` 10
   (studio-bridge msgs 7): each state key is published verbatim as its own
   Zenoh key, `state/{device}/{key}`, with only the characters Zenoh reserves
-  `%XX`-escaped, so Studio reads back `arora/time`, `animation/players`,
-  `joint1.position` and `camera_front.resolution.width` unchanged. Studio's
-  commands name keys the same way, and the device announces protocol 3
+  `%XX`-escaped (and an empty segment written `%`), so Studio reads back
+  `arora/time`, `animation/players`, `joint1.position` and
+  `camera_front.resolution.width` unchanged. Studio's commands name keys the
+  same way, and the device announces protocol 3
   (`mgmt/{device}/liveliness/protocol/3`).
 - **Devices and Studio move together.** A device on this version and a Studio
-  on studio client 9 misread each other: the Studio reads a key holding both a
-  `/` and a `.` as another key (`robot1/joint1.position` as
-  `robot1.joint1.position`), and the device refuses the Studio's commands
-  touching a key that holds a `.` or an empty segment. A router's storage keeps
-  the keys a device on client 9 published, in the old form, so restart the
-  router once its devices run this version.
+  on a studio client older than 10 misread each other: the Studio reads a key
+  holding both a `/` and a `.` as another key (`robot1/joint1.position` as
+  `robot1.joint1.position`), and a studio client 9.1 that addresses its
+  commands has those touching a key with a `.` or an empty segment refused by
+  the device. Conversely, a Studio on studio client 10 reads a key holding a
+  `.` from a device on an earlier `arora` as another key (`joint1.position` as
+  `joint1/position`). A router's storage keeps the keys a device on an earlier
+  `arora` published, in the old form, which a studio client 10 reads as other
+  keys, so restart the router once its devices run this version.
 
 ## [12.1.0] - 2026-10-06
 
