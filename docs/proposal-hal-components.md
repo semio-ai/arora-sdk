@@ -181,8 +181,8 @@ That is a Studio change, in Stage 2 of
 1. The HAL module serves `models()`, `model_glb(component)` and `model_glbs()`,
    under function ids `arora-hal` defines.
 2. Studio's client gains `retrieveModels`, `retrieveModelGlb` and
-   `retrieveModelGlbs`, which call the HAL module by its id
-   ([studio-bridge#104](https://github.com/semio-ai/studio-bridge/pull/104)).
+   `retrieveModelGlbs`, which call the HAL module by its id (studio-bridge
+   PR 104).
    `retrieveGlb` and `GET_MODEL_GLB_FUNCTION_ID` stay as they are: no Arora
    device ever answered them, and removing them would be a studio-bridge-msgs
    major.
