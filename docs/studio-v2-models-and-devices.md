@@ -209,6 +209,7 @@ A Semio client resolves and downloads models from Studio. It runs in three place
 - **No private model through the bridge:** a device never serves a private model through `HalAssets::model_glb`. The bridge router has no transport-level authentication. No Studio code calls `retrieveGlb` in the bridge client.
 - **The joint map of the HAL** goes behind one interface. An explicit assignment or a binding (2.5) can replace it.
 - **Registration** writes `publishedAssetReference`. Both device shapes accept this field today.
+- **A device of several HAL components** has one model per component, each with its mount ([HAL components](proposal-hal-components.md)). Registration then writes one reference per component, and Studio's device document holds a list of them instead of one.
 
 ### 2.3 A device uses the entitlement of its owner
 
