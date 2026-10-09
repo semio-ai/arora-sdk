@@ -1,30 +1,31 @@
 # Proposal: a device's HAL components and their models
 
-Status: proposal, for review.
-Date: 2026-10-09.
+Status: agreed, 2026-10-09.
 
 A device can be more than one piece of hardware: a robot with a face on its
-screen, a base and an arm from two vendors. This proposal states how a device
-holds several HALs, and how it tells a client which 3D models make it up and
-where they sit. It sets the shape of the HAL module's model functions before
-the first one ships ([arora-sdk#294](https://github.com/semio-ai/arora-sdk/pull/294)),
-so that the single-HAL case does not fix an API that the multi-HAL case
-([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)) would have to break.
+screen, a base and an arm from two vendors. This document states how one HAL
+is composed of several components, and how a device tells a client which 3D
+models make it up and where they sit. It fixes the shape of the HAL module's
+model functions before the first one ships
+([arora-sdk#294](https://github.com/semio-ai/arora-sdk/pull/294)), so the
+single-component case does not set an API that a composed HAL
+([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)) would break.
 
 In short:
 
-- A device is a set of **named HAL components**. Each owns its keys and
-  describes itself.
-- There is **one HAL module**. Its functions take the component's name.
-- **Each component's model is state**, published in the store under
-  `arora/hal/<component>/model`: the published release it uses, its content
-  hash, whether the device serves its bytes, and where it is mounted. A client
-  subscribes to it like any key.
-- **Bytes travel only when the component allows it.** A published model is
-  named by reference and fetched from Studio with the client's own rights; a
-  private model never crosses the bridge.
+- A HAL is made of **named components**, given when the HAL is built and fixed
+  for its life. A device still holds one HAL.
+- **A device's models are fixed for the life of the device.** Changing one
+  means restarting Arora.
+- **One HAL module** lists the components' models as an associative array, and
+  serves the bytes of the ones it may serve, per component or all at once.
+- **A published model travels as a reference** that a client resolves from
+  Studio with its own rights; a private model never crosses the bridge. A Vizij
+  face's GLB is servable.
 - **A mount** places a component's model on a `screen` element of another
   component's model, which is how Studio already puts a face on a robot.
+- **A HAL describes the keys it reads and the keys it writes** through a trait
+  it shares with the data store.
 
 ---
 
@@ -37,9 +38,7 @@ In short:
   hardware and software version. Registration with Studio sends it, and Studio
   matches a device to a model on its family alone
   ([models and devices](studio-v2-models-and-devices.md), decision 6).
-- **One model.** `HalAssets::model_glb` returns one GLB. arora-sdk#294 serves it
-  as `model_glb() -> Option<bytes>`, the HAL module's one function, under the
-  function id Studio's client calls (`retrieveGlb`).
+- **One model.** `HalAssets::model_glb` returns one GLB.
 - **Studio composes models.** A robot model declares `screen` elements (RobotData
   type `screen`, semio_studio `packages/scene/src/types/screen.ts`). A project's
   `slotConfig` pairs a screen with the root of a face, and the scene draws that
@@ -48,11 +47,14 @@ In short:
   `publishedAssetReference { assetType: model | face, scopedName, versionRange }`
   (semio_studio `packages/core/src/access/documents.ts`).
 - **A device resolves its model from Studio** at start, into a
-  `ResolvedRef { version, releaseId, artifactKey, contentHash }`, and **never
-  serves a private model over the bridge**: the router has no transport-level
+  `ResolvedRef { version, releaseId, artifactKey, contentHash }`, and never
+  serves a private model over the bridge: the router has no transport-level
   authentication ([models and devices](studio-v2-models-and-devices.md), 2.2).
+- **The data store describes its keys**: `DataStore::meta`, `all_meta`,
+  `set_meta` and `set_prefix_meta` hold each key's `KeyMeta` — its type, range,
+  unit, rest value, and whether a remote may write it.
 
-## 2. The cases a design must hold
+## 2. The cases the design holds
 
 1. **A stand-alone face**: one component, one model (`vizij --studio`).
 2. **A robot**: one component, its model a published release (`arora-hal-ros2`).
@@ -62,63 +64,68 @@ In short:
    vendors: two components, two models, the arm's model attached to the base's.
 5. **A component without a model**: a sensor array, a speaker.
 
-In each case a model can change while the device runs: Vizij reloads a face, an
-explicit assignment ([models and devices](studio-v2-models-and-devices.md), 2.5)
-swaps a release.
+## 3. Design
 
-## 3. Proposal
+### 3.1 A HAL is made of named components
 
-### 3.1 A device is a set of named HAL components
-
-- The host adds each HAL under a name it chooses, unique on the device:
-  `robot`, `face`, `arm`. A device with one HAL names it too.
-- Each component describes itself (`HalDescription`). The device's own identity,
-  the family Studio matches on, is the host's to state; by default it is the
-  description of the component no other component is mounted on.
-- **Each component owns the keys it declares.** Two components declaring one key
-  is a build error, not a merge rule ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)).
-  A write goes to the component that owns its key; the components' update streams
-  merge into the step's one inbound, as the bridges' do.
+- A composed HAL is built from its components, each under a name unique within
+  it: `robot`, `face`, `arm`. The components are given at build and do not
+  change afterwards; the device holds the composed HAL as its one HAL.
+- A HAL that is not composed is one component. Its name is `device`.
+- **Each component owns the keys it describes** (3.5). Two components describing
+  one key is a build error, not a merge rule. A write goes to the component that
+  owns its key; the components' update streams merge into the HAL's one stream.
 - **Keys carry no component prefix.** RobotData keys are element UUIDs, so two
   models never share one; a face's keys already carry its face id
   (`rig/<faceId>/…`). A prefix would change every key Studio and ROS clients
   address today.
 
-### 3.2 One HAL module, addressed by component
+### 3.2 The device's description
 
-The runtime keeps one HAL module (`hal_module::ID`). Its functions take the
-component's name; nothing in its shape assumes a device has one HAL.
+- The device's description — family, hardware and software version, what
+  Studio matches on — is provided explicitly, as it is today.
+- Each component can carry its own description.
+- The composed HAL either states the device's description or inherits it from
+  one of its components, by name.
 
-**A component's model is state.** The runtime publishes it under
-`arora/hal/<component>/model`, a record:
+### 3.3 One HAL module: the models, then their bytes
 
-| Field | Type | Meaning |
-|---|---|---|
-| `reference` | `Option<{ scoped_name, version, content_hash }>` | The published release the component uses, as resolved. Absent for a model with no release, such as a face loaded from a file. |
-| `content_hash` | `Option<string>` | SHA-256 of the GLB, when the device holds the bytes. A client caches by it. |
-| `servable` | `bool` | Whether `model_glb` returns the bytes. |
-| `mount` | `Option<{ component, element }>` | The component, and the `screen` element of its model, that this model is drawn on. Absent for a model that is not mounted. |
+The runtime registers one HAL module (`hal_module::ID`). A device's models do
+not change while it runs: a different model means restarting Arora. So the
+module answers from what the HAL was built with, and clients ask once.
 
-- A component without a model has no such key.
-- Remotes read it and cannot write it.
-- A model that changes is a store change. A client that subscribed learns of it
-  the way it learns of any value, with no polling and no extra message.
+- **`models()`** lists every component that has a model, as an associative
+  array from the component's name to its model. Arora values have no typed map,
+  so it travels as a list of records keyed by `component`:
 
-**The bytes go through a function**:
-`model_glb(component: string) -> Option<bytes>`. It returns `None` when the
-component has no model or its model is not servable. Models are megabytes,
-fetched once per content hash, so they are a call, not a key.
+  | Field | Type | Meaning |
+  |---|---|---|
+  | `component` | `string` | The component's name. |
+  | `description` | `Option<{ family, hardware_version, software_version }>` | The component's own description, when it has one. |
+  | `reference` | `Option<{ scoped_name, version, content_hash }>` | The published release the component uses, as resolved. Absent for a model with no release, such as a face loaded from a file. |
+  | `content_hash` | `Option<string>` | SHA-256 of the GLB, when the device holds the bytes. A client caches by it. |
+  | `servable` | `bool` | Whether the device returns the bytes. |
+  | `mount` | `Option<{ component, element }>` | The component, and the `screen` element of its model, that this model is drawn on. Absent for a model that is not mounted. |
 
-### 3.3 References travel; private bytes do not
+  A component without a model is absent from the list.
+- **`model_glb(component: string) -> Option<bytes>`**: one component's model.
+  `None` when the component has no model or its model is not servable.
+- **`model_glbs()`**: every servable model, as a list of `{ component, glb }`.
+  It saves a client one call per component when it draws the whole device.
+
+On Studio's client these are `retrieveModels`, `retrieveModelGlb` and
+`retrieveModelGlbs`.
+
+### 3.4 References travel; private bytes do not
 
 - A component whose model is a published release states its `reference`. A
   client fetches the release from Studio with its own identity, and Studio's
   rules decide what it may read. The device does not need to send those bytes.
-- The device serves a model's bytes only when the component marks it
-  `servable`:
+- The device serves a model's bytes only when the component marks it servable:
   - a public release;
-  - local content that the operator lets the device serve, such as a face its
-    user authored and loaded from a file.
+  - a Vizij face's GLB, servable by default, because a client needs it to
+    reproduce the device in 3D;
+  - other local content the operator lets the device serve.
 - A model the device holds under a private grant
   ([models and devices](studio-v2-models-and-devices.md), decision 10) is never
   servable.
@@ -126,58 +133,64 @@ fetched once per content hash, so they are a call, not a key.
 The rule "a device never serves a private model" then holds by construction,
 not by a comment on `HalAssets`.
 
-### 3.4 Mounts and Studio's slots
+### 3.5 A HAL describes its keys
+
+A HAL states the keys it reads (actuator targets, the inputs a write reaches)
+and the keys it writes (sensors, measured state), each with its `KeyMeta`. The
+data store already describes its keys the same way, so the two share one trait:
+the key-description half of `DataStore` (`meta`, `all_meta`) moves into a trait
+that both `DataStore` and `Hal` implement.
+
+- The runtime routes a write to the component that describes its key, and
+  refuses at build a key two components describe.
+- The runtime copies a HAL's key descriptions into the store at build, so a
+  device's inputs are open to remotes because its HAL says so, with no second
+  declaration.
+
+### 3.6 Mounts and Studio's slots
 
 - A mount names a parent component and a `screen` element of the parent's
   model. Studio maps it onto `slotConfig`: the parent's screen holds the
   component's model.
-- The host that composes the device states the mounts, because it knows which
-  screen the face is on. A project can still choose otherwise in its own
-  `slotConfig`.
+- The composed HAL states the mounts, because it knows which screen the face is
+  on. A project can still choose otherwise in its own `slotConfig`.
 - With the face drawn from the image its view publishes
   ([VIZ-159](https://linear.app/semio-ai/issue/VIZ-159)), the mount is what
   tells the scene which screen shows it.
+
+### 3.7 What Studio needs
+
+Studio's device document references one published asset. A device of several
+components needs a list of references, one per component, with their mounts.
+That is a Studio change, in Stage 2 of
+[models and devices](studio-v2-models-and-devices.md).
 
 ## 4. Alternatives
 
 | Alternative | Why not |
 |---|---|
-| One model per device, the first HAL's | Fails case 3 as soon as a robot gains a face. |
+| One model per device | Fails case 3 as soon as a robot gains a face. |
 | The device merges its components' models into one GLB | The device takes on asset composition; a private robot mesh would be merged into served bytes; Studio could no longer tell the face from the robot to bind each. |
 | One HAL module per component | A call naming no module becomes ambiguous; `DescribeMethods` lists one module per function id, so a client cannot discover them. |
-| A `models()` function returning the list | It works, but a client has to poll it to learn that a model changed. A key notifies. |
+| The models as store keys that notify a change | Models do not change while a device runs, so there is nothing to notify. |
+| Several HALs held by the device rather than one composed HAL | The device would route and merge them itself; composing them in a HAL keeps the device's loop unchanged. |
 | A component prefix on keys | See 3.1: it moves every key clients address. |
 
 ## 5. What this changes in arora-sdk#294
 
-1. **`model_glb` takes a component.** Its function id becomes one that
-   `arora-hal` defines. Studio's client gains `retrieveModel(deviceId, component)`,
-   which calls it on the HAL module by id, plus a read of
-   `arora/hal/*/model` ([studio-bridge#104](https://github.com/semio-ai/studio-bridge/pull/104)).
+1. The HAL module serves `models()`, `model_glb(component)` and `model_glbs()`,
+   under function ids `arora-hal` defines.
+2. Studio's client gains `retrieveModels`, `retrieveModelGlb` and
+   `retrieveModelGlbs`, which call the HAL module by its id
+   ([studio-bridge#104](https://github.com/semio-ai/studio-bridge/pull/104)).
    `retrieveGlb` and `GET_MODEL_GLB_FUNCTION_ID` stay as they are: no Arora
    device ever answered them, and removing them would be a studio-bridge-msgs
    major.
-2. **Resolving a call that names no module** is then not needed for models. It
-   stays in #294 only if it is wanted on its own merits.
-3. **The one HAL gets a name.** `with_hal(hal)` keeps working and names its
-   component `device`; [ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)
-   adds the named, repeatable form.
-4. **`HalAssets` states the model, not only its bytes**: its reference, its
-   content hash and whether it is servable. `model_glb` returns bytes only for a
-   servable model. Mounts are the host's, set where it adds the component.
-5. **The runtime publishes `arora/hal/<component>/model`** at build, and again
-   when the component's model changes.
+3. Resolving a call that names no module is not needed for models; it stays in
+   #294 only if it is wanted on its own merits.
+4. `HalAssets` states each component's model — reference, content hash,
+   servable, mount — and returns bytes only for a servable one. A HAL that is
+   not composed reports one component, `device`.
 
-## 6. Open questions
-
-1. **How a HAL signals that its model changed**: a notice on its update stream,
-   or a watch the runtime polls each step.
-2. **The device's family when two components have no mount**, as in case 4
-   without an attachment: the host states it, or registration fails.
-3. **Whether a face loaded from a file is servable by default** in Vizij, or only
-   when the operator says so.
-4. **Studio's device document** references one published asset. A device of
-   several components needs a list; that is a Studio change (Stage 2).
-5. **How a component declares the keys it owns** so writes can be routed and
-   overlaps refused at build: from `read_all` at build, or from the key metadata
-   it writes.
+The composed HAL itself, and the shared key-description trait (3.5), are
+[ARORA-103](https://linear.app/semio-ai/issue/ARORA-103).
