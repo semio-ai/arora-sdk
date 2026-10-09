@@ -12,7 +12,10 @@ use ros2_client::{Name, Node, NodeOptions};
 #[cfg(feature = "dds")]
 use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 
-use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult, UpdatesStream};
+use arora_hal::{
+    content_hash, ComponentModel, Hal, HalAssets, HalDescription, HalError, HalResult,
+    UpdatesStream, DEVICE,
+};
 use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 
@@ -72,6 +75,10 @@ pub struct Ros2Hal {
 struct Inner {
     // Inner ROS2 client node
     node: Node,
+
+    // The robot's model, stated when the HAL is built: a device's models are
+    // fixed for its life.
+    model: Option<ComponentModel>,
 
     // Configuration
     config: ROS2RobotConfig,
@@ -218,8 +225,10 @@ impl Ros2Hal {
             }
         }
 
+        let model = model_of(&config);
         let inner = Arc::new(Inner {
             node,
+            model,
             config,
             joint_ids_to_ros_names,
             subscribers: Mutex::new(Vec::new()),
@@ -625,11 +634,7 @@ impl Hal for Ros2Hal {
     /// Describe the device from the robot configuration.
     async fn describe(&self) -> HalDescription {
         debug!("describe called.");
-        HalDescription {
-            model_family: self.inner.config.model_family.clone(),
-            hardware_version: self.inner.config.hardware_version.clone(),
-            software_version: self.inner.config.software_version.clone(),
-        }
+        description_of(&self.inner.config)
     }
 
     /// Retrieves the current values for the given keys from the local state
@@ -711,38 +716,76 @@ impl Hal for Ros2Hal {
             .push(tx);
         Box::pin(rx)
     }
+
+    fn assets(&self) -> Option<&dyn HalAssets> {
+        Some(self)
+    }
 }
 
-#[async_trait]
+/// The robot is one component, [`DEVICE`]; its model is the file at
+/// `model_glb_path`, served only when the config says it may be.
 impl HalAssets for Ros2Hal {
-    /// Get the GLB model file as raw bytes.
-    async fn model_glb(&self) -> HalResult<Option<Vec<u8>>> {
-        debug!("model_glb called.");
+    fn models(&self) -> Vec<ComponentModel> {
+        self.inner.model.iter().cloned().collect()
+    }
 
-        if let Some(ref glb_path) = self.inner.config.model_glb_path {
-            match std::fs::read(glb_path) {
-                Ok(bytes) => {
-                    debug!(
-                        "Successfully read GLB file: {} ({} bytes)",
-                        glb_path,
-                        bytes.len()
-                    );
-                    Ok(Some(bytes))
-                }
-                Err(e) => {
-                    error!("Failed to read GLB file {}: {}", glb_path, e);
-                    Err(HalError::Other(
-                        if e.kind() == std::io::ErrorKind::NotFound {
-                            crate::config::missing_model_message(glb_path)
-                        } else {
-                            format!("Failed to read GLB file {glb_path}: {e}")
-                        },
-                    ))
-                }
-            }
-        } else {
-            debug!("No GLB model path configured");
-            Ok(None)
+    fn servable_glb(&self, component: &str) -> HalResult<Option<Vec<u8>>> {
+        servable_glb_of(&self.inner.config, component)
+    }
+}
+
+fn description_of(config: &ROS2RobotConfig) -> HalDescription {
+    HalDescription {
+        model_family: config.model_family.clone(),
+        hardware_version: config.hardware_version.clone(),
+        software_version: config.software_version.clone(),
+    }
+}
+
+/// The robot's model as the config states it: the file at `model_glb_path`,
+/// hashed now, servable as the config says. A file that cannot be read is
+/// still stated, without a hash.
+fn model_of(config: &ROS2RobotConfig) -> Option<ComponentModel> {
+    let path = config.model_glb_path.as_ref()?;
+    let content_hash = match std::fs::read(path) {
+        Ok(glb) => Some(content_hash(&glb)),
+        Err(e) => {
+            warn!("cannot read the robot model {path}: {e}");
+            None
+        }
+    };
+    Some(ComponentModel {
+        component: DEVICE.to_string(),
+        description: Some(description_of(config)),
+        reference: None,
+        content_hash,
+        servable: config.model_glb_servable,
+        mount: None,
+    })
+}
+
+/// The bytes of the robot's model, when the config makes it servable.
+fn servable_glb_of(config: &ROS2RobotConfig, component: &str) -> HalResult<Option<Vec<u8>>> {
+    if component != DEVICE || !config.model_glb_servable {
+        return Ok(None);
+    }
+    let Some(glb_path) = &config.model_glb_path else {
+        return Ok(None);
+    };
+    match std::fs::read(glb_path) {
+        Ok(bytes) => {
+            debug!("read GLB file: {} ({} bytes)", glb_path, bytes.len());
+            Ok(Some(bytes))
+        }
+        Err(e) => {
+            error!("Failed to read GLB file {}: {}", glb_path, e);
+            Err(HalError::Other(
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    crate::config::missing_model_message(glb_path)
+                } else {
+                    format!("Failed to read GLB file {glb_path}: {e}")
+                },
+            ))
         }
     }
 }
@@ -792,97 +835,56 @@ mod tests {
         out
     }
 
-    /// The HAL, or `None` when the ROS 2 environment is not available.
-    ///
-    /// Only the errors of ROS 2 setup (context, node, publisher, subscriber)
-    /// skip. Each other error fails the test: a model that does not parse is a
-    /// `ConfigError`, or an `Other` from an I/O error, and both come before
-    /// any ROS 2 setup.
-    fn hal_or_skip(result: Result<Ros2Hal, ROS2RobotError>) -> Option<Ros2Hal> {
-        match result {
-            Ok(hal) => Some(hal),
-            Err(
-                e @ (ROS2RobotError::InitializationError(_)
-                | ROS2RobotError::PublisherError { .. }
-                | ROS2RobotError::SubscriberError { .. }),
-            ) => {
-                println!("Skipping test - ROS2 environment not available: {e}");
-                None
-            }
-            Err(e) => panic!("the HAL must load its config and model: {e}"),
+    fn config_with_model(path: Option<&str>, servable: bool) -> ROS2RobotConfig {
+        ROS2RobotConfig {
+            model_family: Some("nao".to_string()),
+            model_glb_path: path.map(str::to_string),
+            model_glb_servable: servable,
+            ..Default::default()
         }
     }
 
-    #[tokio::test]
-    async fn test_model_glb_with_missing_file_names_both_remedies() {
-        // An `Override` mapping does not read the model when the HAL starts,
-        // so a missing file shows only when something reads the model.
-        let config = ROS2RobotConfig {
-            topics: vec![TopicConfig::new::<msgs::JointState>(
-                "/joint_states",
-                TopicDirection::Subscribe,
-                TopicMapping::JointState {
-                    conversion: JointStateConversion::Standard,
-                },
-            )],
-            joint_ids: JointIdMapping::Override(HashMap::new()),
-            model_glb_path: Some("/no/such/dir/nao.glb".to_string()),
-            ..Default::default()
-        };
-        let Some(hal) = hal_or_skip(Ros2Hal::new(config).await) else {
-            return;
-        };
+    #[test]
+    fn the_model_file_is_stated_and_served_only_when_servable() {
+        let path = crate::test_fixture::fixture_glb_path();
+        let glb = std::fs::read(&path).expect("the fixture GLB");
 
-        let err = hal
-            .model_glb()
-            .await
+        let model = model_of(&config_with_model(Some(&path), false)).expect("a model");
+        assert_eq!(model.component, DEVICE);
+        assert_eq!(model.content_hash, Some(content_hash(&glb)));
+        assert!(!model.servable, "a model file is not servable by default");
+        assert_eq!(
+            model.description.and_then(|d| d.model_family).as_deref(),
+            Some("nao")
+        );
+        assert_eq!(
+            servable_glb_of(&config_with_model(Some(&path), false), DEVICE).unwrap(),
+            None
+        );
+
+        let servable = config_with_model(Some(&path), true);
+        assert!(model_of(&servable).unwrap().servable);
+        assert_eq!(servable_glb_of(&servable, DEVICE).unwrap(), Some(glb));
+        assert_eq!(servable_glb_of(&servable, "arm").unwrap(), None);
+    }
+
+    #[test]
+    fn no_model_path_states_no_model() {
+        let config = config_with_model(None, true);
+        assert!(model_of(&config).is_none());
+        assert_eq!(servable_glb_of(&config, DEVICE).unwrap(), None);
+    }
+
+    #[test]
+    fn a_missing_servable_model_file_names_both_remedies() {
+        let config = config_with_model(Some("/no/such/dir/nao.glb"), true);
+        let model = model_of(&config).expect("the model is stated");
+        assert_eq!(model.content_hash, None);
+        let err = servable_glb_of(&config, DEVICE)
             .expect_err("a missing model file is an error")
             .to_string();
         assert!(err.contains("/no/such/dir/nao.glb does not exist"), "{err}");
         assert!(err.contains("model_glb_path"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn test_model_glb_with_no_path() {
-        // Create a config with no model_glb_path
-        let config = ROS2RobotConfig {
-            domain_id: None,
-            topics: vec![TopicConfig::new::<msgs::JointState>(
-                "/joint_states",
-                TopicDirection::Subscribe,
-                TopicMapping::JointState {
-                    conversion: JointStateConversion::Standard,
-                },
-            )],
-            joint_ids: JointIdMapping::Override(HashMap::new()),
-            model_glb_path: None,
-            ..Default::default()
-        };
-
-        // Create a HAL with this config
-        let hal = Ros2Hal::new(config).await;
-
-        // Skip test if ROS2 environment is not available
-        if hal.is_err() {
-            println!("Skipping test - ROS2 environment not available");
-            return;
-        }
-
-        let hal = hal.unwrap();
-
-        // Call model_glb
-        let result = hal.model_glb().await;
-
-        // Assert the result is successful
-        assert!(result.is_ok(), "model_glb should succeed even with no path");
-
-        let glb_data = result.unwrap();
-
-        // Assert we got None
-        assert!(
-            glb_data.is_none(),
-            "Should return None when no model path is configured"
-        );
     }
 
     #[test]
