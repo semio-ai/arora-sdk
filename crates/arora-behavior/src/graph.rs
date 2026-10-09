@@ -21,7 +21,7 @@
 //! [`BehaviorInterpreter::apply`](super::BehaviorInterpreter::apply) is the one
 //! edition entry point.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arora_types::data::Key;
 use arora_types::module::high::TypeRef;
@@ -275,25 +275,47 @@ impl Graph {
     /// Apply `diff` in place.
     pub fn apply(&mut self, diff: GraphDiff) -> Result<(), GraphError> {
         // 1. Remove links, then nodes (and any links still touching them).
-        for target in &diff.remove_links {
-            self.links.retain(|l| &l.target != target);
-        }
-        for id in &diff.remove_nodes {
+        // One pass over the links for the whole diff, not one per removal:
+        // the cost of an edit follows the edit, not the size of the graph.
+        let removed_targets: HashSet<Port> = diff.remove_links.iter().copied().collect();
+        let removed_nodes: HashSet<Uuid> = diff.remove_nodes.iter().copied().collect();
+        for id in &removed_nodes {
             self.nodes.remove(id);
-            self.links
-                .retain(|l| &l.target.node != id && !links_source_is_node(&l.source, id));
-            if self.root == Some(*id) {
-                self.root = None;
-            }
+        }
+        if self.root.is_some_and(|root| removed_nodes.contains(&root)) {
+            self.root = None;
+        }
+        if !removed_targets.is_empty() || !removed_nodes.is_empty() {
+            self.links.retain(|l| {
+                !removed_targets.contains(&l.target)
+                    && !removed_nodes.contains(&l.target.node)
+                    && !source_port(&l.source)
+                        .is_some_and(|port| removed_nodes.contains(&port.node))
+            });
         }
 
-        // 2. Add nodes, then links (replacing any link on the same target).
+        // 2. Add nodes, then links: a link replaces any on the same target,
+        // the diff's own included, so of several added for one target the
+        // last stands.
         for node in diff.add_nodes {
             self.nodes.insert(node.id, node);
         }
-        for link in diff.add_links {
-            self.links.retain(|l| l.target != link.target);
-            self.links.push(link);
+        let last_for_target: HashMap<Port, usize> = diff
+            .add_links
+            .iter()
+            .enumerate()
+            .map(|(idx, link)| (link.target, idx))
+            .collect();
+        if !last_for_target.is_empty() {
+            self.links
+                .retain(|l| !last_for_target.contains_key(&l.target));
+            self.links.extend(
+                diff.add_links
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(idx, link)| last_for_target[&link.target] == *idx)
+                    .map(|(_, link)| link),
+            );
         }
 
         // 3. Predetermined-key overrides.
@@ -322,12 +344,6 @@ impl Graph {
         self.variables.extend(diff.variables);
         Ok(())
     }
-}
-
-/// Whether a [`LinkSource`] reads from node `id` (so the link dangles once that
-/// node is removed).
-fn links_source_is_node(source: &LinkSource, id: &Uuid) -> bool {
-    source_port(source).is_some_and(|port| &port.node == id)
 }
 
 #[cfg(test)]
@@ -422,6 +438,74 @@ mod tests {
         assert_eq!(
             graph.link_to(&target).unwrap().source,
             LinkSource::Literal(Value::U8(2))
+        );
+    }
+
+    /// The one-removal-at-a-time application the single passes replace:
+    /// what `apply` must keep doing to links, root and nodes.
+    fn apply_one_at_a_time(graph: &mut Graph, diff: GraphDiff) {
+        for target in &diff.remove_links {
+            graph.links.retain(|l| &l.target != target);
+        }
+        for id in &diff.remove_nodes {
+            graph.nodes.remove(id);
+            graph.links.retain(|l| {
+                &l.target.node != id && !source_port(&l.source).is_some_and(|p| &p.node == id)
+            });
+            if graph.root == Some(*id) {
+                graph.root = None;
+            }
+        }
+        for node in diff.add_nodes {
+            graph.nodes.insert(node.id, node);
+        }
+        for link in diff.add_links {
+            graph.links.retain(|l| l.target != link.target);
+            graph.links.push(link);
+        }
+    }
+
+    /// One diff removing links and nodes — the root among them, a node some
+    /// links read from — and adding several links, two on one target and
+    /// one replacing an existing link: the result, link order included, is
+    /// what applying it one change at a time gives.
+    #[test]
+    fn a_diff_applies_as_its_changes_one_at_a_time() {
+        let id = |n: u128| Uuid::from_u128(n);
+        let port = |n: u128, p: u128| Port::new(id(n), id(p));
+        let from = |n: u128| LinkSource::Port(port(n, 0xF));
+        let mut graph = Graph::empty();
+        for n in 1..=5 {
+            graph.nodes.insert(id(n), node(id(n), id(0xF1)));
+        }
+        graph.root = Some(id(2));
+        graph.links = vec![
+            Link::new(port(1, 1), from(2)),
+            Link::new(port(3, 1), from(1)),
+            Link::new(port(3, 2), from(4)),
+            Link::new(port(4, 1), LinkSource::Literal(Value::U8(1))),
+            Link::new(port(5, 1), from(2)),
+            Link::new(port(5, 2), from(3)),
+        ];
+        let diff = GraphDiff {
+            remove_links: vec![port(3, 2)],
+            remove_nodes: vec![id(2)],
+            add_nodes: vec![node(id(6), id(0xF2))],
+            add_links: vec![
+                Link::new(port(6, 1), LinkSource::Literal(Value::U8(2))),
+                Link::new(port(4, 1), from(6)),
+                Link::new(port(6, 1), LinkSource::Literal(Value::U8(3))),
+            ],
+            ..GraphDiff::default()
+        };
+        let mut expected = graph.clone();
+        apply_one_at_a_time(&mut expected, diff.clone());
+        graph.apply(diff).unwrap();
+        assert_eq!(graph, expected);
+        assert_eq!(graph.root, None);
+        assert_eq!(
+            graph.link_to(&port(6, 1)).unwrap().source,
+            LinkSource::Literal(Value::U8(3))
         );
     }
 

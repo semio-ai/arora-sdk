@@ -4,6 +4,17 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.1.1] - 2026-10-09
+
+### Fixed
+
+- `Graph::apply` costs what the diff costs, not what the graph does. It
+  scanned every link of the graph once per link it added and once per node
+  it removed, so grafting a hundred nodes into a graph of a few thousand
+  links cost about 25 million instructions; it now makes one pass for the
+  whole diff — about ten times less on that graft — with the same result,
+  link order included.
+
 ## [9.1.0] - 2026-09-28
 
 ### Added
