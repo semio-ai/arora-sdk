@@ -419,10 +419,17 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
                         } else if let Some(Some(shape)) =
                             change.set.get("standard/ros4hri/viseme").cloned()
                         {
+                            // Its time and duration land in the same change.
+                            let at = |key: &str| change.set.get(key).cloned().flatten();
+                            let landed = (
+                                shape.clone(),
+                                at("standard/ros4hri/viseme/time"),
+                                at("standard/ros4hri/viseme/duration"),
+                            );
                             if shape == Value::U8(hri_msgs::Viseme::PP) {
-                                viseme = Some(shape);
+                                viseme = Some(landed);
                             } else {
-                                sequence_viseme = Some(shape);
+                                sequence_viseme = Some(landed);
                             }
                         }
                     }
@@ -460,8 +467,22 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     );
 
     // Both shapes reach the one key, the sequence at its first element.
-    assert_eq!(viseme, Some(Value::U8(hri_msgs::Viseme::PP)));
-    assert_eq!(sequence_viseme, Some(Value::U8(hri_msgs::Viseme::OU)));
+    assert_eq!(
+        viseme,
+        Some((
+            Value::U8(hri_msgs::Viseme::PP),
+            Some(Value::F32(0.0)),
+            Some(Value::F32(0.1)),
+        ))
+    );
+    assert_eq!(
+        sequence_viseme,
+        Some((
+            Value::U8(hri_msgs::Viseme::OU),
+            Some(Value::F32(0.2)),
+            Some(Value::F32(0.1)),
+        ))
+    );
 }
 
 /// `try_send` publishes a changed key to its topic, where a separate node
