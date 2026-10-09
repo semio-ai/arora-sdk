@@ -512,7 +512,7 @@ The device's HAL answers remotes through the same module-call path as the
 interpreter: `arora-hal` declares the HAL module's UUID and its function ids
 (`hal_module`), and the runtime builds that module from the HAL it owns. Its
 functions serve the HAL's components' models — `models()`, `model_glb(component)`
-and `model_glbs()` — as [the HAL components proposal](https://github.com/semio-ai/arora-sdk/pull/296)
+and `model_glbs()` — as [the HAL components design](proposal-hal-components.md)
 sets out: a model travels as a published reference a client resolves with its
 own rights, and the device serves bytes only for a model its HAL states
 servable, which the module checks before it asks the HAL for them. A
