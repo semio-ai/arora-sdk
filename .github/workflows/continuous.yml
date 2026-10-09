@@ -133,7 +133,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: gaurav-nelson/github-action-markdown-link-check@v1
-        with:
-          use-quiet-mode: 'yes'
-          config-file: '.github/workflows/markdown-link-check-config.json'
+      # Run on the runner's own Node rather than through a Docker action: those
+      # build from a Docker Hub image, whose anonymous pulls a shared runner
+      # gets refused (429).
+      - name: Check the links in every Markdown file
+        run: |
+          npm install --global markdown-link-check@3.13.7
+          failed=0
+          while IFS= read -r -d '' file; do
+            markdown-link-check --quiet \
+              --config .github/workflows/markdown-link-check-config.json "$file" || failed=1
+          done < <(find . -type f -name '*.md' -not -path './node_modules/*' -print0)
+          exit "$failed"
