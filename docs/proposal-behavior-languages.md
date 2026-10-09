@@ -8,8 +8,8 @@ actions and skills, which start, run and end with a status. Other parts are
 best written as dataflow networks: rigs and mappings, which turn values into
 values every tick and never end. This proposal makes them two languages of the
 same behavior graph. A node's function decides what its children mean, so the
-way a graph is organized tells how it runs. It also states the execution rules
-both languages need, which no interpreter states today.
+way a graph is organized tells how it runs. A behavior tree already works this
+way. The dataflow graph gets the same rule.
 
 ## 1. Where things stand
 
@@ -18,52 +18,42 @@ both languages need, which no interpreter states today.
 - *links*, which carry values between node slots;
 - *structure*: `root` and each node's ordered `children`.
 
-The behavior tree uses the structure: a control node's function (`SEQ`,
-`FALLBACK`, `PARALLEL`) decides how its children tick. Vizij's processing
-graph uses only the links and topo-sorts them.
+**A behavior tree's order is its structure.** A tick goes from the root to the
+leaves. Each control node (`SEQ`, `FALLBACK`, `PARALLEL`) ticks its children
+in their listed order, as its function decides. A node reads and writes the
+store when it is ticked, so a leaf sees what an earlier leaf wrote in the same
+tick.
+
+**Vizij's processing graph uses only the links.** It topo-sorts them and has
+no structure to break the ties, while `Graph.nodes` is a map. So the order a
+composer gives is lost on the way through the shared model. A face's sources
+are composed in a documented precedence: the rig's graphs, then the mappings,
+then the playing program, then the animations, the later winning a shared
+path. Lowering sorts nodes by id instead. On a device that evaluates
+`animations::` first and `studio::` last, so the source documented to override
+everything loses every shared path.
 
 **A device hosts one interpreter**, set at build. Arora's step ticks it last,
 so its writes are the frame's final ones.
 
-**Neither interpreter has a rule for the nodes the links leave unordered.**
-`Graph.nodes` is a map, so any order an author or a composer gave is lost on
-the way through the shared model:
-- **Vizij** composes a face's sources in a documented precedence: the rig's
-  graphs, then the mappings, then the playing program, then the animations,
-  the later winning a shared path. Lowering sorts nodes by id instead. On a
-  device that evaluates `animations::` first and `studio::` last, so the
-  source documented to override everything loses every shared path.
-- **The behavior tree** lowers in map order with only the root placed first,
-  though a port link needs its producer lowered before its consumer. It also
-  keeps concurrent runs in a map, so which run's write wins is unspecified.
+## 2. The rule: the structure is the order
 
-## 2. The rules
+This is the behavior tree's rule, made the rule of every language:
 
-These hold for every language. Rules 1 to 4 are what Vizij's node graph does
-once its order is kept. Rules 5 and 6 are what keeping it takes.
-
-1. **A value moves within a tick only along a link.** A node runs after every
-   node it reads from: within a tick, evaluation goes from inputs to outputs.
-2. **A store path carries a value to the next tick.** A read sees the store as
-   it was when the tick began. A write lands in the tick's one `StateChange`,
-   and the next tick's reads see it. Paths are the contract between parts of a
-   behavior that no link joins, so no link crosses from one composite to a
-   sibling composite.
-3. **Where no link orders two nodes, the listed order does:** a node's
-   `children` order, the earlier first. On a path both write, the later write
-   wins.
-4. **Composites nest, and the rule applies at every level.** A composite runs
-   as a unit in its parent's order. Everything under a later sibling runs after
-   everything under an earlier one, and wins the paths they share.
-5. **The order is part of the graph.** It lives in `root` and `children`. It
-   survives encoding and decoding, and it travels through LOAD and EDIT like
-   any other part of the graph. EDIT places a new node by replacing its parent
-   with the parent's updated `children`. A node no composite holds runs after
-   every placed node, in id order, so even a graph with no structure has one
-   defined order.
-6. **A run joins the graph at a declared place.** SPAWN grafts the run's
-   fragment as a child of the composite that holds runs, after the runs
-   already there. A later run therefore writes after an earlier one.
+1. **A tick walks the structure from the root to the leaves.** At each
+   composite, the composite's function decides how its children run. Unless it
+   says otherwise, they run in their listed order.
+2. **A node reads and writes the store when it runs.** On a path two nodes
+   write in the same tick, the later one wins.
+3. **The order is part of the graph.** It lives in `root` and `children`, so
+   it survives encoding and decoding and travels through LOAD and EDIT like
+   the rest of the graph. EDIT places a new node by replacing its parent with
+   the parent's updated `children`. A node no composite holds runs after every
+   placed node, in id order, so even a graph with no structure has one defined
+   order.
+4. **A run joins the graph at a declared place.** SPAWN grafts the run as a
+   child of the composite that holds runs, after the runs already there. A
+   later run therefore writes after an earlier one.
 
 ## 3. Composites are the languages
 
@@ -72,9 +62,13 @@ Vizij do today:
 
 | composite | its children are | each tick |
 |---|---|---|
-| **layers** | parts of a behavior, in precedence order | every child runs, in order; the later wins a shared path |
-| **flow** | a dataflow network | every child is evaluated, topologically, ties in listed order (rules 1, 3) |
 | **tree controls** (`SEQ`, `FALLBACK`, `PARALLEL`, …) | sub-behaviors with a status | children tick as the control decides, by status |
+| **layers** | parts of a behavior, in precedence order | every child runs, in order; the later wins a shared path |
+| **flow** | a dataflow network | every child is evaluated in link order: a node after every node it reads from, ties in listed order |
+
+A `flow` is where links carry values within a tick. A link stays inside its
+`flow`. Parts of a behavior that no link joins meet only through store paths,
+read and written in the order the structure gives.
 
 They nest:
 - **A device's root is a `layers`:**
@@ -84,19 +78,21 @@ They nest:
   ├── flow  rig               ← the face's own graphs, in the bundle's order
   ├── flow  pose-driver
   ├── flow  standard::…       ← the mappings, ROS4HRI and Studio among them
-  ├── layers runs             ← the program and every skill run, in spawn order
-  └── flow  animations
+  ├── flow  animations
+  └── layers runs             ← the program and every skill run, in spawn order
   ```
+
+  The runs come last, so a skill overrides a playing animation on the paths
+  both write. The device's program is a run too, so it does the same.
 - **A tree leaf can be a `flow`.** A rig-like controller runs while the leaf is
   `Running`.
 - **A `flow` can start a tree run.** A spawn node (Vizij's `spawn`) asks the
   host to graft a run, and a status key reports it back.
 
 Each language keeps its own executor: the tree engine for tree controls, the
-node-graph plan for a `flow`. One interpreter dispatches each composite to its
-executor and orders the composites by the rules above. Nothing about a
-language leaks into another: the only things they share are the store and the
-structure.
+node-graph plan for a `flow`. One interpreter walks the structure and hands
+each composite to its executor. Nothing about a language leaks into another:
+the only things they share are the store and the structure.
 
 ## 4. What changes
 
@@ -104,10 +100,10 @@ structure.
 - The codec encodes the composed spec as the tree above: a `layers` root, one
   `flow` per composed source in composition order, and each source's nodes as
   its children in listed order.
-- Decoding lists nodes in a pre-order walk of the root.
-- A grafted run becomes a child of `runs`. The plan inserts its component at
-  that place rather than at the end. Components are disjoint, so this is the
-  same remapping as removal.
+- Decoding lists nodes in a pre-order walk of the root, which is the order the
+  plan's topological sort breaks ties by.
+- A grafted run becomes the last child of `runs`, so the plan still appends
+  its component at the end.
 - The device's program, a run today, sits in `runs` with the skills.
 - `compose_sources`' "last writer wins" warning then names the writer that
   actually wins.
@@ -116,9 +112,9 @@ structure.
 - `layers` and `flow` become well-known function ids next to the tree's
   controls. Every interpreter can then read the structure the same way, even
   one that runs a single language.
-- The tree's lowering follows `root` and `children`, so a port link's producer
-  is lowered first whatever the map order.
-- Concurrent runs are kept in spawn order.
+- The tree's runner lists its runs in spawn order. It builds the `PARALLEL`
+  that holds them from a map today, so the order among concurrent runs is not
+  defined.
 
 ## 5. Toward one interpreter
 
@@ -141,13 +137,10 @@ dataflow executor moves into Arora.
 
 ## 6. Open questions
 
-- **Runs and animations.** The layout above places the runs below the
-  animations, as Vizij's composition documents ("a playing animation overrides
-  everything"). A skill run such as `play_viseme` then yields its lips to a
-  playing animation. If a run should win instead, `runs` goes last.
-- **Reads within a tick, in a tree.** Rule 2 is what Vizij does. Whether a
-  tree leaf sees an earlier leaf's write in the same tick needs the same
-  explicit answer.
+- **When a `flow` reads the store.** Rule 2 has a node read when it runs.
+  Vizij's processing graph reads every input path before it evaluates, so a
+  `flow` sees an earlier sibling's write only on the next tick. Reading when
+  the `flow` runs makes it follow the rule and removes a tick of latency.
 - **When a `flow` under a tree is done.** A `flow` never ends on its own. As a
   tree leaf it needs a declared output that reports its status, or it stays
   `Running`.
