@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "12.1.0"
+version = "12.2.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -70,7 +70,8 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # on wasm32-unknown-unknown, a zero-cost re-export of `std::time` elsewhere.
 web-time = "1"
 # The three interfaces the runtime loop wires around the shared state.
-arora-hal = { path = "../arora-hal", version = "4" }
+# 4.1: `Hal::assets` and `hal_module`, the HAL module's ids.
+arora-hal = { path = "../arora-hal", version = "4.1" }
 # 6.1: `client`, the by-name and run conventions `LocalCaller` speaks.
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }

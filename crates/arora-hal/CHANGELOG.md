@@ -4,6 +4,30 @@ All notable changes to `arora-hal`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-10-09
+
+### Added
+
+- A HAL's components' models: `HalAssets::models` states each component's
+  model as a `ComponentModel` (its description, published `reference`,
+  `content_hash`, whether it is `servable`, and its `mount` on another
+  component's model), and `HalAssets::servable_glb` returns a servable model's
+  bytes. A HAL that is not composed is the one component `DEVICE`. Both
+  default to none. `content_hash` hashes a GLB as Semio Studio does.
+- `Hal::assets`, defaulting to `None`: a HAL that implements `HalAssets`
+  returns `Some(self)`, which is how the runtime reaches its models. `FakeHal`
+  does; `set_model_glb` gives it a servable `device` model.
+- `hal_module`: the ids under which the runtime exposes the HAL as a module —
+  its `ID`, and the functions `MODELS`, `MODEL_GLB` (with its parameter
+  `MODEL_GLB_COMPONENT`) and `MODEL_GLBS`.
+- `HalDescription` and the model types derive `AroraType`, so they cross the
+  value plane, and serde's `Serialize` and `Deserialize`.
+
+### Deprecated
+
+- `HalAssets::model_glb`, now provided (returning `None`): the runtime serves
+  `models` and `servable_glb`.
+
 ## [4.0.0] - 2026-09-25
 
 ### Changed

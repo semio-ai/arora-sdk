@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "12.1.0"
+version = "12.2.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -376,19 +376,21 @@ dependencies = [
 
 [[package]]
 name = "arora-hal"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "arora-types",
  "async-trait",
  "futures",
  "futures-channel",
  "futures-core",
+ "serde",
+ "sha2 0.10.9",
  "tokio",
 ]
 
 [[package]]
 name = "arora-hal-restful"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "anyhow",
  "arora",
@@ -408,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-ros2"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "arora",

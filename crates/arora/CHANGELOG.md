@@ -4,6 +4,21 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.2.0] - 2026-10-09
+
+### Added
+
+- The HAL module: every device registers its HAL as a module under
+  `arora_hal::hal_module::ID`, whose described functions serve the HAL's
+  components' models (`HalAssets`): `models()` lists them, `model_glb(component)`
+  returns one model's GLB and `model_glbs()` every servable one's. A model the
+  HAL does not state servable is never served. A HAL without assets has no
+  models.
+
+### Changed
+
+- Depends on arora-hal 4.1.
+
 ## [12.1.0] - 2026-10-06
 
 ### Added

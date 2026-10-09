@@ -20,6 +20,7 @@
 /// next, each use in a subdirectory of its own.
 #[cfg(feature = "native")]
 pub mod device_dir;
+mod hal_module;
 /// A module directory: a guest module's header beside its artifact, the form a
 /// device carries a module in — under its device directory's `modules/`, or
 /// anywhere `--module` names.
@@ -102,6 +103,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -156,8 +158,9 @@ pub struct Arora {
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
-    // out itself.
-    pub(crate) hal: Box<dyn Hal>,
+    // out itself. Shared with the HAL module the builder registered on the
+    // engine, whose functions answer from it.
+    pub(crate) hal: Arc<dyn Hal>,
     // The bridge endpoints, each owned exclusively by this device (their
     // inbound streams were taken at build and merged below); after build they
     // serve outbound `try_send` fan-out and nothing else. A Vec: writes fan
@@ -803,11 +806,22 @@ impl AroraBuilder {
             log::info!("loaded module '{module_name}' ({module_id}): {function_count} function(s)");
         }
 
+        // The HAL module: the device's HAL answering as a module
+        // (`arora_hal::hal_module`) — its components' models — so a remote
+        // reaches it through the same dispatch and finds it in the same method
+        // list.
+        let hal: Arc<dyn Hal> = match self.hal {
+            Some(hal) => Arc::from(hal),
+            None => Arc::new(FakeHal::new()),
+        };
+
         // Register each host-side module so its functions dispatch through the
         // engine's `CallBridge`, exactly like a loaded guest module's. Its
         // described functions join the method index, so introspection
         // (`DescribeMethods`) lists them with their signatures.
-        for module in self.host_modules {
+        let host_modules =
+            std::iter::once(hal_module::module(hal.clone())).chain(self.host_modules);
+        for module in host_modules {
             for description in module.descriptions() {
                 functions.insert(
                     description.id,
@@ -869,7 +883,6 @@ impl AroraBuilder {
         let store = self
             .store
             .unwrap_or_else(|| Box::new(SimpleDataStore::new()));
-        let hal: Box<dyn Hal> = self.hal.unwrap_or_else(|| Box::new(FakeHal::new()));
         let store_changes = store.subscribe();
         let hal_feed = hal.updates().fuse();
 

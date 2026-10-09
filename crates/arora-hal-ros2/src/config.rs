@@ -32,6 +32,14 @@ pub struct ROS2RobotConfig {
     /// Path to the GLB model file for this robot.
     #[serde(default)]
     pub model_glb_path: Option<String>,
+    /// Whether the device serves the file at `model_glb_path` to a remote that
+    /// asks for its model (Semio Studio's `retrieveModelGlb`). False by default:
+    /// anything that can call the device receives what it serves, so set it
+    /// only for a model its owner has made public, never for one held under a
+    /// private grant. Either way the device states the model, with its content
+    /// hash.
+    #[serde(default)]
+    pub model_glb_servable: bool,
 }
 
 impl ROS2RobotConfig {
@@ -88,8 +96,11 @@ impl ROS2RobotConfig {
         if overrides.software_version.is_some() {
             self.software_version = overrides.software_version;
         }
+        // Whether a model is servable is a property of the file: an override
+        // that names a file states it, false unless it says so.
         if overrides.model_glb_path.is_some() {
             self.model_glb_path = overrides.model_glb_path;
+            self.model_glb_servable = overrides.model_glb_servable;
         }
         if !matches!(overrides.joint_ids, JointIdMapping::FromGLB) {
             self.joint_ids = overrides.joint_ids;
@@ -463,16 +474,27 @@ mod tests {
     fn test_apply_overrides_model_glb_path() {
         let mut config = create_test_config();
         config.model_glb_path = Some("/default/nao.glb".to_string());
+        config.model_glb_servable = true;
 
+        // A model path comes with its servability, false unless stated.
         config.apply_overrides(ROS2RobotConfig {
             model_glb_path: Some("/local/nao.glb".to_string()),
             ..Default::default()
         });
         assert_eq!(config.model_glb_path.as_deref(), Some("/local/nao.glb"));
+        assert!(!config.model_glb_servable);
+
+        config.apply_overrides(ROS2RobotConfig {
+            model_glb_path: Some("/public/nao.glb".to_string()),
+            model_glb_servable: true,
+            ..Default::default()
+        });
+        assert!(config.model_glb_servable);
 
         // An override without a model path keeps the existing one.
         config.apply_overrides(ROS2RobotConfig::default());
-        assert_eq!(config.model_glb_path.as_deref(), Some("/local/nao.glb"));
+        assert_eq!(config.model_glb_path.as_deref(), Some("/public/nao.glb"));
+        assert!(config.model_glb_servable);
     }
 
     #[test]
