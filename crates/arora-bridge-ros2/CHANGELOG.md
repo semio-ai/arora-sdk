@@ -4,6 +4,16 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.1] - 2026-10-10
+
+### Fixed
+
+- Requires `ros2-client-multi-rmw` 0.13.1. Before it, a peer's
+  `wait_for_subscription` on the bridge's topics, and `wait_for_service` on its
+  services, could miss a match under load and wait forever: the match event was
+  dropped from a bounded status channel after the wait's one-time check
+  (semio-ai/ros2-client#42).
+
 ## [10.1.0] - 2026-10-10
 
 ### Added
