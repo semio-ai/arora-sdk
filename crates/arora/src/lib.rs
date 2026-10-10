@@ -21,6 +21,7 @@
 #[cfg(feature = "native")]
 pub mod device_dir;
 mod hal_module;
+mod interpreter_signatures;
 /// A module directory: a guest module's header beside its artifact, the form a
 /// device carries a module in — under its device directory's `modules/`, or
 /// anywhere `--module` names.
@@ -866,27 +867,49 @@ impl AroraBuilder {
             .as_ref()
             .map(|interpreter| interpreter.described_methods())
             .unwrap_or_default();
-        let own = [
+        // The interpreter module's task-run functions join the index too, so a
+        // remote finds them by name.
+        let own = interpreter_signatures::all();
+        let reserved = [
             interpreter_module::LOAD,
             interpreter_module::EDIT,
             interpreter_module::SPAWN,
             interpreter_module::SPAWN_GRAPH,
             interpreter_module::HALT,
         ];
+        for (function_id, name, function) in &own {
+            if let Some(described) = functions.get(function_id) {
+                anyhow::bail!(
+                    "function {function_id} ('{}') of module {} has the id of the interpreter \
+                     module's '{name}'",
+                    described.function_name,
+                    described.module_id
+                );
+            }
+            functions.insert(
+                *function_id,
+                ModuleFunction {
+                    module_id: interpreter_module::ID,
+                    function_id: *function_id,
+                    function_name: name.to_string(),
+                    function: function.clone(),
+                },
+            );
+        }
         for (function_id, export) in &interpreter_methods {
+            if reserved.contains(function_id) {
+                anyhow::bail!(
+                    "the behavior interpreter describes '{}' under the id of one of the \
+                     interpreter module's own functions ({function_id})",
+                    export.name
+                );
+            }
             if let Some(described) = functions.get(function_id) {
                 anyhow::bail!(
                     "function {function_id} ('{}') is described by module {} and by the behavior \
                      interpreter",
                     export.name,
                     described.module_id
-                );
-            }
-            if own.contains(function_id) {
-                anyhow::bail!(
-                    "the behavior interpreter describes '{}' under the id of one of the \
-                     interpreter module's own functions ({function_id})",
-                    export.name
                 );
             }
             let ExportKind::Function(function) = &export.kind;
@@ -2257,6 +2280,117 @@ mod caller_tests {
             vec![Some(failure)],
             "a halted run ends Failure"
         );
+    }
+
+    /// The interpreter module's functions are described: a client finds them
+    /// by name and invokes them with arguments by name.
+    #[test]
+    fn the_interpreter_module_s_functions_are_described_and_invoked_by_name() {
+        use arora_behavior::graph::{Graph, Node};
+        use arora_behavior_tree::nodes::RUN_FUNCTION_ID;
+
+        let mut arora = device();
+        let caller = arora.caller();
+        let described = settle(&mut arora, caller.describe_methods(None)).expect("described");
+        for name in ["spawn", "spawn_graph", "halt"] {
+            let method = described
+                .iter()
+                .find(|method| method.name == name)
+                .unwrap_or_else(|| panic!("{name} is described"));
+            assert_eq!(method.module_id, interpreter_module::ID, "{name}");
+        }
+        assert!(
+            !described
+                .iter()
+                .any(|method| method.module_id == interpreter_module::ID
+                    && ["load", "edit"].contains(&method.name.as_str())),
+            "load and edit are reached by id"
+        );
+
+        // `spawn`, its call a key-value as described.
+        let call = Call {
+            module_id: Some(TOOLS),
+            id: WAVE,
+            args: Vec::new(),
+        };
+        let args = HashMap::from([
+            (
+                "call".to_string(),
+                arora_types::value_serde::to_value(&call).expect("a call converts"),
+            ),
+            ("policy".to_string(), Value::from("Concurrent")),
+        ]);
+        let Invoked::Returned(spawned) =
+            settle(&mut arora, caller.invoke("spawn", args, None)).expect("spawned")
+        else {
+            panic!("spawn answers with a handle");
+        };
+        let waving = interpreter_module::decode_spawn_result(&spawned).expect("a handle");
+        assert!(
+            matches!(spawned, Value::KeyValue(_)),
+            "the handle is a key-value"
+        );
+        settle(&mut arora, caller.halt(waving.id)).expect("halted");
+
+        let run = Uuid::from_u128(0x1);
+        let mut graph = Graph::empty();
+        graph.root = Some(run);
+        graph.nodes.insert(
+            run,
+            Node {
+                id: run,
+                function: RUN_FUNCTION_ID,
+                ..Node::default()
+            },
+        );
+        let args = HashMap::from([
+            ("graph_type".to_string(), Value::from("behavior-tree")),
+            ("graph_version".to_string(), Value::from("1.0")),
+            (
+                "graph".to_string(),
+                arora_types::value_serde::to_value(&graph).expect("a graph converts"),
+            ),
+            ("policy".to_string(), Value::from("Concurrent")),
+        ]);
+        let Invoked::Returned(spawned) =
+            settle(&mut arora, caller.invoke("spawn_graph", args, None)).expect("spawned")
+        else {
+            panic!("spawn_graph answers with a handle, not a run of its own");
+        };
+        let handle = interpreter_module::decode_spawn_result(&spawned).expect("a handle");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(running)]
+        );
+
+        let halt = HashMap::from([("task".to_string(), Value::Uuid(handle.id.0))]);
+        settle(&mut arora, caller.invoke("halt", halt, None)).expect("halted");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(failure)]
+        );
+    }
+
+    /// A module function under the id of one of the interpreter module's
+    /// functions fails the build.
+    #[test]
+    fn a_module_function_under_an_interpreter_function_id_fails_the_build() {
+        let clash = ModuleBuilder::new(Uuid::from_u128(0x7201))
+            .described_function(
+                interpreter_module::HALT,
+                "stop_all",
+                signature(&[], FrozenTy::from(PrimitiveKind::Unit)),
+                |_call| answer(Value::Unit),
+            )
+            .build();
+        let Err(error) = Arora::builder().with_host_module(clash).build() else {
+            panic!("the build fails");
+        };
+        assert!(error.to_string().contains("'halt'"), "{error}");
     }
 
     /// `spawn` takes a call by ids and answers with the run's handle.

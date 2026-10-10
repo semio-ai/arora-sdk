@@ -1520,6 +1520,52 @@ mod task_runs {
     }
 }
 
+/// The interpreter module's own functions are not reachable from a tree: a
+/// Groot tag does not resolve to them, and a spawned graph calling one is
+/// refused.
+#[test]
+fn a_tree_does_not_call_the_interpreter_module_s_functions() {
+    use crate::behavior::{graph_type, BehaviorTreeInterpreter};
+    use crate::schema_groot::BehaviorTree as GrootTree;
+    use arora_behavior::graph::{Graph, Node as GraphNode};
+    use arora_behavior::{interpreter_module, BehaviorInterpreter, RunPolicy};
+
+    let halt = ModuleFunction {
+        module_id: interpreter_module::ID,
+        function_id: interpreter_module::HALT,
+        function_name: "halt".to_string(),
+        function: Function {
+            parameters: HashMap::new(),
+            parameter_ordering: Vec::new(),
+            return_ty: FrozenTy::from(PrimitiveKind::Unit),
+        },
+    };
+    let index = HashMap::from([(interpreter_module::HALT, halt)]);
+    let xml = r#"<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Halt/>
+  </BehaviorTree>
+</root>"#;
+    let groot = GrootTree::try_from_groot_xml(xml).expect("parse");
+    assert!(groot.into_graph(&index).is_err(), "Halt does not resolve");
+
+    let node = Uuid::from_u128(0x1);
+    let mut graph = Graph::empty();
+    graph.root = Some(node);
+    graph.nodes.insert(
+        node,
+        GraphNode {
+            id: node,
+            function: interpreter_module::HALT,
+            ..GraphNode::default()
+        },
+    );
+    let mut interp = BehaviorTreeInterpreter::new(Rc::new(index));
+    assert!(interp
+        .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
+        .is_err());
+}
+
 /// The data nodes: `Equal` as a condition, `WriteKeys` writing a key table's
 /// values to the store.
 mod data_nodes {

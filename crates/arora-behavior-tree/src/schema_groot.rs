@@ -212,7 +212,8 @@ impl Node {
 /// `increase`, …) is reachable only under its exact snake_case name. The index
 /// spans every loaded module, host and guest alike, so a name two modules both
 /// export is refused as ambiguous rather than resolved to whichever the index
-/// happens to yield first.
+/// happens to yield first. The interpreter module's own functions are not
+/// reachable from a tree.
 fn function_by_groot_tag(
     index: &HashMap<Uuid, ModuleFunction>,
     tag: &str,
@@ -220,7 +221,8 @@ fn function_by_groot_tag(
     let mut matches: Vec<&ModuleFunction> = index
         .values()
         .filter(|function| {
-            function.function_name == tag || pascal_case(&function.function_name) == tag
+            !crate::is_interpreter_function(function)
+                && (function.function_name == tag || pascal_case(&function.function_name) == tag)
         })
         .collect();
     match matches.len() {
