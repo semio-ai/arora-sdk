@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "12.3.0"
+version = "12.4.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree control nodes and the Semio backend."
 license = "MIT"
@@ -84,10 +84,11 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # headless runner needs, under `firestore_support::options`). Native-only
 # (zenoh/firestore) and optional, so the wasm build of the library stays lean.
 # arora bundles it so a device-specific binary only has to provide its own HAL.
-# 9 speaks studio-bridge msgs 6 (`ListKeys`, `DescribeMethods` over the Studio
-# wire) and keeps the device's Studio credentials (`credentials::DeviceCredentials`);
-# 9.1 also keeps there the certificate a TLS bridge knows the device by.
-arora-studio-bridge-client = { version = "9.1", optional = true }
+# 10 speaks studio-bridge msgs 7 (each state key published verbatim as its
+# Zenoh key, `state/{device}/{key}`; protocol 3) and keeps the device's Studio
+# credentials (`credentials::DeviceCredentials`), with the certificate a TLS
+# bridge knows the device by.
+arora-studio-bridge-client = { version = "10", optional = true }
 # Headless device-runner deps (native-only, optional). `dirs` finds the per-user
 # directory the device directory defaults to; `serde_json` reads a module
 # directory's `header.json`.
