@@ -8,6 +8,20 @@
             <input_port name="delta"/>
             <inout_port name="storage"/>
         </Action>
+        <Condition ID="Equal">
+            <input_port name="a"/>
+            <input_port name="b"/>
+        </Condition>
+        <Action ID="WriteKeys">
+            <input_port name="keys"/>
+            <input_port name="values"/>
+        </Action>
+        <Action ID="RunCall">
+            <input_port name="call"/>
+        </Action>
+        <Decorator ID="RunStatus">
+            <output_port name="status"/>
+        </Decorator>
     </TreeNodesModel>
 </root>
 

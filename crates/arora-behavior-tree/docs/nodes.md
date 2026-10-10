@@ -41,7 +41,7 @@ Two data nodes are ticked natively too, and read their arguments through any lin
 - **`Equal(a, b)`** succeeds when its two values are equal and fails otherwise — a condition over data.
 - **`WriteKeys(keys, values)`** writes `values[i]` under the store key `keys[i]`, skipping an empty key and a `Unit` value. It fails, writing nothing, when `values` is not an array of the table's length. `keys` is a literal array of strings, bound to store slots when the tree is lowered: a key table is structure, shown in the graph and changed by an edit.
 
-They are part of the `behavior-tree 1.1` format.
+They are part of the `behavior-tree 1.1` format. In Groot they are `<Equal a="…" b="…"/>` and `<WriteKeys keys="k0;k1" values="…"/>`: a port holds `{name}` for a variable, `json:` and a value's serde form for a typed literal (`json:{"u64":1}`), or plain text for a string; export falls back to `json:` wherever plain text would not read back as the same value. The task-run nodes are `<RunCall call="json:…"/>` and `<RunStatus status="{key}">…</RunStatus>`.
 
 ## How a node ticks
 
