@@ -57,6 +57,11 @@ pub(crate) struct MethodService {
 /// its name is returned alongside so the caller can log the omission (no silent
 /// truncation). An optional of a scalar or a record travels as the bounded
 /// sequence `T[<=1]`.
+///
+/// The interpreter module's functions (`interpreter_module::ID`) are neither
+/// resolved nor skipped: they load, edit, spawn and halt behavior, which a
+/// graph, a call and a task handle describe, and none of these has a ROS 2
+/// type. A task run the interpreter implements is the actions plane's.
 pub(crate) fn resolve(
     namespace: &str,
     signatures: &[MethodSignature],
@@ -64,7 +69,10 @@ pub(crate) fn resolve(
 ) -> (Vec<MethodService>, Vec<String>) {
     let mut services = Vec::new();
     let mut skipped = Vec::new();
-    for signature in signatures {
+    for signature in signatures
+        .iter()
+        .filter(|signature| signature.module_id != arora_behavior::interpreter_module::ID)
+    {
         let types = request_type(signature).zip(response_type(signature));
         let Some((request_type, response_type)) = types.filter(|(request, response)| {
             ros2_representable(request, registry.types()).is_ok()
@@ -407,6 +415,24 @@ mod tests {
         let back = cdr::decode(&service.response_type, registry.types(), &response_bytes)
             .expect("decode response");
         assert_eq!(back, response);
+    }
+
+    /// The interpreter module's functions make no service and no skipped
+    /// entry: they act on behavior, which has no ROS 2 type.
+    #[test]
+    fn the_interpreter_module_s_functions_are_left_out() {
+        let registry = arora_msgs_ros2::registry();
+        let mut sig = signature(
+            "halt",
+            function(
+                &[("task", primitive(PrimitiveKind::Unit))],
+                primitive(PrimitiveKind::Unit),
+            ),
+        );
+        sig.module_id = arora_behavior::interpreter_module::ID;
+        let (services, skipped) = resolve("robot", std::slice::from_ref(&sig), &registry);
+        assert!(services.is_empty(), "no service");
+        assert!(skipped.is_empty(), "no warning");
     }
 
     #[test]
