@@ -24,7 +24,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   - `WriteKeys(keys, values)` (`WRITE_KEYS_FUNCTION_ID`,
     `WRITE_KEYS_KEYS_PARAM_ID`, `WRITE_KEYS_VALUES_PARAM_ID`): writes
     `values[i]` under the store key `keys[i]`, skipping an empty key and a
-    `Unit` value, one store change per key and tick, and succeeds; fails,
+    `Unit` value, and succeeds (a value equal to the one the key holds
+    makes no store change); fails,
     writing nothing, when `values` is not an array of the table's length.
     `keys` must be a literal array of distinct strings: the table is bound
     when the tree is lowered, each key as a `{var}` of that name binds.
