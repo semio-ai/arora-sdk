@@ -498,6 +498,16 @@ host-function special case in dispatch — a remote editing a behavior calls a
 module function like any other, and interpreter implementations stay engine-
 agnostic behind the `BehaviorInterpreter` trait.
 
+**The interpreter module's task-run functions are described.** `spawn`,
+`spawn_graph` and `halt` are in the device's method index like any module's
+functions, so a client finds them by name over `DescribeMethods` rather than
+from `arora-behavior`'s ids. A call, a graph and a task handle travel as
+key-values keyed by field name, so they are described as the dynamic
+key-value type. `load` and `edit` act on the main behavior and are reached by
+id, leaving their names to the typed functions of a composed behavior host.
+A tree does not call these functions: they act on the interpreter that ticks
+it.
+
 **The interpreter describes the task runs it implements.** A method whose run
 is behavior the interpreter hosts (a node-graph fragment) has no module of
 its own. The interpreter lists it (`described_methods`), and the runtime

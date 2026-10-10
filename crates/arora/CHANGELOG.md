@@ -4,6 +4,25 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.5.0] - 2026-10-10
+
+### Added
+
+- The interpreter module's task-run functions join the method index, so
+  `DescribeMethods` lists them and `invoke` reaches them by name:
+  `spawn(call, policy)`, `spawn_graph(graph_type, graph_version, graph,
+  policy)` and `halt(task)`. A call, a graph and the returned handle are
+  described as the dynamic key-value type they travel as, a policy as a
+  string, a task as a uuid. `load` and `edit` are reached by their ids. A
+  module function under one of the interpreter module's ids fails the build.
+
+### Changed
+
+- A loaded module that exports `spawn`, `spawn_graph` or `halt` shares the
+  name with the interpreter module: `invoke` needs that module's id to reach
+  it, and a bridge that invokes by name alone finds the name ambiguous.
+- Depends on arora-behavior-tree 8.4.
+
 ## [12.4.0] - 2026-10-10
 
 ### Added

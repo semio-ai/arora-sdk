@@ -1814,8 +1814,8 @@ mod tests {
 
         // DescribeMethods returns the same set with full signatures, encoded as
         // JSON over the value plane — a `Value::String` that deserialises to a
-        // `Vec<MethodSignature>` (empty here: this device registers no host
-        // module functions).
+        // `Vec<MethodSignature>`: the HAL module's and the interpreter module's
+        // functions.
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,

@@ -1171,6 +1171,16 @@ fn call_expression(
     Ok(result.ret)
 }
 
+/// Whether `function` is one of the interpreter module's own functions
+/// (`load`, `edit`, `spawn`, `spawn_graph`, `halt`). They act on the
+/// interpreter, which a tree cannot call while it is being ticked, so a tree
+/// names none of them.
+pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
+    use arora_behavior::interpreter_module::{EDIT, HALT, ID, LOAD, SPAWN, SPAWN_GRAPH};
+    function.module_id == ID
+        && [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function.function_id)
+}
+
 pub struct ModuleFunction {
     pub module_id: Uuid,
     pub function_id: Uuid,
