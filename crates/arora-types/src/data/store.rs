@@ -54,6 +54,11 @@ pub trait Slot: Send + Sync {
   /// Read the current value of the cell.
   fn get(&self) -> Option<Value>;
   /// Write the cell; observers of the store see the corresponding change.
+  ///
+  /// Observers see changes only: setting the value the cell already holds
+  /// notifies nothing. A writer that sets a key every tick (a behavior
+  /// holding an output) therefore costs no change while the value does not
+  /// move.
   fn set(&self, value: Option<Value>) -> Result<(), DataError>;
 }
 
@@ -297,7 +302,10 @@ pub trait DataStore: Send + Sync {
   /// `None` if the key is unset/absent.
   fn read(&self, keys: &[Key]) -> Vec<Option<Value>>;
 
-  /// Apply a batch of changes. Observers receive the same [`StateChange`].
+  /// Apply a batch of changes. Observers receive the changes that change
+  /// something: a key set to the value it already holds, or an unset of an
+  /// absent key, is left out of what they see, and a batch that changes
+  /// nothing notifies nothing.
   fn write(&self, changes: StateChange) -> Result<(), DataError>;
 
   /// A snapshot of the entire store.

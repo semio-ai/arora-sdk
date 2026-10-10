@@ -4,6 +4,17 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.6.0] - 2026-10-10
+
+### Changed
+
+- `DataStore::write` and `Slot::set` state that observers see changes only: a
+  key set to the value it already holds, or an unset of an absent key, notifies
+  nothing. A behavior that writes its outputs every tick relies on it to make
+  no change while a value holds. `arora-simple-data-store` (and its namespaced
+  view) already behaves so; an implementation that notifies every write does
+  not meet the contract.
+
 ## [3.5.0] - 2026-10-06
 
 ### Added

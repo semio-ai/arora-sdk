@@ -4,6 +4,24 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.5.0] - 2026-10-10
+
+### Fixed
+
+- A module leaf's argument linked through a selection (`LinkSource::Select`)
+  receives the selected part of its source, as a native node's argument and a
+  call expression's argument already do, rather than the whole source value.
+
+### Changed
+
+- A selection is read-only: the interpreter refuses an edit, load or spawn
+  that links one to a node's return binding (`_ret`) or to a parameter its
+  function declares mutable.
+- A selection over an absent value reads as absent (`Unit`), as the absent
+  value does; a path that a present value does not have errors the tick.
+- `WriteKeys` relies on the store's change-only notification
+  (arora-types 3.6): a value that does not move makes no store change.
+
 ## [8.4.0] - 2026-10-10
 
 ### Changed
