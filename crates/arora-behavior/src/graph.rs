@@ -186,6 +186,40 @@ pub struct Graph {
     pub variables: HashMap<Uuid, String>,
 }
 
+/// The language a [`Graph`] is written in, and the version of that language's
+/// format it is written for.
+///
+/// Every language uses the one [`Graph`] model; the type says how its nodes,
+/// links and structure are read. The version is the format's, not a crate's:
+/// a minor version adds to the format (a new node kind), a major changes what
+/// an existing graph means. A graph states the oldest version that has
+/// everything it uses, so an interpreter reading version `1.3` of a type runs
+/// any `1.x` graph with `x ≤ 3` ([`GraphType::reads`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GraphType {
+    /// The language's name, e.g. `behavior-tree`.
+    pub name: String,
+    /// The version of the language's format.
+    pub version: semver::Version,
+}
+
+impl GraphType {
+    /// Whether an interpreter reading `self` runs a graph written for
+    /// `graph`: the same name and major version, and a minor version no newer
+    /// than `self`'s.
+    pub fn reads(&self, graph: &GraphType) -> bool {
+        self.name == graph.name
+            && self.version.major == graph.version.major
+            && graph.version.minor <= self.version.minor
+    }
+}
+
+impl std::fmt::Display for GraphType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.name, self.version)
+    }
+}
+
 /// A graph edition failed to apply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphError {
@@ -349,6 +383,21 @@ impl Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_graph_type_reads_older_minors_of_its_major() {
+        let ty = |name: &str, major, minor| GraphType {
+            name: name.to_string(),
+            version: semver::Version::new(major, minor, 0),
+        };
+        let reader = ty("behavior-tree", 1, 1);
+        assert!(reader.reads(&ty("behavior-tree", 1, 0)));
+        assert!(reader.reads(&ty("behavior-tree", 1, 1)));
+        assert!(!reader.reads(&ty("behavior-tree", 1, 2)), "a newer minor");
+        assert!(!reader.reads(&ty("behavior-tree", 2, 0)), "another major");
+        assert!(!reader.reads(&ty("node-graph", 1, 0)), "another language");
+        assert_eq!(reader.to_string(), "behavior-tree 1.1.0");
+    }
 
     fn node(id: Uuid, function: Uuid) -> Node {
         Node {
