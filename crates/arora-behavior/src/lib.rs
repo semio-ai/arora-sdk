@@ -47,7 +47,7 @@ pub mod interpreter_module;
 pub mod status;
 pub mod task;
 
-pub use graph::{Graph, GraphDiff};
+pub use graph::{Graph, GraphDiff, GraphType};
 pub use status::{
     declare_status_enumeration, Status, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION,
     STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
@@ -182,9 +182,41 @@ pub trait BehaviorInterpreter {
         })
     }
 
+    /// Spawn `graph`, written in the language `graph_type` names, as a task
+    /// run under `policy`, returning a [`TaskHandle`] to follow and stop it.
+    /// The graph is the run's program: it runs beside the main behavior,
+    /// ticked with it each step, until it reaches a terminal state or is
+    /// [`halt`](Self::halt)ed. Non-blocking, like [`spawn`](Self::spawn), and
+    /// its lifecycle surfaces on the handle's keys.
+    ///
+    /// An interpreter refuses a `graph_type` it does not read — another
+    /// language, another major version, or a newer minor version than it
+    /// reads (see [`GraphType::reads`]) — with an error naming the type it
+    /// reads.
+    ///
+    /// The run's nodes are part of the interpreter's graph: an
+    /// [`apply`](Self::apply) reaches them by id, so a client edits a live run
+    /// (relinks a literal, replaces a node) without respawning it, and a
+    /// [`load`](Self::load) of the main behavior leaves them in place.
+    ///
+    /// The default rejects spawning a graph — override it in interpreters that
+    /// host a graph as a run (a behavior-tree subtree, a node-graph subgraph).
+    fn spawn_graph(
+        &mut self,
+        graph_type: &GraphType,
+        graph: graph::Graph,
+        policy: RunPolicy,
+    ) -> Result<TaskHandle, BehaviorError> {
+        let _ = (graph_type, graph, policy);
+        Err(BehaviorError {
+            message: "this interpreter does not support spawning a graph".to_string(),
+        })
+    }
+
     /// Halt the run identified by `task` (idempotent): a clean stop that may run
     /// compensation, not a hard kill. On reaching a terminal state the run is
-    /// dropped and its status key reflects the outcome.
+    /// dropped and its status key reflects the outcome. It stops a run started
+    /// by [`spawn`](Self::spawn) or by [`spawn_graph`](Self::spawn_graph).
     ///
     /// The default rejects halting — override it alongside [`spawn`](Self::spawn).
     fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {
@@ -212,8 +244,8 @@ pub trait BehaviorInterpreter {
 mod tests {
     use super::*;
 
-    /// A minimal interpreter that only ticks, so it keeps the default `spawn`
-    /// and `halt` — the ones under test.
+    /// A minimal interpreter that only ticks, so it keeps the default `spawn`,
+    /// `spawn_graph` and `halt` — the ones under test.
     struct Idle;
     impl BehaviorInterpreter for Idle {
         fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
@@ -227,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn spawn_and_halt_reject_by_default() {
+    fn spawning_and_halting_reject_by_default() {
         let mut idle = Idle;
         let call = Call {
             module_id: None,
@@ -235,6 +267,16 @@ mod tests {
             args: Vec::new(),
         };
         assert!(idle.spawn(call, RunPolicy::Concurrent).is_err());
+        assert!(idle
+            .spawn_graph(
+                &GraphType {
+                    name: "behavior-tree".to_string(),
+                    version: semver::Version::new(1, 0, 0),
+                },
+                graph::Graph::empty(),
+                RunPolicy::Concurrent
+            )
+            .is_err());
         assert!(idle.halt(TaskId(uuid::Uuid::nil())).is_err());
     }
 }
