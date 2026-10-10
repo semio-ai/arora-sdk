@@ -80,11 +80,11 @@ use uuid::Uuid;
 
 use crate::arora_generated::behavior_tree::status::Status;
 use crate::graph::build_behavior_tree;
-use crate::is_native;
 use crate::nodes::{
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_STATUS_FUNCTION_ID,
     RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
 };
+use crate::{is_interpreter_function, is_native};
 use crate::{lower_behavior_tree, schema_groot, LoweredTree, ModuleFunction};
 
 /// The name of the language this interpreter reads: the [`GraphType::name`] a
@@ -748,10 +748,14 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // lower, renaming no declared variable.
         check_tree(&graph, root)?;
         if let Some(node) = graph.nodes.values().find(|node| {
-            !is_native(node.function) && !self.function_index.contains_key(&node.function)
+            !is_native(node.function)
+                && self
+                    .function_index
+                    .get(&node.function)
+                    .is_none_or(is_interpreter_function)
         }) {
             return Err(behavior_error(format!(
-                "node {} calls function {}, which the device does not have",
+                "node {} calls function {}, which the device does not have for a tree",
                 node.id, node.function
             )));
         }
