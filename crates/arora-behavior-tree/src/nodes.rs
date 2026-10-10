@@ -232,6 +232,41 @@ pub const RUN_STATUS_LATCH_PARAM_ID: Uuid = Uuid::from_bytes([
     0xb7, 0x38, 0x91, 0x2d, 0xc0, 0x54, 0x4a, 0x19, 0x8f, 0xe6, 0x25, 0x70, 0x4c, 0xa8, 0x13, 0x57,
 ]);
 
+// Data nodes: a condition over two values, and a write of a key table's
+// values. Both are ticked natively (see `behavior_tree::tick_builtin`).
+
+/// `Equal(a, b)`: Success when the two values are equal — the same type and
+/// the same value, so `U64(1)` and `U32(1)` differ, and NaN equals nothing —
+/// Failure otherwise. Each argument is any link source, a selection included;
+/// both must be linked. A selection that does not apply to its source's value
+/// errors the tick.
+pub const EQUAL_FUNCTION_ID: Uuid = uuid::uuid!("a67583f5-7b1f-4081-a210-b710bd41d88a");
+/// [`EQUAL_FUNCTION_ID`]'s first value.
+pub const EQUAL_A_PARAM_ID: Uuid = uuid::uuid!("75664d78-aa45-44a7-b1fc-0ab220b933ee");
+/// [`EQUAL_FUNCTION_ID`]'s second value.
+pub const EQUAL_B_PARAM_ID: Uuid = uuid::uuid!("9399b82f-7ace-41fc-8732-38a42a800698");
+
+/// `WriteKeys(keys, values)`: writes `values[i]` under the store key
+/// `keys[i]`, skipping an empty key and a `Unit` value, and succeeds; fails,
+/// writing nothing, when `values` is not an array or its length is not the
+/// table's. A write the store refuses is not reported by the node, as for any
+/// variable.
+///
+/// `keys` is a key table: a literal array of distinct strings
+/// (`Value::ArrayString`), bound to store slots when the tree is lowered, so it
+/// is part of the graph's structure and changes by an edit. A link of any other
+/// kind, or a key listed twice, is refused at lowering. Each key binds as a
+/// `{var}` of that name does (the Direct convention). `values` is any link
+/// source, and must be linked. Each key is written through its store slot on
+/// every tick; the store notifies a change only when the value differs from
+/// the one it holds, so a value that does not move makes no store change and
+/// nothing reaches a bridge.
+pub const WRITE_KEYS_FUNCTION_ID: Uuid = uuid::uuid!("dbc1ec30-8f2d-482e-8638-a803fdb58318");
+/// [`WRITE_KEYS_FUNCTION_ID`]'s key table.
+pub const WRITE_KEYS_KEYS_PARAM_ID: Uuid = uuid::uuid!("06aa9c89-bb27-4705-b499-97a2214b9a2d");
+/// [`WRITE_KEYS_FUNCTION_ID`]'s values.
+pub const WRITE_KEYS_VALUES_PARAM_ID: Uuid = uuid::uuid!("638ac402-69dd-47bc-a04f-aec726ff4c47");
+
 pub const SEQ_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0x32, 0x24, 0x6d, 0xf6, 0xab, 0x5d, 0x4f, 0x18, 0x92, 0x21, 0x23, 0xe2, 0x87, 0x31, 0xde, 0x93,
 ]);

@@ -494,7 +494,7 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
 /// stand-in for a real action-behavior whose status decorator publishes its
 /// outcome to the run's status key.
 mod task_runs {
-    use super::{build, LeafStatuses, LeafTicks, TestBridge};
+    use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::arora_generated::behavior_tree::status::Status;
     use crate::behavior::{graph_type, BehaviorTreeInterpreter};
     use crate::nodes;
@@ -1516,6 +1516,393 @@ mod task_runs {
         ] {
             assert!(interp.apply(diff).is_err(), "{what} is refused");
             assert_eq!(interp.graph(), &before, "{what} changed nothing");
+        }
+    }
+}
+
+/// The data nodes: `Equal` as a condition, `WriteKeys` writing a key table's
+/// values to the store.
+mod data_nodes {
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::nodes;
+    use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::data::{DataStore, Key, StateChange};
+    use arora_types::value::{Structure, StructureField, Value};
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    const SEQ: Uuid = Uuid::from_u128(0x100);
+    const EQUAL: Uuid = Uuid::from_u128(0x101);
+    const WRITE: Uuid = Uuid::from_u128(0x102);
+    const MARK: Uuid = Uuid::from_u128(0x103);
+
+    fn node(id: Uuid, function: Uuid, inputs: &[Uuid]) -> GraphNode {
+        GraphNode {
+            id,
+            function,
+            inputs: inputs.iter().copied().map(Io::new).collect(),
+            ..GraphNode::default()
+        }
+    }
+
+    /// `Sequence(Equal(a, b), WriteKeys(keys, values), WriteKeys(["done"], [true]))`:
+    /// the last write marks that the sequence got past the first two.
+    fn guarded_write(a: LinkSource, b: LinkSource, keys: Value, values: LinkSource) -> Graph {
+        let mut graph = Graph::empty();
+        graph.root = Some(SEQ);
+        graph.nodes.insert(
+            SEQ,
+            GraphNode {
+                children: Some(vec![EQUAL, WRITE, MARK]),
+                ..node(SEQ, nodes::SEQ_FUNCTION_ID, &[])
+            },
+        );
+        graph.nodes.insert(
+            EQUAL,
+            node(
+                EQUAL,
+                nodes::EQUAL_FUNCTION_ID,
+                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
+            ),
+        );
+        for id in [WRITE, MARK] {
+            graph.nodes.insert(
+                id,
+                node(
+                    id,
+                    nodes::WRITE_KEYS_FUNCTION_ID,
+                    &[
+                        nodes::WRITE_KEYS_KEYS_PARAM_ID,
+                        nodes::WRITE_KEYS_VALUES_PARAM_ID,
+                    ],
+                ),
+            );
+        }
+        let link = |node, port, source| Link::new(Port::new(node, port), source);
+        graph.links = vec![
+            link(EQUAL, nodes::EQUAL_A_PARAM_ID, a),
+            link(EQUAL, nodes::EQUAL_B_PARAM_ID, b),
+            link(
+                WRITE,
+                nodes::WRITE_KEYS_KEYS_PARAM_ID,
+                LinkSource::Literal(keys),
+            ),
+            link(WRITE, nodes::WRITE_KEYS_VALUES_PARAM_ID, values),
+            link(
+                MARK,
+                nodes::WRITE_KEYS_KEYS_PARAM_ID,
+                LinkSource::Literal(Value::ArrayString(vec!["done".to_string()])),
+            ),
+            link(
+                MARK,
+                nodes::WRITE_KEYS_VALUES_PARAM_ID,
+                LinkSource::Literal(Value::ArrayBoolean(vec![true])),
+            ),
+        ];
+        graph
+    }
+
+    /// Load `graph` as the main behavior over `store` and tick it once.
+    fn tick_once(store: &SimpleDataStore, graph: Graph) -> Result<(), String> {
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp.load(graph).map_err(|e| e.message)?;
+        let mut bridge = super::TestBridge::empty();
+        let mut ctx = BehaviorContext {
+            store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).map(|_| ()).map_err(|e| e.message)
+    }
+
+    fn read(store: &SimpleDataStore, keys: &[&str]) -> Vec<Option<Value>> {
+        let keys: Vec<Key> = keys.iter().map(|key| Key::new(*key)).collect();
+        store.read(&keys)
+    }
+
+    fn strings(keys: &[&str]) -> Value {
+        Value::ArrayString(keys.iter().map(|key| key.to_string()).collect())
+    }
+
+    fn literal(value: Value) -> LinkSource {
+        LinkSource::Literal(value)
+    }
+
+    #[test]
+    fn write_keys_writes_each_value_under_its_key_skipping_empty_keys_and_units() {
+        let store = SimpleDataStore::new();
+        let values = Value::ArrayValue(vec![
+            Value::F64(1.0),
+            Value::F64(2.0),
+            Value::Unit,
+            Value::String("four".to_string()),
+        ]);
+        tick_once(
+            &store,
+            guarded_write(
+                literal(Value::U64(7)),
+                literal(Value::U64(7)),
+                strings(&["out/a", "", "out/c", "out/d"]),
+                literal(values),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&store, &["out/a", "out/c", "out/d", "done"]),
+            vec![
+                Some(Value::F64(1.0)),
+                None,
+                Some(Value::String("four".to_string())),
+                Some(Value::Boolean(true)),
+            ],
+            "the empty key and the Unit value are skipped"
+        );
+    }
+
+    #[test]
+    fn equal_fails_the_sequence_when_the_values_differ() {
+        let store = SimpleDataStore::new();
+        tick_once(
+            &store,
+            guarded_write(
+                literal(Value::U64(7)),
+                literal(Value::U64(8)),
+                strings(&["out/a"]),
+                literal(Value::ArrayF64(vec![1.0])),
+            ),
+        )
+        .unwrap();
+        assert_eq!(read(&store, &["out/a", "done"]), vec![None, None]);
+    }
+
+    #[test]
+    fn write_keys_fails_and_writes_nothing_on_a_length_mismatch_or_a_non_array() {
+        for values in [Value::ArrayF64(vec![1.0]), Value::F64(1.0), Value::Unit] {
+            let store = SimpleDataStore::new();
+            tick_once(
+                &store,
+                guarded_write(
+                    literal(Value::U8(1)),
+                    literal(Value::U8(1)),
+                    strings(&["out/a", "out/b"]),
+                    literal(values.clone()),
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                read(&store, &["out/a", "out/b", "done"]),
+                vec![None, None, None],
+                "{values} writes nothing and fails"
+            );
+        }
+    }
+
+    #[test]
+    fn write_keys_refuses_a_key_table_that_is_not_a_literal_array_of_strings() {
+        let variable = Uuid::from_u128(0x9);
+        for keys in [
+            LinkSource::Variable(variable),
+            literal(Value::ArrayValue(vec![Value::String("out/a".to_string())])),
+        ] {
+            let mut graph = guarded_write(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                strings(&["out/a"]),
+                literal(Value::ArrayF64(vec![1.0])),
+            );
+            graph.links.push(Link::new(
+                Port::new(WRITE, nodes::WRITE_KEYS_KEYS_PARAM_ID),
+                keys,
+            ));
+            graph.variables.insert(variable, "table".to_string());
+            let store = SimpleDataStore::new();
+            assert!(tick_once(&store, graph).is_err(), "the tree does not lower");
+        }
+    }
+
+    /// The stepping pattern: a structure read from the store, its revision
+    /// compared by selection, its values written by selection.
+    #[test]
+    fn selections_feed_equal_and_write_keys() {
+        let revision = Uuid::from_u128(0x51);
+        let values = Uuid::from_u128(0x52);
+        let frame = Uuid::from_u128(0x53);
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set(
+                "frame",
+                Value::Structure(Structure {
+                    id: Uuid::from_u128(0x50),
+                    fields: vec![
+                        StructureField {
+                            id: revision,
+                            value: Box::new(Value::U64(3)),
+                        },
+                        StructureField {
+                            id: values,
+                            value: Box::new(Value::ArrayF64(vec![0.5, 0.25])),
+                        },
+                    ],
+                }),
+            ))
+            .unwrap();
+        let select = |field: Uuid| LinkSource::Select {
+            source: Box::new(LinkSource::Variable(frame)),
+            path: Key::new(format!(".{field}")),
+        };
+        let mut graph = guarded_write(
+            select(revision),
+            literal(Value::U64(3)),
+            strings(&["face/x", "face/y"]),
+            select(values),
+        );
+        graph.variables.insert(frame, "frame".to_string());
+        tick_once(&store, graph).unwrap();
+        assert_eq!(
+            read(&store, &["face/x", "face/y", "done"]),
+            vec![
+                Some(Value::F64(0.5)),
+                Some(Value::F64(0.25)),
+                Some(Value::Boolean(true))
+            ]
+        );
+    }
+
+    /// Lowering checks the data nodes: both of `Equal`'s arguments and
+    /// `WriteKeys`' values linked, its keys distinct.
+    #[test]
+    fn data_nodes_are_checked_at_lowering() {
+        let unlinked = |node: Uuid, port: Uuid| {
+            let mut graph = guarded_write(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                strings(&["out/a", "out/b"]),
+                literal(Value::ArrayF64(vec![1.0, 2.0])),
+            );
+            graph
+                .links
+                .retain(|link| link.target != Port::new(node, port));
+            graph
+        };
+        let twice = guarded_write(
+            literal(Value::U8(1)),
+            literal(Value::U8(1)),
+            strings(&["out/a", "", "", "out/a"]),
+            literal(Value::ArrayF64(vec![1.0, 2.0, 3.0, 4.0])),
+        );
+        for (what, graph) in [
+            ("Equal without b", unlinked(EQUAL, nodes::EQUAL_B_PARAM_ID)),
+            (
+                "WriteKeys without values",
+                unlinked(WRITE, nodes::WRITE_KEYS_VALUES_PARAM_ID),
+            ),
+            ("a key listed twice", twice),
+        ] {
+            let store = SimpleDataStore::new();
+            assert!(tick_once(&store, graph).is_err(), "{what} does not lower");
+        }
+    }
+
+    /// Without a store, a key binds to the tree's own variable of that name, so
+    /// a node reading the variable sees the write.
+    #[test]
+    fn a_key_shares_the_cell_of_the_variable_of_its_name() {
+        use crate::graph::build_behavior_tree;
+        let variable = Uuid::from_u128(0x77);
+        let mut graph = guarded_write(
+            literal(Value::U8(1)),
+            literal(Value::U8(1)),
+            strings(&["k"]),
+            literal(Value::ArrayU8(vec![5])),
+        );
+        // A check after the writes: Equal({k}, 5).
+        let check = Uuid::from_u128(0x104);
+        graph.nodes.get_mut(&SEQ).unwrap().children = Some(vec![EQUAL, WRITE, MARK, check]);
+        graph.nodes.insert(
+            check,
+            node(
+                check,
+                nodes::EQUAL_FUNCTION_ID,
+                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
+            ),
+        );
+        graph.links.push(Link::new(
+            Port::new(check, nodes::EQUAL_A_PARAM_ID),
+            LinkSource::Variable(variable),
+        ));
+        graph.links.push(Link::new(
+            Port::new(check, nodes::EQUAL_B_PARAM_ID),
+            literal(Value::U8(5)),
+        ));
+        graph.variables.insert(variable, "k".to_string());
+        let tree = build_behavior_tree(&graph, &|_| None).expect("the tree lowers");
+        let mut bridge = super::TestBridge::empty();
+        let status =
+            crate::run_behavior_tree(&tree, Rc::new(HashMap::new()), &mut bridge, false).unwrap();
+        assert_eq!(
+            status,
+            crate::arora_generated::behavior_tree::status::Status::Success
+        );
+    }
+
+    /// A `WriteKeys` at the root of a tree built from `TreeNode`s gets its key
+    /// table too.
+    #[test]
+    fn a_root_write_keys_built_from_tree_nodes_runs() {
+        use crate::schema::Expression;
+        use crate::tree_node::TreeNode;
+        let tree = super::build(TreeNode {
+            function: nodes::WRITE_KEYS_FUNCTION_ID,
+            children: None,
+            parameters: HashMap::from([
+                (
+                    nodes::WRITE_KEYS_KEYS_PARAM_ID,
+                    Expression::Value(strings(&["out/a"])),
+                ),
+                (
+                    nodes::WRITE_KEYS_VALUES_PARAM_ID,
+                    Expression::Value(Value::ArrayF64(vec![1.0])),
+                ),
+            ]),
+        });
+        assert_eq!(
+            super::run(&tree),
+            crate::arora_generated::behavior_tree::status::Status::Success
+        );
+    }
+
+    /// An edit that would leave a `WriteKeys` table unlowerable is refused, and
+    /// the graph stays as it was.
+    #[test]
+    fn an_edit_breaking_a_key_table_is_refused() {
+        use arora_behavior::graph::GraphDiff;
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp
+            .load(guarded_write(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                strings(&["out/a"]),
+                literal(Value::ArrayF64(vec![1.0])),
+            ))
+            .unwrap();
+        let before = interp.graph().clone();
+        for diff in [
+            GraphDiff {
+                remove_links: vec![Port::new(WRITE, nodes::WRITE_KEYS_KEYS_PARAM_ID)],
+                ..GraphDiff::default()
+            },
+            GraphDiff {
+                add_links: vec![Link::new(
+                    Port::new(WRITE, nodes::WRITE_KEYS_KEYS_PARAM_ID),
+                    LinkSource::Variable(Uuid::from_u128(0x99)),
+                )],
+                ..GraphDiff::default()
+            },
+        ] {
+            assert!(interp.apply(diff).is_err());
+            assert_eq!(interp.graph(), &before);
         }
     }
 }

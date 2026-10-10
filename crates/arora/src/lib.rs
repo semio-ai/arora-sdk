@@ -1978,6 +1978,9 @@ mod host_module_tests {
     }
 }
 
+#[cfg(all(test, feature = "native"))]
+mod stepping_tests;
+
 /// The [`LocalCaller`]'s client operations on a device built and stepped in
 /// process: each is enqueued when the method returns and answered by the steps
 /// that follow.

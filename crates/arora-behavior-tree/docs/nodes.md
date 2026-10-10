@@ -36,6 +36,13 @@ This is the sharpest contrast with Vizij's node graph, whose nodes are dataflow 
 
 The basic control nodes and status leaves are wired into this crate and dispatched natively (no engine round-trip). Builders in [`nodes.rs`](../src/nodes.rs): `seq` ([`:141`](../src/nodes.rs#L141)), `seq_star` ([`:146`](../src/nodes.rs#L146), resumes past already-succeeded children via a persisted index), `fallback` ([`:158`](../src/nodes.rs#L158)), `parallel` ([`:163`](../src/nodes.rs#L163)), and the leaves `succeed`/`fail`/`run` ([`:13-23`](../src/nodes.rs#L13-L23)).
 
+Two data nodes are ticked natively too, and read their arguments through any link source, a selection included:
+
+- **`Equal(a, b)`** succeeds when its two values are equal and fails otherwise — a condition over data.
+- **`WriteKeys(keys, values)`** writes `values[i]` under the store key `keys[i]`, skipping an empty key and a `Unit` value. It fails, writing nothing, when `values` is not an array of the table's length. `keys` is a literal array of strings, bound to store slots when the tree is lowered: a key table is structure, shown in the graph and changed by an edit.
+
+They are part of the `behavior-tree 1.1` format.
+
 ## How a node ticks
 
 ```mermaid

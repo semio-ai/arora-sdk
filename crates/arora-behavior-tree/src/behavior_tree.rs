@@ -29,10 +29,11 @@ use crate::arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
 use crate::nodes::{
-    FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID,
-    RUN_CALL_PARAM_ID, RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID,
-    RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
+    PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    WRITE_KEYS_FUNCTION_ID, WRITE_KEYS_KEYS_PARAM_ID, WRITE_KEYS_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -47,7 +48,13 @@ pub struct BehaviorTree {
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    /// Each `WriteKeys` node's key table, bound at load.
+    key_tables: HashMap<Uuid, KeyTable>,
 }
+
+/// A `WriteKeys` node's key table, bound to cells: one per key, `None` for an
+/// empty key.
+type KeyTable = Rc<[Option<VariableCell>]>;
 
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,
@@ -68,6 +75,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
             function_index.clone(),
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
+            &tree.key_tables,
             caller,
             if trace {
                 TraceTick::YesAll
@@ -112,6 +120,7 @@ pub fn lower_behavior_tree(
         function_index,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
+        &tree.key_tables,
         caller,
         if trace {
             TraceTick::YesAll
@@ -182,6 +191,7 @@ fn setup_tick_function(
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    key_tables: &HashMap<Uuid, KeyTable>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -209,6 +219,7 @@ fn setup_tick_function(
                 function_index.clone(),
                 variables.clone(),
                 node_arg_variables.clone(),
+                key_tables,
                 caller,
                 trace,
                 callables,
@@ -221,6 +232,7 @@ fn setup_tick_function(
         function_index,
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
+        key_table: key_tables.get(&node.id).cloned(),
         children: children_ticks,
         trace,
     });
@@ -233,8 +245,8 @@ fn setup_tick_function(
 }
 
 /// Whether `function` is a node this crate ticks natively — a control node, a
-/// status leaf, or a task-run node — rather than a module function the
-/// function index resolves.
+/// status leaf, a task-run node or a data node — rather than a module function
+/// the function index resolves.
 pub(crate) fn is_native(function: Uuid) -> bool {
     matches!(
         function,
@@ -247,21 +259,68 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | PARALLEL_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
+            | EQUAL_FUNCTION_ID
+            | WRITE_KEYS_FUNCTION_ID
     )
 }
 
-/// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
-/// fail, run) natively, without consulting the function index or the wasm
-/// engine. Children are ticked through their registered tick functions
+/// Tick the native nodes (see [`is_native`]) — the control nodes, the status
+/// leaves, the task-run nodes and the data nodes `Equal` and `WriteKeys` —
+/// without consulting the function index or the wasm engine. Children are ticked through their registered tick functions
 /// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
 /// `None` for any other function (which the caller dispatches via the engine).
 fn tick_builtin(
     caller: &mut dyn CallBridge,
+    variables: &HashMap<Uuid, VariableCell>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+    key_table: Option<&[Option<VariableCell>]>,
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
+    // An argument's value, computed from its expression: a selection applies
+    // its path.
+    let argument = |caller: &mut dyn CallBridge, parameter: Uuid| {
+        let node_parameter = NodeParameterId {
+            node: node.id,
+            parameter,
+        };
+        let expression = node.arguments.get(&parameter).ok_or_else(|| {
+            BehaviorTreeError::InconsistentTreeError {
+                message: format!("{node_parameter} has no argument"),
+            }
+        })?;
+        compute_expression(
+            variables,
+            node_parameters_variables,
+            expression,
+            caller,
+            &node_parameter,
+        )
+    };
     let status = match node.function {
+        EQUAL_FUNCTION_ID => {
+            if argument(caller, EQUAL_A_PARAM_ID)? == argument(caller, EQUAL_B_PARAM_ID)? {
+                Status::Success
+            } else {
+                Status::Failure
+            }
+        }
+        WRITE_KEYS_FUNCTION_ID => {
+            let keys = key_table.ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
+                message: format!("WriteKeys node {} has no key table", node.id),
+            })?;
+            match argument(caller, WRITE_KEYS_VALUES_PARAM_ID)?.into_elements() {
+                Ok(values) if values.len() == keys.len() => {
+                    for (cell, value) in keys.iter().zip(values) {
+                        if let Some(cell) = cell.as_ref().filter(|_| value != Value::Unit) {
+                            cell.set(value);
+                        }
+                    }
+                    Status::Success
+                }
+                _ => Status::Failure,
+            }
+        }
         SUCCEED_FUNCTION_ID => Status::Success,
         FAIL_FUNCTION_ID => Status::Failure,
         RUN_FUNCTION_ID => Status::Running,
@@ -438,18 +497,28 @@ fn tick_builtin(
     Ok(Some(status))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tick(
     caller: &mut dyn CallBridge,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    key_table: Option<&[Option<VariableCell>]>,
     child_tick_ids: &Vec<TickId>,
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     // The basic control nodes are wired in natively; everything else is
     // dispatched into a module through the engine.
-    if let Some(status) = tick_builtin(caller, &node_parameters_variables, child_tick_ids, &node)? {
+    let builtin = tick_builtin(
+        caller,
+        &variables.borrow(),
+        &node_parameters_variables,
+        key_table,
+        child_tick_ids,
+        &node,
+    )?;
+    if let Some(status) = builtin {
         if trace != TraceTick::No {
             println!("tick {} -> {:?}", node.id, status);
         }
@@ -636,6 +705,8 @@ struct TickFunction {
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    /// The node's key table, for a `WriteKeys` node.
+    key_table: Option<KeyTable>,
     children: Vec<TickId>,
     trace: TraceTick,
 }
@@ -647,6 +718,7 @@ impl Tickable for TickFunction {
             self.function_index.clone(),
             self.locals.clone(),
             self.node_arg_variables.clone(),
+            self.key_table.as_deref(),
             &self.children,
             self.node.clone(),
             self.trace,
@@ -686,6 +758,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut variables = HashMap::new();
     let mut node_parameters_variables = HashMap::new();
     let mut arguments = Vec::new();
+    let mut key_tables = HashMap::new();
     for node in nodes {
         let shared_node = Rc::new(node);
         if root.is_none() {
@@ -751,6 +824,13 @@ pub fn load_behavior_tree_nodes_with(
         pending = unresolved;
     }
 
+    // The data nodes, once every variable has its cell.
+    for node in node_index.values() {
+        if let Some(table) = bind_data_node(node, resolver, names, &variables)? {
+            key_tables.insert(node.id, table);
+        }
+    }
+
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
             message: "behavior tree has no nodes".to_string(),
@@ -758,6 +838,7 @@ pub fn load_behavior_tree_nodes_with(
         node_index,
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
+        key_tables,
     })
 }
 
@@ -778,6 +859,71 @@ fn get_variable<'a>(
             variable: variable_id.to_owned(),
             node: node_id.to_owned(),
         })
+}
+
+/// Check a data node's arguments, and bind a `WriteKeys` node's key table:
+/// `None` for any other node.
+///
+/// `Equal` needs both its arguments and `WriteKeys` its values, linked. The key
+/// table must be a literal array of distinct strings; each key binds to a cell
+/// as a `{var}` of that name does — the tree's own variable of that name when
+/// there is one, else the store slot `resolver` gives, else a tree-local cell —
+/// and an empty key binds none.
+pub(crate) fn bind_data_node(
+    node: &Node,
+    resolver: &VariableResolver,
+    names: &HashMap<Uuid, String>,
+    variables: &HashMap<Uuid, VariableCell>,
+) -> Result<Option<KeyTable>, BehaviorTreeError> {
+    let refuse = |what: String| {
+        Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!("node {}: {what}", node.id),
+        })
+    };
+    let required = match node.function {
+        EQUAL_FUNCTION_ID => [EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
+        WRITE_KEYS_FUNCTION_ID => [WRITE_KEYS_KEYS_PARAM_ID, WRITE_KEYS_VALUES_PARAM_ID],
+        _ => return Ok(None),
+    };
+    if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
+        return refuse(format!("argument {missing} is not linked"));
+    }
+    if node.function != WRITE_KEYS_FUNCTION_ID {
+        return Ok(None);
+    }
+    let keys = match &node.arguments[&WRITE_KEYS_KEYS_PARAM_ID] {
+        Expression::Value(Value::ArrayString(keys)) => keys,
+        other => {
+            return refuse(format!(
+                "a WriteKeys table must be a literal array of strings, not {other:?}"
+            ))
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    if let Some(twice) = keys
+        .iter()
+        .find(|key| !key.is_empty() && !seen.insert(*key))
+    {
+        return refuse(format!(
+            "key '{twice}' is listed twice in its WriteKeys table"
+        ));
+    }
+    let by_name: HashMap<&str, &Uuid> =
+        names.iter().map(|(id, name)| (name.as_str(), id)).collect();
+    Ok(Some(
+        keys.iter()
+            .map(|key| {
+                (!key.is_empty()).then(|| {
+                    by_name
+                        .get(key.as_str())
+                        .and_then(|id| variables.get(id))
+                        .cloned()
+                        .or_else(|| resolver(key).map(VariableCell::stored))
+                        .unwrap_or_else(VariableCell::local)
+                })
+            })
+            .collect(),
+    ))
 }
 
 /// The other node's argument `expression` reads, through any selection.
