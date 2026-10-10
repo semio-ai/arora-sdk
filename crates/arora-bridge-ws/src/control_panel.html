@@ -398,13 +398,6 @@
         stxt.textContent = t;
       }
 
-      function normalizePath(raw) {
-        return String(raw || "")
-          .trim()
-          .replace(/^\/+/, "")
-          .replace(/\/+/g, "/");
-      }
-
       function extractNumeric(obj, fallback = 0) {
         if (obj === null || obj === undefined) {
           return fallback;
@@ -427,25 +420,6 @@
         return fallback;
       }
 
-      // Two keys can normalize to the same path; the better described one wins.
-      function metadataScore(key) {
-        const meta = (key && key.__meta) || {};
-        let score = 0;
-        if (typeof meta.min === "number") {
-          score += 4;
-        }
-        if (typeof meta.max === "number") {
-          score += 4;
-        }
-        if (meta.default !== undefined) {
-          score += 3;
-        }
-        if (typeof key?.path === "string" && key.path.trim().length) {
-          score += 1;
-        }
-        return score;
-      }
-
       function setControls(nextControls) {
         controls = nextControls;
         controlByPath = new Map(
@@ -454,18 +428,18 @@
       }
 
       function getControlByPath(path) {
-        return controlByPath.get(normalizePath(path));
+        return controlByPath.get(path);
       }
 
-      function getRangeInput(path) {
+      function getRangeInput(control) {
         return mainEl.querySelector(
-          'input[type="range"][data-p="' + cssEscape(path) + '"]',
+          'input[type="range"][data-i="' + control.index + '"]',
         );
       }
 
-      function getNumberInput(path) {
+      function getNumberInput(control) {
         return mainEl.querySelector(
-          'input[type="number"][data-p="' + cssEscape(path) + '"]',
+          'input[type="number"][data-i="' + control.index + '"]',
         );
       }
 
@@ -476,7 +450,7 @@
         }
         const clamped = clampValue(value, control.min, control.max);
         control.currentValue = clamped;
-        const rangeInput = getRangeInput(control.path);
+        const rangeInput = getRangeInput(control);
         if (rangeInput) {
           rangeInput.value = String(clamped);
           const valueText = rangeInput.nextElementSibling.nextElementSibling;
@@ -484,26 +458,11 @@
             valueText.textContent = clamped.toFixed(2);
           }
         }
-        const numberInput = getNumberInput(control.path);
+        const numberInput = getNumberInput(control);
         if (numberInput) {
           numberInput.value = clamped;
         }
         return clamped;
-      }
-
-      function shouldReplaceCanonical(existingKey, newKey) {
-        const existingScore = metadataScore(existingKey);
-        const newScore = metadataScore(newKey);
-        if (newScore !== existingScore) {
-          return newScore > existingScore;
-        }
-        if (newKey?.path && existingKey?.path) {
-          return (
-            normalizePath(newKey.path).length <
-            normalizePath(existingKey.path).length
-          );
-        }
-        return false;
       }
 
       function clampValue(v, min, max) {
@@ -536,17 +495,18 @@
         );
       }
 
+      // A control is the key as the device lists it: its path is displayed,
+      // looked up and written verbatim, since two paths that differ by a slash
+      // are two keys. Only the grouping reads the path's segments. The page's
+      // inputs name a control by its index in `controls`, never by its path:
+      // markup does not carry every string back unchanged (it turns `\r`
+      // into `\n`).
       function deriveControls(keys) {
-        const normalized = (keys || []).filter(isControl);
+        const out = [];
 
-        const byCanonicalPath = new Map();
-
-        for (const s of normalized) {
-          const path = normalizePath(s.path);
+        for (const s of (keys || []).filter(isControl)) {
+          const path = s.path;
           const parts = path.split("/").filter(Boolean);
-          if (!path || !parts.length) {
-            continue;
-          }
           const namespace = parts[0] || "unscoped";
           const group =
             parts.length >= 2
@@ -568,13 +528,9 @@
             currentValue: fallback,
             key: s,
           };
-          const existing = byCanonicalPath.get(path);
-          if (!existing || shouldReplaceCanonical(existing.key, s)) {
-            byCanonicalPath.set(path, control);
-          }
+          out.push(control);
         }
 
-        const out = Array.from(byCanonicalPath.values());
         out.sort((left, right) =>
           left.namespace === right.namespace
             ? left.group === right.group
@@ -583,6 +539,9 @@
             : left.namespace.localeCompare(right.namespace),
         );
 
+        out.forEach((control, index) => {
+          control.index = index;
+        });
         return out;
       }
 
@@ -617,11 +576,9 @@
             '<div class="tab ' +
             (name === namespaceFilter ? "active" : "") +
             '" data-namespace="' +
-            name +
-            '" onclick="setNamespace(\'' +
-            name +
-            "')\">" +
-            label +
+            escapeHtml(name) +
+            '" onclick="setNamespace(this.dataset.namespace)">' +
+            escapeHtml(label) +
             " (" +
             (name === "all" ? controls.length : namespaceCounts[name] || 0) +
             ")</div>";
@@ -640,8 +597,15 @@
         rebuildUI();
       }
 
-      function cssEscape(value) {
-        return String(value).replace(/"/g, '\\"');
+      // A path is any string: what the markup shows of it is escaped, and a
+      // handler reaches it through a data attribute rather than as script text.
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
       function rebuildUI() {
@@ -682,7 +646,7 @@
           if (!groups) {
             return;
           }
-          mainHTML += '<section class="tab-pane active" data-ns="' + ns + '">';
+          mainHTML += '<section class="tab-pane active" data-ns="' + escapeHtml(ns) + '">';
           Object.keys(groups)
             .sort((a, b) => a.localeCompare(b))
             .forEach((group) => {
@@ -694,9 +658,13 @@
                   return (
                     '<div class="slider-row">' +
                     '<span class="slider-label" title="' +
-                    control.track +
+                    escapeHtml(control.path) +
                     '">' +
-                    control.track +
+                    escapeHtml(
+                      control.group + "/" + control.track === control.path
+                        ? control.track
+                        : control.path,
+                    ) +
                     "</span>" +
                     '<input type="range" min="' +
                     control.min +
@@ -706,22 +674,22 @@
                     step +
                     '" value="' +
                     value +
-                    '" data-p="' +
-                    control.path +
+                    '" data-i="' +
+                    control.index +
                     '" oninput="onSlide(this)">' +
                     '<input type="number" class="num-input" step="' +
                     step +
                     '" value="' +
                     value +
-                    '" data-p="' +
-                    control.path +
+                    '" data-i="' +
+                    control.index +
                     '" oninput="onNumber(this)">' +
                     '<span class="slider-val">' +
                     Number(value).toFixed(2) +
                     "</span>" +
-                    '<button class="btn-muted" type="button" onclick="resetOne(\'' +
-                    cssEscape(control.path) +
-                    "')\">↺</button>" +
+                    '<button class="btn-muted" type="button" data-i="' +
+                    control.index +
+                    '" onclick="resetOne(this)">↺</button>' +
                     "</div>"
                   );
                 })
@@ -730,7 +698,7 @@
                 '<div class="panel">' +
                 '<div class="panel-hdr" onclick="togglePanel(this)">' +
                 "<span>" +
-                group.replace(/\//g, " / ") +
+                escapeHtml(group.replace(/\//g, " / ")) +
                 '</span><span class="arrow">▼</span>' +
                 "</div>" +
                 '<div class="panel-body">' +
@@ -775,14 +743,14 @@
 
       function refreshCurrentValues() {
         for (const control of controls) {
-          const el = getRangeInput(control.path);
+          const el = getRangeInput(control);
           if (el) {
             el.value = control.currentValue;
             const valEl = el.nextElementSibling.nextElementSibling;
             if (valEl && valEl.classList.contains("slider-val")) {
               valEl.textContent = Number(control.currentValue).toFixed(2);
             }
-            const numEl = getNumberInput(control.path);
+            const numEl = getNumberInput(control);
             if (numEl) {
               numEl.value = control.currentValue;
             }
@@ -831,31 +799,34 @@
         scheduleFlush();
       }
 
+      function controlOf(el) {
+        return controls[Number(el.dataset.i)];
+      }
+
       function onSlide(el) {
-        const path = el.dataset.p;
+        const control = controlOf(el);
         const value = Number.parseFloat(el.value);
-        if (!path || !Number.isFinite(value)) {
+        if (!control || !Number.isFinite(value)) {
           return;
         }
-        setControlNumeric(path, value);
+        setControlNumeric(control.path, value);
       }
 
       function onNumber(el) {
-        const path = el.dataset.p;
+        const control = controlOf(el);
         const value = Number.parseFloat(el.value);
-        if (!path || !Number.isFinite(value)) {
+        if (!control || !Number.isFinite(value)) {
           return;
         }
-        setControlNumeric(path, value);
+        setControlNumeric(control.path, value);
       }
 
-      function resetOne(rawPath) {
-        const path = normalizePath(rawPath);
-        const control = getControlByPath(path);
+      function resetOne(el) {
+        const control = controlOf(el);
         if (!control) {
           return;
         }
-        setControlNumeric(path, control.defaultValue);
+        setControlNumeric(control.path, control.defaultValue);
       }
 
       function invokeReset() {

@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ws"
-version = "7.2.1"
+version = "7.2.2"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
 license = "MIT"
