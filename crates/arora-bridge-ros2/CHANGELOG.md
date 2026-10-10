@@ -4,6 +4,16 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.2.0] - 2026-10-10
+
+### Added
+
+- The ROS4HRI preset publishes the lip shape being spoken as a
+  `std_msgs/String` on `/robot_face/viseme`, from the speech state key
+  `standard/ros4hri/speech/viseme`: one of the Vizij standard's shape names,
+  `sil` at rest. Anything that follows the lips reads one topic for the whole
+  robot, whichever player is speaking.
+
 ## [10.1.1] - 2026-10-10
 
 ### Fixed
