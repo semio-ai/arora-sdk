@@ -1330,7 +1330,8 @@ mod module_loading_tests {
 
     /// A guest export is described with the signature its module's record
     /// declares for it: what a host module registering the same declaration
-    /// would describe.
+    /// would describe. `frame` returns a record, which a bare header cannot
+    /// pin a version of, so it is not described from the header.
     #[test]
     fn a_guest_export_is_described_as_its_module_record_declares_it() {
         use arora_types::record::module::frozen::ExportKind;
@@ -1341,6 +1342,10 @@ mod module_loading_tests {
         for export in &header.exports {
             let low::ExportSymbol::Function(function) = export;
             let ExportKind::Function(declared) = &record.exports[&function.id].kind;
+            if function.name == "frame" {
+                assert_eq!(module_discovery::guest_function_signature(function), None);
+                continue;
+            }
             assert_eq!(
                 module_discovery::guest_function_signature(function).as_ref(),
                 Some(declared),
@@ -1977,6 +1982,9 @@ mod host_module_tests {
         assert!(error.to_string().contains("described by module"), "{error}");
     }
 }
+
+#[cfg(all(test, feature = "native"))]
+mod stepping_tests;
 
 /// The [`LocalCaller`]'s client operations on a device built and stepped in
 /// process: each is enqueued when the method returns and answered by the steps

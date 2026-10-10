@@ -1,6 +1,20 @@
 //! Engine-local, behavior-tree-free test guest. The Status-returning version
 //! lives in arora-sdk as test-rust-wasm-with-nodes.
 
+/// A frame of values and the revision of the table they are positioned by:
+/// what a module stepped each tick answers, for a behavior to check the
+/// revision and write the values under a key table.
+#[derive(Debug, Clone, PartialEq, arora_types::AroraType)]
+#[arora(id = "d4c6574f-19ae-40b1-a377-2a77780a812e")]
+pub struct Frame {
+    /// The revision of the table `values` is positioned by.
+    #[arora(id = "9340674c-b0b0-4ffc-96ae-f207b39dc09c")]
+    pub revision: u64,
+    /// One value per position.
+    #[arora(id = "b629962e-57c6-4fdf-bf8c-a5b0065bc1ca")]
+    pub values: Vec<f64>,
+}
+
 #[arora_module::module(
     id = "665d6ec9-3fc9-4cfa-9100-5c8964e95aec",
     name = "test-rust-wasm",
@@ -11,6 +25,8 @@
     executable_mime = "application/wasm"
 )]
 pub mod test_rust_wasm {
+    use super::Frame;
+
     #[export(id = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6")]
     pub fn ping() {}
 
@@ -48,6 +64,21 @@ pub mod test_rust_wasm {
         end_ns.map(|end_ns| end_ns.saturating_sub(start_ns))
     }
 
+    /// A frame of `length` values at `revision`: value `i` is the time in
+    /// seconds plus `i`, so it changes every step.
+    #[export(id = "5b44c60c-0e52-432f-9a4c-9e14ff7edb12")]
+    pub fn frame(
+        #[param(id = "b1cce511-53dd-4754-9a15-71e0bafad3d5")] length: u32,
+        #[param(id = "a54ac423-d9f6-455c-9b3f-f8e802ef2316")] revision: u64,
+        #[param(id = "e5a9f7c1-3b8d-4e26-9f0a-6c1d2b3e4f50")] time_ns: u64,
+    ) -> Frame {
+        let seconds = time_ns as f64 / 1e9;
+        Frame {
+            revision,
+            values: (0..length).map(|i| seconds + f64::from(i)).collect(),
+        }
+    }
+
     /// A greeting, naming `name` when there is one.
     #[export(id = "c82c6987-656f-4fb1-9191-ec7a5cd6832b")]
     pub fn greet(
@@ -73,5 +104,12 @@ mod tests {
         assert_eq!(window(10, None), None);
         assert_eq!(greet(Some("Ada".to_string())), "hello, Ada");
         assert_eq!(greet(None), "hello");
+        assert_eq!(
+            frame(2, 7, 1_500_000_000),
+            crate::Frame {
+                revision: 7,
+                values: vec![1.5, 2.5],
+            }
+        );
     }
 }

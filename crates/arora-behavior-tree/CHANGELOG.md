@@ -4,6 +4,33 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.3.0] - 2026-10-10
+
+### Added
+
+- Two natively ticked data nodes, in `nodes`:
+  - `Equal(a, b)` (`EQUAL_FUNCTION_ID`, `EQUAL_A_PARAM_ID`, `EQUAL_B_PARAM_ID`):
+    Success when the two values are equal — same type and same value —
+    Failure otherwise.
+  - `WriteKeys(keys, values)` (`WRITE_KEYS_FUNCTION_ID`,
+    `WRITE_KEYS_KEYS_PARAM_ID`, `WRITE_KEYS_VALUES_PARAM_ID`): writes
+    `values[i]` under the store key `keys[i]`, skipping an empty key and a
+    `Unit` value, one store change per key and tick, and succeeds; fails,
+    writing nothing, when `values` is not an array of the table's length.
+    `keys` must be a literal array of distinct strings: the table is bound
+    when the tree is lowered, each key as a `{var}` of that name binds.
+
+  Their arguments are read through any link source, a selection included,
+  and must be linked; lowering refuses a tree that breaks either rule.
+- The interpreter reads `behavior-tree 1.1` (`GRAPH_TYPE_VERSION`), the
+  version that adds `Equal` and `WriteKeys`; it still runs `1.0` graphs.
+
+### Changed
+
+- An edit is also refused when the edited graph would not lower, so a
+  refused key table or an unlinked argument never stops the device's
+  behavior.
+
 ## [8.2.0] - 2026-10-10
 
 ### Added
