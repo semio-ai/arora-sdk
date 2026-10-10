@@ -4,6 +4,13 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.0.1] - 2026-10-09
+
+### Changed
+
+- `RestfulHal` states its models through arora-hal 4.1's `HalAssets::models`:
+  none, as before.
+
 ## [4.0.0] - 2026-10-06
 
 ### Changed

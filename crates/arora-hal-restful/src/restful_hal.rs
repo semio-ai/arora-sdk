@@ -414,14 +414,8 @@ impl Hal for RestfulHal {
     }
 }
 
-#[async_trait]
-impl HalAssets for RestfulHal {
-    /// RESTful robot configurations carry no GLB model; the HAL reports none.
-    async fn model_glb(&self) -> HalResult<Option<Vec<u8>>> {
-        debug!("model_glb called.");
-        Ok(None)
-    }
-}
+/// RESTful robot configurations carry no model; the HAL states none.
+impl HalAssets for RestfulHal {}
 
 #[cfg(test)]
 mod tests {
@@ -526,9 +520,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_model_glb_is_none() {
+    async fn test_states_no_model() {
         let hal = RestfulHal::new(head_config("http://localhost:1")).expect("create HAL");
-        assert_eq!(hal.model_glb().await.unwrap(), None);
+        assert!(hal.models().is_empty());
+        assert_eq!(hal.servable_glb(arora_hal::DEVICE).unwrap(), None);
     }
 
     #[test]

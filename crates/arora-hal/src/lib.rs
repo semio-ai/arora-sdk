@@ -38,11 +38,30 @@ use futures_core::Stream;
 use arora_types::data::{Key, State, StateChange};
 use arora_types::value::Value;
 
-/// What device a HAL drives.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub mod hal_module;
+mod model;
+
+pub use model::{content_hash, ComponentGlb, ComponentModel, ModelReference, Mount, DEVICE};
+
+/// What device a HAL drives — or, in a [`ComponentModel`], what one of its
+/// components is.
+#[derive(
+    arora_types::AroraType,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+)]
+#[arora(id = "0c048a95-3fd8-46dd-875a-9f7f203923bd")]
 pub struct HalDescription {
+    #[arora(id = "caa29d5f-9760-45d8-ab08-06975713337a")]
     pub model_family: Option<String>,
+    #[arora(id = "d7f27d34-759d-4d8f-825c-256207a3301b")]
     pub hardware_version: Option<String>,
+    #[arora(id = "c50367c8-0f85-4a3a-ae94-61b3ad5c2124")]
     pub software_version: Option<String>,
 }
 
@@ -109,16 +128,51 @@ pub trait Hal: Send + Sync {
     /// it is its one poller (natively the runtime's `run` select, on the web
     /// the per-frame sweep).
     fn updates(&self) -> UpdatesStream;
+
+    /// The device's assets — its 3D model — when this HAL supplies them. The
+    /// runtime serves them as the HAL module's functions
+    /// ([`hal_module`]), so a HAL that implements [`HalAssets`] returns
+    /// `Some(self)` here. Default: `None`, a device with no model.
+    fn assets(&self) -> Option<&dyn HalAssets> {
+        None
+    }
 }
 
 /// The sensor feed of a [`Hal`]: an owned stream of the changes the hardware
 /// reports. The stream ending means the hardware feed is gone.
 pub type UpdatesStream = Pin<Box<dyn Stream<Item = StateChange> + Send>>;
 
-/// Optional extension: HALs that can supply a 3D model (GLB) of the device.
+/// Optional extension: the 3D models of a HAL's components. A HAL exposes it to
+/// the runtime through [`Hal::assets`], and the runtime serves it as the HAL
+/// module's functions ([`hal_module`]).
+///
+/// A device's models are fixed for its life: a different model means a
+/// restart. So both methods answer from what the HAL was built with, at once —
+/// the bytes it holds or a quick local read — and are called from the
+/// runtime's synchronous step.
 #[async_trait]
 pub trait HalAssets: Send + Sync {
-    async fn model_glb(&self) -> HalResult<Option<Vec<u8>>>;
+    /// The model of each component that has one. A HAL that is not composed
+    /// states at most one, under [`DEVICE`]. Default: none.
+    fn models(&self) -> Vec<ComponentModel> {
+        Vec::new()
+    }
+
+    /// The GLB of `component`'s model, when [`models`](HalAssets::models)
+    /// states it [`servable`](ComponentModel::servable); `None` otherwise.
+    /// The runtime asks only for a servable model. Default: none.
+    fn servable_glb(&self, component: &str) -> HalResult<Option<Vec<u8>>> {
+        let _ = component;
+        Ok(None)
+    }
+
+    /// The device's one model, as GLB bytes. The runtime serves
+    /// [`models`](HalAssets::models) and
+    /// [`servable_glb`](HalAssets::servable_glb) instead; it never calls this.
+    #[deprecated(note = "state the components' models with `models` and `servable_glb`")]
+    async fn model_glb(&self) -> HalResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 
 #[derive(Default)]
@@ -167,6 +221,8 @@ impl FakeHal {
         }
     }
 
+    /// Give the fake a model: the [`DEVICE`] component's, servable, hashed
+    /// from `glb`.
     pub fn set_model_glb(&self, glb: Vec<u8>) {
         self.inner.lock().unwrap().model_glb = Some(glb);
     }
@@ -238,10 +294,38 @@ impl Hal for FakeHal {
         self.inner.lock().unwrap().subscribers.push(tx);
         Box::pin(rx)
     }
+
+    fn assets(&self) -> Option<&dyn HalAssets> {
+        Some(self)
+    }
 }
 
 #[async_trait]
 impl HalAssets for FakeHal {
+    fn models(&self) -> Vec<ComponentModel> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .model_glb
+            .as_deref()
+            .map(|glb| ComponentModel {
+                component: DEVICE.to_string(),
+                description: Some(inner.description.clone()),
+                reference: None,
+                content_hash: Some(content_hash(glb)),
+                servable: true,
+                mount: None,
+            })
+            .into_iter()
+            .collect()
+    }
+
+    fn servable_glb(&self, component: &str) -> HalResult<Option<Vec<u8>>> {
+        Ok(match component {
+            DEVICE => self.inner.lock().unwrap().model_glb.clone(),
+            _ => None,
+        })
+    }
+
     async fn model_glb(&self) -> HalResult<Option<Vec<u8>>> {
         Ok(self.inner.lock().unwrap().model_glb.clone())
     }
@@ -311,7 +395,40 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(hal.describe().await.model_family.as_deref(), Some("test"));
+        assert!(hal.models().is_empty());
         hal.set_model_glb(vec![1, 2, 3]);
-        assert_eq!(hal.model_glb().await.unwrap(), Some(vec![1, 2, 3]));
+        let models = hal.models();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].component, DEVICE);
+        assert_eq!(models[0].content_hash, Some(content_hash(&[1, 2, 3])));
+        assert!(models[0].servable);
+        assert_eq!(hal.servable_glb(DEVICE).unwrap(), Some(vec![1, 2, 3]));
+        assert_eq!(hal.servable_glb("arm").unwrap(), None);
+    }
+
+    #[test]
+    fn a_hal_without_assets_has_none() {
+        struct Bare;
+        #[async_trait]
+        impl Hal for Bare {
+            async fn describe(&self) -> HalDescription {
+                HalDescription::default()
+            }
+            async fn read(&self, keys: &[Key]) -> HalResult<Vec<Option<Value>>> {
+                Ok(vec![None; keys.len()])
+            }
+            async fn read_all(&self) -> HalResult<State> {
+                Ok(State::default())
+            }
+            async fn write(&self, _changes: StateChange) -> HalResult<()> {
+                Ok(())
+            }
+            fn try_send(&self, _changes: &StateChange) {}
+            fn updates(&self) -> UpdatesStream {
+                Box::pin(futures::stream::empty())
+            }
+        }
+        assert!(Bare.assets().is_none());
+        assert!(FakeHal::new().assets().is_some());
     }
 }

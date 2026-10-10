@@ -4,6 +4,26 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.1.1] - 2026-10-09
+
+### Fixed
+
+- Requires `ros2-client-multi-rmw` 0.13.1. Before it, `Ros2Hal`'s
+  `wait_for_subscription` before its first publish could miss a match under
+  load and wait forever: the match event was dropped from a bounded status
+  channel after the wait's one-time check (semio-ai/ros2-client#42).
+
+## [5.1.0] - 2026-10-09
+
+### Added
+
+- `Ros2Hal` states the robot's model to the runtime (`Hal::assets`): the file
+  at `model_glb_path`, as the `device` component's model, with its content
+  hash. The device serves the file's bytes only when the config's new
+  `model_glb_servable` is true; it is false by default, and an override that
+  names a model file states its servability with it. Depends on arora-hal 4.1
+  and, for the runner, arora 12.2.
+
 ## [5.0.0] - 2026-10-06
 
 ### Changed

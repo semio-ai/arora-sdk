@@ -125,9 +125,12 @@ impl ExposureProfile {
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
     /// - a streamed viseme lands as its ROS4HRI code on
-    ///   `standard/ros4hri/viseme`, from either shape a TTS node publishes it
-    ///   in: one `hri_msgs/Viseme` on `/tts/viseme`, or an `hri_msgs/Visemes`
-    ///   on `/tts/visemes`. Both carry the shape at the audio playhead, so
+    ///   `standard/ros4hri/viseme`, with where it falls in the utterance on
+    ///   `standard/ros4hri/viseme/time` and how long it is held on
+    ///   `standard/ros4hri/viseme/duration` (seconds), all three in one
+    ///   change. It comes in either shape a TTS node publishes it in: one
+    ///   `hri_msgs/Viseme` on `/tts/viseme`, or an `hri_msgs/Visemes` on
+    ///   `/tts/visemes`. Both carry the shape at the audio playhead, so
     ///   the sequence's first viseme is the one that lands; a message holding
     ///   a whole alignment is a timeline, and playing one out over time is a
     ///   viseme player's work rather than a bridge's. This is how a face
@@ -189,17 +192,24 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
-        // The two shapes a viseme stream comes in reach the same key: the
-        // code alone, or the first of a sequence.
-        let viseme_key = "standard/ros4hri/viseme";
-        let viseme_routes = vec![FieldRoute {
-            field: "value".into(),
-            key: viseme_key.into(),
-        }];
-        let viseme_sequence_routes = vec![FieldRoute {
-            field: "visemes.0.value".into(),
-            key: viseme_key.into(),
-        }];
+        // The two shapes a viseme stream comes in reach the same keys: the
+        // viseme alone, or the first of a sequence.
+        let viseme_fields = [
+            ("value", "standard/ros4hri/viseme"),
+            ("time", "standard/ros4hri/viseme/time"),
+            ("duration", "standard/ros4hri/viseme/duration"),
+        ];
+        let viseme_routes = |prefix: &str| -> Vec<FieldRoute> {
+            viseme_fields
+                .iter()
+                .map(|(field, key)| FieldRoute {
+                    field: format!("{prefix}{field}"),
+                    key: (*key).into(),
+                })
+                .collect()
+        };
+        let viseme_sequence_routes = viseme_routes("visemes.0.");
+        let viseme_routes = viseme_routes("");
         // Every endpoint takes its flow's default delivery. A command surface
         // is reliable: an expression that is dropped is an instruction the
         // face never carries out. The image and the speech text are sensor
@@ -465,14 +475,15 @@ mod tests {
         }
     }
 
-    /// Both viseme shapes a TTS node publishes reach the same key, so a face
-    /// lipsyncs to either without knowing which it is fed.
+    /// Both viseme shapes a TTS node publishes reach the same keys — the
+    /// code, its time and its duration — so a face lipsyncs to either
+    /// without knowing which it is fed.
     #[test]
     fn ros4hri_preset_takes_a_viseme_in_either_shape() {
         let profile = ExposureProfile::ros4hri();
-        for (topic, ros_type, field) in [
-            ("/tts/viseme", "hri_msgs/Viseme", "value"),
-            ("/tts/visemes", "hri_msgs/Visemes", "visemes.0.value"),
+        for (topic, ros_type, prefix) in [
+            ("/tts/viseme", "hri_msgs/Viseme", ""),
+            ("/tts/visemes", "hri_msgs/Visemes", "visemes.0."),
         ] {
             let endpoint = profile
                 .endpoints
@@ -481,12 +492,25 @@ mod tests {
                 .unwrap_or_else(|| panic!("{topic} is in the preset"));
             assert_eq!(endpoint.ros_type, ros_type, "{topic}");
             assert_eq!(endpoint.flow, Flow::In, "{topic}");
-            let [route] = endpoint.routes.as_slice() else {
-                panic!("{topic} routes one field, got {:?}", endpoint.routes);
-            };
+            let routes: Vec<(&str, &str)> = endpoint
+                .routes
+                .iter()
+                .map(|route| (route.field.as_str(), route.key.as_str()))
+                .collect();
             assert_eq!(
-                (route.field.as_str(), route.key.as_str()),
-                (field, "standard/ros4hri/viseme"),
+                routes,
+                [
+                    (format!("{prefix}value"), "standard/ros4hri/viseme"),
+                    (format!("{prefix}time"), "standard/ros4hri/viseme/time"),
+                    (
+                        format!("{prefix}duration"),
+                        "standard/ros4hri/viseme/duration"
+                    ),
+                ]
+                .iter()
+                .map(|(field, key)| (field.as_str(), *key))
+                .collect::<Vec<_>>(),
+                "{topic}"
             );
         }
     }

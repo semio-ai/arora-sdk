@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 description = "Arora Hardware Abstraction Layer (HAL) trait, with a fake implementation."
 license = "MIT"
@@ -12,6 +12,10 @@ async-trait = "0.1"
 # async `write`) on native targets; wasm HALs override `try_send` synchronously.
 futures-channel = "0.3"
 futures-core = "0.3"
+# The models' JSON shape, for a client that hands them on (a browser).
+serde = { version = "1", features = ["derive"] }
+# A model's content hash: the SHA-256 Semio Studio addresses content by.
+sha2 = "0.10"
 
 [dev-dependencies]
 futures = "0.3"
