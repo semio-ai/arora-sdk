@@ -4,6 +4,14 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.3.0] - 2026-10-10
+
+### Changed
+
+- `interpreter_module::encode_halt` sends the task id as `Value::Uuid`, the
+  type `halt`'s `task` parameter is described with. `decode_halt` also reads
+  the uuid's string form, which clients built on earlier versions send.
+
 ## [9.2.0] - 2026-10-10
 
 ### Added
