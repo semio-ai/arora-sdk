@@ -232,6 +232,24 @@ fn setup_tick_function(
     Ok(tick)
 }
 
+/// Whether `function` is a node this crate ticks natively — a control node, a
+/// status leaf, or a task-run node — rather than a module function the
+/// function index resolves.
+pub(crate) fn is_native(function: Uuid) -> bool {
+    matches!(
+        function,
+        SUCCEED_FUNCTION_ID
+            | FAIL_FUNCTION_ID
+            | RUN_FUNCTION_ID
+            | SEQ_FUNCTION_ID
+            | SEQ_STAR_FUNCTION_ID
+            | FALLBACK_FUNCTION_ID
+            | PARALLEL_FUNCTION_ID
+            | RUN_CALL_FUNCTION_ID
+            | RUN_STATUS_FUNCTION_ID
+    )
+}
+
 /// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
 /// fail, run) natively, without consulting the function index or the wasm
 /// engine. Children are ticked through their registered tick functions
@@ -338,7 +356,10 @@ fn tick_builtin(
             // mirroring it onto the bound status output — a store key under the
             // Direct convention, where a run's observers watch it. Latches at
             // terminal: a finished run is inert (never re-invoked) until its
-            // fragment is pruned.
+            // fragment is pruned. A child that errors ends the run `Failure`:
+            // the status is written and latched, and the error goes up this
+            // once, so it is reported and the run's siblings tick on from the
+            // next tick.
             let latch = get_node_parameter_variable(
                 &NodeParameterId {
                     node: node.id,
@@ -356,7 +377,7 @@ fn tick_builtin(
                 .ok_or(BehaviorTreeError::InconsistentTreeError {
                     message: format!("run-status decorator {} needs one child", node.id),
                 })?;
-            let status = child.tick(caller)?;
+            let ticked = child.tick(caller);
             let out = get_node_parameter_variable(
                 &NodeParameterId {
                     node: node.id,
@@ -364,6 +385,14 @@ fn tick_builtin(
                 },
                 node_parameters_variables,
             )?;
+            let status = match ticked {
+                Ok(status) => status,
+                Err(error) => {
+                    out.set(Status::Failure.into());
+                    latch.set(Status::Failure.into());
+                    return Err(error);
+                }
+            };
             out.set(status.clone().into());
             if status != Status::Running {
                 latch.set(status.clone().into());
@@ -656,6 +685,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut root: Option<Rc<Node>> = None;
     let mut variables = HashMap::new();
     let mut node_parameters_variables = HashMap::new();
+    let mut arguments = Vec::new();
     for node in nodes {
         let shared_node = Rc::new(node);
         if root.is_none() {
@@ -671,14 +701,46 @@ pub fn load_behavior_tree_nodes_with(
             });
         }
 
-        // Setup variables for every parameter.
         for (param_id, arg_expr) in &shared_node.arguments {
-            let node_param = NodeParameterId {
-                node: shared_node.id.to_owned(),
-                parameter: param_id.to_owned(),
-            };
+            arguments.push((
+                NodeParameterId {
+                    node: shared_node.id.to_owned(),
+                    parameter: param_id.to_owned(),
+                },
+                arg_expr.clone(),
+            ));
+        }
+    }
+
+    // Setup variables for every parameter. An argument that reads another
+    // node's argument shares its cell, so it is set up once that one is: the
+    // pending arguments are swept until none is left, and a sweep that sets up
+    // none reports what it could not resolve.
+    let mut pending = arguments;
+    while !pending.is_empty() {
+        let before = pending.len();
+        let mut unresolved = Vec::new();
+        for (node_param, arg_expr) in pending {
+            if read_argument(&arg_expr)
+                .is_some_and(|source| !node_parameters_variables.contains_key(source))
+            {
+                unresolved.push((node_param, arg_expr));
+                continue;
+            }
             setup_node_parameter_variable(
                 &node_param,
+                &arg_expr,
+                &mut variables,
+                &mut node_parameters_variables,
+                resolver,
+                names,
+            )?;
+        }
+        if let Some((node_param, arg_expr)) =
+            unresolved.first().filter(|_| unresolved.len() == before)
+        {
+            setup_node_parameter_variable(
+                node_param,
                 arg_expr,
                 &mut variables,
                 &mut node_parameters_variables,
@@ -686,6 +748,7 @@ pub fn load_behavior_tree_nodes_with(
                 names,
             )?;
         }
+        pending = unresolved;
     }
 
     Ok(BehaviorTree {
@@ -715,6 +778,15 @@ fn get_variable<'a>(
             variable: variable_id.to_owned(),
             node: node_id.to_owned(),
         })
+}
+
+/// The other node's argument `expression` reads, through any selection.
+fn read_argument(expression: &Expression) -> Option<&NodeParameterId> {
+    match expression {
+        Expression::NodeArgument(source) => Some(source),
+        Expression::Select { source, .. } => read_argument(source),
+        _ => None,
+    }
 }
 
 fn get_node_parameter_variable<'a>(

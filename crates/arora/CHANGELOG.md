@@ -4,6 +4,20 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.4.0] - 2026-10-10
+
+### Added
+
+- The interpreter module answers `interpreter_module::SPAWN_GRAPH`: a remote's
+  `Call` starts a graph, of a type the device's interpreter reads, as a task
+  run and gets its handle back.
+- `LocalCaller::spawn_graph(graph_type, graph)`: the in-process counterpart,
+  answering with the run's handle; `halt` stops the run.
+
+### Changed
+
+- Depends on arora-behavior 9.2 and arora-behavior-tree 8.2.
+
 ## [12.3.0] - 2026-10-10
 
 ### Changed

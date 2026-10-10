@@ -506,6 +506,25 @@ through. The alternative, a host module per such method whose function only
 fails, would describe a method under a module that does not implement it;
 every device would repeat it.
 
+**A run's program can be a graph.** `spawn_graph` grafts a `Graph` as a task
+run beside the main behavior; `edit` reaches its nodes and `halt` drops it. A
+client that gives a device a program of its own — a behavior that calls a
+module each tick and writes what it returns — therefore neither evicts the
+behavior the device runs, as `load` would, nor needs a module of its own on
+the device. A change to a running program is one `edit` of its links, applied
+between two ticks; replacing the run takes a halt and a spawn, which a remote's
+two calls may deliver on different steps, leaving a step with no program or
+with two. An edit re-lowers the whole tree, so it resets the state its nodes
+hold (a `SequenceStar`'s position) in every run and in the main behavior.
+
+**A graph travels with its type and version.** `spawn_graph` takes the
+graph's language (`behavior-tree`) and the version of that language's format
+as arguments beside the graph, and the interpreter refuses a type it does not
+read. A minor version adds to a format, so an interpreter reading `1.1` runs a
+`1.0` graph; a major changes what a graph means. The type is an argument, not
+a field of `Graph`, so a host can route a call on it without decoding the
+graph.
+
 ### The HAL is a module
 
 The device's HAL answers remotes through the same module-call path as the
