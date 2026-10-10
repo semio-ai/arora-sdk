@@ -26,13 +26,13 @@ use crate::Arora;
 
 const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-// The guest's `frame(length, revision, time_ns) -> Frame { revision, values }`.
+// The guest's `frame(length, revision, time_ns, values: &mut Vec<f64>) -> u64`:
+// it writes the values through `values` and returns the revision.
 const FRAME: Uuid = uuid!("5b44c60c-0e52-432f-9a4c-9e14ff7edb12");
 const FRAME_LENGTH: Uuid = uuid!("b1cce511-53dd-4754-9a15-71e0bafad3d5");
 const FRAME_REVISION: Uuid = uuid!("a54ac423-d9f6-455c-9b3f-f8e802ef2316");
 const FRAME_TIME_NS: Uuid = uuid!("e5a9f7c1-3b8d-4e26-9f0a-6c1d2b3e4f50");
-const FRAME_REVISION_FIELD: Uuid = uuid!("9340674c-b0b0-4ffc-96ae-f207b39dc09c");
-const FRAME_VALUES_FIELD: Uuid = uuid!("b629962e-57c6-4fdf-bf8c-a5b0065bc1ca");
+const FRAME_VALUES: Uuid = uuid!("b629962e-57c6-4fdf-bf8c-a5b0065bc1ca");
 
 const ROOT: Uuid = Uuid::from_u128(0x1);
 const STEP: Uuid = Uuid::from_u128(0x2);
@@ -43,8 +43,9 @@ const EQUAL: Uuid = Uuid::from_u128(0x6);
 const WRITE: Uuid = Uuid::from_u128(0x7);
 const SKIP: Uuid = Uuid::from_u128(0x8);
 const RUN: Uuid = Uuid::from_u128(0x9);
-/// The frame, a tree-local variable: `graph.variables` does not name it.
-const FRAME_VAR: Uuid = Uuid::from_u128(0xF0);
+/// The frame's revision, a tree-local variable: `graph.variables` does not
+/// name it.
+const REVISION_VAR: Uuid = Uuid::from_u128(0xF0);
 /// The clock, the store's `arora/time`.
 const TIME_VAR: Uuid = Uuid::from_u128(0xF1);
 
@@ -52,22 +53,15 @@ fn keys(keys: &[&str]) -> Value {
     Value::ArrayString(keys.iter().map(|key| key.to_string()).collect())
 }
 
-fn select(field: Uuid) -> LinkSource {
-    LinkSource::Select {
-        source: Box::new(LinkSource::Variable(FRAME_VAR)),
-        path: Key::new(format!(".{field}")),
-    }
-}
-
 /// The stepping graph:
 ///
 /// ```text
 /// Parallel
 /// ├─ Sequence
-/// │  ├─ frame(length 3, revision 1, time_ns ← arora/time)   → frame
+/// │  ├─ frame(length 3, revision 1, time_ns ← arora/time)   → revision; values through its port
 /// │  └─ Fallback
 /// │     ├─ Sequence
-/// │     │  ├─ Equal(frame.revision, 1)
+/// │     │  ├─ Equal(revision, 1)
 /// │     │  └─ WriteKeys(table, frame.values)
 /// │     └─ Succeed
 /// └─ Run
@@ -99,8 +93,15 @@ fn stepping_graph(table: &[&str]) -> Graph {
         link(CALL, FRAME_LENGTH, LinkSource::Literal(Value::U32(3))),
         link(CALL, FRAME_REVISION, LinkSource::Literal(Value::U64(1))),
         link(CALL, FRAME_TIME_NS, LinkSource::Variable(TIME_VAR)),
-        link(CALL, _RET_PARAM_ID, LinkSource::Variable(FRAME_VAR)),
-        link(EQUAL, EQUAL_A_PARAM_ID, select(FRAME_REVISION_FIELD)),
+        // The values parameter starts empty; the guest writes the frame's
+        // values through it, and `WriteKeys` reads them from that port.
+        link(
+            CALL,
+            FRAME_VALUES,
+            LinkSource::Literal(Value::ArrayF64(Vec::new())),
+        ),
+        link(CALL, _RET_PARAM_ID, LinkSource::Variable(REVISION_VAR)),
+        link(EQUAL, EQUAL_A_PARAM_ID, LinkSource::Variable(REVISION_VAR)),
         link(EQUAL, EQUAL_B_PARAM_ID, LinkSource::Literal(Value::U64(1))),
         link(
             WRITE,
@@ -110,7 +111,7 @@ fn stepping_graph(table: &[&str]) -> Graph {
         link(
             WRITE,
             WRITE_KEYS_VALUES_PARAM_ID,
-            select(FRAME_VALUES_FIELD),
+            LinkSource::Port(Port::new(CALL, FRAME_VALUES)),
         ),
     ];
     graph.variables.insert(TIME_VAR, "arora/time".to_string());
