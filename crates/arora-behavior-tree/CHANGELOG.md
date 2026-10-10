@@ -4,6 +4,46 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.2.0] - 2026-10-10
+
+### Added
+
+- `behavior::GRAPH_TYPE_NAME` (`behavior-tree`), `GRAPH_TYPE_VERSION` (1.0.0)
+  and `graph_type()`: the graph type the interpreter reads.
+- `BehaviorTreeInterpreter` implements `spawn_graph` for `behavior-tree 1.0`:
+  the spawned graph's nodes and links join the scaffold under a run-status
+  decorator, whose status key is
+  `arora/tasks/<interpreter module>/<spawn_graph>/<run>/status`. The run ticks
+  every step beside the main behavior. The spawn is refused when the graph's
+  type is not one the interpreter reads, when the graph is not one tree under
+  its root, calls a function the device does not have, does not lower,
+  reuses a node id the device's behavior holds, has a link reaching outside
+  its nodes, or renames a declared variable.
+
+### Changed
+
+- A run is the subtree under its decorator. An edit reaches its nodes by id,
+  and a node an edit places under the decorator belongs to the run. The main
+  behavior is every node outside the runner and the runs.
+- A halt prunes the run's subtree at once, but for the nodes another node
+  holds, and drops the variables the run declared that no remaining link
+  reads; the run's `Failure` status is written on the next tick. A run that
+  ends by itself is pruned on the next tick, or by the next call that changes
+  the graph. A run's node ids are therefore free again as soon as it is halted
+  or has ended.
+- A run whose child errors ends `Failure`: the decorator writes and latches
+  it, and the error is the tick's once, so the other runs tick on.
+- The runner ticks the main behavior first, then the runs in spawn order.
+- An edit applies whole or not at all, and is refused when it would leave a
+  child that is not a node or a cycle under the runner, change a run's
+  decorator, place the runner or a decorator under another node, or remove a
+  run's root. A load is refused when it reuses a run's node id or renames a
+  variable a run reads. Removing and re-adding the main behavior's root in one
+  edit keeps it the main root.
+- An argument that reads another node's argument lowers whatever order the
+  nodes are listed in.
+- Depends on arora-behavior 9.2.
+
 ## [8.1.0] - 2026-09-26
 
 ### Added

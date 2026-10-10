@@ -402,6 +402,26 @@ impl LocalCaller {
         async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
     }
 
+    /// Start `graph`, written in the language `graph_type` names, as a task
+    /// run, concurrently with every other run, answering with its handle like
+    /// [`spawn`](Self::spawn). The graph is the run's program: the device's
+    /// behavior interpreter ticks it every step beside its main behavior until
+    /// it ends or is [halted](Self::halt), and an edit through the interpreter
+    /// module reaches its nodes. An interpreter that does not read
+    /// `graph_type`, or hosts no graph as a run, refuses.
+    pub fn spawn_graph(
+        &self,
+        graph_type: &arora_behavior::GraphType,
+        graph: &arora_behavior::Graph,
+    ) -> impl Future<Output = Result<TaskHandle, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Call(interpreter_module::encode_spawn_graph(
+            graph_type,
+            graph,
+            arora_behavior::RunPolicy::Concurrent,
+        )));
+        async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
+    }
+
     /// Stop the run `run` names: it ends `Failure` on the step after the halt is
     /// applied. Idempotent — halting a finished or unknown run is a clean no-op.
     pub fn halt(
@@ -850,6 +870,7 @@ impl AroraBuilder {
             interpreter_module::LOAD,
             interpreter_module::EDIT,
             interpreter_module::SPAWN,
+            interpreter_module::SPAWN_GRAPH,
             interpreter_module::HALT,
         ];
         for (function_id, export) in &interpreter_methods {
@@ -926,7 +947,8 @@ impl AroraBuilder {
             .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new(function_index.clone())));
 
         // The interpreter as a module: a host module under
-        // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`HALT` functions
+        // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`SPAWN_GRAPH`/
+        // `HALT` functions
         // run on the same cell the step loop ticks. A Call to those ids — from a
         // remote or from a behavior — reaches the interpreter through the
         // engine's normal dispatch, like any module function.
@@ -956,6 +978,18 @@ impl AroraBuilder {
                     runtime::with_interpreter_value(&cell, |interpreter| {
                         interpreter
                             .spawn(spawned, policy)
+                            .map(|handle| interpreter_module::encode_spawn_result(&handle))
+                    })
+                }
+            })
+            .function(interpreter_module::SPAWN_GRAPH, {
+                let cell = interpreter.clone();
+                move |call| {
+                    let (graph_type, graph, policy) = interpreter_module::decode_spawn_graph(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter
+                            .spawn_graph(&graph_type, graph, policy)
                             .map(|handle| interpreter_module::encode_spawn_result(&handle))
                     })
                 }
@@ -2133,6 +2167,78 @@ mod caller_tests {
         assert_eq!(
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(running)]
+        );
+
+        settle(&mut arora, caller.halt(handle.id)).expect("the halt is applied");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&handle.status)),
+            vec![Some(failure)],
+            "a halted run ends Failure"
+        );
+    }
+
+    /// `spawn_graph` starts a graph as a run: each step it calls a module
+    /// function and writes the return under a key, until a halt ends it.
+    #[test]
+    fn spawn_graph_runs_a_graph_every_step_until_halted() {
+        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
+        use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
+        use arora_behavior_tree::schema::_RET_PARAM_ID;
+
+        let [parallel, double, run] = [0x1, 0x2, 0x3].map(Uuid::from_u128);
+        let out = Uuid::from_u128(0x4);
+        let mut graph = Graph::empty();
+        graph.root = Some(parallel);
+        graph.nodes.insert(
+            parallel,
+            Node {
+                id: parallel,
+                function: PARALLEL_FUNCTION_ID,
+                children: Some(vec![double, run]),
+                ..Node::default()
+            },
+        );
+        graph.nodes.insert(
+            double,
+            Node {
+                id: double,
+                function: DOUBLE,
+                inputs: vec![Io::new(DOUBLE_X), Io::new(_RET_PARAM_ID)],
+                ..Node::default()
+            },
+        );
+        graph.nodes.insert(
+            run,
+            Node {
+                id: run,
+                function: RUN_FUNCTION_ID,
+                ..Node::default()
+            },
+        );
+        graph.links = vec![
+            Link::new(
+                Port::new(double, DOUBLE_X),
+                LinkSource::Literal(Value::F64(2.0)),
+            ),
+            Link::new(Port::new(double, _RET_PARAM_ID), LinkSource::Variable(out)),
+        ];
+        graph.variables.insert(out, "tools/doubled".to_string());
+
+        let mut arora = device();
+        let caller = arora.caller();
+        let graph_type = arora_behavior_tree::behavior::graph_type();
+        let handle = settle(&mut arora, caller.spawn_graph(&graph_type, &graph))
+            .expect("the graph starts as a run");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora
+                .store()
+                .read(&[handle.status.clone(), Key::new("tools/doubled")]),
+            vec![Some(running), Some(Value::F64(4.0))],
+            "the run is running and its module call wrote its key"
         );
 
         settle(&mut arora, caller.halt(handle.id)).expect("the halt is applied");

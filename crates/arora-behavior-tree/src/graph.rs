@@ -460,4 +460,37 @@ mod tests {
             asked.borrow()
         );
     }
+
+    /// An argument that reads another node's argument lowers whatever order
+    /// the nodes come in: here the reader comes before the node it reads.
+    #[test]
+    fn a_port_link_lowers_whatever_the_node_order() {
+        use crate::schema::NodeParameterId;
+
+        let reader = Uuid::from_u128(0x1);
+        let source = Uuid::from_u128(0x2);
+        let source_arg = Uuid::from_u128(0x20);
+        let nodes = vec![
+            SchemaNode {
+                id: reader,
+                function: SEQ_FUNCTION_ID,
+                arguments: HashMap::from([(
+                    Uuid::from_u128(0x10),
+                    Expression::NodeArgument(NodeParameterId {
+                        node: source,
+                        parameter: source_arg,
+                    }),
+                )]),
+                children: Some(vec![source]),
+            },
+            SchemaNode {
+                id: source,
+                function: SUCCEED_FUNCTION_ID,
+                arguments: HashMap::from([(source_arg, Expression::Value(Value::U8(3)))]),
+                children: None,
+            },
+        ];
+        crate::load_behavior_tree_nodes_with(nodes, &|_| None, &HashMap::new())
+            .expect("the reader lowers after the node it reads");
+    }
 }

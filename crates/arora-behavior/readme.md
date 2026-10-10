@@ -30,6 +30,18 @@ walks the interpreter lifecycle — load, time update, ticks, graph updates, and
 [`arora-behavior-tree`](../arora-behavior-tree/docs/nodes.md) and the whole
 device loop in [`arora`](../arora/docs/runtime-and-data-flow.md).
 
+## Task runs
+
+A task run is a behavior the interpreter hosts beside the main one, followed
+and stopped through the `TaskHandle` it answers with. `spawn` starts one from
+a module `Call`; `spawn_graph` starts one whose program is a `Graph`, ticked
+every step until it ends or is halted, its nodes reachable by `apply` like the
+main behavior's. A graph travels with its `GraphType`: the language it is
+written in and the version of that language's format, which the interpreter
+checks against what it reads. `halt` stops either. Each is a function of the interpreter
+module (`interpreter_module`), so a remote reaches them with an ordinary
+`Call`.
+
 ## Methods an interpreter implements
 
 An interpreter that hosts task runs (`spawn`, `halt`) may implement some

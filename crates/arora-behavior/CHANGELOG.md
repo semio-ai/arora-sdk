@@ -4,6 +4,25 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.2.0] - 2026-10-10
+
+### Added
+
+- `GraphType`: the language a `Graph` is written in and the version of that
+  language's format, with `GraphType::reads`, which tells whether an
+  interpreter reading one version runs a graph written for another (same name
+  and major, no newer minor).
+- `BehaviorInterpreter::spawn_graph(graph_type, graph, policy)`: start a
+  `Graph` as a task run, returning its `TaskHandle`. The graph runs beside
+  the main behavior until it ends or is halted, and `apply` reaches its
+  nodes. An interpreter refuses a graph type it does not read. The default
+  rejects it.
+- `interpreter_module::SPAWN_GRAPH` and its argument ids
+  (`SPAWN_GRAPH_TYPE_ARG`, `SPAWN_GRAPH_VERSION_ARG`, `SPAWN_GRAPH_GRAPH_ARG`,
+  `SPAWN_GRAPH_POLICY_ARG`), with `encode_spawn_graph` and
+  `decode_spawn_graph`. The type and version travel as strings beside the
+  graph; the call answers with the handle, read with `decode_spawn_result`.
+
 ## [9.1.1] - 2026-10-09
 
 ### Fixed
