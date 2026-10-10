@@ -73,7 +73,7 @@ pub struct Args {
     include: Vec<String>,
 
     /// Headers of modules to load. Order must match --exe arguments.
-    #[clap(short, long)]
+    #[clap(short = 'H', long)]
     pub header: Vec<String>,
 
     /// Binaries of modules to load. Order must match --header arguments.
@@ -269,4 +269,18 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use clap::CommandFactory;
+
+    /// clap checks the declared arguments when the command is built, and only in
+    /// debug builds: a short flag that clashes with another, `-h` for help
+    /// included, fails here rather than in every debug run of the binary.
+    #[test]
+    fn arguments_are_consistent() {
+        Args::command().debug_assert();
+    }
 }
