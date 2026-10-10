@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "8.5.0"
+version = "8.6.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -222,6 +222,7 @@ dependencies = [
  "quick-xml",
  "semver",
  "serde",
+ "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "tokio",
  "uuid",
