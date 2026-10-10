@@ -19,10 +19,11 @@
 //! - [`HALT`] → [`BehaviorInterpreter::halt`](crate::BehaviorInterpreter::halt):
 //!   stop the run named by a [`TaskId`].
 //!
-//! Payloads travel as structured [`Value`] arguments, converted generically
-//! through [`arora_types::value_serde`] — any serde type flows, no bespoke
-//! encoding — and the [`TaskHandle`] that [`SPAWN`] and [`SPAWN_GRAPH`]
-//! answer with returns the same way. A
+//! A primitive argument travels as its own [`Value`] — a task id as a uuid, a
+//! graph type and version as strings. A compound payload (a graph, a diff, a
+//! call, a policy) is converted generically through
+//! [`arora_types::value_serde`], and the [`TaskHandle`] that [`SPAWN`] and
+//! [`SPAWN_GRAPH`] answer with returns the same way. A
 //! `Call{module_id: ID, id: LOAD|EDIT|SPAWN|SPAWN_GRAPH|HALT}` — a remote's
 //! `BridgeOp::Call`, or a behavior's own call bridge — reaches the interpreter
 //! through the engine's normal dispatch, like any module function.
@@ -200,12 +201,21 @@ pub fn decode_spawn_graph(call: &Call) -> Result<(GraphType, Graph, RunPolicy), 
     Ok((GraphType { name, version }, graph, policy))
 }
 
-/// Build the [`Call`] that halts the run named by `task`.
+/// Build the [`Call`] that halts the run named by `task`. The task id travels
+/// as a uuid ([`Value::Uuid`]), the type `halt`'s parameter is described with.
 pub fn encode_halt(task: TaskId) -> Call {
-    encode(HALT, HALT_ARG, &task)
+    Call {
+        module_id: Some(ID),
+        id: HALT,
+        args: vec![StructureField {
+            id: HALT_ARG,
+            value: Box::new(Value::from(task)),
+        }],
+    }
 }
 
-/// Read the [`TaskId`] out of a [`HALT`] call.
+/// Read the [`TaskId`] out of a [`HALT`] call: a uuid, or the uuid's string
+/// form.
 pub fn decode_halt(call: &Call) -> Result<TaskId, String> {
     decode(call, HALT, HALT_ARG, "TaskId")
 }
@@ -363,7 +373,17 @@ mod tests {
         let call = encode_halt(task);
         assert_eq!(call.module_id, Some(ID));
         assert_eq!(call.id, HALT);
+        assert_eq!(
+            *call.args[0].value,
+            Value::Uuid(task.0),
+            "a uuid on the wire"
+        );
         assert_eq!(decode_halt(&call).unwrap(), task);
+
+        // The uuid's string form reads too.
+        let mut as_string = call;
+        *as_string.args[0].value = Value::String(task.0.to_string());
+        assert_eq!(decode_halt(&as_string).unwrap(), task);
     }
 
     #[test]
