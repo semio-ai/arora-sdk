@@ -57,11 +57,10 @@ use crate::Arora;
 /// your `main` (or `#[command(flatten)]` it into a larger CLI) and inject the
 /// results through the builder's seams.
 ///
-/// The Groot argument is a behavior-tree option: it loads into a
-/// [`BehaviorTreeInterpreter`](crate::BehaviorTreeInterpreter)
-/// (`load_groot`; the tree binds to the device's store at its first tick)
-/// injected via
-/// [`with_behavior_interpreter`](crate::AroraBuilder::with_behavior_interpreter).
+/// The Groot argument is the device's behavior: read the file and hand its XML
+/// to [`with_groot`](crate::AroraBuilder::with_groot), which resolves its tags
+/// against the device's method index, so the tree's leaves call the modules
+/// the device carries.
 /// The modules — the device directory's and `--module`'s — come out of
 /// [`modules`](Self::modules), each for
 /// [`with_module`](crate::AroraBuilder::with_module). The `arora` binary's
@@ -83,7 +82,9 @@ use crate::Arora;
                   be loaded fails the start, naming it."
 )]
 pub struct DeviceCli {
-    /// Groot behavior-tree file to install as the device's behavior.
+    /// Groot behavior-tree file to install as the device's behavior. Its tags
+    /// name the native nodes and the functions of the modules the device
+    /// carries.
     pub groot: Option<std::path::PathBuf>,
 
     /// Let any bridge write any key. A key is closed to remote writers unless

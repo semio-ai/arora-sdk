@@ -26,7 +26,8 @@ terminal (feature `tui`), headless otherwise.
 ```sh
 cargo build                      # builds arora into target/debug/arora
 
-# install a Groot behavior tree as the device's behavior, then serve
+# install a Groot behavior tree as the device's behavior, then serve; its
+# leaves may call the functions of the modules the device carries
 ./target/debug/arora crates/arora/examples/hello_tree.groot.xml
 
 # or just serve, waiting for a behavior over the bridge
