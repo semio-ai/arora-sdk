@@ -555,8 +555,9 @@ impl AroraBuilder {
     /// once here and not swapped afterwards. An interpreter is constructed empty
     /// and ready; a behavior is loaded *into* it as a separate step (e.g.
     /// [`BehaviorTreeInterpreter::load_groot`]) before it is handed here — or,
-    /// for a tree whose leaves name loaded modules, into the built device with
-    /// [`Arora::load_groot`], which resolves them against the index. Default
+    /// for a tree whose leaves name loaded modules, with
+    /// [`with_groot`](Self::with_groot) or, once built, [`Arora::load_groot`],
+    /// which resolve them against the device's index. Default
     /// (when none is injected): an empty [`BehaviorTreeInterpreter`] over the
     /// assembled function index, so the device idles (each tick a no-op) until a
     /// behavior is loaded.
@@ -674,7 +675,9 @@ impl AroraBuilder {
     /// module's exports — and loads it as [`Arora::load_groot`] does, failing
     /// the build if the tree does not parse, names an unknown function, or
     /// does not load. What a device run through [`run`](AroraBuilder::run)
-    /// uses, since `run` builds the device itself.
+    /// uses, since `run` builds the device itself. The tree loads into the
+    /// device's interpreter, which ticks its leaves against its own function
+    /// index: the default interpreter's is the device's.
     pub fn with_groot(mut self, xml: impl Into<String>) -> Self {
         self.groot = Some(xml.into());
         self

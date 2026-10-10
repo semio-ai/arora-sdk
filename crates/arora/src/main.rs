@@ -14,7 +14,6 @@
 //! outside, no feature flags inside `arora`.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use anyhow::Context;
 use arora_simple_data_store::SimpleDataStore;
@@ -46,21 +45,17 @@ async fn main() -> anyhow::Result<()> {
     for module in cli.modules()? {
         builder = builder.with_module(module.header, module.executable);
     }
-    // A Groot file is a behavior-tree option: load it into a behavior-tree
-    // interpreter against the store the device will tick. The tree binds no
-    // module function (its function index is empty): its nodes are the
-    // natively-hosted control nodes.
+    // A Groot file is the device's behavior: the build resolves its tags
+    // against the method index it assembles — the native nodes and the
+    // functions of every module the device carries — and fails when the tree
+    // does not load. A file that does not parse fails here, before the device
+    // connects anywhere.
     if let Some(path) = cli.groot {
         let xml = std::fs::read_to_string(&path)
             .with_context(|| format!("could not read Groot file {}", path.display()))?;
-        let mut tree = arora::BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        tree.load_groot(&xml).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to install behavior tree from {}: {e:?}",
-                path.display()
-            )
-        })?;
-        builder = builder.with_behavior_interpreter(Box::new(tree));
+        arora_behavior_tree::schema_groot::BehaviorTree::try_from_groot_xml(&xml)
+            .map_err(|e| anyhow::anyhow!("Groot file {} does not parse: {e:?}", path.display()))?;
+        builder = builder.with_groot(xml);
     }
     builder.run().await
 }
