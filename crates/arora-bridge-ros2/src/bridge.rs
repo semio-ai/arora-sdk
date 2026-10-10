@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use arora_bridge::{
     Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
@@ -31,6 +32,7 @@ use arora_types::data::{KeyMeta, StateChange};
 use arora_types::value::{Type, Value};
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
+use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt};
 use log::{debug, warn};
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
@@ -627,9 +629,9 @@ async fn run_node(
     // and action planes.
     let registry = Arc::new(arora_msgs_ros2::registry());
 
-    // Every input topic yields single-key state changes we turn into `Update`
-    // commands.
-    let mut sub_streams: Vec<StateChangeStream> = Vec::new();
+    // Every input topic yields state changes we turn into `Update` commands,
+    // each tagged with its topic for the refusal log.
+    let mut sub_streams: Vec<TopicChangeStream> = Vec::new();
     // Every topic this bridge subscribes to. Publishing on one would hand the
     // device its own command back: the sample re-enters as an inbound update,
     // is written to the store, comes out again on the next step, and circulates
@@ -656,7 +658,7 @@ async fn run_node(
             registry.clone(),
             input.qos.unwrap_or(Qos::default_for(profile::Flow::In)),
         ) {
-            Ok(stream) => sub_streams.push(stream),
+            Ok(stream) => sub_streams.push(from_topic(topic, stream)),
             Err(e) => warn!(
                 "Ros2Bridge could not subscribe to typed key '{}': {e}",
                 input.path
@@ -669,10 +671,11 @@ async fn run_node(
     // the store — and every bridge exposes the same set. A typed profile topic
     // may feed the same key; both are inputs of it.
     for (path, value_type) in device_inputs(&cmd_tx).await {
-        subscribed.insert(topic_name(&namespace, &path));
+        let topic = topic_name(&namespace, &path);
+        subscribed.insert(topic.clone());
         let qos = Qos::default_for(profile::Flow::In);
         match setup_key_subscriber(&mut node, &namespace, &path, &value_type, qos) {
-            Ok(stream) => sub_streams.push(stream),
+            Ok(stream) => sub_streams.push(from_topic(topic, stream)),
             Err(e) => warn!("Ros2Bridge could not subscribe to input '{path}': {e}"),
         }
     }
@@ -728,6 +731,11 @@ async fn run_node(
     // renders every frame onto the scalar plane says it once, not 15 times a
     // second.
     let mut oversized: HashSet<String> = HashSet::new();
+    // The device's answers to the Updates in flight. It refuses a write to a key
+    // it did not open, or of another type than the key states; the refusal is
+    // logged, so a ROS writer can learn why its write did not land.
+    let mut answers = FuturesUnordered::new();
+    let mut refusals = Refusals::default();
 
     loop {
         tokio::select! {
@@ -761,14 +769,25 @@ async fn run_node(
                 )
                 .await;
             }
-            Some(change) = inbound.next() => {
-                let (reply_tx, _reply_rx) = oneshot::channel();
+            Some((topic, change)) = inbound.next() => {
+                let keys = written_keys(&change);
+                let (reply_tx, reply_rx) = oneshot::channel();
                 if cmd_tx
                     .unbounded_send(BridgeCommand::new(BridgeOp::Update(change), reply_tx))
                     .is_err()
                 {
                     // The runtime dropped its command stream.
                     break;
+                }
+                answers.push(async move { (topic, keys, reply_rx.await) });
+            }
+            Some((topic, keys, answer)) = answers.next() => {
+                // A dropped reply is no answer: only the device's refusal is
+                // reported.
+                if let Ok(Err(reason)) = answer {
+                    if let Some(line) = refusals.report(&topic, &keys, &reason, Instant::now()) {
+                        warn!("{line}");
+                    }
                 }
             }
             // A method service received a request; it is decoded, dispatched as a
@@ -780,6 +799,69 @@ async fn run_node(
 
     if let Some(task) = spinner_task {
         task.abort();
+    }
+}
+
+/// An input topic's changes, each with the topic it came from.
+type TopicChangeStream = Pin<Box<dyn Stream<Item = (Arc<str>, StateChange)> + Send>>;
+
+fn from_topic(topic: String, changes: StateChangeStream) -> TopicChangeStream {
+    let topic: Arc<str> = topic.into();
+    Box::pin(changes.map(move |change| (topic.clone(), change)))
+}
+
+/// The keys a change writes, sorted and comma-separated: how a refusal names
+/// them.
+fn written_keys(change: &StateChange) -> String {
+    let mut keys: Vec<&str> = change
+        .set
+        .keys()
+        .chain(change.unset.iter())
+        .map(|key| key.path.as_str())
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys.join(", ")
+}
+
+/// How often the refusals of one topic's writes to one set of keys are logged.
+/// A topic publishing at 100 Hz to a key the device refuses is reported once
+/// per interval, with the count of refusals in between, rather than 100 times
+/// a second.
+const REFUSAL_LOG_INTERVAL: Duration = Duration::from_secs(5);
+
+/// The device's refusals of ROS 2 writes, rate-limited per topic and set of
+/// keys: two topics feeding one key are each named.
+#[derive(Default)]
+struct Refusals {
+    /// For each topic and set of keys, when its refusal was last logged and
+    /// how many refusals went unlogged since.
+    logged: HashMap<(String, String), (Instant, u64)>,
+}
+
+impl Refusals {
+    /// The line to log for the device's refusal, for `reason`, of a write of
+    /// `keys` from `topic`; `None` when a refusal of the same keys from the
+    /// same topic was logged less than [`REFUSAL_LOG_INTERVAL`] before `now`,
+    /// which is then counted into the next line.
+    fn report(&mut self, topic: &str, keys: &str, reason: &str, now: Instant) -> Option<String> {
+        let writer = (topic.to_owned(), keys.to_owned());
+        let unlogged = match self.logged.get_mut(&writer) {
+            Some((logged, unlogged)) if now.duration_since(*logged) < REFUSAL_LOG_INTERVAL => {
+                *unlogged += 1;
+                return None;
+            }
+            Some((_, unlogged)) => std::mem::take(unlogged),
+            None => 0,
+        };
+        self.logged.insert(writer, (now, 0));
+        let since = match unlogged {
+            0 => String::new(),
+            n => format!(" ({n} more since the last report)"),
+        };
+        Some(format!(
+            "Ros2Bridge: the device refused a write from '{topic}' to {keys}: {reason}{since}"
+        ))
     }
 }
 
@@ -1231,6 +1313,74 @@ mod tests {
 
     fn set(key: &str, value: f64) -> StateChange {
         StateChange::set(Key::from(key), Value::F64(value))
+    }
+
+    /// A refusal is logged with its topic, keys and reason; refusals of the
+    /// same topic and keys within the interval are counted into the next
+    /// line, and another topic or key is reported on its own clock.
+    #[test]
+    fn refusals_are_logged_once_per_interval_per_topic_and_keys() {
+        let mut refusals = Refusals::default();
+        let start = Instant::now();
+        let reason = "not an input of this device: face/mouth";
+
+        let first = refusals
+            .report("/robot/keys/face/mouth", "face/mouth", reason, start)
+            .expect("the first refusal is logged");
+        assert_eq!(
+            first,
+            "Ros2Bridge: the device refused a write from '/robot/keys/face/mouth' to \
+             face/mouth: not an input of this device: face/mouth"
+        );
+
+        // 100 Hz for just under the interval: counted, not logged.
+        for tick in 1..=499 {
+            let now = start + Duration::from_millis(10 * tick);
+            assert_eq!(
+                refusals.report("/robot/keys/face/mouth", "face/mouth", reason, now),
+                None
+            );
+        }
+        // Another key, or another topic writing the same key, is not held
+        // back by the first one's interval.
+        assert!(refusals
+            .report(
+                "/robot/expression",
+                "face/mouth",
+                reason,
+                start + Duration::from_secs(1)
+            )
+            .is_some());
+        assert!(refusals
+            .report(
+                "/robot/keys/face/eyes",
+                "face/eyes",
+                reason,
+                start + Duration::from_secs(1)
+            )
+            .is_some());
+
+        let next = refusals
+            .report(
+                "/robot/keys/face/mouth",
+                "face/mouth",
+                reason,
+                start + REFUSAL_LOG_INTERVAL,
+            )
+            .expect("a refusal an interval later is logged");
+        assert!(next.ends_with("(499 more since the last report)"), "{next}");
+    }
+
+    /// A change's keys are named sorted, each once, set or unset.
+    #[test]
+    fn a_change_names_its_keys_sorted() {
+        let mut change = set("face/mouth", 0.5);
+        change
+            .set
+            .insert(Key::from("face/eyes"), Some(Value::F64(1.0)));
+        change.unset.insert(Key::from("face/brow"));
+        change.unset.insert(Key::from("face/mouth"));
+        assert_eq!(written_keys(&change), "face/brow, face/eyes, face/mouth");
     }
 
     /// The preset's outbound endpoints reach the config as typed outputs

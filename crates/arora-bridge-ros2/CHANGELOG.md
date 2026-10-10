@@ -4,6 +4,16 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.2] - 2026-10-10
+
+### Fixed
+
+- The device's refusal of a write from an input topic is logged, with the
+  topic, the keys and the device's reason (a key it did not open, a value of
+  another type than the key states). One topic's refusals for the same keys are
+  logged at most once every 5 seconds, those in between counted into the next
+  line, so a topic publishing at 100 Hz does not flood the log.
+
 ## [10.1.1] - 2026-10-10
 
 ### Fixed

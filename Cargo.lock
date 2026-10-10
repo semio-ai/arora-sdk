@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "10.1.1"
+version = "10.1.2"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
