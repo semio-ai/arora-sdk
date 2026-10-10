@@ -604,3 +604,45 @@ async fn a_write_reaches_only_the_devices_inputs() {
         "unchanged"
     );
 }
+
+/// A key travels verbatim: `/face/mouth` and `face//mouth` are keys of their
+/// own, written and listed as the client named them, and neither lands on
+/// `face/mouth`.
+#[tokio::test]
+async fn a_write_lands_on_the_key_as_named() {
+    let input = || KeyMeta::new().editable().of_type(Type::F64);
+    let device = Device::serving(HashMap::from([
+        ("face/mouth".to_string(), input()),
+        ("/face/mouth".to_string(), input()),
+        ("face//mouth".to_string(), input()),
+    ]))
+    .await;
+    let mut client = Client::connect(&device.url).await;
+
+    client
+        .send(serde_json::json!({
+            "type": "write_values",
+            "values": {"/face/mouth": {"f64": 0.5}, "face//mouth": {"f64": 0.75}}
+        }))
+        .await;
+    assert_eq!(client.answer().await["success"], true);
+    assert_eq!(device.held("/face/mouth"), Some(Value::F64(0.5)));
+    assert_eq!(device.held("face//mouth"), Some(Value::F64(0.75)));
+    assert_eq!(
+        device.held("face/mouth"),
+        Some(Value::F64(0.25)),
+        "unchanged"
+    );
+
+    client.send(serde_json::json!({"type": "list_keys"})).await;
+    let answer = client.answer().await;
+    let listed: Vec<&str> = answer["keys"]
+        .as_array()
+        .expect("the listed keys")
+        .iter()
+        .filter_map(|key| key["path"].as_str())
+        .collect();
+    for path in ["face/mouth", "/face/mouth", "face//mouth"] {
+        assert!(listed.contains(&path), "{path} is listed among {listed:?}");
+    }
+}

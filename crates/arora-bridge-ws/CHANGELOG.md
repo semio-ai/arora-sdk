@@ -4,6 +4,18 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.2] - 2026-10-10
+
+### Fixed
+
+- The control panel keeps each key exactly as the device lists it, for display,
+  lookup and writes: `/a` and `a//b` are written as `/a` and `a//b`, not as `a`
+  and `a/b`, since any string is a key and two keys that differ by a slash are
+  two keys. A control's inputs name it by its index rather than by its path, so
+  a key holding quotes, angle brackets, backslashes or control characters is
+  written as listed; a row whose label would not tell it from a sibling's shows
+  the full path.
+
 ## [7.2.1] - 2026-10-06
 
 ### Changed
