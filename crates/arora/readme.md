@@ -32,7 +32,8 @@ ends.
 ```sh
 cargo build                      # builds arora into target/debug/arora
 
-# install a Groot behavior tree as the device's behavior, then serve
+# install a Groot behavior tree as the device's behavior, then serve; its
+# leaves may call the functions of the modules the device carries
 ./target/debug/arora crates/arora/examples/hello_tree.groot.xml
 
 # or just serve, waiting for a behavior over the bridge
@@ -130,7 +131,8 @@ lists them under one rule: a function whose parameters and return are all
 primitives or optionals over a scalar primitive is described; any other — one
 naming a record type, a map or a fixed-length array — still dispatches
 ([`module_discovery`](src/module_discovery.rs)). A Groot tree the binary
-installs binds no module function: its nodes are the native core nodes.
+installs resolves its tags against the device's method index: its nodes are
+the native core nodes and the functions of the modules the device carries.
 [`module_dir`](src/module_dir.rs) reads module directories for an embedder.
 
 The chain down to the bridge's code, in a `studio-bridge` build:
