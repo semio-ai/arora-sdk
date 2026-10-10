@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "12.11.0"
+version = "12.12.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "8.4.0"
+version = "8.5.0"
 dependencies = [
  "anyhow",
  "arora-behavior",

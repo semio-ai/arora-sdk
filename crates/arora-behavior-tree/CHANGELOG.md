@@ -4,6 +4,15 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.5.0] - 2026-10-13
+
+### Changed
+
+- A tree does not call the interpreter module's own functions (`load`,
+  `edit`, `spawn`, `spawn_graph`, `halt`), which act on the interpreter while
+  it ticks the tree: a Groot tag does not resolve to them, and a spawned graph
+  naming one is refused.
+
 ## [8.4.0] - 2026-10-13
 
 ### Added
