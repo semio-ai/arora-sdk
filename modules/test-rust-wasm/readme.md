@@ -24,6 +24,7 @@ Exported functions:
 | `text` | `(length: u32) -> String` | A string of `length` bytes |
 | `window` | `(start_ns: u64, end_ns: Option<u64>) -> Option<u64>` | The window's length; `None` when `end_ns` is absent |
 | `greet` | `(name: Option<String>) -> String` | `"hello, <name>"`, or `"hello"` when `name` is absent |
+| `frame` | `(length: u32, revision: u64, time_ns: u64) -> Frame` | `Frame { revision, values }`: `length` values, value `i` being the time in seconds plus `i` |
 
 ## Requirements
 

@@ -69,9 +69,9 @@ The return value is always expected to be a `behavior_tree::Status`.
 ## Basic Nodes and Helpers
 
 Some [helpers are also available to create behavior trees in code](src/nodes.rs).
-The basic control nodes (sequence, sequence-star, fallback, parallel) and the
-status leaves (succeed, fail, run) are built in to this crate and dispatched
-natively; additional leaf and utility nodes for tests and demos live in the
+The basic control nodes (sequence, sequence-star, fallback, parallel), the
+status leaves (succeed, fail, run) and the data nodes `Equal(a, b)` and
+`WriteKeys(keys, values)` are built in to this crate and dispatched natively; additional leaf and utility nodes for tests and demos live in the
 [`test-behavior-tree-nodes`](../../modules/test-behavior-tree-nodes/readme.md) module.
 [`TreeNode`](src/tree_node.rs) offers an alternative way to build behavior trees for Rust applications,
 where the nodes are directly created as trees (instead of being juxtaposed flatly),

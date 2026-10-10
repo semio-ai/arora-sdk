@@ -93,10 +93,18 @@ pub const GRAPH_TYPE_NAME: &str = "behavior-tree";
 
 /// The version of the `behavior-tree` format this interpreter reads. A graph
 /// written for it, or for an older minor version of its major, runs.
-pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 0, 0);
+///
+/// - `1.0`: the control nodes, the status leaves, the task-run nodes and
+///   module function leaves;
+/// - `1.1` adds the data nodes `Equal` and `WriteKeys`
+///   ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
+///   [`WRITE_KEYS_FUNCTION_ID`](crate::nodes::WRITE_KEYS_FUNCTION_ID)).
+pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 1, 0);
 
 /// The [`GraphType`] this interpreter reads: [`GRAPH_TYPE_NAME`] at
-/// [`GRAPH_TYPE_VERSION`].
+/// [`GRAPH_TYPE_VERSION`]. A graph states the oldest version that has every
+/// node it uses, so that an interpreter reading an older minor still runs it:
+/// a graph without the `1.1` data nodes is spawned as `1.0`.
 pub fn graph_type() -> GraphType {
     GraphType {
         name: GRAPH_TYPE_NAME.to_string(),
@@ -382,15 +390,17 @@ impl BehaviorTreeInterpreter {
     }
 
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
-    /// diff applies whole or not at all: it is refused when it fails, or when
-    /// the tree under the runner would name a child that is not a node or
-    /// hold a cycle.
+    /// diff applies whole or not at all: it is refused when it fails, when the
+    /// tree under the runner would name a child that is not a node or hold a
+    /// cycle, or when the graph would not lower.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
             .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
         check_acyclic(&graph, self.runner)?;
+        build_behavior_tree(&graph, &|_| None)
+            .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
         self.graph = graph;
         self.dirty = true;
         Ok(())

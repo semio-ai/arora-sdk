@@ -66,6 +66,13 @@ So a branch can react once to each write of a key from outside the tree — the 
 
 The other palette tags (`Status`, `Store`, `Increase`, `Cos`) stay the test module's: a tree using them needs that module loaded.
 
+Two data nodes are ticked natively too, and read their arguments through any link source, a selection included:
+
+- **`Equal(a, b)`** succeeds when its two values are equal and fails otherwise — a condition over data.
+- **`WriteKeys(keys, values)`** writes `values[i]` under the store key `keys[i]`, skipping an empty key and a `Unit` value. It fails, writing nothing, when `values` is not an array of the table's length. `keys` is a literal array of strings, bound to store slots when the tree is lowered: a key table is structure, shown in the graph and changed by an edit.
+
+They are part of the `behavior-tree 1.1` format.
+
 ## How a node ticks
 
 ```mermaid

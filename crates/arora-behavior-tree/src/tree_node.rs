@@ -115,11 +115,20 @@ impl TreeNode {
             resolver,
             names,
         )?;
+        // The data nodes, the root among them, once every variable has its
+        // cell.
+        let mut key_tables = HashMap::new();
+        for node in node_index.values().chain(std::iter::once(&root)) {
+            if let Some(table) = crate::bind_data_node(node, resolver, names, &variables)? {
+                key_tables.insert(node.id, table);
+            }
+        }
         Ok(BehaviorTree {
             root,
             node_index,
             variables: Rc::new(RefCell::new(variables)),
             node_arg_variables: Rc::new(node_arg_variables),
+            key_tables,
         })
     }
 }
