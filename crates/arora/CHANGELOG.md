@@ -4,6 +4,18 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.13.0] - 2026-10-13
+
+### Changed
+
+- The `arora` binary's Groot tree may call the functions of the modules the
+  device carries (its device directory's and `--module`'s): the tree is
+  installed with `AroraBuilder::with_groot`, against the device's method
+  index. A tree naming a function the device lacks fails the start; a file
+  that does not parse fails it before the device connects. With a Groot tree,
+  a graph spawned or loaded by a remote reaches the device's modules too, as
+  it does without one.
+
 ## [12.12.0] - 2026-10-13
 
 ### Added
