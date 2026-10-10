@@ -153,9 +153,11 @@ The chain down to the bridge's code, in a `studio-bridge` build:
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
    and hands it to `DeviceCredentials::in_dir`. The credentials there are the
    client's; arora writes only `device.json` beside them (below).
-3. `studio::connect` passes `DeviceCredentials::refresh_token()` and `saver()` to
-   `ZenohDeviceClient::new`, whose Firebase authenticator signs the device in
-   with the token and calls the saver with each rotated one.
+3. `studio::connect` passes the `DeviceCredentials` to
+   `ZenohDeviceClient::new_with_credentials`, or to
+   `new_endpoint_with_credentials` when `STUDIO_BRIDGE_ENDPOINT` names the
+   bridge's endpoint. The client's Firebase authenticator signs the device in
+   with the refresh token the credentials hold and saves each rotated one there.
 
 ### What the device registers with Studio as
 
