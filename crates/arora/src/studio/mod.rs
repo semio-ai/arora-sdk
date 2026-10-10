@@ -204,7 +204,7 @@ async fn build_studio_bridge(
     // Read the Firebase options and Zenoh endpoints from the environment.
     let firebase_options = FirebaseOptions::from_env();
     let firebase_emulator_options = FirebaseEmulatorOptions::from_env();
-    // The bridge endpoint is baked into `arora-studio-bridge-client` (v3);
+    // The bridge endpoint is baked into `arora-studio-bridge-client`;
     // `STUDIO_BRIDGE_ENDPOINT` overrides it at runtime to target a local/preprod
     // bridge (e.g. `tcp/localhost:7447`) without a rebuild.
     let endpoint_override = std::env::var("STUDIO_BRIDGE_ENDPOINT")
