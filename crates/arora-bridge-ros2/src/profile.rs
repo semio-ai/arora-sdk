@@ -141,6 +141,15 @@ impl ExposureProfile {
     ///   `standard/ros4hri/speech/text` — what a say run is saying, empty at
     ///   rest — so a subtitle or a transcript follows the voice. Text is not
     ///   commanded through a topic: speaking is the `/skill/say` action;
+    /// - the lip shape being spoken publishes as `std_msgs/String` on
+    ///   `/robot_face/viseme` from the speech state key
+    ///   `standard/ros4hri/speech/viseme` — one of the Vizij standard's 15
+    ///   shape names (`aa`, `PP`, …), `sil` at rest — so anything that follows
+    ///   the lips (a mirror face, a monitor) reads one topic for the whole
+    ///   robot, whichever player is speaking. It is a name, not an
+    ///   `hri_msgs/Viseme`: the device reports the shape, and the code, time
+    ///   and duration are a stream's, which the face's state does not carry.
+    ///   `/robot_face/viseme` is not one of PAL's names;
     /// - the `/skill/look_at` **action** (`interaction_skills/LookAt`) spawns
     ///   the device's `look_at` task run, its goal routed onto the
     ///   `(policy, target, frame)` parameters — the skill plane, for gaze
@@ -192,6 +201,10 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
+        let spoken_viseme_routes = vec![FieldRoute {
+            field: "data".into(),
+            key: "standard/ros4hri/speech/viseme".into(),
+        }];
         // The two shapes a viseme stream comes in reach the same keys: the
         // viseme alone, or the first of a sequence.
         let viseme_fields = [
@@ -212,9 +225,9 @@ impl ExposureProfile {
         let viseme_routes = viseme_routes("");
         // Every endpoint takes its flow's default delivery. A command surface
         // is reliable: an expression that is dropped is an instruction the
-        // face never carries out. The image and the speech text are sensor
-        // data: a frame or an utterance is state, and a slow reader must not
-        // stall the renderer.
+        // face never carries out. The image and the speech state are sensor
+        // data: a frame, an utterance or a lip shape is state, and a slow
+        // reader must not stall the renderer.
         let endpoint = |topic: &str, ros_type: &str, flow: Flow, routes: &[FieldRoute]| Endpoint {
             topic: topic.into(),
             ros_type: ros_type.into(),
@@ -256,6 +269,12 @@ impl ExposureProfile {
                     "std_msgs/String",
                     Flow::Out,
                     &speech_routes,
+                ),
+                endpoint(
+                    "/robot_face/viseme",
+                    "std_msgs/String",
+                    Flow::Out,
+                    &spoken_viseme_routes,
                 ),
                 endpoint(
                     "/robot_face/image_raw",
@@ -430,15 +449,17 @@ mod tests {
             "/tts/viseme",
             "/tts/visemes",
             "/robot_face/speech",
+            "/robot_face/viseme",
             "/robot_face/image_raw",
             "/robot_face/image_raw/compressed",
         ] {
             assert!(topics.contains(&expected), "missing {expected}");
         }
-        // The commands flow in; the image and the speech text flow out.
+        // The commands flow in; the image and the speech state flow out.
         for endpoint in &profile.endpoints {
             let expected = if endpoint.topic.starts_with("/robot_face/image_raw")
                 || endpoint.topic == "/robot_face/speech"
+                || endpoint.topic == "/robot_face/viseme"
             {
                 Flow::Out
             } else {
@@ -512,6 +533,31 @@ mod tests {
                 .collect::<Vec<_>>(),
                 "{topic}"
             );
+        }
+    }
+
+    /// The speech state publishes as two strings: the utterance and the lip
+    /// shape, each its key in the message's `data`.
+    #[test]
+    fn ros4hri_preset_publishes_the_speech_state_as_strings() {
+        let profile = ExposureProfile::ros4hri();
+        for (topic, key) in [
+            ("/robot_face/speech", "standard/ros4hri/speech/text"),
+            ("/robot_face/viseme", "standard/ros4hri/speech/viseme"),
+        ] {
+            let endpoint = profile
+                .endpoints
+                .iter()
+                .find(|e| e.topic == topic)
+                .unwrap_or_else(|| panic!("missing {topic}"));
+            assert_eq!(endpoint.ros_type, "std_msgs/String", "{topic}");
+            assert_eq!(endpoint.flow, Flow::Out, "{topic}");
+            let routes: Vec<(&str, &str)> = endpoint
+                .routes
+                .iter()
+                .map(|r| (r.field.as_str(), r.key.as_str()))
+                .collect();
+            assert_eq!(routes, [("data", key)], "{topic}");
         }
     }
 

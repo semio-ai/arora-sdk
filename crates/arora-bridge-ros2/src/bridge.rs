@@ -1235,8 +1235,8 @@ mod tests {
 
     /// The preset's outbound endpoints reach the config as typed outputs
     /// keyed on their routes: the image pair as whole-message routes from
-    /// the display keys, the speech text as a `data` route from the speech
-    /// state key. The command surfaces stay inbound, so nothing else is on
+    /// the display keys, the speech text and the spoken viseme as `data`
+    /// routes from the speech state keys. The command surfaces stay inbound, so nothing else is on
     /// that plane.
     #[test]
     fn the_ros4hri_profile_declares_its_outbound_endpoints_as_typed_outputs() {
@@ -1269,6 +1269,7 @@ mod tests {
                 "/robot_face/image_raw/compressed sensor_msgs/CompressedImage \
                  [ <- display/face/compressed]",
                 "/robot_face/speech std_msgs/String [data <- standard/ros4hri/speech/text]",
+                "/robot_face/viseme std_msgs/String [data <- standard/ros4hri/speech/viseme]",
             ]
         );
         assert!(

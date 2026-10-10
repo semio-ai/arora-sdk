@@ -180,7 +180,10 @@ what the run reports (for a face, the viseme at the audio playhead). What the
 face is saying publishes as a `std_msgs/String` on `/robot_face/speech` from
 the speech state key `standard/ros4hri/speech/text` — the utterance while a
 say run speaks, empty at rest — for subtitles and transcripts; text is not
-commanded through a topic, speaking is the action. The rendered face publishes
+commanded through a topic, speaking is the action. The lip shape being spoken
+publishes the same way, as a `std_msgs/String` on `/robot_face/viseme` from
+`standard/ros4hri/speech/viseme` — a Vizij standard shape name, `sil` at rest
+— so one topic follows the lips of the whole robot. The rendered face publishes
 on the `image_transport` pair PAL OS documents — `display/face` as a
 `sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
 `sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
