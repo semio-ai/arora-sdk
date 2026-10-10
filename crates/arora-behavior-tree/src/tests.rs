@@ -1951,4 +1951,214 @@ mod data_nodes {
             assert_eq!(interp.graph(), &before);
         }
     }
+
+    /// A value that does not move makes no store change — the store notifies
+    /// changes only — so ticking a table twice with the same values changes
+    /// each key once, and a moved value changes it again.
+    #[test]
+    fn write_keys_writes_a_key_only_when_its_value_moves() {
+        use arora_behavior::graph::GraphDiff;
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp
+            .load(guarded_write(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                strings(&["out/a", "out/b"]),
+                literal(Value::ArrayF64(vec![1.0, 2.0])),
+            ))
+            .unwrap();
+        let mut bridge = super::TestBridge::empty();
+        let changes = store.subscribe();
+        // The changes per key since the last drain.
+        let drain = || {
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            while let Some(change) = changes.try_recv() {
+                for key in change.set.keys() {
+                    *counts.entry(key.path.clone()).or_default() += 1;
+                }
+            }
+            counts
+        };
+        let mut tick = |interp: &mut BehaviorTreeInterpreter| {
+            let mut ctx = BehaviorContext {
+                store: &store,
+                call_bridge: &mut bridge,
+            };
+            interp.tick(&mut ctx).unwrap();
+        };
+        tick(&mut interp);
+        tick(&mut interp);
+        let counts = drain();
+        assert_eq!(counts.get("out/a"), Some(&1), "changed once over two ticks");
+        assert_eq!(counts.get("out/b"), Some(&1), "changed once over two ticks");
+
+        interp
+            .apply(GraphDiff {
+                add_links: vec![Link::new(
+                    Port::new(WRITE, nodes::WRITE_KEYS_VALUES_PARAM_ID),
+                    literal(Value::ArrayF64(vec![1.0, 3.0])),
+                )],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        tick(&mut interp);
+        let counts = drain();
+        assert_eq!(counts.get("out/a"), None, "the held value makes no change");
+        assert_eq!(counts.get("out/b"), Some(&1), "the moved value changes");
+        assert_eq!(read(&store, &["out/b"]), vec![Some(Value::F64(3.0))]);
+    }
+
+    /// A module leaf's argument linked through a selection receives the
+    /// selected part of the source, not the whole value.
+    #[test]
+    fn a_module_leaf_receives_the_selected_part_of_its_argument() {
+        use crate::ModuleFunction;
+        use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
+        use arora_types::record::module::frozen::Function;
+        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+        use std::cell::RefCell;
+
+        /// Records the arguments of each module call, and answers Success.
+        #[derive(Default)]
+        struct Recording {
+            calls: Rc<RefCell<Vec<Call>>>,
+            registered: HashMap<u64, Rc<dyn Callable>>,
+        }
+        impl CallBridge for Recording {
+            fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+                self.calls.borrow_mut().push(call);
+                Ok(CallResult {
+                    ret: crate::arora_generated::behavior_tree::status::Status::Success.into(),
+                    mutated: Vec::new(),
+                })
+            }
+            fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
+                let id = self.registered.len() as u64;
+                self.registered.insert(id, callable);
+                CallableId { id }
+            }
+            fn arora_unregister_callable(&mut self, callable_id: &CallableId) {
+                self.registered.remove(&callable_id.id);
+            }
+            fn arora_call_indirect(&mut self, id: &CallableId) -> Result<Value, CallError> {
+                let callable = self.registered[&id.id].clone();
+                callable.call(self)
+            }
+        }
+
+        let function = Uuid::from_u128(0xF00);
+        let param = Uuid::from_u128(0xF01);
+        let field = Uuid::from_u128(0xF02);
+        let frame = Uuid::from_u128(0xF03);
+        let leaf = Uuid::from_u128(0xF04);
+        let producer = Uuid::from_u128(0xF06);
+        let produced = Uuid::from_u128(0xF07);
+        let index = |mutable: bool| {
+            use arora_types::record::module::frozen::Parameter;
+            HashMap::from([(
+                function,
+                ModuleFunction {
+                    module_id: Uuid::from_u128(0xF05),
+                    function_id: function,
+                    function_name: "consume".to_string(),
+                    function: Function {
+                        parameters: HashMap::from([(
+                            param,
+                            Parameter {
+                                name: "frame".to_string(),
+                                ty: FrozenTy::from(PrimitiveKind::U64),
+                                mutable,
+                            },
+                        )]),
+                        parameter_ordering: vec![param],
+                        return_ty: FrozenTy::from(PrimitiveKind::U8),
+                    },
+                },
+            )])
+        };
+        let structure = Value::Structure(Structure {
+            id: Uuid::from_u128(0x50),
+            fields: vec![StructureField {
+                id: field,
+                value: Box::new(Value::U64(42)),
+            }],
+        });
+        let select = |source: LinkSource| LinkSource::Select {
+            source: Box::new(source),
+            path: Key::new(format!(".{field}")),
+        };
+        // `Sequence(producer, leaf)`: the producer holds the structure in an
+        // argument, which a port link can read.
+        let graph = |source: LinkSource, target: Uuid| {
+            let mut graph = Graph::empty();
+            graph.root = Some(SEQ);
+            graph.nodes.insert(
+                SEQ,
+                GraphNode {
+                    children: Some(vec![producer, leaf]),
+                    ..node(SEQ, nodes::SEQ_FUNCTION_ID, &[])
+                },
+            );
+            graph.nodes.insert(
+                producer,
+                node(producer, nodes::SUCCEED_FUNCTION_ID, &[produced]),
+            );
+            graph.nodes.insert(leaf, node(leaf, function, &[param]));
+            graph.links.push(Link::new(
+                Port::new(producer, produced),
+                literal(structure.clone()),
+            ));
+            graph.links.push(Link::new(Port::new(leaf, target), source));
+            graph.variables.insert(frame, "frame".to_string());
+            graph
+        };
+        // What the leaf receives, with the store holding `stored` under
+        // `frame`.
+        let received = |graph: Graph, stored: Option<Value>| {
+            let store = SimpleDataStore::new();
+            if let Some(stored) = stored {
+                store.write(StateChange::set("frame", stored)).unwrap();
+            }
+            let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(false)));
+            interp.load(graph).unwrap();
+            let mut bridge = Recording::default();
+            let calls = bridge.calls.clone();
+            let mut ctx = BehaviorContext {
+                store: &store,
+                call_bridge: &mut bridge,
+            };
+            interp.tick(&mut ctx).unwrap();
+            let calls = calls.borrow();
+            assert_eq!(calls.len(), 1);
+            *calls[0].args[0].value.clone()
+        };
+
+        let from_variable = graph(select(LinkSource::Variable(frame)), param);
+        assert_eq!(
+            received(from_variable.clone(), Some(structure.clone())),
+            Value::U64(42)
+        );
+        assert_eq!(
+            received(from_variable.clone(), None),
+            Value::Unit,
+            "a selection over an absent value reads as absent"
+        );
+        let from_port = graph(
+            select(LinkSource::Port(Port::new(producer, produced))),
+            param,
+        );
+        assert_eq!(received(from_port, None), Value::U64(42));
+
+        // A selection is read-only: refused on a mutable parameter and on the
+        // return binding.
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(true)));
+        assert!(interp.load(from_variable).is_err(), "a mutable parameter");
+        let on_return = graph(
+            select(LinkSource::Variable(frame)),
+            crate::schema::_RET_PARAM_ID,
+        );
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(false)));
+        assert!(interp.load(on_return).is_err(), "the return binding");
+    }
 }

@@ -258,9 +258,9 @@ pub const EQUAL_B_PARAM_ID: Uuid = uuid::uuid!("9399b82f-7ace-41fc-8732-38a42a80
 /// kind, or a key listed twice, is refused at lowering. Each key binds as a
 /// `{var}` of that name does (the Direct convention). `values` is any link
 /// source, and must be linked. Each key is written through its store slot on
-/// every tick; the store notifies a change only when the value differs from
-/// the one it holds, so a value that does not move makes no store change and
-/// nothing reaches a bridge.
+/// every tick; a slot notifies a change only when the value differs from the
+/// one it holds (the `Slot` contract), so a value that does not move makes no
+/// store change and nothing reaches a bridge.
 pub const WRITE_KEYS_FUNCTION_ID: Uuid = uuid::uuid!("dbc1ec30-8f2d-482e-8638-a803fdb58318");
 /// [`WRITE_KEYS_FUNCTION_ID`]'s key table.
 pub const WRITE_KEYS_KEYS_PARAM_ID: Uuid = uuid::uuid!("06aa9c89-bb27-4705-b499-97a2214b9a2d");
