@@ -96,7 +96,7 @@ The overhead at the Zenoh bridge boundary includes:
 If you're currently planning a Zenoh-first architecture (from the zenoh-study):
 
 ```text
-Device Controller ──► Zenoh put("state/{id}/joint1/position") ──► Storage Plugin ──► Studio subscriber
+Device Controller ──► Zenoh put("state/{id}/joint1.position") ──► Storage Plugin ──► Studio subscriber
 ```
 
 Translating this to Copper + Zenoh would look like:
@@ -139,8 +139,8 @@ state to Zenoh. The Zenoh storage plugin caches it for external queries (Studio,
             id: "zenoh", type: "bridges::StateExportBridge",
             config: {"wire_format": "json"},
             channels: [
-                Tx(id: "position", route: "state/{device_id}/joint1/position"),
-                Tx(id: "velocity", route: "state/{device_id}/joint1/velocity"),
+                Tx(id: "position", route: "state/{device_id}/joint1.position"),
+                Tx(id: "velocity", route: "state/{device_id}/joint1.velocity"),
             ],
         ),
     ],
@@ -179,7 +179,7 @@ or from a Copper Zenoh bridge. The bridge publishes to Zenoh key expressions jus
 any other publisher.
 
 ```text
-cu_zenoh_bridge ──put("state/{id}/joint1/position", "1.5")──►  Zenoh Session
+cu_zenoh_bridge ──put("state/{id}/joint1.position", "1.5")──►  Zenoh Session
                                                                      │
                                                               Storage Plugin
                                                               (in-memory cache)
