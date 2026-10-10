@@ -99,7 +99,7 @@ use crate::services::type_ref_of;
 // dev-dependency test) pins them against the defining crate.
 
 /// The interpreter module's id on the engine.
-const INTERPRETER_MODULE: Uuid = Uuid::from_u128(0x61726f72_6100_0000_0000_000000000001);
+pub(crate) const INTERPRETER_MODULE: Uuid = Uuid::from_u128(0x61726f72_6100_0000_0000_000000000001);
 /// Function id of **spawn**: start a task run, returning its handle.
 const SPAWN: Uuid = Uuid::from_u128(0x61726f72_6100_0000_0000_000000000006);
 /// Argument id of SPAWN's first argument: the [`Call`] to run.
@@ -1761,6 +1761,24 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert!(skipped.is_empty());
         assert_eq!(actions[0].name, "/robot/actions/look_at");
+    }
+
+    /// A task run the interpreter implements, described under the interpreter
+    /// module, becomes an action while services leave it out.
+    #[test]
+    fn an_interpreter_task_run_is_an_action_and_no_service() {
+        let registry = arora_msgs_ros2::registry();
+        let mut signature = look_at_signature();
+        signature.module_id = INTERPRETER_MODULE;
+        let (actions, skipped) = resolve("robot", std::slice::from_ref(&signature), &registry);
+        assert_eq!(actions.len(), 1, "an action");
+        assert!(skipped.is_empty());
+        let (services, skipped) =
+            crate::services::resolve("robot", std::slice::from_ref(&signature), &registry);
+        assert!(
+            services.is_empty() && skipped.is_empty(),
+            "no service, no warning"
+        );
     }
 
     /// The SendGoal request round-trips through the real CDR codec, and the

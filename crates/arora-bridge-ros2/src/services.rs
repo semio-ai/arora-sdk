@@ -58,10 +58,10 @@ pub(crate) struct MethodService {
 /// truncation). An optional of a scalar or a record travels as the bounded
 /// sequence `T[<=1]`.
 ///
-/// The interpreter module's functions (`interpreter_module::ID`) are neither
-/// resolved nor skipped: they load, edit, spawn and halt behavior, which a
-/// graph, a call and a task handle describe, and none of these has a ROS 2
-/// type. A task run the interpreter implements is the actions plane's.
+/// The interpreter module's functions are neither resolved nor skipped: its
+/// own functions (`spawn`, `spawn_graph`, `halt`) take or return a graph, a
+/// call or a task handle, none of which has a ROS 2 type, and a task run the
+/// interpreter implements is the actions plane's.
 pub(crate) fn resolve(
     namespace: &str,
     signatures: &[MethodSignature],
@@ -71,7 +71,7 @@ pub(crate) fn resolve(
     let mut skipped = Vec::new();
     for signature in signatures
         .iter()
-        .filter(|signature| signature.module_id != arora_behavior::interpreter_module::ID)
+        .filter(|signature| signature.module_id != crate::actions::INTERPRETER_MODULE)
     {
         let types = request_type(signature).zip(response_type(signature));
         let Some((request_type, response_type)) = types.filter(|(request, response)| {
@@ -429,7 +429,7 @@ mod tests {
                 primitive(PrimitiveKind::Unit),
             ),
         );
-        sig.module_id = arora_behavior::interpreter_module::ID;
+        sig.module_id = crate::actions::INTERPRETER_MODULE;
         let (services, skipped) = resolve("robot", std::slice::from_ref(&sig), &registry);
         assert!(services.is_empty(), "no service");
         assert!(skipped.is_empty(), "no warning");

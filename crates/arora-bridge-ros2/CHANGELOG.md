@@ -8,10 +8,10 @@ All notable changes to `arora-bridge-ros2`. The format follows
 
 ### Fixed
 
-- The interpreter module's functions (load, edit, spawn, halt and the like)
-  are left out of service resolution and out of the start-up warning that
-  names the methods with no ROS 2 form: they act on behavior, which has no
-  ROS 2 type. A task run the interpreter implements still becomes an action.
+- The interpreter module's functions — `spawn`, `spawn_graph` and `halt`, and
+  the task runs the interpreter implements — are left out of service
+  resolution and out of the start-up warning that names the methods with no
+  ROS 2 form. A task run the interpreter implements still becomes an action.
 
 ## [10.1.1] - 2026-10-10
 

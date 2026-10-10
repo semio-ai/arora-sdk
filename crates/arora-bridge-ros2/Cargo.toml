@@ -10,7 +10,6 @@ repository = "https://github.com/semio-ai/arora-sdk"
 name = "arora_bridge_ros2"
 
 [dependencies]
-arora-behavior = { path = "../arora-behavior", version = "9" }
 arora-types = { path = "../arora-types", version = "3" }
 arora-bridge = { path = "../arora-bridge", version = "6" }
 # The behavior-tree Status enumeration's well-known ids: the action plane
@@ -51,6 +50,7 @@ zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 # The crate that DEFINES the interpreter-module SPAWN ABI the action plane
 # speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
 # the bridge's ids and encodings match, without a runtime engine dependency.
+arora-behavior = { path = "../arora-behavior", version = "9" }
 rand = "0.10"
 env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile
