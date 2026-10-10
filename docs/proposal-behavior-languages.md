@@ -28,9 +28,10 @@ In short:
 - **Every loaded or spawned graph is a branch, and branches run in parallel.**
   The behavior interface owns them, whatever interpreter runs each: their
   order, their tick, halting and run policies.
-- **Two parallel branches writing one key is an error.** It is found when a
-  graph is loaded, spawned or edited, from what each graph declares it
-  writes, and otherwise at the first write that reveals it.
+- **Two parallel branches writing one key is an error.** The keys a graph
+  writes are analyzed from the graph itself, never declared beside it. An
+  overlap found when a graph is loaded, spawned or edited refuses the call; a
+  write that reveals one fails, and the graph handles the failure.
 - **Within one graph, the structure is the order**, as in a behavior tree.
 - **The behavior tree and the node graph are the default interpreters**, both
   in arora-sdk. The node graph moves from vizij-rs with its git history and
@@ -112,8 +113,8 @@ arora-sdk, which proceed ahead of this proposal:
 5. **Two versions of one graph type**: a node graph written for a newer format
    runs beside one written for the older format, each on the component that
    reads it.
-6. **Two runs driving one key**: the second is refused, rather than both
-   writing in turn.
+6. **Two runs driving one key**: the second is refused when it spawns, or its
+   write fails, rather than both writing in turn.
 
 ## 3. Design
 
@@ -149,12 +150,14 @@ pub trait BehaviorInterpreter {
     /// The graph types this component runs: per type and major, the newest
     /// version it reads.
     fn graph_types(&self) -> Vec<GraphType>;
-    /// What `graph` writes, before it runs. Refuses a graph it cannot run.
-    fn writes(&self, ty: &GraphType, graph: &Graph) -> Result<WriteSet, BehaviorError>;
-    /// What `branch` would write once `diff` applies, without applying it.
-    fn writes_after(&self, branch: BranchId, diff: &GraphDiff) -> Result<WriteSet, BehaviorError>;
+    /// Accepts `graph` for `branch`, and returns the keys it writes, analyzed
+    /// from the graph. Refuses a graph it cannot run.
     fn load(&mut self, branch: BranchId, ty: &GraphType, graph: Graph, scope: BranchScope)
-        -> Result<(), BehaviorError>;
+        -> Result<WriteSet, BehaviorError>;
+    /// The keys `branch`'s graph writes once `diff` applies, analyzed from the
+    /// edited graph. Changes nothing.
+    fn analyze_edit(&self, branch: BranchId, diff: &GraphDiff)
+        -> Result<WriteSet, BehaviorError>;
     fn edit(&mut self, branch: BranchId, ty: &GraphType, diff: GraphDiff)
         -> Result<(), BehaviorError>;
     fn tick(&mut self, branch: BranchId, ctx: &mut BehaviorContext)
@@ -167,6 +170,10 @@ pub trait BehaviorInterpreter {
 - A component holds several graphs, one per branch the host gives it, and
   ticks the one it is asked to. It does not know which branches are loaded
   graphs and which are runs.
+- **No graph declares what it writes.** The component analyzes the graph it
+  accepted and returns the set; the host keeps it with the branch and has the
+  component analyze it again on every edit. The graph is the one source of
+  truth, and the set is a cache of it that cannot drift (3.6).
 - `BranchScope` carries what a run binds: its key prefix, onto which every
   component maps the `task/` placeholder keys a graph names, and its
   arguments.
@@ -210,6 +217,10 @@ Each function is described, so `DescribeMethods` lists it by name.
   `GraphDiff` have no Arora type of their own.
 - `LOAD`, `EDIT`, `SPAWN` and `HALT` keep their ids. `LOAD` and `EDIT` act on
   the branch `main`, of the type the device's first component declares.
+- **An edit keeps the state of the nodes it leaves**, where the component can:
+  a spring keeps its velocity, a sequence its position. A component may reset
+  them instead. Keeping state spares a behavior a visible jump; it is an
+  optimization, and no client relies on it.
 
 ### 3.4 Advertisement
 
@@ -231,7 +242,9 @@ Each function is described, so `DescribeMethods` lists it by name.
   | `parent` | `Option<string>` | The branch that started it, for a graph a tree leaf runs (3.8). |
   | `component` | `string` | The component running it. |
   | `graph_type`, `graph_version` | `string` | Its type and version. |
-  | `writes` | `{ keys: [string], prefixes: [string] }` | What it declares it writes (3.6). |
+  | `policy` | `Option<string>` | The policy a run was spawned under (3.5). |
+  | `writes` | `[string]` | The keys its graph writes, analyzed from the graph (3.6). |
+  | `claimed` | `[string]` | The keys it claimed by writing them (3.6). |
 
 - **Where they are reached:**
   - **Studio Bridge**: the existing `DescribeMethods` and `Call`; no new
@@ -241,6 +254,9 @@ Each function is described, so `DescribeMethods` lists it by name.
     types ROS 2 can carry, as it does any other. A graph has no ROS message
     type, so loading and editing are not offered over ROS. A skill returns
     `Status`, so it stays a ROS action.
+- **Who may load, edit, spawn and halt.** Over the Studio Bridge these are
+  commands, so the caller must hold the device's claim, as for any command.
+  The behavior module needs no access rule beyond the claim.
 
 ### 3.5 Branches run in parallel
 
@@ -258,10 +274,12 @@ Each function is described, so `DescribeMethods` lists it by name.
 - **Order.** Each step the host ticks every branch once: the loaded graphs in
   load order, then the runs in spawn order. A branch added during a tick runs
   from the next tick.
-  - Two branches never write one key (3.6), so the order never decides which
-    value a key keeps. It decides only whether a reader sees another branch's
-    write of the same tick or of the previous one, and it is the same every
-    time the device runs the same branches.
+  - Two branches do not write one key (3.6), so the order does not decide
+    which value a key keeps. It decides whether a reader sees another
+    branch's write of the same tick or of the previous one, and it is the
+    same every time the device runs the same branches. The exception is a
+    run under `Overlap`, whose write lands after those of the branches before
+    it.
   - "Parallel" means no precedence between branches, not threads: the runtime
     is one thread, and the host ticks one branch at a time.
 - **Halting.**
@@ -278,6 +296,13 @@ Each function is described, so `DescribeMethods` lists it by name.
     before its first tick. An overlap with a loaded graph still refuses the
     spawn: a run does not halt the device's own behavior. A new viseme takes
     over from the one before this way.
+  - **`Overlap`**: the run joins even where its writes overlap other
+    branches'. It claims no key, and no write of its own or of another branch
+    fails because of it; on a key both write, the later in tick order wins.
+    It serves runs whose precedence over a loaded graph rests on mechanisms
+    not yet written as graph structure — a face's programs and skills over
+    its animations, which write the same controls — until that precedence is
+    a graph's own.
   - A skill states the policy it is spawned under when the caller gives none.
 - **A failure stays in its branch.** A `tick` error is transient, as now, and
   is raised on the device's behavior error. A run that ends `Done(Err)` is
@@ -293,31 +318,40 @@ Each function is described, so `DescribeMethods` lists it by name.
   keys under `arora/tasks/…/<run>/`, which only that run writes. They never
   overlap.
 
-**Statically, from the graph.** Before a graph is loaded or spawned, and
-before an edit applies, its component states its write set: keys, and
-prefixes that cover every key below them on `/` boundaries (`prefix_covers`).
-- **Behavior tree**: a variable or predetermined key an output port writes,
-  and a `WriteKeys` table, which is a literal for this reason.
-- **Node graph**: each `output` node's `path`. An `output` that writes the keys
-  its records name (`key_field`/`value_field`, as the animations source does)
-  states a `prefix` its keys stay under; one with no `prefix` is tracked
-  dynamically only.
-- **A graph a tree leaf runs** (3.8): its write set is part of its parent's.
+**The write set is analyzed from the graph.** No graph declares what it
+writes: a declaration beside the nodes that write could disagree with them,
+and the graph would no longer be the one source of truth. The component reads
+the keys off the graph it accepts:
+- **Behavior tree**: the store key a variable or a predetermined key binds to
+  an output port, and the keys of a `WriteKeys` table, which is a literal so
+  that they can be read off it.
+- **Node graph**: each `output` node's `path`.
+- **A graph a tree leaf runs** (3.8): its keys count as its parent's.
 
-The host refuses the call when the new set overlaps a set another branch
-holds. The call fails naming the key and the other branch, and nothing
-changes.
+The host keeps the set with the branch and has the component analyze the graph
+again on every edit, before the edit applies. Keys that only data names — an
+`output` that writes the keys its records carry (`key_field`/`value_field`,
+as the animations source does) — are not in the set; they are found at the
+write.
 
-**Dynamically, at the write.** Each branch writes through a view of the store
-the host gives it.
-- The first write of a key that no write set names claims the key for that
+**At load, spawn and edit.** The host refuses the call when the analyzed set
+overlaps another branch's set or claims. The call fails naming the key and the
+other branch, and nothing changes.
+
+**At the write.** Each branch writes through a view of the store the host
+gives it.
+- The first write of a key that no analyzed set names claims the key for that
   branch, until the branch ends.
-- A write to a key another branch holds is a conflict. The write is not
-  applied, and the branch that made it stops:
-  - a run ends `Failure`, and its result names the key and the other branch;
-  - a loaded graph is unloaded, and the device's behavior error says why.
-- A key outside an `output`'s declared `prefix` is a conflict of the same
-  kind.
+- **The second write fails**: a write to a key another branch holds is not
+  applied. The branch goes on, and its graph handles the failure as it handles
+  any other:
+  - in a behavior tree, the writing node returns `Failure`, and the tree
+    reacts as its controls say: a `FALLBACK` tries its next child, a `SEQ`
+    fails;
+  - in a node graph, the refused keys are not written and the tick reports
+    the error, as a failed store write is reported now: the runtime raises it
+    on the device's behavior error and ticks the graph again the next step.
+    The rest of the graph's writes apply.
 - The cost is one lookup per written key. Studio's stepping run for 300
   tracks writes 600 keys a tick, so 600 lookups.
 
@@ -326,12 +360,14 @@ sets the two against each other. An overlap between them is within the parent
 graph, which its component checks.
 
 **Within one graph, the component checks its parallel parts** when the graph
-is loaded or edited:
-- a tree's `PARALLEL`: two children whose write sets overlap refuse the graph;
+is loaded or edited, from the same analysis:
+- a tree's `PARALLEL`: two children whose keys overlap refuse the graph;
 - a node graph's `flow`: two `output` nodes on one path refuse the graph.
 
 Ordered parts are not parallel: a `SEQ`'s children write one after the other,
-and in a `layers` the later child takes precedence by design (3.7).
+and in a `layers` the later child takes precedence by design (3.7). Two parts
+of one graph writing a key that only data names follow the graph's order;
+tracking them as the host tracks branches is a later stage (section 7).
 
 ### 3.7 Within a graph, the structure is the order
 
@@ -482,7 +518,7 @@ arora-sdk's MIT.
 
 | Crate or surface | Change |
 |---|---|
-| `arora-behavior` (9.1) | Minor: `GraphType`, the typed functions' ids and encoders, `RunPolicy::Replace` (the enum is non-exhaustive). Major: the component trait and the host. |
+| `arora-behavior` (9.1) | Minor: `GraphType`, the typed functions' ids and encoders, `RunPolicy::Replace` and `RunPolicy::Overlap` (the enum is non-exhaustive). Major: the component trait and the host. |
 | `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`; `Equal`, `WriteKeys`, `run_graph`. Major: the runner scaffold goes, with the component trait. |
 | `arora` (12.2), `arora-web` (9.0) | Minor: the typed functions, described. Major: the builder composes components, and `Concurrent` refuses an overlap it accepted before. |
 | `arora-node-graph`, `arora-node-graph-interpreter`, `arora-shape` | New, `1.0.0`. |
@@ -490,14 +526,14 @@ arora-sdk's MIT.
 | `vizij-arora-host` (6.2) | Major: it registers the skills, as trees. |
 | Studio Bridge | No new `AroraOp`, so `studio-bridge-msgs` and the device client do not change. `studio-bridge-studio-client` gains typed helpers: a minor. No `arora-bridge` change, so no studio-bridge re-pin. |
 | WebSocket and ROS 2 bridges | No change: they list and call described functions already. |
-| Graph formats | `behavior-tree 1.0` (now), `1.1` (`Equal`, `WriteKeys`), `1.2` (`run_graph`); `node-graph 1.0` (now), `1.1` (an `output`'s `prefix`). |
+| Graph formats | `behavior-tree 1.0` (now), `1.1` (`Equal`, `WriteKeys`), `1.2` (`run_graph`); `node-graph 1.0` (now). The write analysis adds nothing to either format. |
 
 ## 6. How Studio's additions fit
 
 | Addition | In this design |
 |---|---|
 | `spawn_behavior(graph, policy)` | `spawn_graph` with `graph_type = behavior-tree`. If the addition takes `graph_type` and `graph_version` from the start, checked against the one interpreter's type, Studio's call does not change later. |
-| `Equal`, `WriteKeys` | `behavior-tree 1.1` nodes. `WriteKeys`' literal key table gives the stepping run a static write set: on a robot whose own tree writes one of those keys, the spawn is refused instead of the two fighting. |
+| `Equal`, `WriteKeys` | `behavior-tree 1.1` nodes. `WriteKeys`' key table is a literal, so the analysis reads the stepping run's keys off its graph: on a robot whose own tree writes one of those keys, the spawn is refused instead of the two fighting. |
 | The interpreter module's functions in `DescribeMethods` | The first part of 3.3: every function of the behavior module is described. |
 | The runner's `--groot` through `with_groot` | Unchanged. The tree loads as the branch `main`, of type `behavior-tree`. |
 
@@ -506,7 +542,7 @@ and its `exclusive` fragments become spawns under `Replace`.
 
 ## 7. Stages
 
-Each stage lands on its own. Stages 1, 2 and 5 are additive.
+Each stage lands on its own. Stages 1, 2, 5 and 6 are additive.
 
 1. **Typed graphs.** The typed functions join the module and are described.
    The one interpreter declares its graph types, and the untyped functions act
@@ -519,11 +555,15 @@ Each stage lands on its own. Stages 1, 2 and 5 are additive.
    each behind a default feature. The tree's runner scaffold and the node
    graph's `layers` runner give way to branches. Majors of `arora-behavior`,
    `arora-behavior-tree` and `arora`.
-4. **Write tracking.** Write sets, the static and dynamic checks, the
-   within-graph checks, `Replace`. Landed with stage 3, the two share one
-   `arora` major.
+4. **Write tracking.** Each component's write analysis; the checks at load,
+   spawn and edit; claims and failing writes; the within-graph checks;
+   `Replace` and `Overlap`. Landed with stage 3, the two share one `arora`
+   major.
 5. **Skills as trees.** `run_graph`; `look_at`, `play_viseme` and `say`
    rewritten as trees; bundle skill entries typed.
+6. **Data-chosen keys within one graph.** A component tracks the keys that
+   only data names between the parts of one graph, as the host does between
+   branches.
 
 ## 8. Alternatives
 
@@ -532,26 +572,23 @@ Each stage lands on its own. Stages 1, 2 and 5 are additive.
 | One interpreter that runs every language, handing each composite to its executor | Couples every language into one crate and one lowering; cannot serve two versions of one type side by side; parallel runs stay a concern of that one interpreter. |
 | One module per interpreter | A client would pick the module for each graph. One entry point routes on the type, as the one HAL module serves every component. |
 | The type and version as fields of `Graph` | The host routes and checks the version before it decodes the graph, and a diff has no place for them. |
-| The last writer wins between branches, in a declared order | Two branches driving one key is almost always a mistake, and an order only decides which one is lost, silently. Precedence that is meant is written inside one graph, in a `layers`. |
+| The last writer wins between branches, in a declared order | Two branches driving one key is almost always a mistake, and an order only decides which one is lost, silently. Precedence that is meant is written inside one graph, in a `layers`; `Overlap` is the explicit exception, for runs whose precedence is not yet a graph's own. |
 | Runs grafted into an interpreter's own graph | Each interpreter re-implements runs, order, halting and policies, and a run of one type cannot sit beside a graph of another. |
 | The node graph left in vizij-rs, composed from there | The default device would depend on Vizij, and a robot or the browser runtime could not run node graphs with stock Arora. |
 | The code copied into arora-sdk without its history | Loses `blame` and the reasons commit messages carry. |
 | `git subtree add` | Keeps the commits, but at their vizij-rs paths: `git log` on the new paths stops at the merge. |
+| Write sets declared beside each graph | A declaration and the nodes that write can disagree, and nothing would keep them equal. Analyzed from the graph, the set has one source. |
+| Stopping the branch whose write conflicts | A failed write is a failure like any other, and the graph that made it decides what to do: a tree falls back, a node graph goes on. Stopping the whole branch would take that choice from it. |
 | Skills kept as node graphs | Their lifecycle is computed as data — a start time latched through the store, a `Status` value built from comparisons — where a tree states it. |
 
-## 9. Open questions
+## 9. Open details
 
-- **A run over a loaded graph.** A face's program and skills are runs, and
-  some write controls its animations also write. Under 3.6 such a spawn is
-  refused. Should the face arbitrate inside its own graph (the run writes an
-  input its `layers` ranks), or should a policy let a run take precedence over
-  a loaded graph, ticked after it, while overlaps between runs stay refused?
-- **Who stops at a dynamic conflict.** 3.6 stops the branch whose write finds
-  the key held. Should a loaded graph rather keep running, with the write
-  refused and reported?
-- **Data-chosen keys within one graph.** Two parts of one graph writing a key
-  that only data names follow the graph's order. Should the component track
-  them as the host does between branches?
+The design above holds without them; each is to be investigated before the
+stage it touches.
+
+- **Retiring `Overlap`.** A face's programs and skills take precedence over
+  its animations through mechanisms that are not yet graph structure. Once
+  that precedence is written in graphs, `Overlap` has no user left.
 - **Names**: the crates (`arora-node-graph`, `arora-node-graph-interpreter`,
   `arora-shape`), the graph types (names, or ids as functions have), and the
   host.
@@ -560,14 +597,8 @@ Each stage lands on its own. Stages 1, 2 and 5 are additive.
 - **The untyped functions** (`LOAD`, `EDIT`, and `SPAWN_BEHAVIOR` once it
   lands): until which major they stay.
 - **The HAL's keys.** Once a HAL describes the keys it writes
-  ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)), should a branch
-  writing one be refused the same way?
-- **Who may load and spawn.** Any bridge client can load, spawn and halt.
-  Does the bridge's access control need a rule for the behavior module's
-  functions?
+  ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)), whether a
+  branch writing one fails the same way.
 - **When a `flow` reads the store.** Rule 2 has a node read when it runs. The
   node graph reads every input path before it evaluates, so a `flow` sees an
   earlier sibling's write only on the next tick.
-- **What an edit keeps.** A structural edit re-lowers. The tree resets its
-  nodes' state, while the node graph keeps it. One rule should say what an
-  edit keeps in both.
