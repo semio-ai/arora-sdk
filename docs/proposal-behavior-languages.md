@@ -34,9 +34,14 @@ In short:
   order. When two children write one key, the write of the later child wins.
 - **A node calls a module function. The function is never a node.** `call`
   is a tree leaf that calls the function when ticked. `apply` is a compute
-  node that calls the function as its `when` slot says. The caller decides
-  when to call the function and what happens to its result. The caller also holds
-  the values of the mutable parameters of the function.
+  node that calls the function as its `when` slot says. Either node can call
+  any function, quick or long-running. The caller decides when to call the
+  function and what happens to its result. The caller also holds the values
+  of the mutable parameters of the function.
+- **All nodes share one kind of scheduling.** A node that is not done gives
+  control back and is polled again next tick. A halt cancels it. A tree node
+  returns `Running`. A compute node keeps its last result until a call
+  finishes, and only then do the nodes after it run.
 - **The behavior host runs branches in parallel.** It owns their order,
   halting and run policies. It refuses two branches that write one key. Its
   components serve versions of the behavior-tree format.
@@ -214,10 +219,17 @@ controller that runs until a settle time ends (3.10).
 - It reads the clock (`time`), which moves every tick.
 - It is stateful and has not settled, for example a `damp` that still eases.
 - It is an `apply` whose `when` is `every_tick` (3.5).
+- It is an `apply` with a call in progress. The executor polls the call once
+  each tick until it ends (3.5).
 
 **A result that does not change stops the change.** Sometimes the output of
 a node is equal to its output last tick. Then its downstream nodes stay as
 they were, unless something else that they read changed.
+
+**A node waits for a first value.** An edge has no value until the node
+upstream produces one, for example an `apply` before its first call
+finishes. A node with a linked input that has no value does not run. An
+`output` node in that position writes nothing.
 
 **A node reads and writes when it runs.** An `input` node reads its key from
 the store when it runs, in tree order. Any tree node reads a variable in the
@@ -236,6 +248,7 @@ value of the previous tick (3.4, 3.7).
   child, or a `PARALLEL` resolves, or a halt occurs.
 - **A halt drops the state of the reactive node.** This state is the last
   value of every compute node and the integration of every stateful node.
+  The halt also cancels each call in progress in the reactive node (3.5).
   When its branch runs again, the reactive node starts with no state.
 - A stateful node starts from its first input. Thus `damp`, `spring` and
   `slew` get an `initial` input. When `initial` reads the current value of a
@@ -263,7 +276,7 @@ vocabulary also includes these nodes:
 | `output` | Writes its value to the store key named by the predetermined key of its slot, when the value changes. |
 | `time` | Gives the device clock, `arora/time`. The tree states the time since a branch started, with `Wait`. |
 | `damp`, `spring`, `slew` | Work as now. A new `initial` input sets their start state when it has a link (3.2). |
-| `apply` | Calls a module function (3.5). |
+| `apply` | Calls a module function, quick or long-running (3.5). |
 
 The engine of the node graph evaluates a reactive node. It uses its plan,
 its value types and the state of each node, keyed by node id.
@@ -328,14 +341,15 @@ the function:
 |---|---|---|
 | Called | When ticked | As its `when` slot says: `on_change` calls when an argument changed, and `every_tick` calls every tick |
 | Arguments | Literals or store keys | Literals, store keys, or edges from sibling compute nodes |
-| Return | A `Status` return sets the status of the leaf. Any other return goes to the key bound to `result`, and the leaf succeeds. | Its `result` output |
-| A mutable parameter | The caller holds it: in the key that it is bound to, or with the node while its branch runs | The same |
+| A value return | Goes to the key bound to `result`, and the leaf succeeds | Its `result` output |
+| A `Status` return | Sets the status of the leaf. `Running` keeps the leaf `Running`. | Its `status` output. The function reports its results through its mutable parameters. |
+| A mutable parameter | The caller holds it: in the key that it is bound to, or with the node while its branch runs | The same. Each mutable parameter is also an output. |
 
 **What a caller can know from a description:**
 - A function that returns `Status` reports progress. It is a long-running
   function, polled until it ends ([async functions](async-functions.md)).
-  Only `call` can call it, because a reactive node has no status for the
-  function to set.
+  Either caller can call it. For such a function, `apply` uses `on_change`
+  by default, and it polls a call in progress every tick.
 - A function with a mutable parameter carries state from call to call. For
   such a function, `apply` uses `every_tick` by default.
 - For any other function, `apply` uses `on_change` by default.
@@ -348,6 +362,37 @@ The function stays the same.
 **The calling node decides how the call occurs. The function does not
 change.** To move a call from the tree into a node graph, replace a
 `call` with an `apply` that has the same target and arguments.
+
+**A long-running call holds its last result.** Each call has an invocation
+id, under which the module keeps the progress of the call. The caller polls
+the same invocation each tick until the function returns `Success` or
+`Failure`:
+- While a call is in progress, an `apply` keeps the outputs that the last
+  finished call produced. Its output does not change, so the nodes after it
+  do not run. When the call finishes, the outputs change, and those nodes run.
+  This is forward propagation, as in an event-driven node graph.
+- A `call` in progress returns `Running`. Its siblings keep running, as for
+  any `Running` leaf.
+- Before the first call finishes, an `apply` has no result to keep. The
+  nodes after it wait (3.2).
+
+**Arguments that change during a call.** The `while_busy` slot of an `apply`
+of a long-running function decides what occurs:
+- `restart` cancels the call and starts a new call with the new arguments.
+  Under steady change, no call finishes.
+- `finish` lets the call end, then starts one more call with the latest
+  arguments.
+
+**A halt cancels calls.** A halt cancels each call in progress under the
+halted nodes. The module then drops the progress that it keeps for the
+invocation.
+
+**Cooperative scheduling has a limit.** It handles long durations. It does
+not handle a long single step. A function that does heavy work inside one
+poll holds the tick for that time, whichever caller calls it. Thus a function
+that a caller calls must return from each poll quickly. Longer work runs off
+the tick, and the function polls for its end
+([async functions](async-functions.md)).
 
 **The tree can still read its direct encoding.** In behavior-tree 1.x, a node
 whose function id is a module function reads as a `call` of that function.
@@ -389,7 +434,7 @@ reads as an `apply`.
   - `1.1`: `Equal`, `WriteKeys`.
   - `1.2`: `reactive`, the compute vocabulary, `layers`, the `succeed_on`
     option of `PARALLEL`.
-  - `1.3`: `call`, `apply`.
+  - `1.3`: `call`, `apply`, with `when` and `while_busy`.
 
 ### 3.7 The behavior host and its branches
 
@@ -624,11 +669,10 @@ a view is an edit of the tree.
   | Change the key of an `input` or `output` node | Set the predetermined key of its slot |
   | Delete a node | Remove it from `children`, with its links |
 
-  The view refuses what 3.1, 3.2, 3.4 and 3.5 refuse:
+  The view refuses what 3.1, 3.2 and 3.4 refuse:
   - a control node inside a reactive node
   - a loop
   - an edge to another reactive node
-  - an `apply` of a function that returns `Status`.
 - **The reactive node as stored.** This view draws the reactive node as the
   tree view draws any tree node. The reactive node is above its ordered
   children. The links between children are drawn apart from the edges of
@@ -783,7 +827,9 @@ except stage 4. Stage 4 takes the majors that it names.
    This stage takes majors of `arora-behavior`, `arora-behavior-tree` and
    `arora`.
 5. **Callers and skills.**
-   - `call` and `apply` (`behavior-tree 1.3`).
+   - `call` and `apply` (`behavior-tree 1.3`), each able to poll a
+     long-running function, with invocation ids, `while_busy` and
+     cancellation on halt.
    - The direct module-node encoding, read as `call`.
    - `look_at`, `play_viseme` and `say`, rewritten as trees.
    - Typed skill entries in bundles.
@@ -801,6 +847,8 @@ except stage 4. Stage 4 takes the majors that it names.
 | Edges between reactive nodes | Inside a reactive node, the value of an edge is the value of this tick. Between reactive nodes, the value depends on tick order and on whether the branch of the writer runs. A key makes both visible to the reader and to the write analysis. |
 | A reactive node that evaluates every compute node every tick, as the node graph does today | This is correct, and it is simpler. But a settled mapping then costs a full evaluation every tick while it runs. Change detection costs one comparison for each read, and it does no work for what did not change. |
 | A module function placed as the node itself, with the parent deciding how the call occurs | No place can say how to call a function (every tick or on change) when its description does not say. Also, the return binding of a tree leaf (`_ret`) looks like a parameter but is not one. A caller node holds both, and the function stays a function. |
+| Long-running functions callable only from a tree leaf | A node graph then cannot use a slow source, and a function that changes from quick to long-running breaks every `apply` of it. With one kind of scheduling, both callers poll it, and an `apply` holds its last result while it waits. |
+| A pending node that makes every node after it pending, every tick, until its call finishes | A continuous behavior, such as a rig, then freezes while one input is slow. Holding the last result keeps the graph continuous. The nodes after it run only when a new result arrives. |
 | The type and version as fields of `Graph` | The host routes and checks the version before it decodes the graph. A diff has no place for these fields. |
 | The last writer wins between branches, in a declared order | Two branches that drive one key are almost always a mistake. An order decides only which write the device silently loses. A `layers` states intended precedence. `Overlap` is the explicit exception. |
 | The node graph left in vizij-rs | The default device then depends on Vizij. A robot or the browser runtime cannot run node graphs with stock Arora. |
@@ -827,6 +875,21 @@ investigated before the stage that it touches.
   sources when two write one key (3.8). It is open whether the importer
   splits a composed face back into its sources. The other option is that the
   check allows the overlap for an imported graph.
+- **Invocation ids and cancellation.** A long-running call needs an id. The
+  module keeps the progress of the call under that id. The host also needs a
+  way to cancel a call inside a node, not only a task run. This is the question of
+  [ARORA-87](https://linear.app/semio-ai/issue/ARORA-87).
+- **Measuring long steps.** A poll that holds the tick shows only as a slow
+  tick. Times for each call and each branch belong to the tracing that
+  [ARORA-121](https://linear.app/semio-ai/issue/ARORA-121) proposes. That
+  tracing names the branch and the node that cause a slow tick.
+- **Outputs that update at different times.** In one reactive node, a slow
+  call can delay some outputs and not others. Then the outputs describe two
+  different moments. It is open whether a reactive node needs an option to
+  hold all of its writes until no call in it is in progress.
+- **Polls with no news.** The executor polls a call in progress every tick.
+  It is open whether a module can signal the end of a call, so that the
+  executor polls only then.
 - **Retiring `Overlap`.** After a `layers` states the precedence of a face
   over its programs and skills, `Overlap` has no user.
 - **Names**: the crates, the `reactive` and `layers` composites, the `call`
