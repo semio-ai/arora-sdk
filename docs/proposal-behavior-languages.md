@@ -3,352 +3,410 @@
 Status: draft, for review.
 Date: 2026-10-11.
 
-A device runs behaviors that decide what starts, runs and ends — actions,
-skills — and behaviors that turn values into values every tick — rigs,
-mappings, controllers. People author the first as behavior trees and the
-second as node graphs, and both mental models are worth supporting. Semio
-Studio runs its emulated devices as the same Arora runtime as real ones, so a
-robot gets node graphs and a face gets behavior trees; neither belongs to one
-kind of device.
+A device runs two kinds of behavior. Some behaviors decide what starts, runs
+and ends, such as actions and skills. Other behaviors turn values into values
+every tick, such as rigs, mappings and controllers. People author the first
+kind as behavior trees and the second kind as node graphs. Both mental models
+are worth supporting. Semio Studio runs its emulated devices on the same Arora
+runtime as real devices. Thus a robot gets node graphs, and a face gets
+behavior trees. Neither language belongs to one kind of device.
 
-This document states how a device stores and runs both as **one language, the
-behavior tree**, in which a node graph is a `reactive` node, and how the two
-are offered to authors as two views of the same stored graph.
+This document states how a device stores and runs both kinds as **one
+language, the behavior tree**. In that language, a node graph is a `reactive`
+node. The document also states how authors see the two kinds as two views of
+the same stored graph.
 
 In short:
 
-- **One language: the behavior tree.** A node graph is stored and run as a
-  `reactive` tree node. Its children are compute nodes, and the links between
-  those children are the graph's edges. No other data describes the graph.
-- **A reactive node is change-driven.** Each tick it runs a compute node only
-  when something it reads changed, and a result that comes out the same stops
-  the change there. It is `Running` for as long as its parent ticks it; when
-  the tree moves on, it is halted and its state goes.
+- **One language: the behavior tree.** A device stores and runs a node graph
+  as a `reactive` tree node. Its children are compute nodes. The links
+  between those children are the edges of the graph. No other data describes
+  the graph.
+- **A reactive node is change-driven.** Each tick, it runs a compute node
+  only when something that the node reads changed. A result that does not
+  change stops the change there. The reactive node is `Running` while its
+  parent ticks it. When the tree moves on, the reactive node is halted, and
+  its state goes.
 - **A node graph ends at its reactive node.** Edges join nodes inside one
   reactive node and nowhere else. A value passes between reactive nodes, or to
   the rest of the tree, through a store key.
-- **`layers` orders reactive nodes by precedence**: it ticks every child in
-  order, and a later child's write of a key wins.
-- **A module function is called by a node, never placed as one.** `call`, a
-  tree leaf, calls it when ticked; `apply`, a compute node, calls it as its
-  `when` slot says. The caller decides when the function is called and what
-  happens to its result, and holds its mutable parameters' values.
-- **The behavior host runs branches in parallel**, owns their order, halting
-  and run policies, and refuses two branches writing one key. Its components
-  serve versions of the behavior-tree format.
-- **The node graph moves from vizij-rs into arora-sdk** with its git history,
-  as the compute vocabulary and evaluator of the `reactive` node, and as the
-  importer that reads Vizij's node-graph format into a tree.
-- **Authoring has several views of one stored graph**: the tree, a reactive
-  node opened and edited as a node graph, the same node drawn as the tree node
-  it is stored as, and an overview of the keys that join reactive nodes.
+- **`layers` orders reactive nodes by precedence.** It ticks every child in
+  order. When two children write one key, the write of the later child wins.
+- **A node calls a module function. The function is never a node.** `call`
+  is a tree leaf that calls the function when ticked. `apply` is a compute
+  node that calls the function as its `when` slot says. The caller decides
+  when to call the function and what happens to its result. The caller also holds
+  the values of the mutable parameters of the function.
+- **The behavior host runs branches in parallel.** It owns their order,
+  halting and run policies. It refuses two branches that write one key. Its
+  components serve versions of the behavior-tree format.
+- **The node graph moves from vizij-rs into arora-sdk** with its git history.
+  It becomes the compute vocabulary and the evaluator of the `reactive` node.
+  It also becomes the importer that reads the Vizij node-graph format into a
+  tree.
+- **Authoring has several views of one stored graph:**
+  - the tree
+  - a reactive node that opens as a node graph, for edits
+  - the same reactive node, drawn as the tree node that the device stores
+  - an overview of the keys that join reactive nodes.
 
 ---
 
 ## 1. What exists
 
 **The runtime.**
-- **One interpreter per device**, set at build
+- **One interpreter per device.** The build sets it
   (`AroraBuilder::with_behavior_interpreter`). The default is an empty
   behavior tree.
-- **The interpreter is a module** under `interpreter_module::ID`, with four
+- **The interpreter is a module** under `interpreter_module::ID`. It has four
   functions
   ([`interpreter_module`](../crates/arora-behavior/src/interpreter_module.rs)):
-  - `LOAD(Graph)` replaces the main behavior;
-  - `EDIT(GraphDiff)` edits it;
-  - `SPAWN(Call, RunPolicy) -> TaskHandle` starts a task run;
-  - `HALT(TaskId)` stops one.
-- **`DescribeMethods` lists the methods an interpreter implements** (its
-  `described_methods`), but not those four functions. A client knows their
-  ids from `arora-behavior`.
-- **`RunPolicy` has one variant, `Concurrent`.** Two runs writing one key
-  overwrite each other; the last to write in a tick wins.
+  - `LOAD(Graph)` replaces the main behavior.
+  - `EDIT(GraphDiff)` edits the main behavior.
+  - `SPAWN(Call, RunPolicy) -> TaskHandle` starts a task run.
+  - `HALT(TaskId)` stops a task run.
+- **`DescribeMethods` lists the methods that an interpreter implements** (its
+  `described_methods`). It does not list the four functions above. A client
+  gets their ids from `arora-behavior`.
+- **`RunPolicy` has one variant, `Concurrent`.** Two runs that write one key
+  overwrite each other. The last write in a tick wins.
 
 **The shared model.** An
 [`arora_behavior::Graph`](../crates/arora-behavior/src/graph.rs) carries
-nodes bound to a function id, links that feed a node's input from a literal,
-a variable or another node's slot, and structure: `root` and each node's
-ordered `children`. Each interpreter lowers it into its own runtime form;
-nothing in it says which interpreter reads it, and the two interpreters read
-disjoint vocabularies.
+three things:
+- nodes, each bound to a function id
+- links, each of which feeds the input of a node from a literal, a variable
+  or the slot of another node
+- structure: `root`, and the ordered `children` of each node.
 
-**The behavior tree** (`arora-behavior-tree`) ticks its control nodes
-(`SEQ`, `SEQ_STAR`, `FALLBACK`, `PARALLEL`, which succeeds when every child
-has), its status leaves and its run-fragment nodes natively, and dispatches
-any other function id in its function index as a module call through
-`call_bridge.arora_call`. A node's arguments are expressions: a literal, a
-variable bound to a store key, another node's slot (`NodeArgument`), a
-selection, or a nested `CallExpression { module, function, arguments }`,
-evaluated each tick. A module function's mutable parameters are bound to
-variables, so the tree holds the state the function needs between calls. A
-runner, a `PARALLEL` root, holds the main behavior and one fragment per
-spawned run.
+Each interpreter lowers the graph into its own runtime form. Nothing in the
+graph says which interpreter reads it. The two interpreters read vocabularies
+that do not overlap.
 
-**The node graph** is Vizij's (vizij-rs: `vizij-graph-core`, the engine;
-`vizij-arora-behavior`, its interpreter `ProcessingGraph`):
-- Each tick it reads every subscribed input path from the store, evaluates
-  every node in topological order, and writes the outputs in one batch. It
-  reports `Running` forever.
-- Its root is a `layers` runner: the main behavior as one `flow`, then one
-  `flow` per run, in spawn order. A later run writes after an earlier one
+**The behavior tree** (`arora-behavior-tree`) runs these nodes natively: its
+control nodes (`SEQ`, `SEQ_STAR`, `FALLBACK`, `PARALLEL`), its status leaves
+and its run-fragment nodes. `PARALLEL` succeeds when every child succeeds.
+For any other function id in its function index, the tree makes a module
+call through `call_bridge.arora_call`.
+
+The arguments of a node are expressions, evaluated each tick:
+- a literal
+- a variable bound to a store key
+- the slot of another node (`NodeArgument`)
+- a selection
+- a nested `CallExpression { module, function, arguments }`.
+
+The mutable parameters of a module function are bound to variables. Thus the
+tree holds the state that the function needs between calls. A
+runner, which is a `PARALLEL` root, holds the main behavior and one fragment
+for each spawned run.
+
+**The node graph** comes from Vizij. In vizij-rs, `vizij-graph-core` is the
+engine, and `vizij-arora-behavior` holds its interpreter, `ProcessingGraph`.
+- Each tick, the interpreter reads every subscribed input path from the
+  store. It evaluates every node in topological order. Then it writes the
+  outputs in one batch. It reports `Running` forever.
+- Its root is a `layers` runner. The runner holds the main behavior as one
+  `flow`, then one `flow` for each run, in spawn order. A later run writes
+  after an earlier run
   ([vizij-rs#179](https://github.com/vizij-ai/vizij-rs/pull/179)).
-- A face's main behavior composes its sources in precedence order — its own
-  graphs, the mappings (ROS4HRI, the Studio-key mapping when serving Studio,
-  and any the face embeds), the animations — into one spec, one `flow`, in
-  which a later source's write of a key wins.
-- An `ExternalFunction` node calls a module function by id through the same
+- The main behavior of a face composes its sources in precedence order:
+  1. its own graphs
+  2. the mappings: ROS4HRI, the Studio-key mapping when the face serves
+     Studio, and any mappings that the face embeds
+  3. the animations.
+
+  The composition makes one spec, which is one `flow`. In that `flow`, when
+  two sources write one key, the write of the later source wins.
+- An `ExternalFunction` node calls a module function by id, through the same
   call bridge.
 - **Skills are node-graph fragments**: `look_at`, `play_viseme` and `say`
   (vizij-rs `vizij-arora-host`). A fragment computes its own lifecycle as
-  data and writes a `Status` value to `task/status`: `look_at` latches its
-  start time through the store and selects with a `case` over its policy;
-  the viseme players select on whether the run has ended; `say` hosts the
-  provider's call in a `TaskRun` node.
+  data and writes a `Status` value to `task/status`:
+  - `look_at` latches its start time through the store and selects with a
+    `case` over its policy.
+  - The viseme players select on whether the run has ended.
+  - `say` hosts the call to the provider in a `TaskRun` node.
 
-**Studio's stepping run.** Studio delivers to every device, emulated or real,
-a behavior that steps the animation module each tick and writes its outputs
-under keys, beside the device's own behavior. It needs four additions to
-arora-sdk, which proceed ahead of this proposal:
-- `spawn_behavior(graph, policy)`: a graph as a task run;
-- two built-in tree nodes, `Equal(a, b)` and `WriteKeys(keys, values)`, whose
-  key table is a literal;
-- the interpreter module's functions in `DescribeMethods`;
-- the runner's `--groot` resolving module leaves, through `with_groot`.
+**The stepping run of Studio.** Studio delivers to every device, emulated or
+real, a behavior that steps the animation module each tick. The behavior
+writes its outputs under keys, beside the behavior of the device itself. The
+stepping run needs four additions to arora-sdk. These additions proceed ahead
+of this proposal:
+- `spawn_behavior(graph, policy)`: a graph as a task run.
+- two built-in tree nodes, `Equal(a, b)` and `WriteKeys(keys, values)`. The
+  key table of `WriteKeys` is a literal.
+- the functions of the interpreter module in `DescribeMethods`.
+- `--groot` in the runner, resolving module leaves through `with_groot`.
 
-[Section 7](#7-how-studios-additions-fit) maps each onto this design.
+[Section 7](#7-how-studios-additions-fit) maps each addition onto this design.
 
 ## 2. The cases the design holds
 
 1. **A robot** runs its own behavior tree. Studio spawns its stepping run
-   beside it.
-2. **A Vizij face** runs its composed behavior: a `layers` of reactive nodes,
-   with skill runs and programs spawned and halted beside it.
-3. **A robot with a face** runs both as branches of one host: a tree for the
-   robot and a tree for the face, and runs of either.
-4. **A skill that decides and computes**: a tree whose control states the
-   lifecycle and whose reactive nodes compute what it drives, for as long as
+   beside that tree.
+2. **A Vizij face** runs its composed behavior, which is a `layers` of
+   reactive nodes. Skill runs and programs are spawned and halted beside it.
+3. **A robot with a face** runs both as branches of one host. One tree is for
+   the robot, one tree is for the face, and runs of either start beside them.
+4. **A skill that decides and computes.** The control of a tree states the
+   lifecycle. Reactive nodes in the tree compute what the skill drives, while
    their branch runs.
-5. **One module function, two placements**: a third-party function called
-   from a tree leaf in one behavior and from inside a node graph in another.
-6. **A graph written for an older format** runs beside one written for a
-   newer one, each on the component that reads it.
-7. **Two runs driving one key**: the second is refused when it spawns, or its
-   write fails, rather than both writing in turn.
+5. **One module function, two placements.** A tree leaf in one behavior calls
+   a third-party function. A node graph in another behavior calls the same
+   function.
+6. **A graph written for an older format** runs beside a graph written for a
+   newer format. Each runs on the component that reads its format.
+7. **Two runs that drive one key.** The host refuses the second run when it
+   spawns, or its write fails. The two runs do not write in turn.
 
 ## 3. Design
 
 ### 3.1 One language: the behavior tree
 
-- **Every graph a device runs is a behavior tree.** A node graph is a subtree
-  rooted at a `reactive` node: its children are compute nodes, and the links
-  between those children, with a port source, are its edges.
-- **The reactive node is a composite like `SEQ`.** Its semantics belong to
-  the tree's executor; no second interpreter runs it, and no leaf bridges two
+- **Every graph that a device runs is a behavior tree.** A node graph is a
+  subtree with a `reactive` node at its root. The children of that node are
+  compute nodes. The links between those children, with a port source, are
+  the edges of the graph.
+- **The reactive node is a composite, as `SEQ` is.** The executor of the tree
+  owns its semantics. No second interpreter runs it. No leaf bridges two
   languages.
-- **Its children are stored in order, and the order is not the evaluation
-  order.** The executor evaluates them upstream first; stored order breaks
-  ties.
-- **A node is a tree node or a compute node by where it sits**: under a
-  reactive node, a compute node; anywhere else, a tree node. A control node or
-  a leaf under a reactive node is refused, and so is a compute node anywhere
-  else.
+- **The children have a stored order, which is not the evaluation order.**
+  The executor evaluates upstream nodes first. The stored order breaks ties.
+- **The position of a node sets its kind.** Under a reactive node, a node is
+  a compute node. In all other positions, a node is a tree node. The
+  component refuses a control node or a leaf under a reactive node. It also
+  refuses a compute node in any other position.
 
 | Composite | Its children | Each tick | Status |
 |---|---|---|---|
 | `SEQ`, `FALLBACK`, `PARALLEL`, … | sub-behaviors | ticked as the control decides, by status | from its children |
-| `layers` | sub-behaviors, in precedence order | every child that has not ended, in order; a later child's write of a key wins | see below |
-| `reactive` | compute nodes | each that must run, upstream first | `Running` while ticked |
+| `layers` | sub-behaviors, in precedence order | every child that has not ended, in order. When two children write one key, the later child wins. | see below |
+| `reactive` | compute nodes | each node that must run, upstream first | `Running` while ticked |
 
-**`layers` ends when every child has.** A child that ends — `Success` or
-`Failure` — is not ticked again, and its last writes stay; the others go on.
-`layers` is `Running` while any child is; once every child has ended, it is
-`Failure` if any child failed and `Success` otherwise. One child failing
-neither fails the composite nor halts its siblings: `layers` states
-precedence, not control. Halting `layers` halts every child still running.
-A `layers` of reactive nodes therefore runs until it is halted, as a face's
-standing behavior does.
+**`layers` ends when every child has ended.**
+- A child that ends with `Success` or `Failure` does not tick again. Its last
+  writes stay. The other children continue.
+- `layers` is `Running` while any child is `Running`.
+- When every child has ended, `layers` is `Failure` if any child failed.
+  Otherwise, it is `Success`.
+- When one child fails, the composite does not fail, and it does not halt
+  the other children. `layers` states precedence, not control.
+- A halt of `layers` halts every child that still runs.
 
-`PARALLEL` gains `succeed_on: any`, which succeeds when one child has and
-halts the rest. It is how a tree runs a reactive node for as long as another
-child takes, such as a controller until a settle time (3.10).
+Thus a `layers` of reactive nodes runs until a halt stops it, as the standing
+behavior of a face does.
+
+`PARALLEL` gets a new option, `succeed_on: any`. With it, `PARALLEL` succeeds
+when one child succeeds, and it halts the other children. A tree uses it to
+run a reactive node for as long as another child runs. An example is a
+controller that runs until a settle time ends (3.10).
 
 ### 3.2 How a reactive node runs
 
-**Each tick, a compute node runs when:**
-- it has never run since its reactive node started;
-- any value it reads differs from the value it read last tick: a literal, a
-  store key, an upstream node's output. Comparing values, not only asking
-  whether an upstream node changed, also catches an edit: a new literal, a
-  rewired or removed link, a different key;
-- it reads the clock (`time`), which moves every tick;
-- it is stateful and has not settled (a `damp` still easing);
-- it is an `apply` whose `when` is `every_tick` (3.5).
+**Each tick, a compute node runs when one of these conditions is true:**
+- It has not run since its reactive node started.
+- A value that it reads is different from the value that it read last tick.
+  The value can be a literal, a store key or the output of an upstream node.
+  The executor compares values. It does not only ask whether an upstream node
+  changed. Thus it also catches an edit: a new literal, a rewired or removed
+  link, or a different key.
+- It reads the clock (`time`), which moves every tick.
+- It is stateful and has not settled, for example a `damp` that still eases.
+- It is an `apply` whose `when` is `every_tick` (3.5).
 
-**A result that comes out the same stops the change.** A node whose output
-equals last tick's leaves its downstream nodes as they were, unless something
-else they read changed.
+**A result that does not change stops the change.** Sometimes the output of
+a node is equal to its output last tick. Then its downstream nodes stay as
+they were, unless something else that they read changed.
 
-**Reads and writes happen when a node runs.** An `input` node reads its key
-from the store when it runs, in tree order, as any tree node reads a
-variable; an `output` node writes its key when its value changes. Within a
-reactive node an edge's value is always this tick's: the writer runs before
-the reader. Anywhere else — another reactive node of the same tree, a tree
-node, another branch — a reader sees this tick's value if it runs after the
-writer in tick order, and the previous tick's if it runs before (3.4, 3.7).
+**A node reads and writes when it runs.** An `input` node reads its key from
+the store when it runs, in tree order. Any tree node reads a variable in the
+same way. An `output` node writes its key when its value changes.
+
+Inside a reactive node, the value of an edge is always the value of this
+tick, because the writer runs before the reader. In all other positions, the
+tick order decides. Such a reader can be in another reactive node of the same
+tree, in a tree node or in another branch. If it runs after the writer, it
+reads the value of this tick. If it runs before the writer, it reads the
+value of the previous tick (3.4, 3.7).
 
 **Lifecycle.**
-- A reactive node is `Running` for as long as its parent ticks it. It never
-  succeeds on its own: its parent decides when it stops, by moving to another
-  child, by a `PARALLEL` resolving, or by a halt.
-- **Halting drops its state**: every compute node's last value and every
-  stateful node's integration. When its branch runs again it starts fresh.
-  A stateful node starts from its first input, so `damp`, `spring` and
-  `slew` gain an `initial` input: fed from a key's current value, a
-  restarted branch eases from where the key is instead of jumping.
-- **An edit keeps the state of the nodes it leaves.** A node keeps its id
-  across an edit, so a spring keeps its velocity; the next tick runs whatever
-  the edit changed.
+- A reactive node is `Running` while its parent ticks it. It never succeeds
+  by itself. Its parent decides when it stops. The parent moves to another
+  child, or a `PARALLEL` resolves, or a halt occurs.
+- **A halt drops the state of the reactive node.** This state is the last
+  value of every compute node and the integration of every stateful node.
+  When its branch runs again, the reactive node starts with no state.
+- A stateful node starts from its first input. Thus `damp`, `spring` and
+  `slew` get an `initial` input. When `initial` reads the current value of a
+  key, a restarted branch eases from that value. It does not jump.
+- **An edit keeps the state of the nodes that it does not change.** A node
+  keeps its id across an edit, so a spring keeps its velocity. The next tick
+  runs the nodes that the edit changed.
 
-**A reactive node's links form no loop.** Its evaluation order needs one, so
-a load or edit that closes a loop is refused. A value fed back from one tick
-to the next goes through a store key: an `output` node writes it and an
-`input` node reads it next tick.
+**The links of a reactive node make no loop.** The evaluation order needs an
+order with no loop. Thus the component refuses a load or an edit that makes
+a loop. To feed a value back from one tick to the next tick, use a store key.
+An `output` node writes the value, and an `input` node reads it next tick.
 
 ### 3.3 The compute vocabulary
 
-The compute nodes are the node graph's generic vocabulary, moved into
-arora-sdk (section 5): arithmetic, logic, ranges, time, oscillators and
-noise, smoothing (`damp`, `spring`, `slew`), vectors, blending, records, IK
-behind the `urdf_ik` feature, and:
+The compute nodes are the generic vocabulary of the node graph, which moves
+into arora-sdk (section 5). The vocabulary includes arithmetic, logic,
+ranges, time, oscillators, noise, smoothing (`damp`, `spring`, `slew`),
+vectors, blending and records. IK is behind the `urdf_ik` feature. The
+vocabulary also includes these nodes:
 
 | Node | Does |
 |---|---|
-| `input` | Reads the store key on its slot's predetermined key. |
-| `output` | Writes its value to the store key on its slot's predetermined key, when the value changes. |
-| `time` | The device clock, `arora/time`. Time since a branch started is the tree's to state, with `Wait`. |
-| `damp`, `spring`, `slew` | As now, with an `initial` input their state starts from when it is linked (3.2). |
+| `input` | Reads the store key named by the predetermined key of its slot. |
+| `output` | Writes its value to the store key named by the predetermined key of its slot, when the value changes. |
+| `time` | Gives the device clock, `arora/time`. The tree states the time since a branch started, with `Wait`. |
+| `damp`, `spring`, `slew` | Work as now. A new `initial` input sets their start state when it has a link (3.2). |
 | `apply` | Calls a module function (3.5). |
 
-A reactive node is evaluated by the node graph's engine: its plan, its value
-types and its per-node state, keyed by node id.
+The engine of the node graph evaluates a reactive node. It uses its plan,
+its value types and the state of each node, keyed by node id.
 
 ### 3.4 Where a node graph ends
 
-**Edges join compute nodes inside one reactive node.** A link whose source is
-a port and that has a compute node at either end is valid only between two
-children of the same reactive node. A load or edit with one between two
-reactive nodes, or between a reactive node's child and a tree node, is
-refused. A port link between two tree nodes keeps its `behavior-tree 1.0`
-meaning: an argument that reads another node's slot (`NodeArgument`).
+**Edges join compute nodes inside one reactive node.** This rule applies to
+each link that has a port source and a compute node at either end. Such a
+link is valid only between two children of the same reactive node. The
+component refuses a load or an edit that puts such a link between two
+reactive nodes.
+It also refuses such a link between a child of a reactive node and a tree
+node. A port link between two tree nodes keeps its `behavior-tree 1.0`
+meaning: an argument that reads the slot of another node (`NodeArgument`).
 
 **Between reactive nodes, a value passes through a store key.** Inside a
-reactive node, an edge's value has a definite time: this tick's, since the
-writer runs first. Between two reactive nodes neither holds:
-- the reader may tick before the writer, and see last tick's value;
-- the writer's branch may not be running at all — another option of a
-  `FALLBACK` — and its last value stays.
+reactive node, the value of an edge has a known time. It is the value of
+this tick, because the writer runs first. Between two reactive nodes, that
+is not true:
+- The reader can tick before the writer and read the value of last tick.
+- The branch of the writer possibly does not run at all, for example when it
+  is another option of a `FALLBACK`. Then its last value stays.
 
-A named key makes both visible, and it is what the write analysis (3.8)
-already reads: who writes the key, who reads it, and whether two parallel
-branches write it.
+A named key makes both cases visible. The write analysis (3.8) already reads
+keys: who writes the key, who reads it, and whether two parallel branches
+write it.
 
-**Precedence between reactive nodes is a `layers`.** A face is composed as one
-`layers` with a reactive node per source — its own graphs, the mappings, the
-animations — so a later source's write of a key wins, as listed order does in
-the one `flow` a face is composed into today, and the precedence is
-structure the write analysis can read. A face already composed into one
-`flow` imports as one reactive node (3.6), in which two sources writing one
-key is refused (3.8) until it is composed as a `layers` (section 10).
+**Precedence between reactive nodes is a `layers`.** A face has one
+`layers`, with one reactive node for each source: its own graphs, the
+mappings and the animations. When two sources write one key, the later
+source wins. Today, the listed order of sources in the one `flow` of a face
+gives the same result. With `layers`, the precedence is structure, and the
+write analysis can read it.
+
+A face that is already composed into one `flow` imports as one reactive node
+(3.6). In that node, the component refuses two sources that write one key
+(3.8).
+This refusal continues until the face is composed as a `layers`
+(section 10).
 
 ### 3.5 Module functions and the nodes that call them
 
 **A module function is a function.** Its description, in
-`arora_types::module::high`, is its parameters (each with a type, a
-`mutable` flag and a default) and its return type. Behavior-tree node
-functions are designed to be stateless: state a function needs across calls
-is passed in a mutable parameter that the caller holds
-([arora-behavior-tree](../crates/arora-behavior-tree/readme.md)). That is a
-design aim, not a guarantee: a long-running function keeps per-invocation
-state in its module behind a handle ([async functions](async-functions.md)),
-and a host module may keep state of its own
-([design decisions](design_decisions.md)).
+`arora_types::module::high`, has two parts: its parameters and its return
+type. Each parameter has a type, a `mutable` flag and a default.
 
-**Two nodes call module functions.** Each names its function by the literal
-on its `target` slot and has one slot per parameter of it:
+The design aim for behavior-tree node functions is that they are stateless.
+A function passes the state it needs across calls in a mutable parameter,
+which the caller holds
+([arora-behavior-tree](../crates/arora-behavior-tree/readme.md)). This aim
+is not a guarantee:
+- A long-running function keeps state for each invocation in its module,
+  behind a handle ([async functions](async-functions.md)).
+- A host module can keep state of its own
+  ([design decisions](design_decisions.md)).
+
+**Two nodes call module functions.** Each node names its function with the
+literal on its `target` slot. Each node has one slot for each parameter of
+the function:
 
 | | `call`, a tree leaf | `apply`, a compute node |
 |---|---|---|
-| Called | When ticked | As its `when` slot says: `on_change`, when an argument changed; `every_tick` |
+| Called | When ticked | As its `when` slot says: `on_change` calls when an argument changed, and `every_tick` calls every tick |
 | Arguments | Literals or store keys | Literals, store keys, or edges from sibling compute nodes |
-| Return | A `Status` decides the leaf's; any other value goes to the key bound to `result`, and the leaf succeeds | Its `result` output |
-| A mutable parameter | Held by the caller: in the key it is bound to, or with the node while its branch runs | The same |
+| Return | A `Status` return sets the status of the leaf. Any other return goes to the key bound to `result`, and the leaf succeeds. | Its `result` output |
+| A mutable parameter | The caller holds it: in the key that it is bound to, or with the node while its branch runs | The same |
 
-**What a description lets a caller rely on.**
-- A function that returns `Status` reports progress — a long-running
-  function polled until it ends ([async functions](async-functions.md)) — so
-  only `call` can call it: a reactive node has no status for it to decide.
-- A function with a mutable parameter carries state from call to call, so
-  `apply` defaults to `every_tick`.
-- Any other function, `apply` defaults to `on_change`.
+**What a caller can know from a description:**
+- A function that returns `Status` reports progress. It is a long-running
+  function, polled until it ends ([async functions](async-functions.md)).
+  Only `call` can call it, because a reactive node has no status for the
+  function to set.
+- A function with a mutable parameter carries state from call to call. For
+  such a function, `apply` uses `every_tick` by default.
+- For any other function, `apply` uses `on_change` by default.
 
-**`when` belongs to the caller**, because a description cannot say that a
-function keeps state inside its module or acts on the world. An author
-who knows a function must be called every tick sets `every_tick` on the node
-that calls it; the function is the same either way.
+**The caller owns `when`, because a description cannot say that a function
+keeps state inside its module, or that it acts on the world.** An author who knows
+that a function must run every tick sets `every_tick` on the calling node.
+The function stays the same.
 
-**The node a function is placed under decides how it is called; the function
-does not change.** Moving a call from the tree into a node graph replaces a
-`call` with an `apply`, with the same target and arguments.
+**The calling node decides how the call occurs. The function does not
+change.** To move a call from the tree into a node graph, replace a
+`call` with an `apply` that has the same target and arguments.
 
-**The tree's direct encoding stays readable.** A behavior-tree 1.x node whose
-function id is a module function reads as a `call` of that function, its
-`_ret` binding as `result`; a node graph's `ExternalFunction` reads as an
-`apply`.
+**The tree can still read its direct encoding.** In behavior-tree 1.x, a node
+whose function id is a module function reads as a `call` of that function.
+Its `_ret` binding reads as `result`. An `ExternalFunction` of a node graph
+reads as an `apply`.
 
 ### 3.6 Graph types and versions
 
-- **One graph type runs: `behavior-tree`.** Its version is the format's: a
-  minor version adds to the format (a new node kind); a major changes what an
-  existing graph means. A graph states the oldest version that has everything
-  it uses; a component reading `1.4` runs any `1.x` graph with `x ≤ 4` and
-  refuses a newer one, naming the version it reads.
-- **Type and version are parameters of the call, beside the graph.** The host
-  routes on them before the graph is decoded and checks an edit against the
-  branch it targets.
-- **`node-graph` is an import format.** A load or spawn typed
-  `node-graph 1.0` — the encoding `vizij-arora-behavior` 5.4 decodes — is
-  lowered to a behavior tree before it reaches a component: each `flow` to a
-  reactive node, a `layers` composite in the graph to a `layers` of them,
-  each `ExternalFunction` to an `apply`. A graph with no structure is one
-  `flow`. The runs that `ProcessingGraph`'s root `layers` runner holds today
-  are not part of a loaded graph: each is a branch of the host (3.7).
-- **Lowering keeps node ids**, so a branch loaded as `node-graph 1.0` also
-  accepts an edit typed `node-graph 1.0`: the diff is lowered the same way,
-  node for node, and applied as a tree edit. Such a diff may touch only
-  compute nodes and the links between them; one that changes structure is
-  refused, naming the change. A branch is typed `behavior-tree` once loaded,
-  and accepts `behavior-tree` edits whatever it was loaded as; a branch
-  loaded as `behavior-tree` refuses a `node-graph` edit.
+- **One graph type runs: `behavior-tree`.** Its version is the version of
+  the format. A minor version adds to the format, for example a new node
+  kind. A major version changes what an existing graph means.
+- **A graph states the oldest version that has everything it uses.** A
+  component that reads `1.4` runs any `1.x` graph with `x ≤ 4`. It refuses a
+  newer graph and names the version that it reads.
+- **The call carries the type and the version as parameters, beside the
+  graph.** The host routes on them before it decodes the graph. The host also
+  checks an edit against the branch that the edit targets.
+- **`node-graph` is an import format.** The host lowers a load or spawn typed
+  `node-graph 1.0` to a behavior tree before it sends the graph to a
+  component. (`node-graph 1.0` is the encoding that `vizij-arora-behavior`
+  5.4 decodes.) The lowering maps:
+  - each `flow` to a reactive node
+  - a `layers` composite in the graph to a `layers` of those reactive nodes
+  - each `ExternalFunction` to an `apply`.
+
+  A graph with no structure is one `flow`. The root `layers` runner of
+  `ProcessingGraph` holds runs today. Those runs are not part of a loaded
+  graph. Each run is a branch of the host (3.7).
+- **The lowering keeps node ids.** Thus a branch loaded as `node-graph 1.0`
+  also accepts an edit typed `node-graph 1.0`. The host lowers the diff in
+  the same way, node for node, and applies it as a tree edit. Such a diff can
+  change only compute nodes and the links between them. The host refuses a
+  diff that changes structure, and it names the change.
+- **After a load, the type of each branch is `behavior-tree`.** The branch
+  accepts `behavior-tree` edits, whatever its load type was. A branch loaded
+  as `behavior-tree` refuses a `node-graph` edit.
 - The versions:
-  - `behavior-tree 1.0`: what `arora-behavior-tree` 8.1 lowers;
-  - `1.1`: `Equal`, `WriteKeys`;
-  - `1.2`: `reactive`, the compute vocabulary, `layers`, `PARALLEL`'s
-    `succeed_on`;
+  - `behavior-tree 1.0`: what `arora-behavior-tree` 8.1 lowers.
+  - `1.1`: `Equal`, `WriteKeys`.
+  - `1.2`: `reactive`, the compute vocabulary, `layers`, the `succeed_on`
+    option of `PARALLEL`.
   - `1.3`: `call`, `apply`.
 
 ### 3.7 The behavior host and its branches
 
-A device's behavior interface (the **behavior host**) runs branches and owns
-what no single graph should: their order, their lifecycles, run policies and
-write tracking.
+The behavior interface of a device (the **behavior host**) runs branches. It
+owns what no single graph should own: their order, their lifecycles, the run
+policies and the write tracking.
 
-**Components serve versions of the format.** The host is built from
-interpreter components, each under a name unique within it, each declaring
-the `behavior-tree` majors it reads. Two components serving one major is a
-build error. A device built with one interpreter has one component, named
-`device`. The host lives in `arora-behavior`, so the native runtime and
-`arora-web` share it, and the runtime registers it as one module under
-`interpreter_module::ID`.
+**Components serve versions of the format.**
+- The build makes the host from interpreter components. Each component has a
+  name that is
+  unique in the host. Each component declares the `behavior-tree` majors
+  that it reads.
+- Two components that serve one major cause a build error.
+- A device built with one interpreter has one component, named `device`.
+- The host is in `arora-behavior`, so the native runtime and `arora-web`
+  share it. The runtime registers the host as one module under
+  `interpreter_module::ID`.
 
 ```rust
 pub struct GraphType {
@@ -375,219 +433,252 @@ pub trait BehaviorInterpreter {
 }
 ```
 
-`BranchScope` carries what a run binds: its key prefix, onto which the
-component maps the `task/` placeholder keys a graph names, and its
-arguments.
+`BranchScope` carries what a run binds: its key prefix and its arguments.
+The component maps the `task/` placeholder keys that a graph names onto the
+key prefix.
 
-**A branch is a loaded graph or a run.** A loaded graph is the device's
-standing behavior, ticked every step until it is unloaded, whatever it
-reports. A run starts from a spawn and ends at a halt, when its root reaches
-a terminal status, or when it writes a terminal `Status` to its own
-`task/status` key. The last is how a run whose root never ends — a reactive
-node, a `layers` of them, an imported node-graph fragment — reports that it
-is done.
-A spawn runs a graph (`spawn_graph`), a skill (3.10), or a module function
-returning `Status`, which the host calls each tick until it ends.
+**A branch is a loaded graph or a run.**
+- A loaded graph is the standing behavior of the device. The host ticks it
+  every step until an unload, whatever status it reports.
+- A run starts from a spawn. It ends in one of three ways:
+  - a halt
+  - a terminal status of its root
+  - a terminal `Status` that the run writes to its own `task/status` key
+- The third way is how a run reports that it is done when its root never
+  ends. Such a root can be a reactive node, a `layers` of reactive nodes or
+  an imported node-graph fragment.
+- A spawn runs a graph (`spawn_graph`), a skill (3.10), or a module function
+  that returns `Status`. The host calls such a function each tick until it
+  ends.
 
-**Order.** Each step the host ticks every branch once: the loaded graphs in
-load order, then the runs in spawn order. A branch added during a tick runs
-from the next tick. Two branches do not write one key (3.8), so the order
-decides only whether a reader sees another branch's write of this tick or
-the previous one, and it is the same every time the device runs the same
-branches. "Parallel" means no precedence between branches, not threads.
+**Order.** Each step, the host ticks every branch one time. It ticks the
+loaded graphs in load order, then the runs in spawn order. A branch added
+during a tick runs from the next tick. Two branches do not write one key
+(3.8). Thus the order decides only one thing. It decides whether a reader
+sees the write of another branch from this tick or from the previous tick.
+The order is the same each time the device runs the same branches. Here,
+"parallel" means no precedence between branches. It does not mean threads.
 
-**Halting.** `halt` asks the component to stop the branch; a tree halts its
-running nodes, which drops its reactive nodes' state. A halted run ends
-`Failure` on its status key. Halting writes nothing back: returning a key to
-rest is the client's step. `unload_graph` halts a loaded graph the same way.
+**Halting.**
+- `halt` asks the component to stop the branch. A tree halts its running
+  nodes, which drops the state of its reactive nodes.
+- A halted run ends with `Failure` on its status key.
+- A halt writes nothing back. To return a key to rest is a step for the
+  client.
+- `unload_graph` halts a loaded graph in the same way.
 
 **Run policies:**
-- **`Concurrent`**: the run joins the others. A write overlap with any branch
-  refuses the spawn.
-- **`Replace`**: the runs whose writes overlap the new run's are halted before
-  its first tick. An overlap with a loaded graph still refuses the spawn. A
-  new viseme takes over from the one before this way.
-- **`Overlap`**: the run joins even where its writes overlap other branches';
-  on a key both write, the later in tick order wins. It serves runs whose
-  precedence over a loaded graph is not yet written as a `layers` — a face's
-  programs and skills over its animations.
-- A skill states the policy it is spawned under when the caller gives none.
+- **`Concurrent`**: the run joins the other branches. The host refuses the
+  spawn if the run writes a key that any branch writes.
+- **`Replace`**: before the first tick of the new run, the host halts each
+  run that writes a key that the new run writes. The host still refuses the
+  spawn if the new run writes a key that a loaded graph writes. A new viseme
+  replaces the previous viseme in this way.
+- **`Overlap`**: the run joins even when it writes keys that other branches
+  write. When two branches write one key, the later branch in tick order
+  wins. This policy serves runs whose precedence over a loaded graph is not
+  yet written as a `layers`. An example is the programs and skills of a face
+  over its animations.
+- A skill states the policy that the host uses when the caller gives none.
 
-**A failure stays in its branch.** A `tick` error is transient and raised on
-the device's behavior error. A run that ends `Done(Err)` is dropped; a loaded
-graph that does is unloaded, and the error names it.
+**A failure stays in its branch.** A `tick` error is transient. It is raised
+on the behavior error of the device. The host drops a run that
+ends with `Done(Err)`. The host unloads a loaded graph that ends with
+`Done(Err)`, and the error names the graph.
 
 ### 3.8 Two parallel branches never write one key
 
-**An output is a store key a branch writes.** Keys under `arora/` belong to
-the runtime: the clock, and each run's own keys under `arora/tasks/…/<run>/`,
-which only that run writes.
+**An output is a store key that a branch writes.** The runtime owns the keys
+under `arora/`. These keys are the clock, and the keys of each run under
+`arora/tasks/…/<run>/`. Only that run writes its own keys.
 
-**The write set is analyzed from the graph**, never declared beside it:
-- an `output` node's key;
-- a `call`'s `result` key, and the key bound to any mutable parameter of its
-  target (read and written);
-- an `apply`'s mutable parameters bound to keys;
-- `WriteKeys`' key table, a literal so that it can be read off.
+**The component analyzes the write set from the graph.** No declaration
+beside the graph gives the write set. The set contains:
+- the key of each `output` node
+- the `result` key of each `call`, and the key bound to any mutable
+  parameter of its target (read and written)
+- the keys bound to the mutable parameters of each `apply`
+- the key table of `WriteKeys`, which is a literal so that the analysis can
+  read it.
 
-The host keeps the set with the branch and has the component analyze the
-graph again on every edit, before the edit applies. Keys that only data names
-— an `output` that writes the keys its records carry — are not in the set;
-they are found at the write.
+The host keeps the set with the branch. On every edit, the host tells the
+component to analyze the graph again, before the edit applies. Some keys come
+only from data, for example the keys that the records of an `output` carry.
+These keys are not in the set. The host finds them at the write.
 
-**At load, spawn and edit**, the host refuses the call when the analyzed set
-overlaps another branch's set or claims, naming the key and the other branch
-— except as a run's policy allows (3.7): under `Replace` the overlapping runs
-are halted first, and a run under `Overlap` joins whatever it overlaps.
+**At load, spawn and edit, the host compares write sets.** If the analyzed
+set overlaps the set or the claims of another branch, the host refuses the
+call. The refusal names the key and the other branch. The policy of a run
+can allow the overlap (3.7):
+- Under `Replace`, the host halts the overlapping runs first.
+- Under `Overlap`, the run joins whatever it overlaps.
 
-**At the write**, each branch writes through a view of the store. The first
-write of a key no analyzed set names claims it for that branch until the
-branch ends. A write to a key another branch holds is not applied and fails:
-- a tree node that writes — `WriteKeys`, a `call` — returns `Failure`, and
-  the tree reacts as its controls say;
-- an `output` node in a reactive node does not write, and the tick reports
-  the error on the device's behavior error; the rest of the reactive node's
-  writes apply.
+**At the write, claims apply.** Each branch writes through a view
+of the store. The first write of a key that no analyzed set names claims the
+key for that branch, until the branch ends. A write to a key that another
+branch holds does not apply, and it fails:
+- A tree node that writes, such as `WriteKeys` or a `call`, returns
+  `Failure`. The tree reacts as its controls say.
+- An `output` node in a reactive node does not write. The tick reports the
+  error on the behavior error of the device. The other writes of the
+  reactive node apply.
 
-**Within one graph, the component checks its parallel parts** when the graph
-is loaded or edited:
-- a `PARALLEL`'s children whose keys overlap refuse the graph;
-- two `output` nodes in one reactive node writing one key refuse the graph.
+**Inside one graph, the component checks the parallel parts.** It does this
+check when the graph loads and when an edit occurs. It refuses the graph in
+these cases:
+- The children of a `PARALLEL` write one key.
+- Two `output` nodes in one reactive node write one key.
 
-Ordered parts are not parallel: a `SEQ`'s children write one after the
-other, and in a `layers` the later child takes precedence by design.
+Ordered parts are not parallel. The children of a `SEQ` write one after the
+other. In a `layers`, the later child has precedence by design.
 
-### 3.9 The behavior module's functions
+### 3.9 The functions of the behavior module
 
-Each is described, so `DescribeMethods` lists it by name, and the Studio
-Bridge, the WebSocket bridge and the ROS 2 bridge reach it with no new wire
-op.
+Each function has a description. Thus `DescribeMethods` lists each function
+by name. The Studio Bridge, the WebSocket bridge and the ROS 2 bridge reach
+each function with no new wire op.
 
 | Function | Arguments | Returns | Effect |
 |---|---|---|---|
-| `load_graph` | `name: string`, `graph_type: string`, `graph_version: string`, `graph` | unit | Loads `graph` as the branch `name`, replacing a graph already loaded under that name, in its place. |
+| `load_graph` | `name: string`, `graph_type: string`, `graph_version: string`, `graph` | unit | Loads `graph` as the branch `name`. If a graph is already loaded under that name, `graph` replaces it in its position. |
 | `unload_graph` | `name: string` | unit | Halts the branch `name` and removes it. |
-| `edit_graph` | `branch: string`, `graph_type: string`, `graph_version: string`, `diff` | unit | Edits a branch: a loaded graph by its name, a run by its task id. |
+| `edit_graph` | `branch: string`, `graph_type: string`, `graph_version: string`, `diff` | unit | Edits a branch: a loaded graph by its name, or a run by its task id. |
 | `spawn_graph` | `graph_type: string`, `graph_version: string`, `graph`, `policy: RunPolicy` | `TaskHandle` | Starts `graph` as a task run. |
 | `spawn` | `call: Call`, `policy: RunPolicy` | `TaskHandle` | Starts a module function as a task run (3.7). |
 | `halt` | `task: TaskId` | unit | Stops a run. Idempotent. |
-| `interpreters` | — | list | The components and the format versions they read. |
-| `branches` | — | list | What runs, in tick order, and what each writes. |
+| `interpreters` | — | list | The components, and the format versions that they read. |
+| `branches` | — | list | What runs, in tick order, and what each branch writes. |
 
-- `graph` and `diff` are described as the dynamic record type: `Graph` and
-  `GraphDiff` have no Arora type of their own.
+- The descriptions give `graph` and `diff` the dynamic record type, because
+  `Graph` and `GraphDiff` have no Arora type of their own.
 - `LOAD`, `EDIT`, `SPAWN` and `HALT` keep their ids. `LOAD` and `EDIT` act on
   the branch `main`.
-- `branches()` lists, per branch: its name or task id, its parent branch,
-  its component, its type and version, the policy a run was spawned under,
-  the keys it writes (analyzed) and the keys it claimed.
-- Over the Studio Bridge these are commands like any other. Loading and
-  editing are not offered over ROS 2, which has
-  no message type for a graph; a skill returns `Status`, so it stays a ROS
-  action.
+- For each branch, `branches()` lists:
+  - its name or task id
+  - its parent branch
+  - its component
+  - its type and version
+  - the policy of a run
+  - the keys that it writes (analyzed)
+  - the keys that it claimed.
+- Over the Studio Bridge, these functions are commands, as any other
+  command is.
+- ROS 2 has no message type for a graph. Thus the ROS 2 bridge does not
+  offer load or edit. A skill returns `Status`, so it stays a ROS action.
 
 ### 3.10 Skills are behavior trees
 
-A skill is a method implemented by a graph: its contract (function id, name,
-signature) and a behavior tree. The host registers it, describes it, and
-spawns its graph. Its parameters are the `task/` keys the graph reads.
+A skill is a method that a graph implements. It has a contract (function id,
+name, signature) and a behavior tree. The host registers the skill, describes
+it and spawns its graph. The parameters of the skill are the `task/` keys
+that the graph reads.
 
-A skill's lifecycle — start, wait, end, fail — is control, which the tree
-states directly. What it drives each tick is a reactive node in the branch
-that needs it:
-- **`look_at`**: a `FALLBACK` over the policies. Each policy's branch checks
-  `task/policy`, then runs its gaze. `glance` and `reset` run their gaze
-  under `PARALLEL(succeed_on: any)` with a `Wait` for the settle time, so the
-  run succeeds when it ends; `track`, `idle` and `random` run theirs until
-  halted; an unsupported policy writes `ENOTSUP` to `task/result` and fails.
-  Each gaze is a small reactive node: hold the target, rest, or wander.
-- **`say`**: a `call` of the provider's `say`, which returns `Status`, beside
-  the lipsync reactive node under `PARALLEL(succeed_on: any)`; then a
-  reactive node brings the lips to rest.
-- **`play_viseme`**: the lipsync reactive node for one shape, spawned under
-  `Replace`.
+The lifecycle of a skill is start, wait, end and fail. This lifecycle is
+control, and the tree states control directly. What the skill drives each
+tick is a reactive node in the branch that needs it:
+- **`look_at`** is a `FALLBACK` over the policies. The branch of each policy
+  checks `task/policy`, then runs its gaze.
+  - `glance` and `reset` run their gaze under `PARALLEL(succeed_on: any)`,
+    beside a `Wait` for the settle time. Thus the run succeeds when the wait
+    ends.
+  - `track`, `idle` and `random` run their gaze until a halt.
+  - An unsupported policy writes `ENOTSUP` to `task/result` and fails.
+
+  Each gaze is a small reactive node. It holds the target, rests or wanders.
+- **`say`** runs, under `PARALLEL(succeed_on: any)`, a `call` of the `say`
+  function of the provider beside the lipsync reactive node. That function
+  returns `Status`. After that, a reactive node moves the lips to rest.
+- **`play_viseme`** is the lipsync reactive node for one shape. The host
+  spawns it under `Replace`.
 
 The skill contracts stay where they are declared (vizij-rs
-`vizij-arora-host`). A face bundle's `skill::<id>` entry carries its graph
-type and version beside the graph.
+`vizij-arora-host`). The `skill::<id>` entry of a face bundle carries the
+graph type and version of the skill, beside the graph.
 
-**What changes for a branch that stops.** In a single node graph every
-policy's gaze is computed every tick, selected or not, so a smoothed value
-has history when its policy is selected. In the tree, an unselected branch is
-halted: it costs nothing and keeps nothing, and its smoothing starts fresh
-when selected. Where that difference shows, a smoothing node's `initial`
-input starts it from the key's current value.
+**What changes for a branch that stops.** In one node graph, the gaze of
+every policy runs every tick, whether the policy is selected or not. Thus a
+smoothed value has history when its policy becomes selected. In the tree,
+the tree halts a branch that is not selected. That branch costs nothing and
+keeps nothing. Its smoothing starts with no history when the policy becomes
+selected. Where this difference is visible, the `initial` input of a
+smoothing node starts it from the current value of the key.
 
 ## 4. Authoring: one stored graph, several views
 
-What is stored and run is the tree. The views are drawn from it, and every
-edit made in one is an edit of the tree.
+The device stores and runs the tree. Each view shows the tree. Each edit in
+a view is an edit of the tree.
 
-- **The tree.** Control and leaf nodes are edited here. A reactive node shows
-  as one block, with the keys it reads and writes from the write analysis.
-- **The node graph.** A reactive node opens as the network it is: its
-  children are the graph's nodes and its links are the graph's edges. It is
-  edited in place:
+- **The tree.** Authors edit control nodes and leaves here. A reactive node
+  shows as one block. The block shows the keys that the node reads and
+  writes, from the write analysis.
+- **The node graph.** A reactive node opens as its network. Its children are
+  the nodes of the graph, and its links are the edges of the graph. Authors
+  edit it in place:
 
   | In the node graph | In the stored tree (`GraphDiff`) |
   |---|---|
-  | Add a node | Add a compute node; append it to the reactive node's `children` |
-  | Connect an output to an input | Add a link with a port source, replacing the input's link |
+  | Add a node | Add a compute node, and append it to the `children` of the reactive node |
+  | Connect an output to an input | Add a link with a port source. It replaces the link of the input. |
   | Disconnect | Remove the link |
-  | Set a value on an input | Make the input's link a literal |
-  | Change an `input` or `output` node's key | Set its slot's predetermined key |
+  | Set a value on an input | Make the link of the input a literal |
+  | Change the key of an `input` or `output` node | Set the predetermined key of its slot |
   | Delete a node | Remove it from `children`, with its links |
 
-  The view refuses what 3.1, 3.2, 3.4 and 3.5 refuse: a control node inside a
-  reactive node, a loop, an edge to another reactive node, and an `apply` of
-  a function that returns `Status`.
-- **The reactive node as stored.** The same node drawn as the tree draws any
-  tree node: the reactive node above its ordered children, with the links
-  between children drawn apart from the tree's own edges.
-- **The overview.** Every reactive node, and every tree node that touches the
-  store, joined through the keys they read and write, with the conditions
-  under which each runs.
+  The view refuses what 3.1, 3.2, 3.4 and 3.5 refuse:
+  - a control node inside a reactive node
+  - a loop
+  - an edge to another reactive node
+  - an `apply` of a function that returns `Status`.
+- **The reactive node as stored.** This view draws the reactive node as the
+  tree view draws any tree node. The reactive node is above its ordered
+  children. The links between children are drawn apart from the edges of
+  the tree.
+- **The overview.** It shows every reactive node, and every tree node that
+  touches the store. They are joined through the keys that they read and
+  write. Each node shows the conditions under which it runs.
 
-**Presentation is not part of the graph.** Positions per view and labels are
-kept by the authoring tool beside the graph, never in the `Graph` a device
-runs. A missing position is laid out automatically, so a graph authored as a
-tree opens as a node graph, and the reverse, with nothing else stored.
+**Presentation is not part of the graph.** The authoring tool keeps the
+positions for each view, and the labels, beside the graph. They are never in
+the `Graph` that a device runs. The tool lays out a node that has no
+position. Thus a graph authored as a tree opens as a node graph, and the
+reverse, with nothing more stored.
 
 ## 5. The node graph moves into arora-sdk
 
-The default device runs node graphs with no Vizij crate, so the engine, its
-generic node vocabulary and its importer move into arora-sdk. arora-sdk stays
-free of Vizij.
+The default device runs node graphs with no Vizij crate. Thus the engine,
+its generic node vocabulary and its importer move into arora-sdk. arora-sdk
+stays free of Vizij.
 
 ### 5.1 What moves, what stays
 
 | vizij-rs | In arora-sdk | Stays in vizij-rs |
 |---|---|---|
-| `vizij-graph-core` 2.4 | **`arora-node-graph`**: the engine, the plan, the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature), the external-function seam. `arora-behavior-tree` evaluates its `reactive` node with it. | — |
+| `vizij-graph-core` 2.4 | **`arora-node-graph`**: the engine, the plan, the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature), the external-function seam. `arora-behavior-tree` uses it to evaluate its `reactive` node. | — |
 | `vizij-api-core` 2.0 | **`arora-shape`**: shapes, typed paths, the value vocabulary (vec2–4, quat, color, transform), blend, coercion, write batches, the graph-spec JSON forms | — |
-| `vizij-arora-behavior` 5.4 | **`arora-node-graph-import`**: the `node-graph 1.0` codec and its lowering to a behavior tree (3.6) | the `look_at`, `play_viseme` and `say` registrations and the rig prefix of a skill's controls, into `vizij-arora-host` |
-| `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `arora-node-graph` |
-| `vizij-arora-host` | — | the face's composition, the standard and ROS4HRI mappings, the profiles, the skills |
+| `vizij-arora-behavior` 5.4 | **`arora-node-graph-import`**: the `node-graph 1.0` codec, and its lowering to a behavior tree (3.6) | the registrations of `look_at`, `play_viseme` and `say`, and the rig prefix of the controls of a skill. They move into `vizij-arora-host`. |
+| `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the wasm bindings and registry export of the editor, over `arora-node-graph` |
+| `vizij-arora-host` | — | the composition of the face, the standard and ROS4HRI mappings, the profiles, the skills |
 | `vizij-animation-core` | — | as is, over `arora-shape` |
 
-- **No Vizij node kind enters `arora-node-graph`.** What is specific to
-  Vizij is content — the face's sources, the mappings, the skills — and a
-  function only Vizij needs is a function of a Vizij module, which an `apply`
-  calls.
-- **Wire ids stay.** The value vocabulary's type and field ids and the node
-  type names are carried by saved graphs, module headers and Studio's
-  introspection, so they keep their values. The Rust names lose their
-  `Vizij` prefix (`VizijKind` becomes `ShapeKind`).
-- **The npm packages keep their names** (`@vizij/node-graph-wasm`), built in
-  vizij-rs over the arora crates.
+- **No Vizij node kind goes into `arora-node-graph`.** What is specific to
+  Vizij is content: the sources of the face, the mappings and the skills. A
+  function that only Vizij needs is a function of a Vizij module. An `apply`
+  calls it.
+- **Wire ids stay.** Saved graphs, module headers and the introspection of
+  Studio carry the type ids and field ids of the value vocabulary, and the
+  node type names. Thus these ids keep their values. The Rust names lose
+  their `Vizij` prefix (`VizijKind` becomes `ShapeKind`).
+- **The npm packages keep their names** (`@vizij/node-graph-wasm`). vizij-rs
+  builds them over the arora crates.
 
 ### 5.2 The procedure
 
-The history moves with `git filter-repo`, which rewrites every commit's paths,
-so `git log` and `git blame` on the new paths reach back to the first commit
-with no `--follow`. The three crates have never moved within vizij-rs, so one
-path each covers their history. The fixtures moved once, from the wasm
-package's tests, so both of their paths are kept.
+The history moves with `git filter-repo`, which rewrites the paths of every
+commit. Thus `git log` and `git blame` on the new paths reach back to the
+first commit with no `--follow`. The three crates never moved within
+vizij-rs, so one path for each crate covers its history. The fixtures moved
+one time, from the tests of the wasm package. Thus the procedure keeps both
+of their paths.
 
 ```sh
 # 1. Extract, in a fresh clone: filter-repo rewrites the clone it runs in.
@@ -613,126 +704,138 @@ git merge --allow-unrelated-histories --no-ff vizij-extract
 git branch -D vizij-extract
 ```
 
-3. **Ordinary commits on the same branch**, so the merge itself changes
-   nothing it imports:
+3. **Make ordinary commits on the same branch.** Thus the merge itself changes
+   nothing that it imports. The commits:
    - rename the packages, add them to the workspace, and make their
-     dependencies path dependencies on arora-sdk's crates;
-   - move the skill registrations out (`gaze`, `speech`, `viseme`) and drop the
-     `vizij-arora-host` dependency;
+     dependencies path dependencies on the crates of arora-sdk
+   - move the skill registrations (`gaze`, `speech`, `viseme`) out, and
+     remove the `vizij-arora-host` dependency
    - point the tests, the benchmark and the README at the moved fixtures, in
-     place of `vizij-test-fixtures`;
-   - fix the moved READMEs' relative links, which the Markdown link check
-     reads.
-4. **The pull request lands as a merge commit.** A squash would drop the
-   imported history, and a rebase would replay it as new commits.
-5. **The new crates' first versions are published by hand**, `1.0.0`; then
-   each crate's trusted publisher is registered, and the release workflow
+     place of `vizij-test-fixtures`
+   - fix the relative links of the moved READMEs, which the Markdown link
+     check reads.
+4. **Land the pull request as a merge commit.** A squash drops the imported
+   history. A rebase replays it as new commits.
+5. **Publish the first version of each new crate by hand**, `1.0.0`. Then
+   register the trusted publisher of each crate. The release workflow then
    publishes every later version.
-6. **In vizij-rs**, the crates depend on the arora crates, the skill
-   registrations move into `vizij-arora-host`, and the three crates are
-   removed. Their last published versions stay on crates.io.
+6. **In vizij-rs**, make the crates depend on the arora crates. Move the
+   skill registrations into `vizij-arora-host`, and remove the three crates.
+   Their last published versions stay on crates.io.
 
-The vizij-rs crates are licensed "MIT OR Apache-2.0", which allows them under
-arora-sdk's MIT.
+The license of the vizij-rs crates is "MIT OR Apache-2.0". This license
+allows them under the MIT license of arora-sdk.
 
 ## 6. Versions and compatibility
 
 | Crate or surface | Change |
 |---|---|
-| `arora-behavior` (9.1) | Minor: `GraphType`, the typed functions' ids and encoders, `RunPolicy::Replace` and `RunPolicy::Overlap` (the enum is non-exhaustive). Major: the component trait and the host. |
-| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`; `Equal`, `WriteKeys` (1.1); `reactive`, `layers`, `PARALLEL`'s `succeed_on` (1.2), over `arora-node-graph`; `call`, `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
-| `arora` (12.3), `arora-web` (9.0) | Minor: the typed functions, described; `node-graph 1.0` accepted through the importer. Major: the builder composes components, and `Concurrent` refuses an overlap it accepted before. |
+| `arora-behavior` (9.1) | Minor: `GraphType`, the ids and encoders of the typed functions, `RunPolicy::Replace` and `RunPolicy::Overlap` (the enum is non-exhaustive). Major: the component trait and the host. |
+| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`. It adds `Equal` and `WriteKeys` (1.1), then `reactive`, `layers` and the `succeed_on` option of `PARALLEL` (1.2) over `arora-node-graph`, then `call` and `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
+| `arora` (12.3), `arora-web` (9.0) | Minor: the typed functions, with descriptions. The importer accepts `node-graph 1.0`. Major: the builder composes components, and `Concurrent` refuses an overlap that it accepted before. |
 | `arora-node-graph`, `arora-node-graph-import`, `arora-shape` | New, `1.0.0`. |
-| `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No further release once vizij-rs depends on the arora crates. `ProcessingGraph` retires: a face's graphs run as reactive nodes. |
-| `vizij-arora-host` (6.6) | Major: it composes a face as a `layers` of one reactive node per source, and registers the skills, as trees. |
-| Studio Bridge | No new `AroraOp`, so `studio-bridge-msgs` and the device client do not change. `studio-bridge-studio-client` gains typed helpers: a minor. |
-| WebSocket and ROS 2 bridges | No change: they list and call described functions already. |
-| Graph formats | `behavior-tree 1.0` (now), `1.1`, `1.2`, `1.3` (3.6). `node-graph 1.0` is read and lowered, never run as itself. |
+| `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No more releases after vizij-rs depends on the arora crates. `ProcessingGraph` retires, because the graphs of a face run as reactive nodes. |
+| `vizij-arora-host` (6.6) | Major: it composes a face as a `layers` with one reactive node for each source. It registers the skills as trees. |
+| Studio Bridge | No new `AroraOp`. Thus `studio-bridge-msgs` and the device client do not change. `studio-bridge-studio-client` gets typed helpers, which is a minor change. |
+| WebSocket and ROS 2 bridges | No change. They already list and call described functions. |
+| Graph formats | `behavior-tree 1.0` (now), `1.1`, `1.2`, `1.3` (3.6). The host reads and lowers `node-graph 1.0`. It never runs `node-graph 1.0` as itself. |
 
 ## 7. How Studio's additions fit
 
 | Addition | In this design |
 |---|---|
-| `spawn_behavior(graph, policy)` | `spawn_graph` with `graph_type = behavior-tree`. If the addition takes `graph_type` and `graph_version` from the start, Studio's call does not change later. |
-| `Equal`, `WriteKeys` | `behavior-tree 1.1` nodes. `WriteKeys`' key table is a literal, so the analysis reads the stepping run's keys off its graph: on a robot whose own tree writes one of those keys, the spawn is refused instead of the two fighting. |
-| The interpreter module's functions in `DescribeMethods` | The first part of 3.9: every function of the behavior module is described. |
-| The runner's `--groot` through `with_groot` | Unchanged. The tree loads as the branch `main`. |
+| `spawn_behavior(graph, policy)` | `spawn_graph` with `graph_type = behavior-tree`. If the addition takes `graph_type` and `graph_version` from the start, the call of Studio does not change later. |
+| `Equal`, `WriteKeys` | `behavior-tree 1.1` nodes. The key table of `WriteKeys` is a literal. Thus the analysis reads the keys of the stepping run from its graph. If the tree of a robot writes one of those keys, the host refuses the spawn, so the two do not fight. |
+| The functions of the interpreter module in `DescribeMethods` | The first part of 3.9: every function of the behavior module has a description. |
+| The runner flag `--groot` through `with_groot` | No change. The tree loads as the branch `main`. |
 
-Vizij's `run_behavior` becomes `spawn_graph` with `graph_type = node-graph`,
-lowered on arrival, and its `exclusive` fragments become spawns under
-`Replace`.
+The Vizij `run_behavior` becomes `spawn_graph` with
+`graph_type = node-graph`, which the host lowers on arrival. Its `exclusive`
+fragments become spawns under `Replace`.
 
 ## 8. Stages
 
-Each stage lands on its own. In arora-sdk, every stage but 4 is additive;
-stage 4 takes the majors it names.
+Each stage lands by itself. In arora-sdk, each stage adds without a break,
+except stage 4. Stage 4 takes the majors that it names.
 
-1. **Typed graphs.** The typed functions join the module and are described.
-   The one interpreter declares its format versions, and the untyped
-   functions act for it. `interpreters()` and `branches()` answer from it.
+1. **Typed graphs.** The typed functions join the module, with descriptions.
+   The one interpreter declares its format versions. The untyped functions
+   act for it. `interpreters()` and `branches()` answer from it.
 2. **The node graph moves into arora-sdk** (section 5). Behavior does not
-   change; vizij-rs depends on the arora crates.
-3. **The reactive node.** `reactive`, `layers` and the compute vocabulary in
-   `arora-behavior-tree` (`behavior-tree 1.2`), evaluated change-driven over
-   `arora-node-graph`; `PARALLEL`'s `succeed_on`; the `node-graph 1.0`
-   importer. A face's graphs run as reactive nodes, and `ProcessingGraph`
-   retires. vizij-arora-host composes a face as a `layers` of one reactive
-   node per source, so that stage 4's write tracking finds the face's
-   precedence in its structure.
-4. **The behavior host.** The component trait; branches in parallel, in the
-   order 3.7 states; module-function runs hosted by the host; write tracking
-   (3.8), with `Replace` and `Overlap`. Majors of `arora-behavior`,
-   `arora-behavior-tree` and `arora`.
-5. **Callers and skills.** `call` and `apply` (`behavior-tree 1.3`); the
-   direct module-node encoding read as `call`; `look_at`, `play_viseme` and `say` rewritten as
-   trees; bundle skill entries typed.
-6. **Data-chosen keys within one graph.** A component tracks the keys that
-   only data names between the parts of one graph, as the host does between
-   branches.
+   change. vizij-rs depends on the arora crates.
+3. **The reactive node.**
+   - `reactive`, `layers` and the compute vocabulary in
+     `arora-behavior-tree` (`behavior-tree 1.2`), change-driven over
+     `arora-node-graph`.
+   - The `succeed_on` option of `PARALLEL`.
+   - The `node-graph 1.0` importer.
+
+   The graphs of a face run as reactive nodes. `ProcessingGraph` retires.
+   vizij-arora-host composes a face as a `layers` with one reactive node for
+   each source. Thus the write tracking of stage 4 finds the
+   precedence of the face in its structure.
+4. **The behavior host.**
+   - The component trait.
+   - Branches in parallel, in the order that 3.7 states.
+   - Module-function runs that the host hosts.
+   - Write tracking (3.8), with `Replace` and `Overlap`.
+
+   This stage takes majors of `arora-behavior`, `arora-behavior-tree` and
+   `arora`.
+5. **Callers and skills.**
+   - `call` and `apply` (`behavior-tree 1.3`).
+   - The direct module-node encoding, read as `call`.
+   - `look_at`, `play_viseme` and `say`, rewritten as trees.
+   - Typed skill entries in bundles.
+6. **Keys that only data names, inside one graph.** A component tracks these
+   keys between the parts of one graph, as the host does between branches.
 
 ## 9. Alternatives
 
 | Alternative | Why not |
 |---|---|
-| The node graph as a second interpreter beside the tree, composed by the host, with a `run_graph` leaf for a tree to run a node graph | Two executors, two lowerings and two write analyses for one store; a bridge leaf wherever control meets dataflow; precedence between a tree and a node graph only through tick order or `Overlap`. As a reactive node, a node graph is one composite of one language, analyzed and checked as part of one graph. |
-| A node graph lowered into tree patterns (a change test, the computation and a write per node) | Reading the node graph back out needs metadata that names which tree nodes form which graph node, and a tree edit can break the pattern. A reactive node holds the graph as itself, so the view needs nothing beyond positions. |
-| A node graph stored apart from the tree, as authoring metadata beside it | Two sources of truth: the stored node graph and the tree it is compiled into can disagree. |
-| A node graph drawn over the whole tree, with control as nodes that carry status as a value | Status as data is what a node graph's skill fragment computes today, and it cannot be read back into tree structure. Control stays the tree's; a node graph is a reactive node within it. |
-| Edges between reactive nodes | Inside a reactive node an edge's value is this tick's; between reactive nodes it depends on tick order and on whether the writer's branch runs. A key makes both visible to the reader and to the write analysis. |
-| A reactive node that sweeps every compute node every tick, as the node graph does today | Correct, and simpler, but a settled mapping then costs a full evaluation per tick for as long as it runs. Change detection costs one comparison per read and does no work for what did not change. |
-| A module function placed as the node itself, its calling decided by where it sits | There is no place to say how a function is called — every tick or on change — when its description does not, and a tree leaf's return binding (`_ret`) poses as a parameter. A caller node holds both, and the function stays a function. |
-| The type and version as fields of `Graph` | The host routes and checks the version before it decodes the graph, and a diff has no place for them. |
-| The last writer wins between branches, in a declared order | Two branches driving one key is almost always a mistake, and an order only decides which one is lost, silently. Precedence that is meant is a `layers`; `Overlap` is the explicit exception. |
-| The node graph left in vizij-rs | The default device would depend on Vizij, and a robot or the browser runtime could not run node graphs with stock Arora. |
-| The code copied into arora-sdk without its history, or with `git subtree add` | The first loses `blame` and the reasons commit messages carry; the second keeps the commits at their vizij-rs paths, so `git log` on the new paths stops at the merge. |
+| The node graph as a second interpreter beside the tree. The host composes the two, and a `run_graph` leaf lets a tree run a node graph. | One store gets two executors, two lowerings and two write analyses. A bridge leaf is necessary at each point where control meets dataflow. Precedence between a tree and a node graph comes only from tick order or `Overlap`. As a reactive node, a node graph is one composite of one language. It is analyzed and checked as part of one graph. |
+| A node graph lowered into tree patterns: a change test, the computation and a write for each node | To read the node graph back out, metadata must name which tree nodes make which graph node. A tree edit can break the pattern. A reactive node holds the graph as itself. Thus the view needs only positions. |
+| A node graph stored apart from the tree, as authoring metadata beside it | This gives two sources of truth. The stored node graph and the tree compiled from it can disagree. |
+| A node graph drawn over the whole tree, with control as nodes that carry status as a value | Status as data is what the skill fragments of a node graph compute today. It cannot be read back into tree structure. Control stays in the tree. A node graph is a reactive node in the tree. |
+| Edges between reactive nodes | Inside a reactive node, the value of an edge is the value of this tick. Between reactive nodes, the value depends on tick order and on whether the branch of the writer runs. A key makes both visible to the reader and to the write analysis. |
+| A reactive node that evaluates every compute node every tick, as the node graph does today | This is correct, and it is simpler. But a settled mapping then costs a full evaluation every tick while it runs. Change detection costs one comparison for each read, and it does no work for what did not change. |
+| A module function placed as the node itself, with the parent deciding how the call occurs | No place can say how to call a function (every tick or on change) when its description does not say. Also, the return binding of a tree leaf (`_ret`) looks like a parameter but is not one. A caller node holds both, and the function stays a function. |
+| The type and version as fields of `Graph` | The host routes and checks the version before it decodes the graph. A diff has no place for these fields. |
+| The last writer wins between branches, in a declared order | Two branches that drive one key are almost always a mistake. An order decides only which write the device silently loses. A `layers` states intended precedence. `Overlap` is the explicit exception. |
+| The node graph left in vizij-rs | The default device then depends on Vizij. A robot or the browser runtime cannot run node graphs with stock Arora. |
+| The code copied into arora-sdk without its history, or with `git subtree add` | A copy loses `blame` and the reasons in the commit messages. `git subtree add` keeps the commits at their vizij-rs paths. Then `git log` on the new paths stops at the merge. |
 
 ## 10. Open details
 
-The design above holds without them; each is to be investigated before the
-stage it touches.
+The design above holds without these details. Each detail is to be
+investigated before the stage that it touches.
 
-- **The cost of change detection.** A comparison per input read per tick,
-  against a sweep of every node. Measured on a face's composed graph and on
-  Studio's stepping run before stage 3 lands.
-- **Effects a description does not state.** `when` on `apply` lets an author
-  call a function every tick; whether a module function's description should
-  also declare it (a flag beside `mutable`) is open.
-- **`TaskRun` and `Spawn` nodes.** They express control as dataflow; whether
-  the importer lowers them to tree structure or refuses a graph that uses
-  them, until its control is rewritten, is open.
-- **Faces composed before `layers`.** A face saved composed into one `flow`
-  imports as one reactive node, whose sources writing one key the
-  within-graph check refuses (3.8). Whether the importer splits a composed
-  face back into its sources, or the check allows it for an imported graph,
-  is open.
-- **Retiring `Overlap`.** Once a face's precedence over its programs and
-  skills is written as a `layers`, `Overlap` has no user left.
+- **The cost of change detection.** It costs one comparison for each input
+  read, each tick. The alternative is an evaluation of every node. Measure
+  both on the composed graph of a face and on the stepping run of Studio,
+  before stage 3 lands.
+- **Effects that a description does not state.** With `when` on `apply`, an
+  author can call a function every tick. It is open whether the description
+  of a module function should also declare this, with a flag beside `mutable`.
+- **`TaskRun` and `Spawn` nodes.** They state control as dataflow. It is open
+  whether the importer lowers them to tree structure. The other option is
+  that the importer refuses a graph that uses them, until its control is
+  rewritten.
+- **Faces composed before `layers`.** A face saved as one composed `flow`
+  imports as one reactive node. The check inside one graph refuses its
+  sources when two write one key (3.8). It is open whether the importer
+  splits a composed face back into its sources. The other option is that the
+  check allows the overlap for an imported graph.
+- **Retiring `Overlap`.** After a `layers` states the precedence of a face
+  over its programs and skills, `Overlap` has no user.
 - **Names**: the crates, the `reactive` and `layers` composites, the `call`
   and `apply` nodes, and the host.
-- **Notifying a change of branches**: a key the host writes when a branch
-  starts or ends, beside `branches()`.
-- **The untyped functions** (`LOAD`, `EDIT`, and `SPAWN_BEHAVIOR` once it
-  lands): until which major they stay.
-- **The HAL's keys.** Once a HAL describes the keys it writes
-  ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)), whether a
-  branch writing one fails the same way.
+- **Notice of a change of branches**: a key that the host writes when a
+  branch starts or ends, beside `branches()`.
+- **The untyped functions** (`LOAD`, `EDIT`, and `SPAWN_BEHAVIOR` after it
+  lands): the major until which they stay.
+- **The keys of the HAL.** A HAL can come to describe the keys that it
+  writes ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)). When it
+  does, it is open whether a write by a branch to one of those keys fails in
+  the same way.
