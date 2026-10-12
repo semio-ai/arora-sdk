@@ -110,10 +110,7 @@ fn the_skill_messages_round_trip_through_cdr() {
             meta: meta(),
             timeline: vizij_face_msgs::VisemeTimeline {
                 header: std_msgs::Header {
-                    stamp: builtin_interfaces::Time {
-                        sec: 1,
-                        nanosec: 2,
-                    },
+                    stamp: builtin_interfaces::Time { sec: 1, nanosec: 2 },
                     frame_id: String::new(),
                 },
                 visemes: vec![
