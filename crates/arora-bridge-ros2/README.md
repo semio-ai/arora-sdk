@@ -161,6 +161,19 @@ in a `GoalBook`.
 Introspection over the bridge (`ListKeys` / `ListMethods`) and `BridgeOp::Call`
 over topics remain unwired — services and actions are the method surface.
 
+## Skills on topics
+
+A skill that sets a state held until changed — `set_expression`, say — has no
+lifecycle for a client to follow, so a profile serves it on a **topic** rather
+than as an action: a `TopicSkillBinding` names the topic, its message type, the
+device's task-run method, and the routes from the message's fields onto the
+method's parameters. Each message spawns the method through the same
+interpreter `SPAWN` as an action goal, and nothing answers the publisher. The
+latest message wins: the run the previous message spawned is halted, unless it
+already ended, before the new one is spawned, and messages that queue up while
+a spawn is in flight collapse to the newest. A message whose fields do not
+route is dropped with a warning, and the running state stays as it was.
+
 ## ROS4HRI
 
 This bridge is where a device meets a ROS 2 graph, so it is the natural home for
@@ -199,8 +212,10 @@ a skill's goal or message onto a method's parameters alike:
 [`ExposureProfile`] holds typed endpoints on absolute topics with per-field
 fan-out over device keys, glob includes (`*` one segment, `**` the rest)
 whose prefix rewrites expose bulk keys on the scalar plane under absolute
-names, and **action bindings** that serve a device task-run method as a
-standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
+names, and the skill plane: **action bindings** that serve a device task-run
+method as a standard ROS 2 action, and **topic-skill bindings** that serve one
+on a topic (see [Skills on topics](#skills-on-topics)).
+`ExposureProfile::ros4hri()` ships
 the ROS4HRI face surface under PAL's names (`/robot_face/*`): expression
 commands — an `interaction_skills/SetExpression` on `/skill/set_expression` —
 fan out to `standard/ros4hri/expression/*`, `look_at` points land as the gaze
@@ -236,11 +251,12 @@ let config = Ros2BridgeConfig::new("robot", 0)
     .with_profile(ExposureProfile::ros4hri());
 ```
 
-An action binding is the exterior contract of a skill: at startup the bridge
-checks it against the device's described methods (the function exists, is a
-task run, and every goal field routes onto a parameter of a compatible type)
-and refuses it loudly otherwise. A parameter the goal does not name is left out
-of the spawn call, and the bridge logs it — a standard contract carries what
+An action or topic-skill binding is the exterior contract of a skill: at
+startup the bridge checks it against the device's described methods (the
+function exists, is a task run, and every routed field resolves in the goal
+or message and lands on a parameter of a compatible type) and refuses it
+loudly otherwise. A parameter the message does not name is left out of the
+spawn call, and the bridge logs it — a standard contract carries what
 the standard says, not every parameter an implementation happens to take. What
 the absent argument means is the implementation's: a method declared with
 arora-module reads an absent optional parameter as `None` and fails the call on

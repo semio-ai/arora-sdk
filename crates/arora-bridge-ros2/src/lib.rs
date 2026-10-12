@@ -65,13 +65,16 @@ pub mod qos;
 // (de)serialising it against `arora-msgs-ros2`. Driven by `run_node`'s service
 // loop; the synthesis core is unit-tested against the real codec + registry.
 mod services;
+// The topic-skill plane: a profile-declared topic whose every message spawns a
+// device task run, the latest message winning. Spawns like the bound actions.
+mod topic_skills;
 
 // The CDR codec now lives in `arora-msgs-ros2`, shared with `arora-hal-ros2`.
 // Re-exported so `arora_bridge_ros2::cdr` stays a stable path for consumers.
 pub use arora_msgs_ros2::cdr;
 
 pub use bridge::{Ros2Bridge, Ros2BridgeConfig};
-pub use profile::{ActionBinding, ExposureProfile};
+pub use profile::{ActionBinding, ExposureProfile, TopicSkillBinding};
 pub use qos::Qos;
 
 pub use arora_types::value::{Type, Value};

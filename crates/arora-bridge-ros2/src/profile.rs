@@ -17,6 +17,10 @@
 //!   method — the skill plane, where long-running, cancellable work rides a
 //!   standard `.action` contract (`interaction_skills/LookAt`) instead of a
 //!   topic.
+//! - [`TopicSkillBinding`]s bind an absolute **topic** to a device task-run
+//!   method — the skill plane's other form, for a skill that sets a state
+//!   held until changed (`set_expression`): each message spawns the method,
+//!   fire-and-forget, and the latest message wins.
 //!
 //! [`ExposureProfile::coverage`] reports what a device does not serve, so a
 //! deployment can check a face against the profile it enables instead of
@@ -105,14 +109,45 @@ pub struct ActionBinding {
     pub goal_routes: Vec<FieldRoute>,
 }
 
-/// A named set of [`Endpoint`]s, [`Include`]s and [`ActionBinding`]s —
-/// everything a deployment says with "expose this face as `<profile>`".
+/// A profile-declared topic bound to a device task-run method: the exterior
+/// contract of a **skill on a topic** — a `set_*` skill, which sets a state
+/// that holds until changed, so it has no lifecycle for a client to follow.
+///
+/// Every message on the topic spawns the method as a task run, its fields
+/// routed onto the method's parameters as an [`ActionBinding`]'s goal is.
+/// Nothing answers the publisher. The latest message wins: the run the
+/// previous message spawned is halted, if it has not ended, before the new
+/// one is spawned, and messages arriving while a spawn is in flight collapse
+/// to the newest. The association is checked at startup against the device's
+/// described methods, like an action binding's.
+#[derive(Debug, Clone)]
+pub struct TopicSkillBinding {
+    /// Absolute ROS 2 topic name, e.g. `/skill/set_expression`.
+    pub topic: String,
+    /// Registered ROS message name, e.g. `interaction_skills/SetExpression`.
+    pub ros_type: String,
+    /// The device method each message spawns as a task run. It must be
+    /// action-shaped (return the behavior-tree `Status`) per the device's
+    /// DescribeMethods answer.
+    pub function: String,
+    /// Message fan-out onto the function's parameters, as
+    /// [`ActionBinding::goal_routes`]: [`FieldRoute::field`] is the path into
+    /// the message, [`FieldRoute::key`] names the parameter.
+    pub routes: Vec<FieldRoute>,
+    /// Delivery profile; `None` takes [`Qos::default_for`] an inbound flow.
+    pub qos: Option<Qos>,
+}
+
+/// A named set of [`Endpoint`]s, [`Include`]s, [`ActionBinding`]s and
+/// [`TopicSkillBinding`]s — everything a deployment says with "expose this
+/// face as `<profile>`".
 #[derive(Debug, Clone)]
 pub struct ExposureProfile {
     pub name: String,
     pub endpoints: Vec<Endpoint>,
     pub includes: Vec<Include>,
     pub actions: Vec<ActionBinding>,
+    pub topic_skills: Vec<TopicSkillBinding>,
 }
 
 impl ExposureProfile {
@@ -367,13 +402,15 @@ impl ExposureProfile {
                     }],
                 },
             ],
+            topic_skills: Vec::new(),
         }
     }
 
     /// What the device does not serve of this profile: the endpoint route
     /// keys absent from `keys` (its key set), the include globs matching
-    /// nothing, and the action bindings whose function is absent from
-    /// `functions` (its described method names). Empty means full coverage.
+    /// nothing, and the action and topic-skill bindings whose function is
+    /// absent from `functions` (its described method names). Empty means full
+    /// coverage.
     pub fn coverage<'a>(
         &self,
         keys: impl IntoIterator<Item = &'a str> + Clone,
@@ -410,6 +447,14 @@ impl ExposureProfile {
                 missing.push(format!(
                     "{} ({}): no device method '{}'",
                     binding.action, binding.ros_type, binding.function
+                ));
+            }
+        }
+        for binding in &self.topic_skills {
+            if !functions.clone().into_iter().any(|f| f == binding.function) {
+                missing.push(format!(
+                    "{} ({}): no device method '{}'",
+                    binding.topic, binding.ros_type, binding.function
                 ));
             }
         }
