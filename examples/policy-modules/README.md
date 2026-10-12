@@ -32,7 +32,7 @@ this directory:
 ```sh
 tools/fetch-assets.sh                 # the Microduck model and policies, pinned revisions
 eval "$(tools/setup-mujoco.sh)"       # MuJoCo 3.12.0; exports MUJOCO_DYNAMIC_LINK_DIR and the loader path (per shell)
-cargo test                            # every crate, ten simulated runs included (several minutes the first time)
+cargo test                            # every crate, twelve simulated runs included (several minutes the first time)
 ```
 
 ## Watch and drive it in Semio Studio
@@ -70,9 +70,13 @@ Then, for each demo:
    `Microduck`; an empty owner serves the local bridge instead of Studio.
    `DEVICE_OWNERS`, `DEVICE_NAME` and `MODEL_FAMILY` answer in advance.
    Without a terminal nothing is asked: the device connects to Studio and
-   registers what those variables say. The device's Studio identity is kept
-   next to the binary (`target/release/.semio/`), so every run of that build
-   is the same device.
+   registers what those variables say. The device keeps its Studio identity
+   in its device directory, `~/Library/Application
+   Support/semio/arora/devices/<DEVICE_LOCAL_ID>/studio/` on macOS
+   (`~/.local/share/…` on Linux; `default` when `DEVICE_LOCAL_ID` is unset),
+   so every run with the same local id is the same device, whatever the
+   build. Give the duck its own (`DEVICE_LOCAL_ID=microduck`) when another
+   Arora device runs on this machine.
 5. In Studio, open a project with the Microduck model and pair the device
    from the **Connections** sidebar: the duck in the scene moves with the
    simulated one, walking across the floor.
@@ -152,7 +156,7 @@ Measured on an Apple M1 laptop:
 | served, commanded 0.3 m/s over the local bridge (dev build) | 0.89 m in 8 s; the bridge answers after about 12 s of wasm compile |
 | wasm policy guest | 22 MB in the release build (thin LTO, stripped), the ONNX runtime and seven networks inside |
 | lockstep speed with the policy in wasm | 6 simulated s in 0.2 s (about 30× real time) |
-| `cargo test`, warm | under a minute, ten simulated runs included |
+| `cargo test`, warm | under a minute, twelve simulated runs included |
 
 The walking networks stand still below about 0.25 m/s in plain MuJoCo (the
 robot's own daemon and reference script behave the same); command 0.25–0.3.

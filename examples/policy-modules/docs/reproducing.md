@@ -136,8 +136,10 @@ Studio needs the robot's model and the device's keys under Studio's ids.
    published yet as a string: seed every command key in the store with its
    type at build (`command.behavior`, `command.vx`) and publish the ones a
    HAL consumes (`sim/reset`). A key is closed to every bridge's writers
-   until the device opens it: `DataStore::set_meta` marks each command key
-   `editable`, with its type.
+   until it is described as an input: the device marks each command key
+   `editable`, with its type (`DataStore::set_meta`), and the HAL describes
+   its own inputs, `sim/reset` and the joint setpoints
+   (`Hal::describe_keys`).
 
 A real robot's device does the same with its own HAL: joint ids as key
 entities, and a base pose only if the robot estimates one (without it,

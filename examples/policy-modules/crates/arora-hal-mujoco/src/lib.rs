@@ -42,6 +42,10 @@
 //! the policies were trained against. A model that lacks one for a listed
 //! joint is refused at construction.
 //!
+//! The HAL describes `<joint>.target_position` (`F64`) and `sim/reset` as
+//! inputs ([`Hal::describe_keys`]), which opens them to a remote client; the
+//! aggregate setpoint and every published key stay closed.
+//!
 //! # Clock
 //!
 //! The simulation advances in control periods (`1 / control_hz` of simulated
@@ -66,9 +70,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use arora_hal::{Hal, HalDescription, HalError, HalResult, UpdatesStream};
-use arora_types::data::{Key, State, StateChange};
-use arora_types::value::Value;
+use arora_hal::{Hal, HalDescription, HalError, HalResult, KeyDescriptions, UpdatesStream};
+use arora_types::data::{Key, KeyMeta, State, StateChange};
+use arora_types::value::{Type, Value};
 use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use mujoco_rs::prelude::*;
@@ -894,6 +898,26 @@ impl Hal for MujocoHal {
             }
         }
         Box::pin(rx) as Pin<Box<dyn futures_core::Stream<Item = StateChange> + Send>>
+    }
+
+    /// One item: the joints are fixed at construction.
+    fn describe_keys(&self) -> KeyDescriptions {
+        let input = |ty| KeyMeta::new().of_type(ty).editable();
+        let mut inputs: HashMap<Key, KeyMeta> = self
+            .shared
+            .joint_names
+            .iter()
+            .map(|joint| {
+                (
+                    Key::from(format!("{joint}.target_position")),
+                    input(Type::F64),
+                )
+            })
+            .collect();
+        inputs.insert(Key::from("sim/reset"), input(Type::Boolean));
+        let (tx, rx) = futures_channel::mpsc::unbounded();
+        let _ = tx.unbounded_send(inputs);
+        Box::pin(rx)
     }
 }
 

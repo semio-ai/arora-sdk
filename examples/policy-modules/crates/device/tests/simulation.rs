@@ -237,13 +237,16 @@ fn each_phase_is_announced_once() {
     );
 }
 
-/// A client writes the commands and the reset, typed; the joints and
-/// everything else the device publishes are closed to it.
+/// A client writes the commands the trees read, the joints' setpoints and
+/// the reset, typed — the device opens the first, the HAL its own inputs;
+/// what the device publishes is closed to it.
 #[test]
-fn a_client_may_write_the_commands_only() {
+fn a_client_may_write_the_inputs_only() {
     let mut device = device("interactive", Executor::Native, Command::default());
     device.run_for(0.1).unwrap();
-    let joint = format!("{}.position", microduck_policies::JOINT_NAMES[0]);
+    let joint = microduck_policies::JOINT_NAMES[0];
+    let target = format!("{joint}.target_position");
+    let position = format!("{joint}.position");
     let keys = [
         "command.vx",
         "command.vy",
@@ -251,7 +254,8 @@ fn a_client_may_write_the_commands_only() {
         "command.head",
         "command.behavior",
         "sim/reset",
-        joint.as_str(),
+        target.as_str(),
+        position.as_str(),
         "speech.viseme",
     ];
     let meta = device.store().meta(&keys.map(Key::from));
@@ -261,6 +265,7 @@ fn a_client_may_write_the_commands_only() {
         .filter(|(_, meta)| meta.as_ref().is_some_and(|meta| meta.editable))
         .map(|(key, _)| *key)
         .collect();
-    assert_eq!(editable, &keys[..6]);
+    assert_eq!(editable, &keys[..7]);
     assert_eq!(meta[0].as_ref().unwrap().ty, Some(Type::F64));
+    assert_eq!(meta[6].as_ref().unwrap().ty, Some(Type::F64));
 }
