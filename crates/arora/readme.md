@@ -4,9 +4,11 @@ The **opinionated Arora runtime**. Where [`arora-engine`](../arora-engine) is
 the bare, unopinionated engine, this crate wires the whole device into one
 object, [`Arora`]: the engine (with the WebAssembly and native executors), the
 shared data store, the HAL and bridge I/O seams, one behavior interpreter, and
-the step loop that drives them. The basic behavior-tree control nodes are
-native in [`arora-behavior-tree`](../arora-behavior-tree), so no module needs
-to be loaded to run a tree of them.
+the step loop that drives them. The core behavior-tree nodes — the control
+nodes and the string nodes (`SetString`, `UnsetString`, `IsStringSet`,
+`WaitStringSet`, `RegexMatch`) — are native in
+[`arora-behavior-tree`](../arora-behavior-tree), so no module needs to be
+loaded to run a tree of them.
 
 > **Architecture, with diagrams:** [`docs/runtime-and-data-flow.md`](docs/runtime-and-data-flow.md)
 > shows all of the device's components and how data flows between them, plus a
@@ -128,7 +130,7 @@ lists them under one rule: a function whose parameters and return are all
 primitives or optionals over a scalar primitive is described; any other — one
 naming a record type, a map or a fixed-length array — still dispatches
 ([`module_discovery`](src/module_discovery.rs)). A Groot tree the binary
-installs binds no module function: its nodes are the native control nodes.
+installs binds no module function: its nodes are the native core nodes.
 [`module_dir`](src/module_dir.rs) reads module directories for an embedder.
 
 The chain down to the bridge's code, in a `studio-bridge` build:

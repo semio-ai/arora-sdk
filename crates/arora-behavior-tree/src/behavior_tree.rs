@@ -3,6 +3,7 @@
 #[allow(clippy::all, dead_code)]
 pub mod arora_generated;
 pub mod behavior;
+pub mod core_nodes;
 pub mod error;
 pub mod graph;
 pub mod nodes;
@@ -233,7 +234,7 @@ fn setup_tick_function(
 }
 
 /// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
-/// fail, run) natively, without consulting the function index or the wasm
+/// fail, run) and the core string nodes ([`core_nodes`]) natively, without consulting the function index or the wasm
 /// engine. Children are ticked through their registered tick functions
 /// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
 /// `None` for any other function (which the caller dispatches via the engine).
@@ -404,7 +405,19 @@ fn tick_builtin(
             index_variable.set(Value::U16(current_index));
             status
         }
-        _ => return Ok(None),
+        // The core string nodes, value-based over their bound cells.
+        function => {
+            return core_nodes::tick_core_node(function, node.id, |parameter| {
+                get_node_parameter_variable(
+                    &NodeParameterId {
+                        node: node.id,
+                        parameter,
+                    },
+                    node_parameters_variables,
+                )
+                .cloned()
+            })
+        }
     };
     Ok(Some(status))
 }
@@ -541,7 +554,7 @@ fn tick(
             }
             call.args.push(StructureField {
                 id: *param_id,
-                value: Box::new(variable.get_or_unit()),
+                value: Box::new(argument_value(variable, is_optional(function, param_id))),
             });
         }
     }
@@ -559,13 +572,13 @@ fn tick(
                     mutated.id
                 ),
             })?;
-        variable.set(*mutated.value);
+        write_back(variable, *mutated.value, is_optional(function, &mutated.id));
     }
 
     // If the node has a _ret argument (function does not return a status),
     // write the return value to the bound variable.
     let status = if let Some(var) = locals.get(&_RET_PARAM_ID) {
-        var.set(result.ret.clone());
+        write_back(var, result.ret.clone(), function.return_ty.is_option());
         Status::Success
     } else {
         result.ret.try_into().unwrap_or(Status::Success)
@@ -574,6 +587,46 @@ fn tick(
         println!("tick {} -> {:?}", node.id, status);
     }
     Ok(status)
+}
+
+/// Whether `function` declares its parameter `parameter` as an optional.
+fn is_optional(function: &Function, parameter: &Uuid) -> bool {
+    function
+        .parameters
+        .get(parameter)
+        .is_some_and(|parameter| parameter.ty.is_option())
+}
+
+/// The argument a bound cell passes to a module function. To an optional
+/// parameter, a cell that holds nothing — a store key that is not set (yet) —
+/// passes `None`, so the function decides what an absent value means, and a
+/// value passes framed as `Some(value)` (unless it already is an optional).
+/// To any other parameter, an empty cell passes `()`, which the function
+/// refuses unless it takes it.
+fn argument_value(variable: &VariableCell, optional: bool) -> Value {
+    match (variable.get(), optional) {
+        (Some(value @ Value::Option(_)), _) => value,
+        (Some(value), true) => Value::Option(Some(Box::new(value))),
+        (Some(value), false) => value,
+        (None, true) => Value::Option(None),
+        (None, false) => Value::Unit,
+    }
+}
+
+/// Write a mutated parameter, or a bound return, back to its cell. An optional maps
+/// onto the cell's presence: `Some(v)` writes `v` (creating the store key if
+/// it did not exist), `None` unsets the cell — and leaves an already-unset one
+/// untouched. Any other value is written as is.
+fn write_back(variable: &VariableCell, value: Value, optional: bool) {
+    match value {
+        Value::Option(Some(value)) if optional => variable.set(*value),
+        Value::Option(None) if optional => {
+            if variable.get().is_some() {
+                variable.set_opt(None);
+            }
+        }
+        value => variable.set(value),
+    }
 }
 
 /// Specialization of Callable that returns a Status.

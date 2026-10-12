@@ -4,9 +4,10 @@
 //! a ready-to-use [`Arora`]: the whole device in one object — the engine (with
 //! the WebAssembly and native executors), the shared data store, the HAL and
 //! bridge I/O seams, one behavior interpreter, and the step loop that drives
-//! them. The basic behavior-tree control nodes are wired natively into
-//! [`arora_behavior_tree`], so no module needs to be loaded to run a tree of
-//! them.
+//! them. The core behavior-tree nodes — the control nodes and the string nodes
+//! (`SetString`, `UnsetString`, `IsStringSet`, `WaitStringSet`, `RegexMatch`)
+//! — are wired natively into [`arora_behavior_tree`], so no module needs to be
+//! loaded to run a tree of them.
 //!
 //! Build one with the [`builder`](Arora::builder): pick a data store, a HAL,
 //! zero or more bridges, the modules whose functions behaviors may call, and
@@ -132,8 +133,8 @@ pub struct Arora {
     pub(crate) store: Box<dyn DataStore>,
     pub(crate) engine: PinnedEngine,
     /// Host-function metadata a behavior-tree Groot tree binds its action and
-    /// condition nodes to, keyed by function UUID. The basic control nodes are
-    /// dispatched natively and are not in this index. A host module registered
+    /// condition nodes to, keyed by function UUID. The core nodes (control
+    /// and string nodes) are dispatched natively and are not in this index. A host module registered
     /// through [`AroraBuilder::with_host_module`] dispatches through the engine
     /// directly, so it does not appear here.
     pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
@@ -239,7 +240,7 @@ impl Arora {
 
     /// Install a Groot behavior tree as the device's behavior. Its tags are
     /// resolved against the device's own method index — the natively-hosted
-    /// control nodes and every loaded module's exports — and the lowered graph
+    /// core nodes and every loaded module's exports — and the lowered graph
     /// is loaded through the interpreter module, the path a remote's load
     /// takes. Call it between steps, after [`build`](AroraBuilder::build); the
     /// tree binds to the store at its first tick.
@@ -677,7 +678,7 @@ impl AroraBuilder {
 
     /// Install a Groot behavior tree as the device's behavior once it is
     /// built: [`build`](AroraBuilder::build) resolves its tags against the
-    /// method index it assembled — the control nodes and every loaded
+    /// method index it assembled — the core nodes and every loaded
     /// module's exports — and loads it as [`Arora::load_groot`] does, failing
     /// the build if the tree does not parse, names an unknown function, or
     /// does not load. What a device run through [`run`](AroraBuilder::run)
@@ -1231,6 +1232,57 @@ mod module_loading_tests {
             })
             .expect("call succeed() on the declared module's guest");
         assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    /// A guest's optional parameter bound to a store key that is not set
+    /// receives `None` — rather than the call failing on `()` — and the
+    /// key's value once it is written; an optional return maps onto its
+    /// key's presence the same way.
+    #[test]
+    fn an_unset_key_binds_none_to_a_guest_optional_parameter() {
+        use arora_types::data::{Key, StateChange};
+        use test_rust_wasm::test_rust_wasm::Module;
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::from(vec![
+                ("start", Value::U64(10)),
+                // A stale length: window(10, None) unsets it, a failed call
+                // would leave it.
+                ("length", Value::U64(99)),
+            ]))
+            .expect("seed the start and a stale length");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_declared_module::<Module>(
+                arora_types::module::low::Executor {
+                    name: "wasm".to_string(),
+                    min_version: None,
+                    max_version: None,
+                },
+                WASM.to_vec(),
+            )
+            .with_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <window start_ns="{start}" end_ns="{end}" res="{length}"/>
+                   </BehaviorTree></root>"#,
+            )
+            .build()
+            .expect("window resolves against the declared module");
+        let length = || store.read(&[Key::from("length")]).remove(0);
+
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("window(10, None) runs");
+        assert_eq!(length(), None, "no end: window ran and returned None");
+
+        store
+            .write(StateChange::set("end", Value::U64(40)))
+            .expect("write the end");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("window(10, Some(40)) runs");
+        assert_eq!(length(), Some(Value::U64(30)));
     }
 
     /// A Groot tree loaded into the built device reaches a declared guest
@@ -1855,6 +1907,86 @@ mod module_loading_tests {
 /// Host modules enter dispatch directly (no executor), so these hold under
 /// every feature slice — including the no-executor engine of a
 /// `--no-default-features` native build.
+/// The core behavior-tree nodes — the control nodes and the string nodes —
+/// are native: a device runs a tree of them with no module loaded.
+#[cfg(test)]
+mod core_node_tests {
+    use super::*;
+    use arora_types::data::{Key, StateChange};
+    use arora_types::value::Value;
+    use std::time::Duration;
+
+    /// `IsStringSet → SetString → UnsetString` on a key written from outside
+    /// the tree, installed with `with_groot` on a device with no module: the
+    /// branch runs once per write of the key, and the key's absence before
+    /// the first write is a failed condition, not an error.
+    #[test]
+    fn a_string_branch_runs_once_per_write_with_no_module_loaded() {
+        let store = SimpleDataStore::new();
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <Sequence>
+                       <IsStringSet value="{command}"/>
+                       <SetString variable="{last_command}" value="{command}"/>
+                       <UnsetString variable="{command}"/>
+                     </Sequence>
+                   </BehaviorTree></root>"#,
+            )
+            .build()
+            .expect("the core nodes need no module");
+        let read = |key: &str| store.read(&[Key::from(key)]).remove(0);
+        let unset = |key: &str| StateChange {
+            set: HashMap::new(),
+            unset: std::collections::HashSet::from([Key::from(key)]),
+        };
+
+        arora
+            .step(Duration::from_millis(10))
+            .expect("no command yet");
+        assert_eq!(read("last_command"), None);
+
+        for command in ["sit", "stand"] {
+            store
+                .write(StateChange::set("command", Value::String(command.into())))
+                .expect("write a command");
+            arora
+                .step(Duration::from_millis(10))
+                .expect("the branch runs");
+            assert_eq!(read("last_command"), Some(Value::String(command.into())));
+            assert_eq!(read("command"), None, "the branch consumed the command");
+
+            // No new write: the branch does not run again.
+            store.write(unset("last_command")).expect("clear the trace");
+            arora.step(Duration::from_millis(10)).expect("idle step");
+            arora.step(Duration::from_millis(10)).expect("idle step");
+            assert_eq!(read("last_command"), None, "once per write");
+        }
+    }
+
+    /// `SetString` creates a key the store does not hold yet.
+    #[test]
+    fn set_string_creates_a_key() {
+        let store = SimpleDataStore::new();
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <SetString variable="{mood}" value="happy"/>
+                   </BehaviorTree></root>"#,
+            )
+            .build()
+            .expect("the core nodes need no module");
+        assert_eq!(store.read(&[Key::from("mood")]), vec![None]);
+        arora.step(Duration::from_millis(10)).expect("one step");
+        assert_eq!(
+            store.read(&[Key::from("mood")]),
+            vec![Some(Value::String("happy".into()))]
+        );
+    }
+}
+
 #[cfg(test)]
 mod host_module_tests {
     use super::*;

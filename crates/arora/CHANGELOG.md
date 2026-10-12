@@ -4,6 +4,22 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.10.0] - 2026-10-12
+
+### Added
+
+- **A device runs the string nodes with no module loaded.** `SetString`,
+  `UnsetString`, `IsStringSet`, `WaitStringSet` and `RegexMatch` are core
+  behavior-tree nodes now, native like the control nodes
+  (`arora-behavior-tree` 8.2.0): a Groot tree installed with `with_groot`,
+  `load_groot` or `--groot` uses them without the test module
+  `test-behavior-tree-nodes`. A port bound to a key that is not set yet
+  reads as unset — `IsStringSet` fails, `WaitStringSet` keeps running — and
+  `SetString` creates the key it writes.
+- **A module function's optional parameter bound to an unset key receives
+  `None`** rather than failing the tick, and an optional output or return
+  sets or unsets its key.
+
 ## [12.9.0] - 2026-10-12
 
 ### Added
