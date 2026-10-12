@@ -73,7 +73,9 @@ it targets.
 Attributes after the component carry over to the measured key:
 `hip_yaw/target.position.x` targets `hip_yaw.position.x`. A key whose last
 segment is `target` with no attribute, or a `target.c` at the root (no `k`), is
-not a target.
+not a target. Under a namespace, a last segment `target.c` is always this form:
+`x/target.target_position` targets `x.target_position`, so a joint named
+`target` keeps the current form only at the root.
 
 ### Why
 
@@ -101,7 +103,8 @@ current one. The rule:
 
 1. **A device accepts both forms.** A HAL reads a target from `k/target.c` and
    from `k.target_c` alike. `arora_hal::set_targets` reads both from a change;
-   the HALs in arora-sdk use it (§4).
+   the HALs in arora-sdk use it (§4,
+   [arora-sdk#334](https://github.com/semio-ai/arora-sdk/pull/334)).
 2. **A device lists both forms as open inputs.** Where it declares an input
    by key, it states `editable` meta on `k/target.c` and on `k.target_c`; a HAL
    that describes its keys (HAL components 3.5) describes both for each target
@@ -111,10 +114,13 @@ current one. The rule:
    device does not list by name is written in the current form, which every
    device reads.
 4. **A client writes one form per target.** A change that sets both forms of
-   one target applies `k/target.c` and ignores `k.target_c`: the keys of a
-   `StateChange` carry no order, so "last write wins" cannot apply within one
-   change, and the form decides. Across changes, the later write wins, as for
-   any key.
+   one target applies `k/target.c` and ignores `k.target_c`, whatever value
+   `k/target.c` holds: the keys of a `StateChange` carry no order, so "last
+   write wins" cannot apply within one change, and the form decides. Across
+   changes, the later write wins, whichever form each was written in; a HAL
+   that merges a backlog of changes into one keeps that
+   (`arora_hal::fold_newest_wins`). The two keys stay distinct keys of the
+   store, each holding what was last written to it.
 5. **Nothing new emits `studio_value`.** A client sends a string or boolean
    target as `k/target.value` (see 6).
 
