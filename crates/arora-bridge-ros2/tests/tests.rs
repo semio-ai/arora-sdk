@@ -141,6 +141,122 @@ async fn inbound_topic_becomes_update_command() {
     );
 }
 
+/// A writer of another type on an input's topic does not cost the input its
+/// subscription. RustDDS matches it to the bridge's `Float64` reader by the
+/// topic name alone, so its `Int32` messages reach the reader and fail to decode;
+/// each is dropped, more of them than the subscription tolerates receive
+/// failures in a row, and a `Float64` published afterwards still surfaces as
+/// an `Update`.
+#[tokio::test]
+#[serial]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config); these run on Linux CI. To run locally, \
+              ensure an active multicast-capable interface and use `--ignored`."
+)]
+async fn messages_of_another_type_leave_the_input_subscribed() {
+    let _ = env_logger::try_init();
+    let domain_id = random_domain_id();
+    let namespace = format!("test_mistyped_{domain_id}");
+
+    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
+    let mut inbound = bridge.take_inbound();
+
+    // The device: it opened `face/mouth/open`, an F64, to remote writers, and
+    // hands every Update to the test.
+    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(event) = inbound.next().await {
+            let Inbound::Command(cmd) = event else {
+                continue;
+            };
+            match &cmd.op {
+                BridgeOp::ListKeys { .. } => {
+                    let inputs = vec![(
+                        "face/mouth/open".to_string(),
+                        KeyMeta::new().editable().of_type(Type::F64),
+                    )];
+                    cmd.reply(
+                        arora_types::value_serde::to_value(&inputs)
+                            .map(|ret| CallResult {
+                                ret,
+                                mutated: Vec::new(),
+                            })
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                BridgeOp::Update(change) => {
+                    let _ = updates_tx.send(change.clone());
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let (_ctx, mut pub_node) = create_test_node(domain_id, &format!("pub_{domain_id}"));
+    let topic = Name::parse(&topic_name(&namespace, "face/mouth/open")).expect("valid topic name");
+
+    let mistyped_topic = pub_node
+        .create_topic(
+            &topic,
+            msg_types::Int32::message_type_name(),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create the Int32 topic");
+    let mistyped = pub_node
+        .create_publisher::<msg_types::Int32>(&mistyped_topic, None)
+        .expect("create the Int32 publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        mistyped.wait_for_subscription(&pub_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge's reader to match the Int32 writer");
+    for data in 0..10 {
+        let _ = mistyped.async_publish(msg_types::Int32 { data }).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // Long enough for the reader to have taken every one of them.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // A node of its own: one participant holds one type per topic name.
+    let (_float_ctx, mut float_node) = create_test_node(domain_id, &format!("pub2_{domain_id}"));
+    let float_topic = float_node
+        .create_topic(
+            &topic,
+            msg_types::Float64::message_type_name(),
+            &DEFAULT_PUBLISHER_QOS,
+        )
+        .expect("create the Float64 topic");
+    let publisher = float_node
+        .create_publisher::<msg_types::Float64>(&float_topic, None)
+        .expect("create the Float64 publisher");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        publisher.wait_for_subscription(&float_node),
+    )
+    .await
+    .expect("timed out waiting for the bridge to discover the Float64 publisher");
+    tokio::spawn(async move {
+        loop {
+            let _ = publisher
+                .async_publish(msg_types::Float64 { data: 0.75 })
+                .await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    let change = tokio::time::timeout(Duration::from_secs(10), updates.recv())
+        .await
+        .expect("no Update after messages of another type: the input lost its subscription")
+        .expect("the device task stopped before an Update arrived");
+    assert_eq!(
+        change.set.get("face/mouth/open"),
+        Some(&Some(Value::F64(0.75)))
+    );
+}
+
 /// A typed ROS 2 publisher sending an `interaction_skills/SetExpression`, the
 /// `hri_msgs/Expression` it wraps included, lands the device's key as a
 /// structured value — the ROS4HRI inbound acceptance criterion
