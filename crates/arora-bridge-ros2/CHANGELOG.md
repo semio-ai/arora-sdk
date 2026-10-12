@@ -6,6 +6,15 @@ All notable changes to `arora-bridge-ros2`. The format follows
 
 ## [10.3.0] - 2026-10-12
 
+### Changed
+
+- An input whose shape has no `std_msgs` scalar, and that a typed endpoint
+  routes onto, gets no JSON `std_msgs/String` key topic: the endpoint is its
+  interface, and the bridge says so once at info. With the ROS4HRI preset, the
+  `u8` viseme code `standard/ros4hri/viseme` comes in on `/tts/viseme`
+  (`hri_msgs/Viseme`) and `/tts/visemes` (`hri_msgs/Visemes`) only. An input of
+  such a shape no endpoint serves keeps the JSON fallback.
+
 ### Fixed
 
 - Every key reaches ROS 2 under a valid name. A key path is escaped token by

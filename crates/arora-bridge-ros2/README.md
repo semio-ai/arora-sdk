@@ -42,7 +42,11 @@ escape.
 Input keys are the keys the device's store opens to remote writers
 (`KeyMeta::editable`), asked of the device at startup and typed from their meta:
 a ROS 2 topic is typed, and the subscription is created before any message
-arrives. Output keys need no declaration — a publisher is created from each
+arrives. An input whose shape has no `std_msgs` scalar (a `u8`, a structure)
+takes a JSON `std_msgs/String` topic — unless a typed endpoint routes onto it,
+in which case that endpoint is its interface and it gets no key topic: the
+ROS4HRI viseme code `standard/ros4hri/viseme`, a `u8`, comes in on
+`/tts/viseme` and `/tts/visemes` only. Output keys need no declaration — a publisher is created from each
 changed value's type on first use. A key that cannot be published (its topic is
 taken, or its publisher could not be created) is reported once, not on every
 change.

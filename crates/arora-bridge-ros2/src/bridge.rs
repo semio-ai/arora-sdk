@@ -32,16 +32,16 @@ use arora_types::value::{Type, Value};
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
 use futures::{Stream, StreamExt};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
 use tokio::sync::mpsc as tmpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::actions;
 use crate::conversions::{
-    default_value, place_route, setup_key_subscriber, setup_typed_key_publisher,
-    setup_typed_key_subscriber, topic_name, KeyPublisher, StateChangeStream, TypedKeyPublisher,
-    OVERSIZED_JSON_BYTES,
+    default_value, has_std_msgs_scalar, place_route, setup_key_subscriber,
+    setup_typed_key_publisher, setup_typed_key_subscriber, topic_name, KeyPublisher,
+    StateChangeStream, TypedKeyPublisher, OVERSIZED_JSON_BYTES,
 };
 use crate::profile;
 use crate::qos::Qos;
@@ -668,10 +668,12 @@ async fn run_node(
     // `/{namespace}/keys/{path}` as the `std_msgs` type of its shape. Asked of
     // the device rather than configured here, so an input is stated once — in
     // the store — and every bridge exposes the same set. A typed profile topic
-    // may feed the same key; both are inputs of it. The subscription delivers
-    // to the key itself: a topic maps back to its key through this table, never
-    // by reversing the escape.
-    for (path, value_type, topic) in input_topics(&namespace, device_inputs(&cmd_tx).await) {
+    // may feed the same key; both are inputs of it, unless the key's shape has
+    // no `std_msgs` scalar and the typed topic is its only real interface. The
+    // subscription delivers to the key itself: a topic maps back to its key
+    // through this table, never by reversing the escape.
+    let inputs = device_inputs(&cmd_tx).await;
+    for (path, value_type, topic) in input_topics(&namespace, inputs, &typed_inputs) {
         subscribed.insert(topic, path.clone());
         let qos = Qos::default_for(profile::Flow::In);
         match setup_key_subscriber(&mut node, &namespace, &path, &value_type, qos) {
@@ -791,15 +793,50 @@ async fn run_node(
     }
 }
 
-/// The topic each device input subscribes on, by [`topic_name`]. Two inputs
-/// whose paths escape to one topic cannot both have it: the key that sorts
-/// first keeps it, whatever order the device lists them in, and the other gets
-/// no topic and is reported once, naming both.
-fn input_topics(namespace: &str, mut inputs: Vec<(String, Type)>) -> Vec<(String, Type, String)> {
+/// The topic each device input subscribes on, by [`topic_name`].
+///
+/// An input whose shape has no `std_msgs` scalar, and that a typed input routes
+/// onto, gets no key topic: the typed input is its interface — a ROS4HRI viseme
+/// code is a `u8` that `/tts/viseme` carries as an `hri_msgs/Viseme`, and a
+/// JSON `std_msgs/String` beside it would be a second, untyped way in that no
+/// ROS node speaks. That is said once, at info, naming the typed topics. An
+/// input of such a shape no typed input serves keeps the JSON fallback.
+///
+/// Two inputs whose paths escape to one topic cannot both have it: the key that
+/// sorts first keeps it, whatever order the device lists them in, and the
+/// other gets no topic and is reported once, naming both.
+fn input_topics(
+    namespace: &str,
+    mut inputs: Vec<(String, Type)>,
+    typed_inputs: &[TypedInput],
+) -> Vec<(String, Type, String)> {
     inputs.sort_by(|(a, _), (b, _)| a.cmp(b));
     let mut owners: HashMap<String, String> = HashMap::new();
     let mut topics = Vec::with_capacity(inputs.len());
     for (path, value_type) in inputs {
+        if !has_std_msgs_scalar(&value_type) {
+            let serving: Vec<String> = typed_inputs
+                .iter()
+                .filter(|input| {
+                    input.routes.iter().any(|route| route.key == path)
+                        || (input.routes.is_empty() && input.path == path)
+                })
+                .map(|input| {
+                    input
+                        .topic
+                        .clone()
+                        .unwrap_or_else(|| topic_name(namespace, &input.path))
+                })
+                .collect();
+            if !serving.is_empty() {
+                info!(
+                    "Ros2Bridge serves input '{path}' ({value_type:?}) on {}, which route onto \
+                     it; its shape has no std_msgs scalar, so it gets no key topic",
+                    serving.join(", ")
+                );
+                continue;
+            }
+        }
         let topic = topic_name(namespace, &path);
         if let Some(owner) = owners.get(&topic) {
             warn!(
@@ -1359,7 +1396,7 @@ mod tests {
             ("rig/pose_b-weight".to_string(), Type::F64),
             ("rig/6cefb62d-dc71".to_string(), Type::F32),
         ];
-        let topics: Vec<(String, String)> = input_topics("robot", inputs)
+        let topics: Vec<(String, String)> = input_topics("robot", inputs, &[])
             .into_iter()
             .map(|(path, _, topic)| (path, topic))
             .collect();
@@ -1380,6 +1417,26 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// A `u8` input the ROS4HRI viseme endpoints route onto is served by them
+    /// and gets no JSON key topic; a `u8` input nothing routes onto keeps the
+    /// fallback, and an input with a `std_msgs` scalar keeps its key topic
+    /// even when a profile routes onto it too.
+    #[test]
+    fn an_input_a_typed_endpoint_serves_gets_no_json_key_topic() {
+        let config =
+            Ros2BridgeConfig::new("robot", 0).with_profile(profile::ExposureProfile::ros4hri());
+        let inputs = vec![
+            ("standard/ros4hri/viseme".to_string(), Type::U8),
+            ("standard/ros4hri/viseme/time".to_string(), Type::F32),
+            ("rig/blink".to_string(), Type::U8),
+        ];
+        let paths: Vec<String> = input_topics("robot", inputs, &config.typed_inputs)
+            .into_iter()
+            .map(|(path, _, _)| path)
+            .collect();
+        assert_eq!(paths, ["rig/blink", "standard/ros4hri/viseme/time"]);
     }
 
     /// A routed key lands on its message and marks it for publishing; a key
