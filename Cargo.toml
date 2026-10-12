@@ -4,7 +4,9 @@ resolver = "2"
 members = [
   "crates/arora",
   "modules/nao",
+  "modules/blackboard",
   "modules/polly",
+  "modules/say-silent",
   "crates/arora-web",
   "modules/test-behavior-tree-nodes",
   "crates/arora-behavior-tree-types-yaml",
@@ -72,6 +74,8 @@ default-members = [
   "crates/arora-bridge-ros2",
   "crates/arora-msgs-ros2",
   "crates/wasi-sdk",
+  "modules/blackboard",
+  "modules/say-silent",
   "tests",
 ]
 
