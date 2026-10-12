@@ -274,10 +274,13 @@ dependencies = [
 name = "arora-bridge-ros2"
 version = "10.4.1"
 dependencies = [
+ "arora",
  "arora-behavior",
  "arora-behavior-tree-types",
  "arora-bridge",
+ "arora-hal",
  "arora-msgs-ros2",
+ "arora-simple-data-store",
  "arora-types",
  "async-trait",
  "env_logger",

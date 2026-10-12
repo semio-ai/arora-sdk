@@ -48,6 +48,13 @@ dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
 zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 
 [dev-dependencies]
+# A real device behind the bridge (tests/device.rs): the runtime, the fake HAL
+# whose described keys the bridge exposes, and the store their meta lives in.
+# Without `native` the runtime carries no wasm engine, which a device of host
+# parts does not need.
+arora = { path = "../arora", version = "12.7", default-features = false }
+arora-hal = { path = "../arora-hal", version = "4.3" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 # The crate that DEFINES the interpreter-module SPAWN ABI the action plane
 # speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
 # the bridge's ids and encodings match, without a runtime engine dependency.

@@ -69,8 +69,9 @@ jobs:
         run: .github/scripts/list_modified_targets.sh verify
 
       # The ROS 2 bridge's Zenoh backend is off by default and exclusive with
-      # DDS, so the workspace run never builds it. Its unit tests need no ROS;
-      # the live one against a real subscriber is `#[ignore]`d and documented.
+      # DDS, so the workspace run never builds it. Its unit tests need no ROS,
+      # and its live device test joins two in-process sessions over loopback;
+      # the one against a native ROS 2 subscriber is `#[ignore]`d and documented.
       - name: Test the ROS 2 bridge on the Zenoh backend
         if: steps.affected.outputs.test-arora-bridge-ros2 || steps.affected.outputs.test-arora-msgs-ros2
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
