@@ -949,7 +949,7 @@ async fn discover(
 
 /// The QoS every bridge-served ROS 2 service endpoint uses, on both the
 /// request reader and the reply writer of the plain method services and of an
-/// action's goal, result, cancel and feedback: reliable (the best-effort
+/// action's goal, result and cancel services: reliable (the best-effort
 /// `DEFAULT_SUBSCRIPTION_QOS` drops service requests with no redelivery), a
 /// short history, and **volatile** durability — the profile
 /// `rmw_qos_profile_services_default` gives every rclcpp, rclpy and `ros2` CLI
@@ -972,10 +972,32 @@ fn service_qos() -> ros2_client::ros2::QosPolicies {
         .build()
 }
 
+/// The QoS of an action's feedback writer: [`service_qos`]'s reliable,
+/// volatile, keep-last-4 profile — a native action client reads feedback
+/// reliably, and a best-effort writer would match no such reader — with **no
+/// blocking time**. A write into a full send window then answers
+/// `WouldBlock` at once instead of waiting for a reader to acknowledge, and
+/// the action task holds the newest feedback back
+/// ([`actions::FeedbackOutbox`]): a reader that stops acknowledging costs
+/// stale feedback, never the goal's status or result. The blocking time is
+/// not part of DDS QoS matching, so readers match as before.
+#[cfg(feature = "dds")]
+fn feedback_qos() -> ros2_client::ros2::QosPolicies {
+    use ros2_client::ros2::{policy, QosPolicyBuilder};
+    QosPolicyBuilder::new()
+        .reliability(policy::Reliability::Reliable {
+            max_blocking_time: ros2_client::ros2::Duration::from_millis(0),
+        })
+        .history(policy::History::KeepLast { depth: 4 })
+        .durability(policy::Durability::Volatile)
+        .build()
+}
+
 /// Create the five ROS 2 endpoints for one action, per backend. The status
 /// topic is transient-local with a history of one (late-joining clients read
-/// the current goal states, per the ROS actions design); the services and the
-/// feedback topic ride the reliable, volatile [`service_qos`].
+/// the current goal states, per the ROS actions design); the services ride
+/// the reliable, volatile [`service_qos`], and the feedback topic the same
+/// profile without blocking ([`feedback_qos`]).
 ///
 /// The runtime-typed endpoints are keyed on the REP-2016 hashes the action's
 /// `.action` generates — what a native `rmw_zenoh` client addresses them by —
@@ -1005,7 +1027,7 @@ fn create_raw_action_server(
             goal_service: service_qos(),
             result_service: service_qos(),
             cancel_service: service_qos(),
-            feedback_publisher: service_qos(),
+            feedback_publisher: feedback_qos(),
             status_publisher: status_qos,
         };
         match hashes {
