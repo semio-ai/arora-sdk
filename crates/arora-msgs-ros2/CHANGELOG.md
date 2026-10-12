@@ -2,6 +2,29 @@
 
 All notable changes.
 
+## [2.2.0] - 2026-10-12
+
+### Added
+
+- **`hri_actions_msgs/ClosedCaption`**, ROS4HRI's caption message — the
+  speaker, the text and its locale — vendored from
+  [ros4hri/hri_actions_msgs](https://github.com/ros4hri/hri_actions_msgs)
+  2.5.0 as is. A device can now take `/closed_captions`.
+- **`diagnostic_msgs/DiagnosticArray`, `DiagnosticStatus` and `KeyValue`**,
+  vendored from ROS 2 Jazzy's `common_interfaces` as is. A device can now
+  publish `/diagnostics`.
+
+### Fixed
+
+- **A `byte` field hashes as ROS 2 hashes it.** ROS reads `byte` as the IDL
+  `octet`, a type of its own in the REP-2016 hash, and `char` as `uint8`;
+  all three are the same arora `u8`, so a bundled message with a `byte`
+  field hashed as though it were `uint8`, and a native `rmw_zenoh` peer,
+  which matches the concrete hash, never heard it. The bundled `.msg` files'
+  `byte` fields now hash as `octet`, so `std_msgs/Byte`, `ByteMultiArray`
+  and `diagnostic_msgs/DiagnosticStatus` hash as ROS 2 Jazzy does. A type
+  defined at runtime holds no `byte` field: its `u8` hashes as `uint8`.
+
 ## [2.1.0] - 2026-10-02
 
 ### Added

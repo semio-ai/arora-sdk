@@ -58,7 +58,11 @@ fn main() {
         fs::write(Path::new(&out_dir).join(format!("{package}.rs")), source).unwrap();
     }
 
-    let generated = emit_root(&packages);
+    let byte_fields: Vec<(String, String)> = packages
+        .iter()
+        .flat_map(|package| byte_fields(&msgs_dir.join(package), package))
+        .collect();
+    let generated = emit_root(&packages, &byte_fields);
     fs::write(Path::new(&out_dir).join("generated.rs"), generated).unwrap();
 }
 
@@ -86,6 +90,67 @@ fn parse_package(dir: &Path, package: &str) -> Vec<MessageSpec> {
             }
         })
         .collect()
+}
+
+/// The `(REP-2016 type name, field name)` of every field a package's `.msg` and
+/// `.action` files declare `byte` (`byte`, `byte[]`, `byte[N]`).
+///
+/// ROS 2 reads `byte` as the IDL `octet`, a type of its own in the REP-2016
+/// hash, while it reads `uint8` and `char` as `uint8`. All three are the same
+/// arora `u8` — the same value and the same CDR bytes — so the arora type does
+/// not carry which one a `.msg` spelled, and the hasher looks the spelling up
+/// here.
+fn byte_fields(dir: &Path, package: &str) -> Vec<(String, String)> {
+    let mut files: Vec<_> = fs::read_dir(dir)
+        .expect("package directory")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "msg" || x == "action"))
+        .collect();
+    files.sort();
+
+    let mut out = Vec::new();
+    for path in files {
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let text = fs::read_to_string(&path).unwrap();
+        // An action's goal, result and feedback are `---`-separated sections,
+        // each its own `package/action/Name_Section` message.
+        let sections: Vec<(String, Vec<&str>)> = if path.extension().is_some_and(|x| x == "action")
+        {
+            let mut sections = vec![Vec::new()];
+            for line in text.lines() {
+                if line.trim() == "---" {
+                    sections.push(Vec::new());
+                } else {
+                    sections.last_mut().unwrap().push(line);
+                }
+            }
+            ["Goal", "Result", "Feedback"]
+                .iter()
+                .zip(sections)
+                .map(|(suffix, lines)| (format!("{package}/action/{name}_{suffix}"), lines))
+                .collect()
+        } else {
+            vec![(format!("{package}/msg/{name}"), text.lines().collect())]
+        };
+        for (type_name, lines) in sections {
+            for line in lines {
+                let code = line.split_once('#').map_or(line, |(code, _)| code);
+                // A constant (`byte OK=0`) is not a field.
+                if code.contains('=') {
+                    continue;
+                }
+                let mut tokens = code.split_whitespace();
+                let (Some(ty), Some(field)) = (tokens.next(), tokens.next()) else {
+                    continue;
+                };
+                if ty.split('[').next() == Some("byte") {
+                    out.push((type_name.clone(), field.to_string()));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The source for one package: its structs, their constants, and a `register`.
@@ -284,8 +349,9 @@ fn rust_type(base: &Base, arr: Arr) -> TokenStream {
     }
 }
 
-/// The crate-level `generated.rs`: one module per package, plus `registry()`.
-fn emit_root(packages: &[String]) -> String {
+/// The crate-level `generated.rs`: one module per package, `registry()`, and
+/// the bundled messages' `byte` fields.
+fn emit_root(packages: &[String], byte_fields: &[(String, String)]) -> String {
     let modules = packages.iter().map(|package| {
         let ident = format_ident!("{}", package);
         let file = format!("{package}.rs");
@@ -302,8 +368,17 @@ fn emit_root(packages: &[String]) -> String {
         let ident = format_ident!("{}", package);
         quote! { #ident::register(&mut registry); }
     });
+    let byte_entries = byte_fields
+        .iter()
+        .map(|(type_name, field)| quote! { (#type_name, #field) });
     let tokens = quote! {
         #(#modules)*
+
+        /// The `(REP-2016 type name, field name)` of every field a bundled
+        /// `.msg` declares `byte`: ROS hashes it as the IDL `octet`, which the
+        /// arora `u8` it is carried as does not distinguish from `uint8`.
+        #[cfg_attr(not(feature = "interop"), allow(dead_code))]
+        pub(crate) const BYTE_FIELDS: &[(&str, &str)] = &[ #(#byte_entries),* ];
 
         /// A [`Ros2Registry`](crate::Ros2Registry) holding every bundled ROS 2
         /// message type — the std/geometry/sensor/hri packages and their

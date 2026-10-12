@@ -44,10 +44,21 @@ The `hri_msgs` package is [ROS4HRI](https://ros.org/reps/rep-0155.html)'s human-
 vocabulary — `Expression`, `FacialActionUnits`, `Gaze`, `LiveSpeech`, `Viseme`,
 and the rest — the message layer Vizij's face standard is built on (see
 [vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
+ROS4HRI's skill packages (`std_skills`, `interaction_skills`,
+`communication_skills`) and its `hri_actions_msgs/ClosedCaption` sit beside it,
+and `diagnostic_msgs` carries the `/diagnostics` report every ROS node may
+publish.
 
 **To add a message**, drop its `.msg` into `msgs/<package>/` and rebuild — the
 `build.rs` parser and code generator do the rest. Its dependency packages must
-be present too (the closure here is builtin_interfaces + std/geometry/sensor/hri).
+be present too (the closure here is builtin_interfaces + std/geometry/sensor).
+
+A `.msg` `byte`, `char` and `uint8` are all an arora `u8` — the same value and
+the same CDR bytes — but REP-2016 hashes `byte` as a type of its own (the IDL
+`octet`). The build records which bundled fields a `.msg` declares `byte`, and
+the hash reads that record, so `diagnostic_msgs/DiagnosticStatus.level` hashes
+as ROS 2 does. A type [defined at runtime](#types-defined-at-runtime) carries no
+such record: its `u8` fields hash as `uint8`.
 
 ## Departures from upstream
 

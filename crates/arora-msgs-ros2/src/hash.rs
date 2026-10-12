@@ -261,12 +261,33 @@ fn fields_of(ty: &low::Type, registry: &TypeRegistry) -> Result<Vec<Field>, Erro
     };
     let mut fields = Vec::with_capacity(structure.fields.len());
     for field in structure.fields.values() {
-        fields.push(Field::new(
-            field.name.clone(),
-            field_type(&field.type_ref, registry)?,
-        ));
+        let mut field_type = field_type(&field.type_ref, registry)?;
+        if declared_byte(&ty.name, &field.name) {
+            as_byte(&mut field_type);
+        }
+        fields.push(Field::new(field.name.clone(), field_type));
     }
     Ok(fields)
+}
+
+/// Whether a bundled `.msg` declares this field `byte`. The arora `u8` carries
+/// `byte`, `char` and `uint8` alike, but ROS hashes `byte` as the IDL `octet`,
+/// a type of its own. A type defined at runtime holds no such field: its `u8`
+/// hashes as `uint8`.
+fn declared_byte(type_name: &str, field_name: &str) -> bool {
+    crate::BYTE_FIELDS
+        .iter()
+        .any(|(ty, field)| *ty == type_name && *field == field_name)
+}
+
+/// Turn a `uint8` field type, in any array shape, into its `byte` form. The
+/// shape is an offset on the base id, so the base is swapped and the offset
+/// kept.
+fn as_byte(field_type: &mut FieldType) {
+    let offset = field_type.type_id - field_type.type_id % rid::ARRAY_OFFSET;
+    if field_type.type_id - offset == rid::UINT8 {
+        field_type.type_id = offset + rid::BYTE;
+    }
 }
 
 /// The array shape of a field: a single value, a fixed `[N]`, a bounded
