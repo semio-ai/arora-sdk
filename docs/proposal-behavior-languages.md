@@ -19,7 +19,7 @@ authors see the two kinds as two views of the same stored graph.
 **This document is a proof of concept.** It shows that a device can store
 and run both kinds of behavior as one behavior tree, and that authors keep
 both views. Its purpose is agreement on that concept. The names, the
-encoding of the shape, the `reactive` flag, the change check and the
+encoding of the shape, the change check and the
 interfaces of the host are a sketch of one way to build it. The implementers
 of arora-sdk settle the final design and its implementation.
 
@@ -43,10 +43,13 @@ In short:
   is local to the tree, as a call writes a mutable parameter today. A node
   that reads the output reads that variable. A value passes between node
   graphs, or to the rest of the tree, through a store key.
-- **`reactive` is a flag, not a node.** The `PARALLEL` of a node graph can
-  carry it. The flag lets a component evaluate the node graph with the
-  node-graph engine. It adds no meaning: the result is the same as the
-  result of the plain tree, tick for tick.
+- **One executor, with no second path.** The executor of the tree runs a
+  node graph as it runs any subtree. No flag and no recognized shape selects
+  another evaluator. An optimization of a node graph is structure in the
+  tree, such as the `changed?` guard, which the same executor runs.
+- **`reactive` is a flag for the editor only.** It sits with the
+  presentation, beside the graph, and marks a subtree that the author means
+  as a node graph. The executor never reads it.
 - **`layers` orders node graphs by precedence.** It ticks every child in
   order. When two children write one key, the write of the later child wins.
 - **A node calls a module function. The function is never a node.** `call`
@@ -65,9 +68,8 @@ In short:
   it reports the refusal. Its components serve versions of the behavior-tree
   format.
 - **The node graph moves from vizij-rs into arora-sdk** with its git history.
-  It becomes the compute vocabulary and the evaluator of a node graph that
-  carries the `reactive` flag. It also becomes the importer that reads the Vizij node-graph
-  format into a tree.
+  It becomes the compute vocabulary and its value types. It also becomes
+  the importer that reads the Vizij node-graph format into a tree.
 - **Authoring has several views of one stored graph:**
   - the tree, where each node graph is one block that expands to its patterns
   - a node graph, opened for edits
@@ -379,17 +381,17 @@ vocabulary also includes these nodes:
 | `damp`, `spring`, `slew` | Work as now. A new `initial` input sets their start state when it has a link (3.2). |
 | `apply` | Calls a module function, quick or long-running (3.5). |
 
-**The `reactive` flag.** The `PARALLEL` of a node graph can carry the option
-`reactive: true`. The flag is not an operator, and it adds no node. The
-stored graph is the shape of 3.1, with or without the flag. The flag lets a
-component evaluate the node graph with the engine of the node graph, in place
-of a tick of each pattern:
-- The engine uses its plan, its value types and the state of each node,
-  keyed by node id.
-- The writes and the statuses must be the same as those of the plain tree,
-  tick for tick. Thus a component that ignores the flag is also correct.
-- On a subtree that does not have the shape, the flag has no effect. The
-  shape check reports it.
+**One executor.** The executor runs a node graph as it runs any subtree.
+It has no second path for node graphs. No flag and no recognized shape
+selects another evaluator, because two paths for one meaning must agree on
+every tick. A difference between them is a bug that only one path shows.
+Thus:
+- **An optimization of a node graph is structure in the tree.** The
+  `changed?` guard is one. A node whose inputs did not change costs one check
+  and runs nothing, because the tree says so.
+- **An optimization of the executor applies to every tree.** Examples are
+  links resolved one time at load, and versions compared as integers. Such an
+  optimization does not know about node graphs.
 
 ### 3.4 Where a node graph ends
 
@@ -530,7 +532,7 @@ reads as an `apply`.
   `node-graph 1.0` to a behavior tree before it sends the graph to a
   component. (`node-graph 1.0` is the encoding that `vizij-arora-behavior`
   5.4 decodes.) The lowering maps:
-  - each `flow` to a node graph that carries the `reactive` flag
+  - each `flow` to a node graph
   - a `layers` composite in the graph to a `layers` of those node graphs
   - each `ExternalFunction` to an `apply`.
 
@@ -549,8 +551,7 @@ reads as an `apply`.
   - `behavior-tree 1.0`: what `arora-behavior-tree` 8.1 lowers.
   - `1.1`: `Equal`, `WriteKeys`.
   - `1.2`: `RUNNING`, `changed?`, local variables, the compute vocabulary as
-    function leaves, `layers`, and the `succeed_on` and `reactive` options of
-    `PARALLEL`.
+    function leaves, `layers`, and the `succeed_on` option of `PARALLEL`.
   - `1.3`: `call`, `apply`, with `when` and `while_busy`.
 
 ### 3.7 The behavior host and its branches
@@ -818,6 +819,14 @@ the `Graph` that a device runs. The tool lays out a node that has no
 position. The shape check needs no stored marker. Thus a graph authored as a
 tree opens as a node graph, and the reverse, with nothing more stored.
 
+**The `reactive` flag is presentation.** The authoring tool keeps it with the
+positions, keyed by the id of a `PARALLEL`. It records that the author means
+the subtree as a node graph. A flagged subtree shows as a node-graph block.
+When a tree edit takes it out of the shape, the editor shows it as a node
+graph that no longer reads as one, with the reason from the shape check. An
+unflagged subtree in the shape also opens as a node graph. The executor never
+reads the flag.
+
 ## 5. The node graph moves into arora-sdk
 
 The default device runs node graphs with no Vizij crate. Thus the engine,
@@ -828,7 +837,7 @@ stays free of Vizij.
 
 | vizij-rs | In arora-sdk | Stays in vizij-rs |
 |---|---|---|
-| `vizij-graph-core` 2.4 | **`arora-node-graph`**: the engine, the plan, the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature), the external-function seam. `arora-behavior-tree` uses it to evaluate a node graph that carries the `reactive` flag (3.3). | — |
+| `vizij-graph-core` 2.4 | **`arora-node-graph`**: the engine, the plan, the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature), the external-function seam. `arora-behavior-tree` calls its node vocabulary as function leaves (3.3). | — |
 | `vizij-api-core` 2.0 | **`arora-shape`**: shapes, typed paths, the value vocabulary (vec2–4, quat, color, transform), blend, coercion, write batches, the graph-spec JSON forms | — |
 | `vizij-arora-behavior` 5.4 | **`arora-node-graph-import`**: the `node-graph 1.0` codec, and its lowering to a behavior tree (3.6) | the registrations of `look_at`, `play_viseme` and `say`, and the rig prefix of the controls of a skill. They move into `vizij-arora-host`. |
 | `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the wasm bindings and registry export of the editor, over `arora-node-graph` |
@@ -906,7 +915,7 @@ allows them under the MIT license of arora-sdk.
 | Crate or surface | Change |
 |---|---|
 | `arora-behavior` (9.1) | Minor: `GraphType`, the ids and encoders of the typed functions, `RunPolicy::Replace` and `RunPolicy::Overlap` (the enum is non-exhaustive). Major: the component trait and the host. |
-| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`. It adds `Equal` and `WriteKeys` (1.1), then `RUNNING`, `changed?`, local variables, the compute vocabulary, `layers`, and the `succeed_on` and `reactive` options of `PARALLEL` (1.2) over `arora-node-graph`, then `call` and `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
+| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`. It adds `Equal` and `WriteKeys` (1.1), then `RUNNING`, `changed?`, local variables, the compute vocabulary, `layers` and the `succeed_on` option of `PARALLEL` (1.2) over `arora-node-graph`, then `call` and `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
 | `arora` (12.3), `arora-web` (9.0) | Minor: the typed functions, with descriptions. The importer accepts `node-graph 1.0`. Major: the builder composes components, and `Concurrent` refuses an overlap that it accepted before. |
 | `arora-node-graph`, `arora-node-graph-import`, `arora-shape` | New, `1.0.0`. |
 | `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No more releases after vizij-rs depends on the arora crates. `ProcessingGraph` retires, because the graphs of a face run as node graphs of the tree. |
@@ -941,7 +950,6 @@ except stage 4. Stage 4 takes the majors that it names.
 3. **Node graphs in the tree.**
    - `RUNNING`, `changed?`, local variables and the compute vocabulary as
      function leaves, in `arora-behavior-tree` (`behavior-tree 1.2`).
-   - The `reactive` flag, evaluated over `arora-node-graph`.
    - `layers`, and the `succeed_on` option of `PARALLEL`.
    - The `node-graph 1.0` importer.
 
@@ -972,7 +980,8 @@ except stage 4. Stage 4 takes the majors that it names.
 | Alternative | Why not |
 |---|---|
 | The node graph as a second interpreter beside the tree. The host composes the two, and a `run_graph` leaf lets a tree run a node graph. | One store gets two executors, two lowerings and two write analyses. A bridge leaf is necessary at each point where control meets dataflow. Precedence between a tree and a node graph comes only from tick order or `Overlap`. As a shape of the tree, a node graph is part of one graph. It is analyzed and checked with the rest of the graph. |
-| A `reactive` operator with semantics of its own, as the container of a node graph | Its children then follow rules that no other node follows. Thus the executor interprets two languages, one inside the other. The shape uses only tree nodes. The `reactive` flag only permits a faster way to get the same result. Thus the semantics of the tree alone define what a node graph does. |
+| A `reactive` operator with semantics of its own, as the container of a node graph | Its children then follow rules that no other node follows. Thus the executor interprets two languages, one inside the other. The shape uses only tree nodes. Thus the semantics of the tree alone define what a node graph does. |
+| A flag, or a recognized shape, that sends a node graph to a faster evaluator with the same result | Two paths for one meaning must agree on every tick, and a difference is a bug that only one path shows. It is a second executor under another name. Speed comes from the structure of the tree, which one executor runs. |
 | Function nodes mixed into the tree with no container, triggered by a rule of the executor when a key that they read is set | This also gives one language. But the trigger is a rule that the tree does not show, and the executor must find the nodes that a write affects. In the shape, the trigger is a `changed?` leaf in the tree, and the container is a standard `PARALLEL`. |
 | Metadata that marks which tree nodes make a node graph | A tree edit can make the metadata disagree with the tree. The shape check reads the tree itself. When a subtree no longer reads as a node graph, the check says why. |
 | A node graph stored apart from the tree, as authoring metadata beside it | This gives two sources of truth. The stored node graph and the tree compiled from it can disagree. |
@@ -993,17 +1002,19 @@ except stage 4. Stage 4 takes the majors that it names.
 The design above holds without these details. Each detail is to be
 investigated before the stage that it touches.
 
-- **The cost of the shape.** A plain tick of the shape and an evaluation by
-  the engine run the same calls each tick. The plain tick also ticks about
-  four tree nodes for each node of the graph. In a TypeScript model of this
-  design, the plain tick cost 1.0 to 2.2 times the engine while values
-  changed. It cost less on a wide graph that had settled. These numbers do
-  not predict the cost in Arora. Before stage 3 lands, measure three forms:
-  the plain tick, the engine under the `reactive` flag, and the full
-  evaluation of today. Measure them on the composed graph of a face and
-  on the stepping run of Studio.
-  Then decide whether components honor the `reactive` flag, and whether
-  they also recognize the shape without it.
+- **The cost of the shape.** The shape runs the same calls as a dedicated
+  node-graph evaluator. It also ticks about four tree nodes for each node of
+  the graph. In a TypeScript model of this design, the shape cost 1.0 to 2.2
+  times a dedicated evaluator while values changed. It cost less on a wide
+  graph that had settled. These numbers do not predict the cost in Arora.
+  Before stage 3 lands, measure the shape against the full evaluation of
+  today, on the composed graph of a face and on the stepping run of Studio.
+  If the shape is too slow, the remedy is structure or a general
+  optimization of the executor (3.3), not a second path.
+- **Guards over groups of nodes.** One `changed?` in front of a group of
+  patterns can skip a whole settled part of a graph with one check. It is
+  open whether the shape allows such a guard, and whether the editor writes
+  it.
 - **Effects that a description does not state.** With `when` on `apply`, an
   author can call a function every tick. It is open whether the description
   of a module function should also declare this, with a flag beside `mutable`.
@@ -1033,7 +1044,7 @@ investigated before the stage that it touches.
   executor polls only then.
 - **Retiring `Overlap`.** After a `layers` states the precedence of a face
   over its programs and skills, `Overlap` has no user.
-- **Names**: the crates, `changed?`, the `reactive` flag, the `layers`
+- **Names**: the crates, `changed?`, the `reactive` flag of the editor, the `layers`
   composite, the `call` and `apply` nodes, and the host.
 - **Notice of a change of branches**: a key that the host writes when a
   branch starts or ends, beside `branches()`.
