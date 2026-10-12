@@ -23,7 +23,7 @@ use arora_types::ty::{
 use arora_types::value::{Enumeration, Structure, StructureField, StructureWithoutId, Type, Value};
 use arora_types::Uuid;
 use futures::stream::unfold;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use log::{debug, warn};
 use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher, RawSubscription};
 use tokio::time::{sleep, Duration};
@@ -338,16 +338,6 @@ async fn raw_take(sub: &RawSubscription) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("{e:?}"))
 }
 
-/// Create a **raw** subscription for a key declared with a ROS message type, and
-/// return a stream that decodes each received message against that type into a
-/// single-key [`StateChange`] — the typed-inbound counterpart of
-/// [`setup_typed`], and the sibling of [`setup_typed_key_publisher`]. A device
-/// key thereby receives a real typed ROS message (e.g. `hri_msgs/Expression`)
-/// rather than a `std_msgs` scalar.
-///
-/// `topic` is the topic name (an absolute ROS name, or the
-/// `/{namespace}/keys/{path}` default the caller resolves) and `ros_type` the
-/// registered message name; `path` is the store key the decoded value lands on.
 /// The element type behind any [`TypeRef`](arora_types::module::low::TypeRef)
 /// variant — the id a field walk descends into.
 pub(crate) fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora_types::Uuid {
@@ -1035,6 +1025,19 @@ fn xyz_value(value: &Value, ty: &low::Type) -> Option<Value> {
     Some(Value::Structure(Structure { id: ty.id, fields }))
 }
 
+/// Create a **raw** subscription for a key declared with a ROS message type, and
+/// return a stream that decodes each received message against that type into a
+/// [`StateChange`] — the typed-inbound counterpart of [`setup_typed`], and the
+/// sibling of [`setup_typed_key_publisher`]. A device key thereby receives a
+/// real typed ROS message (e.g. `hri_msgs/Expression`) rather than a
+/// `std_msgs` scalar.
+///
+/// `topic` is the topic name (an absolute ROS name, or the
+/// `/{namespace}/keys/{path}` default the caller resolves) and `ros_type` the
+/// registered message name; `path` is the store key the decoded value lands
+/// on when there are no `routes`. With routes, every routed field of one
+/// message lands in one atomic change; a field that fails to resolve is
+/// logged and skipped, the rest still land.
 pub fn setup_typed_key_subscriber(
     node: &mut Node,
     topic: &str,
@@ -1044,6 +1047,46 @@ pub fn setup_typed_key_subscriber(
     registry: Arc<Ros2Registry>,
     qos: Qos,
 ) -> Result<StateChangeStream, String> {
+    let message_type = registry
+        .get_by_name(ros_type)
+        .ok_or_else(|| format!("unknown ROS message type '{ros_type}'"))?
+        .clone();
+    let messages = setup_typed_message_subscriber(node, topic, ros_type, registry.clone(), qos)?;
+    let stream = messages.filter_map(move |value| {
+        let mut change = StateChange::new();
+        if routes.is_empty() {
+            change.set.insert(Key::from(path.clone()), Some(value));
+        } else {
+            for route in &routes {
+                match extract_route(&value, &message_type, registry.types(), &route.field) {
+                    Ok(extracted) => {
+                        change
+                            .set
+                            .insert(Key::from(route.key.clone()), Some(extracted));
+                    }
+                    Err(e) => warn!("key '{}': {e}", route.key),
+                }
+            }
+        }
+        futures::future::ready((!change.set.is_empty()).then_some(change))
+    });
+    Ok(Box::pin(stream))
+}
+
+/// A boxed stream of decoded messages from one typed subscription.
+pub type MessageStream = Pin<Box<dyn Stream<Item = Value> + Send>>;
+
+/// Create a **raw** subscription on `topic` for the registered message
+/// `ros_type`, and return the stream of its messages decoded against that
+/// type. A message that does not decode is logged and dropped; the stream ends
+/// after a run of consecutive receive failures, backing off between them.
+pub fn setup_typed_message_subscriber(
+    node: &mut Node,
+    topic: &str,
+    ros_type: &str,
+    registry: Arc<Ros2Registry>,
+    qos: Qos,
+) -> Result<MessageStream, String> {
     let message_type = registry
         .get_by_name(ros_type)
         .ok_or_else(|| format!("unknown ROS message type '{ros_type}'"))?
@@ -1058,69 +1101,38 @@ pub fn setup_typed_key_subscriber(
         .create_raw_subscription(&ros_topic, None)
         .map_err(|e| format!("failed to subscribe to {topic}: {e:?}"))?;
 
+    let topic = topic.to_string();
     let ros_type = ros_type.to_string();
     let stream = unfold((subscription, 0u32), move |(sub, errors)| {
-        let path = path.clone();
+        let topic = topic.clone();
         let ros_type = ros_type.clone();
         let message_type = message_type.clone();
         let registry = registry.clone();
-        let routes = routes.clone();
         async move {
             let mut errors = errors;
             loop {
                 match raw_take(&sub).await {
                     Ok(bytes) => match cdr::decode(&message_type, registry.types(), &bytes) {
-                        Ok(value) => {
-                            let mut change = StateChange::new();
-                            if routes.is_empty() {
-                                change.set.insert(Key::from(path.clone()), Some(value));
-                            } else {
-                                // All routed fields of one message land in one
-                                // atomic change; a field that fails to resolve
-                                // is logged and skipped, the rest still land.
-                                for route in &routes {
-                                    match extract_route(
-                                        &value,
-                                        &message_type,
-                                        registry.types(),
-                                        &route.field,
-                                    ) {
-                                        Ok(extracted) => {
-                                            change.set.insert(
-                                                Key::from(route.key.clone()),
-                                                Some(extracted),
-                                            );
-                                        }
-                                        Err(e) => {
-                                            warn!("key '{}': {e}", route.key);
-                                        }
-                                    }
-                                }
-                                if change.set.is_empty() {
-                                    continue;
-                                }
-                            }
-                            return Some((change, (sub, 0)));
-                        }
+                        Ok(value) => return Some((value, (sub, 0))),
                         // A message that does not decode against its declared
                         // type is dropped (not a receive failure); wait for the
                         // next one rather than terminating the stream.
                         Err(e) => {
-                            warn!("key '{path}': failed to decode a '{ros_type}' message: {e}");
+                            warn!("'{topic}': failed to decode a '{ros_type}' message: {e}");
                         }
                     },
                     Err(e) => {
                         errors += 1;
                         if errors >= MAX_CONSECUTIVE_ERRORS {
                             warn!(
-                                "subscription for key '{path}' failed {MAX_CONSECUTIVE_ERRORS} \
+                                "subscription to '{topic}' failed {MAX_CONSECUTIVE_ERRORS} \
                                  consecutive times, terminating stream"
                             );
                             return None;
                         }
                         let shift = (errors - 1).min(62) as u64;
                         let delay = Duration::from_millis(100u64.saturating_mul(1u64 << shift));
-                        warn!("subscription for key '{path}' errored: {e}; retrying");
+                        warn!("subscription to '{topic}' errored: {e}; retrying");
                         sleep(delay).await;
                     }
                 }

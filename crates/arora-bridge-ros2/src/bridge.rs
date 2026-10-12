@@ -40,12 +40,13 @@ use tokio_util::sync::CancellationToken;
 use crate::actions;
 use crate::conversions::{
     default_value, has_std_msgs_scalar, place_route, setup_key_subscriber,
-    setup_typed_key_publisher, setup_typed_key_subscriber, topic_name, KeyPublisher,
-    StateChangeStream, TypedKeyPublisher, OVERSIZED_JSON_BYTES,
+    setup_typed_key_publisher, setup_typed_key_subscriber, setup_typed_message_subscriber,
+    topic_name, KeyPublisher, StateChangeStream, TypedKeyPublisher, OVERSIZED_JSON_BYTES,
 };
 use crate::profile;
 use crate::qos::Qos;
 use crate::services;
+use crate::topic_skills;
 
 /// An output published as a **typed** ROS 2 message rather than a `std_msgs`
 /// scalar: a message of `ros_type` (a registered ROS message name, e.g.
@@ -127,6 +128,11 @@ pub struct Ros2BridgeConfig {
     /// startup against the described methods and refused loudly when the
     /// contract does not hold.
     pub action_bindings: Vec<profile::ActionBinding>,
+    /// Skills on topics: profile-declared topics whose every message spawns a
+    /// device task-run method, the latest message winning (see
+    /// [`profile::TopicSkillBinding`]). Checked at startup like the action
+    /// bindings.
+    pub topic_skill_bindings: Vec<profile::TopicSkillBinding>,
 }
 
 impl Ros2BridgeConfig {
@@ -140,6 +146,7 @@ impl Ros2BridgeConfig {
             includes: Vec::new(),
             outputs: Vec::new(),
             action_bindings: Vec::new(),
+            topic_skill_bindings: Vec::new(),
         }
     }
 
@@ -223,7 +230,7 @@ impl Ros2BridgeConfig {
     /// endpoint becomes a typed binding on its absolute topic with its field
     /// routes — fanned out over keys inbound, composed from keys outbound —
     /// the profile's includes join the scalar plane's rewrite set, and its
-    /// action bindings join the skill plane.
+    /// action and topic-skill bindings join the skill plane.
     pub fn with_profile(mut self, profile: profile::ExposureProfile) -> Self {
         for endpoint in profile.endpoints {
             match endpoint.flow {
@@ -247,6 +254,7 @@ impl Ros2BridgeConfig {
         }
         self.includes.extend(profile.includes);
         self.action_bindings.extend(profile.actions);
+        self.topic_skill_bindings.extend(profile.topic_skills);
         self
     }
 }
@@ -599,6 +607,7 @@ async fn run_node(
         outputs,
         includes,
         action_bindings,
+        topic_skill_bindings,
     } = config;
 
     let mut node = match build_node(&namespace, domain_id) {
@@ -690,8 +699,14 @@ async fn run_node(
     // outbound topics, a device's methods are its own surface, so nothing is
     // declared. Profile-declared skill endpoints join the same action plane,
     // checked against the discovered signatures.
-    let (discovered, discovered_actions) =
-        discover(&cmd_tx, &namespace, &registry, &action_bindings).await;
+    let (discovered, discovered_actions, topic_skills) = discover(
+        &cmd_tx,
+        &namespace,
+        &registry,
+        &action_bindings,
+        &topic_skill_bindings,
+    )
+    .await;
     let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
     for service in discovered {
         if let Some(stream) = service_stream(&mut node, service, registry.clone(), cmd_tx.clone()) {
@@ -718,6 +733,37 @@ async fn run_node(
                 ));
             }
             Err(e) => warn!("Ros2Bridge could not create action '{}': {e}", action.name),
+        }
+    }
+
+    // One task per topic skill, owning its subscription and the run its
+    // latest message spawned; it watches that run's status key on the same
+    // forwarded state changes as the action tasks.
+    for skill in topic_skills {
+        let qos = skill.qos.unwrap_or(Qos::default_for(profile::Flow::In));
+        match setup_typed_message_subscriber(
+            &mut node,
+            &skill.topic,
+            &skill.ros_type,
+            registry.clone(),
+            qos,
+        ) {
+            Ok(messages) => {
+                subscribed.insert(skill.topic.clone(), skill.topic.clone());
+                let (change_tx, change_rx) = tmpsc::unbounded_channel();
+                action_change_txs.push(change_tx);
+                tokio::spawn(topic_skills::topic_skill_task(
+                    skill,
+                    registry.clone(),
+                    cmd_tx.clone(),
+                    messages,
+                    change_rx,
+                ));
+            }
+            Err(e) => warn!(
+                "Ros2Bridge could not subscribe to the skill topic '{}': {e}",
+                skill.topic
+            ),
         }
     }
 
@@ -893,16 +939,22 @@ async fn device_inputs(cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>) -> Vec<(S
 /// planes: the ROS 2-representable methods to services, and the task-run
 /// (behavior-tree-`Status`-returning) methods to actions — the profile's
 /// skill bindings joining the latter, each checked against the described
-/// signatures. Methods whose types aren't representable on their plane, and
-/// bindings whose contract does not hold, are logged and skipped (never
-/// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
-/// the bridge then serves no methods.
+/// signatures, and its topic skills resolved the same way. Methods whose
+/// types aren't representable on their plane, and bindings whose contract
+/// does not hold, are logged and skipped (never silently dropped). Empty if
+/// the runtime never answers (e.g. it stopped) — the bridge then serves no
+/// methods.
 async fn discover(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     namespace: &str,
     registry: &Ros2Registry,
     action_bindings: &[profile::ActionBinding],
-) -> (Vec<services::MethodService>, Vec<actions::MethodAction>) {
+    topic_skill_bindings: &[profile::TopicSkillBinding],
+) -> (
+    Vec<services::MethodService>,
+    Vec<actions::MethodAction>,
+    Vec<topic_skills::TopicSkill>,
+) {
     let (reply_tx, reply_rx) = oneshot::channel();
     if cmd_tx
         .unbounded_send(BridgeCommand::new(
@@ -911,7 +963,7 @@ async fn discover(
         ))
         .is_err()
     {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     }
     let signatures: Vec<MethodSignature> = match reply_rx.await {
         Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
@@ -944,7 +996,12 @@ async fn discover(
         warn!("Ros2Bridge refuses a {error}");
     }
     resolved_actions.extend(bound_actions);
-    (resolved, resolved_actions)
+    let (topic_skills, refused) =
+        topic_skills::resolve(topic_skill_bindings, &signatures, registry);
+    for error in refused {
+        warn!("Ros2Bridge refuses a {error}");
+    }
+    (resolved, resolved_actions, topic_skills)
 }
 
 /// The QoS every bridge-served ROS 2 service endpoint uses, on both the

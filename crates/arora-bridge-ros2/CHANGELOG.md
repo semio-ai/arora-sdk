@@ -13,9 +13,21 @@ All notable changes to `arora-bridge-ros2`. The format follows
   into one flat array (`timeline.visemes.*.viseme.value` is a `[u8]`), and a
   `builtin_interfaces/Duration` routes as its seconds, an `f32`. A bound
   action's goal route accepts a numeric index, as an inbound endpoint's does.
+- **Skills on topics.** A `TopicSkillBinding` in an `ExposureProfile` serves
+  a device task-run method on a topic: each message spawns the method, its
+  fields routed onto the parameters as an action goal's are, and nothing
+  answers. The latest message wins: the run the previous message spawned is
+  halted, unless it already ended, before the new one is spawned, and
+  messages queued while a spawn is in flight collapse to the newest. A
+  binding is checked at startup against the device's described methods and
+  refused loudly when its contract does not hold.
 
 ### Changed
 
+- **Breaking:** `ExposureProfile` has the `topic_skills` field and
+  `Ros2BridgeConfig` the `topic_skill_bindings` field, so a struct literal of
+  either must name it. `ExposureProfile::ros4hri()` and
+  `Ros2BridgeConfig::new` build them as before.
 - Depends on arora-msgs-ros2 2.3.
 
 ## [10.4.2] - 2026-10-13

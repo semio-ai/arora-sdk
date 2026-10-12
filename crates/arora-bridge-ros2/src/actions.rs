@@ -273,6 +273,112 @@ pub(crate) fn resolve(
     (actions, skipped)
 }
 
+/// The described task-run method named `function`: present, and returning
+/// the behavior-tree `Status` so the interpreter can spawn it.
+pub(crate) fn task_run<'a>(
+    signatures: &'a [MethodSignature],
+    function: &str,
+) -> Result<&'a MethodSignature, String> {
+    let signature = signatures
+        .iter()
+        .find(|signature| signature.name == function)
+        .ok_or_else(|| format!("the device describes no method '{function}'"))?;
+    if !is_action_shaped(signature) {
+        return Err(format!(
+            "method '{function}' is not a task run (it does not return the behavior-tree Status)"
+        ));
+    }
+    Ok(signature)
+}
+
+/// Resolve the routes of a skill's message onto the parameters of the
+/// method that implements it: every routed field must resolve in the message
+/// type and land on a parameter of a compatible type. `surface` names the
+/// skill (its action or topic) in the log.
+pub(crate) fn resolve_routes(
+    surface: &str,
+    message_type: &low::Type,
+    field_routes: &[profile::FieldRoute],
+    signature: &MethodSignature,
+    registry: &Ros2Registry,
+) -> Result<Vec<BoundRoute>, String> {
+    let function = &signature.function;
+    let mut routes = Vec::new();
+    for route in field_routes {
+        let field_ref = resolve_field_ref(message_type, registry.types(), &route.field)?;
+        let (parameter_id, parameter) = function
+            .parameter_ordering
+            .iter()
+            .filter_map(|id| Some((*id, function.parameters.get(id)?)))
+            .find(|(_, parameter)| parameter.name == route.key)
+            .ok_or_else(|| {
+                format!(
+                    "method '{}' has no parameter '{}'",
+                    signature.name, route.key
+                )
+            })?;
+        if !route_compatible(&field_ref, &parameter.ty, registry) {
+            return Err(format!(
+                "field '{}' does not fit parameter '{}'",
+                route.field, route.key
+            ));
+        }
+        routes.push(BoundRoute {
+            field: route.field.clone(),
+            parameter: parameter_id,
+        });
+    }
+    // A standard contract carries what the standard says, which need not be
+    // every parameter the implementing method takes — ROS4HRI's `Say` goal has
+    // no field for a voice, say. Such a parameter is left out of the spawn
+    // call, and what an absent argument means is the implementation's: a
+    // method declared with arora-module reads an absent optional parameter as
+    // `None` and fails the call on an absent required one, while a task
+    // fragment may supply the argument itself. So the skill is served, not
+    // refused, and the gap is announced here to be legible in the log rather
+    // than surprising at the first message. A route naming a field the
+    // message lacks, or a parameter the method lacks, is still refused above:
+    // a typo is not an omission.
+    let unrouted: Vec<&str> = function
+        .parameter_ordering
+        .iter()
+        .filter_map(|id| function.parameters.get(id))
+        .map(|parameter| parameter.name.as_str())
+        .filter(|name| !field_routes.iter().any(|route| route.key == *name))
+        .collect();
+    if !unrouted.is_empty() {
+        log::info!(
+            "{surface}: '{}' is spawned without {}, which the message does not carry: \
+             an absent optional parameter is None, and the implementation \
+             supplies an absent required one or fails the run",
+            signature.name,
+            unrouted.join(", "),
+        );
+    }
+    Ok(routes)
+}
+
+/// The spawn call's arguments: each routed field of `message`, extracted
+/// onto its parameter.
+pub(crate) fn routed_args(
+    message: &Value,
+    message_type: &low::Type,
+    routes: &[BoundRoute],
+    registry: &Ros2Registry,
+) -> Result<Vec<StructureField>, String> {
+    routes
+        .iter()
+        .map(|route| {
+            let value = extract_route(message, message_type, registry.types(), &route.field)
+                .map_err(|e| format!("field {e}"))?;
+            Ok(StructureField {
+                id: route.parameter,
+                value: Box::new(value),
+            })
+        })
+        .collect()
+}
+
 /// Resolve every profile-declared [`profile::ActionBinding`] against the
 /// device's described methods and the message registry — the startup check
 /// that a skill's exterior contract is actually implemented. Returns the
@@ -317,73 +423,14 @@ fn resolve_binding(
         message,
     });
 
-    let signature = signatures
-        .iter()
-        .find(|signature| signature.name == binding.function)
-        .ok_or_else(|| format!("the device describes no method '{}'", binding.function))?;
-    if !is_action_shaped(signature) {
-        return Err(format!(
-            "method '{}' is not a task run (it does not return the behavior-tree Status)",
-            binding.function
-        ));
-    }
-
-    // Every routed field must resolve in the goal message and land on a
-    // parameter of a compatible type.
-    let function = &signature.function;
-    let mut routes = Vec::new();
-    for route in &binding.goal_routes {
-        let field_ref = resolve_field_ref(&goal_type, registry.types(), &route.field)?;
-        let (parameter_id, parameter) = function
-            .parameter_ordering
-            .iter()
-            .filter_map(|id| Some((*id, function.parameters.get(id)?)))
-            .find(|(_, parameter)| parameter.name == route.key)
-            .ok_or_else(|| {
-                format!(
-                    "method '{}' has no parameter '{}'",
-                    binding.function, route.key
-                )
-            })?;
-        if !route_compatible(&field_ref, &parameter.ty, registry) {
-            return Err(format!(
-                "goal field '{}' does not fit parameter '{}'",
-                route.field, route.key
-            ));
-        }
-        routes.push(BoundRoute {
-            field: route.field.clone(),
-            parameter: parameter_id,
-        });
-    }
-    // A standard contract carries what the standard says, which need not be
-    // every parameter the implementing method takes — ROS4HRI's `Say` goal has
-    // no field for a voice, say. Such a parameter is left out of the spawn
-    // call, and what an absent argument means is the implementation's: a
-    // method declared with arora-module reads an absent optional parameter as
-    // `None` and fails the call on an absent required one, while a task
-    // fragment may supply the argument itself. So the binding is served, not
-    // refused, and the gap is announced here to be legible in the log rather
-    // than surprising at the first goal. A route naming a field the goal
-    // lacks, or a parameter the method lacks, is still refused above: a typo
-    // is not an omission.
-    let unrouted: Vec<&str> = function
-        .parameter_ordering
-        .iter()
-        .filter_map(|id| function.parameters.get(id))
-        .map(|parameter| parameter.name.as_str())
-        .filter(|name| !binding.goal_routes.iter().any(|route| route.key == *name))
-        .collect();
-    if !unrouted.is_empty() {
-        log::info!(
-            "{}: '{}' is spawned without {}, which the goal does not carry: \
-             an absent optional parameter is None, and the implementation \
-             supplies an absent required one or fails the run",
-            binding.action,
-            binding.function,
-            unrouted.join(", "),
-        );
-    }
+    let signature = task_run(signatures, &binding.function)?;
+    let routes = resolve_routes(
+        &binding.action,
+        &goal_type,
+        &binding.goal_routes,
+        signature,
+        registry,
+    )?;
 
     let send_goal_request_type = bound_send_goal_request_type(&binding.action, &goal_type);
     ros2_representable(&send_goal_request_type, registry.types())
@@ -722,15 +769,8 @@ fn bound_goal_call_of(
         Ok(Value::U8(priority)) => priority,
         _ => std_skills::Meta::NORMAL_PRIORITY,
     };
-    let mut args = Vec::with_capacity(bound.routes.len());
-    for route in &bound.routes {
-        let value = extract_route(&goal, &bound.goal_type, registry.types(), &route.field)
-            .map_err(|e| format!("goal field {e}"))?;
-        args.push(StructureField {
-            id: route.parameter,
-            value: Box::new(value),
-        });
-    }
+    let args = routed_args(&goal, &bound.goal_type, &bound.routes, registry)
+        .map_err(|e| format!("goal {e}"))?;
     Ok((
         goal_id,
         priority,
@@ -1471,7 +1511,7 @@ fn now() -> Time {
 }
 
 /// Dispatch `call` to the runtime as a [`BridgeOp::Call`] and await its result.
-async fn runtime_call(
+pub(crate) async fn runtime_call(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     call: Call,
 ) -> Result<CallResult, String> {
@@ -1865,7 +1905,7 @@ fn offer_ready_results(
 }
 
 /// The three run outcomes a status key carries.
-enum RunStatus {
+pub(crate) enum RunStatus {
     Running,
     Success,
     Failure,
@@ -1874,7 +1914,7 @@ enum RunStatus {
 /// Map a status-key value (the behavior-tree `Status` enumeration) to the run
 /// outcome. `None` for any other value — a foreign write to the key is not a
 /// lifecycle transition.
-fn run_status_of(value: &Value) -> Option<RunStatus> {
+pub(crate) fn run_status_of(value: &Value) -> Option<RunStatus> {
     let Value::Enumeration(enumeration) = value else {
         return None;
     };
