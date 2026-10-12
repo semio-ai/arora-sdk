@@ -4,6 +4,17 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.3] - 2026-10-12
+
+### Changed
+
+- The control panel shows a refused write in its status line with the device's
+  reason (`Write refused: …`) until the device takes a write, and reads back
+  the controls with no write waiting, so they show what the device holds
+  rather than the value it refused. The device takes or refuses a batch of
+  writes whole. A message the server could not read shows its `error` answer
+  in the status line.
+
 ## [7.2.2] - 2026-10-10
 
 ### Fixed

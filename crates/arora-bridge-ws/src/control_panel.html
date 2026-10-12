@@ -364,6 +364,9 @@
       let searchFilter = "";
       let pending = {};
       let flushTimer = null;
+      // Whether the status line shows a refused write, which the next write the
+      // device takes clears.
+      let writeRefused = false;
       let connectTimeout = null;
       // The device's methods, and the last run each task-shaped one started —
       // what a Stop halts.
@@ -1013,6 +1016,7 @@
         }, 10000);
         ws.onopen = () => {
           clearTimeout(connectTimeout);
+          writeRefused = false;
           status("on", "Connected");
           cbtn.textContent = "Disconnect";
           cbtn.className = "btn-off";
@@ -1080,6 +1084,30 @@
             } else if (!message.success) {
               status("off", method + ": " + (message.message || "failed"));
             }
+          } else if (message.type === "write_values_resp") {
+            // The device takes or refuses each batch whole. A refusal names
+            // its reason in the status line until the device takes a write,
+            // and the controls with no write waiting are read back, so they
+            // show what the device holds rather than the value it refused.
+            if (message.success) {
+              if (writeRefused) {
+                writeRefused = false;
+                status("on", "Connected");
+              }
+            } else {
+              writeRefused = true;
+              status("off", "Write refused: " + (message.message || "no reason given"));
+              const settled = controls
+                .map((control) => control.path)
+                .filter((path) => !Object.prototype.hasOwnProperty.call(pending, path));
+              if (settled.length) {
+                ws.send(JSON.stringify({ type: "read_values", keys: settled }));
+              }
+            }
+          } else if (message.type === "error") {
+            // A message the server could not read is answered here, not by
+            // the device.
+            status("off", "Error: " + (message.message || "unknown"));
           } else if (
             message.type === "read_values_resp" ||
             message.type === "values_changed"
