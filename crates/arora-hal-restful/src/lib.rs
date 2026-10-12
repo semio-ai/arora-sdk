@@ -20,8 +20,8 @@
 //! It describes those keys ([`arora_hal::Hal::describe_keys`]) for each joint
 //! of a POST joint-positions endpoint: the four target keys as `F64` inputs,
 //! open to remote writers, and `<joint>.position` and `<joint>.velocity` as
-//! `F64` outputs. A device over it opens its inputs with no host
-//! configuration, and every bridge lists them.
+//! `F64` outputs. A device over it (arora 12.7 or later) opens its inputs with
+//! no host configuration, and every bridge lists them.
 //!
 //! Values are from the arora-types [`Value`](arora_types::value::Value) enum;
 //! state changes are applied as sets and unsets.
