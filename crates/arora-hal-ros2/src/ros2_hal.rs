@@ -94,19 +94,6 @@ struct Inner {
     current_state: Mutex<State>,
 }
 
-/// Fold `later` into `earlier`, per-key newest wins: applying the folded
-/// change equals applying both in order.
-fn fold_newest_wins(earlier: &mut StateChange, later: StateChange) {
-    for key in later.unset {
-        earlier.set.remove(&key);
-        earlier.unset.insert(key);
-    }
-    for (key, value) in later.set {
-        earlier.unset.remove(&key);
-        earlier.set.insert(key, value);
-    }
-}
-
 impl Ros2Hal {
     /// Create a new Ros2Hal with the given configuration.
     ///
@@ -287,14 +274,14 @@ impl Ros2Hal {
         .abort_handle();
 
         // The queued-write task: receives the changes `try_send` enqueues,
-        // folds any backlog into one change (per-key newest wins) so slow
+        // folds any backlog into one change (newest wins, per key and per target) so slow
         // publishes coalesce, and drives the same write path as `write()`.
         let (outbound, mut outbound_rx) = futures::channel::mpsc::unbounded::<StateChange>();
         let task_inner = inner.clone();
         let send_task_abort_handle = tokio::spawn(async move {
             while let Some(mut changes) = outbound_rx.next().await {
                 while let Ok(later) = outbound_rx.try_recv() {
-                    fold_newest_wins(&mut changes, later);
+                    arora_hal::fold_newest_wins(&mut changes, later);
                 }
                 if let Err(e) = task_inner.write(changes).await {
                     warn!("Queued write failed: {e}");
@@ -677,7 +664,7 @@ impl Hal for Ros2Hal {
     }
 
     /// Enqueues the changes onto the queued-write task and returns; the task
-    /// folds the backlog (per-key newest wins) and drives the same path as
+    /// folds the backlog (newest wins, per key and per target) and drives the same path as
     /// [`write`](Hal::write). Never waits on DDS discovery or publishing.
     fn try_send(&self, changes: &StateChange) {
         if changes.is_empty() {
@@ -1118,7 +1105,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Create a state change to publish
-        // Note: FromStateChange expects "target_position" component for publishing
+        // The joint command reads the position targets.
         let mut state_change = StateChange::new();
         state_change.set.insert(
             Key::from("head_yaw.target_position".to_string()),

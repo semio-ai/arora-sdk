@@ -15,14 +15,28 @@ use crate::{
 
 /// Builds a ROS 2 message from the keys of an Arora `StateChange` it reads.
 ///
-/// The joint commands read the root-namespace keys whose first attribute is
-/// `target_position`, the key's entity being the joint's Arora id; `None` when
-/// the change holds none of the keys the message reads.
+/// The joint commands read the position targets of joints at the root
+/// ([`joint_position_targets`]); `None` when the change holds none of the keys
+/// the message reads.
 pub trait FromStateChange: Sized {
     fn from_state_change(
         state_change: &StateChange,
         joint_ids_to_ros_names: &HashMap<String, String>,
     ) -> Result<Option<Self>, ROS2RobotError>;
+}
+
+/// The joint position targets `state_change` sets, as `(joint id, value)`:
+/// the keys `<joint>/target.position` and `<joint>.target_position`
+/// ([`arora_hal::set_targets`]) of a joint at the root (`<joint>` with no
+/// `/`). Where the change sets both forms for one joint, the value is
+/// `<joint>/target.position`'s.
+fn joint_position_targets(state_change: &StateChange) -> Vec<(String, &Option<Value>)> {
+    arora_hal::set_targets(state_change)
+        .into_iter()
+        .filter(|target| target.component() == "position")
+        .filter(|target| target.measured.get_namespace().is_empty())
+        .map(|target| (target.entity().to_string(), target.value))
+        .collect()
 }
 
 // FromStateChange implementations
@@ -36,15 +50,8 @@ impl FromStateChange for JointState {
         let mut names = Vec::new();
         let mut positions = Vec::new();
 
-        // Extract joint positions from StateChange set values
-        for (key, value_opt) in &state_change.set {
-            // Look only for target positions component for this device (root namespace)
-            if !key.get_namespace().is_empty() || key.get_component() != Some("target_position") {
-                continue;
-            }
-
+        for (entity, value_opt) in joint_position_targets(state_change) {
             if let Some(value) = value_opt {
-                let entity = key.get_entity().to_string();
                 let joint_name = joint_ids_to_ros_names.get(&entity).unwrap_or(&entity);
 
                 // Convert Value to f64
@@ -92,14 +99,7 @@ impl FromStateChange for Float64MultiArray {
         debug!("Converting StateChange to Float64MultiArray");
         let mut joint_positions: Vec<(String, f64)> = Vec::new();
 
-        // Extract joint positions from state change
-        for (key, value) in &state_change.set {
-            // Look only for target positions component for this device (root namespace)
-            if !key.get_namespace().is_empty() || key.get_component() != Some("target_position") {
-                continue;
-            }
-
-            let entity = key.get_entity().to_string();
+        for (entity, value) in joint_position_targets(state_change) {
             let joint_name = joint_ids_to_ros_names.get(&entity).unwrap_or(&entity);
             if let Some(Value::F64(position)) = value {
                 joint_positions.push((joint_name.to_string(), *position));
@@ -155,14 +155,7 @@ impl FromStateChange for JointAnglesWithSpeed {
         let mut joint_positions = Vec::new();
         let mut joint_names = Vec::new();
 
-        // Extract joint positions from key/value pairs
-        for (key, value) in &state_change.set {
-            // Only consider target_position components at root namespace
-            if !key.get_namespace().is_empty() || key.get_component() != Some("target_position") {
-                continue;
-            }
-
-            let key_str = &key.path;
+        for (entity, value) in joint_position_targets(state_change) {
             let conversion_result = match value {
                 Some(Value::F64(value)) => Ok(value),
                 Some(_) => Err("value is not a f64"),
@@ -171,14 +164,13 @@ impl FromStateChange for JointAnglesWithSpeed {
 
             match conversion_result {
                 Ok(value) => {
-                    let entity = key.get_entity().to_string();
                     let joint_name = joint_ids_to_ros_names.get(&entity).unwrap_or(&entity);
 
                     joint_names.push(joint_name.to_string());
                     joint_positions.push(*value as f32);
                 }
                 Err(msg) => {
-                    debug!("Key {key_str} ignored in conversion to JointAnglesWithSpeed: {msg}")
+                    debug!("Joint {entity} ignored in conversion to JointAnglesWithSpeed: {msg}")
                 }
             }
         }

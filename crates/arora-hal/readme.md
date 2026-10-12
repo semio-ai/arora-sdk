@@ -17,11 +17,14 @@ state changes back — behaviors never talk to hardware directly. `FakeHal` is a
 in-memory implementation for tests and hardware-less runs.
 
 Each HAL states the keys it reads and writes. `FakeHal`, `arora-hal-ros2` and
-`arora-hal-restful` name a joint's values with an attribute on the key's last
-segment: `<joint>.target_position` is a setpoint written to the hardware,
-`<joint>.position` what is sensed back. That is their naming contract, not
-something keys require: to the store and the bridges a key is a `/`-separated
-path, and `.` one more character of its name.
+`arora-hal-restful` share a naming contract for a joint's values:
+`<joint>.position` is what is sensed back, and its target — the setpoint
+written to the hardware — is `<joint>/target.position` or
+`<joint>.target_position`. `set_targets` reads both forms; a change that sets
+both for one joint applies `<joint>/target.position`, and `fold_newest_wins`
+merges a backlog of changes so the later target wins in either form. That is
+the HALs' contract, not something keys require: to the store and the bridges a
+key is a `/`-separated path, and `.` one more character of its name.
 
 Part of the device runtime interfaces, with
 [`arora-bridge`](https://docs.rs/arora-bridge) and

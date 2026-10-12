@@ -4,6 +4,19 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-10-12
+
+### Changed
+
+- `RestfulHal` takes `<joint>/target.position` and `<joint>/target.velocity`
+  as it takes `<joint>.target_position` and `<joint>.target_velocity`: a
+  request to the joint-position endpoint, mirrored as `<joint>.position` and
+  `<joint>.velocity`. A change that sets both forms of one target requests and
+  mirrors the `<joint>/target.…` value; every key stays held as written. The
+  queued-write task merges its backlog with arora-hal's `fold_newest_wins`,
+  so the later of two targets wins whichever form each was written in.
+  Requires arora-hal 4.2.
+
 ## [4.0.1] - 2026-10-09
 
 ### Changed

@@ -28,6 +28,7 @@
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
 //! and the real ones (ros2, restful, nao) in their own sibling crates.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -40,8 +41,10 @@ use arora_types::value::Value;
 
 pub mod hal_module;
 mod model;
+mod target;
 
 pub use model::{content_hash, ComponentGlb, ComponentModel, ModelReference, Mount, DEVICE};
+pub use target::{fold_newest_wins, set_targets, SetTarget};
 
 /// What device a HAL drives — or, in a [`ComponentModel`], what one of its
 /// components is.
@@ -195,11 +198,11 @@ impl FakeInner {
 
 /// An in-memory fake [`Hal`] for tests and simulators.
 ///
-/// Its naming contract is the HALs' joint convention, an attribute on the
-/// key's last segment ([`Key::get_component`]): a `<joint>.target_position`
-/// write is a setpoint, held and sensed back as `<joint>.position`, so a
-/// consumer that writes a target sees the measured position follow. Every
-/// other key is ignored, the way hardware ignores what it has no actuator for.
+/// Its naming contract is the HALs' target keys ([`set_targets`]): a
+/// `<joint>/target.position` or `<joint>.target_position` write is a setpoint,
+/// held and sensed back as `<joint>.position`, so a consumer that writes a
+/// target sees the measured position follow. Every other key is ignored, the
+/// way hardware ignores what it has no actuator for.
 /// Cheaply cloneable; clones share the same state. (Backed by [`State`], the
 /// trivial owned state type.)
 #[derive(Clone, Default)]
@@ -227,27 +230,42 @@ impl FakeHal {
         self.inner.lock().unwrap().model_glb = Some(glb);
     }
 
-    /// Apply a write synchronously. The fake deals only in setpoints — the keys
-    /// whose first attribute is `target_position` — and ignores every other key
-    /// in the change, the way hardware ignores what it has no actuator for.
-    /// Each setpoint is held and sensed back under the same key with
-    /// `position` as its attribute, the fake's joint actuation. Shared by
-    /// [`Hal::write`] and [`Hal::try_send`].
+    /// Apply a write synchronously. The fake deals only in position setpoints
+    /// — the keys `<joint>/target.position` and `<joint>.target_position` —
+    /// and ignores every other key in the change, the way hardware ignores
+    /// what it has no actuator for. Each setpoint is held as written and
+    /// sensed back as `<joint>.position`, the fake's joint actuation; a change
+    /// that sets both keys of one joint applies `<joint>/target.position`
+    /// ([`set_targets`]). An unset setpoint unsets the sensed position, unless
+    /// the same change sets the joint's other key. Shared by [`Hal::write`]
+    /// and [`Hal::try_send`].
     fn apply_write(&self, changes: &StateChange) {
         let mut setpoints = StateChange::new();
         let mut sensed = StateChange::new();
-        for (key, value) in &changes.set {
-            if key.get_component() == Some("target_position") {
-                setpoints.set.insert(key.clone(), value.clone());
-                sensed
+        // The setpoint key each sensed position follows in this change.
+        let mut sensed_from: HashMap<Key, Key> = HashMap::new();
+        for target in set_targets(changes) {
+            if target.component() == "position" {
+                setpoints
                     .set
-                    .insert(key.clone().with_component("position"), value.clone());
+                    .insert(target.key.clone(), target.value.clone());
+                sensed_from.insert(target.measured.clone(), target.key.clone());
+                sensed.set.insert(target.measured, target.value.clone());
             }
         }
         for key in &changes.unset {
-            if key.get_component() == Some("target_position") {
+            let Some(target) = target::Target::parse(key) else {
+                continue;
+            };
+            if target.measured().get_component() == Some("position") {
                 setpoints.unset.insert(key.clone());
-                sensed.unset.insert(key.clone().with_component("position"));
+                let set_by_other_key = sensed_from
+                    .get(target.measured())
+                    .is_some_and(|from| from != key);
+                if !set_by_other_key {
+                    sensed.set.remove(target.measured());
+                    sensed.unset.insert(target.measured().clone());
+                }
             }
         }
         if setpoints.is_empty() {
@@ -362,6 +380,112 @@ mod tests {
             .iter()
             .any(|c| c.contains(&Key::from("joint1.position")));
         assert!(saw_position);
+    }
+
+    #[tokio::test]
+    async fn fake_mirrors_the_entity_form_target() {
+        let hal = FakeHal::new();
+        let mut sub = hal.updates();
+        hal.write(StateChange::set("joint1/target.position", Value::from(1.0)))
+            .await
+            .unwrap();
+        assert_eq!(
+            hal.read(&[
+                Key::from("joint1.position"),
+                Key::from("joint1/target.position")
+            ])
+            .await
+            .unwrap(),
+            vec![Some(Value::from(1.0)), Some(Value::from(1.0))]
+        );
+        let changes = drain(&mut sub);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].set,
+            HashMap::from([(Key::from("joint1.position"), Some(Value::from(1.0)))])
+        );
+    }
+
+    /// A change that sets both forms of one target applies the entity form's
+    /// value, whatever order the change holds them in (each fresh `HashMap`
+    /// has its own).
+    #[tokio::test]
+    async fn fake_applies_the_entity_form_when_a_change_sets_both() {
+        for _ in 0..32 {
+            let hal = FakeHal::new();
+            let mut change = StateChange::new();
+            change
+                .set
+                .insert(Key::from("joint1.target_position"), Some(Value::from(1.0)));
+            change
+                .set
+                .insert(Key::from("joint1/target.position"), Some(Value::from(2.0)));
+            hal.write(change).await.unwrap();
+            assert_eq!(
+                hal.read(&[
+                    Key::from("joint1.position"),
+                    Key::from("joint1/target.position"),
+                    Key::from("joint1.target_position"),
+                ])
+                .await
+                .unwrap(),
+                vec![Some(Value::from(2.0)), Some(Value::from(2.0)), None]
+            );
+        }
+    }
+
+    /// A change that sets and unsets the same setpoint applies the unset, as
+    /// applying a change does: sets first, then unsets.
+    #[tokio::test]
+    async fn fake_set_and_unset_of_one_key_unsets() {
+        let hal = FakeHal::new();
+        let mut change = StateChange::set("joint1.target_position", Value::from(1.0));
+        change.unset.insert(Key::from("joint1.target_position"));
+        hal.write(change).await.unwrap();
+        assert_eq!(
+            hal.read(&[
+                Key::from("joint1.position"),
+                Key::from("joint1.target_position")
+            ])
+            .await
+            .unwrap(),
+            vec![None, None]
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_unsets_the_sensed_position_with_either_form() {
+        let hal = FakeHal::new();
+        for (target, other) in [
+            ("joint1/target.position", "joint1.target_position"),
+            ("joint1.target_position", "joint1/target.position"),
+        ] {
+            hal.write(StateChange::set(target, Value::from(1.0)))
+                .await
+                .unwrap();
+            let mut unset = StateChange::new();
+            unset.unset.insert(Key::from(target));
+            hal.write(unset).await.unwrap();
+            assert_eq!(
+                hal.read(&[Key::from("joint1.position"), Key::from(target)])
+                    .await
+                    .unwrap(),
+                vec![None, None]
+            );
+
+            // An unset beside a set of the joint's other key keeps the
+            // sensed position the set writes.
+            let mut both = StateChange::set(other, Value::from(3.0));
+            both.unset.insert(Key::from(target));
+            hal.write(both).await.unwrap();
+            assert_eq!(
+                hal.read(&[Key::from("joint1.position")]).await.unwrap(),
+                vec![Some(Value::from(3.0))]
+            );
+            let mut clear = StateChange::new();
+            clear.unset.insert(Key::from(other));
+            hal.write(clear).await.unwrap();
+        }
     }
 
     #[test]

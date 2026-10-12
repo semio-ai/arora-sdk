@@ -6,14 +6,15 @@
 //! well-known robots (NAO, Pepper, Quori, UR3/UR5, Unitree G1) live in
 //! [`configs`]; a JSON file deserializes to the same [`ROS2RobotConfig`].
 //!
-//! Its naming contract for joints is the HALs' convention, an attribute on the
-//! key's last segment ([`Key::get_component`](arora_types::data::Key::get_component)),
-//! `<joint>` being the joint's Arora id (mapped to and from its ROS name by the
-//! configuration's joint mapping). Inbound joint messages set
-//! `<joint>.position` (and, from a `JointState`, `<joint>.velocity` and
-//! `<joint>.effort`). Outbound, the root-namespace `<joint>.target_position`
-//! keys of a change make the joint command (`JointState`, `Float64MultiArray`
-//! or `JointAnglesWithSpeed`); the key `common.target_trajectory` makes a
+//! Its naming contract for joints is the HALs' target keys
+//! ([`arora_hal::set_targets`]), `<joint>` being the joint's Arora id (mapped
+//! to and from its ROS name by the configuration's joint mapping). Inbound
+//! joint messages set `<joint>.position` (and, from a `JointState`,
+//! `<joint>.velocity` and `<joint>.effort`). Outbound, the position targets
+//! of a change for joints at the root (`<joint>` with no `/`) —
+//! `<joint>/target.position` or `<joint>.target_position`, the former's value
+//! where a change sets both for one joint — make the joint command (`JointState`, `Float64MultiArray` or
+//! `JointAnglesWithSpeed`); the key `common.target_trajectory` makes a
 //! `JointTrajectory`.
 
 mod config;

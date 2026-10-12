@@ -426,4 +426,85 @@ mod tests {
         assert!(joint_angles.joint_names.contains(&"HeadYaw".to_string()));
         assert!(joint_angles.joint_names.contains(&"HeadPitch".to_string()));
     }
+
+    /// A change of position targets in mixed forms: `joint1` in the entity
+    /// form only, `joint2` in the attribute form only, `joint3` in both (the
+    /// entity form's 3.0 applies), and keys no joint command reads.
+    fn mixed_form_targets() -> StateChange {
+        let mut change = StateChange::new();
+        for (key, value) in [
+            ("joint1/target.position", 1.0),
+            ("joint2.target_position", 2.0),
+            ("joint3.target_position", -3.0),
+            ("joint3/target.position", 3.0),
+            ("joint4/target.velocity", 4.0),
+            ("arm/joint5/target.position", 5.0),
+            ("arm/joint6.target_position", 6.0),
+        ] {
+            change.set.insert(Key::from(key), Some(Value::F64(value)));
+        }
+        change
+    }
+
+    fn by_name<V: Copy>(names: &[String], values: &[V]) -> Vec<(String, V)> {
+        let mut pairs: Vec<(String, V)> =
+            names.iter().cloned().zip(values.iter().copied()).collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        pairs
+    }
+
+    #[test]
+    fn joint_commands_read_both_target_forms() {
+        let change = mixed_form_targets();
+        let ids_to_ros_names = HashMap::from([("joint1".to_string(), "Joint1".to_string())]);
+        let expected = vec![
+            ("Joint1".to_string(), 1.0),
+            ("joint2".to_string(), 2.0),
+            ("joint3".to_string(), 3.0),
+        ];
+
+        let joint_state = JointState::from_state_change(&change, &ids_to_ros_names)
+            .unwrap()
+            .unwrap();
+        assert_eq!(by_name(&joint_state.name, &joint_state.position), expected);
+
+        let array = Float64MultiArray::from_state_change(&change, &ids_to_ros_names)
+            .unwrap()
+            .unwrap();
+        let labels: Vec<String> = array.layout.dim.iter().map(|d| d.label.clone()).collect();
+        assert_eq!(by_name(&labels, &array.data), expected);
+
+        let angles = JointAnglesWithSpeed::from_state_change(&change, &ids_to_ros_names)
+            .unwrap()
+            .unwrap();
+        let angles: Vec<(String, f64)> = by_name(&angles.joint_names, &angles.joint_angles)
+            .into_iter()
+            .map(|(name, angle)| (name, angle as f64))
+            .collect();
+        assert_eq!(angles, expected);
+    }
+
+    #[test]
+    fn joint_commands_ignore_other_targets() {
+        let mut change = StateChange::new();
+        for key in [
+            "joint4/target.velocity",
+            "joint4.target_velocity",
+            "arm/joint5/target.position",
+            "arm/joint6.target_position",
+            "joint7.position",
+        ] {
+            change.set.insert(Key::from(key), Some(Value::F64(1.0)));
+        }
+        let ids = HashMap::new();
+        assert!(JointState::from_state_change(&change, &ids)
+            .unwrap()
+            .is_none());
+        assert!(Float64MultiArray::from_state_change(&change, &ids)
+            .unwrap()
+            .is_none());
+        assert!(JointAnglesWithSpeed::from_state_change(&change, &ids)
+            .unwrap()
+            .is_none());
+    }
 }
