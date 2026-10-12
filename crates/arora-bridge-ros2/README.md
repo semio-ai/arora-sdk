@@ -16,15 +16,36 @@ Keys map to topics under a namespace: the key `face/mouth` is the topic
 `/{namespace}/keys/face/mouth`. Values speak the Arora data vocabulary
 (`arora_types::Value`).
 
+A ROS 2 name allows only `[A-Za-z0-9_]` in each `/`-separated token, no token
+starting with a digit, and (in `ros2-client`) no `__`, so a key path is escaped
+token by token: every other character becomes `_`, a run of underscores
+collapses to one, a token starting with a digit gains a leading `_`, and an
+empty token becomes `_`. `rig/poses/pose_b.weight` is the topic
+`/{namespace}/keys/rig/poses/pose_b_weight`, and the UUID-named key
+`rig/6cefb62d-dc71-4244-9f65-a343b905ac78` is
+`/{namespace}/keys/rig/_6cefb62d_dc71_4244_9f65_a343b905ac78`. A path that is
+already a valid name is its topic verbatim. An include's rewrite escapes what
+it keeps of the key the same way.
+
+Two keys can escape to one topic (`a.b` and `a-b`). The key that sorts first
+keeps it, and the other gets no topic and is reported once, naming both — on
+the outbound side too, whichever key the device writes first. An input topic
+is never published on for another key. A subscription delivers to the key it
+was made for: the bridge keeps the topic-to-key mapping and never reverses the
+escape.
+
 | Direction | Bridge method | ROS 2 |
 | --- | --- | --- |
 | Runtime → ROS | `send_data(StateChange)` | Publishes each changed key to its topic. The `std_msgs` type is chosen from the value's type (`Value::F64` → `std_msgs/Float64`, …); non-scalar values fall back to a JSON-encoded `std_msgs/String`. |
 | ROS → Runtime | `commands()` | Each message received on a declared input topic becomes a `BridgeOp::Update` the runtime applies to its store. |
 
-Input keys must be declared in the config (path + value type): a ROS 2 topic is
-typed, and the subscription is created before any message arrives. Output keys
-need no declaration — a publisher is created from each changed value's type on
-first use.
+Input keys are the keys the device's store opens to remote writers
+(`KeyMeta::editable`), asked of the device at startup and typed from their meta:
+a ROS 2 topic is typed, and the subscription is created before any message
+arrives. Output keys need no declaration — a publisher is created from each
+changed value's type on first use. A key that cannot be published (its topic is
+taken, or its publisher could not be created) is reported once, not on every
+change.
 
 ## Delivery: only the latest value, twice over
 

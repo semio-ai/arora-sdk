@@ -24,6 +24,7 @@
 
 use std::fmt::Write as _;
 
+use crate::conversions::escape_path;
 use crate::qos::Qos;
 
 /// The direction of an exposed surface, from the device's point of view.
@@ -376,13 +377,16 @@ impl ExposureProfile {
 
 impl Include {
     /// The absolute topic a matching `key` publishes under, `None` when the
-    /// key is outside this include.
+    /// key is outside this include. What remains of the key after `strip` is
+    /// escaped into valid ROS 2 name tokens as a key's own topic is (see
+    /// [`topic_name`](crate::conversions::topic_name)); `prefix` is used
+    /// verbatim.
     pub fn rewrite(&self, key: &str) -> Option<String> {
         if !glob_match(&self.glob, key) {
             return None;
         }
         let rest = key.strip_prefix(&self.strip)?;
-        Some(format!("{}{}", self.prefix, rest))
+        Some(format!("{}{}", self.prefix, escape_path(rest)))
     }
 }
 
@@ -437,6 +441,12 @@ mod tests {
             Some("/robot_face/state/viseme/aa"),
         );
         assert_eq!(include.rewrite("standard/vizij/viseme/aa"), None);
+        assert_eq!(
+            include
+                .rewrite("standard/ros4hri/viseme/pose_b.weight")
+                .as_deref(),
+            Some("/robot_face/state/viseme/pose_b_weight"),
+        );
     }
 
     #[test]

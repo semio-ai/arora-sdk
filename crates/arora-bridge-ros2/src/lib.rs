@@ -5,7 +5,11 @@
 //! it exposes the device's keys over ROS 2 topics and accepts commands from
 //! them. Keys speak the Arora data vocabulary — a [`Value`] at a hierarchical
 //! **key** (e.g. `face/mouth`) — and each key maps to the topic
-//! `/{namespace}/keys/{path}`.
+//! `/{namespace}/keys/{path}`. A path ROS 2 cannot name (`pose_b.weight`, a
+//! bare UUID) is escaped into one it can, token by token, and a path that is
+//! already a valid name is its topic verbatim — see
+//! [`conversions::topic_name`] for the rules and how two keys escaping to one
+//! topic are settled.
 //!
 //! This is distinct from `arora-hal-ros2`: there ROS is the device's own
 //! hardware (a HAL); here ROS is the remote control/data plane (a Bridge),

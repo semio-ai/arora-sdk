@@ -1,7 +1,8 @@
 //! Conversions between the Arora data vocabulary and native ROS 2 messages.
 //!
 //! A device's keys map to ROS 2 topics under a namespace: the key `face/mouth`
-//! becomes the topic `/{namespace}/keys/face/mouth`. Inbound, a typed
+//! becomes the topic `/{namespace}/keys/face/mouth`, a path ROS 2 cannot name
+//! escaped into one it can (see [`topic_name`]). Inbound, a typed
 //! subscription turns each received message into a [`StateChange`] for one key;
 //! outbound, a [`KeyPublisher`] turns a [`Value`] into the matching `std_msgs`
 //! message. The topic type is chosen from the value's type — scalars map to
@@ -36,9 +37,50 @@ use crate::msg_types::{
 /// A boxed stream of single-key [`StateChange`]s produced by one subscription.
 pub type StateChangeStream = Pin<Box<dyn Stream<Item = StateChange> + Send>>;
 
-/// The ROS 2 topic name a key is exposed on: `/{namespace}/keys/{path}`.
+/// The ROS 2 topic name a key is exposed on: `/{namespace}/keys/{path}`, the
+/// path escaped into valid ROS 2 name tokens one `/`-separated token at a time:
+///
+/// - every character outside `[A-Za-z0-9_]` becomes `_`;
+/// - a run of underscores collapses to one, because `ros2-client`'s `Name`
+///   refuses a token containing `__`;
+/// - a token starting with a digit gains a leading `_`, because neither `rmw`
+///   nor `ros2-client` accepts a token starting with a number;
+/// - an empty token (a leading, trailing or doubled `/`) becomes `_`, because
+///   a ROS 2 name has no empty token.
+///
+/// A path that is already a valid name comes back unchanged, so its topic is
+/// its path verbatim. The escape is not injective — `pose_b.weight` and
+/// `pose_b-weight` both become `pose_b_weight` — so the bridge, not this
+/// function, decides which key a shared topic belongs to, and it maps each
+/// topic back to its key from that decision rather than by reversing the
+/// escape.
 pub fn topic_name(namespace: &str, path: &str) -> String {
-    format!("/{namespace}/keys/{path}")
+    format!("/{namespace}/keys/{}", escape_path(path))
+}
+
+/// A key path as valid ROS 2 name tokens, by the rules [`topic_name`] states.
+pub(crate) fn escape_path(path: &str) -> String {
+    let mut escaped = String::with_capacity(path.len() + 1);
+    for (index, token) in path.split('/').enumerate() {
+        if index > 0 {
+            escaped.push('/');
+        }
+        if token.starts_with(|c: char| c.is_ascii_digit()) {
+            escaped.push('_');
+        }
+        let start = escaped.len();
+        for c in token.chars() {
+            let c = if c.is_ascii_alphanumeric() { c } else { '_' };
+            if c == '_' && escaped.len() > start && escaped.ends_with('_') {
+                continue;
+            }
+            escaped.push(c);
+        }
+        if token.is_empty() {
+            escaped.push('_');
+        }
+    }
+    escaped
 }
 
 /// The topic handle each backend hands back (`rustdds`' own on `dds`, the
@@ -967,6 +1009,49 @@ mod tests {
     fn topic_name_follows_the_keys_convention() {
         assert_eq!(topic_name("robot", "face/mouth"), "/robot/keys/face/mouth");
         assert_eq!(topic_name("robot", "enabled"), "/robot/keys/enabled");
+    }
+
+    /// Every key reaches a valid ROS 2 name: the ones a Vizij face holds (a
+    /// dotted morph target, a bare UUID) and the edge shapes, each accepted by
+    /// the `Name` the topic is created from.
+    #[test]
+    fn escaped_paths_are_valid_ros_names() {
+        for (path, escaped) in [
+            (
+                "rig/quori_latest/poses/pose_b.weight",
+                "rig/quori_latest/poses/pose_b_weight",
+            ),
+            (
+                "rig/6cefb62d-dc71-4244-9f65-a343b905ac78",
+                "rig/_6cefb62d_dc71_4244_9f65_a343b905ac78",
+            ),
+            (
+                "6cefb62d-dc71-4244-9f65-a343b905ac78",
+                "_6cefb62d_dc71_4244_9f65_a343b905ac78",
+            ),
+            ("a__b/c._d", "a_b/c_d"),
+            ("-1/x-", "_1/x_"),
+            ("visage/œil", "visage/_il"),
+            ("a//b/", "a/_/b/_"),
+            ("", "_"),
+        ] {
+            assert_eq!(escape_path(path), escaped, "{path}");
+            let topic = topic_name("robot", path);
+            assert!(Name::parse(&topic).is_ok(), "{path} -> {topic}");
+        }
+    }
+
+    /// A path that is already a valid name keeps its exact topic.
+    #[test]
+    fn a_valid_path_escapes_to_itself() {
+        for path in [
+            "face/mouth",
+            "standard/ros4hri/viseme",
+            "rig/_private/x1",
+            "trailing_",
+        ] {
+            assert_eq!(escape_path(path), path);
+        }
     }
 
     #[test]
