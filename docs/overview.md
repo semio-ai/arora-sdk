@@ -142,6 +142,8 @@ for other uses.
   - [`arora`](../crates/arora/readme.md): the opinionated runtime — the
     step loop (`Arora`), the `run` family, and the headless device runner;
   - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
+  - [`arora-hal-naoqi`](../crates/arora-hal-naoqi/readme.md): NAO and Pepper
+    robots as devices, over NAOqi;
   - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
     boundary (Semio Studio via the studio-bridge connector);
   - [`arora-behavior`](../crates/arora-behavior): the `BehaviorInterpreter`
@@ -182,7 +184,6 @@ for other uses.
     behavior-tree node functions as a module, exercising the module path in
     tests (the basic control nodes themselves are native in
     [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md)).
-  - [NAO](../modules/nao): a tentative module for NAO support.
   - [Polly](../modules/polly): a module providing nodes for AWS Polly TTS.
 
 - Behavior Tree:

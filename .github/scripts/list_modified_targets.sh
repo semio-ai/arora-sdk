@@ -28,8 +28,6 @@ IGNORE=(
 INPUTS=(
   'libs/cpp/* test-cpp'      # cmake builds of the C++ modules (build.rs)
   'libs/cpp/* test-cpp-2'
-  'libs/cpp/* arora-nao'
-  'crates/arora-behavior-tree-types-yaml/records/* arora-nao'
   'crates/arora-engine/wit/* test-rust-component'   # wit_bindgen::generate!
 )
 

@@ -12,7 +12,7 @@ is where they are (re)typed by hand.
 | `modules/test-rust-wasm` | wasm guest, Rust | `module.yaml` | same | — |
 | `modules/test-behavior-tree-nodes` | wasm guest, Rust; mutable params, `children` | `module.yaml` | same | — |
 | `modules/test-rust-component` | wasm component (wasip2), Rust | WIT world, no `module.yaml` | `wit_bindgen::generate!` | function ids as `Id { hi, lo }` consts |
-| `modules/nao`, `modules/test-cpp`, `modules/test-cpp-2`, `examples/modules/cpp` | C++ | `module.yaml` | `arora-module-cpp` | — |
+| `modules/test-cpp`, `modules/test-cpp-2`, `examples/modules/cpp` | C++ | `module.yaml` | `arora-module-cpp` | — |
 | `crates/arora-behavior/src/interpreter_module.rs` | host module, no artifact | Rust consts | — | `ID`, `EDIT`, `LOAD`, `SPAWN`, `HALT` + arg ids; encode/decode by hand |
 | `crates/arora/src/lib.rs` (builder) | registers the interpreter as a `HostModule` | — | — | uses the consts above |
 | `crates/arora-behavior-tree/src/schema.rs` | `_RET_PARAM_ID` | Rust const | — | yes |
