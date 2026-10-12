@@ -32,8 +32,7 @@ futures = "0.3"
 log = "0.4"
 # The Rust implementation of the qi framework (libqi), the NAOqi middleware. The package is
 # `libqi-vibe`; the library is used as `qi`.
-# Pinned to the merged 1.0.0 release commit until it is on crates.io, then `version = "1"`.
-qi = { package = "libqi-vibe", git = "https://github.com/victorpaleologue/libqi-rs-vibe", rev = "7dfea024cdcb830fd5efc7ad48cc4c2e5efcacb9" }
+qi = { package = "libqi-vibe", version = "1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
