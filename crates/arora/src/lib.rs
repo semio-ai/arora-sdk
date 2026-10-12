@@ -740,7 +740,13 @@ impl AroraBuilder {
         if self.bridges.is_empty() {
             #[cfg(feature = "studio-bridge")]
             {
-                self = self.with_bridge(studio::default_bridge(&frontend).await?);
+                // Studio registers the model family and versions the HAL
+                // describes, so the operator is not asked for them.
+                let description = match &self.hal {
+                    Some(hal) => hal.describe().await,
+                    None => arora_hal::HalDescription::default(),
+                };
+                self = self.with_bridge(studio::default_bridge(&frontend, &description).await?);
             }
             #[cfg(not(feature = "studio-bridge"))]
             {

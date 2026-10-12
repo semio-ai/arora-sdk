@@ -104,7 +104,8 @@ directory**, each use in a subdirectory of its own:
         │                          .wasm for wasm, .so / .dylib / .dll for native
         └── studio/                the Studio connection's credentials, kept by
             ├── key                arora-studio-bridge-client's DeviceCredentials
-            └── refresh_token
+            ├── refresh_token
+            └── device.json        the saved registration: owners, name, model family
 ```
 
 The local id tells apart the devices one user runs on one host. It is local
@@ -140,11 +141,43 @@ The chain down to the bridge's code, in a `studio-bridge` build:
    An embedder whose platform gives it a data directory (Android, a Tauri app)
    passes its own to `studio::connect_with_device_dir`.
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
-   and hands it to `DeviceCredentials::in_dir`. arora never writes inside it;
-   the files there are the client's.
+   and hands it to `DeviceCredentials::in_dir`. The credentials there are the
+   client's; arora writes only `device.json` beside them (below).
 3. `studio::connect` passes `DeviceCredentials::refresh_token()` and `saver()` to
    `ZenohDeviceClient::new`, whose Firebase authenticator signs the device in
    with the token and calls the saver with each rotated one.
+
+### What the device registers with Studio as
+
+A `studio-bridge` run registers the device with Studio: its owners (the Studio
+user UIDs it belongs to), its name, its model family, and its hardware and
+software versions. Each field comes from the first source that gives it:
+
+| field | sources, in order |
+|---|---|
+| owners | `DEVICE_OWNERS` (comma-separated), `device.json`, the operator |
+| name | `DEVICE_NAME`, `device.json`, the operator (generated when left blank) |
+| model family | `MODEL_FAMILY`, the HAL (`Hal::describe`), `device.json`, the operator |
+| hardware / software version | `HARDWARE_VERSION` / `SOFTWARE_VERSION`, the HAL |
+| description | `DEVICE_DESCRIPTION` |
+
+Under the terminal UI the operator is asked only for what nothing else gives,
+and a run that asked anything saves the owners and name it resolved — and the
+model family the operator typed, if any — in `studio/device.json`. The next
+run asks nothing; it logs
+`studio: registering as <name> for owner(s) <uids> (saved in <path>; delete it to answer again)`.
+Delete the file to be asked again. Leaving the owner empty runs without Studio,
+on the open local bridge, and saves nothing. A headless run asks nothing: it
+registers what the environment and `device.json` give, completed by the HAL,
+so a device set up once under the terminal UI can then run headless.
+
+```json
+{
+  "owners": ["<owner uid>"],
+  "name": "pepper-lab",
+  "model_family": "pepper"
+}
+```
 
 Credentials from arora 11.0 and earlier, in `.semio/arora` under the
 executable's directory, the home directory or the current directory, move into

@@ -4,6 +4,40 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.9.0] - 2026-10-12
+
+### Added
+
+- **A device registered once with Studio is asked nothing again.** Under the
+  terminal UI, a `studio-bridge` run that asked the operator anything saves
+  the owners and name it resolved — and the model family the operator typed,
+  if any — in `studio/device.json` in the device directory, before it
+  connects. Later runs register with it and ask nothing, logging
+  `studio: registering as <name> for owner(s) <uids> (saved in <path>; delete it to answer again)`.
+  Each field takes the first source that gives it: its env var
+  (`DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`), then the saved
+  registration, then the operator. Leaving the owner empty still runs without
+  Studio, and saves nothing.
+- **The model family comes from the HAL.** `AroraBuilder::run` passes the
+  HAL's description (`Hal::describe`) to the Studio connection: the model
+  family is the HAL's unless `MODEL_FAMILY` is set — the operator is no longer
+  asked for it, and the HAL's wins over a saved one — and so are the hardware
+  and software versions unless `HARDWARE_VERSION` / `SOFTWARE_VERSION` are.
+- `studio::connect_with_operator_and_description` and
+  `studio::connect_with_description`: `connect_with_operator` and `connect`
+  completing the device info with an `arora_hal::HalDescription`.
+
+### Changed
+
+- **A headless run registers the saved registration.** `studio::connect` and
+  `studio::connect_with_device_dir` complete the device info the environment
+  gives with the registration saved in the device directory, and register it
+  when the environment gives none — so a device set up once under the
+  terminal UI can then run headless. A device directory no interactive run
+  wrote to registers exactly what the environment gives, as before.
+- A blank device-info env var counts as unset for a headless run too, as it
+  already did under the terminal UI.
+
 ## [12.8.0] - 2026-10-12
 
 ### Added

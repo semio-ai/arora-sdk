@@ -8,7 +8,7 @@
 //! └── devices/
 //!     └── <local id>/      the device directory; DEVICE_DIR replaces this whole path
 //!         ├── modules/     the module directories the device loads at start
-//!         └── studio/      the Studio connection's credentials
+//!         └── studio/      the Studio connection's credentials and saved registration
 //! ```
 //!
 //! `<data_local_dir>` is per user: `~/Library/Application Support` on macOS,
