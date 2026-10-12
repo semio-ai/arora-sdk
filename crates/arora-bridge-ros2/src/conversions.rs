@@ -24,7 +24,7 @@ use arora_types::value::{Enumeration, Structure, StructureField, Type, Value};
 use arora_types::Uuid;
 use futures::stream::unfold;
 use futures::Stream;
-use log::warn;
+use log::{debug, warn};
 use ros2_client::{MessageTypeName, Name, Node, Publisher, RawPublisher, RawSubscription};
 use tokio::time::{sleep, Duration};
 
@@ -239,41 +239,84 @@ fn setup_typed<M: MessageType>(
         .map_err(|e| format!("failed to subscribe to {topic_name}: {e:?}"))?;
 
     let convert = Arc::new(convert);
-    let stream = unfold((subscription, 0u32), move |(sub, errors)| {
-        let path = path.clone();
-        let convert = convert.clone();
-        async move {
-            let mut errors = errors;
-            loop {
-                match sub.async_take().await {
-                    Ok((msg, _info)) => {
-                        let mut change = StateChange::new();
-                        change
-                            .set
-                            .insert(Key::from(path.clone()), Some(convert(msg)));
-                        return Some((change, (sub, 0)));
-                    }
-                    Err(e) => {
-                        errors += 1;
-                        if errors >= MAX_CONSECUTIVE_ERRORS {
-                            warn!(
+    // The state: the subscription, the receive failures in a row, and whether
+    // a dropped message was reported since the last decoded one.
+    let stream = unfold(
+        (subscription, 0u32, false),
+        move |(sub, errors, reported)| {
+            let path = path.clone();
+            let convert = convert.clone();
+            async move {
+                let (mut errors, mut reported) = (errors, reported);
+                loop {
+                    match sub.async_take().await {
+                        Ok((msg, _info)) => {
+                            let mut change = StateChange::new();
+                            change
+                                .set
+                                .insert(Key::from(path.clone()), Some(convert(msg)));
+                            return Some((change, (sub, 0, false)));
+                        }
+                        // A message that does not decode as the topic's type is
+                        // dropped (not a receive failure); wait for the next one
+                        // rather than counting towards terminating the stream. A
+                        // writer of another type sends one at its own rate, so the
+                        // first of a run is reported at warn and the rest at
+                        // debug.
+                        Err(e) if undecodable(&e) => {
+                            let message = format!(
+                                "key '{path}': dropped a message that does not decode as a \
+                             '{}': {e}",
+                                M::MESSAGE_TYPE_STR
+                            );
+                            if reported {
+                                debug!("{message}");
+                            } else {
+                                warn!("{message} (further ones are logged at debug until one decodes)");
+                                reported = true;
+                            }
+                        }
+                        Err(e) => {
+                            errors += 1;
+                            if errors >= MAX_CONSECUTIVE_ERRORS {
+                                warn!(
                                 "subscription for key '{path}' failed {MAX_CONSECUTIVE_ERRORS} \
                                  consecutive times, terminating stream"
                             );
-                            return None;
+                                return None;
+                            }
+                            // Cap the shift so `1u64 << shift` cannot overflow.
+                            let shift = (errors - 1).min(62) as u64;
+                            let delay = Duration::from_millis(100u64.saturating_mul(1u64 << shift));
+                            warn!("subscription for key '{path}' errored: {e:?}; retrying");
+                            sleep(delay).await;
                         }
-                        // Cap the shift so `1u64 << shift` cannot overflow.
-                        let shift = (errors - 1).min(62) as u64;
-                        let delay = Duration::from_millis(100u64.saturating_mul(1u64 << shift));
-                        warn!("subscription for key '{path}' errored: {e:?}; retrying");
-                        sleep(delay).await;
                     }
                 }
             }
-        }
-    });
+        },
+    );
 
     Ok(Box::pin(stream))
+}
+
+/// Whether a receive error is about the one message it was receiving, which
+/// did not decode as the topic's type, rather than about the subscription.
+///
+/// RustDDS, the DDS backend, matches a writer to a reader on the topic name
+/// alone, so a writer of another type on an input's topic reaches the
+/// bridge's reader, and each of its messages shorter than the topic's type
+/// fails to decode. On Zenoh the type name is part of the key expression, so
+/// a writer of another type name never reaches the subscription;
+/// `ros2-client` does not export its Zenoh receive error, so there every error
+/// counts as a receive failure.
+#[cfg(feature = "dds")]
+fn undecodable(error: &ros2_client::ros2::ReadError) -> bool {
+    matches!(error, ros2_client::ros2::ReadError::Deserialization { .. })
+}
+#[cfg(feature = "zenoh")]
+fn undecodable<E>(_error: &E) -> bool {
+    false
 }
 
 /// Await the next raw CDR message from a [`RawSubscription`], uniform across the

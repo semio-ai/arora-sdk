@@ -4,6 +4,18 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.3.1] - 2026-10-12
+
+### Fixed
+
+- A message on an input's topic that does not decode as the topic's
+  `std_msgs` type is dropped, and the input stays subscribed. RustDDS matches
+  a writer of another type on the same topic name (an `Int32` on a `Float64`
+  input) to the bridge's reader; its messages counted as receive failures,
+  and five in a row ended the input's subscription for the rest of the run.
+  The first dropped message after a decoded one is logged at warn, the rest
+  at debug.
+
 ## [10.3.0] - 2026-10-12
 
 ### Changed
