@@ -4,6 +4,28 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.4.0] - 2026-10-12
+
+### Added
+
+- The ROS4HRI preset takes closed captions: an
+  `hri_actions_msgs/ClosedCaption` on `/closed_captions` lands its `text` on
+  `standard/ros4hri/caption/text` and its `speaker_id` on
+  `standard/ros4hri/caption/speaker`, in one change.
+- The ROS4HRI preset publishes the device's diagnostics: the key
+  `diagnostics` holds a whole `diagnostic_msgs/DiagnosticArray`, published
+  on `/diagnostics`. It is the preset's one reliable outbound endpoint,
+  because the ROS diagnostics tooling subscribes reliably and a best-effort
+  writer matches no reliable reader.
+
+### Fixed
+
+- A message holding a sequence or fixed array of messages — a
+  `DiagnosticArray`'s `status` — has a default to compose on: an empty
+  sequence, or that many default messages. A typed output of such a type
+  was refused at its first key write, and a bound action's result or
+  feedback of such a type could not be built.
+
 ## [10.3.1] - 2026-10-12
 
 ### Fixed

@@ -212,7 +212,12 @@ publishes the same way, as a `std_msgs/String` on `/robot_face/viseme` from
 on the `image_transport` pair PAL OS documents — `display/face` as a
 `sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
 `sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
-writes the key of the transport it encodes. Enabling it is one call:
+writes the key of the transport it encodes. A closed caption — an
+`hri_actions_msgs/ClosedCaption` on `/closed_captions` — lands its text on
+`standard/ros4hri/caption/text` and its speaker on
+`standard/ros4hri/caption/speaker`, and the key `diagnostics`, holding a whole
+`diagnostic_msgs/DiagnosticArray`, publishes on `/diagnostics` — reliably,
+since the ROS diagnostics tooling subscribes reliably. Enabling it is one call:
 
 ```rust
 let config = Ros2BridgeConfig::new("robot", 0)

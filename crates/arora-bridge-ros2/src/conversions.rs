@@ -20,7 +20,7 @@ use arora_types::ty::{
     low, TypeRegistry, BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID,
     U16_ID, U32_ID, U64_ID, U8_ID,
 };
-use arora_types::value::{Enumeration, Structure, StructureField, Type, Value};
+use arora_types::value::{Enumeration, Structure, StructureField, StructureWithoutId, Type, Value};
 use arora_types::Uuid;
 use futures::stream::unfold;
 use futures::Stream;
@@ -519,8 +519,8 @@ pub(crate) fn default_value(ty: &low::Type, registry: &TypeRegistry) -> Result<V
 fn default_of_ref(type_ref: &TypeRef, registry: &TypeRegistry) -> Result<Value, String> {
     match type_ref {
         TypeRef::Scalar { id } => default_scalar(id, registry),
-        TypeRef::Array { id } => default_array(id, 0),
-        TypeRef::FixedArray { id, len } => default_array(id, *len),
+        TypeRef::Array { id } => default_array(id, 0, registry),
+        TypeRef::FixedArray { id, len } => default_array(id, *len, registry),
         other => Err(format!("no default for a {other:?} field")),
     }
 }
@@ -560,8 +560,9 @@ fn default_scalar(id: &Uuid, registry: &TypeRegistry) -> Result<Value, String> {
     }
 }
 
-/// The zero value of an array field (`len` zeros for a fixed array).
-fn default_array(id: &Uuid, len: usize) -> Result<Value, String> {
+/// The zero value of an array field (`len` zeros for a fixed array; `len`
+/// default messages for an array of a nested message).
+fn default_array(id: &Uuid, len: usize, registry: &TypeRegistry) -> Result<Value, String> {
     let id = *id;
     if id == *BOOLEAN_ID {
         Ok(Value::ArrayBoolean(vec![false; len]))
@@ -587,6 +588,19 @@ fn default_array(id: &Uuid, len: usize) -> Result<Value, String> {
         Ok(Value::ArrayF64(vec![0.0; len]))
     } else if id == *STRING_ID {
         Ok(Value::ArrayString(vec![String::new(); len]))
+    } else if let Some(nested) = registry.get(&id) {
+        let Value::Structure(element) = default_value(nested, registry)? else {
+            unreachable!("default_value builds a structure");
+        };
+        Ok(Value::ArrayStructure {
+            id,
+            elements: vec![
+                StructureWithoutId {
+                    fields: element.fields
+                };
+                len
+            ],
+        })
     } else {
         Err(format!("no default for an array of type {id}"))
     }
@@ -1378,6 +1392,91 @@ mod tests {
         assert_eq!(whole, decoded);
         // A missing field reports, not panics.
         assert!(extract_route(&decoded, &message_type, registry.types(), "nope").is_err());
+    }
+
+    /// A message holding sequences and fixed arrays of messages has a
+    /// default that encodes as its ROS type: an empty sequence, and a fixed
+    /// array of default messages.
+    #[test]
+    fn a_message_of_message_arrays_has_a_default() {
+        let registry = arora_msgs_ros2::registry();
+        let types = registry.types();
+        let array = registry
+            .get_by_name("diagnostic_msgs/DiagnosticArray")
+            .expect("diagnostic_msgs/DiagnosticArray is registered");
+        let message = default_value(array, types).expect("a default DiagnosticArray");
+        let bytes = cdr::encode(array, types, &message).expect("encode");
+        assert_eq!(cdr::decode(array, types, &bytes).expect("decode"), message);
+
+        let mut registry = registry;
+        let pair = registry
+            .define_from_msg("test_msgs", "Pair", "diagnostic_msgs/KeyValue[2] pair")
+            .expect("define a fixed array of messages");
+        let pair = registry.get(&pair).unwrap().clone();
+        let message = default_value(&pair, registry.types()).expect("a default Pair");
+        let bytes = cdr::encode(&pair, registry.types(), &message).expect("encode");
+        assert_eq!(
+            extract_route(&message, &pair, registry.types(), "pair.1.key").unwrap(),
+            Value::String(String::new())
+        );
+        assert_eq!(
+            cdr::decode(&pair, registry.types(), &bytes).expect("decode"),
+            message
+        );
+    }
+
+    /// The ROS4HRI preset's caption routes, run on what a ClosedCaption
+    /// publisher's bytes decode to: the text and the speaker land as the
+    /// strings the message carries.
+    #[test]
+    fn the_ros4hri_caption_routes_take_text_and_speaker_off_the_wire() {
+        use arora_msgs_ros2::hri_actions_msgs::ClosedCaption;
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let profile = crate::profile::ExposureProfile::ros4hri();
+        let endpoint = profile
+            .endpoints
+            .iter()
+            .find(|e| e.topic == "/closed_captions")
+            .expect("the preset takes captions");
+        let message_type = registry
+            .get_by_name(&endpoint.ros_type)
+            .expect("hri_actions_msgs/ClosedCaption is registered")
+            .clone();
+        let caption = ClosedCaption {
+            speaker_id: ClosedCaption::SPEAKER_ID_SYSTEM.into(),
+            text: "Hello, I am a talking face.".into(),
+            locale: "en_GB".into(),
+        };
+        let (ty, reg) = ClosedCaption::arora_type_with_registry();
+        let value = to_value_seeded(&caption, &ty, &reg).expect("caption to value");
+        let bytes = cdr::encode(&message_type, registry.types(), &value).expect("encode");
+        let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+
+        let landed: Vec<(&str, Value)> = endpoint
+            .routes
+            .iter()
+            .map(|route| {
+                let value = extract_route(&decoded, &message_type, registry.types(), &route.field)
+                    .unwrap_or_else(|e| panic!("{}: {e}", route.field));
+                (route.key.as_str(), value)
+            })
+            .collect();
+        assert_eq!(
+            landed,
+            [
+                (
+                    "standard/ros4hri/caption/text",
+                    Value::String("Hello, I am a talking face.".into())
+                ),
+                (
+                    "standard/ros4hri/caption/speaker",
+                    Value::String("__system__".into())
+                ),
+            ]
+        );
     }
 
     /// A numeric segment indexes a sequence, which is how the ROS4HRI preset
