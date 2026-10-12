@@ -1341,10 +1341,10 @@ mod tests {
     }
 
     /// The preset's outbound endpoints reach the config as typed outputs
-    /// keyed on their routes: the image pair as whole-message routes from
-    /// the display keys, the speech text and the spoken viseme as `data`
-    /// routes from the speech state keys. The command surfaces stay inbound, so nothing else is on
-    /// that plane.
+    /// keyed on their routes: the image pair and the diagnostics report as
+    /// whole-message routes from their keys, the speech text and the spoken
+    /// viseme as `data` routes from the speech state keys. The command
+    /// surfaces stay inbound, so nothing else is on that plane.
     #[test]
     fn the_ros4hri_profile_declares_its_outbound_endpoints_as_typed_outputs() {
         let config =
@@ -1372,6 +1372,7 @@ mod tests {
         assert_eq!(
             outputs,
             [
+                "/diagnostics diagnostic_msgs/DiagnosticArray [ <- diagnostics]",
                 "/robot_face/image_raw sensor_msgs/Image [ <- display/face]",
                 "/robot_face/image_raw/compressed sensor_msgs/CompressedImage \
                  [ <- display/face/compressed]",
@@ -1379,10 +1380,12 @@ mod tests {
                 "/robot_face/viseme std_msgs/String [data <- standard/ros4hri/speech/viseme]",
             ]
         );
-        assert!(
-            config.outputs.iter().all(|o| o.qos.is_none()),
-            "state takes the outbound default (sensor data)"
-        );
+        // State takes the outbound default (sensor data); the diagnostics
+        // report is reliable, as its readers are.
+        for output in &config.outputs {
+            let expected = (output.path == "/diagnostics").then_some(Qos::Reliable);
+            assert_eq!(output.qos, expected, "{}", output.path);
+        }
     }
 
     /// Every input gets a valid topic, its key's own when the path is already
@@ -1437,6 +1440,68 @@ mod tests {
             .map(|(path, _, _)| path)
             .collect();
         assert_eq!(paths, ["rig/blink", "standard/ros4hri/viseme/time"]);
+    }
+
+    /// The diagnostics key holds the whole report: a write replaces the
+    /// message, which encodes as the `diagnostic_msgs/DiagnosticArray` the
+    /// ROS diagnostics tooling reads — a status's `byte` level included.
+    #[test]
+    fn the_diagnostics_key_publishes_the_whole_report() {
+        use arora_msgs_ros2::diagnostic_msgs::{DiagnosticArray, DiagnosticStatus, KeyValue};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let config =
+            Ros2BridgeConfig::new("robot", 0).with_profile(profile::ExposureProfile::ros4hri());
+        let mut outputs = TypedOutputs::new(config.outputs);
+        let index = outputs
+            .bindings
+            .iter()
+            .position(|o| o.path == "/diagnostics")
+            .expect("the preset publishes diagnostics");
+        let report = DiagnosticArray {
+            status: vec![DiagnosticStatus {
+                level: DiagnosticStatus::WARN,
+                name: "vizij: face".into(),
+                message: "contended".into(),
+                hardware_id: "quori".into(),
+                values: vec![KeyValue {
+                    key: "frame_rate".into(),
+                    value: "59.8".into(),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (ty, reg) = DiagnosticArray::arora_type_with_registry();
+        let value = to_value_seeded(&report, &ty, &reg).expect("report to value");
+
+        assert!(outputs.feed("diagnostics", &value, &registry));
+        assert!(outputs.dirty[index]);
+        let message = outputs.messages[index]
+            .as_ref()
+            .expect("the report is held");
+        let message_type = registry
+            .get_by_name("diagnostic_msgs/DiagnosticArray")
+            .expect("diagnostic_msgs/DiagnosticArray is registered");
+        let bytes = arora_msgs_ros2::cdr::encode(message_type, registry.types(), message)
+            .expect("the report encodes as its ROS type");
+        let decoded =
+            arora_msgs_ros2::cdr::decode(message_type, registry.types(), &bytes).expect("decode");
+        assert_eq!(
+            extract_route(&decoded, message_type, registry.types(), "status.0.level").unwrap(),
+            Value::U8(DiagnosticStatus::WARN)
+        );
+        assert_eq!(
+            extract_route(
+                &decoded,
+                message_type,
+                registry.types(),
+                "status.0.values.0.value"
+            )
+            .unwrap(),
+            Value::String("59.8".into())
+        );
     }
 
     /// A routed key lands on its message and marks it for publishing; a key

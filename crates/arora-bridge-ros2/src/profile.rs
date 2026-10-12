@@ -167,12 +167,28 @@ impl ExposureProfile {
     ///   transport's key as unserved — which is what a consumer of that
     ///   transport finds, so it is the truth of the pair rather than a hole.
     ///
+    /// - a closed caption (`hri_actions_msgs/ClosedCaption` on
+    ///   `/closed_captions`) lands as its text on
+    ///   `standard/ros4hri/caption/text` and its speaker on
+    ///   `standard/ros4hri/caption/speaker`, in one change — the speaker as
+    ///   the message carries it, `__system__` when the robot itself speaks.
+    ///   Showing it is the device's: the topic says what is being said, not
+    ///   how long it stays on screen;
+    /// - the device's health publishes as a `diagnostic_msgs/DiagnosticArray`
+    ///   on `/diagnostics` from the key `diagnostics`, which holds the whole
+    ///   message. It is the one outbound endpoint delivered reliably: the
+    ///   diagnostics tooling (`diagnostic_aggregator`, `rqt_robot_monitor`)
+    ///   subscribes reliably, and a best-effort writer matches no reliable
+    ///   reader. A report is a second apart, so a reader that cannot keep up
+    ///   costs the writer little.
+    ///
     /// REP-155 standardises the perception of humans and says nothing of the
     /// robot's own face; the `/robot_face/*` names are PAL's, and they are
     /// what the ROS4HRI tooling (the interaction simulator, `rqt`) reads.
+    /// `/closed_captions` and `/diagnostics` are the names the ROS4HRI nodes
+    /// and the ROS diagnostics tooling use.
     ///
-    /// Diagnostics are tracked separately, so the preset declares no bulk
-    /// includes.
+    /// The preset declares no bulk includes.
     pub fn ros4hri() -> Self {
         let expression_routes = vec![
             FieldRoute {
@@ -202,6 +218,16 @@ impl ExposureProfile {
             field: "data".into(),
             key: "standard/ros4hri/speech/text".into(),
         }];
+        let caption_routes = vec![
+            FieldRoute {
+                field: "text".into(),
+                key: "standard/ros4hri/caption/text".into(),
+            },
+            FieldRoute {
+                field: "speaker_id".into(),
+                key: "standard/ros4hri/caption/speaker".into(),
+            },
+        ];
         let spoken_viseme_routes = vec![FieldRoute {
             field: "data".into(),
             key: "standard/ros4hri/speech/viseme".into(),
@@ -236,7 +262,8 @@ impl ExposureProfile {
             routes: routes.to_vec(),
             qos: None,
         };
-        // An image is not fanned out: the key holds the whole message.
+        // An image or a diagnostics report is not fanned out: the key holds
+        // the whole message.
         let whole = |key: &str| {
             vec![FieldRoute {
                 field: String::new(),
@@ -266,6 +293,12 @@ impl ExposureProfile {
                     &viseme_sequence_routes,
                 ),
                 endpoint(
+                    "/closed_captions",
+                    "hri_actions_msgs/ClosedCaption",
+                    Flow::In,
+                    &caption_routes,
+                ),
+                endpoint(
                     "/robot_face/speech",
                     "std_msgs/String",
                     Flow::Out,
@@ -289,6 +322,15 @@ impl ExposureProfile {
                     Flow::Out,
                     &whole("display/face/compressed"),
                 ),
+                Endpoint {
+                    qos: Some(Qos::Reliable),
+                    ..endpoint(
+                        "/diagnostics",
+                        "diagnostic_msgs/DiagnosticArray",
+                        Flow::Out,
+                        &whole("diagnostics"),
+                    )
+                },
             ],
             includes: Vec::new(),
             actions: vec![
@@ -462,14 +504,18 @@ mod tests {
             "/robot_face/viseme",
             "/robot_face/image_raw",
             "/robot_face/image_raw/compressed",
+            "/closed_captions",
+            "/diagnostics",
         ] {
             assert!(topics.contains(&expected), "missing {expected}");
         }
-        // The commands flow in; the image and the speech state flow out.
+        // The commands and the captions flow in; the image, the speech state
+        // and the diagnostics flow out.
         for endpoint in &profile.endpoints {
             let expected = if endpoint.topic.starts_with("/robot_face/image_raw")
                 || endpoint.topic == "/robot_face/speech"
                 || endpoint.topic == "/robot_face/viseme"
+                || endpoint.topic == "/diagnostics"
             {
                 Flow::Out
             } else {
@@ -569,6 +615,62 @@ mod tests {
                 .collect();
             assert_eq!(routes, [("data", key)], "{topic}");
         }
+    }
+
+    /// A caption lands as its text and its speaker, each on its own key,
+    /// delivered reliably like every inbound surface: a dropped caption is
+    /// text the face never shows.
+    #[test]
+    fn ros4hri_preset_takes_a_closed_caption_as_text_and_speaker() {
+        let profile = ExposureProfile::ros4hri();
+        let endpoint = profile
+            .endpoints
+            .iter()
+            .find(|e| e.topic == "/closed_captions")
+            .expect("/closed_captions is in the preset");
+        assert_eq!(endpoint.ros_type, "hri_actions_msgs/ClosedCaption");
+        assert_eq!(endpoint.flow, Flow::In);
+        assert_eq!(
+            endpoint.qos, None,
+            "an inbound surface takes the reliable default"
+        );
+        let routes: Vec<(&str, &str)> = endpoint
+            .routes
+            .iter()
+            .map(|r| (r.field.as_str(), r.key.as_str()))
+            .collect();
+        assert_eq!(
+            routes,
+            [
+                ("text", "standard/ros4hri/caption/text"),
+                ("speaker_id", "standard/ros4hri/caption/speaker"),
+            ]
+        );
+    }
+
+    /// The diagnostics report publishes whole from one key, reliably, so the
+    /// ROS diagnostics tooling's reliable subscribers match it.
+    #[test]
+    fn ros4hri_preset_publishes_diagnostics_reliably_from_one_key() {
+        let profile = ExposureProfile::ros4hri();
+        let endpoint = profile
+            .endpoints
+            .iter()
+            .find(|e| e.topic == "/diagnostics")
+            .expect("/diagnostics is in the preset");
+        assert_eq!(endpoint.ros_type, "diagnostic_msgs/DiagnosticArray");
+        assert_eq!(endpoint.flow, Flow::Out);
+        assert_eq!(endpoint.qos, Some(Qos::Reliable));
+        let [route] = endpoint.routes.as_slice() else {
+            panic!(
+                "/diagnostics routes one whole key, got {:?}",
+                endpoint.routes
+            );
+        };
+        assert_eq!(
+            (route.field.as_str(), route.key.as_str()),
+            ("", "diagnostics")
+        );
     }
 
     #[test]
