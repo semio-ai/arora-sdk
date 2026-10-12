@@ -82,7 +82,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc as tmpsc;
 
-use crate::conversions::{coerce_scalar, default_value, extract_route, type_ref_id, xyz_structure};
+use crate::conversions::{
+    coerce_scalar, default_value, extract_route, is_duration_id, resolve_field_ref, xyz_structure,
+};
 use crate::profile;
 use crate::services::type_ref_of;
 
@@ -262,6 +264,112 @@ pub(crate) fn resolve(
     (actions, skipped)
 }
 
+/// The described task-run method named `function`: present, and returning
+/// the behavior-tree `Status` so the interpreter can spawn it.
+pub(crate) fn task_run<'a>(
+    signatures: &'a [MethodSignature],
+    function: &str,
+) -> Result<&'a MethodSignature, String> {
+    let signature = signatures
+        .iter()
+        .find(|signature| signature.name == function)
+        .ok_or_else(|| format!("the device describes no method '{function}'"))?;
+    if !is_action_shaped(signature) {
+        return Err(format!(
+            "method '{function}' is not a task run (it does not return the behavior-tree Status)"
+        ));
+    }
+    Ok(signature)
+}
+
+/// Resolve the routes of a skill's message onto the parameters of the
+/// method that implements it: every routed field must resolve in the message
+/// type and land on a parameter of a compatible type. `surface` names the
+/// skill (its action or topic) in the log.
+pub(crate) fn resolve_routes(
+    surface: &str,
+    message_type: &low::Type,
+    field_routes: &[profile::FieldRoute],
+    signature: &MethodSignature,
+    registry: &Ros2Registry,
+) -> Result<Vec<BoundRoute>, String> {
+    let function = &signature.function;
+    let mut routes = Vec::new();
+    for route in field_routes {
+        let field_ref = resolve_field_ref(message_type, registry.types(), &route.field)?;
+        let (parameter_id, parameter) = function
+            .parameter_ordering
+            .iter()
+            .filter_map(|id| Some((*id, function.parameters.get(id)?)))
+            .find(|(_, parameter)| parameter.name == route.key)
+            .ok_or_else(|| {
+                format!(
+                    "method '{}' has no parameter '{}'",
+                    signature.name, route.key
+                )
+            })?;
+        if !route_compatible(&field_ref, &parameter.ty, registry) {
+            return Err(format!(
+                "field '{}' does not fit parameter '{}'",
+                route.field, route.key
+            ));
+        }
+        routes.push(BoundRoute {
+            field: route.field.clone(),
+            parameter: parameter_id,
+        });
+    }
+    // A standard contract carries what the standard says, which need not be
+    // every parameter the implementing method takes — ROS4HRI's `Say` goal has
+    // no field for a voice, say. Such a parameter is left out of the spawn
+    // call, and what an absent argument means is the implementation's: a
+    // method declared with arora-module reads an absent optional parameter as
+    // `None` and fails the call on an absent required one, while a task
+    // fragment may supply the argument itself. So the skill is served, not
+    // refused, and the gap is announced here to be legible in the log rather
+    // than surprising at the first message. A route naming a field the
+    // message lacks, or a parameter the method lacks, is still refused above:
+    // a typo is not an omission.
+    let unrouted: Vec<&str> = function
+        .parameter_ordering
+        .iter()
+        .filter_map(|id| function.parameters.get(id))
+        .map(|parameter| parameter.name.as_str())
+        .filter(|name| !field_routes.iter().any(|route| route.key == *name))
+        .collect();
+    if !unrouted.is_empty() {
+        log::info!(
+            "{surface}: '{}' is spawned without {}, which the message does not carry: \
+             an absent optional parameter is None, and the implementation \
+             supplies an absent required one or fails the run",
+            signature.name,
+            unrouted.join(", "),
+        );
+    }
+    Ok(routes)
+}
+
+/// The spawn call's arguments: each routed field of `message`, extracted
+/// onto its parameter.
+pub(crate) fn routed_args(
+    message: &Value,
+    message_type: &low::Type,
+    routes: &[BoundRoute],
+    registry: &Ros2Registry,
+) -> Result<Vec<StructureField>, String> {
+    routes
+        .iter()
+        .map(|route| {
+            let value = extract_route(message, message_type, registry.types(), &route.field)
+                .map_err(|e| format!("field {e}"))?;
+            Ok(StructureField {
+                id: route.parameter,
+                value: Box::new(value),
+            })
+        })
+        .collect()
+}
+
 /// Resolve every profile-declared [`profile::ActionBinding`] against the
 /// device's described methods and the message registry — the startup check
 /// that a skill's exterior contract is actually implemented. Returns the
@@ -306,73 +414,14 @@ fn resolve_binding(
         message,
     });
 
-    let signature = signatures
-        .iter()
-        .find(|signature| signature.name == binding.function)
-        .ok_or_else(|| format!("the device describes no method '{}'", binding.function))?;
-    if !is_action_shaped(signature) {
-        return Err(format!(
-            "method '{}' is not a task run (it does not return the behavior-tree Status)",
-            binding.function
-        ));
-    }
-
-    // Every routed field must resolve in the goal message and land on a
-    // parameter of a compatible type.
-    let function = &signature.function;
-    let mut routes = Vec::new();
-    for route in &binding.goal_routes {
-        let field_ref = resolve_field_ref(&goal_type, registry.types(), &route.field)?;
-        let (parameter_id, parameter) = function
-            .parameter_ordering
-            .iter()
-            .filter_map(|id| Some((*id, function.parameters.get(id)?)))
-            .find(|(_, parameter)| parameter.name == route.key)
-            .ok_or_else(|| {
-                format!(
-                    "method '{}' has no parameter '{}'",
-                    binding.function, route.key
-                )
-            })?;
-        if !route_compatible(&field_ref, &parameter.ty, registry) {
-            return Err(format!(
-                "goal field '{}' does not fit parameter '{}'",
-                route.field, route.key
-            ));
-        }
-        routes.push(BoundRoute {
-            field: route.field.clone(),
-            parameter: parameter_id,
-        });
-    }
-    // A standard contract carries what the standard says, which need not be
-    // every parameter the implementing method takes — ROS4HRI's `Say` goal has
-    // no field for a voice, say. Such a parameter is left out of the spawn
-    // call, and what an absent argument means is the implementation's: a
-    // method declared with arora-module reads an absent optional parameter as
-    // `None` and fails the call on an absent required one, while a task
-    // fragment may supply the argument itself. So the binding is served, not
-    // refused, and the gap is announced here to be legible in the log rather
-    // than surprising at the first goal. A route naming a field the goal
-    // lacks, or a parameter the method lacks, is still refused above: a typo
-    // is not an omission.
-    let unrouted: Vec<&str> = function
-        .parameter_ordering
-        .iter()
-        .filter_map(|id| function.parameters.get(id))
-        .map(|parameter| parameter.name.as_str())
-        .filter(|name| !binding.goal_routes.iter().any(|route| route.key == *name))
-        .collect();
-    if !unrouted.is_empty() {
-        log::info!(
-            "{}: '{}' is spawned without {}, which the goal does not carry: \
-             an absent optional parameter is None, and the implementation \
-             supplies an absent required one or fails the run",
-            binding.action,
-            binding.function,
-            unrouted.join(", "),
-        );
-    }
+    let signature = task_run(signatures, &binding.function)?;
+    let routes = resolve_routes(
+        &binding.action,
+        &goal_type,
+        &binding.goal_routes,
+        signature,
+        registry,
+    )?;
 
     let send_goal_request_type = bound_send_goal_request_type(&binding.action, &goal_type);
     ros2_representable(&send_goal_request_type, registry.types())
@@ -393,36 +442,11 @@ fn resolve_binding(
     })
 }
 
-/// Resolve a dotted field path against a message type alone — the startup
-/// counterpart of [`extract_route`]'s value walk. Empty routes the whole
-/// message.
-fn resolve_field_ref(
-    ty: &low::Type,
-    registry: &ty::TypeRegistry,
-    dotted: &str,
-) -> Result<TypeRef, String> {
-    let mut current_ref = TypeRef::Scalar { id: ty.id };
-    let mut current_ty = Some(ty);
-    if !dotted.is_empty() {
-        for segment in dotted.split('.') {
-            let Some(low::TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
-                return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
-            };
-            let field = structure
-                .fields
-                .values()
-                .find(|field| field.name == segment)
-                .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
-            current_ref = field.type_ref.clone();
-            current_ty = registry.get(&type_ref_id(&field.type_ref));
-        }
-    }
-    Ok(current_ref)
-}
-
-/// Whether a goal field can feed a parameter: their type references agree, or
-/// the field is an `x`/`y`/`z` structure and the parameter the vec3 array it
-/// coerces to (see [`extract_route`]).
+/// Whether a message field can feed a parameter: their type references
+/// agree, or the field is one [`extract_route`] coerces into the parameter's
+/// type — an `x`/`y`/`z` structure into the vec3 array, a
+/// `builtin_interfaces/Duration` into `f32` seconds, a sequence of Durations
+/// (a `*` route) into an `f32` array.
 fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Registry) -> bool {
     let Some(parameter_ref) = type_ref_of(parameter) else {
         return false;
@@ -439,9 +463,15 @@ fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Regist
     if same {
         return true;
     }
-    matches!(parameter_ref, TypeRef::Array { id } if id == *ty::F32_ID)
-        && matches!(field, TypeRef::Scalar { id }
-            if registry.get(id).is_some_and(xyz_structure))
+    let duration = |id: &Uuid| is_duration_id(id, registry.types());
+    match (field, parameter_ref) {
+        (TypeRef::Scalar { id }, TypeRef::Array { id: f32 }) if f32 == *ty::F32_ID => {
+            registry.get(id).is_some_and(xyz_structure)
+        }
+        (TypeRef::Scalar { id }, TypeRef::Scalar { id: f32 }) if f32 == *ty::F32_ID => duration(id),
+        (TypeRef::Array { id }, TypeRef::Array { id: f32 }) if f32 == *ty::F32_ID => duration(id),
+        _ => false,
+    }
 }
 
 /// The `goal_id: uint8[16]` field every synthesised request leads with (a
@@ -730,15 +760,8 @@ fn bound_goal_call_of(
         Ok(Value::U8(priority)) => priority,
         _ => std_skills::Meta::NORMAL_PRIORITY,
     };
-    let mut args = Vec::with_capacity(bound.routes.len());
-    for route in &bound.routes {
-        let value = extract_route(&goal, &bound.goal_type, registry.types(), &route.field)
-            .map_err(|e| format!("goal field {e}"))?;
-        args.push(StructureField {
-            id: route.parameter,
-            value: Box::new(value),
-        });
-    }
+    let args = routed_args(&goal, &bound.goal_type, &bound.routes, registry)
+        .map_err(|e| format!("goal {e}"))?;
     Ok((
         goal_id,
         priority,
@@ -1319,7 +1342,7 @@ fn now() -> Time {
 }
 
 /// Dispatch `call` to the runtime as a [`BridgeOp::Call`] and await its result.
-async fn runtime_call(
+pub(crate) async fn runtime_call(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     call: Call,
 ) -> Result<CallResult, String> {
@@ -1618,7 +1641,7 @@ fn flush_ready_results(
 }
 
 /// The three run outcomes a status key carries.
-enum RunStatus {
+pub(crate) enum RunStatus {
     Running,
     Success,
     Failure,
@@ -1627,7 +1650,7 @@ enum RunStatus {
 /// Map a status-key value (the behavior-tree `Status` enumeration) to the run
 /// outcome. `None` for any other value — a foreign write to the key is not a
 /// lifecycle transition.
-fn run_status_of(value: &Value) -> Option<RunStatus> {
+pub(crate) fn run_status_of(value: &Value) -> Option<RunStatus> {
     let Value::Enumeration(enumeration) = value else {
         return None;
     };
@@ -2244,7 +2267,12 @@ mod tests {
     #[test]
     fn a_profile_binding_resolves_or_is_refused_with_a_reason() {
         let registry = arora_msgs_ros2::registry();
-        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        // The ROS4HRI standard's skills; the viseme timeline has its own test.
+        let bindings: Vec<_> = crate::profile::ExposureProfile::ros4hri()
+            .actions
+            .into_iter()
+            .filter(|binding| binding.action != "/skill/play_visemes")
+            .collect();
 
         let signatures = [bound_look_at_signature(), bound_say_signature()];
         let (actions, errors) = resolve_bound(&bindings, &signatures, &registry);
@@ -2396,6 +2424,126 @@ mod tests {
     /// The bound result carries the `std_skills` errno of the goal's
     /// lifecycle — or the errno the run wrote — and round-trips through the
     /// codec as the registry Result message.
+    /// A `vizij_face_msgs/PlayVisemes` goal lands as `play_visemes`'s
+    /// parallel arrays: the viseme codes, and each one's start and duration
+    /// in seconds.
+    #[test]
+    fn a_viseme_timeline_goal_becomes_parallel_arrays() {
+        use arora_msgs_ros2::{builtin_interfaces, std_msgs, vizij_face_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let mut parameters = HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for (name, kind) in [
+            ("visemes", PrimitiveKind::ArrayU8),
+            ("starts", PrimitiveKind::ArrayF32),
+            ("durations", PrimitiveKind::ArrayF32),
+        ] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(kind),
+                    mutable: false,
+                },
+            );
+        }
+        let signature = MethodSignature {
+            module_id: gen_uuid_from_str("face-module"),
+            id: gen_uuid_from_str("play_visemes"),
+            name: "play_visemes".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: status_return(),
+            },
+        };
+        let registry = arora_msgs_ros2::registry();
+        let bindings: Vec<_> = crate::profile::ExposureProfile::ros4hri()
+            .actions
+            .into_iter()
+            .filter(|binding| binding.action == "/skill/play_visemes")
+            .collect();
+        let (actions, errors) = resolve_bound(&bindings, &[signature], &registry);
+        assert!(errors.is_empty(), "{errors:?}");
+        let action = &actions[0];
+        let Wire::Bound(bound) = &action.wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        assert!(
+            bound.feedback.is_some(),
+            "the played viseme is the feedback"
+        );
+
+        let timed = |value, start: u32, duration: u32| vizij_face_msgs::TimedViseme {
+            viseme: vizij_face_msgs::Viseme { value },
+            timing: vizij_face_msgs::Timing {
+                start: builtin_interfaces::Duration {
+                    sec: 0,
+                    nanosec: start,
+                },
+                duration: builtin_interfaces::Duration {
+                    sec: 0,
+                    nanosec: duration,
+                },
+            },
+        };
+        let goal = vizij_face_msgs::PlayVisemes_Goal {
+            meta: std_skills::Meta {
+                caller: "tts".to_string(),
+                priority: std_skills::Meta::NORMAL_PRIORITY,
+            },
+            timeline: vizij_face_msgs::VisemeTimeline {
+                header: std_msgs::Header::default(),
+                visemes: vec![
+                    timed(vizij_face_msgs::Viseme::PP, 0, 250_000_000),
+                    timed(vizij_face_msgs::Viseme::AA, 250_000_000, 500_000_000),
+                ],
+            },
+        };
+        let (goal_ty, goal_registry) =
+            <vizij_face_msgs::PlayVisemes_Goal as AroraType>::arora_type_with_registry();
+        let goal_value = to_value_seeded(&goal, &goal_ty, &goal_registry).expect("goal to value");
+        let request = Value::Structure(Structure {
+            id: action.send_goal_request_type.id,
+            fields: vec![
+                StructureField {
+                    id: goal_id_field(),
+                    value: Box::new(Value::ArrayU8(vec![3; 16])),
+                },
+                StructureField {
+                    id: gen_uuid_from_str("action/goal"),
+                    value: Box::new(goal_value),
+                },
+            ],
+        });
+        let bytes = cdr::encode(&action.send_goal_request_type, registry.types(), &request)
+            .expect("encode SendGoal request");
+        let decoded = cdr::decode(&action.send_goal_request_type, registry.types(), &bytes)
+            .expect("decode SendGoal request");
+        let (_, _, call) =
+            bound_goal_call_of(action, bound, &registry, decoded).expect("goal call");
+        assert_eq!(call.id, gen_uuid_from_str("play_visemes"));
+        let arg = |name: &str| {
+            call.args
+                .iter()
+                .find(|arg| arg.id == gen_uuid_from_str(name))
+                .map(|arg| arg.value.as_ref().clone())
+        };
+        assert_eq!(
+            arg("visemes"),
+            Some(Value::ArrayU8(vec![
+                vizij_face_msgs::Viseme::PP,
+                vizij_face_msgs::Viseme::AA
+            ]))
+        );
+        assert_eq!(arg("starts"), Some(Value::ArrayF32(vec![0.0, 0.25])));
+        assert_eq!(arg("durations"), Some(Value::ArrayF32(vec![0.25, 0.5])));
+    }
+
     #[test]
     fn bound_results_carry_the_std_skills_errno() {
         let registry = arora_msgs_ros2::registry();

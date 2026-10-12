@@ -17,6 +17,10 @@
 //!   method — the skill plane, where long-running, cancellable work rides a
 //!   standard `.action` contract (`interaction_skills/LookAt`) instead of a
 //!   topic.
+//! - [`TopicSkillBinding`]s bind an absolute **topic** to a device task-run
+//!   method — the skill plane's other form, for a skill that sets a state
+//!   held until changed (`set_expression`): each message spawns the method,
+//!   fire-and-forget, and the latest message wins.
 //!
 //! [`ExposureProfile::coverage`] reports what a device does not serve, so a
 //! deployment can check a face against the profile it enables instead of
@@ -105,24 +109,73 @@ pub struct ActionBinding {
     pub goal_routes: Vec<FieldRoute>,
 }
 
-/// A named set of [`Endpoint`]s, [`Include`]s and [`ActionBinding`]s —
-/// everything a deployment says with "expose this face as `<profile>`".
+/// A profile-declared topic bound to a device task-run method: the exterior
+/// contract of a **skill on a topic** — a `set_*` skill, which sets a state
+/// that holds until changed, so it has no lifecycle for a client to follow.
+///
+/// Every message on the topic spawns the method as a task run, its fields
+/// routed onto the method's parameters as an [`ActionBinding`]'s goal is.
+/// Nothing answers the publisher. The latest message wins: the run the
+/// previous message spawned is halted, if it has not ended, before the new
+/// one is spawned, and messages arriving while a spawn is in flight collapse
+/// to the newest. The association is checked at startup against the device's
+/// described methods, like an action binding's.
+#[derive(Debug, Clone)]
+pub struct TopicSkillBinding {
+    /// Absolute ROS 2 topic name, e.g. `/skill/set_expression`.
+    pub topic: String,
+    /// Registered ROS message name, e.g. `interaction_skills/SetExpression`.
+    pub ros_type: String,
+    /// The device method each message spawns as a task run. It must be
+    /// action-shaped (return the behavior-tree `Status`) per the device's
+    /// DescribeMethods answer.
+    pub function: String,
+    /// Message fan-out onto the function's parameters, as
+    /// [`ActionBinding::goal_routes`]: [`FieldRoute::field`] is the path into
+    /// the message, [`FieldRoute::key`] names the parameter.
+    pub routes: Vec<FieldRoute>,
+    /// Delivery profile; `None` takes [`Qos::default_for`] an inbound flow.
+    pub qos: Option<Qos>,
+}
+
+/// A named set of [`Endpoint`]s, [`Include`]s, [`ActionBinding`]s and
+/// [`TopicSkillBinding`]s — everything a deployment says with "expose this
+/// face as `<profile>`".
 #[derive(Debug, Clone)]
 pub struct ExposureProfile {
     pub name: String,
     pub endpoints: Vec<Endpoint>,
     pub includes: Vec<Include>,
     pub actions: Vec<ActionBinding>,
+    pub topic_skills: Vec<TopicSkillBinding>,
 }
 
 impl ExposureProfile {
     /// The ROS4HRI face surface, under PAL's `/robot_face/*` names, out of
     /// the box:
     ///
-    /// - expression commands (`interaction_skills/SetExpression` on
-    ///   `/skill/set_expression`) fan out, from the `hri_msgs/Expression`
-    ///   they carry, to the `standard/ros4hri/expression/*` keys the face
-    ///   standard reads;
+    /// - the `set_expression` skill (`interaction_skills/SetExpression` on
+    ///   the topic `/skill/set_expression`) spawns the device's
+    ///   `set_expression(expression: string, valence: f32, arousal: f32)`
+    ///   task run, from the `hri_msgs/Expression` it carries (its
+    ///   `confidence` is perception's and is not routed).
+    ///   [`with_set_expression_on_keys`](Self::with_set_expression_on_keys)
+    ///   lands it on the `standard/ros4hri/expression/*` keys instead;
+    /// - Vizij's `set_facial_action_units` skill
+    ///   (`vizij_face_msgs/SetFacialActionUnits` on the topic
+    ///   `/skill/set_facial_action_units`) spawns
+    ///   `set_facial_action_units(codes: [u8], intensities: [f32])`. It sets
+    ///   what `set_expression` sets, the face's expression, and the device
+    ///   gives the face to the latest of the two;
+    /// - Vizij's `set_viseme` skill (`vizij_face_msgs/SetViseme` on the topic
+    ///   `/skill/set_viseme`) spawns `set_viseme(viseme: u8)`: the mouth
+    ///   shape at the playhead, for a live producer;
+    /// - Vizij's `play_visemes` skill (the **action** `/skill/play_visemes`,
+    ///   `vizij_face_msgs/PlayVisemes`) spawns
+    ///   `play_visemes(visemes: [u8], starts: [f32], durations: [f32])`: the
+    ///   goal's timeline as parallel arrays, times in seconds from its
+    ///   origin. A timeline ends, so it is an action, with feedback,
+    ///   completion and cancellation;
     /// - `look_at` points (`geometry_msgs/PointStamped`) land as the gaze
     ///   target (a vec3) and frame;
     /// - a streamed viseme lands as its ROS4HRI code on
@@ -154,8 +207,9 @@ impl ExposureProfile {
     /// - the `/skill/look_at` **action** (`interaction_skills/LookAt`) spawns
     ///   the device's `look_at` task run, its goal routed onto the
     ///   `(policy, target, frame)` parameters — the skill plane, for gaze
-    ///   work that runs until it converges or is cancelled. `set_expression`
-    ///   stays a topic: setting a target state is not a task;
+    ///   work that runs until it converges or is cancelled. The `set_*`
+    ///   skills are topics: setting a target state is not a task a client
+    ///   follows;
     /// - the rendered face publishes as the `image_transport` pair PAL OS
     ///   documents under `/robot_face/image_raw/*`: the key `display/face`
     ///   as a `sensor_msgs/Image` on `/robot_face/image_raw`, and
@@ -174,20 +228,6 @@ impl ExposureProfile {
     /// Diagnostics are tracked separately, so the preset declares no bulk
     /// includes.
     pub fn ros4hri() -> Self {
-        let expression_routes = vec![
-            FieldRoute {
-                field: "expression.expression".into(),
-                key: "standard/ros4hri/expression/name".into(),
-            },
-            FieldRoute {
-                field: "expression.valence".into(),
-                key: "standard/ros4hri/expression/valence".into(),
-            },
-            FieldRoute {
-                field: "expression.arousal".into(),
-                key: "standard/ros4hri/expression/arousal".into(),
-            },
-        ];
         let look_at_routes = vec![
             FieldRoute {
                 field: "point".into(),
@@ -243,15 +283,28 @@ impl ExposureProfile {
                 key: key.into(),
             }]
         };
+        // A skill's message fields, each onto the parameter it feeds.
+        let routes = |pairs: &[(&str, &str)]| -> Vec<FieldRoute> {
+            pairs
+                .iter()
+                .map(|(field, parameter)| FieldRoute {
+                    field: (*field).into(),
+                    key: (*parameter).into(),
+                })
+                .collect()
+        };
+        let topic_skill = |topic: &str, ros_type: &str, function: &str, pairs: &[(&str, &str)]| {
+            TopicSkillBinding {
+                topic: topic.into(),
+                ros_type: ros_type.into(),
+                function: function.into(),
+                routes: routes(pairs),
+                qos: None,
+            }
+        };
         Self {
             name: "ros4hri".into(),
             endpoints: vec![
-                endpoint(
-                    "/skill/set_expression",
-                    "interaction_skills/SetExpression",
-                    Flow::In,
-                    &expression_routes,
-                ),
                 endpoint(
                     "/robot_face/look_at",
                     "geometry_msgs/PointStamped",
@@ -311,6 +364,18 @@ impl ExposureProfile {
                         },
                     ],
                 },
+                // A timeline routes as parallel arrays, one entry per
+                // viseme, its timing in seconds.
+                ActionBinding {
+                    action: "/skill/play_visemes".into(),
+                    ros_type: "vizij_face_msgs/PlayVisemes".into(),
+                    function: "play_visemes".into(),
+                    goal_routes: routes(&[
+                        ("timeline.visemes.*.viseme.value", "visemes"),
+                        ("timeline.visemes.*.timing.start", "starts"),
+                        ("timeline.visemes.*.timing.duration", "durations"),
+                    ]),
+                },
                 // The speech skill. `person_id` and `group_id` address an
                 // audience a face device has no notion of. The goal carries
                 // only the text, so the device's `say` takes its other
@@ -325,13 +390,72 @@ impl ExposureProfile {
                     }],
                 },
             ],
+            topic_skills: vec![
+                topic_skill(
+                    "/skill/set_expression",
+                    "interaction_skills/SetExpression",
+                    "set_expression",
+                    &[
+                        ("expression.expression", "expression"),
+                        ("expression.valence", "valence"),
+                        ("expression.arousal", "arousal"),
+                    ],
+                ),
+                topic_skill(
+                    "/skill/set_facial_action_units",
+                    "vizij_face_msgs/SetFacialActionUnits",
+                    "set_facial_action_units",
+                    &[
+                        ("facial_action_units.codes", "codes"),
+                        ("facial_action_units.intensities", "intensities"),
+                    ],
+                ),
+                topic_skill(
+                    "/skill/set_viseme",
+                    "vizij_face_msgs/SetViseme",
+                    "set_viseme",
+                    &[("viseme.value", "viseme")],
+                ),
+            ],
         }
+    }
+
+    /// This profile with `/skill/set_expression` landing on the
+    /// `standard/ros4hri/expression/{name,valence,arousal}` keys — a typed
+    /// endpoint — instead of spawning the device's `set_expression` task run:
+    /// for a face that reads its expression from those keys and implements
+    /// no `set_expression` method.
+    pub fn with_set_expression_on_keys(mut self) -> Self {
+        self.topic_skills
+            .retain(|skill| skill.topic != "/skill/set_expression");
+        self.endpoints.insert(
+            0,
+            Endpoint {
+                topic: "/skill/set_expression".into(),
+                ros_type: "interaction_skills/SetExpression".into(),
+                flow: Flow::In,
+                routes: [
+                    ("expression.expression", "standard/ros4hri/expression/name"),
+                    ("expression.valence", "standard/ros4hri/expression/valence"),
+                    ("expression.arousal", "standard/ros4hri/expression/arousal"),
+                ]
+                .iter()
+                .map(|(field, key)| FieldRoute {
+                    field: (*field).into(),
+                    key: (*key).into(),
+                })
+                .collect(),
+                qos: None,
+            },
+        );
+        self
     }
 
     /// What the device does not serve of this profile: the endpoint route
     /// keys absent from `keys` (its key set), the include globs matching
-    /// nothing, and the action bindings whose function is absent from
-    /// `functions` (its described method names). Empty means full coverage.
+    /// nothing, and the action and topic-skill bindings whose function is
+    /// absent from `functions` (its described method names). Empty means full
+    /// coverage.
     pub fn coverage<'a>(
         &self,
         keys: impl IntoIterator<Item = &'a str> + Clone,
@@ -368,6 +492,14 @@ impl ExposureProfile {
                 missing.push(format!(
                     "{} ({}): no device method '{}'",
                     binding.action, binding.ros_type, binding.function
+                ));
+            }
+        }
+        for binding in &self.topic_skills {
+            if !functions.clone().into_iter().any(|f| f == binding.function) {
+                missing.push(format!(
+                    "{} ({}): no device method '{}'",
+                    binding.topic, binding.ros_type, binding.function
                 ));
             }
         }
@@ -454,7 +586,6 @@ mod tests {
         let profile = ExposureProfile::ros4hri();
         let topics: Vec<&str> = profile.endpoints.iter().map(|e| e.topic.as_str()).collect();
         for expected in [
-            "/skill/set_expression",
             "/robot_face/look_at",
             "/tts/viseme",
             "/tts/visemes",
@@ -574,14 +705,34 @@ mod tests {
     #[test]
     fn ros4hri_preset_binds_the_standard_skills() {
         let profile = ExposureProfile::ros4hri();
-        let [look_at, say] = profile.actions.as_slice() else {
-            panic!("the gaze and speech skills, got {:?}", profile.actions);
+        let [look_at, play_visemes, say] = profile.actions.as_slice() else {
+            panic!(
+                "the gaze, viseme and speech skills, got {:?}",
+                profile.actions
+            );
         };
         assert_eq!(look_at.action, "/skill/look_at");
         assert_eq!(look_at.ros_type, "interaction_skills/LookAt");
         assert_eq!(look_at.function, "look_at");
         let params: Vec<&str> = look_at.goal_routes.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(params, ["policy", "target", "frame"]);
+
+        assert_eq!(play_visemes.action, "/skill/play_visemes");
+        assert_eq!(play_visemes.ros_type, "vizij_face_msgs/PlayVisemes");
+        assert_eq!(play_visemes.function, "play_visemes");
+        let routes: Vec<(&str, &str)> = play_visemes
+            .goal_routes
+            .iter()
+            .map(|r| (r.field.as_str(), r.key.as_str()))
+            .collect();
+        assert_eq!(
+            routes,
+            [
+                ("timeline.visemes.*.viseme.value", "visemes"),
+                ("timeline.visemes.*.timing.start", "starts"),
+                ("timeline.visemes.*.timing.duration", "durations"),
+            ]
+        );
 
         assert_eq!(say.action, "/skill/say");
         assert_eq!(say.ros_type, "communication_skills/Say");
@@ -591,18 +742,117 @@ mod tests {
         assert_eq!(params, ["text"]);
     }
 
+    /// The `set_*` skills ride topics, each spawning the face method of its
+    /// name with the message's content routed onto its parameters.
+    #[test]
+    fn ros4hri_preset_serves_the_set_skills_on_topics() {
+        let profile = ExposureProfile::ros4hri();
+        // (topic, type, function, routes)
+        type Skill<'a> = (&'a str, &'a str, &'a str, Vec<(&'a str, &'a str)>);
+        let skills: Vec<Skill> = profile
+            .topic_skills
+            .iter()
+            .map(|skill| {
+                (
+                    skill.topic.as_str(),
+                    skill.ros_type.as_str(),
+                    skill.function.as_str(),
+                    skill
+                        .routes
+                        .iter()
+                        .map(|r| (r.field.as_str(), r.key.as_str()))
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            skills,
+            [
+                (
+                    "/skill/set_expression",
+                    "interaction_skills/SetExpression",
+                    "set_expression",
+                    vec![
+                        ("expression.expression", "expression"),
+                        ("expression.valence", "valence"),
+                        ("expression.arousal", "arousal"),
+                    ],
+                ),
+                (
+                    "/skill/set_facial_action_units",
+                    "vizij_face_msgs/SetFacialActionUnits",
+                    "set_facial_action_units",
+                    vec![
+                        ("facial_action_units.codes", "codes"),
+                        ("facial_action_units.intensities", "intensities"),
+                    ],
+                ),
+                (
+                    "/skill/set_viseme",
+                    "vizij_face_msgs/SetViseme",
+                    "set_viseme",
+                    vec![("viseme.value", "viseme")],
+                ),
+            ]
+        );
+        // A skill topic is not also a typed endpoint: one message, one effect.
+        for skill in &profile.topic_skills {
+            assert!(
+                !profile.endpoints.iter().any(|e| e.topic == skill.topic),
+                "{} is both",
+                skill.topic
+            );
+        }
+    }
+
+    /// The switch back to the expression keys moves `/skill/set_expression`
+    /// from the skill plane to a typed endpoint, and touches nothing else.
+    #[test]
+    fn set_expression_can_land_on_the_expression_keys_instead() {
+        let profile = ExposureProfile::ros4hri().with_set_expression_on_keys();
+        assert!(!profile
+            .topic_skills
+            .iter()
+            .any(|s| s.topic == "/skill/set_expression"));
+        assert_eq!(profile.topic_skills.len(), 2);
+        let endpoint = profile
+            .endpoints
+            .iter()
+            .find(|e| e.topic == "/skill/set_expression")
+            .expect("the expression endpoint");
+        assert_eq!(endpoint.ros_type, "interaction_skills/SetExpression");
+        assert_eq!(endpoint.flow, Flow::In);
+        let keys: Vec<&str> = endpoint.routes.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "standard/ros4hri/expression/name",
+                "standard/ros4hri/expression/valence",
+                "standard/ros4hri/expression/arousal",
+            ]
+        );
+    }
+
     #[test]
     fn coverage_reports_unserved_surfaces() {
         let profile = ExposureProfile::ros4hri();
-        // A face serving every route key and both skill methods covers the
+        // A face serving every route key and every skill method covers the
         // preset fully.
+        let functions = [
+            "look_at",
+            "play_visemes",
+            "say",
+            "set_expression",
+            "set_facial_action_units",
+            "set_viseme",
+        ];
         let keys: Vec<String> = profile
             .endpoints
             .iter()
             .flat_map(|e| e.routes.iter().map(|r| r.key.clone()))
             .collect();
         assert!(profile
-            .coverage(keys.iter().map(String::as_str), ["look_at", "say"])
+            .coverage(keys.iter().map(String::as_str), functions)
             .is_empty());
         // Dropping the gaze target surfaces exactly the look_at hole.
         let partial: Vec<&str> = keys
@@ -610,15 +860,24 @@ mod tests {
             .map(String::as_str)
             .filter(|k| !k.ends_with("gaze/target"))
             .collect();
-        let missing = profile.coverage(partial, ["look_at", "say"]);
+        let missing = profile.coverage(partial, functions);
         assert_eq!(missing.len(), 1, "{missing:?}");
         assert!(missing[0].contains("/robot_face/look_at"));
         assert!(missing[0].contains("gaze/target"));
-        // A device serving neither skill method misses the whole skill plane.
+        // A device serving no skill method misses the whole skill plane, on
+        // actions and on topics.
         let missing = profile.coverage(keys.iter().map(String::as_str), []);
-        assert_eq!(missing.len(), 2, "{missing:?}");
-        assert!(missing.iter().any(|m| m.contains("/skill/look_at")));
-        assert!(missing.iter().any(|m| m.contains("/skill/say")));
+        assert_eq!(missing.len(), functions.len(), "{missing:?}");
+        for skill in [
+            "/skill/look_at",
+            "/skill/play_visemes",
+            "/skill/say",
+            "/skill/set_expression",
+            "/skill/set_facial_action_units",
+            "/skill/set_viseme",
+        ] {
+            assert!(missing.iter().any(|m| m.contains(skill)), "{skill}");
+        }
         // A face encodes one transport, so the other's key is reported as
         // unserved — the truth of the pair, named by topic and type.
         let png_only: Vec<&str> = keys
@@ -626,7 +885,7 @@ mod tests {
             .map(String::as_str)
             .filter(|k| *k != "display/face")
             .collect();
-        let missing = profile.coverage(png_only, ["look_at", "say"]);
+        let missing = profile.coverage(png_only, functions);
         assert_eq!(
             missing,
             ["/robot_face/image_raw (sensor_msgs/Image): no device key 'display/face'"]

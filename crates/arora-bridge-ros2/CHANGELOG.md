@@ -4,6 +4,42 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.4.0] - 2026-10-12
+
+### Added
+
+- **Skills on topics.** A `TopicSkillBinding` in an `ExposureProfile` serves
+  a device task-run method on a topic: each message spawns the method, its
+  fields routed onto the parameters as an action goal's are, and nothing
+  answers. The latest message wins: the run the previous message spawned is
+  halted, unless it already ended, before the new one is spawned, and
+  messages queued while a spawn is in flight collapse to the newest. A
+  binding is checked at startup against the device's described methods and
+  refused loudly when its contract does not hold.
+- **Routes take each element of a sequence and durations as seconds.** A `*`
+  segment collects what the rest of the path reaches in every element into
+  one flat array (`timeline.visemes.*.viseme.value` → `[u8]`), and a
+  `builtin_interfaces/Duration` routes as its seconds, an `f32`. A bound
+  action's goal route now also accepts a numeric index, as a topic's did.
+- The ROS4HRI preset serves Vizij's face skills, typed by
+  `vizij_face_msgs` (arora-msgs-ros2 2.2): `set_facial_action_units(codes:
+  [u8], intensities: [f32])` on the topic `/skill/set_facial_action_units`,
+  `set_viseme(viseme: u8)` on the topic `/skill/set_viseme`, and
+  `play_visemes(visemes: [u8], starts: [f32], durations: [f32])` on the
+  action `/skill/play_visemes`.
+- `ExposureProfile::with_set_expression_on_keys` lands `/skill/set_expression`
+  on the `standard/ros4hri/expression/*` keys.
+
+### Changed
+
+- The ROS4HRI preset serves `/skill/set_expression` as a topic skill: a
+  message spawns the device's `set_expression(expression: string, valence:
+  f32, arousal: f32)` task run instead of landing on the
+  `standard/ros4hri/expression/*` keys. A face that reads those keys takes
+  `with_set_expression_on_keys()`.
+- `ExposureProfile` gains the `topic_skills` field and `Ros2BridgeConfig` the
+  `topic_skill_bindings` field.
+
 ## [10.3.0] - 2026-10-12
 
 ### Changed

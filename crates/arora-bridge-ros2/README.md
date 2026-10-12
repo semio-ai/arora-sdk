@@ -181,17 +181,32 @@ until written), and a change to any routed key publishes the whole message
 again. A `std_msgs` wrapper around one key (`data` ← the key) is the smallest
 case; a `PointStamped` from a vec3 key and a frame key is the same mechanism.
 Inbound, a numeric segment indexes a sequence (`visemes.0.value`), so a
-message wrapping its payload in an array routes like any other.
+message wrapping its payload in an array routes like any other, and a `*`
+segment takes each element (`timeline.visemes.*.viseme.value`), collecting
+what the rest of the path reaches into one flat array. A
+`builtin_interfaces/Duration` routes as its seconds, an `f32`.
 
 **Exposure profiles** (`profile` module) bundle a whole surface: an
 [`ExposureProfile`] holds typed endpoints on absolute topics with per-field
 fan-out over device keys, glob includes (`*` one segment, `**` the rest)
 whose prefix rewrites expose bulk keys on the scalar plane under absolute
-names, and **action bindings** that serve a device task-run method as a
-standard ROS 2 action — the skill plane. `ExposureProfile::ros4hri()` ships
-the ROS4HRI face surface under PAL's names (`/robot_face/*`): expression
-commands — an `interaction_skills/SetExpression` on `/skill/set_expression` —
-fan out to `standard/ros4hri/expression/*`, `look_at` points land as the gaze
+names, and the skill plane: **action bindings** that serve a device task-run
+method as a standard ROS 2 action, and **topic-skill bindings** that serve one
+on a topic, for a `set_*` skill whose state holds until changed — each
+message spawns the method, nothing answers, and the latest message wins (the
+run the previous one spawned is halted). `ExposureProfile::ros4hri()` ships
+the ROS4HRI face surface under PAL's names (`/robot_face/*`). The
+`set_expression` skill (`interaction_skills/SetExpression` on
+`/skill/set_expression`) spawns `set_expression(expression, valence,
+arousal)`; `with_set_expression_on_keys()` lands it on
+`standard/ros4hri/expression/*` instead. Vizij's own skills, typed by
+arora-msgs-ros2's `vizij_face_msgs`, join it: `set_facial_action_units(codes:
+[u8], intensities: [f32])` on the topic `/skill/set_facial_action_units`,
+which sets the face's expression as `set_expression` does (the latest of the
+two takes the face), `set_viseme(viseme: u8)` on the topic
+`/skill/set_viseme`, and `play_visemes(visemes: [u8], starts: [f32],
+durations: [f32])` on the action `/skill/play_visemes`, its timeline routed as
+parallel arrays in seconds. `look_at` points land as the gaze
 target (vec3) and frame, a streamed viseme lands as its ROS4HRI code on
 `standard/ros4hri/viseme`, with its `time` and `duration` (seconds) on
 `standard/ros4hri/viseme/time` and `standard/ros4hri/viseme/duration` — from
@@ -219,10 +234,11 @@ let config = Ros2BridgeConfig::new("robot", 0)
     .with_profile(ExposureProfile::ros4hri());
 ```
 
-An action binding is the exterior contract of a skill: at startup the bridge
+An action or topic-skill binding is the exterior contract of a skill: at
+startup the bridge
 checks it against the device's described methods (the function exists, is a
 task run, and every goal field routes onto a parameter of a compatible type)
-and refuses it loudly otherwise. A parameter the goal does not name is left out
+and refuses it loudly otherwise. A parameter the message does not name is left out
 of the spawn call, and the bridge logs it — a standard contract carries what
 the standard says, not every parameter an implementation happens to take. What
 the absent argument means is the implementation's: a method declared with
