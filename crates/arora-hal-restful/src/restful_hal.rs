@@ -8,9 +8,12 @@ use log::{debug, error, info, warn};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
 
-use arora_hal::{Hal, HalAssets, HalDescription, HalError, HalResult, UpdatesStream};
-use arora_types::data::{Key, State, StateChange};
-use arora_types::value::Value;
+use arora_hal::{
+    target_keys, Hal, HalAssets, HalDescription, HalError, HalResult, KeyDescriptions,
+    UpdatesStream,
+};
+use arora_types::data::{Key, KeyMeta, State, StateChange};
+use arora_types::value::{Type, Value};
 
 use crate::config::{EndpointConfig, EndpointMapping, RESTfulRobotConfig};
 use crate::conversions::hackerbot;
@@ -38,6 +41,9 @@ pub struct RestfulHal {
     // Feeds the queued-write task; dropping it (with the HAL) closes the
     // channel, and the task ends once the remaining backlog is flushed
     outbound: UnboundedSender<StateChange>,
+
+    // The robot's keys, from its configuration: fixed for the HAL's life
+    keys: HashMap<Key, KeyMeta>,
 }
 
 /// The HAL internals behind both write entries: `write()` calls straight in,
@@ -75,6 +81,7 @@ impl RestfulHal {
             config.base_url
         );
 
+        let keys = keys_of(&config);
         let inner = Arc::new(Inner {
             config,
             client,
@@ -99,8 +106,58 @@ impl RestfulHal {
             }
         });
 
-        Ok(Self { inner, outbound })
+        Ok(Self {
+            inner,
+            outbound,
+            keys,
+        })
     }
+}
+
+/// The keys of the robot `config` describes: for each joint of a POST
+/// joint-positions endpoint — the joints a write commands — its position and
+/// velocity targets in both forms (`<joint>/target.position`,
+/// `<joint>.target_position`, `<joint>/target.velocity`,
+/// `<joint>.target_velocity`) as `F64` inputs, and its mirrored
+/// `<joint>.position` and `<joint>.velocity` as `F64` outputs. A target
+/// carries an `F64` or is not requested, so that is the type the inputs take;
+/// positions are in radians, which the robot's conversions turn into its
+/// degrees. A velocity target is the speed of the position target written in
+/// the same change, and requests nothing on its own.
+///
+/// A joint's keys are those of a joint at the root, which every client
+/// addresses; a name with a `.` or a `/`, or an empty one, makes no such key.
+fn keys_of(config: &RESTfulRobotConfig) -> HashMap<Key, KeyMeta> {
+    let position = KeyMeta::new().of_type(Type::F64).in_unit("rad");
+    let velocity = KeyMeta::new().of_type(Type::F64);
+    let position_target = position.clone().editable();
+    let velocity_target = velocity
+        .clone()
+        .editable()
+        .described("The speed of the position target written in the same change.");
+    let mut keys = HashMap::new();
+    let joints = config
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.method == reqwest::Method::POST)
+        .filter_map(|endpoint| match &endpoint.mapping {
+            Some(EndpointMapping::JointPositions { joint_mapping }) => Some(joint_mapping.keys()),
+            _ => None,
+        })
+        .flatten()
+        .filter(|joint| !joint.is_empty() && !joint.contains(['.', '/']));
+    for joint in joints {
+        for (component, target, measured) in [
+            ("position", &position_target, &position),
+            ("velocity", &velocity_target, &velocity),
+        ] {
+            for key in target_keys(joint, component) {
+                keys.insert(key, target.clone());
+            }
+            keys.insert(Key::new(format!("{joint}.{component}")), measured.clone());
+        }
+    }
+    keys
 }
 
 impl Inner {
@@ -364,6 +421,12 @@ impl Hal for RestfulHal {
         }
     }
 
+    /// The robot's keys, from its configuration ([`keys_of`]): one
+    /// description, as they are fixed for the HAL's life.
+    fn describe_keys(&self) -> KeyDescriptions {
+        Box::pin(futures::stream::iter([self.keys.clone()]))
+    }
+
     /// A feed of the changes the robot reports.
     ///
     /// Each feed immediately receives the current state as one `StateChange`
@@ -488,6 +551,133 @@ mod tests {
             }
         });
         (format!("http://{addr}"), rx)
+    }
+
+    /// The keys a write reads and the HAL reports: each joint of a POST
+    /// joint-positions endpoint, and no other.
+    #[tokio::test]
+    async fn test_describes_each_commanded_joint_s_keys() {
+        let mut config = head_config("http://localhost:1");
+        config.endpoints.push(EndpointConfig {
+            path: "/api/v1/arm".to_string(),
+            method: Method::GET,
+            mapping: Some(EndpointMapping::JointPositions {
+                joint_mapping: HashMap::from([("elbow".to_string(), "elbow".to_string())]),
+            }),
+        });
+        if let Some(EndpointMapping::JointPositions { joint_mapping }) =
+            &mut config.endpoints[0].mapping
+        {
+            joint_mapping.insert("not.a.joint".to_string(), "x".to_string());
+            joint_mapping.insert("arm/elbow".to_string(), "x".to_string());
+        }
+        let hal = RestfulHal::new(config).expect("create HAL");
+        let mut feed = hal.describe_keys();
+        let description = feed.next().await.expect("one description");
+        assert_eq!(feed.next().await, None, "the keys are fixed");
+
+        let position = KeyMeta::new().of_type(Type::F64).in_unit("rad");
+        let velocity = KeyMeta::new().of_type(Type::F64);
+        let speed = "The speed of the position target written in the same change.";
+        let mut expected = HashMap::new();
+        for joint in ["head_yaw", "head_pitch"] {
+            for (component, measured, target) in [
+                ("position", &position, position.clone().editable()),
+                (
+                    "velocity",
+                    &velocity,
+                    velocity.clone().editable().described(speed),
+                ),
+            ] {
+                expected.insert(
+                    Key::from(format!("{joint}/target.{component}")),
+                    target.clone(),
+                );
+                expected.insert(Key::from(format!("{joint}.target_{component}")), target);
+                expected.insert(Key::from(format!("{joint}.{component}")), measured.clone());
+            }
+        }
+        assert_eq!(description, expected);
+    }
+
+    /// Through an Arora device: the device lists the HAL's keys with their
+    /// meta, takes a remote write to an input and sends it to the robot, and
+    /// refuses one to an output or to a key the HAL does not describe.
+    #[tokio::test]
+    async fn test_a_device_opens_the_described_inputs() {
+        let (base_url, requests) = spawn_http_server(|_| 200);
+        let hal = RestfulHal::new(head_config(&base_url)).expect("create HAL");
+        let mut device = arora::Arora::builder()
+            .with_hal(Box::new(hal))
+            .build()
+            .expect("build the device");
+        let caller = device.caller();
+
+        let keys = settle(&mut device, caller.list_keys(Some("head_yaw".to_string())))
+            .await
+            .expect("list the keys");
+        let listed: Vec<(&str, bool, Option<Type>)> = keys
+            .iter()
+            .map(|(path, meta)| (path.as_str(), meta.editable, meta.ty.clone()))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                ("head_yaw.position", false, Some(Type::F64)),
+                ("head_yaw.target_position", true, Some(Type::F64)),
+                ("head_yaw.target_velocity", true, Some(Type::F64)),
+                ("head_yaw.velocity", false, Some(Type::F64)),
+                ("head_yaw/target.position", true, Some(Type::F64)),
+                ("head_yaw/target.velocity", true, Some(Type::F64)),
+            ]
+        );
+
+        settle(
+            &mut device,
+            caller.update(StateChange::set(
+                "head_yaw/target.position",
+                Value::F64(0.5),
+            )),
+        )
+        .await
+        .expect("an input");
+        let (path, body) = tokio::task::spawn_blocking(move || {
+            requests
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the robot is asked")
+        })
+        .await
+        .expect("join");
+        assert_eq!(path, "/api/v1/head");
+        assert_eq!(body["yaw"], serde_json::json!(0.5f64.to_degrees() + 180.0));
+
+        for (key, value, why) in [
+            ("head_yaw.position", Value::F64(0.5), "not an input"),
+            ("head_roll.target_position", Value::F64(0.5), "not an input"),
+            ("head_yaw.target_position", Value::I64(1), "declared type"),
+        ] {
+            let refused = settle(&mut device, caller.update(StateChange::set(key, value)))
+                .await
+                .expect_err("refused");
+            assert!(refused.to_string().contains(why), "{key}: {refused}");
+        }
+    }
+
+    /// Step `device` until `reply` is answered.
+    async fn settle<T>(
+        device: &mut arora::Arora,
+        reply: impl std::future::Future<Output = T>,
+    ) -> T {
+        let mut reply = std::pin::pin!(reply);
+        for _ in 0..8 {
+            device
+                .step(std::time::Duration::from_millis(10))
+                .expect("step");
+            if let Some(answer) = reply.as_mut().now_or_never() {
+                return answer;
+            }
+        }
+        panic!("no answer after eight steps");
     }
 
     #[tokio::test]

@@ -4,6 +4,28 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] - 2026-10-12
+
+### Added
+
+- `RestfulHal` describes its keys (`Hal::describe_keys`, arora-hal 4.3), from
+  its configuration: for each joint of a POST joint-positions endpoint,
+  `<joint>/target.position`, `<joint>.target_position`,
+  `<joint>/target.velocity` and `<joint>.target_velocity` as `F64` inputs
+  open to remote writers, and `<joint>.position` and `<joint>.velocity` as
+  `F64` outputs; positions in radians, and a velocity target described as the
+  speed of the position target in the same change. The `arora-restful`
+  runner opened no key before; over arora 12.7 it opens these inputs, and
+  every bridge lists the keys. Where a host opened a prefix covering these
+  keys, they now take the HAL's meta: the outputs are closed to remote
+  writers, and a target takes only an `F64` (another value was held but
+  never requested).
+
+### Changed
+
+- Requires `arora-hal` 4.3 and `arora-types` 3.1; the `runner` feature
+  requires `arora` 12.7, which states the description to the device's store.
+
 ## [4.1.0] - 2026-10-12
 
 ### Changed
