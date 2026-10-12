@@ -391,7 +391,7 @@
       const methodsEl = $("methods");
       const deviceKeysEl = $("device-keys");
 
-      const numberSuffixes = ["f64", "f32", "i64", "i32", "u64", "u32"];
+      const numberSuffixes = ["f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8"];
 
       ip.value = location.hostname || "";
       $("port").textContent = ":" + wsPort;
@@ -451,7 +451,7 @@
         if (!control) {
           return null;
         }
-        const clamped = clampValue(value, control.min, control.max);
+        const clamped = clampValue(value, control.lower, control.upper);
         control.currentValue = clamped;
         const rangeInput = getRangeInput(control);
         if (rangeInput) {
@@ -471,7 +471,7 @@
       function clampValue(v, min, max) {
         const value = Number.parseFloat(v);
         if (!Number.isFinite(value)) {
-          return min;
+          return Number.isFinite(min) ? min : Number.isFinite(max) ? max : 0;
         }
         return Math.max(min, Math.min(max, value));
       }
@@ -485,9 +485,24 @@
       }
 
       // A key is a control when the device opened it to writes and it holds a
-      // number. Its range is what the store says; without one the slider spans
-      // 0..1 and the number box, which is what actually writes, takes any value.
+      // number. A value is held to the bounds the store states and to what its
+      // type holds, to nothing else: the slider spans the stated range, 0..1
+      // where none is stated, and the number box writes any value in bounds.
       const numericTypes = ["f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8"];
+
+      // What each type holds. A 64-bit integer is held to the integers a
+      // JavaScript number represents exactly.
+      const typeBounds = {
+        f32: [-3.4028234663852886e38, 3.4028234663852886e38],
+        i64: [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+        i32: [-2147483648, 2147483647],
+        i16: [-32768, 32767],
+        i8: [-128, 127],
+        u64: [0, Number.MAX_SAFE_INTEGER],
+        u32: [0, 4294967295],
+        u16: [0, 65535],
+        u8: [0, 255],
+      };
 
       function isControl(key) {
         const meta = (key && key.__meta) || {};
@@ -519,6 +534,9 @@
           const meta = s.__meta || {};
           const min = typeof meta.min === "number" ? meta.min : 0;
           const max = typeof meta.max === "number" ? meta.max : min + 1;
+          const [typeLower, typeUpper] = typeBounds[meta.ty] || [-Infinity, Infinity];
+          const lower = Math.max(typeLower, typeof meta.min === "number" ? meta.min : -Infinity);
+          const upper = Math.min(typeUpper, typeof meta.max === "number" ? meta.max : Infinity);
           const fallback = extractNumeric(meta.default, min);
           const control = {
             path,
@@ -527,6 +545,8 @@
             track: track || path,
             min,
             max,
+            lower,
+            upper,
             defaultValue: fallback,
             currentValue: fallback,
             key: s,

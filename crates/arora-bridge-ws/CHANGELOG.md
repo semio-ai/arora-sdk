@@ -4,6 +4,18 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.4] - 2026-10-12
+
+### Fixed
+
+- The control panel's number box writes any value within the bounds a key's
+  meta states and its type holds: a key without a range (a joint target in
+  radians, a counter) takes values beyond 0..1, which only its slider spans.
+  An integer key's values stay within its type (`u8` within 0..255, a 64-bit
+  integer within the integers a JavaScript number holds exactly).
+- The control panel reads `i16`, `i8`, `u16` and `u8` values as numbers, for
+  its controls and a method's arguments alike.
+
 ## [7.2.3] - 2026-10-12
 
 ### Changed
