@@ -4,6 +4,36 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.3.0] - 2026-10-12
+
+### Added
+
+- `Ros2Hal` describes its keys (`Hal::describe_keys`, arora-hal 4.3), from
+  its configuration and joint mapping:
+  - a joint command topic (`JointState`, `Float64MultiArray`,
+    `JointAnglesWithSpeed`): each root joint's `<joint>/target.position` and
+    `<joint>.target_position`, `F64` inputs;
+  - a `JointTrajectory` topic: `common.target_trajectory`, a key-value input;
+  - a `std_msgs/String` topic published from a mapped key (NAO's and
+    Pepper's `text`): that key, a `String` input; received: that key (or
+    `data`), a `String` output;
+  - a received `JointState`: each mapped joint's `<joint>.position`,
+    `<joint>.velocity` and `<joint>.effort`; a received
+    `Float64MultiArray`: `<joint>.position`; `F64` outputs.
+
+  The `arora-ros2` runner opened no key before; over arora 12.7 it opens
+  these inputs, and every bridge lists the keys.
+
+### Changed
+
+- Where a host opened a prefix covering the keys `Ros2Hal` describes, they
+  take the HAL's meta: the outputs are closed to remote writers, and a joint
+  target takes only an `F64` (a `JointState` command also converted an
+  `F32`, `I64` or `I32`), the trajectory only a key-value, the text only a
+  string.
+- Requires `arora-hal` 4.3 and `arora-types` 3.1; the `runner` feature
+  requires `arora` 12.7, which states the description to the device's store.
+
 ## [5.2.0] - 2026-10-12
 
 ### Changed
