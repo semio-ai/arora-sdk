@@ -43,7 +43,6 @@ arora-sdk/
 │   ├── test-behavior-tree-nodes  test-only module exercising BT dispatch
 │   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
 │   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
-│   ├── blackboard             Equals / Assign leaves over the store's strings (wasm or host)
 │   ├── say-silent             the Say contract without a speaker (host)
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
 │   ├── transcribe             speech-to-text module
