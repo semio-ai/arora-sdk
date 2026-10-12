@@ -1,5 +1,5 @@
-//! The HALs' target keys, read by [`set_targets`] and folded by
-//! [`fold_newest_wins`].
+//! The HALs' target keys, named by [`target_keys`], read by [`set_targets`]
+//! and folded by [`fold_newest_wins`].
 
 use std::collections::{HashMap, HashSet};
 
@@ -154,6 +154,31 @@ pub fn set_targets(change: &StateChange) -> Vec<SetTarget<'_>> {
     targets.into_values().map(|(_, set)| set).collect()
 }
 
+/// The two keys of the target for the component `component` of the entity at
+/// path `entity`: `k/target.c` (`hip_yaw/target.position`), then `k.target_c`
+/// (`hip_yaw.target_position`). [`set_targets`] reads both as the target of
+/// the measured key `k.c`, so a HAL that describes its inputs
+/// ([`Hal::describe_keys`](crate::Hal::describe_keys)) describes both.
+///
+/// That holds for the entities and components a target can name: an entity
+/// path with no `.` and a non-empty last segment, and a non-empty component. For any
+/// other, neither key is a target.
+pub fn target_keys(entity: &str, component: &str) -> [Key; 2] {
+    [
+        Key::new(format!("{entity}/{TARGET_ENTITY}.{component}")),
+        Key::new(format!("{entity}.{TARGET_PREFIX}{component}")),
+    ]
+}
+
+/// Whether a target can name the entity at path `entity`: both its
+/// [`target_keys`] read back as targets of `entity`'s measured key.
+pub(crate) fn is_target_entity(entity: &str) -> bool {
+    let measured = Key::new(format!("{entity}.position"));
+    target_keys(entity, "position")
+        .iter()
+        .all(|key| Target::parse(key).is_some_and(|target| target.measured == measured))
+}
+
 /// Fold `later` into `earlier`, per key newest wins, so that the targets
 /// ([`set_targets`]) of the folded change are those of applying both in order:
 /// a target `later` sets or unsets, in either form, drops `earlier`'s set of
@@ -222,6 +247,40 @@ mod tests {
         assert_eq!(
             measured("hip_yaw.target_position.x").as_deref(),
             Some("hip_yaw.position.x")
+        );
+    }
+
+    #[test]
+    fn an_entity_with_a_dot_or_no_name_has_no_target() {
+        assert!(is_target_entity("hip_yaw"));
+        assert!(is_target_entity("robot/hip_yaw"));
+        for entity in ["", "a.b", "robot.x/hip", "robot/"] {
+            assert!(!is_target_entity(entity), "{entity:?}");
+        }
+    }
+
+    #[test]
+    fn target_keys_are_read_back_as_targets_of_the_measured_key() {
+        for (entity, component) in [
+            ("hip_yaw", "position"),
+            ("robot/hip_yaw", "velocity"),
+            ("target", "position"),
+        ] {
+            let measured_key = format!("{entity}.{component}");
+            for key in target_keys(entity, component) {
+                assert_eq!(
+                    measured(key.get_path()).as_deref(),
+                    Some(measured_key.as_str()),
+                    "{key:?}"
+                );
+            }
+        }
+        assert_eq!(
+            target_keys("hip_yaw", "position"),
+            [
+                Key::from("hip_yaw/target.position"),
+                Key::from("hip_yaw.target_position")
+            ]
         );
     }
 

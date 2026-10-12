@@ -201,6 +201,44 @@ fn sweep_now(
     }
 }
 
+/// Phase 0b — state to the store what the HAL says of its keys
+/// ([`Hal::describe_keys`]): each description the feed holds right now, in
+/// order, so a later one replaces what an earlier one said of a key. It runs
+/// before anything writes in the step, so a remote write that arrived with a
+/// description is checked against it.
+///
+/// A key whose own meta someone else stated — the host, before or after the
+/// build — keeps it: the HAL's description fills the keys that have none, and
+/// replaces only the meta `stated` records it stated itself. A store that
+/// keeps no meta cannot hold them, and the device then opens none of the
+/// HAL's inputs; that is logged.
+pub(crate) fn describe_hal_keys(
+    store: &dyn DataStore,
+    descriptions: &mut (impl Stream<Item = HashMap<Key, KeyMeta>> + Unpin),
+    stated: &mut HashMap<Key, KeyMeta>,
+) {
+    while let Some(Some(description)) = descriptions.next().now_or_never() {
+        if description.is_empty() {
+            continue;
+        }
+        let own = store.all_meta();
+        let description: HashMap<Key, KeyMeta> = description
+            .into_iter()
+            .filter(|(key, _)| {
+                own.get(key)
+                    .is_none_or(|meta| stated.get(key) == Some(meta))
+            })
+            .collect();
+        if description.is_empty() {
+            continue;
+        }
+        match store.set_meta(description.clone()) {
+            Ok(()) => stated.extend(description),
+            Err(e) => log::warn!("the store does not hold the HAL's key descriptions: {e}"),
+        }
+    }
+}
+
 /// Phase 1a — advance the built-in clock by `dt` and return this frame's clock
 /// values. The monotonic accumulator is exact integer nanoseconds (no float
 /// drift over a long run). `dt` is the elapsed time since the previous step,
@@ -671,7 +709,10 @@ impl Arora {
     /// here), then the behavior. Per-key precedence is therefore total:
     /// **behavior ▸ bridge ▸ HAL ▸ previous frame**, and within each, arrival
     /// order — the newest write wins. What changed is coalesced into a single
-    /// outbound change and fanned out to the HAL and every bridge.
+    /// outbound change and fanned out to the HAL and every bridge. Before any
+    /// of them, what the HAL has said of its keys since the previous step
+    /// ([`Hal::describe_keys`]) is stated to the store's key meta, which the
+    /// bridges' writes are checked against.
     ///
     /// `dt` is the elapsed time since the previous step, measured by the
     /// caller's driver ([`run`](Arora::run) natively, `requestAnimationFrame` on
@@ -683,6 +724,9 @@ impl Arora {
     pub fn step(&mut self, dt: Duration) -> Result<(), RuntimeError> {
         // 0. sweep — pick up everything the seams hold right now.
         sweep_now(&mut self.hal_feed, &mut self.inbound, &mut self.pending);
+        //    The HAL's key descriptions too, stated at once: the frame's writes
+        //    are checked against them.
+        describe_hal_keys(&*self.store, &mut self.hal_keys, &mut self.hal_stated);
         // 1. time — built-in keys first: the whole frame sees this clock.
         let clock = tick_clock(&mut self.clock, dt);
         publish_clock(&*self.store, &clock)?;
@@ -1380,6 +1424,34 @@ mod tests {
         for _ in 0..5 {
             arora.step(FRAME).expect("step");
         }
+    }
+
+    /// A description replaces what the runtime stated from an earlier one, and
+    /// never a key's own meta someone else stated in between.
+    #[test]
+    fn a_later_description_replaces_the_hal_s_meta_and_not_the_host_s() {
+        let store = SimpleDataStore::new();
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        let mut descriptions = rx.fuse();
+        let mut stated = HashMap::new();
+        let open = KeyMeta::new().editable();
+        let described = |unit: &str| {
+            HashMap::from([
+                (Key::from("a"), open.clone().in_unit(unit)),
+                (Key::from("b"), open.clone().in_unit(unit)),
+            ])
+        };
+        tx.unbounded_send(described("rad")).unwrap();
+        describe_hal_keys(&store, &mut descriptions, &mut stated);
+        store
+            .set_meta(HashMap::from([(Key::from("b"), KeyMeta::new())]))
+            .unwrap();
+        tx.unbounded_send(described("deg")).unwrap();
+        describe_hal_keys(&store, &mut descriptions, &mut stated);
+        assert_eq!(
+            store.meta(&[Key::from("a"), Key::from("b")]),
+            vec![Some(open.in_unit("deg")), Some(KeyMeta::new())]
+        );
     }
 
     #[tokio::test]

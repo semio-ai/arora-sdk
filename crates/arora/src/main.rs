@@ -26,7 +26,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = arora::DeviceCli::parse();
     let store = SimpleDataStore::new();
     // `--open`: every key is an input. The empty prefix covers them all, and a
-    // key's own meta can still close it again.
+    // key's own meta — the HAL's description of its keys among it — is more
+    // specific.
     if cli.open {
         store
             .set_prefix_meta(HashMap::from([(

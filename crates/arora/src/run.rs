@@ -86,9 +86,11 @@ pub struct DeviceCli {
     /// Groot behavior-tree file to install as the device's behavior.
     pub groot: Option<std::path::PathBuf>,
 
-    /// Let any bridge write any key. A key is closed to remote writers unless
-    /// the device opens it, so a plain device accepts no writes; this opens them
-    /// all, for a sandbox or a bench — never a device on a network others share.
+    /// Let any bridge write any key that has no meta of its own. A key is
+    /// closed to remote writers unless the device opens it; this opens every
+    /// key at once, for a sandbox or a bench — never a device on a network
+    /// others share. A key with meta of its own keeps it: a HAL's outputs it
+    /// describes stay closed, and its inputs take only their declared type.
     #[arg(long)]
     pub open: bool,
 
