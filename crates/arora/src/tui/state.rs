@@ -104,6 +104,11 @@ pub(crate) struct State {
     pub hint: Option<String>,
     /// Set when the operator asked to quit (Ctrl-C, or `q` outside a prompt).
     pub quit_requested: bool,
+    /// Whether the UI captures the mouse: `true`, the wheel scrolls the log
+    /// pane; `false`, the terminal handles the mouse itself, so the operator
+    /// can select and copy text. `m` outside a prompt toggles it; the render
+    /// thread applies it to the terminal.
+    pub mouse_capture: bool,
     /// The embedding application's key commands, advertised in the footer and
     /// fired from the no-prompt key handling.
     pub commands: Vec<TuiCommand>,
@@ -125,6 +130,7 @@ impl State {
             input: String::new(),
             hint: None,
             quit_requested: false,
+            mouse_capture: true,
             commands: Vec::new(),
             command_tx: None,
         }
@@ -253,10 +259,12 @@ impl State {
     fn handle_prompt_key(&mut self, key: KeyEvent) {
         match self.prompts.front_mut() {
             None => {
-                // `q` first: it stays the quit shortcut even if an application
-                // registers it as a command key.
+                // `q` and `m` first: they stay the quit and mouse shortcuts
+                // even if an application registers them as command keys.
                 if key.code == KeyCode::Char('q') {
                     self.quit_requested = true;
+                } else if key.code == KeyCode::Char('m') {
+                    self.mouse_capture = !self.mouse_capture;
                 } else if let KeyCode::Char(c) = key.code {
                     let command = self.commands.iter().find(|command| command.key == c);
                     match command.map(|command| command.prompt.clone()) {
@@ -368,7 +376,17 @@ impl State {
                 for command in &self.commands {
                     line.push_str(&format!("{}: {} · ", command.key, command.label));
                 }
-                line.push_str("wheel/PgUp/PgDn: scroll logs · End: follow · q / Ctrl-C: quit");
+                if self.mouse_capture {
+                    line.push_str(
+                        "wheel/PgUp/PgDn: scroll logs · End: follow · \
+                         mouse: scroll (m: select text) · q / Ctrl-C: quit",
+                    );
+                } else {
+                    line.push_str(
+                        "PgUp/PgDn: scroll logs · End: follow · \
+                         mouse: select text (m: scroll) · q / Ctrl-C: quit",
+                    );
+                }
                 line
             }
             Some(Prompt::Text { required, .. }) => {
@@ -641,6 +659,47 @@ mod tests {
         state.handle_key(key(KeyCode::Char('q')));
         assert!(state.quit_requested);
         assert!(rx.try_recv().is_err(), "no command fired");
+    }
+
+    #[test]
+    fn m_toggles_mouse_capture_outside_prompts() {
+        let mut state = State::new();
+        assert!(state.mouse_capture, "the wheel scrolls the logs at start");
+        state.handle_key(key(KeyCode::Char('m')));
+        assert!(!state.mouse_capture, "m hands the mouse to the terminal");
+        state.handle_key(key(KeyCode::Char('m')));
+        assert!(state.mouse_capture, "m takes it back");
+    }
+
+    #[test]
+    fn m_types_into_an_active_prompt() {
+        let mut state = State::new();
+        let (prompt, _rx) = text_prompt("Device name".into(), true);
+        state.prompts.push_back(prompt);
+        state.handle_key(key(KeyCode::Char('m')));
+        assert!(state.mouse_capture, "capture unchanged");
+        assert_eq!(state.input, "m");
+    }
+
+    #[test]
+    fn m_stays_the_mouse_toggle_even_when_registered_as_a_command() {
+        let (mut state, mut rx) = command_state(vec![('m', "move", None)]);
+        state.handle_key(key(KeyCode::Char('m')));
+        assert!(!state.mouse_capture);
+        assert!(rx.try_recv().is_err(), "no command fired");
+    }
+
+    #[test]
+    fn the_footer_says_what_the_mouse_does() {
+        let mut state = State::new();
+        let footer = state.shortcuts(Instant::now());
+        assert!(footer.contains("wheel/PgUp/PgDn: scroll logs"));
+        assert!(footer.contains("mouse: scroll (m: select text)"));
+        state.handle_key(key(KeyCode::Char('m')));
+        let footer = state.shortcuts(Instant::now());
+        assert!(footer.starts_with("PgUp/PgDn: scroll logs"), "{footer}");
+        assert!(footer.contains("mouse: select text (m: scroll)"));
+        assert!(footer.ends_with("q / Ctrl-C: quit"));
     }
 
     #[test]

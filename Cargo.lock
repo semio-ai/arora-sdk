@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "12.7.0"
+version = "12.8.0"
 dependencies = [
  "anyhow",
  "arora-behavior",

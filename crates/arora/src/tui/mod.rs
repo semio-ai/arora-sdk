@@ -50,8 +50,9 @@ type SharedState = Arc<Mutex<State>>;
 /// (via [`commands_frontend`]): the footer advertises it, and pressing its key
 /// outside a prompt fires it.
 pub struct TuiCommand {
-    /// The key that triggers the command. `q` is the quit shortcut and cannot
-    /// trigger a command.
+    /// The key that triggers the command. `q` (quit) and `m` (toggle the mouse
+    /// between scrolling the logs and selecting text) are the UI's own
+    /// shortcuts and cannot trigger a command.
     pub key: char,
     /// What the footer shows next to the key, e.g. `load GLB`.
     pub label: String,
@@ -245,6 +246,9 @@ fn run_ui(
         .checked_sub(Duration::from_secs(1))
         .unwrap_or_else(Instant::now);
     let mut quit = false;
+    // What the terminal was last told about mouse capture: on, from
+    // `setup_terminal`.
+    let mut mouse_captured = true;
 
     while running.load(Ordering::SeqCst) {
         // Terminal events (the poll timeout also paces the redraw).
@@ -279,6 +283,18 @@ fn run_ui(
             if state.quit_requested {
                 quit = true;
                 break;
+            }
+            // The operator toggled the mouse (`m`): apply it here, where the
+            // terminal is owned. Without capture, the terminal selects text.
+            if state.mouse_capture != mouse_captured {
+                let applied = if state.mouse_capture {
+                    execute!(terminal.backend_mut(), EnableMouseCapture)
+                } else {
+                    execute!(terminal.backend_mut(), DisableMouseCapture)
+                };
+                if applied.is_ok() {
+                    mouse_captured = state.mouse_capture;
+                }
             }
             let size = terminal.size().unwrap_or_default();
             state.viewport_height =
@@ -359,8 +375,10 @@ fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
-/// Leave the alternate screen and drop raw mode. Idempotent: only the first call
-/// restores, so the render thread and the handle's `Drop` can both call it.
+/// Leave the alternate screen, release the mouse, and drop raw mode.
+/// Idempotent: only the first call restores, so the render thread and the
+/// handle's `Drop` can both call it. Releasing a mouse the operator already
+/// released (`m`) is harmless: it re-sends the same reset sequences.
 fn restore_terminal(restored: &AtomicBool) {
     if restored.swap(true, Ordering::SeqCst) {
         return;

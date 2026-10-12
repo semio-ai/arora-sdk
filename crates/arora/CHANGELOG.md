@@ -4,6 +4,26 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.8.0] - 2026-10-12
+
+### Added
+
+- **The terminal UI lets the operator select text.** `m`, outside a prompt,
+  toggles the mouse between scrolling the log pane (the default) and the
+  terminal's own selection, so log lines can be selected and copied; `m`
+  again gives the wheel back to the log pane. The footer says what the mouse
+  does now and what `m` switches it to. Like `q`, `m` is the UI's own key: a
+  `TuiCommand` registered on it never fires.
+- **The device says what it runs.** Each call the interpreter module serves
+  logs one line at info level, once it succeeded: a behavior loaded (`behavior
+  loaded: 12 node(s), running from the next step`, or `behavior loaded from a
+  Groot tree: …` for `Arora::load_groot` and `AroraBuilder::with_groot`), a
+  behavior edited (the nodes and links it adds and removes), a task started
+  (its id, the function it runs, its run policy), a task halted. A task run
+  the device started is logged once more when it ends — `succeeded`,
+  `failed`, or `halted`. The behavior finishing, and recovering after a
+  failed tick, are logged once each; its failures already were.
+
 ## [12.7.0] - 2026-10-12
 
 ### Added

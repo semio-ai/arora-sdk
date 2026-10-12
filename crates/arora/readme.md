@@ -21,7 +21,11 @@ embeds the library instead. It reads its configuration from the environment,
 serves the open local bridge on `ws://127.0.0.1:9000` in the default build,
 and connects to Semio Studio in a build with the `studio-bridge` feature. The
 front end is the terminal operator UI when the process is attached to a
-terminal (feature `tui`), headless otherwise.
+terminal (feature `tui`), headless otherwise. In the terminal UI the wheel and
+PgUp/PgDn scroll the log pane, `m` hands the mouse to the terminal to select
+and copy text (and `m` again takes it back), and `q` or Ctrl-C quits. The log
+says when a behavior is loaded or edited and when a task starts, is halted and
+ends.
 
 ```sh
 cargo build                      # builds arora into target/debug/arora
