@@ -1502,3 +1502,371 @@ async fn the_bound_look_at_skill_serves_the_standard_contract() {
         }
     }
 }
+
+/// What [`silent_feedback_reader`] reads its DDS domain from; set only by
+/// [`a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result`],
+/// which runs it as a separate process.
+const SILENT_READER_DOMAIN: &str = "ARORA_SILENT_FEEDBACK_READER_DOMAIN";
+/// The line [`silent_feedback_reader`] prints once it holds a feedback sample.
+const SILENT_READER_READY: &str = "silent-feedback-reader: matched";
+
+/// The feedback reader of
+/// [`a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result`],
+/// run as that test's child process: a plain DDS participant reading the
+/// `look_at` action's feedback reliably. It announces itself once it holds a
+/// sample — proof that the bridge's feedback writer has matched it — and then
+/// idles until the parent stops it, which leaves its reader matched but
+/// silent. Without its environment variable it returns at once.
+#[test]
+#[ignore = "the child process of a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result"]
+fn silent_feedback_reader() {
+    use ros2_client::rustdds::{policy, DomainParticipant, QosPolicyBuilder, TopicKind};
+    use serde::Deserialize;
+
+    let Ok(domain_id) = std::env::var(SILENT_READER_DOMAIN) else {
+        return;
+    };
+    let domain_id: u16 = domain_id.parse().expect("a DDS domain id");
+    let qos = QosPolicyBuilder::new()
+        .reliability(policy::Reliability::Reliable {
+            max_blocking_time: ros2_client::rustdds::Duration::from_millis(100),
+        })
+        .history(policy::History::KeepLast { depth: 4 })
+        .durability(policy::Durability::Volatile)
+        .build();
+    let participant = DomainParticipant::new(domain_id).expect("participant creates");
+    let topic = participant
+        .create_topic(
+            "rt/robot/actions/look_at/_action/feedback".to_string(),
+            "arora::action::dds_::look_at_FeedbackMessage_".to_string(),
+            &qos,
+            TopicKind::NoKey,
+        )
+        .expect("topic creates");
+    let subscriber = participant
+        .create_subscriber(&qos)
+        .expect("subscriber creates");
+
+    #[derive(Deserialize)]
+    struct FeedbackMessage {
+        _goal_id: [u8; 16],
+        _gaze_error: f32,
+    }
+    let mut reader = subscriber
+        .create_datareader_no_key_cdr::<FeedbackMessage>(&topic, Some(qos))
+        .expect("reader creates");
+    while !matches!(reader.take_next_sample(), Ok(Some(_))) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    println!("{SILENT_READER_READY}");
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// A reader of an action's feedback that stops acknowledging does not hold
+/// back the goal's result. A second process ([`silent_feedback_reader`])
+/// matches the bridge's `look_at` feedback writer reliably and is then
+/// stopped (SIGSTOP), so it stays matched for its participant lease but never
+/// acknowledges again: the writer's send window fills and stays full. The
+/// run keeps writing feedback every 10 ms for a second, then succeeds. A
+/// write that waited on the window — the 100 ms a reliable write may block —
+/// would put the result some ten seconds behind the run; feedback that does
+/// not wait puts it within moments. The bridge runs on worker threads apart
+/// from the scripted device, so a write that blocks its thread cannot slow
+/// the device's ticks and hide the delay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config), and the reader is stopped with \
+              SIGSTOP; this runs on Linux CI."
+)]
+async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result() {
+    use std::io::BufRead;
+    use std::process::{Child, Command, Stdio};
+
+    use arora_behavior::interpreter_module;
+    use arora_behavior::{TaskHandle, TaskId};
+    use arora_behavior_tree_types::{
+        STATUS_ENUMERATION_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
+    };
+    use arora_bridge::MethodSignature;
+    use arora_types::data::{Key, StateChange};
+    use arora_types::record::module::frozen::{Function, Parameter};
+    use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
+    use arora_types::record::{FrozenReference, Version};
+    use arora_types::value::Enumeration;
+    use arora_types::{gen_uuid_from_str, value_serde, Uuid};
+    use ros2_client::action_msgs::GoalStatusEnum;
+    use ros2_client::{Message, ServiceMapping};
+    use serde::{Deserialize, Serialize};
+    use tokio::sync::oneshot;
+    use tokio::time::Instant;
+
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtGoal {
+        x: f64,
+    }
+    impl Message for LookAtGoal {}
+    #[derive(Serialize, Deserialize, Clone)]
+    struct LookAtResult {
+        code: i32,
+    }
+    impl Message for LookAtResult {}
+    #[derive(Serialize, Deserialize)]
+    struct LookAtFeedback {
+        gaze_error: f32,
+    }
+    impl Message for LookAtFeedback {}
+
+    /// Kills the reader process however the test ends; a stopped process
+    /// still takes SIGKILL.
+    struct Reader(Child);
+    impl Drop for Reader {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn status_value(variant: Uuid) -> Value {
+        Value::Enumeration(Enumeration {
+            id: STATUS_ENUMERATION_ID,
+            variant_id: variant,
+            value: Box::new(Value::Unit),
+        })
+    }
+
+    /// `look_at(x) -> Status`: the smallest task-run signature.
+    fn look_at_signature() -> MethodSignature {
+        let x = gen_uuid_from_str("x");
+        let mut parameters = std::collections::HashMap::new();
+        parameters.insert(
+            x,
+            Parameter {
+                name: "x".to_string(),
+                ty: FrozenTy::from(PrimitiveKind::F64),
+                mutable: false,
+            },
+        );
+        MethodSignature {
+            module_id: gen_uuid_from_str("gaze-module"),
+            id: gen_uuid_from_str("look_at"),
+            name: "look_at".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering: vec![x],
+                return_ty: FrozenTy::FrozenScalar(FrozenScalar {
+                    reference: FrozenReference {
+                        id: STATUS_ENUMERATION_ID,
+                        version: Version::parse("1.0.0").unwrap(),
+                    },
+                }),
+            },
+        }
+    }
+
+    const RESULT_CODE: i32 = 7;
+    /// Feedback ticks after the reader is stopped, 10 ms apart.
+    const SILENT_TICKS: u32 = 100;
+
+    let _ = env_logger::builder()
+        .parse_filters("warn")
+        .is_test(true)
+        .try_init();
+    let domain_id = random_domain_id();
+    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
+    let mut inbound = bridge.take_inbound();
+
+    // The reader process: this test binary, running `silent_feedback_reader`.
+    let mut reader = Reader(
+        Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "silent_feedback_reader",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(SILENT_READER_DOMAIN, domain_id.to_string())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("the reader process starts"),
+    );
+    let reader_pid = reader.0.id();
+    let (ready_tx, ready_rx) = oneshot::channel::<()>();
+    let reader_stdout = reader.0.stdout.take().expect("piped stdout");
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(reader_stdout).lines() {
+            if line.is_ok_and(|line| line.contains(SILENT_READER_READY)) {
+                let _ = ready_tx.send(());
+                return;
+            }
+        }
+    });
+
+    // The scripted runtime: it answers discovery and SPAWN, then writes the
+    // run's feedback every 10 ms — until the reader is stopped, and for
+    // SILENT_TICKS ticks after — and finally its result and `Success`,
+    // reporting when it did.
+    let (stopped_tx, mut stopped_rx) = oneshot::channel::<()>();
+    let (finished_tx, finished_rx) = oneshot::channel::<Instant>();
+    let runtime = async move {
+        let prefix = "arora/tasks/gaze/look_at/run1";
+        let handle = TaskHandle {
+            id: TaskId(Uuid::from_u128(0x52)),
+            stop: interpreter_module::encode_halt(TaskId(Uuid::from_u128(0x52))),
+            status: Key::from(format!("{prefix}/status")),
+            feedback: vec![Key::from(format!("{prefix}/feedback"))],
+            result: vec![Key::from(format!("{prefix}/result"))],
+            update: vec![Key::from(format!("{prefix}/update"))],
+        };
+        let mut running = false;
+        let mut tick = 0u32;
+        let mut silent_ticks: Option<u32> = None;
+        let mut finished_tx = Some(finished_tx);
+        loop {
+            let event = tokio::select! {
+                event = inbound.next() => event,
+                _ = tokio::time::sleep(Duration::from_millis(10)), if running => {
+                    if silent_ticks.is_none() && stopped_rx.try_recv().is_ok() {
+                        silent_ticks = Some(0);
+                    }
+                    if silent_ticks == Some(SILENT_TICKS) {
+                        let mut change = StateChange::set(
+                            handle.status.clone(),
+                            status_value(STATUS_SUCCESS_VARIANT_ID),
+                        );
+                        change
+                            .set
+                            .insert(handle.result[0].clone(), Some(Value::I32(RESULT_CODE)));
+                        bridge.try_send(&change);
+                        running = false;
+                        if let Some(tx) = finished_tx.take() {
+                            let _ = tx.send(Instant::now());
+                        }
+                        continue;
+                    }
+                    tick += 1;
+                    silent_ticks = silent_ticks.map(|n| n + 1);
+                    let mut change = StateChange::set(
+                        handle.status.clone(),
+                        status_value(STATUS_RUNNING_VARIANT_ID),
+                    );
+                    change
+                        .set
+                        .insert(handle.feedback[0].clone(), Some(Value::F32(tick as f32)));
+                    bridge.try_send(&change);
+                    continue;
+                }
+            };
+            let Some(event) = event else { break };
+            let Inbound::Command(cmd) = event else {
+                continue;
+            };
+            match &cmd.op {
+                BridgeOp::DescribeMethods { .. } => {
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&vec![look_at_signature()])
+                            .expect("signatures encode"),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
+                    running = true;
+                    cmd.reply(Ok(CallResult {
+                        ret: interpreter_module::encode_spawn_result(&handle),
+                        mutated: Vec::new(),
+                    }));
+                }
+                BridgeOp::ListKeys { .. } => {
+                    let inputs: Vec<(String, KeyMeta)> = Vec::new();
+                    cmd.reply(Ok(CallResult {
+                        ret: value_serde::to_value(&inputs).expect("keys encode"),
+                        mutated: Vec::new(),
+                    }));
+                }
+                other => panic!("unexpected runtime command: {other:?}"),
+            }
+        }
+    };
+    tokio::pin!(runtime);
+
+    let client_flow = async {
+        let (_ctx, mut node) = create_test_node(domain_id, "silent_reader_client");
+        let service_qos = {
+            use ros2_client::ros2::{policy, QosPolicyBuilder};
+            QosPolicyBuilder::new()
+                .reliability(policy::Reliability::Reliable {
+                    max_blocking_time: ros2_client::ros2::Duration::from_millis(100),
+                })
+                .history(policy::History::KeepLast { depth: 4 })
+                .durability(policy::Durability::Volatile)
+                .build()
+        };
+        let qos = ros2_client::action::ActionClientQosPolicies {
+            goal_service: service_qos.clone(),
+            result_service: service_qos.clone(),
+            cancel_service: service_qos.clone(),
+            feedback_subscription: service_qos.clone(),
+            status_subscription: service_qos.clone(),
+        };
+        let client = node
+            .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
+                ServiceMapping::Enhanced,
+                &Name::parse("/robot/actions/look_at").expect("valid action name"),
+                &ros2_client::ActionTypeName::new("arora", "look_at"),
+                qos,
+            )
+            .expect("action client creates");
+
+        let goal_id = loop {
+            match tokio::time::timeout(
+                Duration::from_secs(2),
+                client.async_send_goal(LookAtGoal { x: 1.5 }),
+            )
+            .await
+            {
+                Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
+                other => {
+                    eprintln!("[client] send_goal attempt: {other:?}");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        };
+        eprintln!("[client] goal accepted");
+
+        ready_rx.await.expect("the reader process reads feedback");
+        let stopped = Command::new("kill")
+            .args(["-STOP", &reader_pid.to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(stopped.success(), "the reader process stops");
+        eprintln!("[client] reader stopped");
+        let _ = stopped_tx.send(());
+
+        let (status, result) = client
+            .async_request_result(goal_id)
+            .await
+            .expect("the result arrives");
+        let answered = Instant::now();
+        let finished = finished_rx.await.expect("the run finished");
+        assert_eq!(status, GoalStatusEnum::Succeeded);
+        assert_eq!(result.code, RESULT_CODE);
+        let behind = answered.saturating_duration_since(finished);
+        eprintln!("[client] result {behind:?} after the run finished");
+        assert!(
+            behind < Duration::from_secs(3),
+            "the result arrived {behind:?} after the run finished"
+        );
+    };
+
+    tokio::select! {
+        _ = &mut runtime => panic!("the scripted runtime ended early"),
+        result = tokio::time::timeout(Duration::from_secs(60), client_flow) => {
+            result.expect("the silent-reader lifecycle timed out");
+        }
+    }
+    drop(reader);
+}

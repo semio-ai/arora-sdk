@@ -4,6 +4,21 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.4.1] - 2026-10-13
+
+### Fixed
+
+- A reader of an action's feedback that stops acknowledging no longer
+  holds back the goal's status and result. On DDS such a reader keeps the
+  feedback writer's send window full. Each feedback publish blocked until
+  its write timed out, and the state changes behind it queued without
+  bound, so the result came seconds behind the run. Feedback is now a
+  latest-value stream. It is published without waiting on any reader: the
+  DDS feedback writer has no blocking time, and a full window keeps only
+  the newest feedback per goal and feedback key. That feedback is retried
+  with a backoff of 100 ms doubling to 1 s, and dropped once its goal
+  finishes.
+
 ## [10.4.0] - 2026-10-12
 
 ### Added
