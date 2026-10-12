@@ -1,0 +1,13 @@
+# The play_visemes skill, on the action /skill/play_visemes: play an alignment
+# of mouth shapes out over time. It ends when the timeline does, or when
+# cancelled or replaced.
+
+std_skills/Meta meta
+VisemeTimeline timeline
+
+---
+std_skills/Result result
+
+---
+# The shape being played.
+Viseme viseme
