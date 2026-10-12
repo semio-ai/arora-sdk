@@ -358,7 +358,7 @@ impl TypedOutputs {
         node: &mut Node,
         namespace: &str,
         registry: &Arc<Ros2Registry>,
-        subscribed: &HashSet<String>,
+        subscribed: &HashMap<String, String>,
     ) {
         for index in 0..self.bindings.len() {
             if !self.dirty[index] || self.refused[index] {
@@ -371,7 +371,7 @@ impl TypedOutputs {
                     .topic
                     .clone()
                     .unwrap_or_else(|| topic_name(namespace, &binding.path));
-                if subscribed.contains(&topic) {
+                if subscribed.contains_key(&topic) {
                     warn!(
                         "Ros2Bridge does not publish '{}': its topic '{topic}' is one this bridge \
                          subscribes to, and echoing it back would feed the device its own commands",
@@ -636,8 +636,9 @@ async fn run_node(
     // for as long as the graph is up — reviving stale values whenever a real
     // writer and the echo cross. (DDS delivers a participant's own writes to
     // its own readers, and the Zenoh backend declares its subscribers with no
-    // origin filter, so neither middleware saves us from it.)
-    let mut subscribed: HashSet<String> = HashSet::new();
+    // origin filter, so neither middleware saves us from it.) Each topic maps to
+    // the key (or, for a profile endpoint, the binding) it takes input for.
+    let mut subscribed: HashMap<String, String> = HashMap::new();
     // Typed input keys subscribe as a registered ROS message, decoded against
     // its runtime type into a single-key change — how a device key receives a
     // real ROS4HRI message.
@@ -646,7 +647,7 @@ async fn run_node(
             .topic
             .clone()
             .unwrap_or_else(|| topic_name(&namespace, &input.path));
-        subscribed.insert(topic.clone());
+        subscribed.insert(topic.clone(), input.path.clone());
         match setup_typed_key_subscriber(
             &mut node,
             &topic,
@@ -667,9 +668,11 @@ async fn run_node(
     // `/{namespace}/keys/{path}` as the `std_msgs` type of its shape. Asked of
     // the device rather than configured here, so an input is stated once — in
     // the store — and every bridge exposes the same set. A typed profile topic
-    // may feed the same key; both are inputs of it.
-    for (path, value_type) in device_inputs(&cmd_tx).await {
-        subscribed.insert(topic_name(&namespace, &path));
+    // may feed the same key; both are inputs of it. The subscription delivers
+    // to the key itself: a topic maps back to its key through this table, never
+    // by reversing the escape.
+    for (path, value_type, topic) in input_topics(&namespace, device_inputs(&cmd_tx).await) {
+        subscribed.insert(topic, path.clone());
         let qos = Qos::default_for(profile::Flow::In);
         match setup_key_subscriber(&mut node, &namespace, &path, &value_type, qos) {
             Ok(stream) => sub_streams.push(stream),
@@ -721,9 +724,13 @@ async fn run_node(
     // The typed outbound plane: each declared message under composition from
     // its keys, with its own lazily-created raw publisher.
     let mut typed_outputs = TypedOutputs::new(outputs);
-    // Keys whose outbound topic turned out to be one we subscribe to, remembered
-    // so the decision is made (and logged) once per key.
-    let mut echoed: HashSet<String> = HashSet::new();
+    // The key each outbound scalar-plane topic is published for. Two keys whose
+    // paths escape to one topic cannot share it; this says which one has it.
+    let mut topic_owners: HashMap<String, String> = HashMap::new();
+    // Keys this bridge does not publish — their topic is one it subscribes to,
+    // another key keeps their topic, or their publisher could not be created —
+    // remembered so the decision is made, and reported, once per key.
+    let mut refused: HashSet<String> = HashSet::new();
     // Keys already reported for publishing image-sized JSON, so a face that
     // renders every frame onto the scalar plane says it once, not 15 times a
     // second.
@@ -755,7 +762,8 @@ async fn run_node(
                     &includes,
                     &registry,
                     &subscribed,
-                    &mut echoed,
+                    &mut topic_owners,
+                    &mut refused,
                     &mut oversized,
                     &change,
                 )
@@ -783,14 +791,29 @@ async fn run_node(
     }
 }
 
-/// Ask the runtime for every callable method's signature and resolve both
-/// planes: the ROS 2-representable methods to services, and the task-run
-/// (behavior-tree-`Status`-returning) methods to actions — the profile's
-/// skill bindings joining the latter, each checked against the described
-/// signatures. Methods whose types aren't representable on their plane, and
-/// bindings whose contract does not hold, are logged and skipped (never
-/// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
-/// the bridge then serves no methods.
+/// The topic each device input subscribes on, by [`topic_name`]. Two inputs
+/// whose paths escape to one topic cannot both have it: the key that sorts
+/// first keeps it, whatever order the device lists them in, and the other gets
+/// no topic and is reported once, naming both.
+fn input_topics(namespace: &str, mut inputs: Vec<(String, Type)>) -> Vec<(String, Type, String)> {
+    inputs.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let mut owners: HashMap<String, String> = HashMap::new();
+    let mut topics = Vec::with_capacity(inputs.len());
+    for (path, value_type) in inputs {
+        let topic = topic_name(namespace, &path);
+        if let Some(owner) = owners.get(&topic) {
+            warn!(
+                "Ros2Bridge does not subscribe input '{path}': it escapes to the topic '{topic}' \
+                 of input '{owner}', and the key that sorts first keeps it"
+            );
+            continue;
+        }
+        owners.insert(topic.clone(), path.clone());
+        topics.push((path, value_type, topic));
+    }
+    topics
+}
+
 /// The keys the device opened to remote writers, each with the shape it holds —
 /// the topics this bridge subscribes. An input the store states no shape for
 /// cannot have a typed topic, and is reported rather than guessed. Empty if the
@@ -829,6 +852,14 @@ async fn device_inputs(cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>) -> Vec<(S
         .collect()
 }
 
+/// Ask the runtime for every callable method's signature and resolve both
+/// planes: the ROS 2-representable methods to services, and the task-run
+/// (behavior-tree-`Status`-returning) methods to actions — the profile's
+/// skill bindings joining the latter, each checked against the described
+/// signatures. Methods whose types aren't representable on their plane, and
+/// bindings whose contract does not hold, are logged and skipped (never
+/// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
+/// the bridge then serves no methods.
 async fn discover(
     cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
     namespace: &str,
@@ -1139,6 +1170,13 @@ async fn build_response(
 /// once per change however many of its keys the change carried; every other
 /// key takes the untyped `std_msgs` path. `unset` keys have no ROS 2
 /// representation and are ignored.
+///
+/// Two keys whose paths escape to one topic cannot share it: the key that
+/// sorts first keeps it, so which one publishes does not depend on which the
+/// device wrote first. A key that sorts before the topic's current owner takes
+/// it over, and the owner stops publishing. A topic an input subscribes to is
+/// never taken: publishing there would feed the device its own commands, or
+/// write one key's values into another.
 #[allow(clippy::too_many_arguments)]
 async fn publish_change(
     node: &mut Node,
@@ -1147,17 +1185,18 @@ async fn publish_change(
     typed_outputs: &mut TypedOutputs,
     includes: &[profile::Include],
     registry: &Arc<Ros2Registry>,
-    subscribed: &HashSet<String>,
-    echoed: &mut HashSet<String>,
+    subscribed: &HashMap<String, String>,
+    topic_owners: &mut HashMap<String, String>,
+    refused: &mut HashSet<String>,
     oversized: &mut HashSet<String>,
     change: &StateChange,
 ) {
     // Resolving a key's topic costs a format and a glob walk, so the answer is
     // cached: after the first sight of a key it is either in one of the
-    // publisher maps or in `echoed`.
+    // publisher maps or in `refused`.
     for (key, maybe_value) in &change.set {
         let Some(value) = maybe_value else { continue };
-        if echoed.contains(&key.path) {
+        if refused.contains(&key.path) {
             continue;
         }
 
@@ -1179,25 +1218,56 @@ async fn publish_change(
                 Some((topic, qos)) => (topic, qos),
                 None => (topic_name(namespace, &key.path), None),
             };
-            if subscribed.contains(&topic) {
+            if let Some(input) = subscribed.get(&topic) {
+                if *input == key.path {
+                    warn!(
+                        "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this \
+                         bridge subscribes to, and echoing it back would feed the device its own \
+                         commands",
+                        key.path
+                    );
+                } else {
+                    warn!(
+                        "Ros2Bridge does not publish key '{}': it escapes to the topic '{topic}' \
+                         of input '{input}', and publishing there would write this key's values \
+                         into that one",
+                        key.path
+                    );
+                }
+                refused.insert(key.path.clone());
+                continue;
+            }
+            if let Some(owner) = topic_owners.get(&topic) {
+                if *owner < key.path {
+                    warn!(
+                        "Ros2Bridge does not publish key '{}': it escapes to the topic '{topic}' \
+                         of key '{owner}', and the key that sorts first keeps it",
+                        key.path
+                    );
+                    refused.insert(key.path.clone());
+                    continue;
+                }
                 warn!(
-                    "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this bridge \
-                     subscribes to, and echoing it back would feed the device its own commands",
+                    "Ros2Bridge stops publishing key '{owner}': key '{}' escapes to its topic \
+                     '{topic}', and the key that sorts first keeps it",
                     key.path
                 );
-                echoed.insert(key.path.clone());
-                continue;
+                publishers.remove(owner);
+                refused.insert(owner.clone());
             }
             let qos = qos.unwrap_or(Qos::default_for(profile::Flow::Out));
             match KeyPublisher::create(node, &topic, value, qos) {
                 Ok(publisher) => {
                     publishers.insert(key.path.clone(), publisher);
+                    topic_owners.insert(topic, key.path.clone());
                 }
                 Err(e) => {
                     warn!(
-                        "Ros2Bridge could not create a publisher for key '{}': {e}",
+                        "Ros2Bridge does not publish key '{}': its publisher could not be \
+                         created: {e}",
                         key.path
                     );
+                    refused.insert(key.path.clone());
                     continue;
                 }
             }
@@ -1275,6 +1345,40 @@ mod tests {
         assert!(
             config.outputs.iter().all(|o| o.qos.is_none()),
             "state takes the outbound default (sensor data)"
+        );
+    }
+
+    /// Every input gets a valid topic, its key's own when the path is already
+    /// a valid name; of two inputs escaping to one topic, the key that sorts
+    /// first keeps it however the device lists them, and the other gets none.
+    #[test]
+    fn inputs_escaping_to_one_topic_leave_it_to_the_key_that_sorts_first() {
+        let inputs = vec![
+            ("rig/pose_b.weight".to_string(), Type::F64),
+            ("face/mouth".to_string(), Type::F64),
+            ("rig/pose_b-weight".to_string(), Type::F64),
+            ("rig/6cefb62d-dc71".to_string(), Type::F32),
+        ];
+        let topics: Vec<(String, String)> = input_topics("robot", inputs)
+            .into_iter()
+            .map(|(path, _, topic)| (path, topic))
+            .collect();
+        assert_eq!(
+            topics,
+            [
+                (
+                    "face/mouth".to_string(),
+                    "/robot/keys/face/mouth".to_string()
+                ),
+                (
+                    "rig/6cefb62d-dc71".to_string(),
+                    "/robot/keys/rig/_6cefb62d_dc71".to_string()
+                ),
+                (
+                    "rig/pose_b-weight".to_string(),
+                    "/robot/keys/rig/pose_b_weight".to_string()
+                ),
+            ]
         );
     }
 

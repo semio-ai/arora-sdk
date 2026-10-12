@@ -4,6 +4,23 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.3.0] - 2026-10-12
+
+### Fixed
+
+- Every key reaches ROS 2 under a valid name. A key path is escaped token by
+  token — a character outside `[A-Za-z0-9_]` becomes `_`, a run of
+  underscores collapses to one, a token starting with a digit gains a leading
+  `_`, an empty token becomes `_` — so a dotted key such as
+  `rig/poses/pose_b.weight` or a UUID-named rig key now has a topic, inbound
+  and outbound, where it had none. A path that is already a valid name keeps
+  its exact topic. An include's rewrite escapes the key the same way.
+- Of two keys escaping to one topic, the key that sorts first keeps it; the
+  other gets no topic and is reported once, naming both. An output never
+  publishes on another key's input topic.
+- A key whose publisher cannot be created is reported once and no longer
+  retried, instead of warning on every change.
+
 ## [10.2.0] - 2026-10-10
 
 ### Added
