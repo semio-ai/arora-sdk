@@ -370,55 +370,300 @@ pub(crate) fn type_ref_id(type_ref: &arora_types::module::low::TypeRef) -> arora
 /// sequence field carries its element type, so the walk only moves the value
 /// along and the type stays where the field left it.
 ///
-/// A geometry point/vector — a structure of exactly `x`, `y`, `z` numeric
-/// fields — coerces to [`Value::ArrayF32`], the store's vec3 form, so a
-/// `PointStamped.point` lands directly on a `gaze/target`-style key.
+/// A `*` segment takes **each element** of an array, walks the rest of the
+/// path in every one, and collects the results into one array
+/// (`"timeline.visemes.*.viseme.value"` is the `uint8` of every viseme, a
+/// [`Value::ArrayU8`]). What the rest of the path reaches must be a scalar,
+/// so the result is a flat array of it; one `*` per path.
+///
+/// Two message shapes land in the store's form rather than as structures:
+///
+/// - a geometry point/vector — a structure of exactly `x`, `y`, `z` numeric
+///   fields — coerces to [`Value::ArrayF32`], the store's vec3 form, so a
+///   `PointStamped.point` lands directly on a `gaze/target`-style key;
+/// - a `builtin_interfaces/Duration` coerces to its seconds as a
+///   [`Value::F32`], so a timing lands on a seconds parameter.
 pub(crate) fn extract_route(
     value: &Value,
-    ty: &arora_types::ty::low::Type,
-    registry: &arora_types::ty::TypeRegistry,
+    ty: &low::Type,
+    registry: &TypeRegistry,
     dotted: &str,
 ) -> Result<Value, String> {
-    use arora_types::ty::low::TypeKind;
-    let mut current_value = Cow::Borrowed(value);
-    // The current position's type — `None` past a primitive (well-known ids
-    // are not registry entries), which only matters for further descent or
-    // the vec3 coercion, neither of which applies to a primitive.
-    let mut current_ty = Some(ty);
-    if !dotted.is_empty() {
-        for segment in dotted.split('.') {
-            if let Ok(index) = segment.parse::<usize>() {
-                current_value = Cow::Owned(element_at(&current_value, index).ok_or_else(|| {
-                    format!("'{dotted}': no element {index} in the sequence at '{segment}'")
-                })?);
-                continue;
+    let segments: Vec<&str> = if dotted.is_empty() {
+        Vec::new()
+    } else {
+        dotted.split('.').collect()
+    };
+    extract_segments(Cow::Borrowed(value), Some(ty), registry, &segments, dotted)
+}
+
+/// The walk behind [`extract_route`], from `value` of type `ty` along
+/// `segments`. `ty` is `None` past a primitive (well-known ids are not
+/// registry entries), which only matters for further descent or a coercion,
+/// neither of which applies to a primitive.
+fn extract_segments<'a>(
+    value: Cow<'_, Value>,
+    ty: Option<&'a low::Type>,
+    registry: &'a TypeRegistry,
+    segments: &[&str],
+    dotted: &str,
+) -> Result<Value, String> {
+    let Some((segment, rest)) = segments.split_first() else {
+        return Ok(ty
+            .and_then(|ty| coerce_xyz(&value, ty).or_else(|| duration_seconds(&value, ty)))
+            .unwrap_or_else(|| value.into_owned()));
+    };
+    if *segment == "*" {
+        if !is_array(&value) {
+            return Err(format!("'{dotted}': the value at '*' is not a sequence"));
+        }
+        // The element kind comes from the type, so an empty sequence still
+        // yields an array of the right kind.
+        let element = match ty {
+            Some(ty) => resolve_segments(
+                TypeRef::Scalar { id: ty.id },
+                Some(ty),
+                registry,
+                rest,
+                dotted,
+            )?,
+            None => TypeRef::Scalar {
+                id: primitive_element_id(&value)
+                    .ok_or_else(|| format!("'{dotted}': no element type at '*'"))?,
+            },
+        };
+        let element_id = match element {
+            TypeRef::Scalar { id } => coerced_scalar_id(&id, registry)
+                .ok_or_else(|| format!("'{dotted}': each element is not a scalar"))?,
+            _ => return Err(format!("'{dotted}': each element is not a scalar")),
+        };
+        let mut items = Vec::new();
+        let mut index = 0;
+        while let Some(item) = element_at(&value, index) {
+            items.push(extract_segments(
+                Cow::Owned(item),
+                ty,
+                registry,
+                rest,
+                dotted,
+            )?);
+            index += 1;
+        }
+        return collect_array(&element_id, items, registry).map_err(|e| format!("'{dotted}': {e}"));
+    }
+    if let Ok(index) = segment.parse::<usize>() {
+        let item = element_at(&value, index).ok_or_else(|| {
+            format!("'{dotted}': no element {index} in the sequence at '{segment}'")
+        })?;
+        return extract_segments(Cow::Owned(item), ty, registry, rest, dotted);
+    }
+    let Some(low::TypeKind::Structure(structure)) = ty.map(|ty| &ty.kind) else {
+        return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
+    };
+    let (field_id, field) = structure
+        .fields
+        .iter()
+        .find(|(_, field)| field.name == *segment)
+        .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
+    let Value::Structure(value_structure) = value.as_ref() else {
+        return Err(format!(
+            "'{dotted}': value at '{segment}' is not a structure"
+        ));
+    };
+    let field_value = value_structure
+        .fields
+        .iter()
+        .find(|value_field| value_field.id == *field_id)
+        .map(|value_field| value_field.value.as_ref().clone())
+        .ok_or_else(|| format!("'{dotted}': decoded value misses '{segment}'"))?;
+    extract_segments(
+        Cow::Owned(field_value),
+        registry.get(&type_ref_id(&field.type_ref)),
+        registry,
+        rest,
+        dotted,
+    )
+}
+
+/// Resolve a dotted field path against a message type alone — the startup
+/// counterpart of [`extract_route`]'s value walk, with the same segments: a
+/// name descends into a field, a number into one element of a sequence, and
+/// `*` into each element, which makes the result an array of what the rest of
+/// the path reaches. Empty is the whole message. The reference is the field's
+/// own; [`coerced_scalar_id`] says what a Duration leaf becomes.
+pub(crate) fn resolve_field_ref(
+    ty: &low::Type,
+    registry: &TypeRegistry,
+    dotted: &str,
+) -> Result<TypeRef, String> {
+    let segments: Vec<&str> = if dotted.is_empty() {
+        Vec::new()
+    } else {
+        dotted.split('.').collect()
+    };
+    resolve_segments(
+        TypeRef::Scalar { id: ty.id },
+        Some(ty),
+        registry,
+        &segments,
+        dotted,
+    )
+}
+
+/// The walk behind [`resolve_field_ref`], from the field `type_ref` of type
+/// `ty` along `segments`.
+fn resolve_segments<'a>(
+    mut type_ref: TypeRef,
+    mut ty: Option<&'a low::Type>,
+    registry: &'a TypeRegistry,
+    segments: &[&str],
+    dotted: &str,
+) -> Result<TypeRef, String> {
+    let mut each = false;
+    for segment in segments {
+        if *segment == "*" || segment.parse::<usize>().is_ok() {
+            let (TypeRef::Array { id } | TypeRef::FixedArray { id, .. }) = type_ref else {
+                return Err(format!("'{dotted}': '{segment}' does not index a sequence"));
+            };
+            if *segment == "*" {
+                if each {
+                    return Err(format!("'{dotted}': one '*' per path"));
+                }
+                each = true;
             }
-            let Some(TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
-                return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
-            };
-            let (field_id, field) = structure
-                .fields
-                .iter()
-                .find(|(_, field)| field.name == segment)
-                .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
-            let Value::Structure(value_structure) = current_value.as_ref() else {
-                return Err(format!(
-                    "'{dotted}': value at '{segment}' is not a structure"
-                ));
-            };
-            let field_value = value_structure
-                .fields
-                .iter()
-                .find(|value_field| value_field.id == *field_id)
-                .map(|value_field| value_field.value.as_ref().clone())
-                .ok_or_else(|| format!("'{dotted}': decoded value misses '{segment}'"))?;
-            current_value = Cow::Owned(field_value);
-            current_ty = registry.get(&type_ref_id(&field.type_ref));
+            type_ref = TypeRef::Scalar { id };
+            continue;
+        }
+        let Some(low::TypeKind::Structure(structure)) = ty.map(|ty| &ty.kind) else {
+            return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
+        };
+        let field = structure
+            .fields
+            .values()
+            .find(|field| field.name == *segment)
+            .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
+        type_ref = field.type_ref.clone();
+        ty = registry.get(&type_ref_id(&field.type_ref));
+    }
+    if each {
+        let TypeRef::Scalar { id } = type_ref else {
+            return Err(format!("'{dotted}': each element is not a scalar"));
+        };
+        type_ref = TypeRef::Array { id };
+    }
+    Ok(type_ref)
+}
+
+/// The ROS name of the duration message, which a route lands as seconds.
+const DURATION: &str = "builtin_interfaces/msg/Duration";
+
+/// Whether `id` names `builtin_interfaces/Duration`.
+pub(crate) fn is_duration_id(id: &Uuid, registry: &TypeRegistry) -> bool {
+    registry.get(id).is_some_and(|ty| ty.name == DURATION)
+}
+
+/// The scalar id a route yields for a field of scalar type `id`: the
+/// primitive itself, [`F32_ID`] for a Duration (seconds); `None` for any other
+/// message, which a flat array cannot hold.
+fn coerced_scalar_id(id: &Uuid, registry: &TypeRegistry) -> Option<Uuid> {
+    if is_duration_id(id, registry) {
+        Some(*F32_ID)
+    } else if registry.get(id).is_some() {
+        None
+    } else {
+        Some(*id)
+    }
+}
+
+/// A `builtin_interfaces/Duration` value as its seconds, `None` for any other
+/// type.
+fn duration_seconds(value: &Value, ty: &low::Type) -> Option<Value> {
+    if ty.name != DURATION {
+        return None;
+    }
+    let low::TypeKind::Structure(structure) = &ty.kind else {
+        return None;
+    };
+    let Value::Structure(value_structure) = value else {
+        return None;
+    };
+    let field = |name: &str| {
+        let (id, _) = structure.fields.iter().find(|(_, f)| f.name == name)?;
+        value_structure
+            .fields
+            .iter()
+            .find(|f| f.id == *id)
+            .map(|f| f.value.as_ref())
+    };
+    let (Some(Value::I32(sec)), Some(Value::U32(nanosec))) = (field("sec"), field("nanosec"))
+    else {
+        return None;
+    };
+    Some(Value::F32((*sec as f64 + *nanosec as f64 * 1e-9) as f32))
+}
+
+/// Whether a value is an array of any element kind.
+fn is_array(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::ArrayBoolean(_)
+            | Value::ArrayU8(_)
+            | Value::ArrayU16(_)
+            | Value::ArrayU32(_)
+            | Value::ArrayU64(_)
+            | Value::ArrayI8(_)
+            | Value::ArrayI16(_)
+            | Value::ArrayI32(_)
+            | Value::ArrayI64(_)
+            | Value::ArrayF32(_)
+            | Value::ArrayF64(_)
+            | Value::ArrayString(_)
+            | Value::ArrayValue(_)
+            | Value::ArrayStructure { .. }
+            | Value::ArrayEnumeration { .. }
+    )
+}
+
+/// The element id of a primitive array value.
+fn primitive_element_id(value: &Value) -> Option<Uuid> {
+    Some(match value {
+        Value::ArrayBoolean(_) => *BOOLEAN_ID,
+        Value::ArrayU8(_) => *U8_ID,
+        Value::ArrayU16(_) => *U16_ID,
+        Value::ArrayU32(_) => *U32_ID,
+        Value::ArrayU64(_) => *U64_ID,
+        Value::ArrayI8(_) => *I8_ID,
+        Value::ArrayI16(_) => *I16_ID,
+        Value::ArrayI32(_) => *I32_ID,
+        Value::ArrayI64(_) => *I64_ID,
+        Value::ArrayF32(_) => *F32_ID,
+        Value::ArrayF64(_) => *F64_ID,
+        Value::ArrayString(_) => *STRING_ID,
+        _ => return None,
+    })
+}
+
+/// Scalars of the primitive `id`, collected into the array of it.
+fn collect_array(id: &Uuid, items: Vec<Value>, registry: &TypeRegistry) -> Result<Value, String> {
+    let mut array = default_array(id, 0, registry)?;
+    for item in items {
+        match (&mut array, item) {
+            (Value::ArrayBoolean(a), Value::Boolean(v)) => a.push(v),
+            (Value::ArrayU8(a), Value::U8(v)) => a.push(v),
+            (Value::ArrayU16(a), Value::U16(v)) => a.push(v),
+            (Value::ArrayU32(a), Value::U32(v)) => a.push(v),
+            (Value::ArrayU64(a), Value::U64(v)) => a.push(v),
+            (Value::ArrayI8(a), Value::I8(v)) => a.push(v),
+            (Value::ArrayI16(a), Value::I16(v)) => a.push(v),
+            (Value::ArrayI32(a), Value::I32(v)) => a.push(v),
+            (Value::ArrayI64(a), Value::I64(v)) => a.push(v),
+            (Value::ArrayF32(a), Value::F32(v)) => a.push(v),
+            (Value::ArrayF64(a), Value::F64(v)) => a.push(v),
+            (Value::ArrayString(a), Value::String(v)) => a.push(v),
+            (_, item) => return Err(format!("an element {item:?} does not fit the array")),
         }
     }
-    Ok(current_ty
-        .and_then(|ty| coerce_xyz(&current_value, ty))
-        .unwrap_or_else(|| current_value.into_owned()))
+    Ok(array)
 }
 
 /// One element of an array value, whatever the array's element kind, `None`
@@ -1526,5 +1771,155 @@ mod tests {
         let empty = hri_msgs::Visemes { visemes: vec![] };
         let empty = to_value_seeded(&empty, &ty, &reg).expect("empty to value");
         assert!(extract_route(&empty, &message_type, types, "visemes.0.value").is_err());
+    }
+
+    /// One timed viseme: its code, start and duration as `(sec, nanosec)`.
+    type Timed = (u8, (i32, u32), (i32, u32));
+
+    /// A `PlayVisemes` timeline, off the wire.
+    fn decoded_timeline(visemes: &[Timed]) -> (Value, low::Type, Ros2Registry) {
+        use arora_msgs_ros2::{builtin_interfaces, std_msgs, std_skills, vizij_face_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let registry = arora_msgs_ros2::registry();
+        let message_type = registry
+            .get_by_name("vizij_face_msgs/PlayVisemes_Goal")
+            .expect("vizij_face_msgs/PlayVisemes_Goal is registered")
+            .clone();
+        let duration = |(sec, nanosec): (i32, u32)| builtin_interfaces::Duration { sec, nanosec };
+        let goal = vizij_face_msgs::PlayVisemes_Goal {
+            meta: std_skills::Meta::default(),
+            timeline: vizij_face_msgs::VisemeTimeline {
+                header: std_msgs::Header::default(),
+                visemes: visemes
+                    .iter()
+                    .map(|(value, start, length)| vizij_face_msgs::TimedViseme {
+                        viseme: vizij_face_msgs::Viseme { value: *value },
+                        timing: vizij_face_msgs::Timing {
+                            start: duration(*start),
+                            duration: duration(*length),
+                        },
+                    })
+                    .collect(),
+            },
+        };
+        let (ty, reg) =
+            <vizij_face_msgs::PlayVisemes_Goal as AroraType>::arora_type_with_registry();
+        let value = to_value_seeded(&goal, &ty, &reg).expect("goal to value");
+        let bytes = cdr::encode(&message_type, registry.types(), &value).expect("encode");
+        let decoded = cdr::decode(&message_type, registry.types(), &bytes).expect("decode");
+        (decoded, message_type, registry)
+    }
+
+    /// A `*` segment collects a field of every element into one flat array,
+    /// and a Duration lands as its seconds — how a viseme timeline reaches
+    /// `play_visemes` as parallel arrays.
+    #[test]
+    fn routes_collect_each_element_and_take_durations_as_seconds() {
+        let (decoded, message_type, registry) = decoded_timeline(&[
+            (1, (0, 0), (0, 100_000_000)),
+            (10, (0, 100_000_000), (1, 500_000_000)),
+        ]);
+        let types = registry.types();
+        let extract = |path: &str| extract_route(&decoded, &message_type, types, path);
+        assert_eq!(
+            extract("timeline.visemes.*.viseme.value").unwrap(),
+            Value::ArrayU8(vec![1, 10])
+        );
+        assert_eq!(
+            extract("timeline.visemes.*.timing.start").unwrap(),
+            Value::ArrayF32(vec![0.0, 0.1])
+        );
+        assert_eq!(
+            extract("timeline.visemes.*.timing.duration").unwrap(),
+            Value::ArrayF32(vec![0.1, 1.5])
+        );
+        // One element's Duration is a scalar in seconds.
+        assert_eq!(
+            extract("timeline.visemes.1.timing.duration").unwrap(),
+            Value::F32(1.5)
+        );
+        // `*` on a primitive sequence collects it as is.
+        let (units, units_type) = {
+            use arora_msgs_ros2::vizij_face_msgs;
+            use arora_types::value_serde::bridge::to_value_seeded;
+            use arora_types::AroraType;
+            let message = vizij_face_msgs::FacialActionUnits {
+                codes: vec![6, 12],
+                intensities: vec![0.5, 1.0],
+            };
+            let (ty, reg) =
+                <vizij_face_msgs::FacialActionUnits as AroraType>::arora_type_with_registry();
+            let ty_registered = registry
+                .get_by_name("vizij_face_msgs/FacialActionUnits")
+                .unwrap()
+                .clone();
+            (to_value_seeded(&message, &ty, &reg).unwrap(), ty_registered)
+        };
+        assert_eq!(
+            extract_route(&units, &units_type, types, "codes.*").unwrap(),
+            Value::ArrayU8(vec![6, 12])
+        );
+        // A `*` that reaches a structure, or meets no sequence, reports.
+        assert!(extract("timeline.visemes.*.timing").is_err());
+        assert!(extract("timeline.header.*").is_err());
+    }
+
+    /// An empty timeline still yields arrays of the right kind: the element
+    /// kind comes from the type, not from the elements.
+    #[test]
+    fn an_empty_sequence_collects_into_an_empty_array_of_its_kind() {
+        let (decoded, message_type, registry) = decoded_timeline(&[]);
+        let types = registry.types();
+        assert_eq!(
+            extract_route(
+                &decoded,
+                &message_type,
+                types,
+                "timeline.visemes.*.viseme.value"
+            )
+            .unwrap(),
+            Value::ArrayU8(vec![])
+        );
+        assert_eq!(
+            extract_route(
+                &decoded,
+                &message_type,
+                types,
+                "timeline.visemes.*.timing.start"
+            )
+            .unwrap(),
+            Value::ArrayF32(vec![])
+        );
+    }
+
+    /// The startup walk agrees with the value walk on what a path reaches.
+    #[test]
+    fn field_refs_resolve_through_indexes_and_each() {
+        let registry = arora_msgs_ros2::registry();
+        let types = registry.types();
+        let goal = registry
+            .get_by_name("vizij_face_msgs/PlayVisemes_Goal")
+            .unwrap();
+        let duration = registry
+            .get_by_name("builtin_interfaces/Duration")
+            .unwrap()
+            .id;
+        assert!(matches!(
+            resolve_field_ref(goal, types, "timeline.visemes.*.viseme.value").unwrap(),
+            TypeRef::Array { id } if id == *U8_ID
+        ));
+        assert!(matches!(
+            resolve_field_ref(goal, types, "timeline.visemes.*.timing.start").unwrap(),
+            TypeRef::Array { id } if id == duration
+        ));
+        assert!(matches!(
+            resolve_field_ref(goal, types, "timeline.visemes.0.timing.start").unwrap(),
+            TypeRef::Scalar { id } if id == duration
+        ));
+        assert!(is_duration_id(&duration, types));
+        assert!(resolve_field_ref(goal, types, "meta.*").is_err());
+        assert!(resolve_field_ref(goal, types, "timeline.visemes.*.nope").is_err());
     }
 }

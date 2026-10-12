@@ -180,8 +180,20 @@ lands at its field, the fields keep their last value (their type's default
 until written), and a change to any routed key publishes the whole message
 again. A `std_msgs` wrapper around one key (`data` ← the key) is the smallest
 case; a `PointStamped` from a vec3 key and a frame key is the same mechanism.
-Inbound, a numeric segment indexes a sequence (`visemes.0.value`), so a
-message wrapping its payload in an array routes like any other.
+
+Inbound, a route's dotted path reads a decoded message — for a key, and for
+a skill's goal or message onto a method's parameters alike:
+
+- a name descends into a field (`expression.valence`); an empty path is the
+  whole message;
+- a number takes one element of a sequence (`visemes.0.value`), so a message
+  wrapping its payload in an array routes like any other;
+- `*` takes each element of a sequence and collects what the rest of the path
+  reaches into one flat array (`timeline.visemes.*.viseme.value` is a `[u8]`);
+  the rest must reach a scalar, and a path holds one `*`;
+- a geometry point or vector (exactly `x`, `y`, `z`) lands as the vec3
+  `[f32; 3]`, and a `builtin_interfaces/Duration` as its seconds, an `f32` —
+  under `*`, an `[f32]`.
 
 **Exposure profiles** (`profile` module) bundle a whole surface: an
 [`ExposureProfile`] holds typed endpoints on absolute topics with per-field
