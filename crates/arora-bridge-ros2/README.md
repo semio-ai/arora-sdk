@@ -215,27 +215,21 @@ whose prefix rewrites expose bulk keys on the scalar plane under absolute
 names, and the skill plane: **action bindings** that serve a device task-run
 method as a standard ROS 2 action, and **topic-skill bindings** that serve one
 on a topic (see [Skills on topics](#skills-on-topics)).
-`ExposureProfile::ros4hri()` ships
-the ROS4HRI face surface under PAL's names (`/robot_face/*`): expression
-commands — an `interaction_skills/SetExpression` on `/skill/set_expression` —
-fan out to `standard/ros4hri/expression/*`, `look_at` points land as the gaze
-target (vec3) and frame, a streamed viseme lands as its ROS4HRI code on
-`standard/ros4hri/viseme`, with its `time` and `duration` (seconds) on
-`standard/ros4hri/viseme/time` and `standard/ros4hri/viseme/duration` — from
-either shape a TTS node publishes it in, one
-`hri_msgs/Viseme` on `/tts/viseme` or an `hri_msgs/Visemes` on `/tts/visemes`,
-both carrying the shape at the audio playhead — and the two standard skills
-spawn the device's task runs —
-`interaction_skills/LookAt` on `/skill/look_at`, and `communication_skills/Say`
-on `/skill/say`, whose goal `input` is the utterance and whose feedback carries
-what the run reports (for a face, the viseme at the audio playhead). What the
-face is saying publishes as a `std_msgs/String` on `/robot_face/speech` from
-the speech state key `standard/ros4hri/speech/text` — the utterance while a
-say run speaks, empty at rest — for subtitles and transcripts; text is not
-commanded through a topic, speaking is the action. The lip shape being spoken
-publishes the same way, as a `std_msgs/String` on `/robot_face/viseme` from
-`standard/ros4hri/speech/viseme` — a Vizij standard shape name, `sil` at rest
-— so one topic follows the lips of the whole robot. The rendered face publishes
+`ExposureProfile::ros4hri()` ships the ROS4HRI face surface under PAL's names
+(`/robot_face/*`): `look_at` points land as the gaze target (vec3) and frame, a
+streamed viseme lands as its ROS4HRI code on `standard/ros4hri/viseme`, with
+its `time` and `duration` (seconds) on `standard/ros4hri/viseme/time` and
+`standard/ros4hri/viseme/duration` — from either shape a TTS node publishes it
+in, one `hri_msgs/Viseme` on `/tts/viseme` or an `hri_msgs/Visemes` on
+`/tts/visemes`, both carrying the shape at the audio playhead — and the skills
+in the table below spawn the device's task runs. What the face is saying
+publishes as a `std_msgs/String` on `/robot_face/speech` from the speech state
+key `standard/ros4hri/speech/text` — the utterance while a say run speaks,
+empty at rest — for subtitles and transcripts; text is not commanded through a
+topic, speaking is the action. The lip shape being spoken publishes the same
+way, as a `std_msgs/String` on `/robot_face/viseme` from
+`standard/ros4hri/speech/viseme` — a Vizij standard shape name, `sil` at rest —
+so one topic follows the lips of the whole robot. The rendered face publishes
 on the `image_transport` pair PAL OS documents — `display/face` as a
 `sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
 `sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
@@ -250,6 +244,31 @@ since the ROS diagnostics tooling subscribes reliably. Enabling it is one call:
 let config = Ros2BridgeConfig::new("robot", 0)
     .with_profile(ExposureProfile::ros4hri());
 ```
+
+The preset's skills, ROS4HRI's and Vizij's own (typed by arora-msgs-ros2's
+`vizij_face_msgs`):
+
+| Skill | Served as | ROS type | Device method |
+|---|---|---|---|
+| `/skill/set_expression` | topic | `interaction_skills/SetExpression` | `set_expression(expression: string, valence: f32, arousal: f32)` |
+| `/skill/set_facial_action_units` | topic | `vizij_face_msgs/SetFacialActionUnits` | `set_facial_action_units(codes: [u8], intensities: [f32])` |
+| `/skill/set_viseme` | topic | `vizij_face_msgs/SetViseme` | `set_viseme(viseme: u8)` |
+| `/skill/look_at` | action | `interaction_skills/LookAt` | `look_at(policy: string, target: [f32], frame: string)` |
+| `/skill/say` | action | `communication_skills/Say` | `say(text: string)` |
+| `/skill/play_visemes` | action | `vizij_face_msgs/PlayVisemes` | `play_visemes(visemes: [u8], starts: [f32], durations: [f32])` |
+
+`set_expression` and `set_facial_action_units` set the same thing, the face's
+expression, and the device gives the face to the latest of the two; the
+`hri_msgs/Expression`'s `confidence` is perception's and is not routed. A face
+that reads its expression from the `standard/ros4hri/expression/*` keys rather
+than implementing `set_expression` takes
+`ExposureProfile::ros4hri().with_set_expression_on_keys()`, which lands the
+topic on those keys instead. `set_viseme` is the mouth shape at the playhead,
+for a live producer that knows the shape and not its timing; `play_visemes`
+plays a timeline out, so it is an action, routed as parallel arrays with times
+in seconds from the timeline's origin and the shape being played as feedback.
+`say`'s goal `input` is the utterance, and its feedback carries what the run
+reports (for a face, the viseme at the audio playhead).
 
 An action or topic-skill binding is the exterior contract of a skill: at
 startup the bridge checks it against the device's described methods (the

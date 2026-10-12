@@ -21,6 +21,13 @@ All notable changes to `arora-bridge-ros2`. The format follows
   messages queued while a spawn is in flight collapse to the newest. A
   binding is checked at startup against the device's described methods and
   refused loudly when its contract does not hold.
+- The ROS4HRI preset serves Vizij's face skills, typed by arora-msgs-ros2
+  2.3's `vizij_face_msgs`: `set_facial_action_units(codes: [u8], intensities:
+  [f32])` on the topic `/skill/set_facial_action_units`, `set_viseme(viseme:
+  u8)` on the topic `/skill/set_viseme`, and `play_visemes(visemes: [u8],
+  starts: [f32], durations: [f32])` on the action `/skill/play_visemes`.
+- `ExposureProfile::with_set_expression_on_keys` lands `/skill/set_expression`
+  on the `standard/ros4hri/expression/*` keys.
 
 ### Changed
 
@@ -28,6 +35,11 @@ All notable changes to `arora-bridge-ros2`. The format follows
   `Ros2BridgeConfig` the `topic_skill_bindings` field, so a struct literal of
   either must name it. `ExposureProfile::ros4hri()` and
   `Ros2BridgeConfig::new` build them as before.
+- **Breaking:** the ROS4HRI preset serves `/skill/set_expression` as a topic
+  skill: a message spawns the device's `set_expression(expression: string,
+  valence: f32, arousal: f32)` task run instead of landing on the
+  `standard/ros4hri/expression/*` keys. A face that reads those keys takes
+  `ExposureProfile::ros4hri().with_set_expression_on_keys()`.
 - Depends on arora-msgs-ros2 2.3.
 
 ## [10.4.2] - 2026-10-13

@@ -234,13 +234,15 @@ async fn handle_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::resolve_bound;
+    use crate::profile::ExposureProfile;
     use arora_behavior::interpreter_module;
     use arora_behavior::{TaskHandle, TaskId};
     use arora_behavior_tree_types::{
         STATUS_ENUMERATION_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
     };
     use arora_bridge::BridgeOp;
-    use arora_msgs_ros2::{std_skills, vizij_face_msgs};
+    use arora_msgs_ros2::{interaction_skills, std_skills, vizij_face_msgs};
     use arora_types::call::CallResult;
     use arora_types::gen_uuid_from_str;
     use arora_types::record::module::frozen::{Function, Parameter};
@@ -345,6 +347,28 @@ mod tests {
         })
     }
 
+    /// The preset's skills — on topics and on actions — all resolve against
+    /// a face serving the contract, with no refusal.
+    #[test]
+    fn the_ros4hri_skills_resolve_against_the_face_contract() {
+        let registry = arora_msgs_ros2::registry();
+        let profile = ExposureProfile::ros4hri();
+        let (skills, errors) = resolve(&profile.topic_skills, &face_contract(), &registry);
+        assert!(errors.is_empty(), "{errors:?}");
+        let topics: Vec<&str> = skills.iter().map(|s| s.topic.as_str()).collect();
+        assert_eq!(
+            topics,
+            [
+                "/skill/set_expression",
+                "/skill/set_facial_action_units",
+                "/skill/set_viseme"
+            ]
+        );
+        let (actions, errors) = resolve_bound(&profile.actions, &face_contract(), &registry);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(actions.len(), 3);
+    }
+
     /// A binding that does not hold is refused with its reason, never
     /// served half-way.
     #[test]
@@ -403,6 +427,74 @@ mod tests {
             &contract,
         );
         assert!(error.contains("no field 'nope'"), "{error}");
+    }
+
+    /// Each preset topic skill turns its message into the call the face
+    /// contract takes.
+    #[test]
+    fn a_message_becomes_the_call_its_method_takes() {
+        let registry = arora_msgs_ros2::registry();
+        let (skills, _) = resolve(
+            &ExposureProfile::ros4hri().topic_skills,
+            &face_contract(),
+            &registry,
+        );
+        let skill = |topic: &str| skills.iter().find(|s| s.topic == topic).unwrap();
+
+        let call = skill("/skill/set_facial_action_units")
+            .call_of(&action_units(&[6, 12], &[0.5, 1.0]), &registry)
+            .expect("call");
+        assert_eq!(call.id, gen_uuid_from_str("set_facial_action_units"));
+        assert_eq!(call.module_id, Some(gen_uuid_from_str("face-module")));
+        assert_eq!(
+            arg(&call, "set_facial_action_units", "codes"),
+            Some(Value::ArrayU8(vec![6, 12]))
+        );
+        assert_eq!(
+            arg(&call, "set_facial_action_units", "intensities"),
+            Some(Value::ArrayF32(vec![0.5, 1.0]))
+        );
+
+        let viseme = value_of(&vizij_face_msgs::SetViseme {
+            meta: meta(),
+            viseme: vizij_face_msgs::Viseme {
+                value: vizij_face_msgs::Viseme::OU,
+            },
+        });
+        let call = skill("/skill/set_viseme")
+            .call_of(&viseme, &registry)
+            .expect("call");
+        assert_eq!(
+            arg(&call, "set_viseme", "viseme"),
+            Some(Value::U8(vizij_face_msgs::Viseme::OU))
+        );
+
+        let expression = value_of(&interaction_skills::SetExpression {
+            meta: meta(),
+            expression: arora_msgs_ros2::hri_msgs::Expression {
+                header: Default::default(),
+                expression: "happy".into(),
+                valence: 0.5,
+                arousal: -0.25,
+                confidence: 1.0,
+            },
+        });
+        let call = skill("/skill/set_expression")
+            .call_of(&expression, &registry)
+            .expect("call");
+        assert_eq!(call.args.len(), 3, "confidence is not routed");
+        assert_eq!(
+            arg(&call, "set_expression", "expression"),
+            Some(Value::String("happy".into()))
+        );
+        assert_eq!(
+            arg(&call, "set_expression", "valence"),
+            Some(Value::F32(0.5))
+        );
+        assert_eq!(
+            arg(&call, "set_expression", "arousal"),
+            Some(Value::F32(-0.25))
+        );
     }
 
     fn status(variant: Uuid) -> Value {
