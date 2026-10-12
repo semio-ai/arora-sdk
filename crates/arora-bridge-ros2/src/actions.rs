@@ -40,11 +40,12 @@
 //! outbound state stream, cancel through the handle's stop call, and resolve
 //! `GetResult` at terminal. The book is pure state — the node task drives it.
 //!
-//! Feedback is a latest-value stream, kept apart from the lifecycle: the
-//! [`FeedbackOutbox`] publishes it without waiting on any reader, and while a
-//! reader that does not acknowledge keeps the writer's send window full it
-//! holds only the newest message per goal. Status and result never wait
-//! behind feedback.
+//! The action task writes feedback, the status array and `GetResult` replies
+//! without waiting on any reader: a reader that stops acknowledging keeps one
+//! writer's send window full, and the task serves every goal. What a full
+//! window refuses waits in that writer's [`Outbox`] — feedback and status as
+//! latest-value streams, only the newest message held; a reply until it is
+//! written — and is retried with a backoff.
 //!
 //! # Bound actions: the skill plane
 //!
@@ -1263,10 +1264,10 @@ impl GoalBook {
 }
 
 // =============================================================================
-// Feedback — a latest-value stream, published without waiting on readers.
+// Outboxes — what the action task writes without waiting on readers.
 // =============================================================================
 
-/// How one feedback publish went.
+/// How one write went.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Delivery {
     /// The message was written.
@@ -1276,65 +1277,100 @@ pub(crate) enum Delivery {
     /// DDS writer has such a window.
     #[cfg_attr(not(feature = "dds"), allow(dead_code))]
     Full,
-    /// The publish failed otherwise; the message is dropped.
+    /// The write failed otherwise; the message is dropped.
     Failed(String),
 }
 
-/// The feedback an action server has yet to publish: the newest encoded
-/// message per goal and feedback key.
+/// The messages one of an action's writers has yet to write, one per key,
+/// and when to try them again.
 ///
-/// Feedback is a latest-value stream — a newer value supersedes the one
-/// before it — and it shares nothing with the goal's status and result but
-/// the action task. So it is never queued and never waited for: a full send
-/// window leaves the newest message here, overwritten by any newer one, and
-/// the action task goes on serving status and result. The held-back
-/// messages are tried again after a backoff that doubles from
-/// [`Self::FIRST_RETRY`] up to [`Self::LAST_RETRY`] while the window stays
-/// full, so a reader that never acknowledges costs one attempt per
-/// `LAST_RETRY`, and a slow one gets the newest feedback once it catches up.
-/// Pure state: the action task supplies the publish and the timer.
-#[derive(Default)]
-pub(crate) struct FeedbackOutbox {
-    pending: HashMap<([u8; 16], Key), Vec<u8>>,
+/// The action task serves every goal of its action, so a write must never
+/// wait on a reader: one that stopped acknowledging would hold up every goal
+/// with it. The writers an outbox serves therefore have no blocking time — a
+/// full send window refuses a write at once — and the outbox holds what the
+/// window refused:
+///
+/// - a **latest-value stream** (feedback, keyed per goal and feedback key;
+///   the status array, under one key) offers each newer message under the
+///   key of the one it supersedes, so what is held never grows into a queue
+///   and a slow reader gets the newest message once it catches up;
+/// - a **reply** (`GetResult`, keyed by its request) has a key of its own,
+///   so it is held until it is written, never replaced.
+///
+/// A flush writes the held messages in the order their keys were first
+/// offered and stops at the first refusal — the rest would not fit either.
+/// While the window stays full the outbox is retried after a delay that
+/// doubles from [`Self::FIRST_RETRY`] up to [`Self::LAST_RETRY`], so a
+/// reader that never acknowledges costs one refused write per `LAST_RETRY`.
+/// Pure state: the action task supplies the write and the clock.
+pub(crate) struct Outbox<K, M> {
+    pending: Vec<(K, M)>,
     /// The last retry delay, while the window is full.
     backoff: Option<Duration>,
+    /// When to flush again, while the window is full.
+    retry_at: Option<Instant>,
 }
 
-impl FeedbackOutbox {
-    /// The retry delay after the window first fills. A DDS writer asks a
-    /// lagging reader to acknowledge every 100 ms, so the window cannot be
-    /// expected to reopen much sooner.
-    const FIRST_RETRY: Duration = Duration::from_millis(100);
+impl<K, M> Default for Outbox<K, M> {
+    fn default() -> Self {
+        Self {
+            pending: Vec::new(),
+            backoff: None,
+            retry_at: None,
+        }
+    }
+}
+
+impl<K: PartialEq, M> Outbox<K, M> {
+    /// The retry delay after the window first fills. A healthy reader
+    /// acknowledges within a round trip — each sample carries a heartbeat
+    /// that asks it to — so a window that a write found full while a reader
+    /// was still acknowledging reopens about this soon.
+    const FIRST_RETRY: Duration = Duration::from_millis(10);
     /// The longest retry delay.
     const LAST_RETRY: Duration = Duration::from_secs(1);
 
-    /// Hold `message` as the newest feedback of `goal_id` on `key`,
-    /// replacing any not yet published.
-    pub fn offer(&mut self, goal_id: [u8; 16], key: Key, message: Vec<u8>) {
-        self.pending.insert((goal_id, key), message);
+    /// Hold `message` under `key`, replacing a message the key still holds.
+    pub fn offer(&mut self, key: K, message: M) {
+        match self.pending.iter_mut().find(|(held, _)| *held == key) {
+            Some((_, held)) => *held = message,
+            None => self.pending.push((key, message)),
+        }
     }
 
-    /// Drop whatever feedback `goal_id` still has waiting.
-    pub fn forget(&mut self, goal_id: [u8; 16]) {
-        self.pending.retain(|(id, _), _| *id != goal_id);
+    /// Drop the held messages whose key `keep` refuses.
+    pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+        self.pending.retain(|(key, _)| keep(key));
     }
 
-    /// Whether the last flush found the window full.
-    pub fn backing_off(&self) -> bool {
-        self.backoff.is_some()
+    /// Whether the window has stayed full until the retry delay reached its
+    /// cap — a reader is not acknowledging, rather than slow to.
+    pub fn stalled(&self) -> bool {
+        self.backoff == Some(Self::LAST_RETRY)
     }
 
-    /// Publish the held messages through `publish`, keeping each one the
-    /// window refuses. A full window stops the flush at the first refusal —
-    /// the rest would not fit either — and returns how long to wait before
-    /// flushing again; `None` once the window took everything.
-    pub fn flush(&mut self, mut publish: impl FnMut(&[u8]) -> Delivery) -> Option<Duration> {
+    /// When the outbox is next due for a flush; `None` while the window is
+    /// open.
+    pub fn retry_at(&self) -> Option<Instant> {
+        self.retry_at
+    }
+
+    /// Write the held messages through `write`, unless the outbox is backing
+    /// off and its retry is not yet due at `now`. Each message the window
+    /// refuses is kept, and the flush stops there; a message whose write
+    /// fails otherwise is dropped. A refusal sets when to retry
+    /// ([`retry_at`](Self::retry_at)); a flush the window takes in full
+    /// clears it.
+    pub fn flush(&mut self, now: Instant, mut write: impl FnMut(&K, &M) -> Delivery) {
+        if self.retry_at.is_some_and(|at| now < at) {
+            return;
+        }
         let mut full = false;
-        self.pending.retain(|_, message| {
+        self.pending.retain(|(key, message)| {
             if full {
                 return true;
             }
-            match publish(message) {
+            match write(key, message) {
                 Delivery::Sent | Delivery::Failed(_) => false,
                 Delivery::Full => {
                     full = true;
@@ -1346,18 +1382,25 @@ impl FeedbackOutbox {
             self.backoff
                 .map_or(Self::FIRST_RETRY, |delay| (delay * 2).min(Self::LAST_RETRY))
         });
-        self.backoff
+        self.retry_at = self.backoff.map(|delay| now + delay);
     }
 
-    /// The held message of `goal_id` on `key` — the tests' window into the
-    /// outbox.
+    /// The message `key` holds — the tests' window into the outbox.
     #[cfg(test)]
-    fn pending(&self, goal_id: [u8; 16], key: &str) -> Option<&[u8]> {
+    fn pending(&self, key: &K) -> Option<&M> {
         self.pending
-            .get(&(goal_id, Key::from(key)))
-            .map(Vec::as_slice)
+            .iter()
+            .find(|(held, _)| held == key)
+            .map(|(_, message)| message)
     }
 }
+
+/// The newest encoded feedback message per goal and feedback key.
+type FeedbackOutbox = Outbox<([u8; 16], Key), Vec<u8>>;
+/// The newest status array — the one latest value of the status topic.
+type StatusOutbox = Outbox<(), GoalStatusArray>;
+/// The encoded `GetResult` replies, each under the request it answers.
+type ResultOutbox = Outbox<RmwRequestId, Vec<u8>>;
 
 // =============================================================================
 // The action task — one per action, driving its endpoints and its goal book.
@@ -1365,13 +1408,13 @@ impl FeedbackOutbox {
 
 /// Serve one action: the task the node task spawns per resolved
 /// [`MethodAction`]. Owns the action's endpoints, its [`GoalBook`] and its
-/// [`FeedbackOutbox`] (single-owner, no locks) and selects over the four
-/// things that advance a goal: a SendGoal request (decode → SPAWN → accept),
-/// a CancelGoal request (stop calls → `Canceling`), a GetResult request
+/// [`Outboxes`] (single-owner, no locks) and selects over the four things
+/// that advance a goal: a SendGoal request (decode → SPAWN → accept), a
+/// CancelGoal request (stop calls → `Canceling`), a GetResult request
 /// (queued until terminal), and the device's outbound state changes (the
 /// run's status/feedback/result keys), forwarded by the node task on
-/// `changes` — plus, while the feedback window is full, the retry of the
-/// feedback it held back.
+/// `changes` — plus, while a writer's send window is full, the retry of
+/// what its outbox holds back.
 pub(crate) async fn action_task(
     server: RawActionServer,
     action: MethodAction,
@@ -1380,15 +1423,17 @@ pub(crate) async fn action_task(
     mut changes: tmpsc::UnboundedReceiver<StateChange>,
 ) {
     let mut book = GoalBook::default();
-    let mut feedback = FeedbackOutbox::default();
-    // When held-back feedback is next tried; `None` while the window is open.
-    let mut retry_at: Option<Instant> = None;
+    let mut outboxes = Outboxes::default();
     loop {
         tokio::select! {
             goal = server.receive_goal_request() => match goal {
                 Ok((request, bytes)) => {
-                    handle_goal(&server, &action, &registry, &cmd_tx, &mut book, request, &bytes)
-                        .await;
+                    if handle_goal(&server, &action, &registry, &cmd_tx, &mut book, request, &bytes)
+                        .await
+                    {
+                        outboxes.status.offer((), status_array(&book));
+                        outboxes.flush(&server, &action);
+                    }
                 }
                 Err(e) => {
                     warn!("action '{}' stopped receiving goals: {e:?}", action.name);
@@ -1398,6 +1443,8 @@ pub(crate) async fn action_task(
             cancel = server.receive_cancel_request() => match cancel {
                 Ok((request, goal_info)) => {
                     handle_cancel(&server, &action, &cmd_tx, &mut book, request, goal_info).await;
+                    outboxes.status.offer((), status_array(&book));
+                    outboxes.flush(&server, &action);
                 }
                 Err(e) => {
                     warn!("action '{}' stopped receiving cancels: {e:?}", action.name);
@@ -1407,7 +1454,8 @@ pub(crate) async fn action_task(
             result = server.receive_result_request() => match result {
                 Ok((request, goal_id)) => {
                     book.queue_result_request(goal_id.uuid.into_bytes(), request);
-                    flush_ready_results(&server, &action, &registry, &mut book);
+                    offer_ready_results(&action, &registry, &mut book, &mut outboxes.results);
+                    outboxes.flush(&server, &action);
                 }
                 Err(e) => {
                     warn!("action '{}' stopped receiving result requests: {e:?}", action.name);
@@ -1416,24 +1464,15 @@ pub(crate) async fn action_task(
             },
             change = changes.recv() => match change {
                 Some(change) => {
-                    observe_change(
-                        &server,
-                        &action,
-                        &registry,
-                        &mut book,
-                        &mut feedback,
-                        &mut retry_at,
-                        &change,
-                    );
+                    observe_change(&server, &action, &registry, &mut book, &mut outboxes, &change);
                 }
                 // The node task ended; so does this action.
                 None => break,
             },
-            _ = tokio::time::sleep_until(retry_at.unwrap_or_else(Instant::now)),
-                if retry_at.is_some() =>
+            _ = tokio::time::sleep_until(outboxes.retry_at().unwrap_or_else(Instant::now)),
+                if outboxes.retry_at().is_some() =>
             {
-                retry_at = None;
-                flush_feedback(&server, &action, &mut feedback, &mut retry_at);
+                outboxes.flush(&server, &action);
             }
         }
     }
@@ -1467,6 +1506,7 @@ async fn runtime_call(
 /// A SendGoal request: decode the goal, spawn its run, accept — or reject when
 /// anything on that path fails (a malformed request, a refused spawn, a
 /// duplicate goal id, a bound action already serving a higher-priority goal).
+/// Whether the goal was accepted: the status array then changed.
 async fn handle_goal(
     server: &RawActionServer,
     action: &MethodAction,
@@ -1475,10 +1515,11 @@ async fn handle_goal(
     book: &mut GoalBook,
     request: RmwRequestId,
     bytes: &[u8],
-) {
+) -> bool {
     let reject = |reason: String| {
         warn!("action '{}' rejects a goal: {reason}", action.name);
         let _ = server.respond_goal(request, false, Time::ZERO);
+        false
     };
     let decoded = match cdr::decode(&action.send_goal_request_type, registry.types(), bytes) {
         Ok(value) => value,
@@ -1538,7 +1579,7 @@ async fn handle_goal(
     if server.respond_goal(request, true, stamp).is_err() {
         warn!("action '{}' could not answer a goal request", action.name);
     }
-    publish_statuses(server, action, book);
+    true
 }
 
 /// A CancelGoal request: mark the selected goals `Canceling`, issue their stop
@@ -1581,7 +1622,6 @@ async fn handle_cancel(
     if server.respond_cancel(request, response).is_err() {
         warn!("action '{}' could not answer a cancel request", action.name);
     }
-    publish_statuses(server, action, book);
 }
 
 /// One outbound state change: advance the book and act on what it reports —
@@ -1591,8 +1631,7 @@ fn observe_change(
     action: &MethodAction,
     registry: &Ros2Registry,
     book: &mut GoalBook,
-    feedback: &mut FeedbackOutbox,
-    retry_at: &mut Option<Instant>,
+    outboxes: &mut Outboxes,
     change: &StateChange,
 ) {
     let events = book.observe(change);
@@ -1609,20 +1648,23 @@ fn observe_change(
                 value,
             } => {
                 if let Some(message) = encode_feedback(action, registry, goal_id, value) {
-                    feedback.offer(goal_id, key, message);
+                    outboxes.feedback.offer((goal_id, key), message);
                 }
             }
         }
     }
-    flush_feedback(server, action, feedback, retry_at);
+    // While the window is open, feedback goes out ahead of the status and
+    // result of the same step.
+    outboxes.flush(server, action);
     if !terminal.is_empty() {
         // A goal's result supersedes its feedback: what the window still
         // holds for a finished goal is dropped, not delivered after it.
-        for goal_id in terminal {
-            feedback.forget(goal_id);
-        }
-        publish_statuses(server, action, book);
-        flush_ready_results(server, action, registry, book);
+        outboxes
+            .feedback
+            .retain(|(goal_id, _)| !terminal.contains(goal_id));
+        outboxes.status.offer((), status_array(book));
+        offer_ready_results(action, registry, book, &mut outboxes.results);
+        outboxes.flush(server, action);
     }
 }
 
@@ -1670,67 +1712,100 @@ fn encode_feedback(
     }
 }
 
-/// Publish the feedback the outbox holds, unless it is backing off from a
-/// full window — then the retry timer at `retry_at` publishes it. A window
-/// that fills arms that timer.
-fn flush_feedback(
-    server: &RawActionServer,
-    action: &MethodAction,
-    feedback: &mut FeedbackOutbox,
-    retry_at: &mut Option<Instant>,
-) {
-    if retry_at.is_some() {
-        return;
+/// The outboxes of an action's feedback, status and result writers. Each
+/// writer has its own send window, so each outbox backs off on its own.
+#[derive(Default)]
+struct Outboxes {
+    feedback: FeedbackOutbox,
+    status: StatusOutbox,
+    results: ResultOutbox,
+}
+
+impl Outboxes {
+    /// When the first outbox backing off from a full window is due.
+    fn retry_at(&self) -> Option<Instant> {
+        [
+            self.feedback.retry_at(),
+            self.status.retry_at(),
+            self.results.retry_at(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
-    let was_full = feedback.backing_off();
-    let retry = feedback.flush(|message| {
-        let delivery = publish_feedback(server, message);
-        if let Delivery::Failed(e) = &delivery {
-            warn!("action '{}' could not publish feedback: {e}", action.name);
-        }
-        delivery
-    });
-    if let Some(delay) = retry {
-        if !was_full {
-            warn!(
-                "action '{}': the feedback window is full (a reader is not acknowledging); \
-                 holding the newest feedback per goal",
-                action.name
-            );
-        }
-        *retry_at = Some(Instant::now() + delay);
+
+    /// Write what each outbox holds — feedback, then status, then results,
+    /// the order of a device step — except an outbox whose retry is not yet
+    /// due.
+    fn flush(&mut self, server: &RawActionServer, action: &MethodAction) {
+        flush_outbox(action, "feedback", &mut self.feedback, |_, message| {
+            delivery(server.publish_feedback_raw(message))
+        });
+        flush_outbox(action, "status", &mut self.status, |_, statuses| {
+            delivery(server.publish_statuses(statuses.clone()))
+        });
+        flush_outbox(action, "result", &mut self.results, |request, reply| {
+            delivery(server.respond_result_raw(*request, reply))
+        });
     }
 }
 
-/// Publish one encoded feedback message without waiting on any reader.
+/// Flush one outbox now, logging each write that fails and, once, a window
+/// that stays full. A window that a healthy reader has yet to acknowledge
+/// reopens within the first retries, and goes unlogged.
+fn flush_outbox<K: PartialEq, M>(
+    action: &MethodAction,
+    what: &str,
+    outbox: &mut Outbox<K, M>,
+    mut write: impl FnMut(&K, &M) -> Delivery,
+) {
+    let was_stalled = outbox.stalled();
+    outbox.flush(Instant::now(), |key, message| {
+        let delivery = write(key, message);
+        if let Delivery::Failed(e) = &delivery {
+            warn!("action '{}' could not write its {what}: {e}", action.name);
+        }
+        delivery
+    });
+    if outbox.stalled() && !was_stalled {
+        warn!(
+            "action '{}': the {what} window has stayed full for a second (a reader is not \
+             acknowledging); holding back what it refuses",
+            action.name
+        );
+    }
+}
+
+/// How a write went, without having waited on any reader.
 ///
-/// On DDS the feedback writer has no blocking time (see the bridge's
-/// `feedback_qos`), so a full send window answers `WouldBlock` at once.
+/// The feedback, status and result writers have no blocking time (see the
+/// bridge's `create_raw_action_server`), so a full send window answers
+/// `WouldBlock` at once.
 #[cfg(feature = "dds")]
-fn publish_feedback(server: &RawActionServer, message: &[u8]) -> Delivery {
-    match server.publish_feedback_raw(message) {
+fn delivery<D>(written: Result<(), ros2_client::ros2::WriteError<D>>) -> Delivery {
+    match written {
         Ok(()) => Delivery::Sent,
         Err(ros2_client::ros2::WriteError::WouldBlock { .. }) => Delivery::Full,
         Err(e) => Delivery::Failed(e.to_string()),
     }
 }
 
-/// Publish one encoded feedback message without waiting on any reader.
+/// How a write went, without having waited on any reader.
 ///
 /// A Zenoh publisher drops a sample its transmission queue cannot take
 /// (congestion control `Drop`, the default for a `put`) rather than waiting,
-/// so its window never reports full.
+/// and a reply has no window of its own, so nothing reports a full window.
 #[cfg(feature = "zenoh")]
-fn publish_feedback(server: &RawActionServer, message: &[u8]) -> Delivery {
-    match server.publish_feedback_raw(message) {
+fn delivery<E: std::fmt::Debug>(written: Result<(), E>) -> Delivery {
+    match written {
         Ok(()) => Delivery::Sent,
         Err(e) => Delivery::Failed(format!("{e:?}")),
     }
 }
 
-/// Publish the status of every goal the book knows.
-fn publish_statuses(server: &RawActionServer, action: &MethodAction, book: &GoalBook) {
-    let statuses = GoalStatusArray {
+/// The status of every goal the book knows, as the status topic's message.
+fn status_array(book: &GoalBook) -> GoalStatusArray {
+    GoalStatusArray {
         status_list: book
             .statuses()
             .map(|(goal_id, stamp, status)| GoalStatus {
@@ -1743,25 +1818,19 @@ fn publish_statuses(server: &RawActionServer, action: &MethodAction, book: &Goal
                 status,
             })
             .collect(),
-    };
-    if server.publish_statuses(statuses).is_err() {
-        warn!(
-            "action '{}' could not publish its status array",
-            action.name
-        );
     }
 }
 
-/// Answer every queued GetResult request whose goal is terminal. On the
-/// synthesised wire: `status: int8` + the result the run wrote, lazily typed
-/// (status alone when the run wrote none, or wrote a value ROS cannot carry —
-/// logged). On a bound wire: `status` + the bound Result message carrying the
-/// errno ([`bound_result_value`]).
-fn flush_ready_results(
-    server: &RawActionServer,
+/// Encode the reply to every queued GetResult request whose goal is
+/// terminal into `results`. On the synthesised wire: `status: int8` + the
+/// result the run wrote, lazily typed (status alone when the run wrote none,
+/// or wrote a value ROS cannot carry — logged). On a bound wire: `status` +
+/// the bound Result message carrying the errno ([`bound_result_value`]).
+fn offer_ready_results(
     action: &MethodAction,
     registry: &Ros2Registry,
     book: &mut GoalBook,
+    results: &mut ResultOutbox,
 ) {
     for (request, status, cause, result) in book.take_ready_results() {
         let (response_type, value) = match &action.wire {
@@ -1806,11 +1875,7 @@ fn flush_ready_results(
             }
         };
         match cdr::encode(&response_type, registry.types(), &value) {
-            Ok(bytes) => {
-                if server.respond_result_raw(request, &bytes).is_err() {
-                    warn!("action '{}' could not answer a result request", action.name);
-                }
-            }
+            Ok(bytes) => results.offer(request, bytes),
             Err(e) => warn!("action '{}': encoding a result: {e}", action.name),
         }
     }
@@ -2253,96 +2318,166 @@ mod tests {
         );
     }
 
-    /// While the window is full, the outbox holds one message per goal and
-    /// key — the newest — however much feedback the run writes, and each
-    /// flush costs one refused attempt. Once the window reopens, the newest
-    /// value is published once and nothing stale follows it.
+    /// While the window is full, the outbox holds one message per key — the
+    /// newest — however much feedback the run writes, and each due flush costs
+    /// one refused write. Once the window reopens, the newest value is written
+    /// once and nothing stale follows it.
     #[test]
-    fn a_full_window_holds_only_the_newest_feedback() {
-        let key = "arora/tasks/m/f/run1/feedback";
+    fn a_full_window_holds_only_the_newest_message_per_key() {
+        let key = ([1u8; 16], Key::from("arora/tasks/m/f/run1/feedback"));
         let mut outbox = FeedbackOutbox::default();
+        let mut now = Instant::now();
         let mut attempts = 0;
         for value in 1..=50u8 {
-            outbox.offer([1u8; 16], Key::from(key), vec![value]);
-            let retry = outbox.flush(|_| {
+            outbox.offer(key.clone(), vec![value]);
+            outbox.flush(now, |_, _| {
                 attempts += 1;
                 Delivery::Full
             });
-            assert!(retry.is_some(), "a full window asks for a retry");
+            now = outbox.retry_at().expect("a full window asks for a retry");
         }
         assert_eq!(attempts, 50);
-        assert_eq!(outbox.pending([1u8; 16], key), Some(&[50u8][..]));
+        assert_eq!(outbox.pending(&key), Some(&vec![50u8]));
 
-        let mut sent = Vec::new();
-        let retry = outbox.flush(|message| {
-            sent.push(message.to_vec());
+        let mut written = Vec::new();
+        outbox.flush(now, |_, message| {
+            written.push(message.clone());
             Delivery::Sent
         });
-        assert_eq!(retry, None);
-        assert_eq!(sent, vec![vec![50u8]]);
-        assert!(!outbox.backing_off());
-        assert_eq!(outbox.flush(|_| panic!("nothing is left to publish")), None);
+        assert_eq!(written, vec![vec![50u8]]);
+        assert_eq!(outbox.retry_at(), None);
+        outbox.flush(now, |_, _| panic!("nothing is left to write"));
+    }
+
+    /// The status array is one latest value: a full window keeps the newest
+    /// array only, and the reopened window gets that one.
+    #[test]
+    fn a_full_window_keeps_the_newest_status_array() {
+        let mut outbox: Outbox<(), u8> = Outbox::default();
+        let now = Instant::now();
+        outbox.offer((), 1);
+        outbox.flush(now, |_, _| Delivery::Full);
+        outbox.offer((), 2);
+        outbox.offer((), 3);
+        let mut written = Vec::new();
+        outbox.flush(outbox.retry_at().unwrap(), |_, status| {
+            written.push(*status);
+            Delivery::Sent
+        });
+        assert_eq!(written, vec![3]);
+    }
+
+    /// Replies have a key each, so none replaces another: every reply the
+    /// window refused is kept until it is written, in the order the requests
+    /// were answered, however long the window stays full.
+    #[test]
+    fn a_refused_reply_is_kept_until_it_is_written() {
+        let mut outbox: Outbox<u64, Vec<u8>> = Outbox::default();
+        let mut now = Instant::now();
+        for request in 1..=3u64 {
+            outbox.offer(request, vec![request as u8]);
+            outbox.flush(now, |_, _| Delivery::Full);
+            now = outbox.retry_at().unwrap();
+        }
+        for _ in 0..20 {
+            outbox.flush(now, |_, _| Delivery::Full);
+            now = outbox.retry_at().unwrap();
+        }
+        let mut written = Vec::new();
+        outbox.flush(now, |request, reply| {
+            written.push((*request, reply.clone()));
+            Delivery::Sent
+        });
+        assert_eq!(written, vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]);
     }
 
     /// Goals and feedback keys are separate streams. A full window stops a
     /// flush at its first refusal — the rest would not fit either — and they
-    /// all go out together once it reopens.
+    /// all go out together, in the order they were first offered, once it
+    /// reopens.
     #[test]
     fn a_full_window_stops_the_flush_at_the_first_refusal() {
         let mut outbox = FeedbackOutbox::default();
-        outbox.offer([1u8; 16], Key::from("run1/feedback"), vec![1]);
-        outbox.offer([1u8; 16], Key::from("run1/progress"), vec![2]);
-        outbox.offer([2u8; 16], Key::from("run2/feedback"), vec![3]);
+        let now = Instant::now();
+        outbox.offer(([1u8; 16], Key::from("run1/feedback")), vec![1]);
+        outbox.offer(([1u8; 16], Key::from("run1/progress")), vec![2]);
+        outbox.offer(([2u8; 16], Key::from("run2/feedback")), vec![3]);
 
         let mut attempts = 0;
-        outbox.flush(|_| {
+        outbox.flush(now, |_, _| {
             attempts += 1;
             Delivery::Full
         });
         assert_eq!(attempts, 1);
 
-        let mut sent = Vec::new();
-        outbox.flush(|message| {
-            sent.push(message[0]);
+        let mut written = Vec::new();
+        outbox.flush(outbox.retry_at().unwrap(), |_, message| {
+            written.push(message[0]);
             Delivery::Sent
         });
-        sent.sort_unstable();
-        assert_eq!(sent, vec![1, 2, 3]);
+        assert_eq!(written, vec![1, 2, 3]);
     }
 
-    /// The retry delay doubles while the window stays full, up to its cap,
-    /// and starts over once a message gets through.
+    /// The retry delay doubles while the window stays full, up to its cap —
+    /// the outbox is then stalled — and starts over once a message gets
+    /// through. A flush before the retry is due — a newer message offered
+    /// meanwhile — writes nothing.
     #[test]
     fn the_retry_backs_off_while_the_window_stays_full() {
-        let mut outbox = FeedbackOutbox::default();
-        let full = |outbox: &mut FeedbackOutbox| {
-            outbox.offer([1u8; 16], Key::from("run1/feedback"), vec![0]);
-            outbox.flush(|_| Delivery::Full)
-        };
-        let delays: Vec<_> = (0..6).filter_map(|_| full(&mut outbox)).collect();
+        let mut outbox: Outbox<(), u8> = Outbox::default();
+        let mut now = Instant::now();
+        let mut delays = Vec::new();
+        for _ in 0..9 {
+            outbox.offer((), 0);
+            outbox.flush(now, |_, _| Delivery::Full);
+            let at = outbox.retry_at().unwrap();
+            delays.push(at - now);
+            assert_eq!(outbox.stalled(), at - now == Duration::from_secs(1));
+            outbox.flush(at - Duration::from_millis(1), |_, _| {
+                panic!("the retry is not due yet")
+            });
+            now = at;
+        }
         let ms = Duration::from_millis;
         assert_eq!(
             delays,
-            vec![ms(100), ms(200), ms(400), ms(800), ms(1000), ms(1000)]
+            vec![
+                ms(10),
+                ms(20),
+                ms(40),
+                ms(80),
+                ms(160),
+                ms(320),
+                ms(640),
+                ms(1000),
+                ms(1000)
+            ]
         );
-        assert_eq!(outbox.flush(|_| Delivery::Sent), None);
-        assert_eq!(full(&mut outbox), Some(ms(100)));
+        assert!(outbox.stalled());
+        outbox.flush(now, |_, _| Delivery::Sent);
+        assert_eq!(outbox.retry_at(), None);
+        assert!(!outbox.stalled());
+        outbox.offer((), 0);
+        outbox.flush(now, |_, _| Delivery::Full);
+        assert_eq!(outbox.retry_at(), Some(now + ms(10)));
     }
 
     /// A finished goal's held-back feedback is dropped, another goal's kept;
-    /// a publish that fails outright drops its message without backing off.
+    /// a write that fails outright drops its message without backing off.
     #[test]
-    fn finished_goals_and_failed_publishes_drop_their_feedback() {
+    fn finished_goals_and_failed_writes_drop_their_messages() {
+        let run1 = ([1u8; 16], Key::from("run1/feedback"));
+        let run2 = ([2u8; 16], Key::from("run2/feedback"));
         let mut outbox = FeedbackOutbox::default();
-        outbox.offer([1u8; 16], Key::from("run1/feedback"), vec![1]);
-        outbox.offer([2u8; 16], Key::from("run2/feedback"), vec![2]);
-        outbox.forget([1u8; 16]);
-        assert_eq!(outbox.pending([1u8; 16], "run1/feedback"), None);
-        assert_eq!(outbox.pending([2u8; 16], "run2/feedback"), Some(&[2u8][..]));
+        outbox.offer(run1.clone(), vec![1]);
+        outbox.offer(run2.clone(), vec![2]);
+        outbox.retain(|(goal_id, _)| *goal_id != [1u8; 16]);
+        assert_eq!(outbox.pending(&run1), None);
+        assert_eq!(outbox.pending(&run2), Some(&vec![2u8]));
 
-        assert_eq!(outbox.flush(|_| Delivery::Failed("gone".to_string())), None);
-        assert_eq!(outbox.pending([2u8; 16], "run2/feedback"), None);
-        assert!(!outbox.backing_off());
+        outbox.flush(Instant::now(), |_, _| Delivery::Failed("gone".to_string()));
+        assert_eq!(outbox.pending(&run2), None);
+        assert_eq!(outbox.retry_at(), None);
     }
 
     /// The LookAt cancel path: canceling marks the goal, and the halt-driven

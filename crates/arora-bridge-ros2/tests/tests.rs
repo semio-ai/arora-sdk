@@ -1503,87 +1503,17 @@ async fn the_bound_look_at_skill_serves_the_standard_contract() {
     }
 }
 
-/// What [`silent_feedback_reader`] reads its DDS domain from; set only by
-/// [`a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result`],
-/// which runs it as a separate process.
-const SILENT_READER_DOMAIN: &str = "ARORA_SILENT_FEEDBACK_READER_DOMAIN";
-/// The line [`silent_feedback_reader`] prints once it holds a feedback sample.
-const SILENT_READER_READY: &str = "silent-feedback-reader: matched";
+/// An action's readers that stop acknowledging. Each test here runs a second
+/// process — this test binary, running [`silent_reader`](unacknowledged_readers::silent_reader)
+/// — whose reliable readers match the bridge's `look_at` action writers and
+/// are then stopped with SIGSTOP. A stopped process stays matched for its
+/// participant lease but never acknowledges, so each writer it reads keeps a
+/// full send window. The bridge runs on worker threads apart from the
+/// scripted device, so a write that blocks its thread cannot slow the
+/// device's ticks and hide the delay.
+mod unacknowledged_readers {
+    use super::*;
 
-/// The feedback reader of
-/// [`a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result`],
-/// run as that test's child process: a plain DDS participant reading the
-/// `look_at` action's feedback reliably. It announces itself once it holds a
-/// sample — proof that the bridge's feedback writer has matched it — and then
-/// idles until the parent stops it, which leaves its reader matched but
-/// silent. Without its environment variable it returns at once.
-#[test]
-#[ignore = "the child process of a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result"]
-fn silent_feedback_reader() {
-    use ros2_client::rustdds::{policy, DomainParticipant, QosPolicyBuilder, TopicKind};
-    use serde::Deserialize;
-
-    let Ok(domain_id) = std::env::var(SILENT_READER_DOMAIN) else {
-        return;
-    };
-    let domain_id: u16 = domain_id.parse().expect("a DDS domain id");
-    let qos = QosPolicyBuilder::new()
-        .reliability(policy::Reliability::Reliable {
-            max_blocking_time: ros2_client::rustdds::Duration::from_millis(100),
-        })
-        .history(policy::History::KeepLast { depth: 4 })
-        .durability(policy::Durability::Volatile)
-        .build();
-    let participant = DomainParticipant::new(domain_id).expect("participant creates");
-    let topic = participant
-        .create_topic(
-            "rt/robot/actions/look_at/_action/feedback".to_string(),
-            "arora::action::dds_::look_at_FeedbackMessage_".to_string(),
-            &qos,
-            TopicKind::NoKey,
-        )
-        .expect("topic creates");
-    let subscriber = participant
-        .create_subscriber(&qos)
-        .expect("subscriber creates");
-
-    #[derive(Deserialize)]
-    struct FeedbackMessage {
-        _goal_id: [u8; 16],
-        _gaze_error: f32,
-    }
-    let mut reader = subscriber
-        .create_datareader_no_key_cdr::<FeedbackMessage>(&topic, Some(qos))
-        .expect("reader creates");
-    while !matches!(reader.take_next_sample(), Ok(Some(_))) {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    println!("{SILENT_READER_READY}");
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
-    }
-}
-
-/// A reader of an action's feedback that stops acknowledging does not hold
-/// back the goal's result. A second process ([`silent_feedback_reader`])
-/// matches the bridge's `look_at` feedback writer reliably and is then
-/// stopped (SIGSTOP), so it stays matched for its participant lease but never
-/// acknowledges again: the writer's send window fills and stays full. The
-/// run keeps writing feedback every 10 ms for a second, then succeeds. A
-/// write that waited on the window — the 100 ms a reliable write may block —
-/// would put the result some ten seconds behind the run; feedback that does
-/// not wait puts it within moments. The bridge runs on worker threads apart
-/// from the scripted device, so a write that blocks its thread cannot slow
-/// the device's ticks and hide the delay.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial]
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
-              has no unicast-peer/interface config), and the reader is stopped with \
-              SIGSTOP; this runs on Linux CI."
-)]
-async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result() {
     use std::io::BufRead;
     use std::process::{Child, Command, Stdio};
 
@@ -1605,6 +1535,16 @@ async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_resul
     use tokio::sync::oneshot;
     use tokio::time::Instant;
 
+    /// The DDS domain [`silent_reader`] joins; set only by the tests that run
+    /// it as a separate process.
+    const SILENT_READER_DOMAIN: &str = "ARORA_SILENT_READER_DOMAIN";
+    /// The `look_at` endpoints [`silent_reader`] reads, comma-separated:
+    /// `feedback`, `status`, `result` (the `GetResult` replies).
+    const SILENT_READER_ENDPOINTS: &str = "ARORA_SILENT_READER_ENDPOINTS";
+    /// The line [`silent_reader`] prints once each of its readers holds a
+    /// sample.
+    const SILENT_READER_READY: &str = "silent-reader: matched";
+
     #[derive(Serialize, Deserialize, Clone)]
     struct LookAtGoal {
         x: f64,
@@ -1621,13 +1561,170 @@ async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_resul
     }
     impl Message for LookAtFeedback {}
 
-    /// Kills the reader process however the test ends; a stopped process
-    /// still takes SIGKILL.
-    struct Reader(Child);
-    impl Drop for Reader {
+    type LookAt = ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>;
+
+    /// The result code every run writes.
+    const RESULT_CODE: i32 = 7;
+
+    /// The readers of [`SilentReader`], run as a separate process: a plain DDS
+    /// participant reading the `look_at` endpoints its environment names,
+    /// reliably. It announces itself once each reader holds a sample — proof
+    /// that the bridge's writer has matched it — and then idles until the
+    /// parent stops it. Without its environment it returns at once.
+    #[test]
+    #[ignore = "the child process of the unacknowledged_readers tests"]
+    fn silent_reader() {
+        use ros2_client::action_msgs::GoalStatusArray;
+        use ros2_client::rustdds::{
+            policy, DomainParticipant, QosPolicies, QosPolicyBuilder, Subscriber, TopicKind,
+        };
+        use serde::de::DeserializeOwned;
+
+        #[derive(Deserialize)]
+        struct FeedbackMessage {
+            _goal_id: [u8; 16],
+            _gaze_error: f32,
+        }
+        #[derive(Deserialize)]
+        struct GetResultResponse {
+            _status: i8,
+            _code: i32,
+        }
+
+        /// A reliable reader of `topic`, as a check that it took a sample.
+        fn reader<D: DeserializeOwned + 'static>(
+            participant: &DomainParticipant,
+            subscriber: &Subscriber,
+            topic: &str,
+            type_name: &str,
+            durability: policy::Durability,
+        ) -> Box<dyn FnMut() -> bool> {
+            let qos: QosPolicies = QosPolicyBuilder::new()
+                .reliability(policy::Reliability::Reliable {
+                    max_blocking_time: ros2_client::rustdds::Duration::from_millis(100),
+                })
+                .history(policy::History::KeepLast { depth: 4 })
+                .durability(durability)
+                .build();
+            let topic = participant
+                .create_topic(
+                    topic.to_string(),
+                    type_name.to_string(),
+                    &qos,
+                    TopicKind::NoKey,
+                )
+                .expect("topic creates");
+            let mut reader = subscriber
+                .create_datareader_no_key_cdr::<D>(&topic, Some(qos))
+                .expect("reader creates");
+            Box::new(move || matches!(reader.take_next_sample(), Ok(Some(_))))
+        }
+
+        let (Ok(domain_id), Ok(endpoints)) = (
+            std::env::var(SILENT_READER_DOMAIN),
+            std::env::var(SILENT_READER_ENDPOINTS),
+        ) else {
+            return;
+        };
+        let domain_id: u16 = domain_id.parse().expect("a DDS domain id");
+        let participant = DomainParticipant::new(domain_id).expect("participant creates");
+        let subscriber = participant
+            .create_subscriber(&QosPolicies::qos_none())
+            .expect("subscriber creates");
+        let mut readers: Vec<_> = endpoints
+            .split(',')
+            .map(|endpoint| match endpoint {
+                "feedback" => reader::<FeedbackMessage>(
+                    &participant,
+                    &subscriber,
+                    "rt/robot/actions/look_at/_action/feedback",
+                    "arora::action::dds_::look_at_FeedbackMessage_",
+                    policy::Durability::Volatile,
+                ),
+                // The status topic is transient-local: the reader gets the
+                // current array as soon as it matches.
+                "status" => reader::<GoalStatusArray>(
+                    &participant,
+                    &subscriber,
+                    "rt/robot/actions/look_at/_action/status",
+                    "action_msgs::msg::dds_::GoalStatusArray_",
+                    policy::Durability::TransientLocal,
+                ),
+                // A DDS service reply reaches every reader of the reply topic;
+                // the requester picks its own out by request id.
+                "result" => reader::<GetResultResponse>(
+                    &participant,
+                    &subscriber,
+                    "rr/robot/actions/look_at/_action/get_resultReply",
+                    "arora::action::dds_::look_at_GetResult_Response_",
+                    policy::Durability::Volatile,
+                ),
+                other => panic!("no such look_at endpoint: {other}"),
+            })
+            .collect();
+        // The readers stay alive to the end: a dropped reader unmatches.
+        let mut matched = vec![false; readers.len()];
+        while !matched.iter().all(|matched| *matched) {
+            for (took_a_sample, matched) in readers.iter_mut().zip(&mut matched) {
+                *matched |= took_a_sample();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        println!("{SILENT_READER_READY}");
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    /// A [`silent_reader`] process, killed however the test ends (a stopped
+    /// process still takes SIGKILL).
+    struct SilentReader {
+        process: Child,
+        /// Resolves once each of its readers holds a sample.
+        matched: oneshot::Receiver<()>,
+    }
+
+    impl SilentReader {
+        fn spawn(domain_id: u16, endpoints: &str) -> Self {
+            let mut process = Command::new(std::env::current_exe().expect("the test binary"))
+                .args([
+                    "unacknowledged_readers::silent_reader",
+                    "--exact",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(SILENT_READER_DOMAIN, domain_id.to_string())
+                .env(SILENT_READER_ENDPOINTS, endpoints)
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("the reader process starts");
+            let (matched_tx, matched) = oneshot::channel();
+            let stdout = process.stdout.take().expect("piped stdout");
+            std::thread::spawn(move || {
+                for line in std::io::BufReader::new(stdout).lines() {
+                    if line.is_ok_and(|line| line.contains(SILENT_READER_READY)) {
+                        let _ = matched_tx.send(());
+                        return;
+                    }
+                }
+            });
+            Self { process, matched }
+        }
+
+        /// Send the process `signal` (`STOP`, `CONT`).
+        fn signal(&self, signal: &str) {
+            let sent = Command::new("kill")
+                .args([format!("-{signal}"), self.process.id().to_string()])
+                .status()
+                .expect("kill runs");
+            assert!(sent.success(), "the reader process takes SIG{signal}");
+        }
+    }
+
+    impl Drop for SilentReader {
         fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
+            let _ = self.process.kill();
+            let _ = self.process.wait();
         }
     }
 
@@ -1668,133 +1765,41 @@ async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_resul
         }
     }
 
-    const RESULT_CODE: i32 = 7;
-    /// Feedback ticks after the reader is stopped, 10 ms apart.
-    const SILENT_TICKS: u32 = 100;
-
-    let _ = env_logger::builder()
-        .parse_filters("warn")
-        .is_test(true)
-        .try_init();
-    let domain_id = random_domain_id();
-    let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
-    let mut inbound = bridge.take_inbound();
-
-    // The reader process: this test binary, running `silent_feedback_reader`.
-    let mut reader = Reader(
-        Command::new(std::env::current_exe().expect("the test binary"))
-            .args([
-                "silent_feedback_reader",
-                "--exact",
-                "--ignored",
-                "--nocapture",
-            ])
-            .env(SILENT_READER_DOMAIN, domain_id.to_string())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("the reader process starts"),
-    );
-    let reader_pid = reader.0.id();
-    let (ready_tx, ready_rx) = oneshot::channel::<()>();
-    let reader_stdout = reader.0.stdout.take().expect("piped stdout");
-    std::thread::spawn(move || {
-        for line in std::io::BufReader::new(reader_stdout).lines() {
-            if line.is_ok_and(|line| line.contains(SILENT_READER_READY)) {
-                let _ = ready_tx.send(());
-                return;
-            }
-        }
-    });
-
-    // The scripted runtime: it answers discovery and SPAWN, then writes the
-    // run's feedback every 10 ms — until the reader is stopped, and for
-    // SILENT_TICKS ticks after — and finally its result and `Success`,
-    // reporting when it did.
-    let (stopped_tx, mut stopped_rx) = oneshot::channel::<()>();
-    let (finished_tx, finished_rx) = oneshot::channel::<Instant>();
-    let runtime = async move {
-        let prefix = "arora/tasks/gaze/look_at/run1";
-        let handle = TaskHandle {
-            id: TaskId(Uuid::from_u128(0x52)),
-            stop: interpreter_module::encode_halt(TaskId(Uuid::from_u128(0x52))),
+    /// The handle of run `n`: its keys live under `arora/tasks/gaze/look_at/run{n}`.
+    fn run_handle(n: u128) -> TaskHandle {
+        let prefix = format!("arora/tasks/gaze/look_at/run{n}");
+        TaskHandle {
+            id: TaskId(Uuid::from_u128(n)),
+            stop: interpreter_module::encode_halt(TaskId(Uuid::from_u128(n))),
             status: Key::from(format!("{prefix}/status")),
             feedback: vec![Key::from(format!("{prefix}/feedback"))],
             result: vec![Key::from(format!("{prefix}/result"))],
             update: vec![Key::from(format!("{prefix}/update"))],
-        };
-        let mut running = false;
-        let mut tick = 0u32;
-        let mut silent_ticks: Option<u32> = None;
-        let mut finished_tx = Some(finished_tx);
-        loop {
-            let event = tokio::select! {
-                event = inbound.next() => event,
-                _ = tokio::time::sleep(Duration::from_millis(10)), if running => {
-                    if silent_ticks.is_none() && stopped_rx.try_recv().is_ok() {
-                        silent_ticks = Some(0);
-                    }
-                    if silent_ticks == Some(SILENT_TICKS) {
-                        let mut change = StateChange::set(
-                            handle.status.clone(),
-                            status_value(STATUS_SUCCESS_VARIANT_ID),
-                        );
-                        change
-                            .set
-                            .insert(handle.result[0].clone(), Some(Value::I32(RESULT_CODE)));
-                        bridge.try_send(&change);
-                        running = false;
-                        if let Some(tx) = finished_tx.take() {
-                            let _ = tx.send(Instant::now());
-                        }
-                        continue;
-                    }
-                    tick += 1;
-                    silent_ticks = silent_ticks.map(|n| n + 1);
-                    let mut change = StateChange::set(
-                        handle.status.clone(),
-                        status_value(STATUS_RUNNING_VARIANT_ID),
-                    );
-                    change
-                        .set
-                        .insert(handle.feedback[0].clone(), Some(Value::F32(tick as f32)));
-                    bridge.try_send(&change);
-                    continue;
-                }
-            };
-            let Some(event) = event else { break };
-            let Inbound::Command(cmd) = event else {
-                continue;
-            };
-            match &cmd.op {
-                BridgeOp::DescribeMethods { .. } => {
-                    cmd.reply(Ok(CallResult {
-                        ret: value_serde::to_value(&vec![look_at_signature()])
-                            .expect("signatures encode"),
-                        mutated: Vec::new(),
-                    }));
-                }
-                BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
-                    running = true;
-                    cmd.reply(Ok(CallResult {
-                        ret: interpreter_module::encode_spawn_result(&handle),
-                        mutated: Vec::new(),
-                    }));
-                }
-                BridgeOp::ListKeys { .. } => {
-                    let inputs: Vec<(String, KeyMeta)> = Vec::new();
-                    cmd.reply(Ok(CallResult {
-                        ret: value_serde::to_value(&inputs).expect("keys encode"),
-                        mutated: Vec::new(),
-                    }));
-                }
-                other => panic!("unexpected runtime command: {other:?}"),
-            }
         }
-    };
-    tokio::pin!(runtime);
+    }
 
-    let client_flow = async {
-        let (_ctx, mut node) = create_test_node(domain_id, "silent_reader_client");
+    /// Answer the runtime commands every scripted device here answers alike:
+    /// discovery describes `look_at`, and the device opens no inputs.
+    fn answer_discovery(op: &BridgeOp) -> Option<CallResult> {
+        let ret = match op {
+            BridgeOp::DescribeMethods { .. } => {
+                value_serde::to_value(&vec![look_at_signature()]).expect("signatures encode")
+            }
+            BridgeOp::ListKeys { .. } => {
+                let inputs: Vec<(String, KeyMeta)> = Vec::new();
+                value_serde::to_value(&inputs).expect("keys encode")
+            }
+            _ => return None,
+        };
+        Some(CallResult {
+            ret,
+            mutated: Vec::new(),
+        })
+    }
+
+    /// The typed client of the bridge's `look_at` action, on the services
+    /// profile every native client uses.
+    fn look_at_client(node: &mut ros2_client::Node) -> ros2_client::action::ActionClient<LookAt> {
         let service_qos = {
             use ros2_client::ros2::{policy, QosPolicyBuilder};
             QosPolicyBuilder::new()
@@ -1812,61 +1817,364 @@ async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_resul
             feedback_subscription: service_qos.clone(),
             status_subscription: service_qos.clone(),
         };
-        let client = node
-            .create_action_client::<ros2_client::Action<LookAtGoal, LookAtResult, LookAtFeedback>>(
-                ServiceMapping::Enhanced,
-                &Name::parse("/robot/actions/look_at").expect("valid action name"),
-                &ros2_client::ActionTypeName::new("arora", "look_at"),
-                qos,
-            )
-            .expect("action client creates");
+        node.create_action_client::<LookAt>(
+            ServiceMapping::Enhanced,
+            &Name::parse("/robot/actions/look_at").expect("valid action name"),
+            &ros2_client::ActionTypeName::new("arora", "look_at"),
+            qos,
+        )
+        .expect("action client creates")
+    }
 
-        let goal_id = loop {
+    /// Send a goal until the bridge accepts it — the first ones may go out
+    /// before discovery completes.
+    async fn accepted_goal(
+        client: &ros2_client::action::ActionClient<LookAt>,
+    ) -> ros2_client::action::GoalId {
+        loop {
             match tokio::time::timeout(
                 Duration::from_secs(2),
                 client.async_send_goal(LookAtGoal { x: 1.5 }),
             )
             .await
             {
-                Ok(Ok((goal_id, response))) if response.accepted => break goal_id,
+                Ok(Ok((goal_id, response))) if response.accepted => return goal_id,
                 other => {
                     eprintln!("[client] send_goal attempt: {other:?}");
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
             }
-        };
-        eprintln!("[client] goal accepted");
-
-        ready_rx.await.expect("the reader process reads feedback");
-        let stopped = Command::new("kill")
-            .args(["-STOP", &reader_pid.to_string()])
-            .status()
-            .expect("kill runs");
-        assert!(stopped.success(), "the reader process stops");
-        eprintln!("[client] reader stopped");
-        let _ = stopped_tx.send(());
-
-        let (status, result) = client
-            .async_request_result(goal_id)
-            .await
-            .expect("the result arrives");
-        let answered = Instant::now();
-        let finished = finished_rx.await.expect("the run finished");
-        assert_eq!(status, GoalStatusEnum::Succeeded);
-        assert_eq!(result.code, RESULT_CODE);
-        let behind = answered.saturating_duration_since(finished);
-        eprintln!("[client] result {behind:?} after the run finished");
-        assert!(
-            behind < Duration::from_secs(3),
-            "the result arrived {behind:?} after the run finished"
-        );
-    };
-
-    tokio::select! {
-        _ = &mut runtime => panic!("the scripted runtime ended early"),
-        result = tokio::time::timeout(Duration::from_secs(60), client_flow) => {
-            result.expect("the silent-reader lifecycle timed out");
         }
     }
-    drop(reader);
+
+    /// A reader of an action's feedback that stops acknowledging does not
+    /// hold back the goal's result. The silent reader reads the feedback
+    /// topic; once it is stopped, the run keeps writing feedback every 10 ms
+    /// for a second, then succeeds. A write that waited on the window — the
+    /// 100 ms a reliable write may block — would put the result some ten
+    /// seconds behind the run; feedback that does not wait puts it within
+    /// moments.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+                  has no unicast-peer/interface config), and the reader is stopped with \
+                  SIGSTOP; this runs on Linux CI."
+    )]
+    async fn a_feedback_reader_that_stops_acknowledging_does_not_hold_back_the_result() {
+        /// Feedback ticks after the reader is stopped, 10 ms apart.
+        const SILENT_TICKS: u32 = 100;
+
+        let _ = env_logger::builder()
+            .parse_filters("warn")
+            .is_test(true)
+            .try_init();
+        let domain_id = random_domain_id();
+        let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
+        let mut inbound = bridge.take_inbound();
+        let mut reader = SilentReader::spawn(domain_id, "feedback");
+
+        // The scripted runtime: it answers discovery and SPAWN, then writes the
+        // run's feedback every 10 ms — until the reader is stopped, and for
+        // SILENT_TICKS ticks after — and finally its result and `Success`,
+        // reporting when it did.
+        let (stopped_tx, mut stopped_rx) = oneshot::channel::<()>();
+        let (finished_tx, finished_rx) = oneshot::channel::<Instant>();
+        let runtime = async move {
+            let handle = run_handle(0x52);
+            let mut running = false;
+            let mut tick = 0u32;
+            let mut silent_ticks: Option<u32> = None;
+            let mut finished_tx = Some(finished_tx);
+            loop {
+                let event = tokio::select! {
+                    event = inbound.next() => event,
+                    _ = tokio::time::sleep(Duration::from_millis(10)), if running => {
+                        if silent_ticks.is_none() && stopped_rx.try_recv().is_ok() {
+                            silent_ticks = Some(0);
+                        }
+                        if silent_ticks == Some(SILENT_TICKS) {
+                            let mut change = StateChange::set(
+                                handle.status.clone(),
+                                status_value(STATUS_SUCCESS_VARIANT_ID),
+                            );
+                            change
+                                .set
+                                .insert(handle.result[0].clone(), Some(Value::I32(RESULT_CODE)));
+                            bridge.try_send(&change);
+                            running = false;
+                            if let Some(tx) = finished_tx.take() {
+                                let _ = tx.send(Instant::now());
+                            }
+                            continue;
+                        }
+                        tick += 1;
+                        silent_ticks = silent_ticks.map(|n| n + 1);
+                        let mut change = StateChange::set(
+                            handle.status.clone(),
+                            status_value(STATUS_RUNNING_VARIANT_ID),
+                        );
+                        change
+                            .set
+                            .insert(handle.feedback[0].clone(), Some(Value::F32(tick as f32)));
+                        bridge.try_send(&change);
+                        continue;
+                    }
+                };
+                let Some(event) = event else { break };
+                let Inbound::Command(cmd) = event else {
+                    continue;
+                };
+                if let Some(answer) = answer_discovery(&cmd.op) {
+                    cmd.reply(Ok(answer));
+                    continue;
+                }
+                match &cmd.op {
+                    BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
+                        running = true;
+                        cmd.reply(Ok(CallResult {
+                            ret: interpreter_module::encode_spawn_result(&handle),
+                            mutated: Vec::new(),
+                        }));
+                    }
+                    other => panic!("unexpected runtime command: {other:?}"),
+                }
+            }
+        };
+        tokio::pin!(runtime);
+
+        let client_flow = async {
+            let (_ctx, mut node) = create_test_node(domain_id, "silent_reader_client");
+            let client = look_at_client(&mut node);
+            let goal_id = accepted_goal(&client).await;
+            eprintln!("[client] goal accepted");
+
+            (&mut reader.matched)
+                .await
+                .expect("the reader process reads feedback");
+            reader.signal("STOP");
+            eprintln!("[client] reader stopped");
+            let _ = stopped_tx.send(());
+
+            let (status, result) = client
+                .async_request_result(goal_id)
+                .await
+                .expect("the result arrives");
+            let answered = Instant::now();
+            let finished = finished_rx.await.expect("the run finished");
+            assert_eq!(status, GoalStatusEnum::Succeeded);
+            assert_eq!(result.code, RESULT_CODE);
+            let behind = answered.saturating_duration_since(finished);
+            eprintln!("[client] result {behind:?} after the run finished");
+            assert!(
+                behind < Duration::from_secs(3),
+                "the result arrived {behind:?} after the run finished"
+            );
+        };
+
+        tokio::select! {
+            _ = &mut runtime => panic!("the scripted runtime ended early"),
+            result = tokio::time::timeout(Duration::from_secs(60), client_flow) => {
+                result.expect("the silent-reader lifecycle timed out");
+            }
+        }
+        drop(reader);
+    }
+
+    /// A reader of an action's status and `GetResult` replies that stops
+    /// acknowledging holds back no goal, and loses no reply. The silent reader
+    /// reads both; once it is stopped, a client sends `GOALS` goals one after
+    /// another, each run succeeding three ticks after it starts, and asks for
+    /// every result. The status writer's window then holds one array, the
+    /// reply writer's four replies.
+    ///
+    /// - Every goal is accepted at once. A status write that waited on the
+    ///   window would hold the action task 100 ms per goal accepted and per
+    ///   goal finished, and each acceptance would wait behind them.
+    /// - Once the reader resumes, every result arrives, `Succeeded`, and the
+    ///   client reads a status array where every goal has succeeded: what the
+    ///   windows refused was held, not dropped.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+                  has no unicast-peer/interface config), and the reader is stopped with \
+                  SIGSTOP; this runs on Linux CI."
+    )]
+    async fn a_status_and_result_reader_that_stops_acknowledging_holds_back_no_goal() {
+        /// Goals sent while the reader is stopped.
+        const GOALS: usize = 16;
+        /// Ticks, 10 ms apart, from a run's start to its success.
+        const RUN_TICKS: u32 = 3;
+
+        let _ = env_logger::builder()
+            .parse_filters("warn")
+            .is_test(true)
+            .try_init();
+        let domain_id = random_domain_id();
+        let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", domain_id)).await;
+        let mut inbound = bridge.take_inbound();
+        let mut reader = SilentReader::spawn(domain_id, "status,result");
+
+        // The scripted runtime: every SPAWN starts a run, and each device step
+        // (10 ms) writes every run's status, `Success` and its result once
+        // the run is RUN_TICKS steps old.
+        let runtime = async move {
+            let mut runs: Vec<(TaskHandle, u32)> = Vec::new();
+            let mut spawned = 0u128;
+            loop {
+                let event = tokio::select! {
+                    event = inbound.next() => event,
+                    _ = tokio::time::sleep(Duration::from_millis(10)), if !runs.is_empty() => {
+                        let mut change = StateChange::default();
+                        for (handle, ticks) in &mut runs {
+                            *ticks += 1;
+                            let status = if *ticks == RUN_TICKS {
+                                change
+                                    .set
+                                    .insert(handle.result[0].clone(), Some(Value::I32(RESULT_CODE)));
+                                STATUS_SUCCESS_VARIANT_ID
+                            } else {
+                                STATUS_RUNNING_VARIANT_ID
+                            };
+                            change
+                                .set
+                                .insert(handle.status.clone(), Some(status_value(status)));
+                        }
+                        runs.retain(|(_, ticks)| *ticks < RUN_TICKS);
+                        bridge.try_send(&change);
+                        continue;
+                    }
+                };
+                let Some(event) = event else { break };
+                let Inbound::Command(cmd) = event else {
+                    continue;
+                };
+                if let Some(answer) = answer_discovery(&cmd.op) {
+                    cmd.reply(Ok(answer));
+                    continue;
+                }
+                match &cmd.op {
+                    BridgeOp::Call(call) if interpreter_module::decode_spawn(call).is_ok() => {
+                        spawned += 1;
+                        let handle = run_handle(spawned);
+                        cmd.reply(Ok(CallResult {
+                            ret: interpreter_module::encode_spawn_result(&handle),
+                            mutated: Vec::new(),
+                        }));
+                        runs.push((handle, 0));
+                    }
+                    other => panic!("unexpected runtime command: {other:?}"),
+                }
+            }
+        };
+        tokio::pin!(runtime);
+
+        let client_flow = async {
+            let (_ctx, mut node) = create_test_node(domain_id, "silent_status_client");
+            let client = look_at_client(&mut node);
+            // A request written before the server's request reader matched
+            // reaches no one.
+            client.result_client().wait_for_service(&node).await;
+
+            // Run goals to completion until the reader holds a status array
+            // and a reply: then both writers have matched it.
+            loop {
+                let goal_id = accepted_goal(&client).await;
+                let (status, _) = client
+                    .async_request_result(goal_id)
+                    .await
+                    .expect("a result arrives");
+                assert_eq!(status, GoalStatusEnum::Succeeded);
+                match tokio::time::timeout(Duration::from_millis(200), &mut reader.matched).await {
+                    Ok(matched) => break matched.expect("the reader process reads"),
+                    Err(_) => eprintln!("[client] the reader has not matched yet"),
+                }
+            }
+            reader.signal("STOP");
+            eprintln!("[client] reader stopped");
+
+            let sending = Instant::now();
+            let mut goals = Vec::new();
+            for _ in 0..GOALS {
+                let (goal_id, response) = client
+                    .async_send_goal(LookAtGoal { x: 1.5 })
+                    .await
+                    .expect("the goal is answered");
+                assert!(response.accepted, "the goal is accepted");
+                let request = client
+                    .request_result(goal_id)
+                    .expect("the result is requested");
+                goals.push((goal_id, request));
+            }
+            let accepting = sending.elapsed();
+            eprintln!("[client] {GOALS} goals accepted in {accepting:?}");
+            assert!(
+                accepting < Duration::from_secs(1),
+                "{GOALS} goals took {accepting:?} to be accepted"
+            );
+
+            // Let the runs finish while the reader is stopped, then resume it.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            reader.signal("CONT");
+            eprintln!("[client] reader resumed");
+
+            let mut unanswered: Vec<_> = goals.iter().map(|(_, request)| *request).collect();
+            let answering = async {
+                while !unanswered.is_empty() {
+                    match client.result_client().receive_response() {
+                        Ok(Some((request, response))) => {
+                            if unanswered.contains(&request) {
+                                assert_eq!(response.status, GoalStatusEnum::Succeeded);
+                                assert_eq!(response.result.code, RESULT_CODE);
+                                unanswered.retain(|unanswered| *unanswered != request);
+                            }
+                        }
+                        Ok(None) => tokio::time::sleep(Duration::from_millis(10)).await,
+                        Err(e) => panic!("reading a result: {e:?}"),
+                    }
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(10), answering)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("{} of {GOALS} results never arrived", unanswered.len())
+                });
+            eprintln!("[client] every result arrived");
+
+            let succeeded = async {
+                loop {
+                    match client.receive_status() {
+                        Ok(Some(statuses)) => {
+                            let all = goals.iter().all(|(goal_id, _)| {
+                                statuses.status_list.iter().any(|status| {
+                                    status.goal_info.goal_id == *goal_id
+                                        && status.status == GoalStatusEnum::Succeeded
+                                })
+                            });
+                            if all {
+                                return;
+                            }
+                        }
+                        Ok(None) => tokio::time::sleep(Duration::from_millis(10)).await,
+                        Err(e) => panic!("reading a status array: {e:?}"),
+                    }
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(10), succeeded)
+                .await
+                .expect("a status array shows every goal succeeded");
+            eprintln!("[client] the status array shows every goal succeeded");
+        };
+
+        tokio::select! {
+            _ = &mut runtime => panic!("the scripted runtime ended early"),
+            result = tokio::time::timeout(Duration::from_secs(90), client_flow) => {
+                result.expect("the silent-reader lifecycle timed out");
+            }
+        }
+        drop(reader);
+    }
 }
