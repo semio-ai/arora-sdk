@@ -2,6 +2,21 @@
 
 All notable changes.
 
+## [2.2.0] - 2026-10-12
+
+### Added
+
+- **`vizij_face_msgs`**, Vizij's face package. Content: `FacialActionUnits`
+  (sparse `codes` and `intensities`), `Expression` (`expression`, `valence`,
+  `arousal`) and `Viseme` (the 15-shape constants and a `value`) — what a face
+  is, with no confidence and no timing. Observation: `PerceivedFacialActionUnits`,
+  `PerceivedExpression` and `PerceivedViseme`, each a header, the content and
+  a confidence. Timing: `Timing` (`start` and `duration` as
+  `builtin_interfaces/Duration`), `TimedViseme` and `VisemeTimeline`. Skills:
+  the `SetFacialActionUnits` and `SetViseme` topic messages and the
+  `PlayVisemes` action, whose result is `std_skills/Result` and whose feedback
+  is the `Viseme` being played.
+
 ## [2.1.0] - 2026-10-02
 
 ### Added

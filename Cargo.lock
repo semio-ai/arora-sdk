@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "arora-msgs-ros2"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "arora-types",
  "proc-macro2",
