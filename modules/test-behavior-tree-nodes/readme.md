@@ -1,6 +1,12 @@
 # Behavior Tree Nodes
 
-A Rust WASM module providing the core nodes for behavior trees.
+A Rust WASM test module providing behavior-tree nodes.
+
+The control nodes and the string nodes (`set_str`, `unset_str`, `is_str_set`,
+`wait_str_set`, `regex_match`) it exports are core nodes, native to
+`arora-behavior-tree` under the same ids: a tree dispatches them natively and
+never reaches this module's copies. `status_identity`, `store`, `increase` and
+`cos` (Groot `Status`, `Store`, `Increase`, `Cos`) are only here.
 
 It depends on the [Test Rust WASM Module](https://github.com/semio-ai/arora-sdk).
 

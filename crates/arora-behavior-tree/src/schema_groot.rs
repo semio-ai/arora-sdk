@@ -6,7 +6,6 @@ use quick_xml::events::BytesStart;
 use quick_xml::Writer;
 use quick_xml::{events::Event, Reader};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::{
     collections::HashMap,
     error::Error,
@@ -15,11 +14,14 @@ use std::{
 };
 use uuid::Uuid;
 
+use crate::core_nodes::core_node_parameters;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
     COS_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SEQ_STAR_FUNCTION_ID, STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID, REGEX_MATCH_FUNCTION_ID, RUN_FUNCTION_ID,
+    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNSET_STR_FUNCTION_ID,
+    WAIT_STR_SET_FUNCTION_ID,
 };
 use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
@@ -62,13 +64,11 @@ impl Node {
             FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
             COS_GROOT_ID => COS_FUNCTION_ID,
-            SET_STR_GROOT_ID => Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
-            UNSET_STR_GROOT_ID => Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap(),
-            IS_STR_SET_GROOT_ID => Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap(),
-            WAIT_STR_SET_GROOT_ID => {
-                Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap()
-            }
-            REGEX_MATCH_GROOT_ID => Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap(),
+            SET_STR_GROOT_ID => SET_STR_FUNCTION_ID,
+            UNSET_STR_GROOT_ID => UNSET_STR_FUNCTION_ID,
+            IS_STR_SET_GROOT_ID => IS_STR_SET_FUNCTION_ID,
+            WAIT_STR_SET_GROOT_ID => WAIT_STR_SET_FUNCTION_ID,
+            REGEX_MATCH_GROOT_ID => REGEX_MATCH_FUNCTION_ID,
             tag => function_by_groot_tag(index, tag)?,
         };
 
@@ -90,6 +90,26 @@ impl Node {
             } else {
                 HashMap::new()
             };
+            return Ok(TreeNode {
+                function: arora_id,
+                children,
+                parameters,
+            });
+        }
+
+        // The core string nodes are native too: their parameters come from
+        // their own signatures, not from the index.
+        if let Some(core_parameters) = core_node_parameters(arora_id) {
+            let mut parameters = HashMap::new();
+            for (name, arg) in &self.param_args {
+                let parameter = core_parameters
+                    .iter()
+                    .find(|parameter| parameter.name == name)
+                    .ok_or_else(|| BehaviorTreeError::InternalError {
+                        message: format!("no such parameter \"{name}\" in node \"{}\"", self.id),
+                    })?;
+                parameters.insert(parameter.id, groot_arg_to_expression(arg, variables));
+            }
             return Ok(TreeNode {
                 function: arora_id,
                 children,
@@ -138,23 +158,11 @@ impl Node {
             FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
             COS_FUNCTION_ID => COS_GROOT_ID,
-            // The string/regex helper nodes use ad-hoc function ids (see `nodes.rs`)
-            // instead of named constants, so they are matched via guards here.
-            id if id == Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap() => {
-                SET_STR_GROOT_ID
-            }
-            id if id == Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap() => {
-                UNSET_STR_GROOT_ID
-            }
-            id if id == Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap() => {
-                IS_STR_SET_GROOT_ID
-            }
-            id if id == Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap() => {
-                WAIT_STR_SET_GROOT_ID
-            }
-            id if id == Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap() => {
-                REGEX_MATCH_GROOT_ID
-            }
+            SET_STR_FUNCTION_ID => SET_STR_GROOT_ID,
+            UNSET_STR_FUNCTION_ID => UNSET_STR_GROOT_ID,
+            IS_STR_SET_FUNCTION_ID => IS_STR_SET_GROOT_ID,
+            WAIT_STR_SET_FUNCTION_ID => WAIT_STR_SET_GROOT_ID,
+            REGEX_MATCH_FUNCTION_ID => REGEX_MATCH_GROOT_ID,
             // Any other function is written under its own name — the form the
             // importer resolves against the index.
             id => index
@@ -174,6 +182,33 @@ impl Node {
                 id: groot_id,
                 name: Uuid::new_v4().to_string(),
                 param_args: HashMap::new(),
+                children: groot_children,
+            });
+        }
+
+        if let Some(core_parameters) = core_node_parameters(tree_node.function) {
+            let mut param_args = HashMap::new();
+            for (id, arg) in &tree_node.parameters {
+                let parameter = core_parameters
+                    .iter()
+                    .find(|parameter| parameter.id == *id)
+                    .ok_or_else(|| BehaviorTreeError::InternalError {
+                        message: format!("no such parameter \"{id}\" in node \"{groot_id}\""),
+                    })?;
+                let arg = expression_to_groot_arg(arg, variables).ok_or_else(|| {
+                    BehaviorTreeError::InconsistentTreeError {
+                        message: format!(
+                            "param {} of node {groot_id} has a value of an unsupported type: {arg:?}",
+                            parameter.name
+                        ),
+                    }
+                })?;
+                param_args.insert(parameter.name.to_string(), arg);
+            }
+            return Ok(Node {
+                id: groot_id,
+                name: Uuid::new_v4().to_string(),
+                param_args,
                 children: groot_children,
             });
         }
@@ -324,6 +359,38 @@ fn returns_status(return_ty: &FrozenTy) -> bool {
     match return_ty {
         FrozenTy::FrozenScalar(scalar) => scalar.reference.id == STATUS_TYPE_ID,
         _ => false,
+    }
+}
+
+/// A Groot attribute value as an argument expression: `{name}` is the variable
+/// `name` (one id per name across the tree), anything else a string literal.
+fn groot_arg_to_expression(arg: &str, variables: &mut HashMap<String, Uuid>) -> Expression {
+    match arg.strip_prefix('{').and_then(|arg| arg.strip_suffix('}')) {
+        Some(variable_name) => {
+            let id = *variables
+                .entry(variable_name.to_owned())
+                .or_insert_with(Uuid::new_v4);
+            Expression::VariableId(id)
+        }
+        None => Expression::Value(Value::String(arg.to_owned())),
+    }
+}
+
+/// An argument expression as a Groot attribute value: a variable as `{name}`
+/// (named after its id when it has no name yet), a literal as its text.
+/// `None` for an expression Groot cannot spell.
+fn expression_to_groot_arg(
+    expression: &Expression,
+    variables: &mut HashMap<Uuid, String>,
+) -> Option<String> {
+    match expression {
+        Expression::Uuid(id) | Expression::VariableId(id) => {
+            let name = variables.entry(*id).or_insert_with(|| id.to_string());
+            Some(format!("{{{name}}}"))
+        }
+        Expression::Value(Value::String(value)) => Some(value.to_owned()),
+        Expression::Value(value) => Some(value.to_string()),
+        _ => None,
     }
 }
 
@@ -997,5 +1064,74 @@ mod tests {
             .try_into_tree_node(&index, &mut HashMap::new())
             .expect("the exported tag resolves again");
         assert_eq!(back.function, walk);
+    }
+
+    /// The core string nodes resolve with no module loaded — an empty index —
+    /// bind their attributes by name, and export back under their Groot names
+    /// with the same attributes.
+    #[test]
+    fn core_string_nodes_resolve_without_an_index_and_round_trip() {
+        let index = HashMap::new();
+        let tree = groot(
+            r#"<Sequence>
+                 <IsStringSet value="{message}"/>
+                 <RegexMatch value="{message}" matcher="(hi|hello)" first_match="{greeting}"/>
+                 <SetString variable="{heard}" value="{message}"/>
+                 <WaitStringSet value="{reply}"/>
+                 <UnsetString variable="{message}"/>
+               </Sequence>"#,
+        );
+        let mut variables = HashMap::new();
+        let root = tree
+            .root
+            .try_into_tree_node(&index, &mut variables)
+            .expect("the core nodes need no module");
+        let children = root.children.as_ref().expect("the sequence's children");
+        let functions: Vec<Uuid> = children.iter().map(|child| child.function).collect();
+        assert_eq!(
+            functions,
+            vec![
+                IS_STR_SET_FUNCTION_ID,
+                REGEX_MATCH_FUNCTION_ID,
+                SET_STR_FUNCTION_ID,
+                WAIT_STR_SET_FUNCTION_ID,
+                UNSET_STR_FUNCTION_ID,
+            ]
+        );
+        assert_eq!(
+            children[1].parameters[&crate::nodes::REGEX_MATCH_MATCHER_PARAM_ID],
+            Expression::Value(Value::String("(hi|hello)".to_string()))
+        );
+        let message = Expression::VariableId(variables["message"]);
+        assert_eq!(
+            children[2].parameters[&crate::nodes::SET_STR_VALUE_PARAM_ID],
+            message,
+            "one {{message}} variable across the nodes"
+        );
+
+        let mut names = variables
+            .iter()
+            .map(|(name, id)| (*id, name.clone()))
+            .collect();
+        let exported = Node::try_from_tree_node(&root, &index, &mut names).expect("exported");
+        let regex = &exported.children[1];
+        assert_eq!(regex.id, "RegexMatch");
+        assert_eq!(regex.param_args["value"], "{message}");
+        assert_eq!(regex.param_args["matcher"], "(hi|hello)");
+        assert_eq!(regex.param_args["first_match"], "{greeting}");
+        assert_eq!(exported.children[2].id, "SetString");
+        assert_eq!(exported.children[2].param_args["variable"], "{heard}");
+    }
+
+    /// A core node refuses an attribute it does not have.
+    #[test]
+    fn a_core_node_refuses_an_unknown_attribute() {
+        let tree = groot(r#"<IsStringSet key="{message}"/>"#);
+        let error = tree
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut HashMap::new())
+            .map(|_| ())
+            .expect_err("IsStringSet has no `key`");
+        assert!(format!("{error:?}").contains("key"), "{error:?}");
     }
 }

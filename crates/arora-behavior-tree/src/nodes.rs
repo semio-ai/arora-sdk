@@ -4,7 +4,7 @@ use crate::{
     variable::VariableCell,
 };
 use arora_types::value::Value;
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // To simulate statuses
@@ -33,22 +33,16 @@ pub fn status_identity(value: VariableCell) -> TreeNode {
     }
 }
 
-// Basic data-oriented action nodes
+// Core string nodes, dispatched natively (see `core_nodes`)
 //==============================================================
 #[allow(unused)]
 pub fn set_str(variable: Expression, value: Expression) -> TreeNode {
     TreeNode {
-        function: Uuid::from_str("b8349b96-abc7-4a31-906c-da1ce6fa356e").unwrap(),
+        function: SET_STR_FUNCTION_ID,
         children: None,
         parameters: HashMap::from([
-            (
-                Uuid::from_str("8fa2f965-1eb5-40d9-baca-8facef0d31a8").unwrap(),
-                variable,
-            ),
-            (
-                Uuid::from_str("88438955-7872-44ad-8464-d636dc5fe26f").unwrap(),
-                value,
-            ),
+            (SET_STR_VARIABLE_PARAM_ID, variable),
+            (SET_STR_VALUE_PARAM_ID, value),
         ]),
     }
 }
@@ -56,61 +50,45 @@ pub fn set_str(variable: Expression, value: Expression) -> TreeNode {
 #[allow(unused)]
 pub fn unset_str(variable: Expression) -> TreeNode {
     TreeNode {
-        function: Uuid::from_str("7dce01ed-9818-4b7d-b45a-2e7fdece3633").unwrap(),
+        function: UNSET_STR_FUNCTION_ID,
         children: None,
-        parameters: HashMap::from([(
-            Uuid::from_str("2c84bf0f-4ec2-41a4-83ee-3f92a53be79d").unwrap(),
-            variable,
-        )]),
+        parameters: HashMap::from([(UNSET_STR_VARIABLE_PARAM_ID, variable)]),
     }
 }
 
 #[allow(unused)]
 pub fn is_str_set(value: Expression) -> TreeNode {
     TreeNode {
-        function: Uuid::from_str("20ba3f0f-309e-4cd2-adfc-aca6cc432526").unwrap(),
+        function: IS_STR_SET_FUNCTION_ID,
         children: None,
-        parameters: HashMap::from([(
-            Uuid::from_str("c4f1e72d-30fe-400b-a584-f08e93944026").unwrap(),
-            value,
-        )]),
+        parameters: HashMap::from([(IS_STR_SET_VALUE_PARAM_ID, value)]),
     }
 }
 
 #[allow(unused)]
 pub fn wait_str_set(value: Expression) -> TreeNode {
     TreeNode {
-        function: Uuid::from_str("3180977c-25a1-458e-ab82-11f36c654518").unwrap(),
+        function: WAIT_STR_SET_FUNCTION_ID,
         children: None,
-        parameters: HashMap::from([(
-            Uuid::from_str("8f190079-e519-44d3-ac36-3bfc322e87eb").unwrap(),
-            value,
-        )]),
+        parameters: HashMap::from([(WAIT_STR_SET_VALUE_PARAM_ID, value)]),
     }
 }
 
 #[allow(unused)]
 pub fn regex_match(value: Expression, matcher: Expression, first_match: Expression) -> TreeNode {
     TreeNode {
-        function: Uuid::from_str("8e3dbcc1-1a81-4cf6-a457-6e0c075456fd").unwrap(),
+        function: REGEX_MATCH_FUNCTION_ID,
         children: None,
         parameters: HashMap::from([
-            (
-                Uuid::from_str("3267f093-8a7f-4b77-b74c-3bd2e7ad40f9").unwrap(),
-                value,
-            ),
-            (
-                Uuid::from_str("6702e02d-f6ba-4c5d-acab-9ade0a690afa").unwrap(),
-                matcher,
-            ),
-            (
-                Uuid::from_str("e8b71df7-2bb5-4498-8bc3-833c5bc8eadc").unwrap(),
-                first_match,
-            ),
+            (REGEX_MATCH_VALUE_PARAM_ID, value),
+            (REGEX_MATCH_MATCHER_PARAM_ID, matcher),
+            (REGEX_MATCH_FIRST_MATCH_PARAM_ID, first_match),
         ]),
     }
 }
 
+// Test-only data nodes (the `test-behavior-tree-nodes` module)
+//==============================================================
 #[allow(unused)]
 pub fn store(storage: Expression, value: Expression) -> TreeNode {
     TreeNode {
@@ -210,6 +188,28 @@ pub const INCREASE_STORAGE_PARAM_ID: Uuid = Uuid::from_bytes([
 pub const INCREASE_DELTA_PARAM_ID: Uuid = Uuid::from_bytes([
     0x10, 0x18, 0xeb, 0x85, 0x2d, 0x04, 0x49, 0x95, 0xa3, 0x49, 0xb6, 0xc8, 0x3c, 0x27, 0xf2, 0x87,
 ]);
+
+// The core string nodes' ids: those of the `test-behavior-tree-nodes` module
+// that first implemented them, so trees and builders written against the
+// module keep their meaning now that the nodes are native.
+pub const SET_STR_FUNCTION_ID: Uuid = Uuid::from_u128(0xc803889f_4757_4b56_908f_4b2b47041eff);
+pub const SET_STR_VARIABLE_PARAM_ID: Uuid = Uuid::from_u128(0x8fa2f965_1eb5_40d9_baca_8facef0d31a8);
+pub const SET_STR_VALUE_PARAM_ID: Uuid = Uuid::from_u128(0x88438955_7872_44ad_8464_d636dc5fe26f);
+pub const UNSET_STR_FUNCTION_ID: Uuid = Uuid::from_u128(0x7dce01ed_9818_4b7d_b45a_2e7fdece3633);
+pub const UNSET_STR_VARIABLE_PARAM_ID: Uuid =
+    Uuid::from_u128(0x2c84bf0f_4ec2_41a4_83ee_3f92a53be79d);
+pub const IS_STR_SET_FUNCTION_ID: Uuid = Uuid::from_u128(0x20ba3f0f_309e_4cd2_adfc_aca6cc432526);
+pub const IS_STR_SET_VALUE_PARAM_ID: Uuid = Uuid::from_u128(0xc4f1e72d_30fe_400b_a584_f08e93944026);
+pub const WAIT_STR_SET_FUNCTION_ID: Uuid = Uuid::from_u128(0x3180977c_25a1_458e_ab82_11f36c654518);
+pub const WAIT_STR_SET_VALUE_PARAM_ID: Uuid =
+    Uuid::from_u128(0x8f190079_e519_44d3_ac36_3bfc322e87eb);
+pub const REGEX_MATCH_FUNCTION_ID: Uuid = Uuid::from_u128(0x8e3dbcc1_1a81_4cf6_a457_6e0c075456fd);
+pub const REGEX_MATCH_VALUE_PARAM_ID: Uuid =
+    Uuid::from_u128(0x3267f093_8a7f_4b77_b74c_3bd2e7ad40f9);
+pub const REGEX_MATCH_MATCHER_PARAM_ID: Uuid =
+    Uuid::from_u128(0x6702e02d_f6ba_4c5d_acab_9ade0a690afa);
+pub const REGEX_MATCH_FIRST_MATCH_PARAM_ID: Uuid =
+    Uuid::from_u128(0xe8b71df7_2bb5_4498_8bc3_833c5bc8eadc);
 
 // Task-run scaffolding nodes: the graph pieces a spawned run is made of (see
 // `behavior::BehaviorTreeInterpreter`'s runner scaffold). A run-call leaf

@@ -30,6 +30,8 @@ fn status_identity(value: Option<Status>) -> Status {
 
 // Basic data-oriented action nodes
 //==============================================================
+// The string nodes are native to arora-behavior-tree (`core_nodes`) under the
+// same ids and semantics; a tree dispatches those, not these copies.
 fn set_str(variable: &mut Option<String>, value: Option<String>) -> Status {
     *variable = value;
     Status::Success

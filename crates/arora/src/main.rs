@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     // A Groot file is a behavior-tree option: load it into a behavior-tree
     // interpreter against the store the device will tick. The tree binds no
     // module function (its function index is empty): its nodes are the
-    // natively-hosted control nodes.
+    // natively-hosted core nodes (control and string nodes).
     if let Some(path) = cli.groot {
         let xml = std::fs::read_to_string(&path)
             .with_context(|| format!("could not read Groot file {}", path.display()))?;

@@ -24,7 +24,7 @@ pub struct Node {
 }
 ```
 
-There is **one node kind**; the `function` id is the sole discriminant. The runtime either handles that id **natively** (a built-in control node) or **dispatches it as a module call** — the same homogeneous split the shared graph model describes ([`arora-behavior/src/graph.rs:5-9`](../../arora-behavior/src/graph.rs#L5-L9)). Arguments are [`Expression`s](../src/schema.rs#L48-L64): a literal `Value`, a blackboard variable id (`{var}` shared across nodes), another node's argument slot, or a nested `Call` evaluated every tick.
+There is **one node kind**; the `function` id is the sole discriminant. The runtime either handles that id **natively** (a core node: a control node or a string node) or **dispatches it as a module call** — the same homogeneous split the shared graph model describes ([`arora-behavior/src/graph.rs:5-9`](../../arora-behavior/src/graph.rs#L5-L9)). Arguments are [`Expression`s](../src/schema.rs#L48-L64): a literal `Value`, a blackboard variable id (`{var}` shared across nodes), another node's argument slot, or a nested `Call` evaluated every tick.
 
 ### Node tick status vs. interpreter status
 
@@ -32,16 +32,46 @@ A node's tick returns a three-state [`Status`](../src/arora_generated/behavior_t
 
 This is the sharpest contrast with Vizij's node graph, whose nodes are dataflow (they produce values, not a Success/Failure/Running status) and whose interpreter runs forever (`Running`) — see [the parallels in the NodeGraph doc](https://github.com/vizij-ai/vizij-rs/blob/main/crates/interop/vizij-arora-behavior/docs/node-graph.md).
 
-### Built-in control nodes
+### Core nodes
 
-The basic control nodes and status leaves are wired into this crate and dispatched natively (no engine round-trip). Builders in [`nodes.rs`](../src/nodes.rs): `seq` ([`:141`](../src/nodes.rs#L141)), `seq_star` ([`:146`](../src/nodes.rs#L146), resumes past already-succeeded children via a persisted index), `fallback` ([`:158`](../src/nodes.rs#L158)), `parallel` ([`:163`](../src/nodes.rs#L163)), and the leaves `succeed`/`fail`/`run` ([`:13-23`](../src/nodes.rs#L13-L23)).
+The core nodes are wired into this crate and dispatched natively (no engine round-trip, no module to load, not in the function index): every tree — every device — has them. They are the control nodes and status leaves, and the string nodes.
+
+#### Control nodes
+
+Groot `Sequence`, `SequenceStar`, `Fallback`, `Parallel`, and the leaves `Succeed`, `Fail`, `Run`. Builders in [`nodes.rs`](../src/nodes.rs): `seq` ([`:119`](../src/nodes.rs#L119)), `seq_star` ([`:124`](../src/nodes.rs#L124), resumes past already-succeeded children via a persisted index), `fallback` ([`:136`](../src/nodes.rs#L136)), `parallel` ([`:141`](../src/nodes.rs#L141)), and the leaves `succeed`/`fail`/`run` ([`:13-23`](../src/nodes.rs#L13-L23)).
+
+#### Core string nodes
+
+Groot `SetString`, `UnsetString`, `IsStringSet`, `WaitStringSet`, `RegexMatch`, implemented in [`core_nodes.rs`](../src/core_nodes.rs) (builders `set_str`, `unset_str`, `is_str_set`, `wait_str_set`, `regex_match` in [`nodes.rs`](../src/nodes.rs#L39-L90)). They were first the test module `test-behavior-tree-nodes`'s functions and keep its function ids, parameter ids, attribute names and semantics, so trees written against the module mean the same.
+
+Like any module function they are **value-based**: a node never names a store key. It receives the values its ports are bound to and writes through its out-parameters; which keys those are is the tree's business (its `{var}` bindings). A port bound to a variable that holds nothing — a store key that is not set (yet), an unbound local, `()` — reads as `None`. An out-parameter set to `Some(s)` writes `s`, creating the key if it did not exist; set to `None`, it unsets the key; left as it was, the store is not touched. A port bound to a value that is not a string (or an optional string) fails the tick with a conversion error, as the module's argument decoding did.
+
+| Groot node | Signature | Status |
+|---|---|---|
+| `SetString variable="{key}" value="…"` | `set_str(variable: &mut Option<String>, value: Option<String>)` | `variable` takes `value` (an unset `value` unsets `variable`); `Success`. |
+| `UnsetString variable="{key}"` | `unset_str(variable: &mut Option<String>)` | `variable` is unset; `Success`. |
+| `IsStringSet value="{key}"` | `is_str_set(value: Option<String>)` | `Success` if `value` is a **non-empty** string; `Failure` if it is unset or `""`. |
+| `WaitStringSet value="{key}"` | `wait_str_set(value: Option<String>)` | `Success` if `value` is a non-empty string; `Running` while it is unset or `""`. |
+| `RegexMatch value="…" matcher="…" first_match="{key}"` | `regex_match(value: Option<String>, matcher: Option<String>, first_match: &mut Option<String>)` | `Success` if the regular expression `matcher` ([`regex`](https://docs.rs/regex) syntax) matches in `value`, writing the matched text (the whole match, not a capture group) to `first_match`. `Failure`, leaving `first_match` alone, if `value` or `matcher` is unset, `matcher` is invalid, or nothing matches. |
+
+So a branch can react once to each write of a key from outside the tree — the key is absent at first, which is a failed condition, not an error:
+
+```xml
+<Sequence>
+  <IsStringSet value="{command}"/>
+  <SetString variable="{last_command}" value="{command}"/>
+  <UnsetString variable="{command}"/>
+</Sequence>
+```
+
+The other palette tags (`Status`, `Store`, `Increase`, `Cos`) stay the test module's: a tree using them needs that module loaded.
 
 ## How a node ticks
 
 ```mermaid
 flowchart TB
   tick["node tick"] --> builtin{"function id is<br/>a built-in?"}
-  builtin -- yes --> native["tick_builtin (native)<br/>seq / seq_star / fallback / parallel<br/>succeed / fail / run"]
+  builtin -- yes --> native["tick_builtin (native)<br/>seq / seq_star / fallback / parallel<br/>succeed / fail / run<br/>set_str / unset_str / is_str_set<br/>wait_str_set / regex_match"]
   native --> children["tick children through their<br/>registered tick functions"]
   builtin -- no --> resolve["resolve function in function_index"]
   resolve --> buildcall["build Call { module_id, id, args }<br/>children passed as TickId[]"]
@@ -51,7 +81,7 @@ flowchart TB
   writeback --> status
 ```
 
-Native dispatch is [`tick_builtin`](../src/behavior_tree.rs#L159-L269): `SEQ` short-circuits on the first non-`Success` child; `FALLBACK` on the first non-`Failure`; `PARALLEL` ticks every child and succeeds only if all did; `SEQ_STAR` resumes from a persisted `current_index`. Any non-built-in function is resolved in the `function_index` and dispatched through the engine ([`behavior_tree.rs:271-436`](../src/behavior_tree.rs#L271-L436)). At setup, **every node is registered on the engine as a callable** and wrapped in a `TickId`, so children can be invoked through the call bridge ([`setup_tick_function`, `behavior_tree.rs:104-152`](../src/behavior_tree.rs#L104-L152)).
+Native dispatch is [`tick_builtin`](../src/behavior_tree.rs#L241-L423): `SEQ` short-circuits on the first non-`Success` child; `FALLBACK` on the first non-`Failure`; `PARALLEL` ticks every child and succeeds only if all did; `SEQ_STAR` resumes from a persisted `current_index`; the string nodes go to [`tick_core_node`](../src/core_nodes.rs#L132). Any non-built-in function is resolved in the `function_index` and dispatched through the engine ([`behavior_tree.rs:271-436`](../src/behavior_tree.rs#L271-L436)). At setup, **every node is registered on the engine as a callable** and wrapped in a `TickId`, so children can be invoked through the call bridge ([`setup_tick_function`, `behavior_tree.rs:104-152`](../src/behavior_tree.rs#L104-L152)).
 
 ## How nodes interact with the data store
 
@@ -72,11 +102,17 @@ flowchart LR
   resolve -- "name known" --> stored["VariableCell::Stored(Slot)"]
   resolve -- "name unknown" --> local["VariableCell::Local"]
   stored <--> store[("Data store key<br/>of the same name")]
-  node["node tick"] -- "get_or_unit() → call arg" --> stored
+  node["node tick"] -- "get() → call arg" --> stored
   node -- "set() ← module mutated / _ret" --> stored
 ```
 
-So a **read** is a node filling a call argument from `variable.get_or_unit()`, and a **write** is the tick calling `variable.set(...)` when a module reports a mutated parameter or a `_ret` return ([`behavior_tree.rs:401-431`](../src/behavior_tree.rs#L401-L431)). Because a store-backed cell's `set` goes straight to the `Slot`, a node's output lands in the store key of the same name. Verified by [`resolved_variable_is_store_backed`](../src/tests.rs#L93-L144).
+So a **read** is a node filling a call argument from its variable, and a **write** is the tick calling `variable.set(...)` when a module reports a mutated parameter or a `_ret` return ([`behavior_tree.rs:401-431`](../src/behavior_tree.rs#L401-L431)). Because a store-backed cell's `set` goes straight to the `Slot`, a node's output lands in the store key of the same name. Verified by [`resolved_variable_is_store_backed`](../src/tests.rs#L93-L144).
+
+A variable may hold nothing — a store key that is not set yet. What a module function then receives depends on its parameter's declared type ([`argument_value`](../src/behavior_tree.rs#L606), [`write_back`](../src/behavior_tree.rs#L620)):
+
+- an **optional** parameter (`Option<T>`) receives `None`, and a present value as `Some(value)` — the function decides what absence means;
+- any other parameter receives `()`, which the function refuses unless it takes it (an unset key is an error there);
+- an optional **out-parameter**, or an optional return bound with `_ret`, maps onto the key's presence: `Some(v)` writes `v` (creating the key), `None` unsets it.
 
 ## How nodes interact with modules
 
@@ -103,10 +139,11 @@ This is the tree's version of what the shared model calls a module call. (The `G
 | The interpreter (`tick`/`apply`/`load`) | [`crates/arora-behavior-tree/src/behavior.rs`](../src/behavior.rs) |
 | Runtime tree, native dispatch, module dispatch, `TickId` | [`crates/arora-behavior-tree/src/behavior_tree.rs`](../src/behavior_tree.rs) |
 | Node/`Expression` schema | [`crates/arora-behavior-tree/src/schema.rs`](../src/schema.rs) |
-| Built-in control nodes + leaves | [`crates/arora-behavior-tree/src/nodes.rs`](../src/nodes.rs) |
+| Core node ids and builders | [`crates/arora-behavior-tree/src/nodes.rs`](../src/nodes.rs) |
+| Core string nodes (functions, signatures, native tick) | [`crates/arora-behavior-tree/src/core_nodes.rs`](../src/core_nodes.rs) |
 | `VariableCell` (store binding) | [`crates/arora-behavior-tree/src/variable.rs`](../src/variable.rs) |
 | Lowering the shared `Graph` → runnable tree | [`crates/arora-behavior-tree/src/graph.rs`](../src/graph.rs) |
 | `Status` enum | [`crates/arora-behavior-tree/src/arora_generated/behavior_tree/status.rs`](../src/arora_generated/behavior_tree/status.rs) |
 | The interpreter contract this satisfies | [`arora-behavior/docs/interpreter-workflow.md`](../../arora-behavior/docs/interpreter-workflow.md) |
 
-Tests: native control-node semantics ([`tests.rs:267-409`](../src/tests.rs#L267-L409)), store round-trip ([`tests.rs:93-144`](../src/tests.rs#L93-L144)), fresh-interpreter edit + idle ([`tests.rs:411-438`](../src/tests.rs#L411-L438)), graph lower/edit/run and predetermined keys ([`graph.rs:219-420`](../src/graph.rs#L219-L420)).
+Tests: core string nodes in Groot trees over a store and optional parameters bound to unset keys (`core_string_nodes`, `optional_parameters` in [`tests.rs`](../src/tests.rs)), native control-node semantics ([`tests.rs:267-409`](../src/tests.rs#L267-L409)), store round-trip ([`tests.rs:93-144`](../src/tests.rs#L93-L144)), fresh-interpreter edit + idle ([`tests.rs:411-438`](../src/tests.rs#L411-L438)), graph lower/edit/run and predetermined keys ([`graph.rs:219-420`](../src/graph.rs#L219-L420)).

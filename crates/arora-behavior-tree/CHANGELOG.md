@@ -4,6 +4,34 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.2.0] - 2026-10-12
+
+### Added
+
+- **The string nodes are core nodes, native to every tree.** `SetString`,
+  `UnsetString`, `IsStringSet`, `WaitStringSet` and `RegexMatch` are
+  dispatched natively like the control nodes: a tree using them runs with no
+  module loaded (it failed with "function … is missing from index" unless
+  the test module `test-behavior-tree-nodes` was). They keep that module's
+  ids, parameter ids, names and semantics, and stay value-based: a node
+  receives the values its ports are bound to and writes through its
+  out-parameters, the tree deciding which keys those are
+  ([`core_nodes`](src/core_nodes.rs), [docs](docs/nodes.md#core-string-nodes)).
+  A Groot tree names them as before, with an empty function index.
+- **An optional parameter bound to an unset key receives `None`.** A module
+  function's optional parameter (`Option<T>`) bound to a variable that holds
+  nothing — a store key not set yet — is passed `None`, and a present value
+  `Some(value)`, instead of `()`, which the function refused ("unexpected
+  value ()"). An optional out-parameter, or an optional return bound with
+  `_ret`, maps onto its key's presence: `Some(v)` writes `v`, creating the
+  key, and `None` unsets it.
+
+### Fixed
+
+- `SetString` (Groot) and the `nodes::set_str` builder named the test
+  module's `store` function (`b8349b96-…`, an `f32` store) instead of
+  `set_str` (`c803889f-…`). They name `set_str` now.
+
 ## [8.1.0] - 2026-09-26
 
 ### Added

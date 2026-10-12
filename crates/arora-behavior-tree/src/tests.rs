@@ -244,7 +244,7 @@ fn scripted_leaf_function(function: Uuid) -> ModuleFunction {
     }
 }
 
-fn build(node: TreeNode) -> BehaviorTree {
+pub(crate) fn build(node: TreeNode) -> BehaviorTree {
     node.try_into().expect("tree builds")
 }
 
@@ -494,10 +494,9 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
 /// stand-in for a real action-behavior whose status decorator publishes its
 /// outcome to the run's status key.
 mod task_runs {
-    use super::{build, LeafStatuses, LeafTicks, TestBridge};
+    use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::arora_generated::behavior_tree::status::Status;
     use crate::behavior::BehaviorTreeInterpreter;
-    use crate::nodes;
     use arora_behavior::{BehaviorContext, BehaviorInterpreter, BehaviorStatus, RunPolicy, TaskId};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::call::Call;
@@ -817,5 +816,376 @@ mod task_runs {
             vec![Some(running)],
             "the other run is unaffected"
         );
+    }
+}
+
+/// The core string nodes run natively in a Groot tree over a data store, with
+/// no module loaded: their ports bind to store keys that need not exist yet.
+mod core_string_nodes {
+    use super::{LeafStatuses, LeafTicks, TestBridge};
+    use crate::arora_generated::behavior_tree::status::Status;
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::nodes;
+    use crate::schema::Expression;
+    use crate::variable::VariableCell;
+    use crate::BehaviorTreeRuntime;
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::data::{DataStore, Key, StateChange};
+    use arora_types::value::Value;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    fn groot(body: &str) -> String {
+        format!(
+            r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">{body}</BehaviorTree></root>"#
+        )
+    }
+
+    /// An interpreter with no module (an empty function index) running `body`.
+    fn interpreter(body: &str) -> BehaviorTreeInterpreter {
+        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interpreter
+            .load_groot(&groot(body))
+            .expect("the core nodes need no module");
+        interpreter
+    }
+
+    /// A loaded tree and the bridge its node ticks are registered on.
+    struct Device {
+        tree: BehaviorTreeInterpreter,
+        bridge: TestBridge,
+    }
+
+    fn device(body: &str) -> Device {
+        Device {
+            tree: interpreter(body),
+            bridge: TestBridge::new(LeafStatuses::default(), LeafTicks::default()),
+        }
+    }
+
+    fn tick(device: &mut Device, store: &SimpleDataStore) {
+        let mut ctx = BehaviorContext {
+            store,
+            call_bridge: &mut device.bridge,
+        };
+        device.tree.tick(&mut ctx).expect("the tree ticks");
+    }
+
+    fn read(store: &SimpleDataStore, key: &str) -> Option<Value> {
+        store.read(&[Key::from(key)]).remove(0)
+    }
+
+    fn string(value: &str) -> Option<Value> {
+        Some(Value::String(value.to_string()))
+    }
+
+    fn unset(key: &str) -> StateChange {
+        StateChange {
+            set: HashMap::new(),
+            unset: std::collections::HashSet::from([Key::from(key)]),
+        }
+    }
+
+    /// `IsStringSet → SetString → UnsetString` on a key written from outside
+    /// the tree runs its branch once per write: the key is absent at first
+    /// (the condition fails, nothing errors), each write runs the branch once,
+    /// and the branch consuming the key keeps it from running again.
+    #[test]
+    fn a_branch_runs_once_per_write_of_a_key() {
+        let store = SimpleDataStore::new();
+        let mut tree = device(
+            r#"<Sequence>
+                 <IsStringSet value="{message}"/>
+                 <SetString variable="{heard}" value="{message}"/>
+                 <UnsetString variable="{message}"/>
+               </Sequence>"#,
+        );
+
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "heard"), None, "no message yet: no branch");
+
+        store
+            .write(StateChange::set("message", Value::String("hi".into())))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "heard"), string("hi"), "the branch ran");
+        assert_eq!(read(&store, "message"), None, "and consumed the message");
+
+        // Clear the trace: a tick without a new write does not run the branch.
+        store.write(unset("heard")).unwrap();
+        tick(&mut tree, &store);
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "heard"), None, "no write, no run");
+
+        store
+            .write(StateChange::set("message", Value::String("again".into())))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "heard"), string("again"));
+        assert_eq!(read(&store, "message"), None);
+
+        // An empty string is not set.
+        store.write(unset("heard")).unwrap();
+        store
+            .write(StateChange::set("message", Value::String(String::new())))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "heard"), None, "an empty string is not set");
+    }
+
+    /// `SetString` creates a key that does not exist yet, from a literal.
+    #[test]
+    fn set_string_creates_a_missing_key() {
+        let store = SimpleDataStore::new();
+        let mut tree = device(r#"<SetString variable="{greeting}" value="hello"/>"#);
+        assert_eq!(read(&store, "greeting"), None);
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "greeting"), string("hello"));
+    }
+
+    /// `WaitStringSet` holds its sequence `Running` while its key is absent,
+    /// then lets it through once the key is written.
+    #[test]
+    fn wait_string_set_waits_for_its_key() {
+        let store = SimpleDataStore::new();
+        let mut tree = device(
+            r#"<Sequence>
+                 <WaitStringSet value="{reply}"/>
+                 <SetString variable="{done}" value="yes"/>
+               </Sequence>"#,
+        );
+        tick(&mut tree, &store);
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "done"), None, "waiting for the reply");
+        store
+            .write(StateChange::set("reply", Value::String("ok".into())))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "done"), string("yes"));
+    }
+
+    /// `WaitStringSet`'s own status: `Running` on an absent value, `Success`
+    /// once set.
+    #[test]
+    fn wait_string_set_is_running_then_success() {
+        let reply = VariableCell::local();
+        let tree = crate::tests::build(nodes::wait_str_set(Expression::Variable(reply.clone())));
+        let mut bridge = TestBridge::empty();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, Rc::new(HashMap::new()), &mut bridge, false)
+                .expect("runtime sets up");
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        reply.set(Value::String("ok".into()));
+        assert_eq!(runtime.tick().unwrap(), Status::Success);
+    }
+
+    /// `RegexMatch` writes the matched text to its output key, creating it,
+    /// and fails — leaving the output alone — when nothing matches or the
+    /// input is absent.
+    #[test]
+    fn regex_match_writes_the_match() {
+        let store = SimpleDataStore::new();
+        let mut tree = device(
+            r#"<RegexMatch value="{input}" matcher="(Ross|Brad|Victor)" first_match="{name}"/>"#,
+        );
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "name"), None, "no input: no match");
+        store
+            .write(StateChange::set(
+                "input",
+                Value::String("I am Victor".into()),
+            ))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "name"), string("Victor"));
+        store
+            .write(StateChange::set("input", Value::String("nobody".into())))
+            .unwrap();
+        tick(&mut tree, &store);
+        assert_eq!(read(&store, "name"), string("Victor"), "a miss leaves it");
+    }
+
+    /// A port bound to a value that is not a string fails the tick, as the
+    /// module's argument decoding did, rather than reading as unset.
+    #[test]
+    fn a_non_string_value_fails_the_tick() {
+        let value = VariableCell::local_with(Value::F32(1.0));
+        let tree = crate::tests::build(nodes::is_str_set(Expression::Variable(value)));
+        let mut bridge = TestBridge::empty();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, Rc::new(HashMap::new()), &mut bridge, false)
+                .expect("runtime sets up");
+        assert!(runtime.tick().is_err());
+    }
+}
+
+/// Module functions with optional parameters, bound to store keys that may be
+/// absent: an absent key passes `None`, an optional out-parameter writes
+/// `Some` as the key's value and `None` as unsetting it.
+mod optional_parameters {
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::ModuleFunction;
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
+    use arora_types::data::{DataStore, Key, StateChange};
+    use arora_types::record::module::frozen::{Function, Parameter};
+    use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
+    use arora_types::value::{StructureField, Value};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    const ECHO: Uuid = Uuid::from_u128(0xEC40);
+    const INPUT: Uuid = Uuid::from_u128(0xEC41);
+    const OUTPUT: Uuid = Uuid::from_u128(0xEC42);
+
+    fn unset(key: &str) -> StateChange {
+        StateChange {
+            set: HashMap::new(),
+            unset: std::collections::HashSet::from([Key::from(key)]),
+        }
+    }
+
+    fn optional_string() -> FrozenTy {
+        FrozenTy::FrozenOption(FrozenOption {
+            element: Box::new(FrozenTy::from(PrimitiveKind::String)),
+        })
+    }
+
+    /// `echo(input: Option<String>, output: &mut Option<String>)`.
+    fn echo_index() -> HashMap<Uuid, ModuleFunction> {
+        HashMap::from([(
+            ECHO,
+            ModuleFunction {
+                module_id: Uuid::from_u128(0xEC00),
+                function_id: ECHO,
+                function_name: "echo".to_string(),
+                function: Function {
+                    parameters: HashMap::from([
+                        (
+                            INPUT,
+                            Parameter {
+                                name: "input".to_string(),
+                                ty: optional_string(),
+                                mutable: false,
+                            },
+                        ),
+                        (
+                            OUTPUT,
+                            Parameter {
+                                name: "output".to_string(),
+                                ty: optional_string(),
+                                mutable: true,
+                            },
+                        ),
+                    ]),
+                    parameter_ordering: vec![INPUT, OUTPUT],
+                    return_ty: FrozenTy::from(PrimitiveKind::U8),
+                },
+            },
+        )])
+    }
+
+    /// Serves `echo` the way a module decoding `Option<String>` would: it
+    /// refuses `()` for its optional input, and returns its output framed as
+    /// an optional. Records the inputs it received.
+    #[derive(Default)]
+    struct EchoBridge {
+        registered: HashMap<u64, Rc<dyn Callable>>,
+        next_id: u64,
+        inputs: Rc<RefCell<Vec<Value>>>,
+    }
+
+    impl CallBridge for EchoBridge {
+        fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+            let input = call
+                .args
+                .iter()
+                .find(|arg| arg.id == INPUT)
+                .map(|arg| (*arg.value).clone())
+                .ok_or(CallError::Generic {
+                    message: "no input".into(),
+                })?;
+            self.inputs.borrow_mut().push(input.clone());
+            let output = match input {
+                Value::Option(None) => Value::Option(None),
+                Value::Option(Some(s)) if matches!(*s, Value::String(_)) => Value::Option(Some(s)),
+                other => {
+                    return Err(CallError::Generic {
+                        message: format!("input: unexpected value {other}"),
+                    })
+                }
+            };
+            Ok(CallResult {
+                ret: Value::Unit,
+                mutated: vec![StructureField {
+                    id: OUTPUT,
+                    value: Box::new(output),
+                }],
+            })
+        }
+        fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.registered.insert(id, callable);
+            CallableId { id }
+        }
+        fn arora_unregister_callable(&mut self, callable_id: &CallableId) {
+            self.registered.remove(&callable_id.id);
+        }
+        fn arora_call_indirect(&mut self, callable_id: &CallableId) -> Result<Value, CallError> {
+            let callable = self.registered[&callable_id.id].clone();
+            callable.call(self)
+        }
+    }
+
+    #[test]
+    fn an_absent_key_binds_none_and_an_optional_output_maps_to_the_key() {
+        let store = SimpleDataStore::new();
+        let mut tree = BehaviorTreeInterpreter::new(Rc::new(echo_index()));
+        tree.load_groot(
+            r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                 <Echo input="{in}" output="{out}"/>
+               </BehaviorTree></root>"#,
+        )
+        .expect("echo resolves by its PascalCase name");
+        let mut bridge = EchoBridge::default();
+        let inputs = bridge.inputs.clone();
+        let read = |key: &str| store.read(&[Key::from(key)]).remove(0);
+        let mut tick = |bridge: &mut EchoBridge| {
+            let mut ctx = BehaviorContext {
+                store: &store,
+                call_bridge: bridge,
+            };
+            tree.tick(&mut ctx).expect("the tree ticks");
+        };
+
+        // `in` is not set: the module receives `None`, not `()`, and writes
+        // `None`, which leaves `out` absent.
+        tick(&mut bridge);
+        assert_eq!(inputs.borrow().last(), Some(&Value::Option(None)));
+        assert_eq!(read("out"), None);
+
+        // `in` is set: the module receives `Some("x")`, and its `Some`
+        // creates `out`, holding the bare string.
+        store
+            .write(StateChange::set("in", Value::String("x".into())))
+            .unwrap();
+        tick(&mut bridge);
+        assert_eq!(
+            inputs.borrow().last(),
+            Some(&Value::Option(Some(Box::new(Value::String("x".into())))))
+        );
+        assert_eq!(read("out"), Some(Value::String("x".into())));
+
+        // `in` is unset again: `None` unsets `out`.
+        store.write(unset("in")).unwrap();
+        tick(&mut bridge);
+        assert_eq!(inputs.borrow().last(), Some(&Value::Option(None)));
+        assert_eq!(read("out"), None);
     }
 }

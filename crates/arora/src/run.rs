@@ -268,7 +268,7 @@ impl Bridge for LocalBridge {
 
 /// Run an arora device with the given HAL, bridge, and data store.
 ///
-/// Builds an [`Arora`] (engine with the basic behavior-tree control nodes wired
+/// Builds an [`Arora`] (engine with the core behavior-tree nodes wired
 /// natively) around the injected HAL + bridge over `store`, then drives the
 /// step loop. There is no bridge factory — the caller builds the bridge
 /// endpoint (awaiting any async construction on its own runtime) and hands it
@@ -349,7 +349,7 @@ pub(crate) async fn run_builder_with_frontend(
     // subscription opening on the device's whole state, and its identity.
     on_ready(arora.store().subscribe(), info, device_id);
 
-    info!("engine started; native behavior-tree control nodes ready");
+    info!("engine started; native behavior-tree core nodes ready");
 
     // Serve remote clients' access requests through the chosen operator, one
     // at a time, for as long as the bridge yields them, concurrently with the
