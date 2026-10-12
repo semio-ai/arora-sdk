@@ -91,7 +91,9 @@ use std::time::Duration;
 use tokio::sync::mpsc as tmpsc;
 use tokio::time::Instant;
 
-use crate::conversions::{coerce_scalar, default_value, extract_route, type_ref_id, xyz_structure};
+use crate::conversions::{
+    coerce_scalar, default_value, extract_route, is_duration_id, resolve_field_ref, xyz_structure,
+};
 use crate::profile;
 use crate::services::type_ref_of;
 
@@ -402,36 +404,11 @@ fn resolve_binding(
     })
 }
 
-/// Resolve a dotted field path against a message type alone — the startup
-/// counterpart of [`extract_route`]'s value walk. Empty routes the whole
-/// message.
-fn resolve_field_ref(
-    ty: &low::Type,
-    registry: &ty::TypeRegistry,
-    dotted: &str,
-) -> Result<TypeRef, String> {
-    let mut current_ref = TypeRef::Scalar { id: ty.id };
-    let mut current_ty = Some(ty);
-    if !dotted.is_empty() {
-        for segment in dotted.split('.') {
-            let Some(low::TypeKind::Structure(structure)) = current_ty.map(|ty| &ty.kind) else {
-                return Err(format!("'{dotted}': '{segment}' is not inside a structure"));
-            };
-            let field = structure
-                .fields
-                .values()
-                .find(|field| field.name == segment)
-                .ok_or_else(|| format!("'{dotted}': no field '{segment}'"))?;
-            current_ref = field.type_ref.clone();
-            current_ty = registry.get(&type_ref_id(&field.type_ref));
-        }
-    }
-    Ok(current_ref)
-}
-
-/// Whether a goal field can feed a parameter: their type references agree, or
-/// the field is an `x`/`y`/`z` structure and the parameter the vec3 array it
-/// coerces to (see [`extract_route`]).
+/// Whether a message field can feed a parameter: their type references
+/// agree, or the field is one [`extract_route`] coerces into the parameter's
+/// type — an `x`/`y`/`z` structure into the vec3 array, a
+/// `builtin_interfaces/Duration` into `f32` seconds, a sequence of Durations
+/// (a `*` route) into an `f32` array.
 fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Registry) -> bool {
     let Some(parameter_ref) = type_ref_of(parameter) else {
         return false;
@@ -448,9 +425,15 @@ fn route_compatible(field: &TypeRef, parameter: &FrozenTy, registry: &Ros2Regist
     if same {
         return true;
     }
-    matches!(parameter_ref, TypeRef::Array { id } if id == *ty::F32_ID)
-        && matches!(field, TypeRef::Scalar { id }
-            if registry.get(id).is_some_and(xyz_structure))
+    let duration = |id: &Uuid| is_duration_id(id, registry.types());
+    match (field, parameter_ref) {
+        (TypeRef::Scalar { id }, TypeRef::Array { id: f32 }) if f32 == *ty::F32_ID => {
+            registry.get(id).is_some_and(xyz_structure)
+        }
+        (TypeRef::Scalar { id }, TypeRef::Scalar { id: f32 }) if f32 == *ty::F32_ID => duration(id),
+        (TypeRef::Array { id }, TypeRef::Array { id: f32 }) if f32 == *ty::F32_ID => duration(id),
+        _ => false,
+    }
 }
 
 /// The `goal_id: uint8[16]` field every synthesised request leads with (a

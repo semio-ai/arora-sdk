@@ -4,6 +4,20 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.0.0] - 2026-10-13
+
+### Added
+
+- **Routes take each element of a sequence, and durations as seconds.** A
+  `*` segment collects what the rest of the path reaches in every element
+  into one flat array (`timeline.visemes.*.viseme.value` is a `[u8]`), and a
+  `builtin_interfaces/Duration` routes as its seconds, an `f32`. A bound
+  action's goal route accepts a numeric index, as an inbound endpoint's does.
+
+### Changed
+
+- Depends on arora-msgs-ros2 2.3.
+
 ## [10.4.2] - 2026-10-13
 
 ### Fixed
