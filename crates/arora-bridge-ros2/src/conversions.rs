@@ -204,6 +204,22 @@ pub fn setup_key_subscriber(
     }
 }
 
+/// Whether [`setup_key_subscriber`] subscribes a value type as its own
+/// `std_msgs` message rather than the JSON `std_msgs/String` fallback.
+pub(crate) fn has_std_msgs_scalar(value_type: &Type) -> bool {
+    matches!(
+        value_type,
+        Type::F64
+            | Type::F32
+            | Type::I64
+            | Type::I32
+            | Type::U64
+            | Type::U32
+            | Type::Boolean
+            | Type::String
+    )
+}
+
 /// Create a typed subscription and return a stream converting each message to a
 /// single-key [`StateChange`].
 fn setup_typed<M: MessageType>(
