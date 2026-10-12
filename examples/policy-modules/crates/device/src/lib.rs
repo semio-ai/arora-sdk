@@ -300,16 +300,15 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         "command.behavior",
         Value::String("walk".to_string()),
     ))?;
-    // What a client may write: the commands the trees read and the
-    // simulator's reset. Every other key is the device's own.
+    // The commands the trees read are open to a client; the HAL opens its
+    // own inputs.
     let input = |ty| KeyMeta::new().of_type(ty).editable();
     store.set_meta(HashMap::from([
         (Key::from("command.vx"), input(Type::F64)),
         (Key::from("command.vy"), input(Type::F64)),
         (Key::from("command.vyaw"), input(Type::F64)),
-        (Key::from("command.head"), KeyMeta::new().editable()),
+        (Key::from("command.head"), input(Type::ArrayF32)),
         (Key::from("command.behavior"), input(Type::String)),
-        (Key::from("sim/reset"), input(Type::Boolean)),
     ]))?;
 
     let mut builder = Arora::builder()
