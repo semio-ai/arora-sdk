@@ -6,9 +6,13 @@
 //! reaches nothing. So the values below are not derived here — they are read
 //! from the type-description files a ROS 2 Jazzy install ships
 //! (`share/<pkg>/msg/<Type>.json`, `type_hashes[].hash_string`), the same
-//! source `rclpy` announces on the wire. Both image messages exercise what a
+//! source `rclpy` announces on the wire (`hri_actions_msgs` from Jazzy's
+//! `ros-jazzy-hri-actions-msgs` 2.5.0). Both image messages exercise what a
 //! scalar cannot: a nested `Header` with its own nested `Time`, a `string`, and
-//! a `uint8[]` sequence. `rcl_interfaces/msg/ParameterDescriptor` is ROS 2's own
+//! a `uint8[]` sequence. `byte` and `char` both arrive as an arora `u8`, but ROS
+//! hashes `byte` as its own type and `char` as `uint8`: `std_msgs/Byte`,
+//! `ByteMultiArray` and `diagnostic_msgs/DiagnosticStatus` hold the former,
+//! `std_msgs/Char` the latter. `rcl_interfaces/msg/ParameterDescriptor` is ROS 2's own
 //! spelling of optional fields, `FloatingPointRange[<=1]`: described with arora
 //! optionals, it hashes as ROS 2 does.
 
@@ -35,6 +39,34 @@ const AUTHORITATIVE: &[(&str, &str)] = &[
     (
         "std_msgs/Float64",
         "RIHS01_705ba9c3d1a09df43737eb67095534de36fd426c0587779bda2bc51fe790182a",
+    ),
+    (
+        "std_msgs/Byte",
+        "RIHS01_41e1a3345f73fe93ede006da826a6ee274af23dd4653976ff249b0f44e3e798f",
+    ),
+    (
+        "std_msgs/ByteMultiArray",
+        "RIHS01_972fec7f50ab3c1d06783c228e79e8a9a509021708c511c059926261ada901d4",
+    ),
+    (
+        "std_msgs/Char",
+        "RIHS01_3ad2d04dd29ba19d04b16659afa3ccaedd691914b02a64e82e252f2fa6a586a9",
+    ),
+    (
+        "diagnostic_msgs/KeyValue",
+        "RIHS01_d68081eaa540288c5440753baecef0c4e16e81a5f78ad68902ded5100413bb42",
+    ),
+    (
+        "diagnostic_msgs/DiagnosticStatus",
+        "RIHS01_b0e3e692ea2d54a8af2f4ef1930e81556a2db55216b771f8a7d2724ed47bf0e4",
+    ),
+    (
+        "diagnostic_msgs/DiagnosticArray",
+        "RIHS01_5a8a36efb05fb25070fa0fb3810290c0e6cd4862b54a8fb975a1ee8dc55a333e",
+    ),
+    (
+        "hri_actions_msgs/ClosedCaption",
+        "RIHS01_d143880f1492061fdf58fc1b6a1f58455a82a99bf7e51ac69deb0bb47bf3255f",
     ),
 ];
 
