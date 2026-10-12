@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal"
-version = "4.1.0"
+version = "4.2.0"
 dependencies = [
  "arora-types",
  "async-trait",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-restful"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-ros2"
-version = "5.1.1"
+version = "5.2.0"
 dependencies = [
  "anyhow",
  "arora",

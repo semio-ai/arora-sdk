@@ -4,6 +4,36 @@ All notable changes to `arora-hal`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] - 2026-10-12
+
+### Added
+
+- `set_targets` reads the targets a `StateChange` sets, in either of the two
+  forms a target key takes for the component `c` of the entity at path `k`:
+  `k/target.c` (`hip_yaw/target.position`) and `k.target_c`
+  (`hip_yaw.target_position`). Each `SetTarget` carries the key as written,
+  the measured key `k.c` it targets (`hip_yaw.position`), and the value; its
+  `component` and `entity` name the targeted component and entity. A change
+  that sets both forms of one target yields the `k/target.c` key and value
+  only: the keys of a change carry no order, so the form decides. A
+  namespaced last segment `target.c` is always the first form, so
+  `x/target.target_position` targets `x.target_position`.
+- `fold_newest_wins` merges a later change into an earlier one, newest wins
+  per key and per target: a target the later change sets or unsets, in either
+  form, drops the earlier change's set of it in either form. For a HAL that
+  coalesces a backlog of writes.
+
+### Changed
+
+- `FakeHal` takes `<joint>/target.position` as a setpoint, as it takes
+  `<joint>.target_position`, and senses both back as `<joint>.position`. A
+  change that sets both for one joint applies `<joint>/target.position`; an
+  unset of one form beside a set of the other keeps the sensed position the
+  set writes.
+- `FakeHal` no longer takes `<ns>/target.target_position` as a setpoint for a
+  joint named `target`: that key is now the target of `<ns>.target_position`.
+  `target.target_position` at the root is still a setpoint.
+
 ## [4.1.0] - 2026-10-09
 
 ### Added

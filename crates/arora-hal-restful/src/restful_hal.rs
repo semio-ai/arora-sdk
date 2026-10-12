@@ -56,19 +56,6 @@ struct Inner {
     subscribers: Mutex<Vec<UnboundedSender<StateChange>>>,
 }
 
-/// Fold `later` into `earlier`, per-key newest wins: applying the folded
-/// change equals applying both in order.
-fn fold_newest_wins(earlier: &mut StateChange, later: StateChange) {
-    for key in later.unset {
-        earlier.set.remove(&key);
-        earlier.unset.insert(key);
-    }
-    for (key, value) in later.set {
-        earlier.unset.remove(&key);
-        earlier.set.insert(key, value);
-    }
-}
-
 impl RestfulHal {
     /// Create a new RestfulHal with the given configuration.
     ///
@@ -96,7 +83,7 @@ impl RestfulHal {
         });
 
         // The queued-write task: receives the changes `try_send` enqueues,
-        // folds any backlog into one change (per-key newest wins) so slow
+        // folds any backlog into one change (newest wins, per key and per target) so slow
         // round-trips coalesce, and drives the same write path as `write()`.
         // It ends when the channel closes, i.e. when the HAL is dropped.
         let (outbound, mut outbound_rx) = futures::channel::mpsc::unbounded::<StateChange>();
@@ -104,7 +91,7 @@ impl RestfulHal {
         tokio::spawn(async move {
             while let Some(mut changes) = outbound_rx.next().await {
                 while let Ok(later) = outbound_rx.try_recv() {
-                    fold_newest_wins(&mut changes, later);
+                    arora_hal::fold_newest_wins(&mut changes, later);
                 }
                 if let Err(e) = task_inner.write(changes).await {
                     warn!("Queued write failed: {e}");
@@ -119,9 +106,13 @@ impl RestfulHal {
 impl Inner {
     /// Plan the HTTP requests for the joint-position targets in `changes`.
     ///
-    /// A target is a key whose first attribute is `target_position` or
-    /// `target_velocity`, its entity being the joint's name; its measured value
-    /// is mirrored under the same key with `position` or `velocity` instead.
+    /// A target is a position or velocity target key in either form
+    /// ([`arora_hal::set_targets`]) — `<joint>/target.position` or
+    /// `<joint>.target_position`, `<joint>/target.velocity` or
+    /// `<joint>.target_velocity` — its entity being the joint's name; its
+    /// measured value is mirrored under `<joint>.position` or
+    /// `<joint>.velocity`. Where `changes` sets both forms of one target, the
+    /// `<joint>/target.…` value is the one requested and mirrored.
     ///
     /// Returns the resulting state changes (the targets plus their mirrored
     /// measured values) and one `(url, payload)` request per matching
@@ -134,33 +125,22 @@ impl Inner {
         let mut joint_positions: HashMap<String, f64> = HashMap::new();
         let mut joint_velocities: HashMap<String, f64> = HashMap::new();
         let mut result_changes = StateChange::new();
-        for (key, value) in &changes.set {
-            let Some(value) = value else { continue };
-            if key.get_component() == Some("target_position") {
-                if let Value::F64(angle) = value {
-                    let joint_name = key.get_entity();
-                    joint_positions.insert(joint_name.to_string(), *angle);
-                    result_changes
-                        .set
-                        .insert(key.clone(), Some(Value::F64(*angle)));
-                    result_changes.set.insert(
-                        key.clone().with_component("position"),
-                        Some(Value::F64(*angle)),
-                    );
-                }
-            } else if key.get_component() == Some("target_velocity") {
-                if let Value::F64(velocity) = value {
-                    let joint_name = key.get_entity();
-                    joint_velocities.insert(joint_name.to_string(), *velocity);
-                    result_changes
-                        .set
-                        .insert(key.clone(), Some(Value::F64(*velocity)));
-                    result_changes.set.insert(
-                        key.clone().with_component("velocity"),
-                        Some(Value::F64(*velocity)),
-                    );
-                }
-            }
+        for target in arora_hal::set_targets(changes) {
+            let Some(Value::F64(value)) = target.value else {
+                continue;
+            };
+            let joints = match target.component() {
+                "position" => &mut joint_positions,
+                "velocity" => &mut joint_velocities,
+                _ => continue,
+            };
+            joints.insert(target.entity().to_string(), *value);
+            result_changes
+                .set
+                .insert(target.key.clone(), Some(Value::F64(*value)));
+            result_changes
+                .set
+                .insert(target.measured, Some(Value::F64(*value)));
         }
 
         if joint_positions.is_empty() {
@@ -373,7 +353,7 @@ impl Hal for RestfulHal {
     }
 
     /// Enqueues the changes onto the queued-write task and returns; the task
-    /// folds the backlog (per-key newest wins) and drives the same path as
+    /// folds the backlog (newest wins, per key and per target) and drives the same path as
     /// [`write`](Hal::write). Never waits on the HTTP round-trip.
     fn try_send(&self, changes: &StateChange) {
         if changes.is_empty() {
@@ -620,6 +600,92 @@ mod tests {
         assert_eq!(
             change.set.get(&Key::from("head_yaw.target_position")),
             Some(&Some(Value::from(0.5)))
+        );
+    }
+
+    /// The `<joint>/target.…` keys request and mirror as the
+    /// `<joint>.target_…` keys do.
+    #[tokio::test]
+    async fn test_write_entity_form_targets_posts_and_mirrors() {
+        let (base_url, requests) = spawn_http_server(|_| 200);
+        let hal = RestfulHal::new(head_config(&base_url)).expect("create HAL");
+        let mut feed = hal.updates();
+
+        let mut changes = StateChange::set("head_yaw/target.position", Value::from(0.5));
+        changes.set.insert(
+            Key::from("head_yaw/target.velocity"),
+            Some(Value::from(2.0)),
+        );
+        hal.write(changes).await.expect("write should succeed");
+
+        let (path, payload) = requests.try_recv().expect("one request expected");
+        assert_eq!(path, "/api/v1/head");
+        let yaw = payload["yaw"].as_f64().expect("yaw should be a number");
+        assert!((yaw - (0.5f64.to_degrees() + 180.0)).abs() < 1e-9);
+        assert_eq!(payload["speed"].as_f64(), Some(2.0 * 75.0));
+
+        let change = feed
+            .next()
+            .now_or_never()
+            .flatten()
+            .expect("a state change expected");
+        for (key, value) in [
+            ("head_yaw/target.position", 0.5),
+            ("head_yaw.position", 0.5),
+            ("head_yaw/target.velocity", 2.0),
+            ("head_yaw.velocity", 2.0),
+        ] {
+            assert_eq!(
+                change.set.get(&Key::from(key)),
+                Some(&Some(Value::from(value))),
+                "{key}"
+            );
+        }
+        assert_eq!(change.set.len(), 4);
+    }
+
+    /// A change that sets both forms of one target requests and mirrors the
+    /// `<joint>/target.…` value.
+    #[tokio::test]
+    async fn test_write_both_forms_applies_the_entity_form() {
+        let (base_url, requests) = spawn_http_server(|_| 200);
+        let hal = RestfulHal::new(head_config(&base_url)).expect("create HAL");
+        let mut feed = hal.updates();
+
+        let mut changes = StateChange::new();
+        for (key, value) in [
+            ("head_yaw.target_position", 0.2),
+            ("head_yaw/target.position", 0.5),
+            ("head_yaw.target_velocity", 1.0),
+            ("head_yaw/target.velocity", 2.0),
+        ] {
+            changes.set.insert(Key::from(key), Some(Value::from(value)));
+        }
+        hal.write(changes).await.expect("write should succeed");
+
+        let (_, payload) = requests.try_recv().expect("one request expected");
+        let yaw = payload["yaw"].as_f64().expect("yaw should be a number");
+        assert!((yaw - (0.5f64.to_degrees() + 180.0)).abs() < 1e-9);
+        assert_eq!(payload["speed"].as_f64(), Some(2.0 * 75.0));
+        assert!(requests.try_recv().is_err(), "one request only");
+
+        let change = feed
+            .next()
+            .now_or_never()
+            .flatten()
+            .expect("a state change expected");
+        assert_eq!(
+            change.set.get(&Key::from("head_yaw.position")),
+            Some(&Some(Value::from(0.5)))
+        );
+        assert_eq!(
+            change.set.get(&Key::from("head_yaw.velocity")),
+            Some(&Some(Value::from(2.0)))
+        );
+        assert_eq!(change.set.get(&Key::from("head_yaw.target_position")), None);
+        assert_eq!(
+            hal.read(&[Key::from("head_yaw.position")]).await.unwrap(),
+            vec![Some(Value::from(0.5))]
         );
     }
 

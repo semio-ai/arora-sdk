@@ -7,12 +7,15 @@
 //! JSON file deserializes to [`RESTfulRobotConfig`] (see
 //! `configs/hackerbot.json` for a sample).
 //!
-//! Its naming contract for joints is the HALs' convention, an attribute on the
-//! key's last segment ([`Key::get_component`](arora_types::data::Key::get_component)),
-//! `<joint>` being the joint's name: a `<joint>.target_position` write becomes
-//! a request to the robot's joint-position endpoint, at the speed a
-//! `<joint>.target_velocity` in the same change sets, and both are mirrored as
-//! `<joint>.position` and `<joint>.velocity`. Any other key is held as written.
+//! Its naming contract for joints is the HALs' target keys
+//! ([`arora_hal::set_targets`]), `<joint>` being the joint's name: a
+//! `<joint>/target.position` or `<joint>.target_position` write becomes a
+//! request to the robot's joint-position endpoint, at the speed a
+//! `<joint>/target.velocity` or `<joint>.target_velocity` in the same change
+//! sets, and both are mirrored as `<joint>.position` and `<joint>.velocity`. A
+//! change that sets both forms of one target requests and mirrors the
+//! `<joint>/target.…` value. Every key is held as written, both forms of a
+//! target included: each holds what was last written to it.
 //! Values are from the arora-types [`Value`](arora_types::value::Value) enum;
 //! state changes are applied as sets and unsets.
 

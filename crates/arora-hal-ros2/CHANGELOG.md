@@ -4,6 +4,18 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.2.0] - 2026-10-12
+
+### Changed
+
+- `Ros2Hal`'s joint commands (`JointState`, `Float64MultiArray`,
+  `JointAnglesWithSpeed`) read `<joint>/target.position` as they read
+  `<joint>.target_position`, for a joint at the root (`<joint>` with no `/`).
+  A change that sets both for one joint commands the `<joint>/target.position`
+  value. The queued-write task merges its backlog with arora-hal's
+  `fold_newest_wins`, so the later of two targets wins whichever form each
+  was written in. Requires arora-hal 4.2.
+
 ## [5.1.1] - 2026-10-09
 
 ### Fixed
