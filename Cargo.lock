@@ -190,6 +190,7 @@ dependencies = [
  "sysinfo",
  "test-rust-wasm",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "uuid",
  "wasm-bindgen-test",
  "web-time",
