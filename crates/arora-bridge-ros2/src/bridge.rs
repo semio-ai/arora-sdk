@@ -1507,6 +1507,7 @@ mod tests {
     use super::*;
     use crate::conversions::extract_route;
     use arora_types::data::Key;
+    use ros2_client::Name;
 
     fn set(key: &str, value: f64) -> StateChange {
         StateChange::set(Key::from(key), Value::F64(value))
@@ -1660,6 +1661,101 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// The keys a HAL describes for a joint and those a Vizij face describes
+    /// for an animatable, named by an identifier or a UUID — each target form,
+    /// the per-axis forms of a compound value, the legacy `studio_value`, and
+    /// the measured keys — each get a topic of their own: no two inputs share
+    /// one, and no output escapes onto an input's topic, where the bridge
+    /// would not publish it. The escape is not injective, so this holds of
+    /// these forms for ids like these, not of any key set (`a.target_position`
+    /// and `a_target.position` share a topic).
+    #[test]
+    fn every_described_target_and_measured_key_gets_a_topic_of_its_own() {
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        for id in ["hip_yaw", "HeadYaw", "6cefb62d-dc71-4c3e-9f0a-2b8f3c1d5e7a"] {
+            for component in ["position", "velocity"] {
+                inputs.push(format!("{id}/target.{component}"));
+                inputs.push(format!("{id}.target_{component}"));
+                outputs.push(format!("{id}.{component}"));
+            }
+            outputs.push(format!("{id}.effort"));
+            inputs.push(format!("{id}.studio_value"));
+            for axis in ["x", "y", "z", "r", "g", "b"] {
+                inputs.push(format!("{id}/target.position.{axis}"));
+                inputs.push(format!("{id}.target_position.{axis}"));
+                inputs.push(format!("{id}.{axis}.target_position"));
+                outputs.push(format!("{id}.position.{axis}"));
+                outputs.push(format!("{id}.{axis}.position"));
+            }
+        }
+        inputs.push("common.target_trajectory".to_string());
+        inputs.push("text".to_string());
+
+        let typed = inputs
+            .iter()
+            .map(|path| (path.clone(), Type::F64))
+            .collect();
+        let topics = input_topics("robot", typed, &[]);
+        assert_eq!(topics.len(), inputs.len(), "two inputs share a topic");
+        let input_topics: HashSet<&str> = topics.iter().map(|(_, _, t)| t.as_str()).collect();
+        for (path, _, topic) in &topics {
+            assert!(Name::parse(topic).is_ok(), "{path} -> {topic}");
+        }
+        let mut output_topics = HashSet::new();
+        for path in &outputs {
+            let topic = topic_name("robot", path);
+            assert!(Name::parse(&topic).is_ok(), "{path} -> {topic}");
+            assert!(!input_topics.contains(topic.as_str()), "{path} -> {topic}");
+            assert!(output_topics.insert(topic.clone()), "{path} -> {topic}");
+        }
+
+        let topic_of = |path: &str| {
+            topics
+                .iter()
+                .find(|(p, _, _)| p == path)
+                .map(|(_, _, t)| t.as_str())
+        };
+        let uuid = "6cefb62d-dc71-4c3e-9f0a-2b8f3c1d5e7a";
+        let escaped = "_6cefb62d_dc71_4c3e_9f0a_2b8f3c1d5e7a";
+        for (path, topic) in [
+            (
+                "hip_yaw/target.position".to_string(),
+                "hip_yaw/target_position".to_string(),
+            ),
+            (
+                "hip_yaw.target_position".to_string(),
+                "hip_yaw_target_position".to_string(),
+            ),
+            (
+                format!("{uuid}/target.position.x"),
+                format!("{escaped}/target_position_x"),
+            ),
+            (
+                format!("{uuid}.target_position.x"),
+                format!("{escaped}_target_position_x"),
+            ),
+            (
+                format!("{uuid}.x.target_position"),
+                format!("{escaped}_x_target_position"),
+            ),
+            (
+                format!("{uuid}.studio_value"),
+                format!("{escaped}_studio_value"),
+            ),
+            (
+                "common.target_trajectory".to_string(),
+                "common_target_trajectory".to_string(),
+            ),
+        ] {
+            assert_eq!(
+                topic_of(&path),
+                Some(format!("/robot/keys/{topic}").as_str()),
+                "{path}"
+            );
+        }
     }
 
     /// A `u8` input the ROS4HRI viseme endpoints route onto is served by them
