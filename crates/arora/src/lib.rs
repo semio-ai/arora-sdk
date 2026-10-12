@@ -99,7 +99,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
@@ -155,6 +155,13 @@ pub struct Arora {
     /// [`run`](Arora::run) owns the device still observes a self-paced
     /// loop's failures; each distinct failure is sent once.
     pub(crate) behavior_error: watch::Sender<Option<String>>,
+    /// The task runs started through the interpreter module that have not yet
+    /// ended, each step reading whether they did, to log how.
+    pub(crate) task_runs: runtime::TaskRuns,
+    /// Set by [`load_groot`](Arora::load_groot) around its load, so the
+    /// interpreter module's `LOAD` logs that the behavior came from a Groot
+    /// tree.
+    pub(crate) loading_groot: Rc<Cell<bool>>,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
@@ -242,8 +249,10 @@ impl Arora {
         let graph = tree
             .into_graph(&self.function_index)
             .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
-        self.call(interpreter_module::encode_load(&graph))
-            .map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
+        self.loading_groot.set(true);
+        let loaded = self.call(interpreter_module::encode_load(&graph));
+        self.loading_groot.set(false);
+        loaded.map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
         Ok(())
     }
 
@@ -950,14 +959,31 @@ impl AroraBuilder {
         // run on the same cell the step loop ticks. A Call to those ids — from a
         // remote or from a behavior — reaches the interpreter through the
         // engine's normal dispatch, like any module function.
+        //
+        // Each one that succeeds says so in the log, once per call: what the
+        // device now runs is what an operator watching it asks first.
         let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
+        let task_runs: runtime::TaskRuns = Rc::default();
+        let loading_groot: Rc<Cell<bool>> = Rc::default();
         let module = ModuleBuilder::new(interpreter_module::ID)
             .function(interpreter_module::LOAD, {
                 let cell = interpreter.clone();
+                let loading_groot = loading_groot.clone();
                 move |call| {
                     let graph = interpreter_module::decode_load(&call)
                         .map_err(|message| CallError::Guest { message })?;
-                    runtime::with_interpreter(&cell, |interpreter| interpreter.load(graph))
+                    let nodes = graph.nodes.len();
+                    let result =
+                        runtime::with_interpreter(&cell, |interpreter| interpreter.load(graph))?;
+                    let source = if loading_groot.get() {
+                        " from a Groot tree"
+                    } else {
+                        ""
+                    };
+                    log::info!(
+                        "behavior loaded{source}: {nodes} node(s), running from the next step"
+                    );
+                    Ok(result)
                 }
             })
             .function(interpreter_module::EDIT, {
@@ -965,27 +991,69 @@ impl AroraBuilder {
                 move |call| {
                     let diff = interpreter_module::decode_edit(&call)
                         .map_err(|message| CallError::Guest { message })?;
-                    runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))
+                    let summary = format!(
+                        "+{} -{} node(s), +{} -{} link(s)",
+                        diff.add_nodes.len(),
+                        diff.remove_nodes.len(),
+                        diff.add_links.len(),
+                        diff.remove_links.len()
+                    );
+                    let result =
+                        runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))?;
+                    log::info!("behavior edited: {summary}, running from the next step");
+                    Ok(result)
                 }
             })
             .function(interpreter_module::SPAWN, {
                 let cell = interpreter.clone();
+                let task_runs = task_runs.clone();
+                let function_index = function_index.clone();
                 move |call| {
                     let (spawned, policy) = interpreter_module::decode_spawn(&call)
                         .map_err(|message| CallError::Guest { message })?;
-                    runtime::with_interpreter_value(&cell, |interpreter| {
-                        interpreter
-                            .spawn(spawned, policy)
-                            .map(|handle| interpreter_module::encode_spawn_result(&handle))
-                    })
+                    let function = runtime::function_label(&function_index, spawned.id);
+                    let mut handle = None;
+                    let result = runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter.spawn(spawned, policy).map(|spawned| {
+                            let value = interpreter_module::encode_spawn_result(&spawned);
+                            handle = Some(spawned);
+                            value
+                        })
+                    })?;
+                    if let Some(handle) = handle {
+                        log::info!("task {} started: {function}, {policy:?} run", handle.id.0);
+                        task_runs.borrow_mut().push(runtime::TaskRun {
+                            id: handle.id,
+                            function,
+                            status: handle.status,
+                            halted: false,
+                        });
+                    }
+                    Ok(result)
                 }
             })
             .function(interpreter_module::HALT, {
                 let cell = interpreter.clone();
+                let task_runs = task_runs.clone();
                 move |call| {
                     let task = interpreter_module::decode_halt(&call)
                         .map_err(|message| CallError::Guest { message })?;
-                    runtime::with_interpreter(&cell, |interpreter| interpreter.halt(task))
+                    let result =
+                        runtime::with_interpreter(&cell, |interpreter| interpreter.halt(task))?;
+                    let mut runs = task_runs.borrow_mut();
+                    match runs.iter_mut().find(|run| run.id == task) {
+                        Some(run) => {
+                            run.halted = true;
+                            log::info!(
+                                "task {} ({}) halting: it stops at the next step",
+                                task.0,
+                                run.function
+                            );
+                        }
+                        // Halting a finished or unknown run is a no-op.
+                        None => log::info!("task {} halt requested: no such running task", task.0),
+                    }
+                    Ok(result)
                 }
             });
         // A method the interpreter implements is a task run, which a direct
@@ -1024,6 +1092,8 @@ impl AroraBuilder {
             store_changes,
             clock: Clock::starting_at(self.start_time),
             behavior_error: watch::Sender::new(None),
+            task_runs,
+            loading_groot,
         };
         if let Some(xml) = self.groot {
             arora.load_groot(&xml)?;
@@ -2160,6 +2230,11 @@ mod caller_tests {
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(running)]
         );
+        assert_eq!(
+            arora.task_runs.borrow().len(),
+            1,
+            "the device follows the running task, to log its end"
+        );
 
         settle(&mut arora, caller.halt(handle.id)).expect("the halt is applied");
         arora.step(Duration::from_millis(10)).expect("step");
@@ -2168,6 +2243,47 @@ mod caller_tests {
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(failure)],
             "a halted run ends Failure"
+        );
+        assert!(
+            arora.task_runs.borrow().is_empty(),
+            "the ended run is reported once and no longer followed"
+        );
+    }
+
+    /// The device follows each run it started until the run ends, marking the
+    /// one it was asked to halt, so the log says once how each ended.
+    #[test]
+    fn the_device_follows_a_run_to_its_end() {
+        let mut arora = device();
+        let spawned = arora
+            .call(interpreter_module::encode_spawn(
+                &Call {
+                    module_id: Some(TOOLS),
+                    id: WAVE,
+                    args: Vec::new(),
+                },
+                arora_behavior::RunPolicy::Concurrent,
+            ))
+            .expect("the run starts");
+        let handle = interpreter_module::decode_spawn_result(&spawned.ret).expect("a handle");
+        {
+            let runs = arora.task_runs.borrow();
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].id, handle.id);
+            assert!(runs[0].function.contains("'wave'"), "{}", runs[0].function);
+            assert!(!runs[0].halted);
+        }
+        arora.step(Duration::from_millis(10)).expect("step");
+        assert_eq!(arora.task_runs.borrow().len(), 1, "still running");
+
+        arora
+            .call(interpreter_module::encode_halt(handle.id))
+            .expect("the halt is accepted");
+        assert!(arora.task_runs.borrow()[0].halted, "marked halted");
+        arora.step(Duration::from_millis(10)).expect("step");
+        assert!(
+            arora.task_runs.borrow().is_empty(),
+            "the ended run is reported once and no longer followed"
         );
     }
 

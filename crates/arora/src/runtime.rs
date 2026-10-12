@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use arora_behavior::{built_in, BehaviorContext, BehaviorInterpreter, BehaviorStatus};
+use arora_behavior::{
+    built_in, BehaviorContext, BehaviorInterpreter, BehaviorStatus, Status, TaskId,
+};
 use arora_behavior_tree::ModuleFunction;
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound, MethodSignature};
 use arora_hal::Hal;
@@ -560,6 +562,60 @@ pub(crate) fn with_interpreter_value(
     })
 }
 
+/// A task run the device started, followed to its end so the log says how it
+/// ended. The interpreter module's `SPAWN` adds one, its `HALT` marks it, and
+/// each step reads its status key once, after the behavior ticked.
+pub(crate) struct TaskRun {
+    pub id: TaskId,
+    /// What the run calls, as the log names it.
+    pub function: String,
+    /// The key the run's status is written to.
+    pub status: Key,
+    /// A halt was requested: the run ends `Failure` because it was stopped.
+    pub halted: bool,
+}
+
+/// The task runs the device started and has not yet seen end — shared, like
+/// the [`InterpreterCell`], between the interpreter module's functions and
+/// the step loop.
+pub(crate) type TaskRuns = Rc<RefCell<Vec<TaskRun>>>;
+
+/// How the log names the function `call` reaches: its name in the device's
+/// function index, with its id; the bare id when the index does not know it.
+pub(crate) fn function_label(index: &HashMap<Uuid, ModuleFunction>, id: Uuid) -> String {
+    match index.get(&id) {
+        Some(function) => format!("'{}' ({id})", function.function_name),
+        None => format!("function {id}"),
+    }
+}
+
+/// Log each task run whose status key reached a terminal status, once, and
+/// stop following it.
+fn report_ended_runs(store: &dyn DataStore, runs: &TaskRuns) {
+    let Ok(mut runs) = runs.try_borrow_mut() else {
+        return;
+    };
+    if runs.is_empty() {
+        return;
+    }
+    runs.retain(|run| {
+        let status = store
+            .read(std::slice::from_ref(&run.status))
+            .into_iter()
+            .next()
+            .flatten()
+            .and_then(|value| Status::try_from(value).ok());
+        let outcome = match status {
+            Some(Status::Success) => "succeeded",
+            Some(Status::Failure) if run.halted => "halted",
+            Some(Status::Failure) => "failed",
+            Some(Status::Running) | None => return true,
+        };
+        log::info!("task {} ({}) {outcome}", run.id.0, run.function);
+        false
+    });
+}
+
 /// Phase 4 — tick the one behavior interpreter (a tree, a node graph, …)
 /// against the shared store, **last**: its writes win the frame, and it ticks
 /// over everything the frame already applied (clock, sensors, remote updates).
@@ -599,17 +655,25 @@ fn tick_behavior(
             standing_error.send_replace(Some(message));
         }
     };
+    // Clear a standing fault; whether there was one to clear.
     let clear = || {
-        if standing_error.borrow().is_some() {
+        let standing = standing_error.borrow().is_some();
+        if standing {
             standing_error.send_replace(None);
         }
+        standing
     };
     match behavior.tick(&mut ctx) {
         // Still running: this tick was clean, so clear any standing fault.
-        Ok(BehaviorStatus::Running) => clear(),
+        Ok(BehaviorStatus::Running) => {
+            if clear() {
+                log::info!("the behavior recovered: it ticks cleanly again");
+            }
+        }
         // Terminal, clean: clear the fault and drop the interpreter.
         Ok(BehaviorStatus::Done(Ok(()))) => {
             clear();
+            log::info!("the behavior finished and its interpreter was dropped");
             *interpreter = None;
         }
         // Terminal, faulted: surface the reason and drop the interpreter — a
@@ -752,6 +816,8 @@ impl Arora {
             &mut self.engine,
             &self.behavior_error,
         );
+        //    The task runs this tick ended, said once each.
+        report_ended_runs(&*self.store, &self.task_runs);
         // 5. flush — everything this frame changed, as one change.
         let out = flush(&self.store_changes);
         // 6. writings — the hardware first (its own readings subtracted), then
