@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -13,11 +13,11 @@ use ros2_client::{Name, Node, NodeOptions};
 use ros2_client::{DEFAULT_PUBLISHER_QOS, DEFAULT_SUBSCRIPTION_QOS};
 
 use arora_hal::{
-    content_hash, ComponentModel, Hal, HalAssets, HalDescription, HalError, HalResult,
-    UpdatesStream, DEVICE,
+    content_hash, target_keys, ComponentModel, Hal, HalAssets, HalDescription, HalError, HalResult,
+    KeyDescriptions, UpdatesStream, DEVICE,
 };
-use arora_types::data::{Key, State, StateChange};
-use arora_types::value::Value;
+use arora_types::data::{Key, KeyMeta, State, StateChange};
+use arora_types::value::{Type, Value};
 
 use crate::config::{
     get_joint_ids_from_glb_file, JointIdMapping, ROS2RobotConfig, TopicConfig, TopicDirection,
@@ -62,6 +62,9 @@ pub struct Ros2Hal {
 
     // Feeds the queued-write task
     outbound: UnboundedSender<StateChange>,
+
+    // The robot's keys, from its configuration: fixed for the HAL's life
+    keys: HashMap<Key, KeyMeta>,
 
     // Handles to abort background tasks when the HAL is dropped
     spinner_abort_handle: tokio::task::AbortHandle,
@@ -133,6 +136,7 @@ impl Ros2Hal {
                 base_map
             }
         };
+        let keys = keys_of(&config, &joint_ros_names_to_ids);
         let joint_ids_to_ros_names = joint_ros_names_to_ids
             .iter()
             .map(|(ros_name, arora_id)| (arora_id.clone(), ros_name.clone()))
@@ -294,6 +298,7 @@ impl Ros2Hal {
         Ok(Self {
             inner,
             outbound,
+            keys,
             spinner_abort_handle,
             subscriber_task_abort_handle,
             send_task_abort_handle,
@@ -675,6 +680,12 @@ impl Hal for Ros2Hal {
         }
     }
 
+    /// The robot's keys, from its configuration ([`keys_of`]): one
+    /// description, as they are fixed for the HAL's life.
+    fn describe_keys(&self) -> KeyDescriptions {
+        Box::pin(futures::stream::iter([self.keys.clone()]))
+    }
+
     /// A feed of the changes the robot reports.
     ///
     /// Each feed immediately receives the current state as one `StateChange`
@@ -719,6 +730,126 @@ impl HalAssets for Ros2Hal {
     fn servable_glb(&self, component: &str) -> HalResult<Option<Vec<u8>>> {
         servable_glb_of(&self.inner.config, component)
     }
+}
+
+/// The keys of the robot `config` describes, whose joints `joint_ids` maps
+/// from their ROS names to their Arora ids: what its topics read and write.
+///
+/// - A joint command topic (`JointState` or `Float64MultiArray` under a
+///   joint-state mapping, `JointAnglesWithSpeed` under the joint-angles
+///   mapping, `Float64MultiArray` under its own) reads, for each joint at the
+///   root, `<joint>/target.position` and `<joint>.target_position`: `F64`
+///   inputs.
+/// - A `JointTrajectory` topic under the trajectory mapping reads
+///   `common.target_trajectory`: a key-value input (`jointNames`, `points`).
+/// - A `std_msgs/String` topic under a standard-message mapping carries its
+///   text in `data`: published from the key `data` is mapped to, a `String`
+///   input; received into that key (or `data`), a `String` output.
+/// - A `JointState` topic received under a joint-state mapping reports each
+///   joint's `<joint>.position`, `<joint>.velocity` and `<joint>.effort`; a
+///   `Float64MultiArray` received under its own mapping, `<joint>.position`:
+///   `F64` outputs.
+///
+/// Inputs are described for the joints whose Arora id is a name at the root
+/// (no `.`, no `/`), the only joints the commands read; outputs for every
+/// mapped joint, which is what a received message reports under its id. A
+/// joint the robot reports under a ROS name the mapping lacks is not known in
+/// advance, so not described. A key both read and reported is an input.
+///
+/// Not described either: a topic with a message type its mapping does not
+/// convert, and a standard-message mapping of a type other than `String`,
+/// whose keys are read or reported only alongside a mapped field.
+fn keys_of(config: &ROS2RobotConfig, joint_ids: &HashMap<String, String>) -> HashMap<Key, KeyMeta> {
+    let input = |ty| KeyMeta::new().editable().of_type(ty);
+    let output = |ty| KeyMeta::new().of_type(ty);
+    // Every mapped joint is reported under its id; a command names only the
+    // ones at the root.
+    let reported_joints: BTreeSet<&str> = joint_ids
+        .values()
+        .map(String::as_str)
+        .filter(|joint| !joint.is_empty())
+        .collect();
+    let commanded_joints: BTreeSet<&str> = reported_joints
+        .iter()
+        .copied()
+        .filter(|joint| !joint.contains(['.', '/']))
+        .collect();
+    let mut inputs = HashMap::new();
+    let mut outputs = HashMap::new();
+    for topic in &config.topics {
+        let publishes = matches!(
+            topic.direction,
+            TopicDirection::Publish | TopicDirection::Both
+        );
+        let subscribes = matches!(
+            topic.direction,
+            TopicDirection::Subscribe | TopicDirection::Both
+        );
+        let message = topic.message_type.as_str();
+        let joint_state = is_type::<msgs::JointState>(message);
+        let multi_array = is_type::<msgs::Float64MultiArray>(message);
+        match &topic.mapping {
+            TopicMapping::StandardMessage { field_mappings } => {
+                if !is_type::<msgs::String>(message) {
+                    continue;
+                }
+                let text = field_mappings.get("data");
+                if let Some(key) = text.filter(|_| publishes) {
+                    inputs.insert(Key::new(key.clone()), input(Type::String));
+                }
+                if subscribes {
+                    let key = text.map_or("data", String::as_str);
+                    outputs.insert(Key::new(key), output(Type::String));
+                }
+            }
+            TopicMapping::JointTrajectory => {
+                if publishes && is_type::<msgs::JointTrajectory>(message) {
+                    inputs.insert(
+                        Key::from("common.target_trajectory"),
+                        input(Type::KeyValue).described(
+                            "A joint trajectory: `jointNames` (strings) and `points` \
+                             (`positions`, `timeFromStart`, optional `velocities`, \
+                             `accelerations`, `effort`).",
+                        ),
+                    );
+                }
+            }
+            mapping => {
+                let commands = match mapping {
+                    TopicMapping::JointState { .. } => joint_state || multi_array,
+                    TopicMapping::JointAngles => is_type::<msgs::JointAnglesWithSpeed>(message),
+                    TopicMapping::Float64MultiArray => multi_array,
+                    _ => false,
+                };
+                if publishes && commands {
+                    for joint in &commanded_joints {
+                        for key in target_keys(joint, "position") {
+                            inputs.insert(key, input(Type::F64));
+                        }
+                    }
+                }
+                let reported: &[&str] = match mapping {
+                    TopicMapping::JointState { .. } if joint_state => {
+                        &["position", "velocity", "effort"]
+                    }
+                    TopicMapping::Float64MultiArray if multi_array => &["position"],
+                    _ => &[],
+                };
+                if subscribes {
+                    for joint in &reported_joints {
+                        for component in reported {
+                            outputs.insert(
+                                Key::new(format!("{joint}.{component}")),
+                                output(Type::F64),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    outputs.extend(inputs);
+    outputs
 }
 
 fn description_of(config: &ROS2RobotConfig) -> HalDescription {
@@ -1519,5 +1650,266 @@ mod tests {
         );
 
         println!("Successfully published and received String: {:?}", msg);
+    }
+}
+
+/// What the HAL describes of its keys: from each built-in configuration, and
+/// through an Arora device.
+#[cfg(test)]
+mod keys_tests {
+    use super::*;
+    use crate::configs;
+    use crate::test_fixture::FIXTURE_JOINTS;
+    use crate::JointStateConversion;
+
+    fn input(ty: Type) -> KeyMeta {
+        KeyMeta::new().editable().of_type(ty)
+    }
+
+    fn output(ty: Type) -> KeyMeta {
+        KeyMeta::new().of_type(ty)
+    }
+
+    /// The fixture model's joints, by ROS name, as a configuration maps them.
+    fn fixture_joints() -> HashMap<String, String> {
+        FIXTURE_JOINTS
+            .iter()
+            .map(|(ros, id)| (ros.to_string(), id.to_string()))
+            .collect()
+    }
+
+    fn joint_targets(keys: &mut HashMap<Key, KeyMeta>) -> Vec<(String, KeyMeta)> {
+        let mut found = Vec::new();
+        for (_, id) in FIXTURE_JOINTS {
+            for key in target_keys(id, "position") {
+                found.push((
+                    key.get_path().to_string(),
+                    keys.remove(&key).expect("a target"),
+                ));
+            }
+        }
+        found
+    }
+
+    /// NAO: joint states in, joint angles, trajectories and speech out.
+    #[test]
+    fn nao_describes_its_joints_trajectory_and_speech() {
+        let mut keys = keys_of(&configs::nao::create_config(), &fixture_joints());
+        for (key, meta) in joint_targets(&mut keys) {
+            assert_eq!(meta, input(Type::F64), "{key}");
+        }
+        for (_, id) in FIXTURE_JOINTS {
+            for component in ["position", "velocity", "effort"] {
+                assert_eq!(
+                    keys.remove(&Key::new(format!("{id}.{component}"))),
+                    Some(output(Type::F64))
+                );
+            }
+        }
+        let trajectory = keys
+            .remove(&Key::from("common.target_trajectory"))
+            .expect("the trajectory input");
+        assert!(trajectory.editable);
+        assert_eq!(trajectory.ty, Some(Type::KeyValue));
+        assert_eq!(keys.remove(&Key::from("text")), Some(input(Type::String)));
+        assert!(keys.is_empty(), "{keys:?}");
+    }
+
+    /// Quori: joint states in, a joint-state mapping onto a
+    /// `Float64MultiArray` command out.
+    #[test]
+    fn quori_describes_its_joint_commands_and_states() {
+        let mut keys = keys_of(&configs::quori::create_config(), &fixture_joints());
+        assert_eq!(joint_targets(&mut keys).len(), 4);
+        assert_eq!(
+            keys.len(),
+            6,
+            "position, velocity, effort per joint: {keys:?}"
+        );
+        assert!(keys.values().all(|meta| *meta == output(Type::F64)));
+    }
+
+    /// A built-in configuration with a joint command topic describes each
+    /// joint's two target forms as `F64` inputs, one that speaks its text
+    /// key; none describes the standard-message fields of other types
+    /// (Pepper's tablet image, a `Twist`, a trajectory's renamed fields).
+    #[test]
+    fn every_configuration_describes_its_joint_targets() {
+        for (name, config, speaks) in [
+            ("nao", configs::nao::create_config(), true),
+            ("pepper", configs::pepper::create_config(), true),
+            ("quori", configs::quori::create_config(), false),
+            ("ur3", configs::ur3::create_config(), false),
+            ("ur5", configs::ur5::create_config(), false),
+            ("g1", configs::unitree_g1::create_config(), false),
+        ] {
+            let mut keys = keys_of(&config, &fixture_joints());
+            let commands = config.topics.iter().any(|topic| {
+                matches!(
+                    topic.direction,
+                    TopicDirection::Publish | TopicDirection::Both
+                ) && !matches!(
+                    topic.mapping,
+                    TopicMapping::StandardMessage { .. } | TopicMapping::JointTrajectory
+                )
+            });
+            if commands {
+                for (key, meta) in joint_targets(&mut keys) {
+                    assert_eq!(meta, input(Type::F64), "{name}: {key}");
+                }
+            }
+            assert_eq!(
+                keys.contains_key(&Key::from("text")),
+                speaks,
+                "{name}: {keys:?}"
+            );
+            for key in [
+                "image_data",
+                "velocity.x",
+                "rotation.z",
+                "tool_speed.x",
+                "positions",
+            ] {
+                assert!(!keys.contains_key(&Key::from(key)), "{name}: {key}");
+            }
+        }
+    }
+
+    /// A joint whose id is no root name is reported, not commanded; a
+    /// `String` topic received with no mapping of `data` reports `data`.
+    #[test]
+    fn a_namespaced_joint_is_reported_only_and_unmapped_text_is_data() {
+        let config = ROS2RobotConfig {
+            topics: vec![
+                TopicConfig::new::<msgs::JointState>(
+                    "/joint_states",
+                    TopicDirection::Both,
+                    TopicMapping::JointState {
+                        conversion: JointStateConversion::Standard,
+                    },
+                ),
+                TopicConfig::new::<msgs::String>(
+                    "/heard",
+                    TopicDirection::Subscribe,
+                    TopicMapping::StandardMessage {
+                        field_mappings: HashMap::new(),
+                    },
+                ),
+            ],
+            ..Default::default()
+        };
+        let joints = HashMap::from([
+            ("Head".to_string(), "head".to_string()),
+            ("Arm".to_string(), "arm/elbow".to_string()),
+            ("Odd".to_string(), "odd.joint".to_string()),
+        ]);
+        let keys = keys_of(&config, &joints);
+        let mut paths: Vec<&str> = keys.keys().map(Key::get_path).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "arm/elbow.effort",
+                "arm/elbow.position",
+                "arm/elbow.velocity",
+                "data",
+                "head.effort",
+                "head.position",
+                "head.target_position",
+                "head.velocity",
+                "head/target.position",
+                "odd.joint.effort",
+                "odd.joint.position",
+                "odd.joint.velocity"
+            ]
+        );
+        assert_eq!(keys[&Key::from("data")], output(Type::String));
+    }
+
+    /// Through an Arora device: it lists the HAL's keys with their meta, takes
+    /// a remote write to an input, and refuses one to an output or to a key
+    /// the HAL does not describe. The HAL's node needs no peer for that; its
+    /// topics are its own, so no other test's subscriber hears its command.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_device_opens_the_described_inputs() {
+        let config = ROS2RobotConfig {
+            domain_id: Some(rand::random_range(1..=200)),
+            topics: vec![
+                TopicConfig::new::<msgs::JointState>(
+                    "/describe_keys_test/joint_states",
+                    TopicDirection::Subscribe,
+                    TopicMapping::JointState {
+                        conversion: JointStateConversion::Standard,
+                    },
+                ),
+                TopicConfig::new::<msgs::JointAnglesWithSpeed>(
+                    "/describe_keys_test/joint_angles",
+                    TopicDirection::Publish,
+                    TopicMapping::JointAngles,
+                ),
+            ],
+            joint_ids: JointIdMapping::Override(HashMap::from([(
+                "HeadYaw".to_string(),
+                "head_yaw".to_string(),
+            )])),
+            ..Default::default()
+        };
+        let hal = Ros2Hal::new(config).await.expect("create the HAL");
+        let mut device = arora::Arora::builder()
+            .with_hal(Box::new(hal))
+            .build()
+            .expect("build the device");
+        let caller = device.caller();
+
+        let keys = settle(&mut device, caller.list_keys(Some("head_yaw".to_string())))
+            .expect("list the keys");
+        let listed: Vec<(&str, bool)> = keys
+            .iter()
+            .map(|(path, meta)| (path.as_str(), meta.editable))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                ("head_yaw.effort", false),
+                ("head_yaw.position", false),
+                ("head_yaw.target_position", true),
+                ("head_yaw.velocity", false),
+                ("head_yaw/target.position", true),
+            ]
+        );
+        assert!(keys.iter().all(|(_, meta)| meta.ty == Some(Type::F64)));
+
+        settle(
+            &mut device,
+            caller.update(StateChange::set(
+                "head_yaw/target.position",
+                Value::F64(0.5),
+            )),
+        )
+        .expect("an input");
+        for (key, value, why) in [
+            ("head_yaw.position", Value::F64(0.5), "not an input"),
+            ("head_roll.target_position", Value::F64(0.5), "not an input"),
+            ("head_yaw.target_position", Value::I64(1), "declared type"),
+        ] {
+            let refused = settle(&mut device, caller.update(StateChange::set(key, value)))
+                .expect_err("refused");
+            assert!(refused.to_string().contains(why), "{key}: {refused}");
+        }
+    }
+
+    /// Step `device` until `reply` is answered.
+    fn settle<T>(device: &mut arora::Arora, reply: impl std::future::Future<Output = T>) -> T {
+        use futures::FutureExt;
+        let mut reply = std::pin::pin!(reply);
+        for _ in 0..8 {
+            device
+                .step(std::time::Duration::from_millis(10))
+                .expect("step");
+            if let Some(answer) = reply.as_mut().now_or_never() {
+                return answer;
+            }
+        }
+        panic!("no answer after eight steps");
     }
 }

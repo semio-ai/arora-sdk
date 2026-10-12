@@ -16,6 +16,13 @@
 //! where a change sets both for one joint — make the joint command (`JointState`, `Float64MultiArray` or
 //! `JointAnglesWithSpeed`); the key `common.target_trajectory` makes a
 //! `JointTrajectory`.
+//!
+//! It describes those keys ([`arora_hal::Hal::describe_keys`]) from its
+//! configuration: each root joint's two position target forms, the
+//! trajectory key and a speech topic's text as inputs open to remote
+//! writers, and the joints' sensed values and a received text as outputs. A
+//! device over it (arora 12.7 or later) opens its inputs with no host
+//! configuration, and every bridge lists them.
 
 mod config;
 pub use config::{
