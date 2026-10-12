@@ -157,7 +157,10 @@ loop:
   is sent its own keys and none of its neighbours'.
 - **HAL** — `arora_hal::Hal`, the device boundary. A robot HAL talks to
   hardware; a simulator or a renderer (e.g. a Vizij rig-instrumented face) is
-  just another implementation.
+  just another implementation. A HAL can describe its keys
+  (`Hal::describe_keys`): the runtime states the description to the store's key
+  meta, so the HAL's inputs are open to remote writers and every bridge lists
+  them.
 - **Bridges** — `arora_bridge::Bridge`, the remote boundary. An instance holds
   a *vector* of them (`AroraBuilder::with_bridge` adds one), each a numbered
   endpoint: the studio-bridge Zenoh connector for Studio, `arora-bridge-ws` for

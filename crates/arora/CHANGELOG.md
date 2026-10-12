@@ -4,6 +4,32 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.7.0] - 2026-10-12
+
+### Added
+
+- **A device's HAL opens its own inputs.** The runtime states what the HAL
+  says of its keys (`arora_hal::Hal::describe_keys`) to the store's key meta:
+  the description the HAL holds when the device is built, then each later one
+  at the next step, before that step applies any write. The HAL's inputs are
+  open to remote writers with their declared type, its outputs closed, and
+  every bridge lists them (`ListKeys`) before anything writes them. A key
+  whose own meta the host states keeps it: the HAL's description fills the
+  keys with none and replaces only what it stated itself, so a host narrows or
+  closes one of its HAL's inputs by stating its meta. A HAL that describes no
+  key leaves the device as it was.
+- `LocalCaller::update`: write a change to the device's store as a remote
+  does, checked against the store's key meta like every bridge's write.
+
+### Changed
+
+- A key the HAL describes takes the HAL's meta over a prefix's, as any key's
+  own meta does: under `--open`, or in a subtree a host opened, the HAL's
+  outputs are closed and its inputs take only their declared type. Every key
+  the HAL does not describe keeps what the store says of it. `--open`'s help
+  says so.
+- Requires `arora-hal` 4.3.
+
 ## [12.3.0] - 2026-10-10
 
 ### Changed

@@ -4,6 +4,28 @@ All notable changes to `arora-hal`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.3.0] - 2026-10-12
+
+### Added
+
+- `Hal::describe_keys`: what the HAL's keys are, as a feed of
+  `HashMap<Key, KeyMeta>` (`KeyDescriptions`) — its inputs open to remote
+  writers (`KeyMeta::editable`), its outputs closed, each with its type and,
+  where the HAL knows them, its unit, range and rest value. The first item,
+  ready at once, describes the keys the HAL knows then; a later item describes
+  keys it learns while it runs, or keys anew, and adds to or replaces what an
+  earlier one said. The runtime states each item to the device's store. A
+  provided method: the default describes no key, so every HAL keeps compiling
+  and behaving as before.
+- `target_keys(entity, component)`: the two keys of a target,
+  `k/target.c` then `k.target_c`, for a HAL that describes the inputs
+  `set_targets` reads.
+- `FakeHal::add_joints`: the fake describes the keys of the joints it is
+  given — `<joint>/target.position` and `<joint>.target_position` as `F64`
+  inputs, `<joint>.position` as an `F64` output — and joints added later reach
+  every description feed as one more item. A joint it was not given still
+  follows its setpoint, undescribed.
+
 ## [4.2.0] - 2026-10-12
 
 ### Added

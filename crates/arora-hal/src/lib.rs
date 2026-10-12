@@ -16,7 +16,10 @@
 //! sensor feed as a [`Stream`] (each call an independent subscription, owned by
 //! its consumer — the runtime's loop is its one poller), and
 //! [`try_send`](Hal::try_send) pushes actuator writes immediately, called
-//! directly from the synchronous step. Any real async work is the
+//! directly from the synchronous step. What the keys are — which ones a remote
+//! may write, of what type — the HAL describes as a feed too
+//! ([`describe_keys`](Hal::describe_keys)), which the runtime states to the
+//! store. Any real async work is the
 //! implementation's own responsibility (its own task/queue), the same way a
 //! bridge owns its socket; this crate depends on no async runtime.
 //!
@@ -28,7 +31,7 @@
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
 //! and the real ones (ros2, restful, nao) in their own sibling crates.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -36,15 +39,15 @@ use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use futures_core::Stream;
 
-use arora_types::data::{Key, State, StateChange};
-use arora_types::value::Value;
+use arora_types::data::{Key, KeyMeta, State, StateChange};
+use arora_types::value::{Type, Value};
 
 pub mod hal_module;
 mod model;
 mod target;
 
 pub use model::{content_hash, ComponentGlb, ComponentModel, ModelReference, Mount, DEVICE};
-pub use target::{fold_newest_wins, set_targets, SetTarget};
+pub use target::{fold_newest_wins, set_targets, target_keys, SetTarget};
 
 /// What device a HAL drives — or, in a [`ComponentModel`], what one of its
 /// components is.
@@ -132,6 +135,34 @@ pub trait Hal: Send + Sync {
     /// the per-frame sweep).
     fn updates(&self) -> UpdatesStream;
 
+    /// What this HAL's keys are. Its inputs — the keys it reads from a write,
+    /// such as actuator targets — are open to remote writers
+    /// ([`KeyMeta::editable`]); its outputs — what it reports, such as sensed
+    /// values — are closed. Each states its type, and its unit, range and rest
+    /// value where the HAL knows them.
+    ///
+    /// The description is a feed, because a HAL may learn its keys after it
+    /// starts: a topic discovered, a configuration fetched. Each call yields an
+    /// independent stream. Its first item, ready at once, describes the keys
+    /// the HAL knows then; a later item describes keys it has learnt, or keys
+    /// anew. An item adds to the description and replaces what an earlier item
+    /// said of the same key; no item retracts a key. A HAL whose keys are fixed
+    /// yields one item.
+    ///
+    /// The runtime states each item to the device's store
+    /// ([`DataStore::set_meta`](arora_types::data::DataStore::set_meta)) — the
+    /// items ready when the device is built, then each later one at the next
+    /// step — so every bridge lists the keys with their meta and accepts a
+    /// remote write to an input, with no declaration of its own. A key the HAL
+    /// does not describe keeps whatever the store says of it, and so does a key
+    /// whose own meta the device's host stated: the host has the last word on
+    /// what its device opens.
+    ///
+    /// Default: no item, a HAL that describes no key.
+    fn describe_keys(&self) -> KeyDescriptions {
+        Box::pin(futures_util::stream::empty())
+    }
+
     /// The device's assets — its 3D model — when this HAL supplies them. The
     /// runtime serves them as the HAL module's functions
     /// ([`hal_module`]), so a HAL that implements [`HalAssets`] returns
@@ -144,6 +175,12 @@ pub trait Hal: Send + Sync {
 /// The sensor feed of a [`Hal`]: an owned stream of the changes the hardware
 /// reports. The stream ending means the hardware feed is gone.
 pub type UpdatesStream = Pin<Box<dyn Stream<Item = StateChange> + Send>>;
+
+/// The key descriptions of a [`Hal`] ([`describe_keys`](Hal::describe_keys)):
+/// an owned stream of statements, each the meta of some of its keys, in the
+/// shape [`DataStore::set_meta`](arora_types::data::DataStore::set_meta)
+/// takes.
+pub type KeyDescriptions = Pin<Box<dyn Stream<Item = HashMap<Key, KeyMeta>> + Send>>;
 
 /// Optional extension: the 3D models of a HAL's components. A HAL exposes it to
 /// the runtime through [`Hal::assets`], and the runtime serves it as the HAL
@@ -184,9 +221,29 @@ struct FakeInner {
     model_glb: Option<Vec<u8>>,
     state: State,
     subscribers: Vec<UnboundedSender<StateChange>>,
+    joints: BTreeSet<String>,
+    key_subscribers: Vec<UnboundedSender<HashMap<Key, KeyMeta>>>,
 }
 
 impl FakeInner {
+    /// The meta of the keys of `joints`: for each, its position target in
+    /// both forms, an `F64` input, and its sensed position, an `F64` output.
+    fn describe<'j>(joints: impl IntoIterator<Item = &'j String>) -> HashMap<Key, KeyMeta> {
+        let target = KeyMeta::new().editable().of_type(Type::F64);
+        let sensed = KeyMeta::new().of_type(Type::F64);
+        joints
+            .into_iter()
+            .flat_map(|joint| {
+                let [entity_form, prefixed_form] = target_keys(joint, "position");
+                [
+                    (entity_form, target.clone()),
+                    (prefixed_form, target.clone()),
+                    (Key::new(format!("{joint}.position")), sensed.clone()),
+                ]
+            })
+            .collect()
+    }
+
     fn notify(&mut self, change: &StateChange) {
         if change.is_empty() {
             return;
@@ -203,6 +260,12 @@ impl FakeInner {
 /// held and sensed back as `<joint>.position`, so a consumer that writes a
 /// target sees the measured position follow. Every other key is ignored, the
 /// way hardware ignores what it has no actuator for.
+///
+/// It describes the keys of the joints it is given
+/// ([`add_joints`](FakeHal::add_joints)): their position targets as inputs,
+/// their sensed positions as outputs. A joint it was not given still follows
+/// its setpoint, undescribed.
+///
 /// Cheaply cloneable; clones share the same state. (Backed by [`State`], the
 /// trivial owned state type.)
 #[derive(Clone, Default)]
@@ -222,6 +285,30 @@ impl FakeHal {
                 ..Default::default()
             })),
         }
+    }
+
+    /// Give the fake these joints: it describes their keys
+    /// ([`Hal::describe_keys`]) — for each joint, `<joint>/target.position` and
+    /// `<joint>.target_position` as `F64` inputs, and `<joint>.position` as an
+    /// `F64` output. Joints added once the fake is described reach every
+    /// description feed as one more item, the way a HAL that discovers its
+    /// joints describes them. A name no target can name — one with a `.`, or
+    /// an empty last segment ([`target_keys`]) — is no joint, and is skipped.
+    pub fn add_joints(&self, joints: impl IntoIterator<Item = impl Into<String>>) {
+        let mut inner = self.inner.lock().unwrap();
+        let added: Vec<String> = joints
+            .into_iter()
+            .map(Into::into)
+            .filter(|joint| target::is_target_entity(joint))
+            .filter(|joint| inner.joints.insert(joint.clone()))
+            .collect();
+        if added.is_empty() {
+            return;
+        }
+        let description = FakeInner::describe(&added);
+        inner
+            .key_subscribers
+            .retain(|tx| tx.unbounded_send(description.clone()).is_ok());
     }
 
     /// Give the fake a model: the [`DEVICE`] component's, servable, hashed
@@ -310,6 +397,17 @@ impl Hal for FakeHal {
     fn updates(&self) -> UpdatesStream {
         let (tx, rx) = futures_channel::mpsc::unbounded();
         self.inner.lock().unwrap().subscribers.push(tx);
+        Box::pin(rx)
+    }
+
+    fn describe_keys(&self) -> KeyDescriptions {
+        let (tx, rx) = futures_channel::mpsc::unbounded();
+        let mut inner = self.inner.lock().unwrap();
+        // The opening item, even when empty: the keys the fake knows now. The
+        // receiver is held here, so the send cannot fail.
+        let _ = tx.unbounded_send(FakeInner::describe(&inner.joints));
+        inner.key_subscribers.retain(|tx| !tx.is_closed());
+        inner.key_subscribers.push(tx);
         Box::pin(rx)
     }
 
@@ -530,6 +628,64 @@ mod tests {
         assert_eq!(hal.servable_glb("arm").unwrap(), None);
     }
 
+    /// Drain every description the feed has already buffered, and whether it
+    /// has ended.
+    fn drain_keys(feed: &mut KeyDescriptions) -> (Vec<HashMap<Key, KeyMeta>>, bool) {
+        let mut out = Vec::new();
+        loop {
+            match feed.next().now_or_never() {
+                Some(Some(description)) => out.push(description),
+                Some(None) => return (out, true),
+                None => return (out, false),
+            }
+        }
+    }
+
+    #[test]
+    fn the_fake_describes_its_joints_targets_as_inputs_and_positions_as_outputs() {
+        let hal = FakeHal::new();
+        hal.add_joints(["head_yaw", "arm/elbow"]);
+        let (descriptions, ended) = drain_keys(&mut hal.describe_keys());
+        assert!(!ended, "the fake can describe more joints later");
+        assert_eq!(descriptions.len(), 1, "one opening item");
+        let input = KeyMeta::new().editable().of_type(Type::F64);
+        let output = KeyMeta::new().of_type(Type::F64);
+        assert_eq!(
+            descriptions[0],
+            HashMap::from([
+                (Key::from("head_yaw/target.position"), input.clone()),
+                (Key::from("head_yaw.target_position"), input.clone()),
+                (Key::from("head_yaw.position"), output.clone()),
+                (Key::from("arm/elbow/target.position"), input.clone()),
+                (Key::from("arm/elbow.target_position"), input),
+                (Key::from("arm/elbow.position"), output),
+            ])
+        );
+    }
+
+    #[test]
+    fn joints_added_later_reach_an_open_feed_as_one_more_item() {
+        let hal = FakeHal::new();
+        let mut feed = hal.describe_keys();
+        assert_eq!(drain_keys(&mut feed).0, vec![HashMap::new()]);
+        hal.add_joints(["joint1"]);
+        hal.add_joints(["joint1", "not.a.joint", ""]);
+        let (later, _) = drain_keys(&mut feed);
+        assert_eq!(
+            later.len(),
+            1,
+            "a joint already described, or no joint, sends nothing"
+        );
+        assert_eq!(
+            later[0].keys().map(Key::get_path).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "joint1/target.position",
+                "joint1.target_position",
+                "joint1.position"
+            ])
+        );
+    }
+
     #[test]
     fn a_hal_without_assets_has_none() {
         struct Bare;
@@ -553,6 +709,7 @@ mod tests {
             }
         }
         assert!(Bare.assets().is_none());
+        assert_eq!(drain_keys(&mut Bare.describe_keys()), (Vec::new(), true));
         assert!(FakeHal::new().assets().is_some());
     }
 }

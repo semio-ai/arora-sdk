@@ -16,10 +16,17 @@ The runtime drains HAL updates into the shared blackboard each step and flushes
 state changes back — behaviors never talk to hardware directly. `FakeHal` is an
 in-memory implementation for tests and hardware-less runs.
 
-Each HAL states the keys it reads and writes. `FakeHal`, `arora-hal-ros2` and
-`arora-hal-restful` share a naming contract for a joint's values:
-`<joint>.position` is what is sensed back, and its target — the setpoint
-written to the hardware — is `<joint>/target.position` or
+A HAL can describe the keys it reads and writes (`describe_keys`; by default
+it describes none), each with its `KeyMeta`: its inputs open to remote
+writers, its outputs closed. The runtime states the description to the
+device's store, so the inputs are open and every bridge lists them with no
+declaration of its own; a HAL that learns its keys while it runs describes
+them as it learns them. `FakeHal` describes the joints it is given
+(`add_joints`).
+
+`FakeHal`, `arora-hal-ros2` and `arora-hal-restful` share a naming contract
+for a joint's values: `<joint>.position` is what is sensed back, and its
+target — the setpoint written to the hardware — is `<joint>/target.position` or
 `<joint>.target_position`. `set_targets` reads both forms; a change that sets
 both for one joint applies `<joint>/target.position`, and `fold_newest_wins`
 merges a backlog of changes so the later target wins in either form. That is

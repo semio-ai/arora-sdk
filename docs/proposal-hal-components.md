@@ -24,8 +24,9 @@ In short:
   face's GLB is servable.
 - **A mount** places a component's model on a `screen` element of another
   component's model, which is how Studio already puts a face on a robot.
-- **A HAL describes the keys it reads and the keys it writes** through a trait
-  it shares with the data store.
+- **A HAL describes the keys it reads and the keys it writes**, each with the
+  `KeyMeta` the data store keeps, and the runtime states the description to the
+  store.
 
 ---
 
@@ -136,16 +137,25 @@ not by a comment on `HalAssets`.
 ### 3.5 A HAL describes its keys
 
 A HAL states the keys it reads (actuator targets, the inputs a write reaches)
-and the keys it writes (sensors, measured state), each with its `KeyMeta`. The
-data store already describes its keys the same way, so the two share one trait:
-the key-description half of `DataStore` (`meta`, `all_meta`) moves into a trait
-that both `DataStore` and `Hal` implement.
+and the keys it writes (sensors, measured state), each with its `KeyMeta`: its
+inputs open to remote writers (`editable`), its outputs closed. The data store
+already describes its keys the same way, so the description is in the store's
+vocabulary: a map of keys to `KeyMeta`, what `DataStore::set_meta` takes.
 
-- The runtime routes a write to the component that describes its key, and
-  refuses at build a key two components describe.
-- The runtime copies a HAL's key descriptions into the store at build, so a
-  device's inputs are open to remotes because its HAL says so, with no second
-  declaration.
+- `Hal::describe_keys` yields the description as a feed: the keys the HAL knows
+  when the device is built, then each key it learns later (a ROS 2 topic
+  discovered, a configuration fetched). A HAL whose keys are fixed yields one
+  item; a HAL that describes nothing yields none.
+- The runtime states each item to the store, at build and then at the next
+  step, so a device's inputs are open to remotes because its HAL says so, with
+  no second declaration, and every bridge lists them (`ListKeys`).
+- A composed HAL describes the keys of all its components. The runtime routes
+  a write to the component that describes its key, and refuses a key that a
+  second component describes, at build or when that component describes it
+  later.
+
+The store remains the one place a key's meta is asked of
+([design decisions](design_decisions.md#a-hal-describes-its-keys-and-the-store-holds-the-description)).
 
 ### 3.6 Mounts and Studio's slots
 
@@ -175,6 +185,7 @@ That is a Studio change, in Stage 2 of
 | The models as store keys that notify a change | Models do not change while a device runs, so there is nothing to notify. |
 | Several HALs held by the device rather than one composed HAL | The device would route and merge them itself; composing them in a HAL keeps the device's loop unchanged. |
 | A component prefix on keys | See 3.1: it moves every key clients address. |
+| A key-description trait the HAL shares with the data store (`meta`, `all_meta`) | A query cannot tell the device about a key the HAL learns while it runs; the store stays the one place meta is asked of; moving the methods out of `DataStore` is an `arora-types` major. |
 
 ## 5. What this changes in arora-sdk#294
 
@@ -192,5 +203,6 @@ That is a Studio change, in Stage 2 of
    servable, mount — and returns bytes only for a servable one. A HAL that is
    not composed reports one component, `device`.
 
-The composed HAL itself, and the shared key-description trait (3.5), are
-[ARORA-103](https://linear.app/semio-ai/issue/ARORA-103).
+The composed HAL itself is
+[ARORA-103](https://linear.app/semio-ai/issue/ARORA-103); its components
+describe their keys as 3.5 states.

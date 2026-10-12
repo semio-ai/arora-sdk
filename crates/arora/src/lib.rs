@@ -87,10 +87,10 @@ use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
 /// in-process functions under a module id — and inject it with
 /// [`AroraBuilder::with_host_module`].
 pub use arora_engine::module::{FunctionDescription, HostModule, ModuleBuilder};
-use arora_hal::{FakeHal, Hal, UpdatesStream};
+use arora_hal::{FakeHal, Hal, KeyDescriptions, UpdatesStream};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
-use arora_types::data::{DataStore, KeyMeta, Subscription};
+use arora_types::data::{DataStore, Key, KeyMeta, StateChange, Subscription};
 use arora_types::module::declared::AroraModule;
 use arora_types::module::low::{self, Header};
 use arora_types::record::module::frozen::ExportKind;
@@ -170,6 +170,13 @@ pub struct Arora {
     // select) is its one poller. Fused: once the hardware feed ends it stays
     // quietly finished.
     pub(crate) hal_feed: Fuse<UpdatesStream>,
+    // What the HAL says of its keys (`Hal::describe_keys`), owned by this
+    // device: what it held at build is already in the store, and each step
+    // states what it has since delivered. Fused: the HAL may end it.
+    pub(crate) hal_keys: Fuse<KeyDescriptions>,
+    // The meta the device stated from the HAL's descriptions, per key: a later
+    // description replaces it, and never meta a host stated itself.
+    pub(crate) hal_stated: HashMap<Key, KeyMeta>,
     // Every endpoint's inbound stream, merged. Each is chained with a terminal
     // disconnect marker at build, so an endpoint's stream ending is an explicit
     // event, never a silent drop from the merge.
@@ -274,9 +281,9 @@ impl Arora {
 }
 
 /// The in-process client of a device: everything a remote client asks of it
-/// over a bridge — calling a function, listing its keys, describing its
-/// methods, invoking one by name, starting and halting a run — from the same
-/// process, including while [`run`](Arora::run) owns it. Obtained from
+/// over a bridge — writing its inputs, calling a function, listing its keys,
+/// describing its methods, invoking one by name, starting and halting a run —
+/// from the same process, including while [`run`](Arora::run) owns it. Obtained from
 /// [`Arora::caller`]; clones freely, every clone reaching the same device.
 ///
 /// Each operation is the [`BridgeOp`] a remote sends, put on the device's
@@ -315,6 +322,18 @@ impl LocalCaller {
                 Err(_) => Err(generic("the device dropped the request")),
             }
         }
+    }
+
+    /// Write `change` to the device's store, as a remote's write: checked
+    /// against the store's key meta like every bridge's, so a key that is not
+    /// one of the device's inputs (`KeyMeta::editable`), or a value not of its
+    /// key's declared type, refuses the whole change and writes nothing.
+    pub fn update(
+        &self,
+        change: StateChange,
+    ) -> impl Future<Output = Result<(), CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Update(change));
+        async move { reply.await.map(|_| ()) }
     }
 
     /// The device's keys under `prefix` (every key when `None`), sorted by path,
@@ -885,6 +904,7 @@ impl AroraBuilder {
             .unwrap_or_else(|| Box::new(SimpleDataStore::new()));
         let store_changes = store.subscribe();
         let hal_feed = hal.updates().fuse();
+        let hal_keys = hal.describe_keys().fuse();
 
         // Take each endpoint's inbound stream (the take-once seam: from here on
         // the device is the endpoint's one poller) and merge them. A stream
@@ -995,6 +1015,8 @@ impl AroraBuilder {
             hal,
             bridges,
             hal_feed,
+            hal_keys,
+            hal_stated: HashMap::new(),
             inbound,
             pending: Pending::default(),
             data_requested: vec![false; endpoints],
@@ -1006,6 +1028,10 @@ impl AroraBuilder {
         if let Some(xml) = self.groot {
             arora.load_groot(&xml)?;
         }
+        // What the HAL says of its keys, stated to the store once nothing can
+        // fail the build, and before anything can write: a device's inputs are
+        // open, and listed, from its first step.
+        runtime::describe_hal_keys(&*arora.store, &mut arora.hal_keys, &mut arora.hal_stated);
         Ok(arora)
     }
 }
@@ -2188,5 +2214,151 @@ mod caller_tests {
             invoked,
             Invoked::Returned(Value::String("player stopped".to_string()))
         );
+    }
+}
+
+/// A HAL's key descriptions as the device's key meta: what `ListKeys` lists,
+/// and what a remote write is checked against.
+#[cfg(test)]
+mod hal_key_tests {
+    use super::*;
+    use arora_types::value::{Type, Value};
+    use caller_tests::settle;
+
+    fn device_with(hal: FakeHal, store: SimpleDataStore) -> Arora {
+        Arora::builder()
+            .with_hal(Box::new(hal))
+            .with_data_store(Box::new(store))
+            .build()
+            .expect("build the device")
+    }
+
+    fn fake_with(joints: &[&str]) -> FakeHal {
+        let hal = FakeHal::new();
+        hal.add_joints(joints.iter().copied());
+        hal
+    }
+
+    /// A remote's write of `value` to `key`, through the path every bridge's
+    /// `Update` takes.
+    fn update(arora: &mut Arora, key: &str, value: Value) -> Result<(), CallError> {
+        let caller = arora.caller();
+        settle(arora, caller.update(StateChange::set(key, value)))
+    }
+
+    fn refused(arora: &mut Arora, key: &str, value: Value) -> String {
+        update(arora, key, value)
+            .expect_err("the write is refused")
+            .to_string()
+    }
+
+    #[test]
+    fn the_hal_s_inputs_are_listed_open_and_its_outputs_closed() {
+        let mut arora = device_with(fake_with(&["joint1"]), SimpleDataStore::new());
+        let caller = arora.caller();
+        let keys = settle(&mut arora, caller.list_keys(Some("joint1".to_string())))
+            .expect("the device lists its keys");
+        let input = KeyMeta::new().editable().of_type(Type::F64);
+        let output = KeyMeta::new().of_type(Type::F64);
+        assert_eq!(
+            keys,
+            vec![
+                ("joint1.position".to_string(), output),
+                ("joint1.target_position".to_string(), input.clone()),
+                ("joint1/target.position".to_string(), input),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_remote_writes_the_hal_s_inputs_and_nothing_else() {
+        let mut arora = device_with(fake_with(&["joint1"]), SimpleDataStore::new());
+        update(&mut arora, "joint1/target.position", Value::F64(0.5))
+            .expect("an input in the entity form");
+        update(&mut arora, "joint1.target_position", Value::F64(0.25))
+            .expect("an input in the prefixed form");
+        arora.step(Duration::from_millis(10)).expect("step");
+        assert_eq!(
+            arora.store().read(&[Key::from("joint1.position")]),
+            vec![Some(Value::F64(0.25))],
+            "the fake senses the target back"
+        );
+
+        let output = refused(&mut arora, "joint1.position", Value::F64(1.0));
+        assert!(output.contains("not an input"), "{output}");
+        let unlisted = refused(&mut arora, "joint2.target_position", Value::F64(1.0));
+        assert!(unlisted.contains("not an input"), "{unlisted}");
+        let ill_typed = refused(&mut arora, "joint1.target_position", Value::I64(1));
+        assert!(ill_typed.contains("declared type"), "{ill_typed}");
+    }
+
+    #[test]
+    fn keys_the_hal_describes_later_are_inputs_from_the_next_step() {
+        let hal = FakeHal::new();
+        let mut arora = device_with(hal.clone(), SimpleDataStore::new());
+        refused(&mut arora, "joint1.target_position", Value::F64(1.0));
+        hal.add_joints(["joint1"]);
+        update(&mut arora, "joint1.target_position", Value::F64(1.0))
+            .expect("the joint is described");
+    }
+
+    /// `arora --open` opens every key with the empty prefix: a key the HAL
+    /// describes takes the HAL's meta, which is more specific, and every other
+    /// key stays open.
+    #[test]
+    fn open_keeps_every_key_the_hal_does_not_describe_open() {
+        let store = SimpleDataStore::new();
+        store
+            .set_prefix_meta(HashMap::from([(String::new(), KeyMeta::new().editable())]))
+            .expect("open everything");
+        let mut arora = device_with(fake_with(&["joint1"]), store);
+        update(&mut arora, "joint2.target_position", Value::I64(1)).expect("undescribed");
+        update(&mut arora, "anything", Value::String("x".into())).expect("undescribed");
+        update(&mut arora, "joint1.target_position", Value::F64(1.0)).expect("an input");
+        let output = refused(&mut arora, "joint1.position", Value::F64(1.0));
+        assert!(output.contains("not an input"), "{output}");
+        let ill_typed = refused(&mut arora, "joint1/target.position", Value::I64(1));
+        assert!(ill_typed.contains("declared type"), "{ill_typed}");
+    }
+
+    /// A key's own meta the host stated before the build is the host's: the
+    /// HAL's description does not replace it, and fills the HAL's other keys.
+    #[test]
+    fn a_host_s_own_meta_for_a_described_key_wins() {
+        let store = SimpleDataStore::new();
+        store
+            .set_meta(HashMap::from([(
+                Key::from("joint1/target.position"),
+                KeyMeta::new(),
+            )]))
+            .expect("close one input");
+        let hal = fake_with(&["joint1"]);
+        let mut arora = device_with(hal.clone(), store);
+        let closed = refused(&mut arora, "joint1/target.position", Value::F64(1.0));
+        assert!(closed.contains("not an input"), "{closed}");
+        update(&mut arora, "joint1.target_position", Value::F64(1.0))
+            .expect("the other form is the HAL's");
+        hal.add_joints(["joint2"]);
+        update(&mut arora, "joint2.target_position", Value::F64(1.0))
+            .expect("a joint described later");
+    }
+
+    /// A device that opens a subtree keeps its inputs there: the HAL's inputs
+    /// under it stay open, an undescribed key under it too.
+    #[test]
+    fn a_prefix_opened_subtree_keeps_its_inputs() {
+        let store = SimpleDataStore::new();
+        store
+            .set_prefix_meta(HashMap::from([(
+                "arm".to_string(),
+                KeyMeta::new().editable(),
+            )]))
+            .expect("open the arm");
+        let mut arora = device_with(fake_with(&["arm/elbow"]), store);
+        update(&mut arora, "arm/elbow/target.position", Value::F64(1.0)).expect("an input");
+        update(&mut arora, "arm/elbow.target_position", Value::F64(1.0)).expect("an input");
+        update(&mut arora, "arm/wrist.target_position", Value::F64(1.0)).expect("undescribed");
+        let output = refused(&mut arora, "arm/elbow.position", Value::F64(1.0));
+        assert!(output.contains("not an input"), "{output}");
     }
 }

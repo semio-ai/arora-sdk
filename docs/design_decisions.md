@@ -525,6 +525,46 @@ cannot query on a trait object. A device's models are fixed for its life, so
 `HalAssets` answers synchronously, from what the HAL was built with, and the
 module's functions answer from the step.
 
+### A HAL describes its keys, and the store holds the description
+
+A HAL states which keys it reads from a write (its inputs: actuator targets)
+and which it reports (its outputs: sensed values), each with its `KeyMeta`:
+the type it takes, and the unit, range and rest value where it knows them.
+Inputs are `editable`; outputs are not. The runtime states that description to
+the device's store with `DataStore::set_meta` when the device is built, so the
+store remains the one place a key's meta is asked of: the runtime checks a
+remote write against it, and every bridge lists it (`ListKeys`) with nothing
+of its own to declare. A device's inputs are open because its HAL says so.
+
+The description is a feed (`Hal::describe_keys`), not a query, because a HAL
+can learn its keys after it starts: topics discovered on a ROS 2 graph, a
+configuration fetched from the robot. Its first item describes what the HAL
+knows when the device is built; each later item is stated at the next step,
+before that step applies any write. An item adds or replaces, as `set_meta`
+does; nothing retracts a key, because the store has no statement that does
+either. A HAL whose keys are fixed yields one item.
+
+The HAL and the store therefore share the description's vocabulary — a map of
+keys to `KeyMeta`, the argument of `set_meta` — rather than one trait with the
+store's `meta` and `all_meta`. A HAL whose keys appear while it runs has to
+tell the device when they do, which a query cannot; and moving `meta` and
+`all_meta` out of `DataStore` would be a major of `arora-types` that changes
+no behaviour.
+
+A key's own meta is more specific than a prefix's, so a key the HAL describes
+takes the HAL's meta, whatever a prefix says: under `arora --open` (the empty
+prefix opened) or a subtree a host opened, the HAL's outputs are closed and its
+inputs take only their declared type. Every key the HAL does not describe keeps
+what the store says of it, so an undescribed key under an opened prefix stays
+open.
+
+A key's own meta that the host states is the host's. The runtime fills, from
+the HAL's description, the keys that have no meta of their own, and replaces
+only the meta it stated from an earlier description; so a host narrows or
+closes one of its HAL's inputs by stating that key's meta, before the build or
+after it. The host is the authority on what its device opens; the HAL only says
+what its hardware takes.
+
 ### A device carries its modules as module directories
 
 The `arora` runner loads the guest modules under its device directory's
