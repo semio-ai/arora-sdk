@@ -49,9 +49,15 @@ ROS4HRI's skill packages (`std_skills`, `interaction_skills`,
 and `diagnostic_msgs` carries the `/diagnostics` report every ROS node may
 publish.
 
+The `vizij_face_msgs` package is Vizij's own: a face's content (action units,
+expression, viseme) as one type shared by perception, commands and state, with
+observation and timing as separate wrappers, and the `set_facial_action_units`,
+`set_viseme` and `play_visemes` skills built on them (see the table below).
+
 **To add a message**, drop its `.msg` into `msgs/<package>/` and rebuild — the
 `build.rs` parser and code generator do the rest. Its dependency packages must
-be present too (the closure here is builtin_interfaces + std/geometry/sensor).
+be present too (the closure here is builtin_interfaces,
+std/geometry/sensor/diagnostic/hri and the skill packages).
 
 A `.msg` `byte`, `char` and `uint8` are all an arora `u8` — the same value and
 the same CDR bytes — but REP-2016 hashes `byte` as a type of its own (the IDL
@@ -73,6 +79,7 @@ this table when upstream adopts it or we drop it.
 |---|---|---|---|---|
 | `communication_skills/Say.action` | [ros4hri/communication_skills](https://github.com/ros4hri/communication_skills/blob/main/action/Say.action) | Feedback gains `string viseme` and `float32 intensity` after the standard's `std_skills/Feedback feedback`. | A face speaking under `/skill/say` shapes its mouth per viseme; a client mirroring the lips or captioning the speech needs that stream, and the standard's generic feedback has no place for it. Additive, so a goal from an upstream client still parses. | Not yet proposed. |
 | `hri_msgs/Viseme.msg`, `hri_msgs/Visemes.msg` | None — [ros4hri/hri_msgs](https://github.com/ros4hri/hri_msgs/tree/master/msg) has no viseme message on any branch. | New files: `Viseme` carries the 15-shape constants, a `value`, and the `time`/`duration` that place it in the utterance; `Visemes` is a sequence of them. | A TTS node aligning speech to lip shapes publishes them on `/tts/viseme` and `/tts/visemes`, which is how a face lipsyncs to speech synthesized elsewhere, and upstream has no vocabulary for it. The fields and the constants are the ones the ROS4HRI TTS nodes in the field already publish under these names, so a face built from these files hears them. | Not yet proposed; the shape to propose is this one, since it is what is deployed. |
+| `vizij_face_msgs/*` | None — Vizij's own package, not a modified standard type. | New package. Content (`FacialActionUnits`, `Expression`, `Viseme`: what a face is, no confidence, no timing), observation (`Perceived*`: a header, the content, a confidence), timing (`Timing`, `TimedViseme`, `VisemeTimeline`), and the skills on them: `SetFacialActionUnits` and `SetViseme` (topics), `PlayVisemes` (an action whose result is `std_skills/Result`, as `LookAt`'s). | ROS4HRI's face messages mix what a face is with how it was observed and timed, which fits perception but not commanding a face; a standard type cannot be extended under its own name (rmw_zenoh matches by hash), so a new capability needs its own package. Layered this way, adopting a standard later changes a package name and nothing else. | Counter-proposal for the standard (vizij-docs `ros4hri_face/face-interfaces-proposal.md`). |
 
 A device exposes the extended contract only under the ROS4HRI exposure
 profile — the skill is ROS4HRI's, and so is the extension.
