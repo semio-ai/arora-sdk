@@ -4,6 +4,22 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.4.2] - 2026-10-13
+
+### Fixed
+
+- A reader of an action's status or `GetResult` replies that stops
+  acknowledging no longer holds up the action. On DDS such a reader keeps
+  that writer's send window full, and each status or reply write blocked
+  the action task for up to 100 ms, delaying every goal it serves; a reply
+  whose write timed out was lost. The status and result writers now have
+  no blocking time, like the feedback writer. A full window keeps the
+  newest status array, and every refused reply until it is written. What
+  a window holds back is retried with a backoff of 10 ms doubling to 1 s;
+  feedback now starts its backoff at 10 ms too. A window is reported full
+  once it has stayed full for a second, not each time a reader is slow to
+  acknowledge.
+
 ## [10.4.1] - 2026-10-13
 
 ### Fixed
