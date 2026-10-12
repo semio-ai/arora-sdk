@@ -2694,7 +2694,12 @@ mod tests {
     #[test]
     fn a_profile_binding_resolves_or_is_refused_with_a_reason() {
         let registry = arora_msgs_ros2::registry();
-        let bindings = crate::profile::ExposureProfile::ros4hri().actions;
+        // The ROS4HRI standard's skills; the viseme timeline has its own test.
+        let bindings: Vec<_> = crate::profile::ExposureProfile::ros4hri()
+            .actions
+            .into_iter()
+            .filter(|binding| binding.action != "/skill/play_visemes")
+            .collect();
 
         let signatures = [bound_look_at_signature(), bound_say_signature()];
         let (actions, errors) = resolve_bound(&bindings, &signatures, &registry);
@@ -2841,6 +2846,126 @@ mod tests {
             arg("frame"),
             Some(Value::String("sellion_link".to_string()))
         );
+    }
+
+    /// A `vizij_face_msgs/PlayVisemes` goal lands as `play_visemes`'s
+    /// parallel arrays: the viseme codes, and each one's start and duration
+    /// in seconds.
+    #[test]
+    fn a_viseme_timeline_goal_becomes_parallel_arrays() {
+        use arora_msgs_ros2::{builtin_interfaces, std_msgs, vizij_face_msgs};
+        use arora_types::value_serde::bridge::to_value_seeded;
+        use arora_types::AroraType;
+
+        let mut parameters = HashMap::new();
+        let mut parameter_ordering = Vec::new();
+        for (name, kind) in [
+            ("visemes", PrimitiveKind::ArrayU8),
+            ("starts", PrimitiveKind::ArrayF32),
+            ("durations", PrimitiveKind::ArrayF32),
+        ] {
+            let id = gen_uuid_from_str(name);
+            parameter_ordering.push(id);
+            parameters.insert(
+                id,
+                Parameter {
+                    name: name.to_string(),
+                    ty: FrozenTy::from(kind),
+                    mutable: false,
+                },
+            );
+        }
+        let signature = MethodSignature {
+            module_id: gen_uuid_from_str("face-module"),
+            id: gen_uuid_from_str("play_visemes"),
+            name: "play_visemes".to_string(),
+            function: Function {
+                parameters,
+                parameter_ordering,
+                return_ty: status_return(),
+            },
+        };
+        let registry = arora_msgs_ros2::registry();
+        let bindings: Vec<_> = crate::profile::ExposureProfile::ros4hri()
+            .actions
+            .into_iter()
+            .filter(|binding| binding.action == "/skill/play_visemes")
+            .collect();
+        let (actions, errors) = resolve_bound(&bindings, &[signature], &registry);
+        assert!(errors.is_empty(), "{errors:?}");
+        let action = &actions[0];
+        let Wire::Bound(bound) = &action.wire else {
+            panic!("a binding resolves to a bound wire");
+        };
+        assert!(
+            bound.feedback.is_some(),
+            "the played viseme is the feedback"
+        );
+
+        let timed = |value, start: u32, duration: u32| vizij_face_msgs::TimedViseme {
+            viseme: vizij_face_msgs::Viseme { value },
+            timing: vizij_face_msgs::Timing {
+                start: builtin_interfaces::Duration {
+                    sec: 0,
+                    nanosec: start,
+                },
+                duration: builtin_interfaces::Duration {
+                    sec: 0,
+                    nanosec: duration,
+                },
+            },
+        };
+        let goal = vizij_face_msgs::PlayVisemes_Goal {
+            meta: std_skills::Meta {
+                caller: "tts".to_string(),
+                priority: std_skills::Meta::NORMAL_PRIORITY,
+            },
+            timeline: vizij_face_msgs::VisemeTimeline {
+                header: std_msgs::Header::default(),
+                visemes: vec![
+                    timed(vizij_face_msgs::Viseme::PP, 0, 250_000_000),
+                    timed(vizij_face_msgs::Viseme::AA, 250_000_000, 500_000_000),
+                ],
+            },
+        };
+        let (goal_ty, goal_registry) =
+            <vizij_face_msgs::PlayVisemes_Goal as AroraType>::arora_type_with_registry();
+        let goal_value = to_value_seeded(&goal, &goal_ty, &goal_registry).expect("goal to value");
+        let request = Value::Structure(Structure {
+            id: action.send_goal_request_type.id,
+            fields: vec![
+                StructureField {
+                    id: goal_id_field(),
+                    value: Box::new(Value::ArrayU8(vec![3; 16])),
+                },
+                StructureField {
+                    id: gen_uuid_from_str("action/goal"),
+                    value: Box::new(goal_value),
+                },
+            ],
+        });
+        let bytes = cdr::encode(&action.send_goal_request_type, registry.types(), &request)
+            .expect("encode SendGoal request");
+        let decoded = cdr::decode(&action.send_goal_request_type, registry.types(), &bytes)
+            .expect("decode SendGoal request");
+        let (_, _, call) =
+            bound_goal_call_of(action, bound, &registry, decoded).expect("goal call");
+        assert_eq!(call.id, gen_uuid_from_str("play_visemes"));
+        let arg = |name: &str| {
+            call.args
+                .iter()
+                .find(|arg| arg.id == gen_uuid_from_str(name))
+                .map(|arg| arg.value.as_ref().clone())
+        };
+        assert_eq!(
+            arg("visemes"),
+            Some(Value::ArrayU8(vec![
+                vizij_face_msgs::Viseme::PP,
+                vizij_face_msgs::Viseme::AA
+            ]))
+        );
+        assert_eq!(arg("starts"), Some(Value::ArrayF32(vec![0.0, 0.25])));
+        assert_eq!(arg("durations"), Some(Value::ArrayF32(vec![0.25, 0.5])));
     }
 
     /// The bound result carries the `std_skills` errno of the goal's

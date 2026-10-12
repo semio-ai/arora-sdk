@@ -380,8 +380,10 @@ async fn the_ros4hri_profile_fans_typed_topics_onto_face_keys() {
     let domain_id = random_domain_id();
     let namespace = format!("test_profile_{domain_id}");
 
-    let config =
-        Ros2BridgeConfig::new(&namespace, domain_id).with_profile(ExposureProfile::ros4hri());
+    // The expression lands on its keys here; served as a skill, it spawns the
+    // device's `set_expression` (covered by the topic-skill unit tests).
+    let config = Ros2BridgeConfig::new(&namespace, domain_id)
+        .with_profile(ExposureProfile::ros4hri().with_set_expression_on_keys());
     let mut bridge = Ros2Bridge::new(config).await;
     let mut inbound = bridge.take_inbound();
 
