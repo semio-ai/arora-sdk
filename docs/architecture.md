@@ -321,8 +321,8 @@ how direct and indirect dispatch work and how behavior trees use them.
 
 ## CI
 
-`.github/workflows/continuous.yml` runs independent work as parallel jobs, each
-under its own 40-minute limit:
+`.github/workflows/continuous.yml` runs independent work as parallel jobs; each
+build-and-test job has its own 40-minute limit:
 
 - **`select`** lists the members a pull request can reach
   ([`list_modified_targets.sh`](../.github/scripts/list_modified_targets.sh));
@@ -341,9 +341,9 @@ under its own 40-minute limit:
 - **`markdown-link-check`**: link-checks the markdown.
 
 Each Rust job restores a dependency cache that only `main` saves. Tests build
-`--release` without LTO and with line tables only: they run optimised, and the
-link-time optimisation a shipped binary gets would otherwise dominate the build
-of every test binary.
+`--release` without the release profile's cross-crate thin LTO and with line
+tables only: they run optimised, and LTO over every test binary would otherwise
+dominate the build.
 
 The NAO cross-build of `arora-naoqi` is not exercised in CI; it depends on a
 Homebrew formula not available on the CI image. See

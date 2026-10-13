@@ -357,12 +357,11 @@ build step skips.
 
 ### CI builds release
 
-CI tests the default members with `cargo test --release` (LTO off, see
-[the CI section of the architecture](architecture.md#ci)); the tests that read
-the C++ guests from `target/<profile>/modules/` pick `release` from
-`debug_assertions`. `arora-web`'s `build.rs` reads `PROFILE` so its
-`include_bytes!` resolves to the release artefact when wasm-pack is invoked
-with `--release`.
+CI tests the default members with `cargo test --release` (without cross-crate
+LTO, see [the CI section of the architecture](architecture.md#ci)); the tests
+that read the C++ guests from `target/<profile>/modules/` pick `release` from
+`debug_assertions`. The browser tests take their guest from the artifact
+dependency's `CARGO_CDYLIB_FILE_*` path, whatever the profile.
 
 ## Out of scope (recorded so we remember why)
 

@@ -9,13 +9,14 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   # Tests build optimised, so wasmtime runs the guests at speed, but without
-  # the link-time optimisation and full debug info a shipped binary gets: every
+  # the cross-crate thin LTO and the debug info the release profile sets: every
   # test binary links wasmtime, and LTO over each of them is most of the build.
   CARGO_PROFILE_RELEASE_LTO: "false"
   CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
 
 # Independent work runs as parallel jobs, each under its own time limit; a job
-# none of whose packages a pull request reaches is skipped.
+# none of whose packages a pull request reaches is skipped. A job reads the
+# selection through `select`'s outputs, so a flag a job needs is listed there.
 jobs:
   # A pull request builds and tests only the members its diff can reach
   # through cargo's dependency graph; main runs everything. The rules
