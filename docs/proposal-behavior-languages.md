@@ -160,8 +160,9 @@ writes its outputs under keys, beside the behavior of the device itself. The
 stepping run needs four additions to arora-sdk. These additions proceed ahead
 of this proposal:
 - `spawn_behavior(graph, policy)`: a graph as a task run.
-- two built-in tree nodes, `Equal(a, b)` and `WriteKeys(keys, values)`. The
-  key table of `WriteKeys` is a literal.
+- two built-in tree nodes, `Equal(a, b)` and `Unpack(values, out_0 …
+  out_63)`. Each output of `Unpack` is an ordinary port binding to a
+  variable, so no node resolves keys from values.
 - the functions of the interpreter module in `DescribeMethods`.
 - `--groot` in the runner, resolving module leaves through `with_groot`.
 
@@ -549,7 +550,7 @@ reads as an `apply`.
   as `behavior-tree` refuses a `node-graph` edit.
 - The versions:
   - `behavior-tree 1.0`: what `arora-behavior-tree` 8.1 lowers.
-  - `1.1`: `Equal`, `WriteKeys`.
+  - `1.1`: `Equal`, `Unpack`.
   - `1.2`: `RUNNING`, `changed?`, local variables, the compute vocabulary as
     function leaves, `layers`, and the `succeed_on` option of `PARALLEL`.
   - `1.3`: `call`, `apply`, with `when` and `while_busy`.
@@ -661,8 +662,8 @@ beside the graph gives the write set. The set contains:
 - the `result` key of each `call`, and the key bound to any mutable
   parameter of its target (read and written)
 - the keys bound to the mutable parameters of each `apply`
-- the key table of `WriteKeys`, which is a literal so that the analysis can
-  read it.
+- the keys bound to the outputs of each `Unpack`, which are port bindings
+  like any other.
 
 The host keeps the set with the branch. On every edit, the host tells the
 component to analyze the graph again, before the edit applies. Some keys come
@@ -680,7 +681,7 @@ can allow the overlap (3.7):
 of the store. The first write of a key that no analyzed set names claims the
 key for that branch, until the branch ends. A write to a key that another
 branch holds does not apply, and it fails:
-- A tree node that writes, such as `WriteKeys` or a `call`, returns
+- A tree node that writes, such as `Unpack` or a `call`, returns
   `Failure`. The tree reacts as its controls say.
 - An `output` node in a node graph does not write. The tick reports the
   error on the behavior error of the device. The other writes of the node
@@ -915,7 +916,7 @@ allows them under the MIT license of arora-sdk.
 | Crate or surface | Change |
 |---|---|
 | `arora-behavior` (9.1) | Minor: `GraphType`, the ids and encoders of the typed functions, `RunPolicy::Replace` and `RunPolicy::Overlap` (the enum is non-exhaustive). Major: the component trait and the host. |
-| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`. It adds `Equal` and `WriteKeys` (1.1), then `RUNNING`, `changed?`, local variables, the compute vocabulary, `layers` and the `succeed_on` option of `PARALLEL` (1.2) over `arora-node-graph`, then `call` and `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
+| `arora-behavior-tree` (8.1) | Minor: it declares `behavior-tree 1.x`. It adds `Equal` and `Unpack` (1.1), then `RUNNING`, `changed?`, local variables, the compute vocabulary, `layers` and the `succeed_on` option of `PARALLEL` (1.2) over `arora-node-graph`, then `call` and `apply` (1.3). Major: the runner scaffold goes, with the component trait. |
 | `arora` (12.3), `arora-web` (9.0) | Minor: the typed functions, with descriptions. The importer accepts `node-graph 1.0`. Major: the builder composes components, and `Concurrent` refuses an overlap that it accepted before. |
 | `arora-node-graph`, `arora-node-graph-import`, `arora-shape` | New, `1.0.0`. |
 | `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No more releases after vizij-rs depends on the arora crates. `ProcessingGraph` retires, because the graphs of a face run as node graphs of the tree. |
@@ -929,7 +930,7 @@ allows them under the MIT license of arora-sdk.
 | Addition | In this design |
 |---|---|
 | `spawn_behavior(graph, policy)` | `spawn_graph` with `graph_type = behavior-tree`. If the addition takes `graph_type` and `graph_version` from the start, the call of Studio does not change later. |
-| `Equal`, `WriteKeys` | `behavior-tree 1.1` nodes. The key table of `WriteKeys` is a literal. Thus the analysis reads the keys of the stepping run from its graph. If the tree of a robot writes one of those keys, the host refuses the spawn, so the two do not fight. |
+| `Equal`, `Unpack` | `behavior-tree 1.1` nodes. The outputs of `Unpack` are port bindings. Thus the analysis reads the keys of the stepping run from its graph. If the tree of a robot writes one of those keys, the host refuses the spawn, so the two do not fight. |
 | The functions of the interpreter module in `DescribeMethods` | The first part of 3.9: every function of the behavior module has a description. |
 | The runner flag `--groot` through `with_groot` | No change. The tree loads as the branch `main`. |
 
