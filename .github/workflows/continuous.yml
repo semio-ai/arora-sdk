@@ -203,7 +203,7 @@ jobs:
   # and an lcov artifact; it gates nothing. docs/testing.md has the command and
   # what native coverage cannot see.
   coverage:
-    if: github.event_name == 'push'
+    if: true
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
