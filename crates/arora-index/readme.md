@@ -5,11 +5,12 @@ assets. Behavior trees use “index” for their function lookup; that lookup an
 this registry are unrelated.
 
 `Resolver` reads a scoped name, the published asset document, and every page of
-releases through Firestore REST. It selects the newest non-deprecated release
-in the range with a primary content hash, then `fetch` downloads that artifact
-through Storage REST and verifies its SHA-256. `resolve` takes an `AssetType` (`Model`, `Animation`, or `Face`);
-`Model` is the default enum value. `latestVersion` does not select a release.
-An alias resolves to the asset's current scoped name.
+releases through Firestore REST. It selects the newest non-deprecated release in
+the range with a primary content hash, then `fetch` downloads that artifact
+through Storage REST and verifies its SHA-256. `resolve` takes an `AssetType`
+(`Model`, `Animation`, or `Face`); `Model` is the default enum value.
+`latestVersion` does not select a release. An alias resolves to the asset's
+current scoped name.
 
 ```rust,no_run
 use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
@@ -100,15 +101,16 @@ The caller chooses a directory with `Cache::new`, usually `<device dir>/assets`:
 `store` verifies bytes before writing. `read` verifies every hit. A failed
 verification returns a miss and takes the write lock to re-read and verify the
 file before deleting it, so a concurrent writer's valid replacement is safe.
-Public and private reads use distinct files. Private bytes use XSalsa20-Poly1305 with a random 24-byte nonce followed
-by ciphertext; encryption and decryption take place in memory. The key is
-written completely to a mode-0600 temporary file and published without
-replacing an existing key. An existing key of invalid length is replaced under
-the cache lock with a warning; old ciphertext then becomes a cache miss. Blob
-and pin updates use a temporary file in the same directory and an atomic rename.
-The lock also prevents concurrent pin updates from losing other names. Verified
-reads take no lock and public and private hits work in read-only directories; a corrupt
-blob that cannot be removed still returns a miss, with a warning.
+Public and private reads use distinct files. Private bytes use XSalsa20-Poly1305
+with a random 24-byte nonce followed by ciphertext; encryption and decryption
+take place in memory. The key is written completely to a mode-0600 temporary
+file and published without replacing an existing key. An existing key of invalid
+length is replaced under the cache lock with a warning; old ciphertext then
+becomes a cache miss. Blob and pin updates use a temporary file in the same
+directory and an atomic rename. The lock also prevents concurrent pin updates
+from losing other names. Verified reads take no lock and public and private hits
+work in read-only directories; a corrupt blob that cannot be removed still
+returns a miss, with a warning.
 
 `save_pin(requested_name, pin)` and `last_pin(requested_name)` maintain the
 resolution map, including aliases under the name requested. Each entry has
@@ -155,8 +157,10 @@ loads models at runtime and need not pin a robot model.
 [build-dependencies]
 arora-index = { path = "../arora-index" }
 
-[package.metadata.arora.models]
-robot = { scoped_name = "@scope/robot", version = "1.2.3", content_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+[package.metadata.arora.models.robot]
+scoped_name = "@scope/robot"
+version = "1.2.3"
+content_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
 Replace the example hash with the published artifact's SHA-256. In `build.rs`:

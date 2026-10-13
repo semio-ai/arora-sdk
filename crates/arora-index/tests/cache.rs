@@ -256,10 +256,7 @@ fn invalid_key_is_replaced_and_old_ciphertext_becomes_a_miss() {
     assert_eq!(fs::read(dir.path().join("key")).unwrap().len(), 32);
     assert!(cache.read(&hash, true).unwrap().is_none());
     assert_eq!(cache.read(&other, true).unwrap().unwrap(), b"new bytes");
-    assert!(WARNINGS
-        .0
-        .lock()
-        .unwrap()
+    assert!(lock(&WARNINGS.0)
         .iter()
         .any(|m| m.contains("replacing key with invalid length")
             && m.contains(dir.path().to_str().unwrap())));
@@ -268,6 +265,10 @@ fn invalid_key_is_replaced_and_old_ciphertext_becomes_a_miss() {
 #[cfg(unix)]
 #[test]
 fn verified_public_private_and_pin_reads_need_no_writable_directory_or_lock() {
+    if !file_modes_apply() {
+        eprintln!("skipped: file modes do not restrict this user");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path()).unwrap();
@@ -398,6 +399,10 @@ async fn a_busy_cache_lock_does_not_block_the_async_executor() {
 #[cfg(unix)]
 #[test]
 fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
+    if !file_modes_apply() {
+        eprintln!("skipped: file modes do not restrict this user");
+        return;
+    }
     capture_warnings();
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
@@ -418,7 +423,7 @@ fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
     fs::set_permissions(&blobs, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(public.unwrap().is_none());
     assert!(private.unwrap().is_none());
-    assert!(WARNINGS.0.lock().unwrap().iter().any(
+    assert!(lock(&WARNINGS.0).iter().any(
         |m| m.contains("could not remove corrupt blob") && m.contains(blobs.to_str().unwrap())
     ));
 }
@@ -507,6 +512,10 @@ fn pin_updates_preserve_raw_entries_and_only_remove_the_named_blob() {
 #[cfg(unix)]
 #[test]
 fn unreadable_pins_are_never_overwritten_and_warn() {
+    if !file_modes_apply() {
+        eprintln!("skipped: file modes do not restrict this user");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt;
     capture_warnings();
     let dir = tempfile::tempdir().unwrap();
@@ -523,16 +532,10 @@ fn unreadable_pins_are_never_overwritten_and_warn() {
     saved.unwrap();
     removed.unwrap();
     assert_eq!(fs::read(&path).unwrap(), before);
-    assert!(WARNINGS
-        .0
-        .lock()
-        .unwrap()
+    assert!(lock(&WARNINGS.0)
         .iter()
         .any(|m| m.contains("could not save resolved pin") && m.contains(path.to_str().unwrap())));
-    assert!(WARNINGS
-        .0
-        .lock()
-        .unwrap()
+    assert!(lock(&WARNINGS.0)
         .iter()
         .any(|m| m.contains("could not clear resolved pin") && m.contains(path.to_str().unwrap())));
 }
@@ -605,10 +608,7 @@ async fn cleanup_failures_warn_and_preserve_the_definitive_error() {
                 "{error}"
             );
             cache.remove_pin(NAME).unwrap();
-            assert!(WARNINGS
-                .0
-                .lock()
-                .unwrap()
+            assert!(lock(&WARNINGS.0)
                 .iter()
                 .any(|m| m.contains("could not clear resolved pin")
                     && m.contains(path.to_str().unwrap())));
@@ -723,7 +723,7 @@ async fn store_verification_runs_off_the_executor_with_shared_bytes() {
         bytes,
         resolved: None,
     });
-    let since = HASH_THREADS.lock().unwrap().len();
+    let since = lock(&HASH_THREADS).len();
     cache.store_async(asset.clone()).await.unwrap();
     assert_hash_off_executor(asset.bytes.len(), since);
     assert_eq!(

@@ -455,10 +455,7 @@ async fn cache_failures_never_replace_live_success_or_network_error() {
         .await
         .unwrap();
     assert_eq!(resolved.source, ResolutionSource::Server);
-    assert!(WARNINGS
-        .0
-        .lock()
-        .unwrap()
+    assert!(lock(&WARNINGS.0)
         .iter()
         .any(|m| m.contains("could not save resolved pin") && m.contains(NAME)));
     server.reset().await;
@@ -738,10 +735,7 @@ async fn non_string_family_warns_and_keeps_the_newest_release() {
             .unwrap();
         assert_eq!(pin.release_id, id);
         assert_eq!(pin.family, None);
-        assert!(WARNINGS
-            .0
-            .lock()
-            .unwrap()
+        assert!(lock(&WARNINGS.0)
             .iter()
             .any(|m| m.contains(&id) && m.contains("family") && m.contains("absent")));
     }
@@ -788,7 +782,7 @@ async fn local_hashing_runs_off_the_executor() {
     let path = dir.path().join("model");
     let bytes = vec![42; 1231];
     fs::write(&path, &bytes).unwrap();
-    let since = HASH_THREADS.lock().unwrap().len();
+    let since = lock(&HASH_THREADS).len();
     let fetched = fetch_local(path).await.unwrap();
     assert_eq!(fetched.bytes, bytes);
     assert_hash_off_executor(bytes.len(), since);
@@ -802,7 +796,7 @@ async fn storage_verification_runs_off_the_executor() {
     storage(&server, &bytes, 200).await;
     let mut pin = pin();
     pin.content_hash = content_hash(&bytes);
-    let since = HASH_THREADS.lock().unwrap().len();
+    let since = lock(&HASH_THREADS).len();
     let fetched = Resolver::new(config(&server), NoToken)
         .unwrap()
         .fetch(&pin)

@@ -126,17 +126,37 @@ impl log::Log for Warnings {
     }
     fn log(&self, record: &log::Record<'_>) {
         if record.level() <= log::Level::Warn {
-            self.0.lock().unwrap().push(record.args().to_string());
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(record.args().to_string());
         }
         if record.level() == log::Level::Trace && record.target() == "arora-assets" {
-            HASH_THREADS
-                .lock()
-                .unwrap()
-                .push((record.args().to_string(), std::thread::current().id()));
+            lock(&HASH_THREADS).push((record.args().to_string(), std::thread::current().id()));
         }
     }
     fn flush(&self) {}
 }
+/// Locks a shared test record even after a test panicked while holding it, so
+/// one failing test does not make every later one fail too.
+pub fn lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard<'static, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether file modes restrict this process. They do not restrict root, so a
+/// test that needs a read-only file or directory skips when they do not apply.
+#[cfg(unix)]
+pub fn file_modes_apply() -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    let applies = std::fs::write(dir.path().join("probe"), b"").is_err();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    applies
+}
+
 pub fn capture_warnings() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
@@ -162,7 +182,7 @@ pub fn model_pin(private: bool) -> ResolvedRef {
 }
 
 pub fn assert_hash_off_executor(size: usize, since: usize) {
-    let messages = HASH_THREADS.lock().unwrap();
+    let messages = lock(&HASH_THREADS);
     let threads: Vec<_> = messages[since..]
         .iter()
         .filter(|(message, _)| message == &format!("computing SHA-256 for {size} bytes"))
