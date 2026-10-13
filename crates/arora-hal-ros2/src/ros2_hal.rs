@@ -1256,20 +1256,18 @@ mod tests {
             }
         });
 
-        // Wait for the message to be received by the external subscriber with 10s timeout
-        // Use a loop because async_take returns immediately if no message is available
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let msg = loop {
-            if tokio::time::Instant::now() >= deadline {
-                panic!("timeout waiting for JointState message");
-            }
-            match subscriber.async_take().await {
-                Ok((msg, _info)) => break msg,
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+        // `async_take` waits for the next sample, so the timeout is what bounds
+        // the wait; a read error is skipped like a missing sample.
+        let msg = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match subscriber.async_take().await {
+                    Ok((msg, _info)) => break msg,
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 }
             }
-        };
+        })
+        .await
+        .expect("timeout waiting for JointState message");
 
         println!("Received JointState message: {:?}", msg);
 
@@ -1512,20 +1510,18 @@ mod tests {
             }
         });
 
-        // Wait for the message to be received by the external subscriber with 10s timeout
-        // Use a loop because async_take returns immediately if no message is available
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let msg = loop {
-            if tokio::time::Instant::now() >= deadline {
-                panic!("timeout waiting for String message");
-            }
-            match subscriber.async_take().await {
-                Ok((msg, _info)) => break msg,
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+        // `async_take` waits for the next sample, so the timeout is what bounds
+        // the wait; a read error is skipped like a missing sample.
+        let msg = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match subscriber.async_take().await {
+                    Ok((msg, _info)) => break msg,
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 }
             }
-        };
+        })
+        .await
+        .expect("timeout waiting for String message");
 
         println!("Received String message: {:?}", msg);
 
@@ -1625,20 +1621,18 @@ mod tests {
             }
         });
 
-        // Wait for the message to be received by the external subscriber with 10s timeout
-        // Use a loop because async_take returns immediately if no message is available
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let msg = loop {
-            if tokio::time::Instant::now() >= deadline {
-                panic!("timeout waiting for String message");
-            }
-            match subscriber.async_take().await {
-                Ok((msg, _info)) => break msg,
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+        // `async_take` waits for the next sample, so the timeout is what bounds
+        // the wait; a read error is skipped like a missing sample.
+        let msg = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match subscriber.async_take().await {
+                    Ok((msg, _info)) => break msg,
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 }
             }
-        };
+        })
+        .await
+        .expect("timeout waiting for String message");
 
         println!("Received String message: {:?}", msg);
 
