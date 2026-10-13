@@ -8,19 +8,35 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Tests build optimised, so wasmtime runs the guests at speed, but without
+  # the link-time optimisation and full debug info a shipped binary gets: every
+  # test binary links wasmtime, and LTO over each of them is most of the build.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
 
+# Independent work runs as parallel jobs, each under its own time limit; a job
+# none of whose packages a pull request reaches is skipped.
 jobs:
-  build_and_test:
+  # A pull request builds and tests only the members its diff can reach
+  # through cargo's dependency graph; main runs everything. The rules
+  # (ignored files, inputs read across packages) live in the script.
+  select:
     runs-on: ubuntu-latest
-    # Fail fast on a wedged run (e.g. a stalled dependency fetch): the suite
-    # normally finishes in ~20 min, so cap well under GitHub's 6h default.
-    timeout-minutes: 40
-
+    timeout-minutes: 10
+    outputs:
+      any: ${{ steps.affected.outputs.any }}
+      test-args: ${{ steps.affected.outputs.test-args }}
+      test-arora: ${{ steps.affected.outputs.test-arora }}
+      test-arora-engine: ${{ steps.affected.outputs.test-arora-engine }}
+      test-arora-web: ${{ steps.affected.outputs.test-arora-web }}
+      build-arora-web: ${{ steps.affected.outputs.build-arora-web }}
+      test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
+      test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
     steps:
       - uses: actions/checkout@v6
         with:
-          # The selection below diffs against the merge base with the PR's
-          # base branch, so it needs the history.
+          # The selection diffs against the merge base with the PR's base
+          # branch, so it needs the history.
           fetch-depth: 0
 
       - name: Configure cargo git access
@@ -30,19 +46,6 @@ jobs:
           echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
           git config --global credential.helper 'store --file ~/.my-credentials'
 
-      - name: Cache cargo registry & target
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
-
-      # A pull request builds and tests only the members its diff can reach
-      # through cargo's dependency graph; main runs everything. The rules
-      # (ignored files, inputs read across packages) live in the script.
       - name: Select the packages this change affects
         id: affected
         env:
@@ -52,81 +55,148 @@ jobs:
           if [ "$EVENT" = pull_request ]; then base="origin/$BASE_REF"; else base=--all; fi
           .github/scripts/list_modified_targets.sh "$base" >> "$GITHUB_OUTPUT"
 
+  test:
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      # Dependencies only: workspace members always rebuild. Main saves the
+      # cache, pull requests restore it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       # `cargo test --release` builds the wasm32-wasip1 guests automatically
-      # via the integration-test crate's artifact
-      # dependencies (bindeps); the tests locate them through the forwarded
-      # CARGO_CDYLIB_FILE_* env vars (see tests/build.rs). No separate guest build step is needed.
+      # via the integration-test crate's artifact dependencies (bindeps); the
+      # tests locate them through the forwarded CARGO_CDYLIB_FILE_* env vars
+      # (see tests/build.rs). No separate guest build step is needed.
       - name: Test (native + wasm modules via wasmtime)
-        if: steps.affected.outputs.any == 'true'
-        run: cargo test --release ${{ steps.affected.outputs.test-args }}
+        run: cargo test --release ${{ needs.select.outputs.test-args }}
 
       # Every file cargo tracked as an input of what was just built (rustc
       # dep-info, build-script rerun-if-changed) must select the package that
-      # read it; otherwise the selection above could skip a package a change
+      # read it; otherwise the selection could skip a package a change
       # reaches. On failure it names the file and the INPUTS line to add.
       - name: Verify the selection covers every tracked input
-        if: steps.affected.outputs.any == 'true'
         run: .github/scripts/list_modified_targets.sh verify
 
-      # The ROS 2 bridge's Zenoh backend is off by default and exclusive with
-      # DDS, so the workspace run never builds it. Its unit tests need no ROS;
-      # the live one against a real subscriber is `#[ignore]`d and documented.
+  # The ROS 2 bridge's Zenoh backend is off by default and exclusive with DDS,
+  # so the test job never builds it. Its unit tests need no ROS; the live one
+  # against a real subscriber is `#[ignore]`d and documented.
+  zenoh:
+    needs: select
+    if: needs.select.outputs.test-arora-bridge-ros2 || needs.select.outputs.test-arora-msgs-ros2
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Test the ROS 2 bridge on the Zenoh backend
-        if: steps.affected.outputs.test-arora-bridge-ros2 || steps.affected.outputs.test-arora-msgs-ros2
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
-      # Lint in this job rather than a parallel one: the test build above has
-      # already fetched every dependency and run the build scripts that emit
-      # each crate's src/arora_generated.rs. clippy has to compile regardless,
-      # and `cargo fmt --check` errors on the unresolved `mod arora_generated;`
-      # when those files are absent — so folding both in reuses that work
-      # instead of paying for a second runner to redo the bindep/codegen build.
+  lint:
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Clippy runs the build scripts that emit each crate's
+      # src/arora_generated.rs, which `cargo fmt --check` needs: it errors on an
+      # unresolved `mod arora_generated;` when those files are absent.
       - name: Clippy
-        if: steps.affected.outputs.any == 'true'
-        run: cargo clippy --release ${{ steps.affected.outputs.test-args }} -- -D warnings
+        run: cargo clippy ${{ needs.select.outputs.test-args }} -- -D warnings
 
       # An unselected package has no changed file, so its formatting is
       # unchanged (a rustfmt.toml or toolchain change selects everything).
       - name: Check formatting
-        if: steps.affected.outputs.any == 'true'
-        run: cargo fmt --check ${{ steps.affected.outputs.test-args }}
+        run: cargo fmt --check ${{ needs.select.outputs.test-args }}
 
-      # The engine's web host (executor::browser) only compiles for wasm32, so
-      # it never gets exercised by the native build above. Build and run it
-      # here, in a real headless browser, so regressions in the browser host
-      # are caught at the engine level rather than downstream.
+  # The engine's web host (executor::browser) and the run loop's JS-timer
+  # cadence only compile for wasm32, so the native jobs never exercise them.
+  # Build and run them here, in a real headless browser.
+  browser:
+    needs: select
+    if: needs.select.outputs.test-arora-engine || needs.select.outputs.test-arora || needs.select.outputs.test-arora-web || needs.select.outputs.build-arora-web
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Install the wasm32-unknown-unknown target and wasm-pack
-        if: steps.affected.outputs.test-arora-engine || steps.affected.outputs.test-arora || steps.affected.outputs.test-arora-web
         run: |
           rustup target add wasm32-unknown-unknown
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       # geckodriver + firefox are preinstalled on ubuntu-latest.
-      # --no-default-features drops the wasmtime/native hosts so `arora` builds
-      # for wasm32; the test loads the test-rust-wasm guest through
-      # BrowserExecutor and dispatches it (see crates/arora/tests/browser.rs).
+      # --no-default-features drops the wasmtime/native hosts so the engine
+      # builds for wasm32; the test loads the test-rust-wasm guest through
+      # BrowserExecutor and dispatches it (see crates/arora-engine/tests/browser.rs).
       - name: Browser executor test (headless Firefox)
-        if: steps.affected.outputs.test-arora-engine
+        if: needs.select.outputs.test-arora-engine
         run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
 
       # The run loop's cadence rides a JS timer on wasm32 and Tokio's natively,
-      # with the same guarantees either way; the native run above covers the
-      # latter, this the former.
+      # with the same guarantees either way; the test job covers the latter,
+      # this the former.
       - name: Metronome cadence test (headless Firefox)
-        if: steps.affected.outputs.test-arora
+        if: needs.select.outputs.test-arora
         run: wasm-pack test --headless --firefox crates/arora --no-default-features --lib
 
       # The opinionated `arora` runtime must also compile for the browser:
-      # arora-web wraps it (AroraRuntime) with no default features, selecting the
-      # browser engine host and the Tokio-free runtime. Building it here guards
-      # the whole wasm runtime path against regressions.
+      # arora-web wraps it (AroraRuntime) with no default features, selecting
+      # the browser engine host and the Tokio-free runtime.
       - name: Build arora-web for wasm32 (opinionated runtime)
-        if: steps.affected.outputs.build-arora-web
+        if: needs.select.outputs.build-arora-web
         run: cargo build -p arora-web --target wasm32-unknown-unknown
 
       # arora-web's JS surface over the browser runtime.
       - name: arora-web browser test (headless Firefox)
-        if: steps.affected.outputs.test-arora-web
+        if: needs.select.outputs.test-arora-web
         run: wasm-pack test --headless --firefox crates/arora-web --test browser
 
   markdown-link-check:
