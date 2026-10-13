@@ -1,4 +1,19 @@
-#![doc = include_str!("../readme.md")]
+//! The asset registry: resolves a published Studio asset (a scoped name and a
+//! semver range) to a release, and fetches its bytes verified against the
+//! release's SHA-256. `readme.md` covers configuration, the cache, the build
+//! helper and the tests.
+//!
+//! ```rust,no_run
+//! use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
+//!
+//! # async fn example() -> Result<(), arora_index::Error> {
+//! let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
+//! let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
+//! let fetched = resolver.fetch(&pin).await?;
+//! assert_eq!(fetched.content_hash, pin.content_hash);
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod build;
 mod cache;
@@ -210,3 +225,9 @@ pub(crate) async fn blocking<R: Send + 'static>(
         .await
         .map_err(|e| Error::Cache(e.to_string()))?
 }
+
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+mod tests;

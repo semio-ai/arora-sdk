@@ -82,6 +82,7 @@ impl Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Pins the floor, canonical spelling, numeric ordering, overflow and each range boundary.
     #[test]
     fn versions_and_ranges() {
         assert!(Version::parse("0.9.9").is_none());

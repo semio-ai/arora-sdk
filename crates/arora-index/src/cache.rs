@@ -301,22 +301,4 @@ fn publish_key(path: &Path, key: &Key) -> Result<Key, Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn key_publication_is_complete_and_never_clobbers_a_winner() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("key");
-        let first = Key::from([1; 32]);
-        let second = Key::from([2; 32]);
-        let temp = private_temp(&path, &first).unwrap();
-        assert!(!path.exists());
-        assert_eq!(fs::read(temp.path()).unwrap(), first.as_slice());
-        drop(temp);
-        assert_eq!(publish_key(&path, &first).unwrap(), first);
-        assert_eq!(publish_key(&path, &second).unwrap(), first);
-        assert_eq!(fs::read(path).unwrap(), first.as_slice());
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-    }
-}
+mod tests;

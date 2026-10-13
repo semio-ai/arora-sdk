@@ -144,17 +144,7 @@ impl<T: TokenSource> Resolver<T> {
         let asset = self
             .document(scoped_name, "asset document", &["publishedAssets", id])
             .await?;
-        let asset = Fields::document(&asset, scoped_name, "asset document")?;
-        let actual = asset.string("assetType")?;
-        if actual != expected_type.as_str() {
-            return Err(Error::WrongAssetType {
-                scoped_name: scoped_name.into(),
-                expected: expected_type.as_str().into(),
-                actual: actual.into(),
-            });
-        }
-        let current_name = asset.string("scopedName")?.to_owned();
-        let private = asset.optional_string("publicRole")?.is_none();
+        let (current_name, private) = asset_identity(&asset, scoped_name, expected_type)?;
         let mut releases = Vec::new();
         let mut page: Option<String> = None;
         let mut seen = HashSet::new();
@@ -165,72 +155,21 @@ impl<T: TokenSource> Resolver<T> {
                 url.query_pairs_mut().append_pair("pageToken", page);
             }
             let value = self.json(scoped_name, "release listing", url).await?;
-            let object = value
-                .as_object()
-                .ok_or_else(|| unexpected(scoped_name, "release listing", "expected an object"))?;
-            if let Some(documents) = object.get("documents") {
-                let documents = documents.as_array().ok_or_else(|| {
-                    unexpected(scoped_name, "release listing", "documents must be an array")
-                })?;
-                releases.extend(documents.iter().cloned());
-            }
-            match object.get("nextPageToken") {
-                None => break,
-                Some(Value::String(token)) if !token.is_empty() && seen.insert(token.clone()) => {
-                    page = Some(token.clone())
-                }
-                _ => {
-                    return Err(unexpected(
-                        scoped_name,
-                        "release listing",
-                        "invalid or repeated nextPageToken",
-                    ))
-                }
+            page = release_page(&value, scoped_name, &mut releases, &mut seen)?;
+            if page.is_none() {
+                break;
             }
         }
-        let (release, version) = select(&releases, scoped_name, range, &parsed)?;
-        let release_id = release["name"]
-            .as_str()
-            .unwrap()
-            .rsplit('/')
-            .next()
-            .unwrap()
-            .to_owned();
-        let step = format!("release {release_id}");
-        let fields = Fields::document(release, scoped_name, &step)?;
-        let primary = fields.map("artifacts")?.unwrap().map("primary")?.unwrap();
-        let hash = primary.string("contentHash")?;
-        if !crate::valid_hash(hash) {
-            return Err(primary.error("contentHash must be 64 lowercase hex digits"));
-        }
-        let storage = primary
-            .map("storage")?
-            .ok_or_else(|| primary.error("missing storage"))?;
-        let storage_path = storage.string("fileBucket")?.to_owned();
-        validate_storage_path(&storage_path, scoped_name, &step)?;
-        let family = fields.fields.get("family").and_then(|value| {
-            let family = value.get("stringValue").and_then(Value::as_str);
-            if family.is_none() {
-                log::warn!(target: "arora-assets", "{scoped_name}: {step}: family must be a string; treating family as absent");
-            }
-            family.map(str::to_owned)
-        });
-        Ok(ResolvedRef {
-            scoped_name: current_name,
-            published_asset_id: id.into(),
-            version: version.to_string(),
-            release_id,
-            artifact_key: "primary".into(),
-            content_hash: hash.into(),
-            storage_path: Some(storage_path),
-            asset_type: expected_type,
-            family,
+        resolved_release(
+            &releases,
+            scoped_name,
+            range,
+            &parsed,
+            &current_name,
+            id,
             private,
-            resolved_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| Error::Config(e.to_string()))?
-                .as_millis() as u64,
-        })
+            expected_type,
+        )
     }
 
     /// Always resolve online first. Only transient network failures permit a compatible saved pin.
@@ -243,88 +182,31 @@ impl<T: TokenSource> Resolver<T> {
     ) -> Result<Resolution, Error> {
         validate_name(scoped_name)?;
         let parsed = Range::parse(scoped_name, range)?;
-        match self.resolve(scoped_name, range, expected_type).await {
-            Ok(pin) => {
-                let name = scoped_name.to_owned();
-                let saved = pin.clone();
-                if let Err(error) = cache
-                    .blocking(move |cache| cache.save_pin(&name, &saved))
-                    .await
-                {
-                    log::warn!(target: "arora-assets", "{scoped_name}: could not save resolved pin: {error}");
-                }
-                Ok(Resolution {
-                    resolved: pin,
-                    source: ResolutionSource::Server,
-                })
-            }
-            Err(e @ Error::Network { .. }) => {
-                let name = scoped_name.to_owned();
-                let pin = cache
-                    .blocking(move |cache| cache.last_pin(&name))
-                    .await
-                    .ok()
-                    .flatten();
-                match pin {
-                    Some(pin)
-                        if pin.asset_type == expected_type
-                            && Version::parse(&pin.version).is_some_and(|v| parsed.contains(v)) =>
-                    {
-                        Ok(Resolution {
-                            resolved: pin,
-                            source: ResolutionSource::Cache,
-                        })
-                    }
-                    _ => Err(e),
-                }
-            }
-            Err(
-                e @ (Error::NotFound {
-                    http_status: 404, ..
-                }
-                | Error::Refused { .. }),
-            ) => {
-                let name = scoped_name.to_owned();
-                if let Err(error) = cache.blocking(move |cache| cache.remove_pin(&name)).await {
-                    log::warn!(target: "arora-assets", "{scoped_name}: could not clear resolved pin: {error}");
-                }
-                Err(e)
-            }
-            Err(e) => Err(e),
-        }
+        finish_resolution(
+            self.resolve(scoped_name, range, expected_type).await,
+            scoped_name,
+            &parsed,
+            expected_type,
+            cache,
+        )
+        .await
     }
 
     /// Always contact Storage and verify the returned bytes.
     pub async fn fetch(&self, resolved: &ResolvedRef) -> Result<FetchedAsset, Error> {
-        let storage_path = resolved.storage_path.as_deref().ok_or_else(|| {
-            Error::Cache(format!(
-                "{}: offline pin has no storage path; read the bytes from the cache by hash {}",
-                resolved.scoped_name, resolved.content_hash
-            ))
-        })?;
-        validate_storage_path(
-            storage_path,
-            &resolved.scoped_name,
-            &format!("release {}", resolved.release_id),
-        )?;
-        let mut url = endpoint(
-            &self.config.storage_url,
-            &["v0", "b", &self.config.storage_bucket, "o", storage_path],
-        )?;
-        url.query_pairs_mut().append_pair("alt", "media");
+        let url = storage_endpoint(&self.config, resolved)?;
         let bytes = self
             .read(&resolved.scoped_name, "Storage bytes", url, true)
             .await?;
-        let resolved = resolved.clone();
-        crate::blocking(move || {
-            verify(&resolved.scoped_name, &resolved.content_hash, &bytes)?;
-            Ok(FetchedAsset {
-                bytes,
-                content_hash: resolved.content_hash.clone(),
-                resolved: Some(resolved),
-            })
-        })
-        .await
+        verified_asset(resolved, bytes).await
+    }
+
+    pub(crate) fn body_limit(&self, storage: bool) -> usize {
+        if storage {
+            self.storage_limit
+        } else {
+            FIRESTORE_LIMIT
+        }
     }
 
     fn firestore(&self, path: &[&str]) -> Result<Url, Error> {
@@ -364,59 +246,11 @@ impl<T: TokenSource> Resolver<T> {
                 format!("{} {token}", if storage { "Firebase" } else { "Bearer" }),
             );
         }
-        let network = |e: reqwest::Error| {
-            if e.is_builder() {
-                unexpected(name, step, "invalid request or authorization header")
-            } else {
-                Error::Network {
-                    scoped_name: name.into(),
-                    step: step.into(),
-                    detail: error_chain(&e.without_url()),
-                }
-            }
-        };
+        let network = |e| network_error(name, step, e);
         let response = request.send().await.map_err(network)?;
         let status = response.status();
-        if status.as_u16() == 401 {
-            return Err(Error::Unauthorized {
-                scoped_name: name.into(),
-                step: step.into(),
-            });
-        }
-        if status.as_u16() == 403 && token.is_some() {
-            return Err(Error::Refused {
-                scoped_name: name.into(),
-                step: step.into(),
-            });
-        }
-        if status.as_u16() == 404 || (status.as_u16() == 403 && token.is_none()) {
-            return Err(Error::NotFound {
-                scoped_name: name.into(),
-                step: step.into(),
-                http_status: status.as_u16(),
-                cause: if status.as_u16() == 403 {
-                    "not found, or not public"
-                } else {
-                    "not found"
-                }
-                .into(),
-            });
-        }
-        if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
-            return Err(Error::Network {
-                scoped_name: name.into(),
-                step: step.into(),
-                detail: format!("HTTP {status}"),
-            });
-        }
-        if !status.is_success() {
-            return Err(unexpected(name, step, &format!("HTTP {status}")));
-        }
-        let limit = if storage {
-            self.storage_limit
-        } else {
-            FIRESTORE_LIMIT
-        };
+        classify_status(status, token.is_some(), name, step)?;
+        let limit = self.body_limit(storage);
         read_body(
             response.bytes_stream().map(|chunk| chunk.map_err(network)),
             limit,
@@ -425,6 +259,262 @@ impl<T: TokenSource> Resolver<T> {
         )
         .await
     }
+}
+
+pub(crate) fn asset_identity(
+    asset: &Value,
+    scoped_name: &str,
+    expected_type: AssetType,
+) -> Result<(String, bool), Error> {
+    let asset = Fields::document(asset, scoped_name, "asset document")?;
+    let actual = asset.string("assetType")?;
+    if actual != expected_type.as_str() {
+        return Err(Error::WrongAssetType {
+            scoped_name: scoped_name.into(),
+            expected: expected_type.as_str().into(),
+            actual: actual.into(),
+        });
+    }
+    let current_name = asset.string("scopedName")?.to_owned();
+    let private = asset.optional_string("publicRole")?.is_none();
+    Ok((current_name, private))
+}
+
+pub(crate) fn release_page(
+    value: &Value,
+    scoped_name: &str,
+    releases: &mut Vec<Value>,
+    seen: &mut HashSet<String>,
+) -> Result<Option<String>, Error> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| unexpected(scoped_name, "release listing", "expected an object"))?;
+    if let Some(documents) = object.get("documents") {
+        let documents = documents.as_array().ok_or_else(|| {
+            unexpected(scoped_name, "release listing", "documents must be an array")
+        })?;
+        releases.extend(documents.iter().cloned());
+    }
+    match object.get("nextPageToken") {
+        None => Ok(None),
+        Some(Value::String(token)) if !token.is_empty() && seen.insert(token.clone()) => {
+            Ok(Some(token.clone()))
+        }
+        _ => Err(unexpected(
+            scoped_name,
+            "release listing",
+            "invalid or repeated nextPageToken",
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolved_release(
+    releases: &[Value],
+    scoped_name: &str,
+    range: &str,
+    parsed: &Range,
+    current_name: &str,
+    id: &str,
+    private: bool,
+    expected_type: AssetType,
+) -> Result<ResolvedRef, Error> {
+    let (release, version) = select(releases, scoped_name, range, parsed)?;
+    let release_id = release["name"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_owned();
+    let step = format!("release {release_id}");
+    let fields = Fields::document(release, scoped_name, &step)?;
+    let primary = fields.map("artifacts")?.unwrap().map("primary")?.unwrap();
+    let hash = primary.string("contentHash")?;
+    if !crate::valid_hash(hash) {
+        return Err(primary.error("contentHash must be 64 lowercase hex digits"));
+    }
+    let storage = primary
+        .map("storage")?
+        .ok_or_else(|| primary.error("missing storage"))?;
+    let storage_path = storage.string("fileBucket")?.to_owned();
+    validate_storage_path(&storage_path, scoped_name, &step)?;
+    let family = fields.fields.get("family").and_then(|value| {
+            let family = value.get("stringValue").and_then(Value::as_str);
+            if family.is_none() {
+                log::warn!(target: "arora-assets", "{scoped_name}: {step}: family must be a string; treating family as absent");
+            }
+            family.map(str::to_owned)
+        });
+    Ok(ResolvedRef {
+        scoped_name: current_name.into(),
+        published_asset_id: id.into(),
+        version: version.to_string(),
+        release_id,
+        artifact_key: "primary".into(),
+        content_hash: hash.into(),
+        storage_path: Some(storage_path),
+        asset_type: expected_type,
+        family,
+        private,
+        resolved_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| Error::Config(e.to_string()))?
+            .as_millis() as u64,
+    })
+}
+
+pub(crate) async fn finish_resolution(
+    result: Result<ResolvedRef, Error>,
+    scoped_name: &str,
+    parsed: &Range,
+    expected_type: AssetType,
+    cache: &Cache,
+) -> Result<Resolution, Error> {
+    match result {
+        Ok(pin) => {
+            let name = scoped_name.to_owned();
+            let saved = pin.clone();
+            if let Err(error) = cache
+                .blocking(move |cache| cache.save_pin(&name, &saved))
+                .await
+            {
+                log::warn!(target: "arora-assets", "{scoped_name}: could not save resolved pin: {error}");
+            }
+            Ok(Resolution {
+                resolved: pin,
+                source: ResolutionSource::Server,
+            })
+        }
+        Err(e @ Error::Network { .. }) => {
+            let name = scoped_name.to_owned();
+            let pin = cache
+                .blocking(move |cache| cache.last_pin(&name))
+                .await
+                .ok()
+                .flatten();
+            match pin {
+                Some(pin)
+                    if pin.asset_type == expected_type
+                        && Version::parse(&pin.version).is_some_and(|v| parsed.contains(v)) =>
+                {
+                    Ok(Resolution {
+                        resolved: pin,
+                        source: ResolutionSource::Cache,
+                    })
+                }
+                _ => Err(e),
+            }
+        }
+        Err(
+            e @ (Error::NotFound {
+                http_status: 404, ..
+            }
+            | Error::Refused { .. }),
+        ) => {
+            let name = scoped_name.to_owned();
+            if let Err(error) = cache.blocking(move |cache| cache.remove_pin(&name)).await {
+                log::warn!(target: "arora-assets", "{scoped_name}: could not clear resolved pin: {error}");
+            }
+            Err(e)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+pub(crate) fn storage_endpoint(
+    config: &StudioConfig,
+    resolved: &ResolvedRef,
+) -> Result<Url, Error> {
+    let storage_path = resolved.storage_path.as_deref().ok_or_else(|| {
+        Error::Cache(format!(
+            "{}: offline pin has no storage path; read the bytes from the cache by hash {}",
+            resolved.scoped_name, resolved.content_hash
+        ))
+    })?;
+    validate_storage_path(
+        storage_path,
+        &resolved.scoped_name,
+        &format!("release {}", resolved.release_id),
+    )?;
+    let mut url = endpoint(
+        &config.storage_url,
+        &["v0", "b", &config.storage_bucket, "o", storage_path],
+    )?;
+    url.query_pairs_mut().append_pair("alt", "media");
+    Ok(url)
+}
+
+pub(crate) async fn verified_asset(
+    resolved: &ResolvedRef,
+    bytes: Vec<u8>,
+) -> Result<FetchedAsset, Error> {
+    let resolved = resolved.clone();
+    crate::blocking(move || {
+        verify(&resolved.scoped_name, &resolved.content_hash, &bytes)?;
+        Ok(FetchedAsset {
+            bytes,
+            content_hash: resolved.content_hash.clone(),
+            resolved: Some(resolved),
+        })
+    })
+    .await
+}
+
+pub(crate) fn network_error(name: &str, step: &str, e: reqwest::Error) -> Error {
+    if e.is_builder() {
+        unexpected(name, step, "invalid request or authorization header")
+    } else {
+        Error::Network {
+            scoped_name: name.into(),
+            step: step.into(),
+            detail: error_chain(&e.without_url()),
+        }
+    }
+}
+
+pub(crate) fn classify_status(
+    status: reqwest::StatusCode,
+    authenticated: bool,
+    name: &str,
+    step: &str,
+) -> Result<(), Error> {
+    if status.as_u16() == 401 {
+        return Err(Error::Unauthorized {
+            scoped_name: name.into(),
+            step: step.into(),
+        });
+    }
+    if status.as_u16() == 403 && authenticated {
+        return Err(Error::Refused {
+            scoped_name: name.into(),
+            step: step.into(),
+        });
+    }
+    if status.as_u16() == 404 || (status.as_u16() == 403 && !authenticated) {
+        return Err(Error::NotFound {
+            scoped_name: name.into(),
+            step: step.into(),
+            http_status: status.as_u16(),
+            cause: if status.as_u16() == 403 {
+                "not found, or not public"
+            } else {
+                "not found"
+            }
+            .into(),
+        });
+    }
+    if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
+        return Err(Error::Network {
+            scoped_name: name.into(),
+            step: step.into(),
+            detail: format!("HTTP {status}"),
+        });
+    }
+    if !status.is_success() {
+        return Err(unexpected(name, step, &format!("HTTP {status}")));
+    }
+    Ok(())
 }
 
 fn endpoint(base: &str, parts: &[&str]) -> Result<Url, Error> {
@@ -640,89 +730,4 @@ fn append_chunk(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    #[test]
-    fn selection_is_stable_and_skips_unusable_releases() {
-        let release = |id, version, deprecated, hash| {
-            json!({"name": id, "fields": {
-                "version": {"stringValue": version}, "deprecated": {"booleanValue": deprecated},
-                "artifacts": {"mapValue": {"fields": {"primary": {"mapValue": {"fields": hash}}}}}
-            }})
-        };
-        let hash = json!({"contentHash": {"stringValue": crate::content_hash(b"test")}, "storage": {"mapValue": {"fields": {"fileBucket": {"stringValue": "object"}}}}});
-        let releases = vec![
-            release("deprecated", "9.0.0", true, hash.clone()),
-            release("missing", "8.0.0", false, json!({})),
-            release("old", "0.9.9", false, hash.clone()),
-            release("bad", "garbage", false, hash.clone()),
-            release("earlier", "2.9.0", false, hash.clone()),
-            release("first", "v2.10.0", false, hash.clone()),
-            release("second", "2.10.0", false, hash),
-        ];
-        let (chosen, version) =
-            select(&releases, "name", "*", &Range::parse("name", "*").unwrap()).unwrap();
-        assert_eq!(chosen["name"], "first");
-        assert_eq!(version.to_string(), "2.10.0");
-    }
-}
-
-#[cfg(test)]
-mod transport_tests {
-    use super::*;
-
-    #[test]
-    fn builder_timeouts_have_no_total_deadline() {
-        let config = StudioConfig {
-            project_id: String::new(),
-            storage_bucket: String::new(),
-            firestore_url: String::new(),
-            storage_url: String::new(),
-        };
-        let builder = Resolver::builder(config.clone(), NoToken);
-        let debug = format!("{:?}", builder.client);
-        assert!(debug.contains("connect_timeout: 30s"), "{debug}");
-
-        assert!(!debug.contains(", timeout:"), "{debug}");
-        assert_eq!(builder.storage_limit, 1024 * 1024 * 1024);
-        let built = builder.build().unwrap();
-        assert!(format!("{:?}", built.client).contains("read_timeout: 60s"));
-        let builder = Resolver::builder(config, NoToken)
-            .connect_timeout(Duration::from_millis(12))
-            .read_timeout(Duration::from_millis(34));
-        let debug = format!("{:?}", builder.client);
-        assert!(debug.contains("connect_timeout: 12ms"), "{debug}");
-        let built = builder.build().unwrap();
-        assert!(format!("{:?}", built.client).contains("read_timeout: 34ms"));
-        assert!(!debug.contains(", timeout:"), "{debug}");
-    }
-
-    #[test]
-    fn cap_checks_each_chunk_before_extending_the_buffer() {
-        let mut bytes = vec![];
-        append_chunk(&mut bytes, &[1; 3], 5, "@test/model", "bytes").unwrap();
-        let error = append_chunk(&mut bytes, &[2; 3], 5, "@test/model", "bytes").unwrap_err();
-        assert!(matches!(error, Error::ResponseTooLarge { limit: 5, .. }));
-        assert_eq!(bytes, [1; 3]);
-        append_chunk(&mut bytes, &[3; 2], 5, "@test/model", "bytes").unwrap();
-        assert_eq!(bytes.len(), 5);
-    }
-}
-
-#[cfg(test)]
-mod stream_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn oversized_stream_stops_before_polling_the_rest() {
-        let mut polled = 0;
-        let stream =
-            futures_util::stream::iter((0..10).map(|_| Ok(vec![0; 3]))).inspect(|_| polled += 1);
-        let error = read_body(stream, 5, "@test/model", "bytes")
-            .await
-            .unwrap_err();
-        assert!(matches!(error, Error::ResponseTooLarge { limit: 5, .. }));
-        assert_eq!(polled, 2);
-    }
-}
+mod tests;

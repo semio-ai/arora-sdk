@@ -1,5 +1,5 @@
 mod fake_studio;
-use arora_index::{build, content_hash, Cache};
+use arora_index::{build, content_hash};
 use fake_studio::*;
 use std::collections::BTreeMap;
 use wiremock::MockServer;
@@ -35,202 +35,59 @@ fn environment(
     env
 }
 
+/// Exercises manifest pins, public downloads, Cargo directives and an offline rebuild.
 #[tokio::test(flavor = "multi_thread")]
 async fn pinned_download_is_exposed_and_then_works_offline_without_configuration() {
-    let server = MockServer::start().await;
-    chain(&server, false).await;
-    storage(&server, BYTES, 200).await;
-    let dir = tempfile::tempdir().unwrap();
-    let env = environment(dir.path(), Some(&server), "1.2.3", &content_hash(BYTES));
-    let lines = tokio::task::spawn_blocking(move || {
-        let mut lines = Vec::new();
-        build::models_with(
-            |key| env.get(key).cloned(),
-            |line| lines.push(line.to_owned()),
-        )
-        .unwrap();
-        lines
-    })
-    .await
-    .unwrap();
-    let directive = lines
-        .iter()
-        .find(|l| l.starts_with("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL="))
-        .unwrap();
-    let path = directive
-        .strip_prefix("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL=")
-        .unwrap();
-    assert!(std::path::Path::new(path).is_absolute());
-    assert!(lines.contains(&format!("cargo:rerun-if-changed={path}")));
-    assert_eq!(std::fs::read(path).unwrap(), BYTES);
-    for var in [
-        "CARGO_MANIFEST_DIR",
-        "ARORA_ASSETS_CACHE_DIR",
-        "CARGO_HOME",
-        "HOME",
-        "ARORA_ASSETS_OFFLINE",
-        "FIREBASE_PROJECT_ID",
-        "FIREBASE_STORAGE_BUCKET",
-        "FIREBASE_FIRESTORE_EMULATOR_HOST",
-        "FIREBASE_STORAGE_EMULATOR_HOST",
-    ] {
-        assert!(lines.contains(&format!("cargo:rerun-if-env-changed={var}")));
-    }
-    assert!(lines.contains(&"cargo:rerun-if-changed=Cargo.toml".into()));
-    let before = server.received_requests().await.unwrap().len();
-    let mut env = environment(dir.path(), None, "1.2.3", &content_hash(BYTES));
-    env.insert("ARORA_ASSETS_OFFLINE".into(), "1".into());
-    tokio::task::spawn_blocking(move || {
-        build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap()
-    })
-    .await
-    .unwrap();
-    assert_eq!(server.received_requests().await.unwrap().len(), before);
-}
-
-#[test]
-fn invalid_pins_offline_misses_and_missing_configuration_are_actionable() {
-    let dir = tempfile::tempdir().unwrap();
-    for version in ["^1.2.3", "~1.2.3", "*", "v1.2.3", "1.2.3-beta", "0.9.9"] {
-        let env = environment(dir.path(), None, version, &content_hash(BYTES));
-        let error = build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap_err();
-        assert!(error.to_string().contains("robot-model"));
-        assert!(error.to_string().contains("exact canonical version"));
-    }
-    let mut env = environment(dir.path(), None, "1.2.3", &content_hash(BYTES));
-    env.insert("ARORA_ASSETS_OFFLINE".into(), "1".into());
-    let err = build::models_with(|key| env.get(key).cloned(), |_| {})
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("robot-model") && err.contains("fill the cache"));
-    env.remove("ARORA_ASSETS_OFFLINE");
-    assert!(build::models_with(|key| env.get(key).cloned(), |_| {})
-        .unwrap_err()
-        .to_string()
-        .contains("FIREBASE_PROJECT_ID"));
-    env.insert("FIREBASE_PROJECT_ID".into(), "demo-test".into());
-    assert!(build::models_with(|key| env.get(key).cloned(), |_| {})
-        .unwrap_err()
-        .to_string()
-        .contains("FIREBASE_STORAGE_BUCKET"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn private_assets_and_mismatched_pins_are_refused_before_storage() {
-    for private in [true, false] {
+    bounded(async {
         let server = MockServer::start().await;
-        chain(&server, private).await;
+        chain(&server, false).await;
+        storage(&server, BYTES, 200).await;
         let dir = tempfile::tempdir().unwrap();
-        let env = environment(
-            dir.path(),
-            Some(&server),
-            "1.2.3",
-            &content_hash(b"different pin"),
-        );
-        let err = tokio::task::spawn_blocking(move || {
-            build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap_err()
+        let env = environment(dir.path(), Some(&server), "1.2.3", &content_hash(BYTES));
+        let lines = tokio::task::spawn_blocking(move || {
+            let mut lines = Vec::new();
+            build::models_with(
+                |key| env.get(key).cloned(),
+                |line| lines.push(line.to_owned()),
+            )
+            .unwrap();
+            lines
         })
         .await
         .unwrap();
-        if private {
-            assert!(err.to_string().contains("must be public"));
-        } else {
-            assert!(err.to_string().contains("SHA-256 mismatch"));
+        let directive = lines
+            .iter()
+            .find(|l| l.starts_with("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL="))
+            .unwrap();
+        let path = directive
+            .strip_prefix("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL=")
+            .unwrap();
+        assert!(std::path::Path::new(path).is_absolute());
+        assert!(lines.contains(&format!("cargo:rerun-if-changed={path}")));
+        assert_eq!(std::fs::read(path).unwrap(), BYTES);
+        for var in [
+            "CARGO_MANIFEST_DIR",
+            "ARORA_ASSETS_CACHE_DIR",
+            "CARGO_HOME",
+            "HOME",
+            "ARORA_ASSETS_OFFLINE",
+            "FIREBASE_PROJECT_ID",
+            "FIREBASE_STORAGE_BUCKET",
+            "FIREBASE_FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_STORAGE_EMULATOR_HOST",
+        ] {
+            assert!(lines.contains(&format!("cargo:rerun-if-env-changed={var}")));
         }
-        assert_eq!(server.received_requests().await.unwrap().len(), 3);
-        assert_eq!(
-            std::fs::read_dir(dir.path().join("cache/blobs"))
-                .unwrap()
-                .count(),
-            0
-        );
-    }
-}
-
-#[test]
-fn default_cache_paths_and_sealed_only_miss() {
-    for cargo_home in [true, false] {
-        let dir = tempfile::tempdir().unwrap();
+        assert!(lines.contains(&"cargo:rerun-if-changed=Cargo.toml".into()));
+        let before = server.received_requests().await.unwrap().len();
         let mut env = environment(dir.path(), None, "1.2.3", &content_hash(BYTES));
-        env.remove("ARORA_ASSETS_CACHE_DIR");
-        env.insert(
-            if cargo_home { "CARGO_HOME" } else { "HOME" }.into(),
-            dir.path().to_str().unwrap().into(),
-        );
         env.insert("ARORA_ASSETS_OFFLINE".into(), "1".into());
-        let path = dir.path().join(if cargo_home {
-            "arora-assets"
-        } else {
-            ".cargo/arora-assets"
-        });
-        let cache = Cache::new(path).unwrap();
-        cache.store(&content_hash(BYTES), BYTES, true).unwrap();
-        assert!(build::models_with(|key| env.get(key).cloned(), |_| {})
-            .unwrap_err()
-            .to_string()
-            .contains("offline cache miss"));
-        cache.store(&content_hash(BYTES), BYTES, false).unwrap();
-        build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap();
-    }
-}
-
-#[test]
-fn online_cache_hit_without_firebase_and_empty_overrides() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut env = environment(dir.path(), None, "1.2.3", &content_hash(BYTES));
-    env.insert("ARORA_ASSETS_CACHE_DIR".into(), String::new());
-    env.insert("CARGO_HOME".into(), String::new());
-    env.insert("ARORA_ASSETS_OFFLINE".into(), String::new());
-    env.insert("HOME".into(), dir.path().to_str().unwrap().into());
-    let cache = Cache::new(dir.path().join(".cargo/arora-assets")).unwrap();
-    cache.store(&content_hash(BYTES), BYTES, false).unwrap();
-    let mut lines = Vec::new();
-    build::models_with(
-        |key| env.get(key).cloned(),
-        |line| lines.push(line.to_owned()),
-    )
-    .unwrap();
-    let path = cache
-        .public_path(&content_hash(BYTES))
-        .unwrap()
-        .canonicalize()
+        tokio::task::spawn_blocking(move || {
+            build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap()
+        })
+        .await
         .unwrap();
-    assert!(lines.contains(&format!("cargo:rerun-if-changed={}", path.display())));
-}
-
-#[test]
-fn every_pin_is_validated_before_any_cache_hit() {
-    let dir = tempfile::tempdir().unwrap();
-    let hash = content_hash(BYTES);
-    let cache = Cache::new(dir.path().join("cache")).unwrap();
-    cache.store(&hash, BYTES, false).unwrap();
-    for (name, version, pin_hash, detail) in [
-        ("bad/name", "1.2.3", hash.as_str(), "invalid scoped name"),
-        (NAME, "^1.2.3", hash.as_str(), "exact canonical version"),
-        (NAME, "v1.2.3", hash.as_str(), "exact canonical version"),
-        (NAME, "1.2.3", "BAD", "64 lowercase hex"),
-    ] {
-        let env = environment(dir.path(), None, "1.2.3", &hash);
-        let manifest = dir.path().join("Cargo.toml");
-        let mut text = std::fs::read_to_string(&manifest).unwrap();
-        text.push_str(&format!("z-invalid = {{ scoped_name = '{name}', version = '{version}', content_hash = '{pin_hash}' }}\n"));
-        std::fs::write(manifest, text).unwrap();
-        let mut lines = vec![];
-        let error = build::models_with(
-            |key| env.get(key).cloned(),
-            |line| lines.push(line.to_owned()),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains("z-invalid") && error.contains(detail),
-            "{error}"
-        );
-        assert!(
-            !lines
-                .iter()
-                .any(|line| line.starts_with("cargo:rustc-env=")),
-            "every pin must be checked before any blob is exposed"
-        );
-    }
+        assert_eq!(server.received_requests().await.unwrap().len(), before);
+    })
+    .await;
 }

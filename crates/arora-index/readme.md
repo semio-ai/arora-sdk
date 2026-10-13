@@ -12,16 +12,16 @@ through Storage REST and verifies its SHA-256. `resolve` takes an `AssetType`
 `latestVersion` does not select a release. An alias resolves to the asset's
 current scoped name.
 
-```rust,no_run
+```rust
 use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
 
-# async fn example() -> Result<(), arora_index::Error> {
-let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
-let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
-let fetched = resolver.fetch(&pin).await?;
-assert_eq!(fetched.content_hash, pin.content_hash);
-# Ok(())
-# }
+async fn example() -> Result<(), arora_index::Error> {
+    let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
+    let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
+    let fetched = resolver.fetch(&pin).await?;
+    assert_eq!(fetched.content_hash, pin.content_hash);
+    Ok(())
+}
 ```
 
 `TokenSource` supplies an optional Firebase ID token asynchronously. The crate
@@ -165,7 +165,7 @@ content_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 Replace the example hash with the published artifact's SHA-256. In `build.rs`:
 
-```rust,no_run
+```rust
 fn main() -> Result<(), arora_index::Error> {
     arora_index::build::models()
 }
@@ -200,7 +200,20 @@ output closures for embedding and testing.
 
 ## Tests
 
-Normal tests use temporary directories and localhost `wiremock` servers.
+Run `cargo test --release` for this package. Unit tests beside the implementation
+exercise version selection, typed Firestore values, validation, status and
+fallback decisions, bounded streams, environment lookup, build pins, and cache
+files. Cache tests use temporary directories for encryption, atomic publication,
+permissions and locking. The transport timeout test uses a bounded local TCP
+peer; decision tests need no HTTP server.
+
+Four end-to-end tests use `tests/fake_studio`: a public alias through paged
+releases and Storage, an authenticated private chain, refused-connection
+fallback followed by definitive revocation, and a pinned build followed by an
+offline rebuild. Their waits have deadlines. Assertion-specific test comments
+identify distinctions that line coverage cannot show. No normal test contacts
+a Google or Firebase host.
+
 The ignored emulator test also requires `ARORA_ASSETS_EMULATOR_TEST=1`, both
 emulator hosts on localhost, and a project id starting with `demo-`. With an
 unset or empty opt-in variable it prints a skip message and returns, even

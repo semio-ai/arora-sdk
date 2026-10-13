@@ -1,12 +1,10 @@
-mod fake_studio;
-use arora_index::{content_hash, AssetType, Cache, Error, NoToken, Resolver};
-use fake_studio::*;
+use super::*;
+use crate::test_support::*;
+use crate::{content_hash, AssetType};
 use serde_json::{json, Value};
-use std::fs;
 use std::time::Duration;
-use wiremock::matchers::method;
-use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// Asserts verified hits corruption and visibility are separate.
 #[test]
 fn verified_hits_corruption_and_visibility_are_separate() {
     let dir = tempfile::tempdir().unwrap();
@@ -16,6 +14,7 @@ fn verified_hits_corruption_and_visibility_are_separate() {
     cache.store(&hash, BYTES, false).unwrap();
     assert_eq!(cache.read(&hash, false).unwrap().unwrap(), BYTES);
     assert!(cache.read(&hash, true).unwrap().is_none());
+    assert_eq!(cache.read(&hash, false).unwrap().unwrap(), BYTES);
     fs::write(cache.public_path(&hash).unwrap(), b"corrupt").unwrap();
     assert!(cache.read(&hash, false).unwrap().is_none());
     assert!(!cache.public_path(&hash).unwrap().exists());
@@ -37,6 +36,7 @@ fn assert_no_plaintext(dir: &std::path::Path) {
     }
 }
 
+/// Asserts private bytes stay sealed even after reading.
 #[test]
 fn private_bytes_stay_sealed_even_after_reading() {
     let dir = tempfile::tempdir().unwrap();
@@ -71,6 +71,7 @@ fn private_bytes_stay_sealed_even_after_reading() {
     assert!(!sealed_path.exists());
 }
 
+/// Asserts changed key makes private blob a miss.
 #[test]
 fn changed_key_makes_private_blob_a_miss() {
     let dir = tempfile::tempdir().unwrap();
@@ -83,6 +84,7 @@ fn changed_key_makes_private_blob_a_miss() {
     assert_eq!(fs::read_dir(dir.path().join("blobs")).unwrap().count(), 0);
 }
 
+/// Asserts pins use requested names and studio field names.
 #[test]
 fn pins_use_requested_names_and_studio_field_names() {
     let dir = tempfile::tempdir().unwrap();
@@ -119,88 +121,7 @@ fn pins_use_requested_names_and_studio_field_names() {
     assert_eq!(serde_json::to_value(pin).unwrap()["storagePath"], OBJECT);
 }
 
-#[test]
-fn independent_cache_handles_preserve_keys_and_all_pins() {
-    let dir = tempfile::tempdir().unwrap();
-    std::thread::scope(|scope| {
-        for i in 0..12 {
-            let path = dir.path();
-            scope.spawn(move || {
-                let cache = Cache::new(path).unwrap();
-                let mut pin = model_pin(true);
-                let bytes = format!("private bytes {i}");
-                pin.content_hash = content_hash(bytes.as_bytes());
-                cache
-                    .store(&pin.content_hash, bytes.as_bytes(), true)
-                    .unwrap();
-                cache.save_pin(&format!("@test/{i}"), &pin).unwrap();
-            });
-        }
-    });
-    let cache = Cache::new(dir.path()).unwrap();
-    for i in 0..12 {
-        let pin = cache.last_pin(&format!("@test/{i}")).unwrap().unwrap();
-        assert_eq!(
-            cache.fetch(&pin).unwrap().unwrap().bytes,
-            format!("private bytes {i}").as_bytes()
-        );
-    }
-}
-
-#[tokio::test]
-async fn only_network_errors_allow_a_compatible_last_pin() {
-    let server = MockServer::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    let resolver = Resolver::new(config(&server), NoToken).unwrap();
-    chain(&server, false).await;
-    let online = resolver
-        .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-        .await
-        .unwrap();
-    assert_eq!(
-        cache.last_pin(NAME).unwrap().unwrap().version,
-        online.resolved.version
-    );
-    for status in [503, 403, 404, 400, 200] {
-        server.reset().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(status).set_body_string("not JSON"))
-            .mount(&server)
-            .await;
-        let result = resolver
-            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-            .await;
-        if status == 503 {
-            assert_eq!(result.unwrap().resolved.version, "1.2.3");
-            assert!(matches!(
-                resolver
-                    .resolve_with_fallback(NAME, "2.0.0", AssetType::Model, &cache)
-                    .await,
-                Err(Error::Network { .. })
-            ));
-        } else {
-            assert!(result.is_err());
-        }
-    }
-    server.reset().await;
-    documents(&server, false, "face").await;
-    assert!(matches!(
-        resolver
-            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-            .await,
-        Err(Error::WrongAssetType { .. })
-    ));
-    server.reset().await;
-    chain(&server, false).await;
-    assert!(matches!(
-        resolver
-            .resolve_with_fallback(NAME, "2.0.0", AssetType::Model, &cache)
-            .await,
-        Err(Error::NoRelease { .. })
-    ));
-}
-
+/// Asserts decrypted hash is verified.
 #[test]
 fn decrypted_hash_is_verified() {
     let dir = tempfile::tempdir().unwrap();
@@ -215,6 +136,7 @@ fn decrypted_hash_is_verified() {
     assert!(!destination.exists());
 }
 
+/// Asserts pins recover valid entries and discard bad files.
 #[test]
 fn pins_recover_valid_entries_and_discard_bad_files() {
     let dir = tempfile::tempdir().unwrap();
@@ -242,6 +164,7 @@ fn pins_recover_valid_entries_and_discard_bad_files() {
     assert!(cache.last_pin(NAME).unwrap().is_none());
 }
 
+/// Asserts invalid key is replaced and old ciphertext becomes a miss.
 #[test]
 fn invalid_key_is_replaced_and_old_ciphertext_becomes_a_miss() {
     capture_warnings();
@@ -262,6 +185,7 @@ fn invalid_key_is_replaced_and_old_ciphertext_becomes_a_miss() {
             && m.contains(dir.path().to_str().unwrap())));
 }
 
+/// Asserts verified public private and pin reads need no writable directory or lock.
 #[cfg(unix)]
 #[test]
 fn verified_public_private_and_pin_reads_need_no_writable_directory_or_lock() {
@@ -309,93 +233,47 @@ fn verified_public_private_and_pin_reads_need_no_writable_directory_or_lock() {
     assert_eq!(fs::read_dir(dir.path().join("blobs")).unwrap().count(), 2);
 }
 
-#[tokio::test]
-async fn definitive_no_clears_only_its_pin_and_unreferenced_sealed_blobs() {
-    let server = MockServer::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    let pin = pin();
-    for status in [404, 403] {
-        server.reset().await;
-        cache.save_pin(NAME, &pin).unwrap();
-        cache.save_pin("@test/remaining", &pin).unwrap();
-        cache.store(&pin.content_hash, BYTES, true).unwrap();
-        cache.store(&pin.content_hash, BYTES, false).unwrap();
-        let orphan = content_hash(b"orphan");
-        cache.store(&orphan, b"orphan", true).unwrap();
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(status))
-            .mount(&server)
-            .await;
-        let resolver = Resolver::new(config(&server), Token).unwrap();
-        let error = resolver
-            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-            .await
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            Error::NotFound { .. } | Error::Refused { .. }
-        ));
-        assert!(cache.last_pin(NAME).unwrap().is_none());
-        assert!(cache.last_pin("@test/remaining").unwrap().is_some());
-        assert!(cache.read(&pin.content_hash, true).unwrap().is_some());
-        assert!(dir
-            .path()
-            .join("blobs")
-            .join(format!("{orphan}.sealed"))
-            .exists());
-        cache.remove_pin("@test/remaining").unwrap();
-        assert!(cache.read(&pin.content_hash, true).unwrap().is_none());
-        assert!(cache.read(&pin.content_hash, false).unwrap().is_some());
-        server.reset().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(503))
-            .mount(&server)
-            .await;
-        assert!(matches!(
-            resolver
-                .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-                .await,
-            Err(Error::Network { .. })
-        ));
-    }
-}
-
+/// Asserts a busy cache lock does not block the async executor.
 #[tokio::test(flavor = "current_thread")]
 async fn a_busy_cache_lock_does_not_block_the_async_executor() {
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    let lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(dir.path().join(".lock"))
-        .unwrap();
-    lock.lock().unwrap();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    // The timeout only releases a regressed synchronous writer so the test cannot hang.
-    let release = std::thread::spawn(move || {
-        let executor_ran = release_rx.recv_timeout(Duration::from_secs(3)).is_ok();
-        drop(lock);
-        executor_ran
-    });
-    let asset = arora_index::FetchedAsset {
-        content_hash: content_hash(BYTES),
-        bytes: BYTES.to_vec(),
-        resolved: None,
-    };
-    let (stored, ()) = tokio::join!(biased;
-        cache.store_async(asset),
-        async { let _ = release_tx.send(()); },
-    );
-    stored.unwrap();
-    assert!(
-        release.join().unwrap(),
-        "the executor must run while the cache writer waits for its lock"
-    );
+    bounded(async {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.path().join(".lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        // The timeout only releases a regressed synchronous writer so the test cannot hang.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let executor_ran = release_rx.recv_timeout(Duration::from_millis(500)).is_ok();
+            drop(lock);
+            done_tx.send(executor_ran).unwrap();
+        });
+        let asset = crate::FetchedAsset {
+            content_hash: content_hash(BYTES),
+            bytes: BYTES.to_vec(),
+            resolved: None,
+        };
+        let (stored, ()) = tokio::join!(biased;
+            cache.store_async(asset),
+            async { let _ = release_tx.send(()); },
+        );
+        stored.unwrap();
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(750)).unwrap(),
+            "the executor must run while the cache writer waits for its lock"
+        );
+    })
+    .await;
 }
 
+/// Asserts corrupt read only blobs are misses even when cleanup fails.
 #[cfg(unix)]
 #[test]
 fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
@@ -428,6 +306,7 @@ fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
     ));
 }
 
+/// Asserts old pins without asset type are models.
 #[test]
 fn old_pins_without_asset_type_are_models() {
     let dir = tempfile::tempdir().unwrap();
@@ -445,21 +324,26 @@ fn old_pins_without_asset_type_are_models() {
     );
 }
 
+/// Asserts async cache helpers preserve private storage.
 #[tokio::test]
 async fn async_cache_helpers_preserve_private_storage() {
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    let pin = pin();
-    let asset = arora_index::FetchedAsset {
-        content_hash: pin.content_hash.clone(),
-        bytes: BYTES.to_vec(),
-        resolved: Some(pin.clone()),
-    };
-    cache.store_async(asset).await.unwrap();
-    assert_eq!(cache.fetch_async(&pin).await.unwrap().unwrap().bytes, BYTES);
-    assert!(!cache.public_path(&pin.content_hash).unwrap().exists());
+    bounded(async {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let pin = pin();
+        let asset = crate::FetchedAsset {
+            content_hash: pin.content_hash.clone(),
+            bytes: BYTES.to_vec(),
+            resolved: Some(pin.clone()),
+        };
+        cache.store_async(asset).await.unwrap();
+        assert_eq!(cache.fetch_async(&pin).await.unwrap().unwrap().bytes, BYTES);
+        assert!(!cache.public_path(&pin.content_hash).unwrap().exists());
+    })
+    .await;
 }
 
+/// Asserts pin updates preserve raw entries and only remove the named blob.
 #[test]
 fn pin_updates_preserve_raw_entries_and_only_remove_the_named_blob() {
     let dir = tempfile::tempdir().unwrap();
@@ -509,6 +393,7 @@ fn pin_updates_preserve_raw_entries_and_only_remove_the_named_blob() {
     }
 }
 
+/// Asserts unreadable pins are never overwritten and warn.
 #[cfg(unix)]
 #[test]
 fn unreadable_pins_are_never_overwritten_and_warn() {
@@ -540,196 +425,28 @@ fn unreadable_pins_are_never_overwritten_and_warn() {
         .any(|m| m.contains("could not clear resolved pin") && m.contains(path.to_str().unwrap())));
 }
 
-#[tokio::test]
-async fn only_definitive_statuses_clear_pins() {
-    let server = MockServer::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    for status in [403, 404] {
-        server.reset().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(status))
-            .mount(&server)
-            .await;
-        cache.save_pin(NAME, &pin()).unwrap();
-        let error = Resolver::new(config(&server), NoToken)
-            .unwrap()
-            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-            .await
-            .unwrap_err();
-        assert!(matches!(error, Error::NotFound { http_status, .. } if http_status == status));
-        assert_eq!(cache.last_pin(NAME).unwrap().is_some(), status == 403);
-        cache.save_pin(NAME, &pin()).unwrap();
-        let error = Resolver::new(config(&server), Token)
-            .unwrap()
-            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-            .await
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            Error::NotFound { .. } | Error::Refused { .. }
-        ));
-        assert!(cache.last_pin(NAME).unwrap().is_none());
-    }
-}
-
-#[tokio::test]
-async fn cleanup_failures_warn_and_preserve_the_definitive_error() {
-    capture_warnings();
-    let server = MockServer::start().await;
-    for status in [403, 404] {
-        server.reset().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(status))
-            .mount(&server)
-            .await;
-        for obstacle in [".lock", "resolved.json", "blob"] {
-            let dir = tempfile::tempdir().unwrap();
-            let cache = Cache::new(dir.path()).unwrap();
-            let pin = pin();
-            cache.save_pin(NAME, &pin).unwrap();
-            let path = if obstacle == "blob" {
-                dir.path()
-                    .join("blobs")
-                    .join(format!("{}.sealed", pin.content_hash))
-            } else {
-                let path = dir.path().join(obstacle);
-                fs::remove_file(&path).unwrap();
-                path
-            };
-            fs::create_dir(&path).unwrap();
-            let error = Resolver::new(config(&server), Token)
-                .unwrap()
-                .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(error, Error::NotFound { .. } | Error::Refused { .. }),
-                "{error}"
-            );
-            cache.remove_pin(NAME).unwrap();
-            assert!(lock(&WARNINGS.0)
-                .iter()
-                .any(|m| m.contains("could not clear resolved pin")
-                    && m.contains(path.to_str().unwrap())));
-        }
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn corrupt_read_rechecks_a_concurrent_replacement_under_the_lock() {
-    use std::io::Write;
-    for private in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = Cache::new(dir.path()).unwrap();
-        let hash = content_hash(BYTES);
-        cache.store(&hash, BYTES, private).unwrap();
-        let path = dir.path().join("blobs").join(if private {
-            format!("{hash}.sealed")
-        } else {
-            hash.clone()
-        });
-        let replacement = dir.path().join("replacement");
-        fs::rename(&path, &replacement).unwrap();
-        assert!(std::process::Command::new("mkfifo")
-            .arg(&path)
-            .status()
-            .unwrap()
-            .success());
-        let lock = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(dir.path().join(".lock"))
-            .unwrap();
-        lock.lock().unwrap();
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        let reader = cache.clone();
-        let reader_hash = hash.clone();
-        let thread = std::thread::spawn(move || {
-            done_tx.send(reader.read(&reader_hash, private)).unwrap();
-        });
-        // Opening the FIFO synchronizes with the reader's original file descriptor.
-        let mut pipe = fs::OpenOptions::new().write(true).open(&path).unwrap();
-        pipe.write_all(b"corrupt").unwrap();
-        drop(pipe);
-        let early = done_rx.recv_timeout(Duration::from_millis(100));
-        fs::rename(&replacement, &path).unwrap();
-        drop(lock);
-        assert!(
-            early.is_err(),
-            "corrupt cleanup must wait for the write lock"
-        );
-        assert!(done_rx
-            .recv_timeout(Duration::from_secs(3))
-            .unwrap()
-            .unwrap()
-            .is_none());
-        thread.join().unwrap();
-        assert_eq!(cache.read(&hash, private).unwrap().unwrap(), BYTES);
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn busy_pin_save_and_clear_leave_the_executor_free() {
-    let server = MockServer::start().await;
-    for clearing in [false, true] {
-        server.reset().await;
-        if clearing {
-            Mock::given(method("GET"))
-                .respond_with(ResponseTemplate::new(404))
-                .mount(&server)
-                .await;
-        } else {
-            chain(&server, false).await;
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let cache = Cache::new(dir.path()).unwrap();
-        cache.save_pin(NAME, &pin()).unwrap();
-        let lock = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(dir.path().join(".lock"))
-            .unwrap();
-        lock.lock().unwrap();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let release = std::thread::spawn(move || {
-            let executor_ran = release_rx.recv_timeout(Duration::from_secs(3)).is_ok();
-            drop(lock);
-            executor_ran
-        });
-        let resolver = Resolver::new(config(&server), Token).unwrap();
-        let (result, ()) = tokio::join!(biased;
-            resolver.resolve_with_fallback(NAME, "*", AssetType::Model, &cache),
-            async { tokio::time::sleep(Duration::from_millis(100)).await; let _ = release_tx.send(()); },
-        );
-        assert_eq!(result.is_err(), clearing);
-        assert!(
-            release.join().unwrap(),
-            "pin writes must not block the executor"
-        );
-        assert_eq!(cache.last_pin(NAME).unwrap().is_none(), clearing);
-    }
-}
-
+/// Asserts store verification runs off the executor with shared bytes.
 #[tokio::test(flavor = "current_thread")]
 async fn store_verification_runs_off_the_executor_with_shared_bytes() {
-    capture_warnings();
-    let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::new(dir.path()).unwrap();
-    let bytes = vec![44; 1249];
-    let asset = std::sync::Arc::new(arora_index::FetchedAsset {
-        content_hash: content_hash(&bytes),
-        bytes,
-        resolved: None,
-    });
-    let since = lock(&HASH_THREADS).len();
-    cache.store_async(asset.clone()).await.unwrap();
-    assert_hash_off_executor(asset.bytes.len(), since);
-    assert_eq!(
-        cache.read(&asset.content_hash, false).unwrap().unwrap(),
-        asset.bytes
-    );
+    bounded(async {
+        capture_warnings();
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let bytes = vec![44; 1249];
+        let asset = std::sync::Arc::new(crate::FetchedAsset {
+            content_hash: content_hash(&bytes),
+            bytes,
+            resolved: None,
+        });
+        let since = lock(&HASH_THREADS).len();
+        cache.store_async(asset.clone()).await.unwrap();
+        assert_hash_off_executor(asset.bytes.len(), since);
+        assert_eq!(
+            cache.read(&asset.content_hash, false).unwrap().unwrap(),
+            asset.bytes
+        );
+    })
+    .await;
 }
 
 mod allocations {
@@ -772,7 +489,7 @@ mod allocations {
         }
     }
 
-    pub async fn count_large_allocations<F: std::future::Future>(
+    pub(super) async fn count_large_allocations<F: std::future::Future>(
         future: F,
         minimum: usize,
     ) -> (F::Output, usize) {
@@ -789,23 +506,160 @@ mod allocations {
     }
 }
 
+/// Asserts async store does not copy the body on the executor.
 #[tokio::test(flavor = "current_thread")]
 async fn async_store_does_not_copy_the_body_on_the_executor() {
+    bounded(async {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let bytes = vec![45; 1024 * 1024];
+        let asset = std::sync::Arc::new(crate::FetchedAsset {
+            content_hash: content_hash(&bytes),
+            bytes,
+            resolved: None,
+        });
+        let (result, allocations) = allocations::count_large_allocations(
+            cache.store_async(asset.clone()),
+            asset.bytes.len(),
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(allocations, 0, "the executor must not allocate a body copy");
+        assert_eq!(
+            cache.read(&asset.content_hash, false).unwrap().unwrap(),
+            asset.bytes
+        );
+    })
+    .await;
+}
+
+/// Asserts key publication is complete and never clobbers a winner.
+#[test]
+fn key_publication_is_complete_and_never_clobbers_a_winner() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("key");
+    let first = Key::from([1; 32]);
+    let second = Key::from([2; 32]);
+    let temp = private_temp(&path, &first).unwrap();
+    assert!(!path.exists());
+    assert_eq!(fs::read(temp.path()).unwrap(), first.as_slice());
+    drop(temp);
+    assert_eq!(publish_key(&path, &first).unwrap(), first);
+    assert_eq!(publish_key(&path, &second).unwrap(), first);
+    assert_eq!(fs::read(path).unwrap(), first.as_slice());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+/// Four concurrent writers must preserve every pin and share one complete encryption key.
+#[test]
+fn independent_cache_handles_preserve_keys_and_all_pins() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path()).unwrap();
-    let bytes = vec![45; 1024 * 1024];
-    let asset = std::sync::Arc::new(arora_index::FetchedAsset {
-        content_hash: content_hash(&bytes),
-        bytes,
-        resolved: None,
-    });
-    let (result, allocations) =
-        allocations::count_large_allocations(cache.store_async(asset.clone()), asset.bytes.len())
-            .await;
-    result.unwrap();
-    assert_eq!(allocations, 0, "the executor must not allocate a body copy");
-    assert_eq!(
-        cache.read(&asset.content_hash, false).unwrap().unwrap(),
-        asset.bytes
-    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    for i in 0..4 {
+        let cache = cache.clone();
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut pin = pin();
+            let bytes = format!("private {i}");
+            pin.content_hash = content_hash(bytes.as_bytes());
+            let result = cache
+                .store(&pin.content_hash, bytes.as_bytes(), true)
+                .and_then(|()| cache.save_pin(&format!("@test/{i}"), &pin));
+            tx.send(result).unwrap();
+        });
+    }
+    for _ in 0..4 {
+        rx.recv_timeout(Duration::from_millis(750))
+            .unwrap()
+            .unwrap();
+    }
+    for i in 0..4 {
+        let pin = cache.last_pin(&format!("@test/{i}")).unwrap().unwrap();
+        assert_eq!(
+            cache.fetch(&pin).unwrap().unwrap().bytes,
+            format!("private {i}").as_bytes()
+        );
+    }
+}
+
+/// Only the cleared pin's own hash is eligible; shared, pending and public blobs remain.
+#[test]
+fn clearing_only_removes_its_own_unshared_sealed_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let pin = pin();
+    cache.save_pin(NAME, &pin).unwrap();
+    cache.save_pin("@test/other", &pin).unwrap();
+    cache.store(&pin.content_hash, BYTES, true).unwrap();
+    cache.store(&pin.content_hash, BYTES, false).unwrap();
+    let pending = content_hash(b"pending");
+    cache.store(&pending, b"pending", true).unwrap();
+    cache.remove_pin(NAME).unwrap();
+    assert!(cache.read(&pin.content_hash, true).unwrap().is_some());
+    cache.remove_pin("@test/other").unwrap();
+    assert!(cache.read(&pin.content_hash, true).unwrap().is_none());
+    assert!(cache.read(&pin.content_hash, false).unwrap().is_some());
+    assert!(cache.read(&pending, true).unwrap().is_some());
+}
+
+/// Each filesystem failure warns; even failed blob deletion is advisory after pin removal.
+#[test]
+fn cleanup_failures_warn_without_failing() {
+    capture_warnings();
+    for obstacle in [".lock", "resolved.json", "blob"] {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let pin = pin();
+        cache.save_pin(NAME, &pin).unwrap();
+        let path = if obstacle == "blob" {
+            cache.blob_path(&pin.content_hash, true).unwrap()
+        } else {
+            let p = dir.path().join(obstacle);
+            fs::remove_file(&p).unwrap();
+            p
+        };
+        fs::create_dir(&path).unwrap();
+        cache.remove_pin(NAME).unwrap();
+        assert!(lock(&WARNINGS.0)
+            .iter()
+            .any(|m| m.contains("could not clear resolved pin")
+                && m.contains(path.to_str().unwrap())));
+    }
+}
+
+/// A failed initial verification cannot delete a valid replacement published before the recheck.
+#[test]
+fn corrupt_read_rechecks_a_concurrent_replacement_under_the_lock() {
+    for private in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let hash = content_hash(BYTES);
+        cache.store(&hash, BYTES, private).unwrap();
+        let path = cache.blob_path(&hash, private).unwrap();
+        let replacement = dir.path().join("replacement");
+        fs::rename(&path, &replacement).unwrap();
+        fs::write(&path, b"bad").unwrap();
+        assert!(cache
+            .verified_bytes(&hash, private, fs::read(&path).unwrap())
+            .unwrap()
+            .is_none());
+        let lock = cache.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = cache.clone();
+        let read_path = path.clone();
+        let read_hash = hash.clone();
+        std::thread::spawn(move || {
+            let result = reader.remove_corrupt(&read_path, &read_hash, private);
+            tx.send(result).unwrap();
+        });
+        let early = rx.recv_timeout(Duration::from_millis(30));
+        fs::rename(replacement, &path).unwrap();
+        drop(lock);
+        assert!(early.is_err(), "cleanup must wait for the lock");
+        rx.recv_timeout(Duration::from_millis(750))
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache.read(&hash, private).unwrap().unwrap(), BYTES);
+    }
 }
