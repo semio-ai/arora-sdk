@@ -232,6 +232,68 @@ pub const RUN_STATUS_LATCH_PARAM_ID: Uuid = Uuid::from_bytes([
     0xb7, 0x38, 0x91, 0x2d, 0xc0, 0x54, 0x4a, 0x19, 0x8f, 0xe6, 0x25, 0x70, 0x4c, 0xa8, 0x13, 0x57,
 ]);
 
+// Data nodes: a condition over two values, and an array spread over output
+// ports. Both are ticked natively (see `behavior_tree::tick_builtin`).
+
+/// `Equal(a, b)`: Success when the two values are equal — the same type and
+/// the same value, so `U64(1)` and `U32(1)` differ, and NaN equals nothing —
+/// Failure otherwise. Each argument is any link source, a selection included;
+/// both must be linked. A selection that does not apply to its source's value
+/// errors the tick.
+pub const EQUAL_FUNCTION_ID: Uuid = uuid::uuid!("a67583f5-7b1f-4081-a210-b710bd41d88a");
+/// [`EQUAL_FUNCTION_ID`]'s first value.
+pub const EQUAL_A_PARAM_ID: Uuid = uuid::uuid!("75664d78-aa45-44a7-b1fc-0ab220b933ee");
+/// [`EQUAL_FUNCTION_ID`]'s second value.
+pub const EQUAL_B_PARAM_ID: Uuid = uuid::uuid!("9399b82f-7ace-41fc-8732-38a42a800698");
+
+/// `Unpack(values, out_0 … out_63)`: writes element `i` of the array `values`
+/// to the variable bound to the output port `out_i`, and succeeds. An unbound
+/// port is skipped, and so is a `Unit` element, which leaves its variable as
+/// it is; elements past the last bound port are ignored. It fails, writing
+/// nothing, when `values` is not an array or has fewer elements than the last
+/// bound port needs.
+///
+/// Each `out_i` is an ordinary port binding: a variable (`out_0="{face/k0}"`),
+/// bound to its cell when the tree is lowered as any port is — under the
+/// Direct convention, the store key of the variable's name. A port bound to
+/// anything but a variable, or two ports bound to one variable or one name, is
+/// refused at lowering: one tick writes each variable once. `values` is any
+/// link source, a selection included, and must be linked. A port's variable
+/// is written on every tick; a slot notifies a change only when the value
+/// differs from the one it holds, so a value that does not move makes no store
+/// change and nothing reaches a bridge. A write the store refuses is not
+/// reported by the node, as for any variable.
+pub const UNPACK_FUNCTION_ID: Uuid = uuid::uuid!("72d3c388-9fe0-4fe9-9b04-38f9e92d6c78");
+/// [`UNPACK_FUNCTION_ID`]'s array.
+pub const UNPACK_VALUES_PARAM_ID: Uuid = uuid::uuid!("aa7e72c3-f979-4e94-b11f-f69014ace7cd");
+/// The number of [`UNPACK_FUNCTION_ID`]'s output ports, `out_0` to `out_63`.
+///
+/// Every port is declared — in the Groot palette, one line each, and in
+/// Groot's port editor, one row each — so the count is what a node can show:
+/// 64 holds a face's 52 ARKit blend shapes with head and eye pose beside them.
+/// A longer array is split by its producer into arrays of at most 64 elements.
+pub const UNPACK_PORTS: usize = 64;
+/// [`UNPACK_FUNCTION_ID`]'s output ports: `UNPACK_OUT_PARAM_IDS[i]` is
+/// `out_i`. They differ only in their last byte, which is `i`.
+pub const UNPACK_OUT_PARAM_IDS: [Uuid; UNPACK_PORTS] = {
+    let mut ids = [Uuid::nil(); UNPACK_PORTS];
+    let mut i = 0;
+    while i < UNPACK_PORTS {
+        ids[i] = Uuid::from_u128(UNPACK_OUT_BASE + i as u128);
+        i += 1;
+    }
+    ids
+};
+/// `out_0`; `out_i` adds `i` to it.
+const UNPACK_OUT_BASE: u128 = uuid::uuid!("ae061284-22e5-4149-909a-e74a02524800").as_u128();
+
+/// The index `i` of the output port `out_i` of [`UNPACK_FUNCTION_ID`] that
+/// `param` is, if it is one.
+pub fn unpack_out_index(param: Uuid) -> Option<usize> {
+    let index = param.as_u128().checked_sub(UNPACK_OUT_BASE)?;
+    (index < UNPACK_PORTS as u128).then_some(index as usize)
+}
+
 pub const SEQ_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0x32, 0x24, 0x6d, 0xf6, 0xab, 0x5d, 0x4f, 0x18, 0x92, 0x21, 0x23, 0xe2, 0x87, 0x31, 0xde, 0x93,
 ]);

@@ -30,10 +30,11 @@ use crate::arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
 use crate::nodes::{
-    FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID,
-    RUN_CALL_PARAM_ID, RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID,
-    RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
+    PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -48,7 +49,13 @@ pub struct BehaviorTree {
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    /// Each `Unpack` node's output cells, bound at load.
+    unpack_outputs: HashMap<Uuid, UnpackOutputs>,
 }
+
+/// An `Unpack` node's output cells, by port index up to its last bound port:
+/// `None` for an unbound port.
+type UnpackOutputs = Rc<[Option<VariableCell>]>;
 
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,
@@ -69,6 +76,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
             function_index.clone(),
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
+            &tree.unpack_outputs,
             caller,
             if trace {
                 TraceTick::YesAll
@@ -113,6 +121,7 @@ pub fn lower_behavior_tree(
         function_index,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
+        &tree.unpack_outputs,
         caller,
         if trace {
             TraceTick::YesAll
@@ -183,6 +192,7 @@ fn setup_tick_function(
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    unpack_outputs: &HashMap<Uuid, UnpackOutputs>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -210,6 +220,7 @@ fn setup_tick_function(
                 function_index.clone(),
                 variables.clone(),
                 node_arg_variables.clone(),
+                unpack_outputs,
                 caller,
                 trace,
                 callables,
@@ -222,6 +233,7 @@ fn setup_tick_function(
         function_index,
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
+        outputs: unpack_outputs.get(&node.id).cloned(),
         children: children_ticks,
         trace,
     });
@@ -234,8 +246,8 @@ fn setup_tick_function(
 }
 
 /// Whether `function` is a node this crate ticks natively — a control node, a
-/// status leaf, a task-run node or a core string node — rather than a module
-/// function the function index resolves.
+/// status leaf, a task-run node, a core string node or a data node — rather
+/// than a module function the function index resolves.
 pub(crate) fn is_native(function: Uuid) -> bool {
     matches!(
         function,
@@ -248,21 +260,69 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | PARALLEL_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
+            | EQUAL_FUNCTION_ID
+            | UNPACK_FUNCTION_ID
     ) || core_nodes::core_node_parameters(function).is_some()
 }
 
-/// Tick the basic control nodes (seq, seq_star, fallback, parallel, succeed,
-/// fail, run) and the core string nodes ([`core_nodes`]) natively, without consulting the function index or the wasm
-/// engine. Children are ticked through their registered tick functions
+/// Tick the native nodes (see [`is_native`]) — the control nodes, the status
+/// leaves, the task-run nodes, the data nodes `Equal` and `Unpack` and the
+/// core string nodes ([`core_nodes`]) — without consulting the function index
+/// or the wasm engine. Children are ticked through their registered tick functions
 /// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
 /// `None` for any other function (which the caller dispatches via the engine).
 fn tick_builtin(
     caller: &mut dyn CallBridge,
+    variables: &HashMap<Uuid, VariableCell>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+    outputs: Option<&[Option<VariableCell>]>,
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
+    // An argument's value, computed from its expression: a selection applies
+    // its path.
+    let argument = |caller: &mut dyn CallBridge, parameter: Uuid| {
+        let node_parameter = NodeParameterId {
+            node: node.id,
+            parameter,
+        };
+        let expression = node.arguments.get(&parameter).ok_or_else(|| {
+            BehaviorTreeError::InconsistentTreeError {
+                message: format!("{node_parameter} has no argument"),
+            }
+        })?;
+        compute_expression(
+            variables,
+            node_parameters_variables,
+            expression,
+            caller,
+            &node_parameter,
+        )
+    };
     let status = match node.function {
+        EQUAL_FUNCTION_ID => {
+            if argument(caller, EQUAL_A_PARAM_ID)? == argument(caller, EQUAL_B_PARAM_ID)? {
+                Status::Success
+            } else {
+                Status::Failure
+            }
+        }
+        UNPACK_FUNCTION_ID => {
+            let outputs = outputs.ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
+                message: format!("Unpack node {} has no bound outputs", node.id),
+            })?;
+            match argument(caller, UNPACK_VALUES_PARAM_ID)?.into_elements() {
+                Ok(values) if values.len() >= outputs.len() => {
+                    for (cell, value) in outputs.iter().zip(values) {
+                        if let Some(cell) = cell.as_ref().filter(|_| value != Value::Unit) {
+                            cell.set(value);
+                        }
+                    }
+                    Status::Success
+                }
+                _ => Status::Failure,
+            }
+        }
         SUCCEED_FUNCTION_ID => Status::Success,
         FAIL_FUNCTION_ID => Status::Failure,
         RUN_FUNCTION_ID => Status::Running,
@@ -451,18 +511,28 @@ fn tick_builtin(
     Ok(Some(status))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tick(
     caller: &mut dyn CallBridge,
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    outputs: Option<&[Option<VariableCell>]>,
     child_tick_ids: &Vec<TickId>,
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     // The basic control nodes are wired in natively; everything else is
     // dispatched into a module through the engine.
-    if let Some(status) = tick_builtin(caller, &node_parameters_variables, child_tick_ids, &node)? {
+    let builtin = tick_builtin(
+        caller,
+        &variables.borrow(),
+        &node_parameters_variables,
+        outputs,
+        child_tick_ids,
+        &node,
+    )?;
+    if let Some(status) = builtin {
         if trace != TraceTick::No {
             println!("tick {} -> {:?}", node.id, status);
         }
@@ -689,6 +759,8 @@ struct TickFunction {
     function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    /// The node's output cells, for an `Unpack` node.
+    outputs: Option<UnpackOutputs>,
     children: Vec<TickId>,
     trace: TraceTick,
 }
@@ -700,6 +772,7 @@ impl Tickable for TickFunction {
             self.function_index.clone(),
             self.locals.clone(),
             self.node_arg_variables.clone(),
+            self.outputs.as_deref(),
             &self.children,
             self.node.clone(),
             self.trace,
@@ -739,6 +812,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut variables = HashMap::new();
     let mut node_parameters_variables = HashMap::new();
     let mut arguments = Vec::new();
+    let mut unpack_outputs = HashMap::new();
     for node in nodes {
         let shared_node = Rc::new(node);
         if root.is_none() {
@@ -804,6 +878,13 @@ pub fn load_behavior_tree_nodes_with(
         pending = unresolved;
     }
 
+    // The data nodes, once every argument has its cell.
+    for node in node_index.values() {
+        if let Some(outputs) = bind_data_node(node, names, &node_parameters_variables)? {
+            unpack_outputs.insert(node.id, outputs);
+        }
+    }
+
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
             message: "behavior tree has no nodes".to_string(),
@@ -811,6 +892,7 @@ pub fn load_behavior_tree_nodes_with(
         node_index,
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
+        unpack_outputs,
     })
 }
 
@@ -831,6 +913,69 @@ fn get_variable<'a>(
             variable: variable_id.to_owned(),
             node: node_id.to_owned(),
         })
+}
+
+/// Check a data node's arguments, and gather an `Unpack` node's output cells:
+/// `None` for any other node.
+///
+/// `Equal` needs both its arguments and `Unpack` its values, linked. Each of
+/// `Unpack`'s other arguments is an output port bound to a variable, whose cell
+/// the generic lowering already set up; two ports may not bind one variable, by
+/// id or by name.
+pub(crate) fn bind_data_node(
+    node: &Node,
+    names: &HashMap<Uuid, String>,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+) -> Result<Option<UnpackOutputs>, BehaviorTreeError> {
+    let refuse = |what: String| {
+        Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!("node {}: {what}", node.id),
+        })
+    };
+    let required: &[Uuid] = match node.function {
+        EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
+        UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
+        _ => return Ok(None),
+    };
+    if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
+        return refuse(format!("argument {missing} is not linked"));
+    }
+    if node.function != UNPACK_FUNCTION_ID {
+        return Ok(None);
+    }
+    let mut bound = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (param, expression) in &node.arguments {
+        if *param == UNPACK_VALUES_PARAM_ID {
+            continue;
+        }
+        let Some(index) = crate::nodes::unpack_out_index(*param) else {
+            return refuse(format!("Unpack has no port {param}"));
+        };
+        let Expression::VariableId(variable) = expression else {
+            return refuse(format!(
+                "Unpack's out_{index} is written, so it binds a variable, not {expression:?}"
+            ));
+        };
+        let target = names
+            .get(variable)
+            .map_or_else(|| variable.to_string(), |name| format!("'{name}'"));
+        if !seen.insert(target.clone()) {
+            return refuse(format!("two of Unpack's ports write the variable {target}"));
+        }
+        bound.push(index);
+    }
+    let count = bound.iter().max().map_or(0, |last| last + 1);
+    let mut outputs = vec![None; count];
+    for index in bound {
+        let port = NodeParameterId {
+            node: node.id,
+            parameter: UNPACK_OUT_PARAM_IDS[index],
+        };
+        outputs[index] =
+            Some(get_node_parameter_variable(&port, node_parameters_variables)?.clone());
+    }
+    Ok(Some(outputs.into()))
 }
 
 /// The other node's argument `expression` reads, through any selection.
