@@ -24,6 +24,18 @@
 //! - `set_spread`: one `Set(variable → ({face/k0}, …), value ←
 //!   produce.values)`, the same tuple binding on a node's output.
 //!
+//! Four pipelines smooth the values (`Smooth`, exponential, alpha 0.5, state
+//! in the node) before they reach `face/k*`:
+//!
+//! - `pipe_store`: `Unpack` to the store keys `raw/k*`, then one `Smooth` per
+//!   key from `{raw/ki}` to `{face/ki}` — every stage through the store;
+//! - `pipe_local`: one `Smooth` over the array into a tree-local variable,
+//!   then `Unpack` to `{face/k*}`;
+//! - `pipe_packed`: one `Smooth` over the array into the one store key
+//!   `face/packed`;
+//! - `pipe_perkey`: `Unpack` to N tree-local variables, then one `Smooth` per
+//!   key to `{face/ki}` — local, but per key.
+//!
 //! Each tree case runs with the keys in the store (`store`) and in tree-local
 //! cells (`local`), the tree's own share of the cost. Two cases without a
 //! tree give the store's share alone: `store_slots` writes the N values
@@ -50,6 +62,9 @@ use arora_behavior_tree::nodes::{
     SET_VALUE_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID, UNPACK_LOOKUP_FUNCTION_ID,
     UNPACK_VALUES_PARAM_ID, WRITE_KEYS_FUNCTION_ID, WRITE_KEYS_KEYS_PARAM_ID,
     WRITE_KEYS_VALUES_PARAM_ID,
+};
+use arora_behavior_tree::nodes::{
+    SMOOTH_ALPHA_PARAM_ID, SMOOTH_FUNCTION_ID, SMOOTH_OUT_PARAM_ID, SMOOTH_VALUE_PARAM_ID,
 };
 use arora_behavior_tree::schema::{Expression, Node, NodeParameterId};
 use arora_behavior_tree::{
@@ -85,7 +100,7 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
-const CASES: [&str; 7] = [
+const CASES: [&str; 11] = [
     "baseline",
     "write_keys",
     "unpack",
@@ -93,6 +108,10 @@ const CASES: [&str; 7] = [
     "set_select",
     "spread",
     "set_spread",
+    "pipe_store",
+    "pipe_local",
+    "pipe_packed",
+    "pipe_perkey",
 ];
 const SIZES: [usize; 4] = [1, 10, 30, 100];
 
@@ -112,6 +131,54 @@ fn variable(i: usize) -> Uuid {
 
 fn set_node(i: usize) -> Uuid {
     Uuid::from_u128(0xB000 + i as u128)
+}
+
+/// The intermediate store key of a value, before smoothing.
+fn raw_key(i: usize) -> String {
+    format!("raw/k{i}")
+}
+
+/// The variable of [`raw_key`]`(i)`.
+fn raw_variable(i: usize) -> Uuid {
+    Uuid::from_u128(0xC000 + i as u128)
+}
+
+/// A tree-local variable, by index: it has no name, so no store key.
+fn local_variable(i: usize) -> Uuid {
+    Uuid::from_u128(0xD000 + i as u128)
+}
+
+/// The tree-local variable holding the smoothed array.
+const LOCAL_ARRAY: Uuid = Uuid::from_u128(0xE000);
+/// The store key holding the whole smoothed array.
+const PACKED_KEY: &str = "face/packed";
+const PACKED_VARIABLE: Uuid = Uuid::from_u128(0xE001);
+const SMOOTH_NODE: Uuid = Uuid::from_u128(0x4);
+
+fn smooth_node(i: usize) -> Uuid {
+    Uuid::from_u128(0xB100 + i as u128)
+}
+
+fn smooth(id: Uuid, value: Expression, out: Uuid) -> Node {
+    node(
+        id,
+        SMOOTH_FUNCTION_ID,
+        vec![
+            (SMOOTH_VALUE_PARAM_ID, value),
+            (SMOOTH_ALPHA_PARAM_ID, Expression::Value(Value::F64(0.5))),
+            (SMOOTH_OUT_PARAM_ID, Expression::VariableId(out)),
+        ],
+    )
+}
+
+fn unpack(values: Expression, out: impl Fn(usize) -> Uuid, n: usize) -> Node {
+    node(
+        WRITER_NODE,
+        UNPACK_FUNCTION_ID,
+        std::iter::once((UNPACK_VALUES_PARAM_ID, values))
+            .chain((0..n).map(|i| (unpack_out_param_id(i), Expression::VariableId(out(i)))))
+            .collect(),
+    )
 }
 
 /// `produce(values: &mut [Value]) -> Status`.
@@ -260,6 +327,45 @@ fn tree_nodes(case: &str, n: usize) -> Vec<Node> {
             Expression::Spread((0..n).map(|i| Some(variable(i))).collect()),
             vec![],
         ),
+        // A: every stage through the store.
+        "pipe_store" => (
+            local_output,
+            std::iter::once(unpack(produced(), raw_variable, n))
+                .chain((0..n).map(|i| {
+                    smooth(
+                        smooth_node(i),
+                        Expression::VariableId(raw_variable(i)),
+                        variable(i),
+                    )
+                }))
+                .collect(),
+        ),
+        // B: smoothed as one array in a tree-local variable, then unpacked.
+        "pipe_local" => (
+            local_output,
+            vec![
+                smooth(SMOOTH_NODE, produced(), LOCAL_ARRAY),
+                unpack(Expression::VariableId(LOCAL_ARRAY), variable, n),
+            ],
+        ),
+        // C: smoothed as one array, written to one store key.
+        "pipe_packed" => (
+            local_output,
+            vec![smooth(SMOOTH_NODE, produced(), PACKED_VARIABLE)],
+        ),
+        // D: unpacked to tree-local variables, smoothed per key.
+        "pipe_perkey" => (
+            local_output,
+            std::iter::once(unpack(produced(), local_variable, n))
+                .chain((0..n).map(|i| {
+                    smooth(
+                        smooth_node(i),
+                        Expression::VariableId(local_variable(i)),
+                        variable(i),
+                    )
+                }))
+                .collect(),
+        ),
         "set_spread" => (
             local_output,
             vec![node(
@@ -321,7 +427,10 @@ impl Setup {
         let resolver_store = store.clone();
         let resolver =
             move |name: &str| (sink == Sink::Store).then(|| resolver_store.slot(&Key::from(name)));
-        let names: HashMap<Uuid, String> = (0..n).map(|i| (variable(i), key(i))).collect();
+        let names: HashMap<Uuid, String> = (0..n)
+            .flat_map(|i| [(variable(i), key(i)), (raw_variable(i), raw_key(i))])
+            .chain([(PACKED_VARIABLE, PACKED_KEY.to_string())])
+            .collect();
         let tree = load_behavior_tree_nodes_with(tree_nodes(case, n), &resolver, &names)
             .expect("the tree loads");
         let mut bridge = Bridge {
@@ -356,6 +465,9 @@ impl Setup {
     /// Every key holds the last tick's value, or none in the baseline and with
     /// tree-local cells.
     fn check(&self, case: &str) {
+        if case.starts_with("pipe_") {
+            return self.check_pipeline(case);
+        }
         let keys: Vec<Key> = (0..self.n).map(|i| Key::from(key(i))).collect();
         let base = self.bridge.calls as f64;
         let written = case != "baseline" && self.sink == Sink::Store;
@@ -363,6 +475,30 @@ impl Setup {
             .map(|i| written.then_some(Value::F64(base + i as f64)))
             .collect();
         assert_eq!(self.store.read(&keys), expected, "{case} writes every key");
+    }
+}
+
+impl Setup {
+    /// The smoothed values reach their keys: one per key, or the whole array
+    /// under one key (`pipe_packed`); none with tree-local cells.
+    fn check_pipeline(&self, case: &str) {
+        let store = self.sink == Sink::Store;
+        if case == "pipe_packed" {
+            let packed = self.store.read(&[Key::from(PACKED_KEY)]).remove(0);
+            match packed {
+                Some(Value::ArrayValue(values)) if store => assert_eq!(values.len(), self.n),
+                None if !store => {}
+                other => panic!("{case}: the packed key holds {other:?}"),
+            }
+            return;
+        }
+        let keys: Vec<Key> = (0..self.n).map(|i| Key::from(key(i))).collect();
+        for (i, value) in self.store.read(&keys).into_iter().enumerate() {
+            assert!(
+                matches!((&value, store), (Some(Value::F64(_)), true) | (None, false)),
+                "{case}: key {i} holds {value:?}"
+            );
+        }
     }
 }
 

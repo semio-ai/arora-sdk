@@ -303,6 +303,18 @@ pub fn unpack_out_index(param: Uuid) -> Option<usize> {
 pub const SET_VALUE_FUNCTION_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e20");
 /// [`SET_VALUE_FUNCTION_ID`]'s written variable.
 pub const SET_VALUE_VARIABLE_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e21");
+/// `Smooth(value, alpha, out)`: exponential smoothing, `out ← s + alpha·(value
+/// − s)` with `s` the node's previous output, kept in the node; over an `F64`
+/// or elementwise over an array of `F64`s (`Value::ArrayValue`). The first
+/// value, or one of another shape, passes through. Study prototype.
+pub const SMOOTH_FUNCTION_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e30");
+/// [`SMOOTH_FUNCTION_ID`]'s input.
+pub const SMOOTH_VALUE_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e31");
+/// [`SMOOTH_FUNCTION_ID`]'s factor, an `F64` in `[0, 1]`.
+pub const SMOOTH_ALPHA_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e32");
+/// [`SMOOTH_FUNCTION_ID`]'s output.
+pub const SMOOTH_OUT_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e33");
+
 /// [`SET_VALUE_FUNCTION_ID`]'s value.
 pub const SET_VALUE_VALUE_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e22");
 

@@ -41,6 +41,9 @@ use crate::nodes::{
     SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
     WRITE_KEYS_FUNCTION_ID, WRITE_KEYS_KEYS_PARAM_ID, WRITE_KEYS_VALUES_PARAM_ID,
 };
+use crate::nodes::{
+    SMOOTH_ALPHA_PARAM_ID, SMOOTH_FUNCTION_ID, SMOOTH_OUT_PARAM_ID, SMOOTH_VALUE_PARAM_ID,
+};
 
 // Runtime.
 //====================================================================
@@ -239,6 +242,7 @@ fn setup_tick_function(
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
         key_table: key_tables.get(&node.id).cloned(),
+        state: RefCell::new(None),
         children: children_ticks,
         trace,
     });
@@ -270,6 +274,7 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | UNPACK_FUNCTION_ID
             | UNPACK_LOOKUP_FUNCTION_ID
             | SET_VALUE_FUNCTION_ID
+            | SMOOTH_FUNCTION_ID
     ) || core_nodes::core_node_parameters(function).is_some()
 }
 
@@ -284,6 +289,7 @@ fn tick_builtin(
     variables: &HashMap<Uuid, VariableCell>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
     key_table: Option<&[Option<VariableCell>]>,
+    state: &RefCell<Option<Value>>,
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
@@ -367,6 +373,45 @@ fn tick_builtin(
                 }
                 _ => Status::Failure,
             }
+        }
+        SMOOTH_FUNCTION_ID => {
+            let Value::F64(alpha) = argument(caller, SMOOTH_ALPHA_PARAM_ID)? else {
+                return Ok(Some(Status::Failure));
+            };
+            let smooth = |state: f64, input: f64| state + alpha * (input - state);
+            let input = argument(caller, SMOOTH_VALUE_PARAM_ID)?;
+            let mut state = state.borrow_mut();
+            let next = match (input, state.take()) {
+                (Value::F64(input), Some(Value::F64(state))) => Value::F64(smooth(state, input)),
+                (Value::ArrayValue(inputs), Some(Value::ArrayValue(states)))
+                    if inputs.len() == states.len() =>
+                {
+                    Value::ArrayValue(
+                        inputs
+                            .into_iter()
+                            .zip(states)
+                            .map(|(input, state)| match (input, state) {
+                                (Value::F64(input), Value::F64(state)) => {
+                                    Value::F64(smooth(state, input))
+                                }
+                                (input, _) => input,
+                            })
+                            .collect(),
+                    )
+                }
+                // The first value, or one of another shape, starts over.
+                (input, _) => input,
+            };
+            *state = Some(next.clone());
+            get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: SMOOTH_OUT_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?
+            .set(next);
+            Status::Success
         }
         SET_VALUE_FUNCTION_ID => {
             let value = argument(caller, SET_VALUE_VALUE_PARAM_ID)?;
@@ -575,6 +620,7 @@ fn tick(
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     key_table: Option<&[Option<VariableCell>]>,
+    state: &RefCell<Option<Value>>,
     child_tick_ids: &Vec<TickId>,
     node: Rc<Node>,
     trace: TraceTick,
@@ -586,6 +632,7 @@ fn tick(
         &variables.borrow(),
         &node_parameters_variables,
         key_table,
+        state,
         child_tick_ids,
         &node,
     )?;
@@ -818,6 +865,8 @@ struct TickFunction {
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     /// The node's key table, for a `WriteKeys` node.
     key_table: Option<KeyTable>,
+    /// The state a stateful native node keeps across ticks (`Smooth`'s).
+    state: RefCell<Option<Value>>,
     children: Vec<TickId>,
     trace: TraceTick,
 }
@@ -830,6 +879,7 @@ impl Tickable for TickFunction {
             self.locals.clone(),
             self.node_arg_variables.clone(),
             self.key_table.as_deref(),
+            &self.state,
             &self.children,
             self.node.clone(),
             self.trace,

@@ -16,7 +16,7 @@ BIN=$(ls -t /target/release/deps/write_fanout-* | grep -v '\.d$' | head -1)
 T=${T:-200}
 ir() { valgrind --tool=callgrind --callgrind-out-file=/dev/null "$BIN" "$@" 2>&1 | sed -n 's/.*Collected : \([0-9]*\).*/\1/p'; }
 printf "%-14s %-6s %4s %12s\n" case sink n "Ir/tick"
-for spec in ${SPECS:-baseline:store baseline:local write_keys:store write_keys:local unpack:store unpack:local unpack_lookup:store unpack_lookup:local set_select:store set_select:local spread:store spread:local set_spread:store set_spread:local store_slots:store store_batch:store}; do
+for spec in ${SPECS:-baseline:store baseline:local write_keys:store write_keys:local unpack:store unpack:local unpack_lookup:store unpack_lookup:local set_select:store set_select:local spread:store spread:local set_spread:store set_spread:local pipe_store:store pipe_store:local pipe_local:store pipe_local:local pipe_packed:store pipe_packed:local pipe_perkey:store pipe_perkey:local store_slots:store store_batch:store}; do
   case=${spec%%:*}; sink=${spec##*:}
   for n in 1 10 30 100; do
     zero=$(ir "$case" "$n" 0 "$sink"); full=$(ir "$case" "$n" "$T" "$sink")
