@@ -8,6 +8,83 @@
             <input_port name="delta"/>
             <inout_port name="storage"/>
         </Action>
+        <Condition ID="Equal">
+            <input_port name="a"/>
+            <input_port name="b"/>
+        </Condition>
+        <Action ID="Unpack">
+            <input_port name="values"/>
+            <output_port name="out_0"/>
+            <output_port name="out_1"/>
+            <output_port name="out_2"/>
+            <output_port name="out_3"/>
+            <output_port name="out_4"/>
+            <output_port name="out_5"/>
+            <output_port name="out_6"/>
+            <output_port name="out_7"/>
+            <output_port name="out_8"/>
+            <output_port name="out_9"/>
+            <output_port name="out_10"/>
+            <output_port name="out_11"/>
+            <output_port name="out_12"/>
+            <output_port name="out_13"/>
+            <output_port name="out_14"/>
+            <output_port name="out_15"/>
+            <output_port name="out_16"/>
+            <output_port name="out_17"/>
+            <output_port name="out_18"/>
+            <output_port name="out_19"/>
+            <output_port name="out_20"/>
+            <output_port name="out_21"/>
+            <output_port name="out_22"/>
+            <output_port name="out_23"/>
+            <output_port name="out_24"/>
+            <output_port name="out_25"/>
+            <output_port name="out_26"/>
+            <output_port name="out_27"/>
+            <output_port name="out_28"/>
+            <output_port name="out_29"/>
+            <output_port name="out_30"/>
+            <output_port name="out_31"/>
+            <output_port name="out_32"/>
+            <output_port name="out_33"/>
+            <output_port name="out_34"/>
+            <output_port name="out_35"/>
+            <output_port name="out_36"/>
+            <output_port name="out_37"/>
+            <output_port name="out_38"/>
+            <output_port name="out_39"/>
+            <output_port name="out_40"/>
+            <output_port name="out_41"/>
+            <output_port name="out_42"/>
+            <output_port name="out_43"/>
+            <output_port name="out_44"/>
+            <output_port name="out_45"/>
+            <output_port name="out_46"/>
+            <output_port name="out_47"/>
+            <output_port name="out_48"/>
+            <output_port name="out_49"/>
+            <output_port name="out_50"/>
+            <output_port name="out_51"/>
+            <output_port name="out_52"/>
+            <output_port name="out_53"/>
+            <output_port name="out_54"/>
+            <output_port name="out_55"/>
+            <output_port name="out_56"/>
+            <output_port name="out_57"/>
+            <output_port name="out_58"/>
+            <output_port name="out_59"/>
+            <output_port name="out_60"/>
+            <output_port name="out_61"/>
+            <output_port name="out_62"/>
+            <output_port name="out_63"/>
+        </Action>
+        <Action ID="RunCall">
+            <input_port name="call"/>
+        </Action>
+        <Decorator ID="RunStatus">
+            <output_port name="status"/>
+        </Decorator>
     </TreeNodesModel>
 </root>
 

@@ -17,11 +17,13 @@ use uuid::Uuid;
 use crate::core_nodes::core_node_parameters;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
-    COS_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID,
-    IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID, REGEX_MATCH_FUNCTION_ID, RUN_FUNCTION_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
-    STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNSET_STR_FUNCTION_ID,
-    WAIT_STR_SET_FUNCTION_ID,
+    COS_FUNCTION_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID,
+    FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID, IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID,
+    REGEX_MATCH_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
 };
 use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
@@ -63,6 +65,10 @@ impl Node {
             SEQ_STAR_GROOT_ID => SEQ_STAR_FUNCTION_ID,
             FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
+            EQUAL_GROOT_ID => EQUAL_FUNCTION_ID,
+            UNPACK_GROOT_ID => UNPACK_FUNCTION_ID,
+            RUN_CALL_GROOT_ID => RUN_CALL_FUNCTION_ID,
+            RUN_STATUS_GROOT_ID => RUN_STATUS_FUNCTION_ID,
             COS_GROOT_ID => COS_FUNCTION_ID,
             SET_STR_GROOT_ID => SET_STR_FUNCTION_ID,
             UNSET_STR_GROOT_ID => UNSET_STR_FUNCTION_ID,
@@ -78,27 +84,8 @@ impl Node {
             Some(tree_node_children)
         };
 
-        // The basic control nodes are dispatched natively, so they are not in
-        // the function index: build their TreeNode directly. seq_star also needs
-        // its persistent current-index variable seeded.
-        if is_builtin_function(arora_id) {
-            let parameters = if arora_id == SEQ_STAR_FUNCTION_ID {
-                HashMap::from([(
-                    SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-                    Expression::Value(Value::U16(0)),
-                )])
-            } else {
-                HashMap::new()
-            };
-            return Ok(TreeNode {
-                function: arora_id,
-                children,
-                parameters,
-            });
-        }
-
-        // The core string nodes are native too: their parameters come from
-        // their own signatures, not from the index.
+        // The core string nodes are not in the function index either: their
+        // parameters come from their own signatures.
         if let Some(core_parameters) = core_node_parameters(arora_id) {
             let mut parameters = HashMap::new();
             for (name, arg) in &self.param_args {
@@ -109,6 +96,52 @@ impl Node {
                         message: format!("no such parameter \"{name}\" in node \"{}\"", self.id),
                     })?;
                 parameters.insert(parameter.id, groot_arg_to_expression(arg, variables));
+            }
+            return Ok(TreeNode {
+                function: arora_id,
+                children,
+                parameters,
+            });
+        }
+
+        // The native nodes are not in the function index: build their TreeNode
+        // directly, from their ports. seq_star's persistent current-index and a
+        // run-status decorator's latch are seeded.
+        if crate::is_native(arora_id) {
+            let mut parameters = if arora_id == SEQ_STAR_FUNCTION_ID {
+                HashMap::from([(
+                    SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+                    Expression::Value(Value::U16(0)),
+                )])
+            } else {
+                HashMap::new()
+            };
+            // A run-status decorator's latch is its own state: it starts
+            // empty.
+            if arora_id == RUN_STATUS_FUNCTION_ID {
+                parameters.insert(RUN_STATUS_LATCH_PARAM_ID, Expression::Value(Value::Unit));
+            }
+            // A node with ports reads every one of its required ports, and
+            // takes no attribute that is not a port; a control node's
+            // attributes are not arguments.
+            let ports = builtin_ports(arora_id);
+            if !ports.is_empty() {
+                for (port, text) in &self.param_args {
+                    let param = builtin_port_param(arora_id, port).ok_or_else(|| {
+                        BehaviorTreeError::InconsistentTreeError {
+                            message: format!("{} has no port \"{port}\"", self.id),
+                        }
+                    })?;
+                    parameters.insert(param, builtin_port_expression(text, variables)?);
+                }
+                if let Some((missing, _)) = ports
+                    .iter()
+                    .find(|(port, _)| !self.param_args.contains_key(*port))
+                {
+                    return Err(BehaviorTreeError::InconsistentTreeError {
+                        message: format!("{} needs its port \"{missing}\"", self.id),
+                    });
+                }
             }
             return Ok(TreeNode {
                 function: arora_id,
@@ -157,6 +190,10 @@ impl Node {
             SEQ_STAR_FUNCTION_ID => SEQ_STAR_GROOT_ID,
             FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
+            EQUAL_FUNCTION_ID => EQUAL_GROOT_ID,
+            UNPACK_FUNCTION_ID => UNPACK_GROOT_ID,
+            RUN_CALL_FUNCTION_ID => RUN_CALL_GROOT_ID,
+            RUN_STATUS_FUNCTION_ID => RUN_STATUS_GROOT_ID,
             COS_FUNCTION_ID => COS_GROOT_ID,
             SET_STR_FUNCTION_ID => SET_STR_GROOT_ID,
             UNSET_STR_FUNCTION_ID => UNSET_STR_GROOT_ID,
@@ -174,18 +211,7 @@ impl Node {
         }
         .to_string();
 
-        // The basic control nodes are dispatched natively and not in the
-        // function index. They carry no Groot attributes — seq_star's persistent
-        // current-index is internal state, not a Groot param.
-        if is_builtin_function(tree_node.function) {
-            return Ok(Node {
-                id: groot_id,
-                name: Uuid::new_v4().to_string(),
-                param_args: HashMap::new(),
-                children: groot_children,
-            });
-        }
-
+        // The core string nodes' arguments are named by their own signatures.
         if let Some(core_parameters) = core_node_parameters(tree_node.function) {
             let mut param_args = HashMap::new();
             for (id, arg) in &tree_node.parameters {
@@ -204,6 +230,26 @@ impl Node {
                     }
                 })?;
                 param_args.insert(parameter.name.to_string(), arg);
+            }
+            return Ok(Node {
+                id: groot_id,
+                name: Uuid::new_v4().to_string(),
+                param_args,
+                children: groot_children,
+            });
+        }
+
+        // The native nodes are dispatched natively and not in the function
+        // index. Their ports are the arguments they read — seq_star's persistent
+        // current-index and a run-status decorator's latch are internal state,
+        // not Groot ports.
+        if crate::is_native(tree_node.function) {
+            let mut param_args = HashMap::new();
+            for (param, expression) in &tree_node.parameters {
+                let Some(port) = builtin_port_name(tree_node.function, *param) else {
+                    continue;
+                };
+                param_args.insert(port, builtin_port_text(expression, variables)?);
             }
             return Ok(Node {
                 id: groot_id,
@@ -244,7 +290,8 @@ impl Node {
 /// its snake_case name (`Walk` for `walk`, `PlayClip` for `play_clip`), the
 /// convention the palette's own tags follow. The palette is matched first, so
 /// a module export spelled like a palette entry (`cos`, `store`, `status`,
-/// `increase`, …) is reachable only under its exact snake_case name. The index
+/// `increase`, `equal`, `unpack`, `run_call`, `run_status`, …) is
+/// reachable only under its exact snake_case name. The index
 /// spans every loaded module, host and guest alike, so a name two modules both
 /// export is refused as ambiguous rather than resolved to whichever the index
 /// happens to yield first. The interpreter module's own functions are not
@@ -292,19 +339,119 @@ fn pascal_case(name: &str) -> String {
         .collect()
 }
 
-/// Whether the given arora function id is a basic control node dispatched
-/// natively (and therefore absent from the module function index).
-fn is_builtin_function(function: Uuid) -> bool {
-    matches!(
-        function,
-        SUCCEED_FUNCTION_ID
-            | FAIL_FUNCTION_ID
-            | RUN_FUNCTION_ID
-            | SEQ_FUNCTION_ID
-            | SEQ_STAR_FUNCTION_ID
-            | FALLBACK_FUNCTION_ID
-            | PARALLEL_FUNCTION_ID
-    )
+/// A native node's required Groot ports: each port's name and the parameter
+/// it sets. `Unpack` also has its optional output ports `out_0` to `out_63`
+/// (see [`builtin_port_param`]).
+fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
+    match function {
+        EQUAL_FUNCTION_ID => &[("a", EQUAL_A_PARAM_ID), ("b", EQUAL_B_PARAM_ID)],
+        UNPACK_FUNCTION_ID => &[("values", UNPACK_VALUES_PARAM_ID)],
+        RUN_CALL_FUNCTION_ID => &[("call", RUN_CALL_PARAM_ID)],
+        RUN_STATUS_FUNCTION_ID => &[("status", RUN_STATUS_OUT_PARAM_ID)],
+        _ => &[],
+    }
+}
+
+/// The parameter a native node's Groot port `name` sets: a required port, or
+/// one of `Unpack`'s output ports, spelled `out_<i>` as export writes it (no
+/// sign, no leading zero), so that every port reads back as itself.
+fn builtin_port_param(function: Uuid, name: &str) -> Option<Uuid> {
+    if let Some((_, param)) = builtin_ports(function)
+        .iter()
+        .find(|(port, _)| *port == name)
+    {
+        return Some(*param);
+    }
+    let index: usize = name.strip_prefix("out_")?.parse().ok()?;
+    (function == UNPACK_FUNCTION_ID && format!("out_{index}") == name)
+        .then(|| UNPACK_OUT_PARAM_IDS.get(index).copied())
+        .flatten()
+}
+
+/// The Groot port of a native node's parameter: the inverse of
+/// [`builtin_port_param`]. `None` for a parameter that is internal state.
+fn builtin_port_name(function: Uuid, param: Uuid) -> Option<String> {
+    if let Some((port, _)) = builtin_ports(function).iter().find(|(_, id)| *id == param) {
+        return Some(port.to_string());
+    }
+    (function == UNPACK_FUNCTION_ID)
+        .then(|| crate::nodes::unpack_out_index(param))
+        .flatten()
+        .map(|index| format!("out_{index}"))
+}
+
+/// The prefix of a port text holding a value as JSON — the value's serde form,
+/// e.g. `json:{"u64":1}` — so a typed literal survives Groot. It is
+/// BehaviorTree.CPP's convention for structured port values.
+const JSON_PREFIX: &str = "json:";
+
+/// A native node's port text as an argument: `{name}` is the variable of that
+/// name; `json:…` is a value in its serde form; anything else is a string.
+fn builtin_port_expression(
+    text: &str,
+    variables: &mut HashMap<String, Uuid>,
+) -> Result<Expression, BehaviorTreeError> {
+    if let Some(name) = text.strip_prefix('{').and_then(|t| t.strip_suffix('}')) {
+        let id = *variables
+            .entry(name.to_string())
+            .or_insert_with(Uuid::new_v4);
+        return Ok(Expression::VariableId(id));
+    }
+    if let Some(json) = text.strip_prefix(JSON_PREFIX) {
+        let value: Value =
+            serde_json::from_str(json).map_err(|e| BehaviorTreeError::ParsingError {
+                message: format!("port value '{text}' is not a value in JSON: {e}"),
+            })?;
+        return Ok(Expression::Value(value));
+    }
+    Ok(Expression::Value(Value::String(text.to_string())))
+}
+
+/// Whether `text`, written as a port's plain text, reads back as itself: not
+/// empty, not a `{name}` variable, not `json:`, and with no tab or line break
+/// (an attribute value turns them into spaces).
+fn reads_back_as_plain(text: &str) -> bool {
+    !text.is_empty()
+        && !text.starts_with(JSON_PREFIX)
+        && !(text.starts_with('{') && text.ends_with('}'))
+        && !text.contains(['\t', '\n', '\r'])
+}
+
+/// A native node's argument as port text: the inverse of
+/// [`builtin_port_expression`].
+fn builtin_port_text(
+    expression: &Expression,
+    variables: &mut HashMap<Uuid, String>,
+) -> Result<String, BehaviorTreeError> {
+    Ok(match expression {
+        Expression::VariableId(id) => {
+            let name = variables
+                .entry(*id)
+                .or_insert_with(|| id.to_string())
+                .clone();
+            format!("{{{name}}}")
+        }
+        Expression::Value(Value::String(text)) if reads_back_as_plain(text) => text.clone(),
+        Expression::Value(value) => {
+            let json = serde_json::to_string(value).map_err(|e| {
+                BehaviorTreeError::InconsistentTreeError {
+                    message: format!("a value does not convert to JSON: {e}"),
+                }
+            })?;
+            // A value JSON cannot hold (a non-finite float) has no Groot form.
+            if serde_json::from_str::<Value>(&json).ok().as_ref() != Some(value) {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("{value} has no exact JSON form"),
+                });
+            }
+            format!("{JSON_PREFIX}{json}")
+        }
+        other => {
+            return Err(BehaviorTreeError::InconsistentTreeError {
+                message: format!("a native node's argument has no Groot form: {other:?}"),
+            })
+        }
+    })
 }
 
 pub fn seq(children: Vec<Node>) -> Node {
@@ -345,6 +492,10 @@ const SEQ_STAR_GROOT_ID: &str = "SequenceStar";
 const FALLBACK_GROOT_ID: &str = "Fallback";
 const PARALLEL_GROOT_ID: &str = "Parallel";
 const COS_GROOT_ID: &str = "Cos";
+const EQUAL_GROOT_ID: &str = "Equal";
+const UNPACK_GROOT_ID: &str = "Unpack";
+const RUN_CALL_GROOT_ID: &str = "RunCall";
+const RUN_STATUS_GROOT_ID: &str = "RunStatus";
 const SET_STR_GROOT_ID: &str = "SetString";
 const UNSET_STR_GROOT_ID: &str = "UnsetString";
 const IS_STR_SET_GROOT_ID: &str = "IsStringSet";
@@ -1135,5 +1286,176 @@ mod tests {
             .map(|_| ())
             .expect_err("IsStringSet has no `key`");
         assert!(format!("{error:?}").contains("key"), "{error:?}");
+    }
+
+    /// `Equal`, `Unpack`, `RunCall` and `RunStatus` read from Groot with
+    /// their ports, export back to the same ports, and the tree runs.
+    #[test]
+    fn native_data_and_run_nodes_round_trip_through_groot() {
+        let xml = r#"<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <Equal a="{revision}" b='json:{"u64":1}'/>
+      <Unpack values='json:{"f64s":[1.0,2.0,3.0]}' out_0="{out/a}" out_2="{out/c}"/>
+      <RunStatus status="{run/status}">
+        <Succeed/>
+      </RunStatus>
+    </Sequence>
+  </BehaviorTree>
+</root>"#;
+        let groot = BehaviorTree::try_from_groot_xml(xml).expect("parse");
+        let mut names = HashMap::new();
+        let tree = groot
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut names)
+            .expect("the tags resolve");
+        let children = tree.children.as_ref().expect("a sequence");
+        let equal = &children[0];
+        assert_eq!(equal.function, EQUAL_FUNCTION_ID);
+        assert_eq!(
+            equal.parameters[&EQUAL_B_PARAM_ID],
+            Expression::Value(Value::U64(1))
+        );
+        assert_eq!(
+            equal.parameters[&EQUAL_A_PARAM_ID],
+            Expression::VariableId(names["revision"])
+        );
+        let unpack = &children[1];
+        assert_eq!(
+            unpack.parameters,
+            HashMap::from([
+                (
+                    UNPACK_VALUES_PARAM_ID,
+                    Expression::Value(Value::ArrayF64(vec![1.0, 2.0, 3.0]))
+                ),
+                (
+                    UNPACK_OUT_PARAM_IDS[0],
+                    Expression::VariableId(names["out/a"])
+                ),
+                (
+                    UNPACK_OUT_PARAM_IDS[2],
+                    Expression::VariableId(names["out/c"])
+                ),
+            ])
+        );
+        assert_eq!(children[2].function, RUN_STATUS_FUNCTION_ID);
+
+        // Export and import again: the same nodes and arguments.
+        let mut by_id: HashMap<Uuid, String> =
+            names.iter().map(|(name, id)| (*id, name.clone())).collect();
+        let exported =
+            Node::try_from_tree_node(&tree, &HashMap::new(), &mut by_id).expect("exported");
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        let mut names_again = HashMap::new();
+        let again = BehaviorTree::try_from_groot_xml(&xml)
+            .expect("the export parses")
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut names_again)
+            .expect("the export resolves");
+        let again_children = again.children.as_ref().unwrap();
+        for (before, after) in children.iter().zip(again_children) {
+            assert_eq!(before.function, after.function);
+            assert_eq!(before.parameters.len(), after.parameters.len(), "{xml}");
+            for (param, expression) in &before.parameters {
+                match expression {
+                    Expression::VariableId(id) => {
+                        let name = &by_id[id];
+                        assert_eq!(
+                            after.parameters[param],
+                            Expression::VariableId(names_again[name])
+                        );
+                    }
+                    other => assert_eq!(&after.parameters[param], other, "{xml}"),
+                }
+            }
+        }
+
+        // An unknown port is refused.
+        let bad = r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+    <Equal a="{x}" c="1"/></BehaviorTree></root>"#;
+        assert!(BehaviorTree::try_from_groot_xml(bad)
+            .unwrap()
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut HashMap::new())
+            .is_err());
+
+        // The imported tree builds.
+        let graph = groot
+            .into_graph(&HashMap::new())
+            .expect("lowers to a graph");
+        crate::graph::build_behavior_tree(&graph, &|_| None).expect("the tree builds");
+    }
+
+    /// The Groot palette declares `Unpack` with its input and every output
+    /// port, in order.
+    #[test]
+    fn the_palette_declares_every_unpack_port() {
+        let palette = include_str!("../groot/groot_arora_palette.xml");
+        let start = palette.find(r#"<Action ID="Unpack">"#).expect("Unpack");
+        let end = start + palette[start..].find("</Action>").unwrap();
+        let ports: Vec<&str> = palette[start..end]
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let expected: Vec<String> = std::iter::once(r#"<input_port name="values"/>"#.to_string())
+            .chain(
+                (0..crate::nodes::UNPACK_PORTS)
+                    .map(|i| format!(r#"<output_port name="out_{i}"/>"#)),
+            )
+            .collect();
+        assert_eq!(ports, expected);
+    }
+
+    /// Export writes plain text only where it reads back as the same value, and
+    /// import refuses an unknown or missing port on a node with ports, while a
+    /// control node's attributes are not arguments.
+    #[test]
+    fn groot_ports_read_back_as_written() {
+        let export =
+            |value: Value| builtin_port_text(&Expression::Value(value), &mut HashMap::new());
+        let import = |text: &str| builtin_port_expression(text, &mut HashMap::new()).unwrap();
+        for text in ["", "{a}", "json:x", "a\tb", "plain"] {
+            let value = Value::String(text.to_string());
+            let written = export(value.clone()).unwrap();
+            assert_eq!(import(&written), Expression::Value(value));
+        }
+        let keys = Value::ArrayString(vec!["a;b".to_string(), String::new()]);
+        assert_eq!(
+            import(&export(keys.clone()).unwrap()),
+            Expression::Value(keys)
+        );
+        assert!(export(Value::F64(f64::NAN)).is_err());
+
+        let tree = |xml: &str| {
+            BehaviorTree::try_from_groot_xml(&format!(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">{xml}</BehaviorTree></root>"#
+            ))
+            .unwrap()
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut HashMap::new())
+        };
+        assert!(tree(r#"<Equal a="{x}"/>"#).is_err(), "a missing port");
+        assert!(tree(r#"<Unpack out_0="{x}"/>"#).is_err(), "no values");
+        assert!(tree(r#"<Unpack values="{v}"/>"#).is_ok(), "no output");
+        for port in ["out_63", "out_0"] {
+            assert!(tree(&format!(r#"<Unpack values="{{v}}" {port}="{{x}}"/>"#)).is_ok());
+        }
+        for port in ["out_64", "out_01", "out_+1", "out_", "out_x"] {
+            assert!(
+                tree(&format!(r#"<Unpack values="{{v}}" {port}="{{x}}"/>"#)).is_err(),
+                "{port} is not a port"
+            );
+        }
+        assert!(tree(r#"<Equal a="{x}" b="{y}" out_0="{z}"/>"#).is_err());
+        assert!(
+            tree(r#"<RunStatus><Succeed/></RunStatus>"#).is_err(),
+            "no status"
+        );
+        assert!(
+            tree(r#"<Parallel success_count="1"><Succeed/></Parallel>"#).is_ok(),
+            "a control node's attribute is not an argument"
+        );
     }
 }
