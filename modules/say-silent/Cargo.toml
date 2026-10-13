@@ -1,0 +1,13 @@
+[package]
+name = "say-silent"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Semio"]
+description = "The say contract of behavior trees without a speaker: a sentence takes a speaker's time, then is logged"
+readme = "readme.md"
+
+[dependencies]
+arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
+arora-module = { path = "../../crates/arora-module", version = "2" }
+log = "0.4"
