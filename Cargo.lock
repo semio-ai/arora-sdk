@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "8.5.0"
+version = "8.6.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "3.5.0"
+version = "3.6.0"
 dependencies = [
  "arora-types-derive",
  "async-trait",

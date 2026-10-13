@@ -84,6 +84,7 @@ use crate::nodes::{
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_STATUS_FUNCTION_ID,
     RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
 };
+use crate::schema::_RET_PARAM_ID;
 use crate::{is_interpreter_function, is_native};
 use crate::{lower_behavior_tree, schema_groot, LoweredTree, ModuleFunction};
 
@@ -252,6 +253,35 @@ fn check_acyclic(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
     Ok(())
 }
 
+/// Check that no selection is written: a `Select` link reads part of its
+/// source, so it cannot feed a node's return (`_ret`) or a parameter its
+/// function declares mutable, whose writes would land on the whole source.
+fn check_selections(
+    graph: &Graph,
+    index: &HashMap<Uuid, ModuleFunction>,
+) -> Result<(), BehaviorError> {
+    for link in &graph.links {
+        if !matches!(link.source, LinkSource::Select { .. }) {
+            continue;
+        }
+        let Port { node, port } = link.target;
+        let written = port == _RET_PARAM_ID
+            || graph
+                .nodes
+                .get(&node)
+                .and_then(|node| index.get(&node.function))
+                .and_then(|function| function.function.parameters.get(&port))
+                .is_some_and(|parameter| parameter.mutable);
+        if written {
+            return Err(behavior_error(format!(
+                "the selection linked to {node}.{port} would be written: a selection is \
+                 read-only, so link a variable there"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The nodes `starts` reach through the children relation, `starts`
 /// included.
 fn reach(graph: &Graph, starts: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid> {
@@ -392,13 +422,15 @@ impl BehaviorTreeInterpreter {
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
     /// diff applies whole or not at all: it is refused when it fails, when the
     /// tree under the runner would name a child that is not a node or hold a
-    /// cycle, or when the graph would not lower.
+    /// cycle, when a selection would be written, or when the graph would not
+    /// lower.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
             .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
         check_acyclic(&graph, self.runner)?;
+        check_selections(&graph, &self.function_index)?;
         build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
         self.graph = graph;
