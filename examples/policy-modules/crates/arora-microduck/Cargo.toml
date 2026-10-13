@@ -1,5 +1,5 @@
 [package]
-name = "policy-device"
+name = "arora-microduck"
 description = "Microduck in MuJoCo, driven by Arora: the policy module (wasm or in-process), a behavior tree, and the local bridge"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "policy-device"
+name = "arora-microduck"
 path = "src/main.rs"
 
 [features]

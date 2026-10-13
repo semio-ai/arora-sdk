@@ -16,7 +16,7 @@ ticked afterwards — the episodic-leaf convention the policy leaves follow
 too; `Failure` when the voice or the audio output fails. `viseme` carries
 the mouth shape at the audio playhead (`PP`, `aa`, … and `sil` at rest).
 
-Two providers, registered one at a time (`policy-device --speech`):
+Two providers, registered one at a time (`arora-microduck --speech`):
 
 | Provider | Crate | What it does |
 |---|---|---|

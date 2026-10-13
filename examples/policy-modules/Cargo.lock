@@ -354,6 +354,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-microduck"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora",
+ "arora-hal",
+ "arora-hal-mujoco",
+ "arora-policy",
+ "arora-simple-data-store",
+ "arora-types",
+ "clap",
+ "env_logger",
+ "log",
+ "microduck-policies",
+ "say-piper",
+ "say-silent",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "arora-module"
 version = "2.1.0"
 dependencies = [
@@ -4052,27 +4073,6 @@ checksum = "7d4643d3d4db6b08741050c2f3afa9a892c4244c085a72fcda93c9c2c9a00f4b"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "policy-device"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arora",
- "arora-hal",
- "arora-hal-mujoco",
- "arora-policy",
- "arora-simple-data-store",
- "arora-types",
- "clap",
- "env_logger",
- "log",
- "microduck-policies",
- "say-piper",
- "say-silent",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
