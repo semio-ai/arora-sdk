@@ -321,17 +321,29 @@ how direct and indirect dispatch work and how behavior trees use them.
 
 ## CI
 
-`.github/workflows/continuous.yml`:
+`.github/workflows/continuous.yml` runs independent work as parallel jobs, each
+under its own 40-minute limit:
 
-- **`build_and_test`** (ubuntu-latest) runs, in order: `cargo build --release`
-  (default-members); `cargo test --release` (native + the wasm-via-wasmtime
-  integration tests — this builds the wasm32-wasip1 guests via bindeps and
-  builds `test-cpp`/`test-cpp-2` via the dev-dependency edge);
-  `cargo build -p arora --target wasm32-unknown-unknown --no-default-features
-  --release`; then it installs `wasm-pack` and runs the browser test inline
-  (`wasm-pack test --headless --firefox --release crates/arora-web`). It also
-  frees disk space first (the multi-target builds need ~35 GB).
+- **`select`** lists the members a pull request can reach
+  ([`list_modified_targets.sh`](../.github/scripts/list_modified_targets.sh));
+  `main` selects everything. A job none of whose packages is selected is
+  skipped.
+- **`test`**: `cargo test --release` over the selected default members (native
+  and the wasm-via-wasmtime integration tests, which build the wasm32 guests
+  through artifact dependencies and `test-cpp`/`test-cpp-2` through the
+  dev-dependency edge), then checks that the selection covers every input
+  cargo tracked.
+- **`zenoh`**: the ROS 2 bridge and messages on the Zenoh backend, which the
+  default (DDS) build never compiles.
+- **`lint`**: clippy with `-D warnings`, then `cargo fmt --check`.
+- **`browser`**: the wasm32-only code — the engine's browser executor, the
+  run loop's JS-timer cadence and `arora-web` — in headless Firefox.
 - **`markdown-link-check`**: link-checks the markdown.
+
+Each Rust job restores a dependency cache that only `main` saves. Tests build
+`--release` without LTO and with line tables only: they run optimised, and the
+link-time optimisation a shipped binary gets would otherwise dominate the build
+of every test binary.
 
 The NAO cross-build of `arora-naoqi` is not exercised in CI; it depends on a
 Homebrew formula not available on the CI image. See
