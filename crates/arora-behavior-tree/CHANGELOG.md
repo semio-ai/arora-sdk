@@ -4,6 +4,24 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.8.0] - 2026-10-13
+
+### Added
+
+- Tree-local variables: a variable whose name starts with `.` (`{.x}`) is a
+  cell of the lowered tree. The lowering never asks the resolver for it, so
+  it has no store slot, makes no store change and is in no write set.
+  `variable::is_tree_local` states the rule.
+
+### Changed
+
+- A variable named with a leading `.` no longer binds the store key of that
+  name.
+- Groot export writes a variable without a name as `{.<id>}`, so it imports
+  back as one tree-local variable; it was written as `{<id>}`, which imported
+  as a store key. Every reference to one such variable, a module leaf's
+  included, exports the same name.
+
 ## [8.7.0] - 2026-10-13
 
 ### Added

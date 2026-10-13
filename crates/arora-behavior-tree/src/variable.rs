@@ -90,5 +90,18 @@ impl VariableCell {
 
 /// Resolves a `{var}` name to a store-backed cell, or `None` for a tree-local
 /// variable. Supplied by the host (the runtime backs it with the data store), so
-/// the behavior-tree crate never depends on a concrete `DataStore`.
+/// the behavior-tree crate never depends on a concrete `DataStore`. It is never
+/// asked for a tree-local name (see [`is_tree_local`]).
 pub type VariableResolver<'a> = dyn Fn(&str) -> Option<Box<dyn Slot>> + 'a;
+
+/// The prefix of a tree-local variable's name.
+pub(crate) const TREE_LOCAL_PREFIX: char = '.';
+
+/// Whether a variable named `name` is tree-local: a name that starts with `.`.
+/// Such a variable is one cell of the lowered tree that holds it, never a
+/// store key: the resolver is not asked for it, so it has no store slot,
+/// reaches no observer, and is in no write set. A store key whose path starts
+/// with `.` is therefore out of a tree's reach.
+pub fn is_tree_local(name: &str) -> bool {
+    name.starts_with(TREE_LOCAL_PREFIX)
+}

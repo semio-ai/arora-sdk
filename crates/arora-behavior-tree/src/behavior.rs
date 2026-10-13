@@ -155,7 +155,8 @@ pub struct BehaviorTreeInterpreter {
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
-/// convention (variable name == store key).
+/// convention (variable name == store key). The lowering never asks it for a
+/// tree-local name ([`is_tree_local`](crate::variable::is_tree_local)).
 fn direct_resolver(store: &dyn DataStore) -> impl Fn(&str) -> Option<Box<dyn Slot>> + '_ {
     move |name: &str| Some(store.slot(&Key::from(name)))
 }

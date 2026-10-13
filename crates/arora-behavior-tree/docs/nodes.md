@@ -103,11 +103,14 @@ pub enum VariableCell {
 
 A `Stored` cell wraps a [`Slot`](../../arora-types/src/data/store.rs#L49-L54) — a direct handle to one store key's cell, resolved once so `get`/`set` skip re-resolving the path each tick. Which one a `{var}` becomes is decided when the tree is lowered, by the **Direct convention** (the variable's name *is* the store key): [`direct_resolver`](../src/behavior.rs#L48-L52) hands back `store.slot(&Key::from(name))`, and the first reference to a variable binds it to that store slot if the resolver knows the name, else a tree-local cell ([`behavior_tree.rs:611-630`](../src/behavior_tree.rs#L611-L630)).
 
+**Tree-local variables.** A variable whose name starts with `.` (`{.values}`) is tree-local: the lowering never asks the resolver for it, so it is a cell of the lowered tree — no store slot, no store change, nothing a bridge sees — and it is in no write set: an analysis of the keys a tree writes, and a claim on a key, both ignore it. Each variable is its own cell, so two trees' `.x` never meet; within a Groot tree one name is one variable, so `{.x}` is one cell, an ordinary entry of the tree's own blackboard in BehaviorTree.CPP. A variable with no name is tree-local too, and Groot export writes it as `.` followed by its id, so it imports back as one tree-local variable rather than as a store key. A `.` variable carries a value between nodes of one tree, such as a module's array output on its way to `Unpack`; a value another tree reads goes through a named key.
+
 ```mermaid
 flowchart LR
   authored["authored {var}<br/>(by name / predetermined key)"] --> resolve["direct_resolver(name)"]
   resolve -- "name known" --> stored["VariableCell::Stored(Slot)"]
   resolve -- "name unknown" --> local["VariableCell::Local"]
+  authored -- "name starts with ." --> local
   stored <--> store[("Data store key<br/>of the same name")]
   node["node tick"] -- "get() → call arg" --> stored
   node -- "set() ← module mutated / _ret" --> stored
