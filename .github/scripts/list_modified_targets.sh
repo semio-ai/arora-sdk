@@ -142,5 +142,6 @@ echo "any=$([[ -n $args ]] && echo true || echo false)"
 echo "build=$(jq -c .build <<<"$result")"
 echo "test=$(jq -c .test <<<"$result")"
 echo "test-args=$args"
-# One flag per selected member: `if: steps.affected.outputs.test-arora-engine`.
+# One flag per selected member: `if: needs.select.outputs.test-arora-engine`
+# (continuous.yml lists each flag a job reads under `select`'s outputs).
 jq -r '(.build[] | "build-\(.)=true"), (.test[] | "test-\(.)=true")' <<<"$result"
