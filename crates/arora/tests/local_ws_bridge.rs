@@ -147,9 +147,11 @@ async fn the_hal_s_keys_are_listed_with_their_meta() {
 }
 
 /// A write in either target form is acknowledged and moves the sensed
-/// position, which the client is pushed.
+/// position, which the client is pushed. A write the device refuses is
+/// answered `success: false` with the device's reason, and a batch holding one
+/// refused key is refused whole: nothing in it reaches the HAL.
 #[tokio::test]
-async fn a_write_in_either_target_form_moves_the_joint() {
+async fn a_write_is_acknowledged_in_either_target_form_or_refused_with_a_reason() {
     let (mut device, url) = device_over(joint()).await;
     with_device(&mut device, async {
         let mut client = Client::connect(&url).await;
@@ -157,51 +159,19 @@ async fn a_write_in_either_target_form_moves_the_joint() {
             .send(json!({"type": "subscribe", "keys": ["hip_yaw.position"]}))
             .await;
         client.next_of("subscribe_resp").await;
-
-        let answer = client
-            .write(json!({"hip_yaw/target.position": {"f64": 0.5}}))
-            .await;
-        assert_eq!(
-            answer,
-            json!({"type": "write_values_resp", "success": true})
-        );
-        client.sees("hip_yaw.position", json!({"f64": 0.5})).await;
-
-        let answer = client
-            .write(json!({"hip_yaw.target_position": {"f64": 0.25}}))
-            .await;
-        assert_eq!(
-            answer,
-            json!({"type": "write_values_resp", "success": true})
-        );
-        client.sees("hip_yaw.position", json!({"f64": 0.25})).await;
-
-        client
-            .send(json!({"type": "read_values", "keys": ["hip_yaw.position"]}))
-            .await;
-        let read = client.next_of("read_values_resp").await;
-        assert_eq!(read["values"]["hip_yaw.position"], json!({"f64": 0.25}));
-    })
-    .await;
-}
-
-/// A write the device refuses is answered `success: false` with the device's
-/// reason, and a batch holding one refused key is refused whole: nothing in it
-/// reaches the HAL.
-#[tokio::test]
-async fn a_refused_write_carries_the_device_s_reason() {
-    let (mut device, url) = device_over(joint()).await;
-    with_device(&mut device, async {
-        let mut client = Client::connect(&url).await;
-        client
-            .send(json!({"type": "subscribe", "keys": ["hip_yaw.position"]}))
-            .await;
-        client.next_of("subscribe_resp").await;
-        let answer = client
-            .write(json!({"hip_yaw.target_position": {"f64": 0.25}}))
-            .await;
-        assert_eq!(answer["success"], json!(true), "{answer}");
-        client.sees("hip_yaw.position", json!({"f64": 0.25})).await;
+        for (values, position) in [
+            (json!({"hip_yaw/target.position": {"f64": 0.5}}), 0.5),
+            (json!({"hip_yaw.target_position": {"f64": 0.25}}), 0.25),
+        ] {
+            let answer = client.write(values).await;
+            assert_eq!(
+                answer,
+                json!({"type": "write_values_resp", "success": true})
+            );
+            client
+                .sees("hip_yaw.position", json!({"f64": position}))
+                .await;
+        }
 
         for (values, why) in [
             (

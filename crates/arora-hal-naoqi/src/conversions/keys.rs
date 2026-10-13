@@ -144,12 +144,4 @@ mod tests {
         assert_eq!(joint_id_from_naoqi_name("LHipYawPitch"), "l_hip_yaw_pitch");
         assert_eq!(joint_id_from_naoqi_name("RHand"), "r_hand");
     }
-
-    #[test]
-    fn memory_keys_follow_the_device_tree() {
-        assert_eq!(
-            joint_memory_key("HeadYaw", "Position/Sensor"),
-            "Device/SubDeviceList/HeadYaw/Position/Sensor/Value"
-        );
-    }
 }

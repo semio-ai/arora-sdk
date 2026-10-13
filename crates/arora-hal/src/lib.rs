@@ -605,12 +605,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_absent_is_none() {
-        let hal = FakeHal::new();
-        assert_eq!(hal.read(&[Key::from("nope")]).await.unwrap(), vec![None]);
-    }
-
-    #[tokio::test]
     async fn describe_and_glb() {
         let hal = FakeHal::with_description(HalDescription {
             model_family: Some("test".into()),

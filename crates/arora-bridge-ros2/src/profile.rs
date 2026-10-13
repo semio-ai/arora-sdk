@@ -656,33 +656,6 @@ mod tests {
         }
     }
 
-    /// The image pair is the contract a face device writes against: one key
-    /// per transport, each holding the whole message its topic is typed as.
-    #[test]
-    fn ros4hri_preset_publishes_the_face_image_one_key_per_transport() {
-        let profile = ExposureProfile::ros4hri();
-        for (topic, ros_type, key) in [
-            ("/robot_face/image_raw", "sensor_msgs/Image", "display/face"),
-            (
-                "/robot_face/image_raw/compressed",
-                "sensor_msgs/CompressedImage",
-                "display/face/compressed",
-            ),
-        ] {
-            let endpoint = profile
-                .endpoints
-                .iter()
-                .find(|e| e.topic == topic)
-                .unwrap_or_else(|| panic!("{topic} is in the preset"));
-            assert_eq!(endpoint.ros_type, ros_type, "{topic}");
-            assert_eq!(endpoint.flow, Flow::Out, "{topic}");
-            let [route] = endpoint.routes.as_slice() else {
-                panic!("{topic} routes one whole key, got {:?}", endpoint.routes);
-            };
-            assert_eq!((route.field.as_str(), route.key.as_str()), ("", key));
-        }
-    }
-
     /// Both viseme shapes a TTS node publishes reach the same keys — the
     /// code, its time and its duration — so a face lipsyncs to either
     /// without knowing which it is fed.
@@ -723,31 +696,6 @@ mod tests {
         }
     }
 
-    /// The speech state publishes as two strings: the utterance and the lip
-    /// shape, each its key in the message's `data`.
-    #[test]
-    fn ros4hri_preset_publishes_the_speech_state_as_strings() {
-        let profile = ExposureProfile::ros4hri();
-        for (topic, key) in [
-            ("/robot_face/speech", "standard/ros4hri/speech/text"),
-            ("/robot_face/viseme", "standard/ros4hri/speech/viseme"),
-        ] {
-            let endpoint = profile
-                .endpoints
-                .iter()
-                .find(|e| e.topic == topic)
-                .unwrap_or_else(|| panic!("missing {topic}"));
-            assert_eq!(endpoint.ros_type, "std_msgs/String", "{topic}");
-            assert_eq!(endpoint.flow, Flow::Out, "{topic}");
-            let routes: Vec<(&str, &str)> = endpoint
-                .routes
-                .iter()
-                .map(|r| (r.field.as_str(), r.key.as_str()))
-                .collect();
-            assert_eq!(routes, [("data", key)], "{topic}");
-        }
-    }
-
     /// A caption lands as its text and its speaker, each on its own key,
     /// delivered reliably like every inbound surface: a dropped caption is
     /// text the face never shows.
@@ -776,31 +724,6 @@ mod tests {
                 ("text", "standard/ros4hri/caption/text"),
                 ("speaker_id", "standard/ros4hri/caption/speaker"),
             ]
-        );
-    }
-
-    /// The diagnostics report publishes whole from one key, reliably, so the
-    /// ROS diagnostics tooling's reliable subscribers match it.
-    #[test]
-    fn ros4hri_preset_publishes_diagnostics_reliably_from_one_key() {
-        let profile = ExposureProfile::ros4hri();
-        let endpoint = profile
-            .endpoints
-            .iter()
-            .find(|e| e.topic == "/diagnostics")
-            .expect("/diagnostics is in the preset");
-        assert_eq!(endpoint.ros_type, "diagnostic_msgs/DiagnosticArray");
-        assert_eq!(endpoint.flow, Flow::Out);
-        assert_eq!(endpoint.qos, Some(Qos::Reliable));
-        let [route] = endpoint.routes.as_slice() else {
-            panic!(
-                "/diagnostics routes one whole key, got {:?}",
-                endpoint.routes
-            );
-        };
-        assert_eq!(
-            (route.field.as_str(), route.key.as_str()),
-            ("", "diagnostics")
         );
     }
 

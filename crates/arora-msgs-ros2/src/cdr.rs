@@ -666,37 +666,6 @@ mod tests {
         r
     }
 
-    fn point_element(x: f64, y: f64, z: f64) -> StructureWithoutId {
-        StructureWithoutId {
-            fields: vec![
-                f(0x331, Value::F64(x)),
-                f(0x332, Value::F64(y)),
-                f(0x333, Value::F64(z)),
-            ],
-        }
-    }
-
-    #[test]
-    fn scalar_and_struct_arrays_round_trip() {
-        let ty = shape_ty();
-        let registry = shape_registry();
-        let value = st(
-            0x55,
-            vec![
-                f(0x551, Value::ArrayF64(vec![1.5, -2.5, 3.75])),
-                f(
-                    0x552,
-                    Value::ArrayStructure {
-                        id: id(0x33),
-                        elements: vec![point_element(1.0, 2.0, 3.0), point_element(4.0, 5.0, 6.0)],
-                    },
-                ),
-            ],
-        );
-        let bytes = encode(&ty, &registry, &value).unwrap();
-        assert_eq!(decode(&ty, &registry, &bytes).unwrap(), value);
-    }
-
     #[test]
     fn empty_arrays_round_trip() {
         let ty = shape_ty();

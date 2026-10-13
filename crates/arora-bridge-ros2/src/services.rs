@@ -310,36 +310,6 @@ mod tests {
     }
 
     #[test]
-    fn service_name_follows_the_methods_convention() {
-        assert_eq!(service_name("robot", "speak"), "/robot/methods/speak");
-    }
-
-    #[test]
-    fn request_type_has_one_field_per_parameter_keyed_by_parameter_id() {
-        let sig = signature(
-            "add",
-            function(
-                &[
-                    ("a", primitive(PrimitiveKind::F64)),
-                    ("b", primitive(PrimitiveKind::F64)),
-                ],
-                primitive(PrimitiveKind::F64),
-            ),
-        );
-        let request = request_type(&sig).unwrap();
-        let low::TypeKind::Structure(structure) = &request.kind else {
-            panic!("request is a structure");
-        };
-        // Field ids are the parameter ids, in declared order — so a decoded
-        // request's fields are the call arguments unchanged.
-        let field_ids: Vec<_> = structure.fields.keys().copied().collect();
-        assert_eq!(
-            field_ids,
-            vec![gen_uuid_from_str("a"), gen_uuid_from_str("b")]
-        );
-    }
-
-    #[test]
     fn unit_return_yields_an_empty_response_type() {
         let sig = signature("reset", function(&[], primitive(PrimitiveKind::Unit)));
         let response = response_type(&sig).unwrap();
@@ -369,6 +339,16 @@ mod tests {
         assert!(skipped.is_empty(), "an all-f64 method is representable");
         let service = &services[0];
         assert_eq!(service.name, "/robot/methods/add");
+        // The request's field ids are the parameter ids, in declared order —
+        // so a decoded request's fields are the call arguments unchanged.
+        let low::TypeKind::Structure(structure) = &service.request_type.kind else {
+            panic!("request is a structure");
+        };
+        let field_ids: Vec<_> = structure.fields.keys().copied().collect();
+        assert_eq!(
+            field_ids,
+            vec![gen_uuid_from_str("a"), gen_uuid_from_str("b")]
+        );
 
         // A request value (a = 2.0, b = 40.0), fields keyed by parameter id.
         let request = Value::Structure(Structure {

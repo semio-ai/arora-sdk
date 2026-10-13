@@ -369,25 +369,6 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalue_set_field_value_new() {
-    let mut kv = KeyValue::new();
-    let health_value = Value::I32(100);
-
-    // Directly set a field and value entry into the KV
-
-    kv.set_field_value("health", health_value.clone());
-
-    assert_eq!(kv.fields.len(), 1);
-    assert!(kv.fields.contains_key("health"));
-
-    let field = kv.get_field("health").unwrap();
-    match field.value.as_deref() {
-      Some(Value::I32(value)) => assert_eq!(*value, 100),
-      _ => panic!("Expected I32 value"),
-    }
-  }
-
-  #[test]
   fn test_keyvalue_set_field_value_update_existing() {
     let mut kv = KeyValue::new();
 
@@ -434,12 +415,6 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalue_get_field_nonexistent() {
-    let kv = KeyValue::new();
-    assert_eq!(kv.get_field("nonexistent"), None);
-  }
-
-  #[test]
   fn test_keyvalue_field_new() {
     let field = KeyValueField::new("test_id", Value::String("test_value".to_string()));
     assert_eq!(field.name, "test_id");
@@ -459,29 +434,6 @@ mod tests {
     match field.value.as_deref() {
       Some(Value::KeyValue(kv)) => assert_eq!(kv.id, id),
       _ => panic!("Expected KeyValue variant"),
-    }
-  }
-
-  #[test]
-  fn test_simple_make_kv_from_fields() {
-    let fields = vec![
-      KeyValueField::new("health", Value::I32(100)),
-      KeyValueField::new("mana", Value::I32(50)),
-    ];
-    let id = gen_bb_uuid();
-    let kv: KeyValue = KeyValue::from((id, fields));
-    assert_eq!(kv.id, id);
-    assert_eq!(kv.fields.len(), 2);
-    assert!(kv.fields.contains_key("health"));
-    assert!(kv.fields.contains_key("mana"));
-    match kv.fields.get("health").unwrap().value.as_deref() {
-      Some(Value::I32(value)) => assert_eq!(*value, 100),
-      _ => panic!("Expected I32 value"),
-    }
-
-    match kv.fields.get("mana").unwrap().value.as_deref() {
-      Some(Value::I32(value)) => assert_eq!(*value, 50),
-      _ => panic!("Expected I32 value"),
     }
   }
 
@@ -719,6 +671,8 @@ mod tests {
     for (name, value) in test_cases {
       let mut kv = KeyValue::new();
       kv.set_field_value(name, value.clone());
+      assert_eq!(kv.fields.len(), 1);
+      assert!(kv.fields.contains_key(name));
 
       let retrieved_field = kv.get_field(name).unwrap();
 
@@ -778,20 +732,6 @@ mod tests {
   }
 
   #[test]
-  fn test_keyvalueitems_set_replaces() {
-    let mut kvis = KeyValueItems::new();
-    let inserted = kvis.set(KeyValueField::new("speed", Value::I32(10)));
-    assert!(inserted.is_none());
-    let inserted2 = kvis.set(KeyValueField::new("speed", Value::I32(20))); // replace
-    assert!(inserted2.is_some());
-    assert_eq!(kvis.len(), 1);
-    match kvis.get("speed").unwrap().value.as_deref() {
-      Some(Value::I32(20)) => {}
-      other => panic!("expected 20 got {:?}", other),
-    }
-  }
-
-  #[test]
   fn test_keyvalueitems_set_returns_old() {
     let mut kvis = KeyValueItems::new();
     assert!(kvis.set(KeyValueField::new("x", Value::I32(1))).is_none());
@@ -802,6 +742,7 @@ mod tests {
       Some(Value::I32(1)) => {}
       other => panic!("expected old=1 got {:?}", other),
     }
+    assert_eq!(kvis.len(), 1);
     match kvis.get("x").unwrap().value.as_deref() {
       Some(Value::I32(2)) => {}
       other => panic!("expected new=2 got {:?}", other),

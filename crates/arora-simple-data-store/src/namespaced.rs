@@ -205,39 +205,6 @@ mod tests {
     use crate::SimpleDataStore;
 
     #[test]
-    fn write_lands_under_namespace_in_inner_store() {
-        let shared = SimpleDataStore::new();
-        let view = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
-
-        // A device-relative write through the view…
-        view.write(StateChange::set("joint1.position", Value::Boolean(true)))
-            .unwrap();
-
-        // …lands prefixed in the inner store.
-        assert_eq!(
-            shared.read(&[Key::from("robotA/joint1.position")]),
-            vec![Some(Value::Boolean(true))]
-        );
-        // The un-prefixed key is NOT present in the inner store.
-        assert_eq!(shared.read(&[Key::from("joint1.position")]), vec![None]);
-    }
-
-    #[test]
-    fn read_round_trips_device_relative_keys() {
-        let shared = SimpleDataStore::new();
-        let view = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
-
-        view.write(StateChange::set("battery_level", Value::Boolean(false)))
-            .unwrap();
-
-        // Reading the device-relative key through the view returns the value.
-        assert_eq!(
-            view.read(&[Key::from("battery_level")]),
-            vec![Some(Value::Boolean(false))]
-        );
-    }
-
-    #[test]
     fn slot_round_trips_and_coincides_with_inner() {
         let shared = SimpleDataStore::new();
         let view = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
@@ -284,6 +251,8 @@ mod tests {
             ]),
             vec![Some(Value::Boolean(true)), Some(Value::Boolean(false))]
         );
+        // The device-relative key itself is not in the inner store.
+        assert_eq!(shared.read(&[Key::from("joint1.position")]), vec![None]);
     }
 
     /// Two devices over one store: what one writes, the other's subscription,

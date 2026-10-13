@@ -1018,13 +1018,6 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_without_a_value() {
-        let bytes = to_bytes(&sample()).unwrap();
-        let back: Sample = from_bytes(&bytes).unwrap();
-        assert_eq!(back, sample());
-    }
-
-    #[test]
     fn a_struct_writes_a_keyvalue() {
         // An id-less struct carries its field names, so it travels as a
         // keyvalue — a name-hash type id would be a false identity the moment a

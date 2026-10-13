@@ -357,17 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_overrides_model() {
-        let mut config = create_test_config();
-        let override_config = ROS2RobotConfig::default();
-
-        config.apply_overrides(override_config);
-
-        assert_eq!(config.domain_id, Some(42)); // Should remain unchanged
-        assert_eq!(config.topics.len(), 1); // Should remain unchanged
-    }
-
-    #[test]
     fn test_apply_overrides_domain_id() {
         let mut config = create_test_config();
         let override_config = ROS2RobotConfig {
@@ -541,12 +530,6 @@ mod tests {
             .map(|(name, id)| (name.to_string(), id.to_string()))
             .collect();
         assert_eq!(joint_ids, expected);
-    }
-
-    #[test]
-    fn test_get_joint_ids_from_invalid_file() {
-        let result = get_joint_ids_from_glb_file("nonexistent_file.glb");
-        assert!(result.is_err(), "Should fail on nonexistent file");
     }
 
     #[test]

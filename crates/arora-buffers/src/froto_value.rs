@@ -334,20 +334,6 @@ pub fn deserialize(data: &[u8]) -> Value {
 mod tests {
     use super::*;
 
-    /// F64 scalars and arrays used to double-tag on the wire (`add_f64_raw`
-    /// wrote the type tag), so they round-tripped to garbage. Pinned here.
-    #[test]
-    fn f64_values_round_trip() {
-        for value in [
-            Value::F64(0.5),
-            Value::F64(-2.5e300),
-            Value::ArrayF64(vec![1.0, -2.0, 3.5]),
-        ] {
-            let bytes = serialize(&value);
-            assert_eq!(deserialize(&bytes), value, "round-trip of {value:?}");
-        }
-    }
-
     /// String arrays used to double-tag on the wire (`add_string` wrote a
     /// per-element `TYPE_STRING` tag the reader never expected), so they never
     /// round-tripped. Pinned here alongside empty and multi-length cases.

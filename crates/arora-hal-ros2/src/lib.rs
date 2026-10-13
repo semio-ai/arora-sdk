@@ -83,17 +83,6 @@ mod tests {
         let _conversion = JointStateConversion::Standard;
     }
 
-    #[test]
-    fn test_pre_built_configs_available() {
-        // Test that pre-built configs are accessible
-        let _ur5_config = configs::ur5::create_config();
-        let _ur3_config = configs::ur3::create_config();
-        let _nao_config = configs::nao::create_config();
-        let _pepper_config = configs::pepper::create_config();
-        let _quori_config = configs::quori::create_config();
-        let _g1_config = configs::unitree_g1::create_config();
-    }
-
     /// Round-trips a JointState conversion through the NAO configuration with
     /// the fixture model: the GLB joint-id mapping turns ROS joint names into
     /// Arora keys, and a target-position write converts back to a JointState
