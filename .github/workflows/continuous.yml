@@ -200,6 +200,63 @@ jobs:
         if: needs.select.outputs.test-arora-web
         run: wasm-pack test --headless --firefox crates/arora-web --test browser
 
+  # Line and region coverage of the native tests on main, as the job summary
+  # and an lcov artifact; it gates nothing. docs/testing.md has the command and
+  # what native coverage cannot see.
+  coverage:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools-preview
+
+      # --coverage-target-only instruments the host target alone: the wasm32
+      # guests the tests build as artifact dependencies cannot link the
+      # profiler runtime.
+      - name: Measure coverage
+        run: |
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          cargo llvm-cov --release --target "$host" --coverage-target-only --no-report
+          cargo llvm-cov report --release --target "$host" --lcov --output-path lcov.info
+          cargo llvm-cov report --release --target "$host" --summary-only > coverage.txt
+          {
+            echo '### Coverage'
+            echo '```'
+            tail -n 1 coverage.txt
+            echo '```'
+            echo '<details><summary>Per file</summary>'
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            lcov.info
+            coverage.txt
+
   markdown-link-check:
     runs-on: ubuntu-latest
     steps:
