@@ -135,11 +135,12 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Clippy runs the build scripts that emit each crate's
-      # src/arora_generated.rs, which `cargo fmt --check` needs: it errors on an
-      # unresolved `mod arora_generated;` when those files are absent.
+      # Clippy lints every target, tests included. It also runs the build
+      # scripts that emit each crate's src/arora_generated.rs, which
+      # `cargo fmt --check` needs: it errors on an unresolved
+      # `mod arora_generated;` when those files are absent.
       - name: Clippy
-        run: cargo clippy ${{ needs.select.outputs.test-args }} -- -D warnings
+        run: cargo clippy ${{ needs.select.outputs.test-args }} --all-targets -- -D warnings
 
       # An unselected package has no changed file, so its formatting is
       # unchanged (a rustfmt.toml or toolchain change selects everything).

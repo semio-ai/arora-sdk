@@ -335,7 +335,8 @@ build-and-test job has its own 40-minute limit:
   cargo tracked.
 - **`zenoh`**: the ROS 2 bridge and messages on the Zenoh backend, which the
   default (DDS) build never compiles.
-- **`lint`**: clippy with `-D warnings`, then `cargo fmt --check`.
+- **`lint`**: clippy over every target, tests included, with `-D warnings`,
+  then `cargo fmt --check`.
 - **`browser`**: the wasm32-only code — the engine's browser executor, the
   run loop's JS-timer cadence and `arora-web` — in headless Firefox.
 - **`coverage`** (pushes to `main` only): line and region coverage of the
