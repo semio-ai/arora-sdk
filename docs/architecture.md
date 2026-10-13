@@ -338,6 +338,10 @@ build-and-test job has its own 40-minute limit:
 - **`lint`**: clippy with `-D warnings`, then `cargo fmt --check`.
 - **`browser`**: the wasm32-only code — the engine's browser executor, the
   run loop's JS-timer cadence and `arora-web` — in headless Firefox.
+- **`coverage`** (pushes to `main` only): line and region coverage of the
+  native tests with `cargo-llvm-cov`, as the job summary and an `lcov.info`
+  artifact; it gates nothing. [`testing.md`](testing.md#coverage) has the
+  command and what native coverage cannot see.
 - **`markdown-link-check`**: link-checks the markdown.
 
 Each Rust job restores a dependency cache that only `main` saves. Tests build
