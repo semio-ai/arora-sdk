@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "12.7.0"
+version = "12.11.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -204,6 +204,7 @@ dependencies = [
  "log",
  "ratatui",
  "rustls",
+ "serde",
  "serde_json",
  "sysinfo",
  "tokio",
@@ -213,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.1.1"
+version = "9.2.0"
 dependencies = [
  "arora-types",
  "semver",
@@ -223,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "8.1.0"
+version = "8.3.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -235,6 +236,7 @@ dependencies = [
  "derive_more",
  "lazy_static",
  "quick-xml",
+ "regex",
  "semver",
  "serde",
  "serde_yaml",
@@ -842,14 +844,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 dependencies = [
  "serde_core",
-]
-
-[[package]]
-name = "blackboard"
-version = "0.1.0"
-dependencies = [
- "arora-behavior",
- "arora-module",
 ]
 
 [[package]]
@@ -4071,7 +4065,6 @@ dependencies = [
  "arora-policy",
  "arora-simple-data-store",
  "arora-types",
- "blackboard",
  "clap",
  "env_logger",
  "log",

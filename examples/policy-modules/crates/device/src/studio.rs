@@ -24,6 +24,9 @@ pub struct StudioModel {
     /// The root's translation and rotation ids, when the model is a robot
     /// Studio can place.
     pub base: Option<BasePoseKeys>,
+    /// The robot's model family: the root body's name (the URDF's robot
+    /// name), capitalized as Studio capitalizes it to name the model.
+    pub family: Option<String>,
 }
 
 impl StudioModel {
@@ -63,6 +66,7 @@ impl StudioModel {
 
         let mut joints = HashMap::new();
         let mut base = None;
+        let mut family = None;
         for data in nodes
             .iter()
             .filter_map(|node| node.pointer("/extensions/RobotData"))
@@ -84,6 +88,10 @@ impl StudioModel {
                 if base.is_some() {
                     bail!("more than one robot root");
                 }
+                family = data
+                    .get("name")
+                    .and_then(Json::as_str)
+                    .and_then(capitalized);
                 let id = |feature: &str| -> Result<String> {
                     animated_id(features.and_then(|f| f.get(feature)))
                         .ok_or_else(|| anyhow!("the robot's root has no animated {feature}"))
@@ -101,7 +109,11 @@ impl StudioModel {
         if joints.is_empty() {
             bail!("no animated joint");
         }
-        Ok(Self { joints, base })
+        Ok(Self {
+            joints,
+            base,
+            family,
+        })
     }
 
     /// The id of each of `names`, in order; fails naming every joint the
@@ -138,6 +150,13 @@ fn animated_id(feature: Option<&Json>) -> Option<String> {
     }
 }
 
+/// `name` with its first character in upper case; `None` when it is empty.
+fn capitalized(name: &str) -> Option<String> {
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    Some(first.to_uppercase().chain(chars).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,7 +185,7 @@ mod tests {
     #[test]
     fn reads_the_joint_and_root_ids() {
         let document = serde_json::json!({"nodes": [
-            {"extensions": {"RobotData": {"type": "body", "root": true, "features": {
+            {"extensions": {"RobotData": {"type": "body", "root": true, "name": "microduck", "features": {
                 "translation.x": animated("tx"), "translation.y": animated("ty"),
                 "translation.z": animated("tz"), "rotation.r": animated("rr"),
                 "rotation.p": animated("rp"), "rotation.y": {"animated": true, "value": "ry"},
@@ -184,6 +203,7 @@ mod tests {
             [base.x, base.y, base.z, base.roll, base.pitch, base.yaw],
             ["tx", "ty", "tz", "rr", "rp", "ry"].map(String::from)
         );
+        assert_eq!(model.family.as_deref(), Some("Microduck"));
     }
 
     #[test]

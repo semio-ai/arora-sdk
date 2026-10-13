@@ -175,24 +175,27 @@ The tree is where situations are told apart. The `showcase` tree:
   its end, an episodic leaf keeps running its network and keeps returning
   `Success`: a seat is held by the sitting network, not by frozen targets.
 - **A request from outside** selects a branch in the `interactive` tree. A
-  tree has no comparison of its own — control nodes route on their
-  children's status only — so the `blackboard` module supplies two leaves:
-  `Equals` turns "`command.behavior` is `kick_left`" into a status, and
-  `Assign` writes a value back. Each requestable behavior is a branch of the
-  fallback headed by an `Equals`:
+  tree's control nodes route on their children's status only, so the
+  branch is chosen by Arora's native string nodes: `RegexMatch` turns
+  "`command.behavior` is `kick_left`" into a status, and `SetString` writes a
+  value back. Each requestable behavior is a branch of the fallback headed by
+  a `RegexMatch`:
 
   ```xml
   <Sequence>
-    <Equals value="{command.behavior}" expected="kick_left" />
+    <RegexMatch value="{command.behavior}" matcher="^kick_left$" first_match="{matched_request}" />
     <Skill skill="kick_left" … />
-    <Assign value="walk" target="{command.behavior}" />
+    <SetString variable="{command.behavior}" value="walk" />
   </Sequence>
   ```
 
+  `RegexMatch` writes what it matched to `first_match`; `{matched_request}`
+  names no store key, so that lands in a tree-local variable.
+
   While the request stands, the sequence re-enters the same skill leaf every
-  tick, so its run continues; when the skill succeeds, `Assign` hands the
+  tick, so its run continues; when the skill succeeds, `SetString` hands the
   request back to `walk`, and the next tick falls through to the walking
-  branch. A branch without an `Assign` (`sit`) holds until something else is
+  branch. A branch without a `SetString` (`sit`) holds until something else is
   requested. Whoever writes `command.behavior` — an editor's live data, a
   script on the local bridge, another leaf — switches the policy, and the
   situation checks placed before it (`Fallen`) still take precedence.
@@ -212,9 +215,6 @@ policies that take them), `Decimator` (the fixed-rate clock), and
 standard keys, a real-time or lockstep clock, CSV recording, and the keys an
 editor drives its model by (joints under ids of its choosing, the base pose
 as six scalars).
-
-`modules/blackboard` holds the two leaves a tree needs to switch on a
-request; nothing in it is robot-specific.
 
 The SDK seams this example added: `AroraBuilder::with_declared_module` and
 Groot tags resolved by function name let a declared module's leaves be

@@ -14,8 +14,7 @@ examples/policy-modules/
 ├── crates/arora-policy          ONNX inference (tract), history, decimator, gravity — what a policy module needs, wasm-safe
 ├── crates/arora-hal-mujoco      any MJCF robot as an Arora HAL, under the keys a real robot HAL uses
 ├── modules/microduck-policies   the policy module: walk, stand, sit, rise, skill, fallen, head_clip, joint_names
-├── modules/blackboard           equals / assign: the leaves a tree switches on a request with
-├── modules/say-piper, say-silent  the say leaf: Piper on board (GPLv3, opt-in) and a silent one
+├── modules/say-piper            the say leaf spoken on board by Piper (GPLv3, opt-in); the silent one is the SDK's
 ├── crates/device                the device: simulator + modules (wasm or in-process) + tree, on the standard Arora run
 ├── trees/                       Groot trees: interactive, stand, walk, showcase, sit_rise, kick
 ├── tools/                       setup-mujoco.sh, fetch-assets.sh, export-urdf.py (for Studio), replay.py (recording → video)
@@ -50,8 +49,8 @@ its Live Data page writes the commands. Once:
    and checks the result against the MJCF: every mesh vertex where MuJoCo
    has it, to the micrometre.
 2. In Studio, **Upload URDF** and select `microduck.urdf` with every `.stl`
-   of that directory. Studio saves a model named `microduck`, of model family
-   `Microduck`.
+   of that directory. Studio saves a model named `Microduck`, the URDF's
+   robot name capitalised.
 3. On that model, **Download Asset**, and save the GLB, say as
    `assets/microduck/studio-model.glb`. It carries the ids Studio gave the
    joints and the robot's placement; the device publishes under them.
@@ -66,9 +65,12 @@ Then, for each demo:
    ```
 
    The terminal asks for the owner (your Studio user id, shown in Studio's
-   **Register Device** dialog), a device name, and the model family: answer
-   `Microduck`; an empty owner serves the local bridge instead of Studio.
-   `DEVICE_OWNERS`, `DEVICE_NAME` and `MODEL_FAMILY` answer in advance.
+   **Register Device** dialog) and a device name, once: the device saves the
+   answers and registers with them on every later run. An empty owner serves
+   the local bridge instead of Studio. The model family is the GLB's robot
+   name, capitalised (`Microduck`), and the hardware version `mujoco`.
+   `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION`
+   override them.
    Without a terminal nothing is asked: the device connects to Studio and
    registers what those variables say. The device keeps its Studio identity
    in its device directory, `~/Library/Application

@@ -11,9 +11,7 @@ members = [
   "crates/arora-policy",
   "crates/arora-hal-mujoco",
   "modules/microduck-policies",
-  "modules/blackboard",
   "modules/say-piper",
-  "modules/say-silent",
   "crates/device",
 ]
 # Piper (say-piper) builds libpiper with cmake and links GPLv3 code: it is
@@ -22,8 +20,6 @@ default-members = [
   "crates/arora-policy",
   "crates/arora-hal-mujoco",
   "modules/microduck-policies",
-  "modules/blackboard",
-  "modules/say-silent",
   "crates/device",
 ]
 
@@ -40,9 +36,9 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
-arora = { path = "../../crates/arora", version = "12.7" }
+arora = { path = "../../crates/arora", version = "12.10" }
 arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
-arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.1" }
+arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.2" }
 arora-bridge = { path = "../../crates/arora-bridge", version = "6" }
 arora-hal = { path = "../../crates/arora-hal", version = "4.3" }
 arora-module = { path = "../../crates/arora-module", version = "2" }

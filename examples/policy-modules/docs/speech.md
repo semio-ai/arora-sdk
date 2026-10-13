@@ -21,7 +21,7 @@ Two providers, registered one at a time (`policy-device --speech`):
 | Provider | Crate | What it does |
 |---|---|---|
 | `piper` (the `piper` feature) | `modules/say-piper` | Piper synthesizes on board, the host's audio output plays: no network, no credentials |
-| `silent` | `modules/say-silent` | a speaker's timing counted in ticks (five a character), each sentence logged: tests, builds without Piper |
+| `silent` | the SDK's `modules/say-silent` | a speaker's timing counted in ticks (five a character), each sentence logged: tests, builds without Piper |
 
 Both are host modules, whatever executor the policies use: a speaker is the
 host's, not a portable guest's.
@@ -74,7 +74,7 @@ long falls: speech is never a step before an action. Each branch of the
 
 ```xml
 <Sequence>
-  <Equals value="{command.behavior}" expected="kick_left" />
+  <RegexMatch value="{command.behavior}" matcher="^kick_left$" first_match="{matched_request}" />
   <Parallel>
     <Skill skill="kick_left" … />
     <Fallback>
@@ -82,7 +82,7 @@ long falls: speech is never a step before an action. Each branch of the
       <Succeed />
     </Fallback>
   </Parallel>
-  <Assign value="walk" target="{command.behavior}" />
+  <SetString variable="{command.behavior}" value="walk" />
 </Sequence>
 ```
 

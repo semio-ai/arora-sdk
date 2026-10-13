@@ -36,9 +36,6 @@ const POLICY_WASM: &[u8] = include_bytes!(env!(
     "CARGO_CDYLIB_FILE_MICRODUCK_POLICIES_microduck_policies"
 ));
 
-/// The blackboard module's wasm32-wasip1 build, the same way.
-const BLACKBOARD_WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_BLACKBOARD_blackboard"));
-
 /// The workspace root, for the default asset and tree paths.
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -150,7 +147,7 @@ impl Device {
         &self.sim
     }
 
-    /// The device's blackboard.
+    /// The device's store.
     pub fn store(&self) -> &dyn DataStore {
         self.arora.store()
     }
@@ -264,8 +261,16 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         control_hz: 50.0,
         clock: config.clock,
         record: config.record.clone(),
+        // What the device registers with Studio as: the family of the model
+        // it publishes for, the simulator as its hardware.
         description: HalDescription {
-            model_family: Some("microduck".to_string()),
+            model_family: Some(
+                config
+                    .studio
+                    .as_ref()
+                    .and_then(|model| model.family.clone())
+                    .unwrap_or_else(|| "Microduck".to_string()),
+            ),
             hardware_version: Some("mujoco".to_string()),
             software_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         },
@@ -315,15 +320,8 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         .with_data_store(Box::new(store))
         .with_hal(Box::new(hal));
     builder = match config.executor {
-        Executor::Wasm => builder
-            .with_declared_module::<Policies>(wasm_executor(), POLICY_WASM)
-            .with_declared_module::<blackboard::blackboard::Module>(
-                wasm_executor(),
-                BLACKBOARD_WASM,
-            ),
-        Executor::Native => builder
-            .with_host_module(HostModule::of::<Policies>())
-            .with_host_module(HostModule::of::<blackboard::blackboard::Module>()),
+        Executor::Wasm => builder.with_declared_module::<Policies>(wasm_executor(), POLICY_WASM),
+        Executor::Native => builder.with_host_module(HostModule::of::<Policies>()),
     };
     // The voice is a host module whatever the executor: it opens the audio
     // output, which a guest has no access to.
