@@ -51,9 +51,9 @@ learned policy for a different robot into an Arora module. It assumes the
   front end, and Semio Studio or the local bridge by build feature — with
   the joint-order check at build. Only the HAL is simulation-specific: the
   device for the real robot swaps it and keeps the rest.
-- `modules/blackboard` and the `interactive` tree's shape: a fallback of
-  situation checks first, then one branch per requestable behavior headed by
-  `Equals` on `command.behavior`, `Assign` handing an episodic one back.
+- The `interactive` tree's shape: a fallback of situation checks first,
+  then one branch per requestable behavior headed by a `RegexMatch` on
+  `command.behavior`, a `SetString` handing an episodic one back.
 - Command parameters an operator writes typed as the editors write them:
   `f64` for numbers (Semio Studio sends every number as one; a type is
   checked, not converted, at the leaf boundary).
@@ -121,9 +121,10 @@ Studio needs the robot's model and the device's keys under Studio's ids.
    vertex against MuJoCo's. It needs the hinges at their bodies' origins (as
    onshape-to-robot places them) and STL meshes (Studio reads STL and DAE
    only, matched by file name — two meshes with one file name in different
-   directories collide). Studio files the model under the URDF's robot name,
-   capitalised, as its model family: the family the device registers with
-   must match it for Studio to offer pairing.
+   directories collide). Studio names the model after the URDF's robot
+   name, capitalised; the device registers that name, read from the GLB, as
+   its model family (`HalDescription::model_family`, which arora registers
+   with Studio).
 2. **The ids.** Studio gives each joint, and the robot's root translation and
    rotation, an id at upload, and drives them from `<id>.position` (radians,
    metres). The device reads them from the GLB Studio saves

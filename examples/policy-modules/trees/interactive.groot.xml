@@ -29,7 +29,7 @@
           </Fallback>
       </Sequence>
       <Sequence>
-        <Equals value="{command.behavior}" expected="sit" />
+        <RegexMatch value="{command.behavior}" matcher="^sit$" first_match="{matched_request}" />
         <Parallel>
           <Sit dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
                joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
@@ -41,7 +41,7 @@
         </Parallel>
       </Sequence>
       <Sequence>
-        <Equals value="{command.behavior}" expected="rise" />
+        <RegexMatch value="{command.behavior}" matcher="^rise$" first_match="{matched_request}" />
         <Parallel>
           <Rise dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
                joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
@@ -51,10 +51,10 @@
             <Succeed />
           </Fallback>
         </Parallel>
-        <Assign value="walk" target="{command.behavior}" />
+        <SetString variable="{command.behavior}" value="walk" />
       </Sequence>
       <Sequence>
-        <Equals value="{command.behavior}" expected="kick_left" />
+        <RegexMatch value="{command.behavior}" matcher="^kick_left$" first_match="{matched_request}" />
         <Parallel>
           <Skill skill="kick_left" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
                joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
@@ -64,10 +64,10 @@
             <Succeed />
           </Fallback>
         </Parallel>
-        <Assign value="walk" target="{command.behavior}" />
+        <SetString variable="{command.behavior}" value="walk" />
       </Sequence>
       <Sequence>
-        <Equals value="{command.behavior}" expected="kick_right" />
+        <RegexMatch value="{command.behavior}" matcher="^kick_right$" first_match="{matched_request}" />
         <Parallel>
           <Skill skill="kick_right" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
                joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
@@ -77,10 +77,10 @@
             <Succeed />
           </Fallback>
         </Parallel>
-        <Assign value="walk" target="{command.behavior}" />
+        <SetString variable="{command.behavior}" value="walk" />
       </Sequence>
       <Sequence>
-        <Equals value="{command.behavior}" expected="stand" />
+        <RegexMatch value="{command.behavior}" matcher="^stand$" first_match="{matched_request}" />
         <Parallel>
           <Stand head="{command.head}" dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
                joint_positions="{joints.position}" joint_velocities="{joints.velocity}"

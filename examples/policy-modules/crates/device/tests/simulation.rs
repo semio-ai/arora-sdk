@@ -159,8 +159,7 @@ fn request(device: &Device, behavior: &str) {
         .unwrap();
 }
 
-/// The interactive tree from the wasm guests (the policies and the
-/// blackboard leaves): it walks by default, on an `F64` command — the number
+/// The interactive tree from the wasm guest: it walks by default, on an `F64` command — the number
 /// an editor writes.
 #[test]
 fn the_interactive_tree_walks_from_the_wasm_guests() {
