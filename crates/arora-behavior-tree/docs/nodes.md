@@ -71,7 +71,7 @@ Two data nodes are ticked natively too, and read their arguments through any lin
 - **`Equal(a, b)`** succeeds when its two values are equal and fails otherwise — a condition over data.
 - **`Unpack(values, out_0 … out_63)`** writes element `i` of the array `values` to the variable bound to its output port `out_i`, and succeeds. An unbound port is skipped, and so is a `Unit` element; elements past the last bound port are ignored. It fails, writing nothing, when `values` is not an array or is shorter than the last bound port needs. Each `out_i` is an ordinary port binding (`out_0="{face/k0}"`), bound when the tree is lowered as any port is, so which keys a tree writes is structure: shown in the graph and changed by an edit. Lowering refuses a port bound to anything but a variable, and two ports bound to one variable or one name. The node has 64 output ports because each is declared, one line in the Groot palette and one row in Groot's port editor: 64 holds a face's 52 ARKit blend shapes with head and eye pose beside them, and a longer array is split by its producer.
 
-They are part of the `behavior-tree 1.1` format.
+They are part of the `behavior-tree 1.1` format. In Groot they are `<Equal a="…" b="…"/>` and `<Unpack values="…" out_0="{face/k0}" out_2="{face/k2}"/>`, an unbound output left out: a port holds `{name}` for a variable, `json:` and a value's serde form for a typed literal (`json:{"u64":1}`), or plain text for a string; export falls back to `json:` wherever plain text would not read back as the same value. The task-run nodes are `<RunCall call="json:…"/>` and `<RunStatus status="{key}">…</RunStatus>`.
 
 ## How a node ticks
 

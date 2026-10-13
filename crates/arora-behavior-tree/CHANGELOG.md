@@ -4,6 +4,29 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.7.0] - 2026-10-13
+
+### Added
+
+- Groot tags for the native data and task-run nodes, read and written with
+  their arguments as ports: `Equal` (`a`, `b`), `Unpack` (`values`, and the
+  optional output ports `out_0` to `out_63`), `RunCall` (`call`) and
+  `RunStatus` (`status`; its latch is internal state, seeded on import). A
+  port holds `{name}` for a variable, `json:` followed by a value's serde form
+  for a typed literal (BehaviorTree.CPP's convention), or plain text for a
+  string. Export writes plain text only where it reads back as the same
+  value, and `json:` otherwise. Import refuses a port these nodes do not have
+  (an `Unpack` output spelled other than `out_<i>`, `i` below 64, included)
+  and a missing required one; export refuses a value JSON cannot hold exactly
+  (a non-finite float). The Groot palette declares the four nodes with all
+  their ports.
+
+### Changed
+
+- The tags `Equal`, `Unpack`, `RunCall` and `RunStatus` name the native
+  nodes: a module export named `equal`, `unpack`, `run_call` or `run_status`
+  is reachable from Groot under that exact snake_case name only.
+
 ## [8.6.0] - 2026-10-13
 
 ### Fixed
