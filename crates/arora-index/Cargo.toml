@@ -1,0 +1,24 @@
+[package]
+name = "arora-index"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+readme = "readme.md"
+description = "Resolve and fetch verified published Studio assets"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+crypto_secretbox = "0.1"
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "fs", "time", "net"] }
+toml = "0.9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
