@@ -1931,3 +1931,433 @@ mod optional_parameters {
         assert_eq!(read("out"), None);
     }
 }
+
+/// The data nodes: `Equal` as a condition, `Unpack` spreading an array over
+/// variables.
+mod data_nodes {
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::nodes::{self, UNPACK_OUT_PARAM_IDS as OUT};
+    use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::data::{DataStore, Key, StateChange};
+    use arora_types::gen_uuid_from_str;
+    use arora_types::value::{Structure, StructureField, Value};
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    const SEQ: Uuid = Uuid::from_u128(0x100);
+    const EQUAL: Uuid = Uuid::from_u128(0x101);
+    const UNPACK: Uuid = Uuid::from_u128(0x102);
+    const MARK: Uuid = Uuid::from_u128(0x103);
+
+    fn node(id: Uuid, function: Uuid, inputs: &[Uuid]) -> GraphNode {
+        GraphNode {
+            id,
+            function,
+            inputs: inputs.iter().copied().map(Io::new).collect(),
+            ..GraphNode::default()
+        }
+    }
+
+    /// The variable named `name`.
+    fn variable(name: &str) -> Uuid {
+        gen_uuid_from_str(name)
+    }
+
+    /// `Sequence(Equal(a, b), Unpack(values, out_i → {name}…), Unpack([true],
+    /// out_0 → {done}))`: the last node marks that the sequence got past the
+    /// first two.
+    fn guarded_unpack(
+        a: LinkSource,
+        b: LinkSource,
+        outputs: &[(usize, &str)],
+        values: LinkSource,
+    ) -> Graph {
+        let mut graph = Graph::empty();
+        graph.root = Some(SEQ);
+        graph.nodes.insert(
+            SEQ,
+            GraphNode {
+                children: Some(vec![EQUAL, UNPACK, MARK]),
+                ..node(SEQ, nodes::SEQ_FUNCTION_ID, &[])
+            },
+        );
+        graph.nodes.insert(
+            EQUAL,
+            node(
+                EQUAL,
+                nodes::EQUAL_FUNCTION_ID,
+                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
+            ),
+        );
+        for id in [UNPACK, MARK] {
+            graph.nodes.insert(
+                id,
+                node(
+                    id,
+                    nodes::UNPACK_FUNCTION_ID,
+                    &[nodes::UNPACK_VALUES_PARAM_ID],
+                ),
+            );
+        }
+        let link = |node, port, source| Link::new(Port::new(node, port), source);
+        graph.links = vec![
+            link(EQUAL, nodes::EQUAL_A_PARAM_ID, a),
+            link(EQUAL, nodes::EQUAL_B_PARAM_ID, b),
+            link(UNPACK, nodes::UNPACK_VALUES_PARAM_ID, values),
+            link(
+                MARK,
+                nodes::UNPACK_VALUES_PARAM_ID,
+                LinkSource::Literal(Value::ArrayBoolean(vec![true])),
+            ),
+            link(MARK, OUT[0], LinkSource::Variable(variable("done"))),
+        ];
+        for (index, name) in outputs {
+            graph.links.push(link(
+                UNPACK,
+                OUT[*index],
+                LinkSource::Variable(variable(name)),
+            ));
+        }
+        for name in outputs.iter().map(|(_, name)| *name).chain(["done"]) {
+            graph.variables.insert(variable(name), name.to_string());
+        }
+        graph
+    }
+
+    /// Load `graph` as the main behavior over `store` and tick it once.
+    fn tick_once(store: &SimpleDataStore, graph: Graph) -> Result<(), String> {
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp.load(graph).map_err(|e| e.message)?;
+        let mut bridge = super::TestBridge::empty();
+        let mut ctx = BehaviorContext {
+            store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).map(|_| ()).map_err(|e| e.message)
+    }
+
+    fn read(store: &SimpleDataStore, keys: &[&str]) -> Vec<Option<Value>> {
+        let keys: Vec<Key> = keys.iter().map(|key| Key::new(*key)).collect();
+        store.read(&keys)
+    }
+
+    fn literal(value: Value) -> LinkSource {
+        LinkSource::Literal(value)
+    }
+
+    #[test]
+    fn unpack_writes_each_element_to_its_port_skipping_unbound_ports_and_units() {
+        let store = SimpleDataStore::new();
+        let values = Value::ArrayValue(vec![
+            Value::F64(1.0),
+            Value::F64(2.0),
+            Value::Unit,
+            Value::String("four".to_string()),
+            Value::F64(5.0),
+        ]);
+        tick_once(
+            &store,
+            guarded_unpack(
+                literal(Value::U64(7)),
+                literal(Value::U64(7)),
+                &[(0, "out/a"), (2, "out/c"), (3, "out/d")],
+                literal(values),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&store, &["out/a", "out/c", "out/d", "done"]),
+            vec![
+                Some(Value::F64(1.0)),
+                None,
+                Some(Value::String("four".to_string())),
+                Some(Value::Boolean(true)),
+            ],
+            "out_1 is unbound, the Unit element is skipped, the fifth is past the last port"
+        );
+    }
+
+    #[test]
+    fn the_last_port_takes_the_last_element() {
+        let store = SimpleDataStore::new();
+        let last = nodes::UNPACK_PORTS - 1;
+        let values = (0..nodes::UNPACK_PORTS).map(|i| i as f64).collect();
+        tick_once(
+            &store,
+            guarded_unpack(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                &[(last, "out/last")],
+                literal(Value::ArrayF64(values)),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&store, &["out/last"]),
+            vec![Some(Value::F64(last as f64))]
+        );
+    }
+
+    #[test]
+    fn equal_fails_the_sequence_when_the_values_differ() {
+        let store = SimpleDataStore::new();
+        tick_once(
+            &store,
+            guarded_unpack(
+                literal(Value::U64(7)),
+                literal(Value::U64(8)),
+                &[(0, "out/a")],
+                literal(Value::ArrayF64(vec![1.0])),
+            ),
+        )
+        .unwrap();
+        assert_eq!(read(&store, &["out/a", "done"]), vec![None, None]);
+    }
+
+    #[test]
+    fn unpack_fails_and_writes_nothing_on_a_short_array_or_a_non_array() {
+        for values in [Value::ArrayF64(vec![1.0]), Value::F64(1.0), Value::Unit] {
+            let store = SimpleDataStore::new();
+            tick_once(
+                &store,
+                guarded_unpack(
+                    literal(Value::U8(1)),
+                    literal(Value::U8(1)),
+                    &[(0, "out/a"), (1, "out/b")],
+                    literal(values.clone()),
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                read(&store, &["out/a", "out/b", "done"]),
+                vec![None, None, None],
+                "{values} writes nothing and fails"
+            );
+        }
+    }
+
+    /// The stepping pattern: a structure read from the store, its revision
+    /// compared by selection, its values unpacked by selection.
+    #[test]
+    fn selections_feed_equal_and_unpack() {
+        let revision = Uuid::from_u128(0x51);
+        let values = Uuid::from_u128(0x52);
+        let frame = Uuid::from_u128(0x53);
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set(
+                "frame",
+                Value::Structure(Structure {
+                    id: Uuid::from_u128(0x50),
+                    fields: vec![
+                        StructureField {
+                            id: revision,
+                            value: Box::new(Value::U64(3)),
+                        },
+                        StructureField {
+                            id: values,
+                            value: Box::new(Value::ArrayF64(vec![0.5, 0.25])),
+                        },
+                    ],
+                }),
+            ))
+            .unwrap();
+        let select = |field: Uuid| LinkSource::Select {
+            source: Box::new(LinkSource::Variable(frame)),
+            path: Key::new(format!(".{field}")),
+        };
+        let mut graph = guarded_unpack(
+            select(revision),
+            literal(Value::U64(3)),
+            &[(0, "face/x"), (1, "face/y")],
+            select(values),
+        );
+        graph.variables.insert(frame, "frame".to_string());
+        tick_once(&store, graph).unwrap();
+        assert_eq!(
+            read(&store, &["face/x", "face/y", "done"]),
+            vec![
+                Some(Value::F64(0.5)),
+                Some(Value::F64(0.25)),
+                Some(Value::Boolean(true))
+            ]
+        );
+    }
+
+    /// Lowering checks the data nodes: both of `Equal`'s arguments and
+    /// `Unpack`'s values linked, each of its outputs a port bound to a
+    /// variable no other output binds.
+    #[test]
+    fn data_nodes_are_checked_at_lowering() {
+        let graph = |outputs: &[(usize, &str)]| {
+            guarded_unpack(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                outputs,
+                literal(Value::ArrayF64(vec![1.0, 2.0])),
+            )
+        };
+        let unlinked = |node: Uuid, port: Uuid| {
+            let mut graph = graph(&[(0, "out/a")]);
+            graph
+                .links
+                .retain(|link| link.target != Port::new(node, port));
+            graph
+        };
+        let bound = |port: Uuid, source: LinkSource| {
+            let mut graph = graph(&[]);
+            graph.links.push(Link::new(Port::new(UNPACK, port), source));
+            graph
+        };
+        // Two variables of one name: one store key.
+        let mut one_name = graph(&[(0, "out/a")]);
+        let other = Uuid::from_u128(0x77);
+        one_name.variables.insert(other, "out/a".to_string());
+        one_name.links.push(Link::new(
+            Port::new(UNPACK, OUT[1]),
+            LinkSource::Variable(other),
+        ));
+        for (what, graph) in [
+            ("Equal without b", unlinked(EQUAL, nodes::EQUAL_B_PARAM_ID)),
+            (
+                "Unpack without values",
+                unlinked(UNPACK, nodes::UNPACK_VALUES_PARAM_ID),
+            ),
+            (
+                "two ports on one variable",
+                graph(&[(0, "out/a"), (1, "out/a")]),
+            ),
+            ("two ports on one name", one_name),
+            (
+                "an output bound to a literal",
+                bound(OUT[0], literal(Value::F64(1.0))),
+            ),
+            (
+                "an output bound to a selection",
+                bound(
+                    OUT[0],
+                    LinkSource::Select {
+                        source: Box::new(LinkSource::Variable(variable("done"))),
+                        path: Key::new(".0"),
+                    },
+                ),
+            ),
+            (
+                "an output bound to another node's port",
+                bound(
+                    OUT[0],
+                    LinkSource::Port(Port::new(EQUAL, nodes::EQUAL_A_PARAM_ID)),
+                ),
+            ),
+            (
+                "a port Unpack does not have",
+                bound(
+                    Uuid::from_u128(0x78),
+                    LinkSource::Variable(variable("done")),
+                ),
+            ),
+        ] {
+            let store = SimpleDataStore::new();
+            assert!(tick_once(&store, graph).is_err(), "{what} does not lower");
+        }
+    }
+
+    /// Without a store, an output binds the tree's own variable, so a node
+    /// reading the variable sees the write.
+    #[test]
+    fn an_output_shares_the_cell_of_its_variable() {
+        use crate::graph::build_behavior_tree;
+        let mut graph = guarded_unpack(
+            literal(Value::U8(1)),
+            literal(Value::U8(1)),
+            &[(0, "k")],
+            literal(Value::ArrayU8(vec![5])),
+        );
+        // A check after the writes: Equal({k}, 5).
+        let check = Uuid::from_u128(0x104);
+        graph.nodes.get_mut(&SEQ).unwrap().children = Some(vec![EQUAL, UNPACK, MARK, check]);
+        graph.nodes.insert(
+            check,
+            node(
+                check,
+                nodes::EQUAL_FUNCTION_ID,
+                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
+            ),
+        );
+        graph.links.push(Link::new(
+            Port::new(check, nodes::EQUAL_A_PARAM_ID),
+            LinkSource::Variable(variable("k")),
+        ));
+        graph.links.push(Link::new(
+            Port::new(check, nodes::EQUAL_B_PARAM_ID),
+            literal(Value::U8(5)),
+        ));
+        let tree = build_behavior_tree(&graph, &|_| None).expect("the tree lowers");
+        let mut bridge = super::TestBridge::empty();
+        let status =
+            crate::run_behavior_tree(&tree, Rc::new(HashMap::new()), &mut bridge, false).unwrap();
+        assert_eq!(
+            status,
+            crate::arora_generated::behavior_tree::status::Status::Success
+        );
+    }
+
+    /// An `Unpack` at the root of a tree built from `TreeNode`s gets its
+    /// outputs too.
+    #[test]
+    fn a_root_unpack_built_from_tree_nodes_runs() {
+        use crate::schema::Expression;
+        use crate::tree_node::TreeNode;
+        let tree = super::build(TreeNode {
+            function: nodes::UNPACK_FUNCTION_ID,
+            children: None,
+            parameters: HashMap::from([
+                (
+                    nodes::UNPACK_VALUES_PARAM_ID,
+                    Expression::Value(Value::ArrayF64(vec![1.0])),
+                ),
+                (OUT[0], Expression::VariableId(variable("out/a"))),
+            ]),
+        });
+        assert_eq!(
+            super::run(&tree),
+            crate::arora_generated::behavior_tree::status::Status::Success
+        );
+    }
+
+    /// An edit that would leave an `Unpack` unlowerable is refused, and the
+    /// graph stays as it was.
+    #[test]
+    fn an_edit_breaking_an_unpack_is_refused() {
+        use arora_behavior::graph::GraphDiff;
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp
+            .load(guarded_unpack(
+                literal(Value::U8(1)),
+                literal(Value::U8(1)),
+                &[(0, "out/a")],
+                literal(Value::ArrayF64(vec![1.0])),
+            ))
+            .unwrap();
+        let before = interp.graph().clone();
+        for diff in [
+            GraphDiff {
+                remove_links: vec![Port::new(UNPACK, nodes::UNPACK_VALUES_PARAM_ID)],
+                ..GraphDiff::default()
+            },
+            GraphDiff {
+                add_links: vec![Link::new(
+                    Port::new(UNPACK, OUT[1]),
+                    LinkSource::Variable(variable("out/a")),
+                )],
+                ..GraphDiff::default()
+            },
+        ] {
+            assert!(interp.apply(diff).is_err());
+            assert_eq!(interp.graph(), &before);
+        }
+    }
+}

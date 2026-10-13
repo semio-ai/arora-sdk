@@ -66,6 +66,13 @@ So a branch can react once to each write of a key from outside the tree — the 
 
 The other palette tags (`Status`, `Store`, `Increase`, `Cos`) stay the test module's: a tree using them needs that module loaded.
 
+Two data nodes are ticked natively too, and read their arguments through any link source, a selection included:
+
+- **`Equal(a, b)`** succeeds when its two values are equal and fails otherwise — a condition over data.
+- **`Unpack(values, out_0 … out_63)`** writes element `i` of the array `values` to the variable bound to its output port `out_i`, and succeeds. An unbound port is skipped, and so is a `Unit` element; elements past the last bound port are ignored. It fails, writing nothing, when `values` is not an array or is shorter than the last bound port needs. Each `out_i` is an ordinary port binding (`out_0="{face/k0}"`), bound when the tree is lowered as any port is, so which keys a tree writes is structure: shown in the graph and changed by an edit. Lowering refuses a port bound to anything but a variable, and two ports bound to one variable or one name. The node has 64 output ports because each is declared, one line in the Groot palette and one row in Groot's port editor: 64 holds a face's 52 ARKit blend shapes with head and eye pose beside them, and a longer array is split by its producer.
+
+They are part of the `behavior-tree 1.1` format.
+
 ## How a node ticks
 
 ```mermaid

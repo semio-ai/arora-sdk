@@ -4,6 +4,36 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [8.4.0] - 2026-10-13
+
+### Added
+
+- Two natively ticked data nodes, in `nodes`:
+  - `Equal(a, b)` (`EQUAL_FUNCTION_ID`, `EQUAL_A_PARAM_ID`, `EQUAL_B_PARAM_ID`):
+    Success when the two values are equal — same type and same value —
+    Failure otherwise.
+  - `Unpack(values, out_0 … out_63)` (`UNPACK_FUNCTION_ID`,
+    `UNPACK_VALUES_PARAM_ID`, `UNPACK_OUT_PARAM_IDS`, `UNPACK_PORTS`,
+    `unpack_out_index`): writes element `i` of the array `values` to the
+    variable bound to the output port `out_i`, skipping an unbound port and a
+    `Unit` element and ignoring elements past the last bound port, and
+    succeeds (a value equal to the one a key holds makes no store change);
+    fails, writing nothing, when `values` is not an array or is shorter than
+    the last bound port needs. Each output is an ordinary port binding to a
+    variable, bound when the tree is lowered; lowering refuses an output
+    bound to anything else, and two outputs bound to one variable or one name.
+
+  Their inputs are read through any link source, a selection included, and
+  must be linked; lowering refuses a tree that breaks either rule.
+- The interpreter reads `behavior-tree 1.1` (`GRAPH_TYPE_VERSION`), the
+  version that adds `Equal` and `Unpack`; it still runs `1.0` graphs.
+
+### Changed
+
+- An edit is also refused when the edited graph would not lower, so a
+  refused output binding or an unlinked argument never stops the device's
+  behavior.
+
 ## [8.3.0] - 2026-10-13
 
 ### Added
