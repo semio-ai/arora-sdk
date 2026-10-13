@@ -48,6 +48,22 @@ pub mod test_rust_wasm {
         end_ns.map(|end_ns| end_ns.saturating_sub(start_ns))
     }
 
+    /// A frame at `revision`: writes `length` values into `values` — value
+    /// `i` is the time in seconds plus `i`, so it changes every step — and
+    /// returns `revision`, the revision of the table the values are positioned
+    /// by.
+    #[export(id = "5b44c60c-0e52-432f-9a4c-9e14ff7edb12")]
+    pub fn frame(
+        #[param(id = "b1cce511-53dd-4754-9a15-71e0bafad3d5")] length: u32,
+        #[param(id = "a54ac423-d9f6-455c-9b3f-f8e802ef2316")] revision: u64,
+        #[param(id = "e5a9f7c1-3b8d-4e26-9f0a-6c1d2b3e4f50")] time_ns: u64,
+        #[param(id = "b629962e-57c6-4fdf-bf8c-a5b0065bc1ca")] values: &mut Vec<f64>,
+    ) -> u64 {
+        let seconds = time_ns as f64 / 1e9;
+        *values = (0..length).map(|i| seconds + f64::from(i)).collect();
+        revision
+    }
+
     /// A greeting, naming `name` when there is one.
     #[export(id = "c82c6987-656f-4fb1-9191-ec7a5cd6832b")]
     pub fn greet(
@@ -73,5 +89,8 @@ mod tests {
         assert_eq!(window(10, None), None);
         assert_eq!(greet(Some("Ada".to_string())), "hello, Ada");
         assert_eq!(greet(None), "hello");
+        let mut values = Vec::new();
+        assert_eq!(frame(2, 7, 1_500_000_000, &mut values), 7);
+        assert_eq!(values, vec![1.5, 2.5]);
     }
 }
