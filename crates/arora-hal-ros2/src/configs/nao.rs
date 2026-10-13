@@ -185,19 +185,18 @@ mod tests {
             }
         });
 
-        // Wait for the message to be received
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let msg = loop {
-            if tokio::time::Instant::now() >= deadline {
-                panic!("timeout waiting for JointAnglesWithSpeed message");
-            }
-            match subscriber.async_take().await {
-                Ok((msg, _info)) => break msg,
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+        // `async_take` waits for the next sample, so the timeout is what bounds
+        // the wait; a read error is skipped like a missing sample.
+        let msg = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match subscriber.async_take().await {
+                    Ok((msg, _info)) => break msg,
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 }
             }
-        };
+        })
+        .await
+        .expect("timeout waiting for JointAnglesWithSpeed message");
 
         println!("Received JointAnglesWithSpeed message: {:?}", msg);
 
