@@ -36,7 +36,7 @@ This document gives the full design of Stage 1. It gives an outline of Stages 2 
 | **Scoped name** | The address of a published asset, for example `@quori/quori`. |
 | **Range** | A semver range, for example `^1.0.0`. |
 | **Resolve** | To select the release that a range refers to. |
-| **`ResolvedRef`** | The result of resolve: `{version, releaseId, artifactKey, contentHash}`. Studio stores the same shape in `project.resolved`. |
+| **`ResolvedRef`** | The result of resolve: `{version, releaseId, artifactKey, contentHash, resolvedAt}`. Studio stores the same shape in `project.resolved`. |
 | **Private model** | A published model that has no public audience. Its `publicRole` is null. |
 | **Rung** | An access level in Studio: viewer, editor, admin or owner. |
 
@@ -90,6 +90,7 @@ Each decision has its reason.
    - A public release at an exact version, verified by its hash, is reproducible. It changes only when someone changes the pin.
    - A build never gets a private model, with any identity, because licensed meshes must not be in build output.
    - A build never resolves a range, because the result would depend on the time of the build.
+   - Only a bespoke HAL that targets specific hardware, for example `arora-hal-naoqi`, uses a build pin. A generic HAL, for example `arora-hal-ros2`, names no robot. Its device resolves the model at run time.
 3. **A person or an organization owns a device, as with a project. A device is never an organization member**. Membership would give the device all members-only assets and organization projects. It would also give the device the right to create resources in the organization.
 4. **A device can get exactly the assets that a project with the same owner can use** (STUDIO-312).
    - A device that an organization owns gets public assets, assets that the organization owns, and assets granted to the organization.
@@ -99,10 +100,15 @@ Each decision has its reason.
 6. **The compatibility check compares only `family`**. Studio uses the same rule to offer a device for a binding.
 7. **The HAL config names the model of the device**. The model stays with the joint map of the HAL, which depends on it.
 8. **A device encrypts private models in its device directory**.
-9. **The resolver is a new crate. It is the first part of the unified registry**. It does not use the current `ReadableRegistry`. The registry merge replaces `RecordType` and identity by UUID or folder path. The merged registry uses the Studio v2 shape and terms. The resolver becomes part of `arora-registry` when the registry covers all asset types.
+9. **The resolver is a new crate, `arora-index`. It is the first part of the unified registry**. It does not use the current `ReadableRegistry`. The registry merge replaces `RecordType` and identity by UUID or folder path. The merged registry uses the Studio v2 shape and terms. The resolver becomes part of `arora-registry` when the registry covers all asset types.
 10. **An operator can grant a private model to one device, but only when one account owns both**. This applies until Stage 2 lets a device use the entitlement of its owner.
 11. **The Studio account of a developer can download models on a development machine, never on a deployed device**. It reads exactly what that person can read, with Studio unchanged. A deployed device acts for its owner (decision 4), not for a person.
-12. **Resolution gives the default model. An explicit assignment over the bridge overrides it**. A client sometimes must set a specific model or config on one device, deterministically. Resolution cannot express that.
+12. **Resolution gives the default model**. A client sometimes must set a specific model or config on one device, deterministically. Resolution cannot express that. How a client does it is open (2.5).
+13. **The device runtime resolves the model, not the HAL**. The runtime gives each HAL component the bytes, a `ModelReference` and whether the component can serve them. A HAL never reads a model from Studio. Thus one cache and one token source serve all components. The models stay fixed for the life of the device ([HAL components](proposal-hal-components.md)).
+14. **A pin names the asset as it is now**. A transfer makes the old name an alias of the same asset. The requested name is the key of the pin in `resolved.json`, as the name of a dependency is the key in `project.resolved`.
+15. **Only a definitive answer clears a pin**: a 404, or a 403 to a request with a token. A 403 to a request without a token means "not found, or not public", so it clears nothing. Only a network error lets a device use its last pin. Clearing deletes the pin, and the sealed blob of the pin when no other pin uses it. Thus a later start without a connection cannot use that model.
+16. **Release selection is the same as in Studio**. For the same releases and the same range, a device and a project select the same release. If the selected release is broken, resolution fails. It does not use an older release.
+17. **A person approves a code on the Studio website to give a CLI its own session, or to enroll a device**. The session comes from a custom token. A device with no screen or terminal uses a pre-issued enrollment token.
 
 ## Stage 1: quick fix
 
@@ -155,18 +161,19 @@ Model resolution from Studio, the device-directory cache, encryption, `published
 
 The parts are independent, except where this table names a dependency:
 
-| Part | Needs a Studio change | Needs the device credential | Status |
-|---|---|---|---|
-| 2.1 Enrollment and a device credential | Yes | It supplies the credential | Agreed |
-| 2.2 Model resolution in a Semio client | No | No | Agreed |
-| 2.3 A device uses the entitlement of its owner | Yes | Yes | Agreed |
-| 2.4 Devices that an organization owns | Yes | No | Agreed |
-| 2.5 Explicit assignment over the bridge | Only for Studio to send it | No | Agreed |
-| 2.6 Robot support as data | No | No | Proposed, not agreed |
+| Part | Needs a Studio change | Needs the device credential | Status | Tracked in |
+|---|---|---|---|---|
+| 2.1 Enrollment and a device credential | Yes | It supplies the credential | Agreed | STUDIO-284, ARORA-165, STUDIO-366 |
+| 2.2 Model resolution in a Semio client | No | No | Agreed | ARORA-164, ARORA-172 |
+| 2.3 A device uses the entitlement of its owner | Yes | Yes | Agreed | STUDIO-365 |
+| 2.4 Devices that an organization owns | Yes | No | Agreed | STUDIO-365, STUDIO-366 |
+| 2.5 Explicit assignment over the bridge | Only for Studio to send it | No | Open (see 2.5) | — |
+| 2.6 Robot support as data | No | No | Proposed, not agreed | ARORA-172 |
 
 ### 2.1 Enrollment and a device credential
 
 - A person approves the device and selects its owner, a person or an organization. Studio checks the standing of that person for that owner. A usual pattern is "enter this code on the website", the OAuth device authorization grant.
+- Two paths give the same device credential. A person approves a code that the device shows, or the device uses a pre-issued enrollment token. A person makes the token in Studio for an owner. The token expires. It enrolls one device, or a set number of devices.
 - The server creates the device document. The device does not write its own document.
 - The device gets a credential that marks it as a device. The rules can then limit a device to device paths and to content reads. Studio can revoke the credential.
 - This part replaces the device account and self-registration. It changes the sign-in and the registration of the bridge client. It keeps the bridge and its connection.
@@ -178,7 +185,7 @@ The parts are independent, except where this table names a dependency:
 
 A Semio client resolves and downloads models from Studio. It runs in three places: on a device at start, in a build script, and on a developer's machine. Public models and the Studio account of a developer need no Studio change, so this part does not wait for 2.1. Only the device-credential identity comes later, with 2.1 and 2.3.
 
-- **The resolver crate** changes a reference `{scopedName, range}` into verified bytes:
+- **The resolver crate** (`arora-index`) changes a reference `{scopedName, range}` into verified bytes:
   - It resolves with the rules of the Studio function `resolveDependency`. A version is `MAJOR.MINOR.PATCH` and 1.0.0 or higher. Deprecated releases and releases without a `primary` content hash are not candidates. The newest candidate in the range is the result.
   - It downloads the artifact and verifies the SHA-256 hash against `contentHash`.
   - It has two backends: Studio v2, and a local file.
@@ -186,27 +193,28 @@ A Semio client resolves and downloads models from Studio. It runs in three place
   - It does not depend on the asset type. A model is its first use.
 - **Identities**. The resolver uses one of three identities:
   - No token: public models only.
-  - The Studio account of a developer, on a development machine: the models that this person can read. Signing a person in from a CLI is part of this work.
+  - The Studio account of a developer, on a development machine: the models that this person can read. The CLI gets its own session through the code approval of 2.1, not the session of the browser.
   - The device credential, after 2.1: the models that the owner of the device can use (2.3).
 
   A deployed device never uses the account of a person.
-- **Build time**. A build script can depend on a public model at an exact version, `{scopedName, version}`, with its `contentHash`. The resolver downloads the model, verifies the hash, and caches the model by hash. Later builds then work offline. A build script never resolves a range, and it never downloads a private model.
+- **Build time**. A build script can depend on a public model at an exact version, `{scopedName, version}`, with its `contentHash`. Only a bespoke HAL does this (decision 2). The pins are in `[package.metadata.arora.models]` in `Cargo.toml`. The resolver downloads the model, verifies the hash, and caches the model by hash. Later builds then work offline. A build script never resolves a range, and it never downloads a private model.
 - **The device directory** keeps the result of resolution at run time:
 
   ```text
   <device dir>/assets/
-  ├── blobs/<contentHash>   public bytes as downloaded, private bytes encrypted
-  ├── key                   key for private blobs, readable by the OS user of the device only
-  └── resolved.json         scopedName → ResolvedRef, the same shape as project.resolved
+  ├── blobs/<contentHash>          public bytes as downloaded
+  ├── blobs/<contentHash>.sealed   private bytes, encrypted
+  ├── key                          key for sealed blobs, readable by the OS user of the device only
+  └── resolved.json                requested scopedName → pin
   ```
 
-  - The device resolves again at each start when it can connect. If it cannot connect, it uses the `ResolvedRef` in `resolved.json`. An explicit assignment (2.5) takes precedence over resolution.
-  - `resolved.json` is a map, not one model slot.
+  - The device resolves again at each start. If a network error stops it, it uses the pin in `resolved.json`. It uses the pin only if the pin has the requested asset type and a version in the requested range. A definitive answer clears the pin (decision 15).
+  - `resolved.json` is a map, not one model slot. Each entry has the fields of `project.resolved`, and five more for an offline start: `scopedName`, `publishedAssetId`, `assetType`, `family` and `private`.
   - The device encrypts private bytes with the scheme of its refresh token (XSalsa20-Poly1305, a key file, permissions for the OS user only). This protects a copy of the cache. It does not protect against a person who controls the OS account.
   - The device decrypts private bytes into memory and gives them to the HAL as bytes.
-- **The HAL config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override.
+- **The HAL config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override. The resolver reads the local file through its local-file backend, so each model reaches the HAL in the same way.
 - **Family check:** the device refuses a release when its `family` is different from `model_family`. It uses a release without `family` and logs a warning. Registration takes its family from the HAL config.
-- **No private model through the bridge:** a device never serves a private model through `HalAssets::model_glb`. The bridge router has no transport-level authentication. No Studio code calls `retrieveGlb` in the bridge client.
+- **No private model through the bridge:** a device serves the bytes of a model only when the model is servable. A private model is never servable ([HAL components](proposal-hal-components.md) 3.4), because anything that can call the device receives what it serves. The enforcing bridge router authenticates devices and people. The open router has no transport-level authentication.
 - **The joint map of the HAL** goes behind one interface. An explicit assignment or a binding (2.5) can replace it.
 - **Registration** writes `publishedAssetReference`. Both device shapes accept this field today.
 - **A device of several HAL components** has one model per component, each with its mount ([HAL components](proposal-hal-components.md)). Registration then writes one reference per component, and Studio's device document holds a list of them instead of one.
@@ -220,6 +228,13 @@ Decision 4 needs this part. It depends on 2.1, because the rules must know that 
 Enrollment under an organization needs the device list to find such devices. The list rule for devices matches only a direct grant to the caller (`uid() in grants`). A device that an organization owns has no owner grant to a person. Thus the owners and admins of the organization do not see it. This needs a rules change.
 
 ### 2.5 Explicit assignment over the bridge
+
+**Open.** The [HAL components](proposal-hal-components.md) design fixes the models of a device for the life of the device. That leaves two options:
+
+- An assignment takes effect at the next start.
+- Studio binds the keys on its side (Studio on Arora), and the device keeps its joint map.
+
+This part needs a decision before work starts. The rest of this section describes an assignment that changes the model while the device runs, which the HAL components design does not allow.
 
 A client tells one device which model and which config to use. The command goes over the bridge, as a module function of the device. The assignment names the model, as an exact release or as bytes that the client sends, and the config. It overrides resolution until a client clears it. The device keeps the assignment in its device directory, so a restart keeps it. Resolution gives only the default model.
 
