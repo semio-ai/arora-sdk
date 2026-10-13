@@ -357,10 +357,10 @@ build step skips.
 
 ### CI builds release
 
-`.github/workflows/continuous.yml` runs `cargo build --workspace --release`
-and `cargo test --all --release` for both the host workspace and the
-wasm32-wasip1 guest builds. The behavior-tree tests' profile selection picks
-up `release` automatically. `arora-web`'s `build.rs` reads `PROFILE` so its
+CI tests the default members with `cargo test --release` (LTO off, see
+[the CI section of the architecture](architecture.md#ci)); the tests that read
+the C++ guests from `target/<profile>/modules/` pick `release` from
+`debug_assertions`. `arora-web`'s `build.rs` reads `PROFILE` so its
 `include_bytes!` resolves to the release artefact when wasm-pack is invoked
 with `--release`.
 
