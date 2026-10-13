@@ -1,11 +1,11 @@
-mod support;
+mod fake_studio;
 use arora_index::{
     content_hash, fetch_local, AssetType, Cache, Error, NoToken, ResolutionSource, Resolver,
 };
+use fake_studio::*;
 use serde_json::json;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use support::*;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -325,14 +325,6 @@ async fn malformed_releases_are_skipped_and_deprecation_is_tolerant() {
     wrong_version["fields"]["version"] = json!({"integerValue": "9"});
     let mut bad_artifacts = release("bad-artifacts", "9.0.0");
     bad_artifacts["fields"]["artifacts"] = json!({"stringValue": "bad"});
-    let mut bad_hash = release("bad-hash", "9.0.0");
-    bad_hash["fields"]["artifacts"]["mapValue"]["fields"]["primary"]["mapValue"]["fields"]
-        ["contentHash"] = json!({"stringValue": "bad"});
-    let mut bad_storage = release("bad-storage", "9.0.0");
-    bad_storage["fields"]["artifacts"]["mapValue"]["fields"]["primary"]["mapValue"]["fields"]
-        ["storage"]["mapValue"]["fields"]["fileBucket"] = json!({"stringValue": ""});
-    let mut bad_family = release("bad-family", "9.0.0");
-    bad_family["fields"]["family"] = json!({"integerValue": "42"});
     for deprecated in [
         None,
         Some(json!({"nullValue": null})),
@@ -350,9 +342,6 @@ async fn malformed_releases_are_skipped_and_deprecation_is_tolerant() {
                 no_version.clone(),
                 wrong_version.clone(),
                 bad_artifacts.clone(),
-                bad_hash.clone(),
-                bad_storage.clone(),
-                bad_family.clone(),
                 release("invalid", "invalid"),
                 chosen,
                 release("old", "1.0.0"),
@@ -673,4 +662,152 @@ async fn response_caps_apply_to_firestore_and_storage_and_do_not_fallback() {
         .build()
         .unwrap();
     assert_eq!(resolver.fetch(&pin()).await.unwrap().bytes, BYTES);
+}
+
+#[tokio::test]
+async fn selected_release_errors_never_choose_an_older_release() {
+    let server = MockServer::start().await;
+    for (field, value) in [
+        ("contentHash", Some(json!({"stringValue": "bad"}))),
+        ("contentHash", Some(json!({"stringValue": "A".repeat(64)}))),
+        ("storage", None),
+        ("storage", Some(json!({"stringValue": "wrong type"}))),
+        ("storage", Some(json!({"mapValue": {"fields": {}}}))),
+        (
+            "storage",
+            Some(json!({"mapValue": {"fields": {"fileBucket": {"stringValue": ""}}}})),
+        ),
+        (
+            "storage",
+            Some(json!({"mapValue": {"fields": {"fileBucket": {"stringValue": "."}}}})),
+        ),
+        (
+            "storage",
+            Some(json!({"mapValue": {"fields": {"fileBucket": {"stringValue": ".."}}}})),
+        ),
+    ] {
+        server.reset().await;
+        let mut newer = release("newer", "2.0.0");
+        let primary = newer["fields"]["artifacts"]["mapValue"]["fields"]["primary"]["mapValue"]
+            ["fields"]
+            .as_object_mut()
+            .unwrap();
+        match value {
+            Some(value) => {
+                primary.insert(field.into(), value);
+            }
+            None => {
+                primary.remove(field);
+            }
+        }
+        listing(&server, vec![release("older", "1.0.0"), newer]).await;
+        let error = Resolver::new(config(&server), NoToken)
+            .unwrap()
+            .resolve(NAME, "*", AssetType::Model)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::UnexpectedResponse { .. }));
+        assert!(
+            error.to_string().contains("newer") && error.to_string().contains(NAME),
+            "{error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn non_string_family_warns_and_keeps_the_newest_release() {
+    capture_warnings();
+    let server = MockServer::start().await;
+    for (i, family) in [
+        json!({"integerValue": "42"}),
+        json!({"nullValue": null}),
+        json!({"booleanValue": false}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        server.reset().await;
+        let id = format!("family-not-string-{i}");
+        let mut newer = release(&id, "2.0.0");
+        newer["fields"]["family"] = family;
+        listing(&server, vec![release("older", "1.0.0"), newer]).await;
+        let pin = Resolver::new(config(&server), NoToken)
+            .unwrap()
+            .resolve(NAME, "*", AssetType::Model)
+            .await
+            .unwrap();
+        assert_eq!(pin.release_id, id);
+        assert_eq!(pin.family, None);
+        assert!(WARNINGS
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| m.contains(&id) && m.contains("family") && m.contains("absent")));
+    }
+}
+
+#[tokio::test]
+async fn empty_or_non_string_hashes_are_not_candidates() {
+    let server = MockServer::start().await;
+    let mut releases = vec![];
+    for hash in [json!({"stringValue": ""}), json!({"integerValue": "123"})] {
+        let mut newer = release("no-hash", "2.0.0");
+        newer["fields"]["artifacts"]["mapValue"]["fields"]["primary"]["mapValue"]["fields"]
+            ["contentHash"] = hash;
+        releases.push(newer);
+    }
+    releases.push(release("valid", "1.0.0"));
+    listing(&server, releases).await;
+    let pin = Resolver::new(config(&server), NoToken)
+        .unwrap()
+        .resolve(NAME, "*", AssetType::Model)
+        .await
+        .unwrap();
+    assert_eq!(pin.release_id, "valid");
+}
+
+#[tokio::test]
+async fn fetch_rejects_invalid_storage_paths_before_http() {
+    let server = MockServer::start().await;
+    let resolver = Resolver::new(config(&server), NoToken).unwrap();
+    for path in ["", ".", ".."] {
+        let mut pin = pin();
+        pin.storage_path = Some(path.into());
+        let error = resolver.fetch(&pin).await.unwrap_err();
+        assert!(matches!(error, Error::UnexpectedResponse { .. }));
+        assert!(error.to_string().contains(&pin.release_id));
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn local_hashing_runs_off_the_executor() {
+    capture_warnings();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model");
+    let bytes = vec![42; 1231];
+    fs::write(&path, &bytes).unwrap();
+    let since = HASH_THREADS.lock().unwrap().len();
+    let fetched = fetch_local(path).await.unwrap();
+    assert_eq!(fetched.bytes, bytes);
+    assert_hash_off_executor(bytes.len(), since);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn storage_verification_runs_off_the_executor() {
+    capture_warnings();
+    let server = MockServer::start().await;
+    let bytes = vec![43; 1237];
+    storage(&server, &bytes, 200).await;
+    let mut pin = pin();
+    pin.content_hash = content_hash(&bytes);
+    let since = HASH_THREADS.lock().unwrap().len();
+    let fetched = Resolver::new(config(&server), NoToken)
+        .unwrap()
+        .fetch(&pin)
+        .await
+        .unwrap();
+    assert_eq!(fetched.bytes, bytes);
+    assert_hash_off_executor(bytes.len(), since);
 }

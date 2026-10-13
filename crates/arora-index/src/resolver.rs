@@ -189,7 +189,15 @@ impl<T: TokenSource> Resolver<T> {
             }
         }
         let (release, version) = select(&releases, scoped_name, range, &parsed)?;
-        let fields = Fields::document(release, scoped_name, "release selection")?;
+        let release_id = release["name"]
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_owned();
+        let step = format!("release {release_id}");
+        let fields = Fields::document(release, scoped_name, &step)?;
         let primary = fields.map("artifacts")?.unwrap().map("primary")?.unwrap();
         let hash = primary.string("contentHash")?;
         if !crate::valid_hash(hash) {
@@ -199,16 +207,14 @@ impl<T: TokenSource> Resolver<T> {
             .map("storage")?
             .ok_or_else(|| primary.error("missing storage"))?;
         let storage_path = storage.string("fileBucket")?.to_owned();
-        if storage_path.is_empty() {
-            return Err(storage.error("fileBucket is empty"));
-        }
-        let release_id = release
-            .get("name")
-            .and_then(Value::as_str)
-            .and_then(|s| s.rsplit('/').next())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| fields.error("missing document name"))?
-            .to_owned();
+        validate_storage_path(&storage_path, scoped_name, &step)?;
+        let family = fields.fields.get("family").and_then(|value| {
+            let family = value.get("stringValue").and_then(Value::as_str);
+            if family.is_none() {
+                log::warn!(target: "arora-assets", "{scoped_name}: {step}: family must be a string; treating family as absent");
+            }
+            family.map(str::to_owned)
+        });
         Ok(ResolvedRef {
             scoped_name: current_name,
             published_asset_id: id.into(),
@@ -218,7 +224,7 @@ impl<T: TokenSource> Resolver<T> {
             content_hash: hash.into(),
             storage_path: Some(storage_path),
             asset_type: expected_type,
-            family: fields.optional_string("family")?.map(str::to_owned),
+            family,
             private,
             resolved_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -272,9 +278,16 @@ impl<T: TokenSource> Resolver<T> {
                     _ => Err(e),
                 }
             }
-            Err(e @ (Error::NotFound { .. } | Error::Refused { .. })) => {
+            Err(
+                e @ (Error::NotFound {
+                    http_status: 404, ..
+                }
+                | Error::Refused { .. }),
+            ) => {
                 let name = scoped_name.to_owned();
-                cache.blocking(move |cache| cache.remove_pin(&name)).await?;
+                if let Err(error) = cache.blocking(move |cache| cache.remove_pin(&name)).await {
+                    log::warn!(target: "arora-assets", "{scoped_name}: could not clear resolved pin: {error}");
+                }
                 Err(e)
             }
             Err(e) => Err(e),
@@ -289,6 +302,11 @@ impl<T: TokenSource> Resolver<T> {
                 resolved.scoped_name, resolved.content_hash
             ))
         })?;
+        validate_storage_path(
+            storage_path,
+            &resolved.scoped_name,
+            &format!("release {}", resolved.release_id),
+        )?;
         let mut url = endpoint(
             &self.config.storage_url,
             &["v0", "b", &self.config.storage_bucket, "o", storage_path],
@@ -297,12 +315,16 @@ impl<T: TokenSource> Resolver<T> {
         let bytes = self
             .read(&resolved.scoped_name, "Storage bytes", url, true)
             .await?;
-        verify(&resolved.scoped_name, &resolved.content_hash, &bytes)?;
-        Ok(FetchedAsset {
-            bytes,
-            content_hash: resolved.content_hash.clone(),
-            resolved: Some(resolved.clone()),
+        let resolved = resolved.clone();
+        crate::blocking(move || {
+            verify(&resolved.scoped_name, &resolved.content_hash, &bytes)?;
+            Ok(FetchedAsset {
+                bytes,
+                content_hash: resolved.content_hash.clone(),
+                resolved: Some(resolved),
+            })
         })
+        .await
     }
 
     fn firestore(&self, path: &[&str]) -> Result<Url, Error> {
@@ -371,7 +393,8 @@ impl<T: TokenSource> Resolver<T> {
             return Err(Error::NotFound {
                 scoped_name: name.into(),
                 step: step.into(),
-                cause: if token.is_none() {
+                http_status: status.as_u16(),
+                cause: if status.as_u16() == 403 {
                     "not found, or not public"
                 } else {
                     "not found"
@@ -520,14 +543,9 @@ fn select<'a>(
         let usable = (|| {
             let primary = fields.map("artifacts").ok()??.map("primary").ok()??;
             let hash = primary.string("contentHash").ok()?;
-            if !crate::valid_hash(hash) {
+            if hash.is_empty() {
                 return None;
             }
-            let storage = primary.map("storage").ok()??;
-            if storage.string("fileBucket").ok()?.is_empty() {
-                return None;
-            }
-            fields.optional_string("family").ok()?;
             Some(())
         })();
         if usable.is_some() && newest.is_none_or(|(_, kept)| version > kept) {
@@ -540,7 +558,7 @@ fn select<'a>(
     })
 }
 
-fn validate_name(name: &str) -> Result<(), Error> {
+pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     let valid = name
         .strip_prefix('@')
         .and_then(|s| s.split_once('/'))
@@ -552,6 +570,17 @@ fn validate_name(name: &str) -> Result<(), Error> {
         return Err(Error::InvalidName {
             scoped_name: name.into(),
         });
+    }
+    Ok(())
+}
+
+fn validate_storage_path(path: &str, name: &str, step: &str) -> Result<(), Error> {
+    if path.is_empty() || matches!(path, "." | "..") {
+        return Err(unexpected(
+            name,
+            step,
+            &format!("invalid storage path {path:?}"),
+        ));
     }
     Ok(())
 }

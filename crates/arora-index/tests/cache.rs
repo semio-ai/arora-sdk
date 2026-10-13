@@ -1,9 +1,9 @@
-mod support;
+mod fake_studio;
 use arora_index::{content_hash, AssetType, Cache, Error, NoToken, Resolver};
+use fake_studio::*;
 use serde_json::{json, Value};
 use std::fs;
 use std::time::Duration;
-use support::*;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -230,7 +230,7 @@ fn pins_recover_valid_entries_and_discard_bad_files() {
     cache.save_pin("@test/new", &pin()).unwrap();
     let map: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert!(map.get(NAME).is_some() && map.get("@test/new").is_some());
-    assert!(map.get("@test/bad").is_none());
+    assert_eq!(map["@test/bad"], json!({"version": 123}));
     for bytes in [b"{truncated".as_slice(), b"[]"] {
         fs::write(&path, bytes).unwrap();
         assert!(cache.last_pin(NAME).unwrap().is_none());
@@ -338,7 +338,7 @@ async fn definitive_no_clears_only_its_pin_and_unreferenced_sealed_blobs() {
         assert!(cache.last_pin(NAME).unwrap().is_none());
         assert!(cache.last_pin("@test/remaining").unwrap().is_some());
         assert!(cache.read(&pin.content_hash, true).unwrap().is_some());
-        assert!(!dir
+        assert!(dir
             .path()
             .join("blobs")
             .join(format!("{orphan}.sealed"))
@@ -385,7 +385,7 @@ async fn a_busy_cache_lock_does_not_block_the_async_executor() {
         resolved: None,
     };
     let (stored, ()) = tokio::join!(biased;
-        cache.store_async(&asset),
+        cache.store_async(asset),
         async { let _ = release_tx.send(()); },
     );
     stored.unwrap();
@@ -398,6 +398,7 @@ async fn a_busy_cache_lock_does_not_block_the_async_executor() {
 #[cfg(unix)]
 #[test]
 fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
+    capture_warnings();
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path()).unwrap();
@@ -417,6 +418,9 @@ fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
     fs::set_permissions(&blobs, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(public.unwrap().is_none());
     assert!(private.unwrap().is_none());
+    assert!(WARNINGS.0.lock().unwrap().iter().any(
+        |m| m.contains("could not remove corrupt blob") && m.contains(blobs.to_str().unwrap())
+    ));
 }
 
 #[test]
@@ -446,7 +450,362 @@ async fn async_cache_helpers_preserve_private_storage() {
         bytes: BYTES.to_vec(),
         resolved: Some(pin.clone()),
     };
-    cache.store_async(&asset).await.unwrap();
+    cache.store_async(asset).await.unwrap();
     assert_eq!(cache.fetch_async(&pin).await.unwrap().unwrap().bytes, BYTES);
     assert!(!cache.public_path(&pin.content_hash).unwrap().exists());
+}
+
+#[test]
+fn pin_updates_preserve_raw_entries_and_only_remove_the_named_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let pin = pin();
+    let path = dir.path().join("resolved.json");
+    let raw = format!(
+        r#"{{ "contentHash" : "{}", "unknown": 1e2, "version": false }}"#,
+        pin.content_hash
+    );
+    fs::write(
+        &path,
+        format!(
+            r#"{{"{NAME}": {}, "@test/raw": {raw}}}"#,
+            serde_json::to_string(&pin).unwrap()
+        ),
+    )
+    .unwrap();
+    cache.store(&pin.content_hash, BYTES, true).unwrap();
+    let pending = content_hash(b"stored before pin");
+    cache.store(&pending, b"stored before pin", true).unwrap();
+    cache.save_pin("@test/new", &pin).unwrap();
+    assert!(fs::read_to_string(&path).unwrap().contains(&raw));
+    cache.remove_pin("@test/new").unwrap();
+    cache.remove_pin(NAME).unwrap();
+    assert!(cache.last_pin(NAME).unwrap().is_none());
+    assert!(fs::read_to_string(&path).unwrap().contains(&raw));
+    assert_eq!(cache.read(&pin.content_hash, true).unwrap().unwrap(), BYTES);
+    assert_eq!(
+        cache.read(&pending, true).unwrap().unwrap(),
+        b"stored before pin"
+    );
+    let before = fs::read(&path).unwrap();
+    for absent in ["@test/missing", "@test/raw"] {
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&path).unwrap().ino()
+        };
+        cache.remove_pin(absent).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_pins_are_never_overwritten_and_warn() {
+    use std::os::unix::fs::PermissionsExt;
+    capture_warnings();
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let path = dir.path().join("resolved.json");
+    cache.save_pin(NAME, &pin()).unwrap();
+    let before = fs::read(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    let read = cache.last_pin(NAME);
+    let saved = cache.save_pin("@test/new", &pin());
+    let removed = cache.remove_pin(NAME);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(read.unwrap().is_none());
+    saved.unwrap();
+    removed.unwrap();
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(WARNINGS
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|m| m.contains("could not save resolved pin") && m.contains(path.to_str().unwrap())));
+    assert!(WARNINGS
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|m| m.contains("could not clear resolved pin") && m.contains(path.to_str().unwrap())));
+}
+
+#[tokio::test]
+async fn only_definitive_statuses_clear_pins() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    for status in [403, 404] {
+        server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        cache.save_pin(NAME, &pin()).unwrap();
+        let error = Resolver::new(config(&server), NoToken)
+            .unwrap()
+            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::NotFound { http_status, .. } if http_status == status));
+        assert_eq!(cache.last_pin(NAME).unwrap().is_some(), status == 403);
+        cache.save_pin(NAME, &pin()).unwrap();
+        let error = Resolver::new(config(&server), Token)
+            .unwrap()
+            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::NotFound { .. } | Error::Refused { .. }
+        ));
+        assert!(cache.last_pin(NAME).unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn cleanup_failures_warn_and_preserve_the_definitive_error() {
+    capture_warnings();
+    let server = MockServer::start().await;
+    for status in [403, 404] {
+        server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        for obstacle in [".lock", "resolved.json", "blob"] {
+            let dir = tempfile::tempdir().unwrap();
+            let cache = Cache::new(dir.path()).unwrap();
+            let pin = pin();
+            cache.save_pin(NAME, &pin).unwrap();
+            let path = if obstacle == "blob" {
+                dir.path()
+                    .join("blobs")
+                    .join(format!("{}.sealed", pin.content_hash))
+            } else {
+                let path = dir.path().join(obstacle);
+                fs::remove_file(&path).unwrap();
+                path
+            };
+            fs::create_dir(&path).unwrap();
+            let error = Resolver::new(config(&server), Token)
+                .unwrap()
+                .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, Error::NotFound { .. } | Error::Refused { .. }),
+                "{error}"
+            );
+            cache.remove_pin(NAME).unwrap();
+            assert!(WARNINGS
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|m| m.contains("could not clear resolved pin")
+                    && m.contains(path.to_str().unwrap())));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn corrupt_read_rechecks_a_concurrent_replacement_under_the_lock() {
+    use std::io::Write;
+    for private in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        let hash = content_hash(BYTES);
+        cache.store(&hash, BYTES, private).unwrap();
+        let path = dir.path().join("blobs").join(if private {
+            format!("{hash}.sealed")
+        } else {
+            hash.clone()
+        });
+        let replacement = dir.path().join("replacement");
+        fs::rename(&path, &replacement).unwrap();
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.path().join(".lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let reader = cache.clone();
+        let reader_hash = hash.clone();
+        let thread = std::thread::spawn(move || {
+            done_tx.send(reader.read(&reader_hash, private)).unwrap();
+        });
+        // Opening the FIFO synchronizes with the reader's original file descriptor.
+        let mut pipe = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        pipe.write_all(b"corrupt").unwrap();
+        drop(pipe);
+        let early = done_rx.recv_timeout(Duration::from_millis(100));
+        fs::rename(&replacement, &path).unwrap();
+        drop(lock);
+        assert!(
+            early.is_err(),
+            "corrupt cleanup must wait for the write lock"
+        );
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap()
+            .is_none());
+        thread.join().unwrap();
+        assert_eq!(cache.read(&hash, private).unwrap().unwrap(), BYTES);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn busy_pin_save_and_clear_leave_the_executor_free() {
+    let server = MockServer::start().await;
+    for clearing in [false, true] {
+        server.reset().await;
+        if clearing {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&server)
+                .await;
+        } else {
+            chain(&server, false).await;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path()).unwrap();
+        cache.save_pin(NAME, &pin()).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.path().join(".lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release = std::thread::spawn(move || {
+            let executor_ran = release_rx.recv_timeout(Duration::from_secs(3)).is_ok();
+            drop(lock);
+            executor_ran
+        });
+        let resolver = Resolver::new(config(&server), Token).unwrap();
+        let (result, ()) = tokio::join!(biased;
+            resolver.resolve_with_fallback(NAME, "*", AssetType::Model, &cache),
+            async { tokio::time::sleep(Duration::from_millis(100)).await; let _ = release_tx.send(()); },
+        );
+        assert_eq!(result.is_err(), clearing);
+        assert!(
+            release.join().unwrap(),
+            "pin writes must not block the executor"
+        );
+        assert_eq!(cache.last_pin(NAME).unwrap().is_none(), clearing);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn store_verification_runs_off_the_executor_with_shared_bytes() {
+    capture_warnings();
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let bytes = vec![44; 1249];
+    let asset = std::sync::Arc::new(arora_index::FetchedAsset {
+        content_hash: content_hash(&bytes),
+        bytes,
+        resolved: None,
+    });
+    let since = HASH_THREADS.lock().unwrap().len();
+    cache.store_async(asset.clone()).await.unwrap();
+    assert_hash_off_executor(asset.bytes.len(), since);
+    assert_eq!(
+        cache.read(&asset.content_hash, false).unwrap().unwrap(),
+        asset.bytes
+    );
+}
+
+mod allocations {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static MIN_SIZE: Cell<usize> = const { Cell::new(0) };
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct Allocator;
+    #[global_allocator]
+    static ALLOCATOR: Allocator = Allocator;
+
+    fn record(size: usize) {
+        let _ = MIN_SIZE.try_with(|min| {
+            if min.get() != 0 && size >= min.get() {
+                let _ = COUNT.try_with(|count| count.set(count.get() + 1));
+            }
+        });
+    }
+
+    // Observe allocations on the polling thread; System owns every allocation.
+    unsafe impl GlobalAlloc for Allocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            record(size);
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    pub async fn count_large_allocations<F: std::future::Future>(
+        future: F,
+        minimum: usize,
+    ) -> (F::Output, usize) {
+        let mut future = std::pin::pin!(future);
+        COUNT.set(0);
+        let result = std::future::poll_fn(|cx| {
+            MIN_SIZE.set(minimum);
+            let result = future.as_mut().poll(cx);
+            MIN_SIZE.set(0);
+            result
+        })
+        .await;
+        (result, COUNT.get())
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_store_does_not_copy_the_body_on_the_executor() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let bytes = vec![45; 1024 * 1024];
+    let asset = std::sync::Arc::new(arora_index::FetchedAsset {
+        content_hash: content_hash(&bytes),
+        bytes,
+        resolved: None,
+    });
+    let (result, allocations) =
+        allocations::count_large_allocations(cache.store_async(asset.clone()), asset.bytes.len())
+            .await;
+    result.unwrap();
+    assert_eq!(allocations, 0, "the executor must not allocate a body copy");
+    assert_eq!(
+        cache.read(&asset.content_hash, false).unwrap().unwrap(),
+        asset.bytes
+    );
 }

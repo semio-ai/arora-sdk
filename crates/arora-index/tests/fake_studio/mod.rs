@@ -1,3 +1,7 @@
+//! A fake Studio for the tests: the name entries, published-asset documents,
+//! release listings and Storage objects the resolver reads, served by
+//! `wiremock`, plus the pins, token source and warning capture the tests share.
+
 #![allow(dead_code)]
 use arora_index::{content_hash, AssetType, Error, ResolvedRef, StudioConfig, TokenSource};
 use async_trait::async_trait;
@@ -113,13 +117,23 @@ pub async fn listing(server: &MockServer, documents: Vec<Value>) {
 }
 
 pub struct Warnings(pub std::sync::Mutex<Vec<String>>);
+pub static HASH_THREADS: std::sync::Mutex<Vec<(String, std::thread::ThreadId)>> =
+    std::sync::Mutex::new(Vec::new());
 pub static WARNINGS: Warnings = Warnings(std::sync::Mutex::new(Vec::new()));
 impl log::Log for Warnings {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
+        metadata.target() == "arora-assets"
     }
     fn log(&self, record: &log::Record<'_>) {
-        self.0.lock().unwrap().push(record.args().to_string());
+        if record.level() <= log::Level::Warn {
+            self.0.lock().unwrap().push(record.args().to_string());
+        }
+        if record.level() == log::Level::Trace && record.target() == "arora-assets" {
+            HASH_THREADS
+                .lock()
+                .unwrap()
+                .push((record.args().to_string(), std::thread::current().id()));
+        }
     }
     fn flush(&self) {}
 }
@@ -127,7 +141,7 @@ pub fn capture_warnings() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         log::set_logger(&WARNINGS).unwrap();
-        log::set_max_level(log::LevelFilter::Warn);
+        log::set_max_level(log::LevelFilter::Trace);
     });
 }
 
@@ -145,4 +159,20 @@ pub fn model_pin(private: bool) -> ResolvedRef {
         private,
         resolved_at: 123,
     }
+}
+
+pub fn assert_hash_off_executor(size: usize, since: usize) {
+    let messages = HASH_THREADS.lock().unwrap();
+    let threads: Vec<_> = messages[since..]
+        .iter()
+        .filter(|(message, _)| message == &format!("computing SHA-256 for {size} bytes"))
+        .map(|(_, thread)| *thread)
+        .collect();
+    assert!(!threads.is_empty(), "hashing must be observed");
+    assert!(
+        threads
+            .iter()
+            .all(|thread| *thread != std::thread::current().id()),
+        "hashing must run off the async executor"
+    );
 }

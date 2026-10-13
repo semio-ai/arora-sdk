@@ -69,9 +69,14 @@ is the object path within the configured bucket.
 
 Versions contain three unsigned integer components, optionally preceded by
 `v`, and must be at least 1.0.0. Selection compares components numerically and
-keeps the first usable release in listing order for ties, replacing it only
-with a strictly newer version. Malformed release fields or versions are
-skipped; only a boolean `true` marks a release deprecated. Listing shapes and
+keeps the first candidate in listing order for ties, replacing it only
+with a strictly newer version. A candidate needs a valid version and a non-empty
+string at `primary.contentHash`; only a boolean `true` marks it deprecated.
+Releases without fields, a valid version, or a primary hash are skipped.
+The selected release must have a 64-digit lowercase hexadecimal hash and a
+storage path other than an empty string, `.` or `..`. Invalid selected fields
+are errors naming that release; they do not select an older release instead.
+A non-string `family` is absent, with a warning. Listing shapes and
 document names are checked separately. Requested names must be `@scope/name`,
 with both parts non-empty, exactly one slash and no colon. Server document ids
 cannot be empty, `.`, `..`, or contain a slash. Ranges are `*`, exact versions, `^X.Y.Z` (before
@@ -92,16 +97,17 @@ The caller chooses a directory with `Cache::new`, usually `<device dir>/assets`:
 └── .lock                        coordination across processes
 ```
 
-`store` verifies bytes before writing. `read` verifies every hit, removing
-corrupt blobs and returning a miss. Public and private reads use distinct
-files. Private bytes use XSalsa20-Poly1305 with a random 24-byte nonce followed
+`store` verifies bytes before writing. `read` verifies every hit. A failed
+verification returns a miss and takes the write lock to re-read and verify the
+file before deleting it, so a concurrent writer's valid replacement is safe.
+Public and private reads use distinct files. Private bytes use XSalsa20-Poly1305 with a random 24-byte nonce followed
 by ciphertext; encryption and decryption take place in memory. The key is
 written completely to a mode-0600 temporary file and published without
 replacing an existing key. An existing key of invalid length is replaced under
-the cache lock with a warning; old ciphertext then becomes a cache miss. Blob and pin updates use
-a temporary file in the same directory and an atomic rename. The lock also
-prevents concurrent pin updates from losing other names. Reads take no lock
-and verified public and private hits work in read-only directories; a corrupt
+the cache lock with a warning; old ciphertext then becomes a cache miss. Blob
+and pin updates use a temporary file in the same directory and an atomic rename.
+The lock also prevents concurrent pin updates from losing other names. Verified
+reads take no lock and public and private hits work in read-only directories; a corrupt
 blob that cannot be removed still returns a miss, with a warning.
 
 `save_pin(requested_name, pin)` and `last_pin(requested_name)` maintain the
@@ -113,24 +119,31 @@ resolution map, including aliases under the name requested. Each entry has
 its verified bytes; a Studio fetch without a storage path reports that the
 bytes must be read from the cache by hash.
 
-Pins are parsed independently. Invalid entries are absent; an unreadable or
-truncated file reads as empty. A save retains every valid entry plus the new
-pin. Failure to save after a live resolve logs a warning and still returns
-the live result. Unreadable pins never replace a network error with a cache error.
+Pins are parsed independently. Invalid entries cannot supply a pin, but saving
+or clearing preserves every untouched entry verbatim as raw JSON. An unreadable
+file reads as empty; writes leave it untouched and warn. A file that can be read
+but is not a JSON object holds no recoverable pins, and the next save replaces
+it. Failure to save after a live resolve logs a warning and still returns the
+live result. Unreadable pins never replace a network error with a cache error.
 
 `resolve_with_fallback(name, range, expected_type, cache)` always tries the
 server first and returns `Resolution { resolved, source }`. `source` is
 `ResolutionSource::Server` or `ResolutionSource::Cache`. Only a network error
 permits a saved pin, and its version and asset type must still match.
-A live `NotFound` or `Refused` removes the requested name's pin and every sealed
-blob that no remaining pin references. Public blobs remain. Cleanup failures
-are surfaced as cache/I/O errors so the caller knows revocation could not be
-persisted; use a writable cache when resolving online.
+A live 404 or authenticated 403 (`Refused`) clears only the requested name's
+parseable pin. Its sealed blob is deleted only if no other raw entry references
+that hash, including entries that cannot supply a pin. An anonymous 403 leaves
+pins intact. An absent or unparsable pin changes nothing; unrelated blobs and
+public blobs remain, including bytes stored before their pin is saved.
+Cleanup failures warn and preserve the original asset error.
 
-The async resolver dispatches cache work through `spawn_blocking`. Direct
-`Cache` methods are synchronous; `fetch_async` and `store_async` run their
-filesystem work off the executor. Resolution does not fetch bytes: choose
-`Resolver::fetch` or `Cache::fetch_async` according to the returned source.
+The async resolver dispatches cache work, including pin saves and clears,
+through `spawn_blocking`. Hashing and verification for Storage and local files
+also run off the executor. Direct `Cache` methods are synchronous; `fetch_async`
+and `store_async` run their filesystem and verification work on blocking workers.
+`store_async` accepts an owned `FetchedAsset` or `Arc<FetchedAsset>`, moving or
+sharing the bytes without copying the body on the executor. Resolution does not
+fetch bytes: choose `Resolver::fetch` or `Cache::fetch_async` according to the returned source.
 Use a separate cache per identity when storing private pins.
 
 ## Build scripts
@@ -159,7 +172,9 @@ The helper emits `cargo:rustc-env=ARORA_MODEL_ROBOT=<absolute path>`, usable as
 digits, `_` and `-`; output names are uppercase with `-` replaced by `_`.
 Colliding output names are an error. Versions must be exact canonical versions
 (no ranges, `v` prefix, whitespace or leading zeroes); a lowercase 64-digit
-hash is mandatory. A download must match both the version and hash. Private
+hash is mandatory. Every entry's scoped name, version and hash is validated
+before any cache lookup or blob is exposed. A download must match both the
+version and hash. Private
 assets are refused. The helper uses a current-thread Tokio runtime and the
 same resolver; call it outside an existing async runtime.
 

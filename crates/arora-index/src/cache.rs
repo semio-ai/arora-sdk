@@ -1,10 +1,12 @@
 use crate::{io, valid_hash, verify, Error, FetchedAsset, ResolvedRef};
 use crypto_secretbox::aead::{Aead, AeadCore, KeyInit, OsRng};
 use crypto_secretbox::{Key, Nonce, XSalsa20Poly1305};
+use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Content-addressed bytes and the last resolution for each requested name.
 #[derive(Clone, Debug)]
@@ -58,6 +60,21 @@ impl Cache {
         let Some(stored) = read_optional(&path)? else {
             return Ok(None);
         };
+        if let Some(bytes) = self.verified_bytes(hash, private, stored)? {
+            return Ok(Some(bytes));
+        }
+        if let Err(error) = self.remove_corrupt(&path, hash, private) {
+            log::warn!(target: "arora-assets", "{}: could not remove corrupt blob: {error}", path.display());
+        }
+        Ok(None)
+    }
+
+    fn verified_bytes(
+        &self,
+        hash: &str,
+        private: bool,
+        stored: Vec<u8>,
+    ) -> Result<Option<Vec<u8>>, Error> {
         let bytes = if private {
             match self.read_key()? {
                 Some(key) if stored.len() >= 24 => XSalsa20Poly1305::new(&key)
@@ -68,17 +85,18 @@ impl Cache {
         } else {
             Some(stored)
         };
-        match bytes {
-            Some(bytes) if verify(hash, hash, &bytes).is_ok() => Ok(Some(bytes)),
-            _ => {
-                if let Err(error) = fs::remove_file(&path) {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        log::warn!(target: "arora-assets", "{}: could not remove corrupt blob: {error}", path.display());
-                    }
-                }
-                Ok(None)
+        Ok(bytes.filter(|bytes| verify(hash, hash, bytes).is_ok()))
+    }
+
+    fn remove_corrupt(&self, path: &Path, hash: &str, private: bool) -> Result<(), Error> {
+        let _lock = self.lock()?;
+        if let Some(stored) = read_optional(path)? {
+            // A writer may have replaced the failed read before this lock was acquired.
+            if self.verified_bytes(hash, private, stored)?.is_none() {
+                remove_optional(path)?;
             }
         }
+        Ok(())
     }
 
     pub fn fetch(&self, pin: &ResolvedRef) -> Result<Option<FetchedAsset>, Error> {
@@ -109,59 +127,75 @@ impl Cache {
     }
 
     pub fn last_pin(&self, requested_name: &str) -> Result<Option<ResolvedRef>, Error> {
-        Ok(self.pins().remove(requested_name))
+        Ok(self.raw_pins().ok().and_then(|mut entries| {
+            let entry = entries.remove(requested_name)?;
+            let mut pin: ResolvedRef = serde_json::from_str(entry.get()).ok()?;
+            pin.storage_path = None;
+            Some(pin)
+        }))
     }
 
     pub fn save_pin(&self, requested_name: &str, pin: &ResolvedRef) -> Result<(), Error> {
         let _lock = self.lock()?;
-        let mut pins = self.pins();
-        pins.insert(requested_name.into(), pin.clone());
+        let mut pins = match self.raw_pins() {
+            Ok(pins) => pins,
+            Err(error) => {
+                log::warn!(target: "arora-assets", "{requested_name}: could not save resolved pin: {error}");
+                return Ok(());
+            }
+        };
+        let mut value = serde_json::to_value(pin).map_err(|e| Error::Cache(e.to_string()))?;
+        value.as_object_mut().unwrap().remove("storagePath");
+        let value =
+            serde_json::value::to_raw_value(&value).map_err(|e| Error::Cache(e.to_string()))?;
+        pins.insert(requested_name.into(), value);
         self.write_pins(&pins)
     }
 
-    /// Remove a revoked name and sealed blobs with no remaining pin.
+    /// Clear only this name and its sealed blob, preserving all other raw entries.
+    /// Cleanup failures warn without failing the call.
     pub fn remove_pin(&self, requested_name: &str) -> Result<(), Error> {
-        let _lock = self.lock()?;
-        let mut pins = self.pins();
-        pins.remove(requested_name);
-        self.write_pins(&pins)?;
-        let blobs = self.dir.join("blobs");
-        for entry in fs::read_dir(&blobs).map_err(|e| io(&blobs, e))? {
-            let entry = entry.map_err(|e| io(&blobs, e))?;
-            let file = entry.file_name();
-            if let Some(hash) = file.to_str().and_then(|s| s.strip_suffix(".sealed")) {
-                if !pins.values().any(|pin| pin.content_hash == hash) {
-                    fs::remove_file(entry.path()).map_err(|e| io(&entry.path(), e))?;
-                }
-            }
+        if let Err(error) = self.clear_pin(requested_name) {
+            log::warn!(target: "arora-assets", "{requested_name}: could not clear resolved pin: {error}");
         }
         Ok(())
     }
 
-    fn write_pins(&self, pins: &BTreeMap<String, ResolvedRef>) -> Result<(), Error> {
-        let mut value = serde_json::to_value(pins).map_err(|e| Error::Cache(e.to_string()))?;
-        for pin in value.as_object_mut().unwrap().values_mut() {
-            pin.as_object_mut().unwrap().remove("storagePath");
+    fn clear_pin(&self, requested_name: &str) -> Result<(), Error> {
+        let _lock = self.lock()?;
+        let mut pins = self.raw_pins()?;
+        let Some(pin) = pins
+            .get(requested_name)
+            .and_then(|raw| serde_json::from_str::<ResolvedRef>(raw.get()).ok())
+        else {
+            return Ok(());
+        };
+        pins.remove(requested_name);
+        self.write_pins(&pins)?;
+        let referenced = pins.values().any(|raw| {
+            serde_json::from_str::<serde_json::Value>(raw.get())
+                .ok()
+                .is_some_and(|value| {
+                    value.get("contentHash").and_then(serde_json::Value::as_str)
+                        == Some(&pin.content_hash)
+                })
+        });
+        if !referenced {
+            remove_optional(&self.blob_path(&pin.content_hash, true)?)?;
         }
-        let bytes = serde_json::to_vec_pretty(&value).map_err(|e| Error::Cache(e.to_string()))?;
+        Ok(())
+    }
+
+    fn write_pins(&self, pins: &BTreeMap<String, Box<RawValue>>) -> Result<(), Error> {
+        let bytes = serde_json::to_vec_pretty(pins).map_err(|e| Error::Cache(e.to_string()))?;
         atomic_write(&self.dir.join("resolved.json"), &bytes)
     }
 
-    fn pins(&self) -> BTreeMap<String, ResolvedRef> {
+    fn raw_pins(&self) -> Result<BTreeMap<String, Box<RawValue>>, Error> {
         let path = self.dir.join("resolved.json");
-        let Some(entries) = fs::read(&path).ok().and_then(|bytes| {
-            serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(&bytes).ok()
-        }) else {
-            return BTreeMap::new();
-        };
-        entries
-            .into_iter()
-            .filter_map(|(name, value)| {
-                let mut pin: ResolvedRef = serde_json::from_value(value).ok()?;
-                pin.storage_path = None;
-                Some((name, pin))
-            })
-            .collect()
+        Ok(read_optional(&path)?
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default())
     }
 
     pub(crate) async fn blocking<R: Send + 'static>(
@@ -179,12 +213,14 @@ impl Cache {
         self.blocking(move |cache| cache.fetch(&pin)).await
     }
 
-    pub async fn store_async(&self, asset: &FetchedAsset) -> Result<(), Error> {
-        let hash = asset.content_hash.clone();
-        let bytes = asset.bytes.clone();
-        let private = asset.resolved.as_ref().is_some_and(|pin| pin.private);
-        self.blocking(move |cache| cache.store(&hash, &bytes, private))
-            .await
+    /// Move owned or shared bytes to a blocking worker without copying the body.
+    pub async fn store_async(&self, asset: impl Into<Arc<FetchedAsset>>) -> Result<(), Error> {
+        let asset = asset.into();
+        self.blocking(move |cache| {
+            let private = asset.resolved.as_ref().is_some_and(|pin| pin.private);
+            cache.store(&asset.content_hash, &asset.bytes, private)
+        })
+        .await
     }
 
     fn read_key(&self) -> Result<Option<Key>, Error> {
@@ -201,6 +237,14 @@ impl Cache {
         }
         let key = XSalsa20Poly1305::generate_key(&mut OsRng);
         publish_key(&path, &key)
+    }
+}
+
+fn remove_optional(path: &Path) -> Result<(), Error> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io(path, e)),
     }
 }
 

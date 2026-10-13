@@ -94,6 +94,7 @@ pub enum Error {
         scoped_name: String,
         step: String,
         cause: String,
+        http_status: u16,
     },
     #[error("{scoped_name}: {step}: access refused (HTTP 403 with a token)")]
     Refused { scoped_name: String, step: String },
@@ -160,6 +161,7 @@ pub(crate) fn io(path: &Path, source: std::io::Error) -> Error {
 
 /// Lowercase hexadecimal SHA-256, the published content identity.
 pub fn content_hash(bytes: &[u8]) -> String {
+    log::trace!(target: "arora-assets", "computing SHA-256 for {} bytes", bytes.len());
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -184,16 +186,27 @@ pub(crate) fn verify(asset: &str, expected: &str, bytes: &[u8]) -> Result<(), Er
 
 /// Read a local override through the same byte container as a published asset.
 pub async fn fetch_local(path: impl AsRef<Path>) -> Result<FetchedAsset, Error> {
-    let path = path.as_ref();
-    let bytes = tokio::fs::read(path).await.map_err(|e| io(path, e))?;
-    Ok(FetchedAsset {
-        content_hash: content_hash(&bytes),
-        bytes,
-        resolved: None,
+    let path = path.as_ref().to_owned();
+    blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|e| io(&path, e))?;
+        Ok(FetchedAsset {
+            content_hash: content_hash(&bytes),
+            bytes,
+            resolved: None,
+        })
     })
+    .await
 }
 
 /// Empty environment values have the same meaning as missing variables.
 pub(crate) fn env_value(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.is_empty())
+}
+
+pub(crate) async fn blocking<R: Send + 'static>(
+    work: impl FnOnce() -> Result<R, Error> + Send + 'static,
+) -> Result<R, Error> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| Error::Cache(e.to_string()))?
 }

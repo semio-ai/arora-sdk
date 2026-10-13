@@ -1,7 +1,7 @@
-mod support;
+mod fake_studio;
 use arora_index::{build, content_hash, Cache};
+use fake_studio::*;
 use std::collections::BTreeMap;
-use support::*;
 use wiremock::MockServer;
 
 fn environment(
@@ -196,4 +196,41 @@ fn online_cache_hit_without_firebase_and_empty_overrides() {
         .canonicalize()
         .unwrap();
     assert!(lines.contains(&format!("cargo:rerun-if-changed={}", path.display())));
+}
+
+#[test]
+fn every_pin_is_validated_before_any_cache_hit() {
+    let dir = tempfile::tempdir().unwrap();
+    let hash = content_hash(BYTES);
+    let cache = Cache::new(dir.path().join("cache")).unwrap();
+    cache.store(&hash, BYTES, false).unwrap();
+    for (name, version, pin_hash, detail) in [
+        ("bad/name", "1.2.3", hash.as_str(), "invalid scoped name"),
+        (NAME, "^1.2.3", hash.as_str(), "exact canonical version"),
+        (NAME, "v1.2.3", hash.as_str(), "exact canonical version"),
+        (NAME, "1.2.3", "BAD", "64 lowercase hex"),
+    ] {
+        let env = environment(dir.path(), None, "1.2.3", &hash);
+        let manifest = dir.path().join("Cargo.toml");
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        text.push_str(&format!("z-invalid = {{ scoped_name = '{name}', version = '{version}', content_hash = '{pin_hash}' }}\n"));
+        std::fs::write(manifest, text).unwrap();
+        let mut lines = vec![];
+        let error = build::models_with(
+            |key| env.get(key).cloned(),
+            |line| lines.push(line.to_owned()),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("z-invalid") && error.contains(detail),
+            "{error}"
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.starts_with("cargo:rustc-env=")),
+            "every pin must be checked before any blob is exposed"
+        );
+    }
 }

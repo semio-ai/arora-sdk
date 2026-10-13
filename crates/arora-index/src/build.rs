@@ -84,6 +84,7 @@ pub fn models_with(
             .clone()
             .try_into()
             .map_err(|e: toml::de::Error| fail(e.to_string()))?;
+        crate::resolver::validate_name(&pin.scoped_name).map_err(|e| fail(e.to_string()))?;
         if Version::parse(&pin.version).is_none_or(|v| v.to_string() != pin.version) {
             return Err(fail(format!(
                 "version {:?} must be an exact canonical version at least 1.0.0",
