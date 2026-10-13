@@ -433,6 +433,38 @@ mod tests {
         }
     }
 
+    fn outer_value() -> Value {
+        Value::Structure(Structure {
+            id: id(OUTER),
+            fields: vec![
+                vfield(
+                    0x1,
+                    Value::Structure(Structure {
+                        id: id(INNER),
+                        fields: vec![vfield(0xA, Value::I32(7)), vfield(0xB, Value::F32(1.5))],
+                    }),
+                ),
+                vfield(0x2, Value::String("hi".to_string())),
+                vfield(0x3, Value::F64(2.0)),
+            ],
+        })
+    }
+
+    #[test]
+    fn nested_struct_round_trips_through_ty_low() {
+        let outer = outer_type();
+        let registry = registry();
+        let value = outer_value();
+
+        let mut w = BuffersValueWriter::new();
+        write_value(&outer, &registry, &value, &mut w).expect("write");
+        let buf = w.finish();
+
+        let mut r = BuffersValueReader::new(&buf);
+        let back = read_value(&outer, &registry, &mut r).expect("read");
+        assert_eq!(back, value);
+    }
+
     #[test]
     fn value_fields_out_of_declared_order_are_rejected() {
         // Same fields, but name/x swapped relative to the type's declared order.
