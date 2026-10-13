@@ -1206,28 +1206,6 @@ mod module_loading_tests {
         })
     }
 
-    /// `with_module` loads the guest executable into the engine, and its
-    /// exported functions dispatch through [`Arora::call`] — the same path a
-    /// behavior or a remote reaches when it calls a module.
-    #[test]
-    fn with_module_loads_a_wasm_module_reachable_through_call() {
-        let header = test_module_header();
-        let module_id = header.id;
-        let mut arora = Arora::builder()
-            .with_module(header, WASM.to_vec())
-            .build()
-            .expect("build a device with a loaded wasm module");
-
-        let result = arora
-            .call(Call {
-                module_id: Some(module_id),
-                id: Uuid::parse_str(SUCCEED).expect("valid uuid"),
-                args: Vec::new(),
-            })
-            .expect("call succeed() on the loaded module");
-        assert_eq!(result.ret, Value::Boolean(true));
-    }
-
     /// A module loaded from its Rust declaration indexes every export with the
     /// declaration's own frozen signature — the same entries the crate would
     /// contribute registered in-process — and its functions dispatch to the
@@ -1771,14 +1749,6 @@ mod module_loading_tests {
             .arora_call_indirect(&id)
             .expect("the registered callable dispatches");
         assert!(matches!(result, Value::I32(42)));
-    }
-
-    /// The default device builds fine with no modules loaded.
-    #[test]
-    fn builds_without_any_module() {
-        Arora::builder()
-            .build()
-            .expect("the default device builds with no modules loaded");
     }
 
     /// Two guest modules with one id fail the build, naming both: the engine

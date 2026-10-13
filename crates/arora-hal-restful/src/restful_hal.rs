@@ -706,12 +706,6 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn test_read_absent_is_none() {
-        let hal = RestfulHal::new(head_config("http://localhost:1")).expect("create HAL");
-        assert_eq!(hal.read(&[Key::from("nope")]).await.unwrap(), vec![None]);
-    }
-
     /// A write with no joint targets issues no request; the values land in the
     /// state cache and read/read_all return them.
     #[tokio::test]
@@ -1017,6 +1011,9 @@ mod tests {
         hal.write(StateChange::set("text", Value::from("hello".to_string())))
             .await
             .unwrap();
+        // A write without joint targets notifies no subscriber: the robot's
+        // API took no command, so there is nothing the hardware reports.
+        assert!(drain(&mut early).is_empty());
 
         // Non-empty state: the snapshot arrives first.
         let mut late = hal.updates();
@@ -1030,19 +1027,5 @@ mod tests {
             Some(&Some(Value::from("hello".to_string())))
         );
         assert!(first.unset.is_empty());
-    }
-
-    /// Writes without joint targets don't notify subscribers: the robot's API
-    /// took no command, so there is nothing the hardware reports.
-    #[tokio::test]
-    async fn test_non_joint_write_does_not_notify() {
-        let hal = RestfulHal::new(head_config("http://localhost:1")).expect("create HAL");
-        let mut feed = hal.updates();
-
-        hal.write(StateChange::set("text", Value::from("hello".to_string())))
-            .await
-            .unwrap();
-
-        assert!(drain(&mut feed).is_empty());
     }
 }

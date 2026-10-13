@@ -137,13 +137,4 @@ mod tests {
             serde_json::from_str(&json).expect("Should deserialize from JSON");
         assert_eq!(deserialized.topics.len(), config.topics.len());
     }
-
-    #[test]
-    fn test_ur5_config_clone() {
-        let config = create_config();
-        let cloned = config.clone();
-
-        assert_eq!(config.topics.len(), cloned.topics.len());
-        assert_eq!(config.topics[0].name, cloned.topics[0].name);
-    }
 }

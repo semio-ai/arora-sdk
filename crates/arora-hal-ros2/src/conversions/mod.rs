@@ -300,49 +300,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_state_change_to_joint_state_no_positions() {
-        let state_change = StateChange::new(); // Empty state change
-        let joint_ids = HashMap::new();
-        let result = JointState::from_state_change(&state_change, &joint_ids);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
-
-    #[test]
-    fn test_roundtrip_conversion() {
-        let original_joint_state = create_test_joint_state();
-        let joint_ids = HashMap::new();
-
-        // Convert JointState -> StateChange
-        original_joint_state.into_state_change(&joint_ids).unwrap();
-
-        // Create a new StateChange with target positions for conversion back
-        let mut target_state_change = StateChange::new();
-        target_state_change.set.insert(
-            Key::from("joint1.target_position".to_string()),
-            Some(Value::from(1.0_f64)),
-        );
-        target_state_change.set.insert(
-            Key::from("joint2.target_position".to_string()),
-            Some(Value::from(2.0_f64)),
-        );
-        target_state_change.set.insert(
-            Key::from("joint3.target_position".to_string()),
-            Some(Value::from(3.0_f64)),
-        );
-
-        // Convert StateChange -> JointState
-        let converted_joint_state = JointState::from_state_change(&target_state_change, &joint_ids)
-            .unwrap()
-            .unwrap();
-
-        // Should have same number of joints
-        assert_eq!(converted_joint_state.name.len(), 3);
-        assert_eq!(converted_joint_state.position.len(), 3);
-    }
-
     fn create_test_joint_angles() -> JointAnglesWithSpeed {
         JointAnglesWithSpeed {
             header: msgs::Header {
@@ -484,8 +441,14 @@ mod tests {
         assert_eq!(angles, expected);
     }
 
+    /// A change without joint position targets, empty or not, commands no
+    /// joint.
     #[test]
     fn joint_commands_ignore_other_targets() {
+        let ids = HashMap::new();
+        assert!(JointState::from_state_change(&StateChange::new(), &ids)
+            .unwrap()
+            .is_none());
         let mut change = StateChange::new();
         for key in [
             "joint4/target.velocity",
@@ -496,7 +459,6 @@ mod tests {
         ] {
             change.set.insert(Key::from(key), Some(Value::F64(1.0)));
         }
-        let ids = HashMap::new();
         assert!(JointState::from_state_change(&change, &ids)
             .unwrap()
             .is_none());

@@ -14,22 +14,16 @@ pub(crate) fn normalize_endpoint_path(path: &str) -> String {
 mod tests {
     use super::*;
 
+    /// The scheme and authority are stripped, whatever the host's form.
     #[test]
     fn test_normalize_endpoint_path_with_host() {
-        let path = "http://192.168.1.143:5000/api/v1/head";
-        assert_eq!(normalize_endpoint_path(path), "/api/v1/head");
-    }
-
-    #[test]
-    fn test_normalize_endpoint_path_with_host_no_port() {
-        let path = "http://localhost/api/v1/arm";
-        assert_eq!(normalize_endpoint_path(path), "/api/v1/arm");
-    }
-
-    #[test]
-    fn test_normalize_endpoint_path_placeholder() {
-        let path = "http://<host>/api/v1/head";
-        assert_eq!(normalize_endpoint_path(path), "/api/v1/head");
+        for (url, path) in [
+            ("http://192.168.1.143:5000/api/v1/head", "/api/v1/head"),
+            ("http://localhost/api/v1/arm", "/api/v1/arm"),
+            ("http://<host>/api/v1/head", "/api/v1/head"),
+        ] {
+            assert_eq!(normalize_endpoint_path(url), path, "{url}");
+        }
     }
 
     #[test]

@@ -1110,20 +1110,15 @@ mod tests {
         // No seams named: fake HAL, no bridge (a standalone device is legal —
         // e.g. a preview), a private store, and the default executor — an
         // empty, idle behavior-tree interpreter.
-        let arora = Arora::builder().build().expect("default device builds");
+        let mut arora = Arora::builder().build().expect("default device builds");
         assert!(
             arora.interpreter.borrow().is_some(),
             "default installs an (empty) behavior interpreter"
         );
         assert!(arora.bridges.is_empty(), "no bridge unless one is added");
-    }
-
-    #[test]
-    fn a_bridgeless_device_steps() {
-        // The zero-bridge device (a preview, a bench test) steps and stays live.
-        let mut arora = Arora::builder().build().expect("builds");
+        // The bridgeless device steps and stays live.
         for _ in 0..5 {
-            arora.step(FRAME).expect("step");
+            arora.step(FRAME).expect("a bridgeless device steps");
         }
     }
 
