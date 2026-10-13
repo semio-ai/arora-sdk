@@ -15,7 +15,7 @@ examples/policy-modules/
 ├── crates/arora-hal-mujoco      any MJCF robot as an Arora HAL, under the keys a real robot HAL uses
 ├── modules/microduck-policies   the policy module: walk, stand, sit, rise, skill, fallen, head_clip, joint_names
 ├── modules/say-piper            the say leaf spoken on board by Piper (GPLv3, opt-in); the silent one is the SDK's
-├── crates/device                the device: simulator + modules (wasm or in-process) + tree, on the standard Arora run
+├── crates/arora-microduck       the device: simulator + modules (wasm or in-process) + tree, on the standard Arora run
 ├── trees/                       Groot trees: interactive, stand, walk, showcase, sit_rise, kick
 ├── tools/                       setup-mujoco.sh, fetch-assets.sh, export-urdf.py (for Studio), replay.py (recording → video)
 ├── assets/                      fetched, not committed: the Microduck MJCF, meshes and policies (Apache-2.0)
@@ -60,7 +60,7 @@ Then, for each demo:
 4. Run the device with the Studio bridge:
 
    ```sh
-   cargo run --release -p policy-device --features studio,piper -- \
+   cargo run --release -p arora-microduck --features studio,piper -- \
        --studio-model assets/microduck/studio-model.glb
    ```
 
@@ -111,9 +111,9 @@ changed, and writes as
 ```
 
 ```sh
-cargo run --release -p policy-device                       # serves; the bridge answers once the modules are compiled
-cargo run --release -p policy-device -- --command 0.3 0 0  # starts walking
-cargo run --release -p policy-device --features piper      # and speaks on board
+cargo run --release -p arora-microduck                       # serves; the bridge answers once the modules are compiled
+cargo run --release -p arora-microduck -- --command 0.3 0 0  # starts walking
+cargo run --release -p arora-microduck --features piper      # and speaks on board
 ```
 
 Without `--studio-model`, joints are published under their names
@@ -125,7 +125,7 @@ recorded and rendered to a video (no display needed):
 
 ```sh
 mkdir -p recordings
-cargo run --release -p policy-device -- --tree trees/walk.groot.xml --command 0.3 0 0 \
+cargo run --release -p arora-microduck -- --tree trees/walk.groot.xml --command 0.3 0 0 \
     --duration 10 --record recordings/walk.csv
 uv run --python 3.12 --with mujoco --with numpy --with imageio --with imageio-ffmpeg \
     python tools/replay.py recordings/walk.csv --video recordings/walk.mp4

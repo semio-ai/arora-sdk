@@ -1,4 +1,4 @@
-//! `policy-device`: Microduck in MuJoCo on the Arora runtime.
+//! `arora-microduck`: Microduck in MuJoCo on the Arora runtime.
 //!
 //! Without `--duration` the device serves at real time on the standard Arora
 //! run: the operator front end (the terminal UI on a terminal), and the
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use arora_hal_mujoco::Clock;
 use clap::Parser;
-use policy_device::{
+use arora_microduck::{
     default_model, serve, tree_path, Command, Device, DeviceConfig, Executor, Speech, StudioModel,
 };
 

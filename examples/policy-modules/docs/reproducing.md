@@ -45,7 +45,7 @@ learned policy for a different robot into an Arora module. It assumes the
   (`[w, x, y, z]`, world from IMU); `sim/*` for what only a simulator knows.
   Leaves read the aggregates, so renaming the per-joint keys changes nothing
   above the HAL.
-- The device shape (`crates/device`): HAL + declared modules (wasm or
+- The device shape (`crates/arora-microduck`): HAL + declared modules (wasm or
   in-process) + Groot tree (`with_groot`), built directly for a lockstep run
   and handed to the standard `AroraBuilder::run` for serving — the operator
   front end, and Semio Studio or the local bridge by build feature — with
@@ -128,7 +128,7 @@ Studio needs the robot's model and the device's keys under Studio's ids.
 2. **The ids.** Studio gives each joint, and the robot's root translation and
    rotation, an id at upload, and drives them from `<id>.position` (radians,
    metres). The device reads them from the GLB Studio saves
-   (`--studio-model`, `crates/device/src/studio.rs`), gives the joint ids to
+   (`--studio-model`, `crates/arora-microduck/src/studio.rs`), gives the joint ids to
    the HAL as the joints' key entities, and the root ids as its
    `base_pose_keys`: six scalars, the translation and the fixed-axes
    roll, pitch, yaw — what Studio's root takes, in its Z-up world.

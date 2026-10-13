@@ -8,7 +8,7 @@ use std::time::Instant;
 use arora_hal_mujoco::Clock;
 use arora_types::data::{Key, StateChange};
 use arora_types::value::{Type, Value};
-use policy_device::{default_model, tree_path, Command, Device, DeviceConfig, Executor, Speech};
+use arora_microduck::{default_model, tree_path, Command, Device, DeviceConfig, Executor, Speech};
 
 fn device(tree: &str, executor: Executor, command: Command) -> Device {
     let config = DeviceConfig {
