@@ -260,8 +260,8 @@ pub const EQUAL_B_PARAM_ID: Uuid = uuid::uuid!("9399b82f-7ace-41fc-8732-38a42a80
 /// refused at lowering: one tick writes each variable once. `values` is any
 /// link source, a selection included, and must be linked. A port's variable
 /// is written on every tick; a slot notifies a change only when the value
-/// differs from the one it holds, so a value that does not move makes no store
-/// change and nothing reaches a bridge. A write the store refuses is not
+/// differs from the one it holds (the `Slot` contract), so a value that does
+/// not move makes no store change and nothing reaches a bridge. A write the store refuses is not
 /// reported by the node, as for any variable.
 pub const UNPACK_FUNCTION_ID: Uuid = uuid::uuid!("72d3c388-9fe0-4fe9-9b04-38f9e92d6c78");
 /// [`UNPACK_FUNCTION_ID`]'s array.

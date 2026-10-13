@@ -313,6 +313,8 @@ fn tick_builtin(
             })?;
             match argument(caller, UNPACK_VALUES_PARAM_ID)?.into_elements() {
                 Ok(values) if values.len() >= outputs.len() => {
+                    // A slot notifies a change only when the value moves
+                    // (the `Slot` contract), so a held value costs none.
                     for (cell, value) in outputs.iter().zip(values) {
                         if let Some(cell) = cell.as_ref().filter(|_| value != Value::Unit) {
                             cell.set(value);
@@ -622,6 +624,11 @@ fn tick(
     // Some of them were setup to be shared, but it is transparent here.
     // They are indexed by parameter id.
     let mut locals = HashMap::<Uuid, VariableCell>::new();
+    // Arguments read through a selection: the function receives the selected
+    // part. A selection is read-only — the interpreter refuses one on a
+    // mutable parameter — so a mutation reported for it is not written back
+    // over the whole source.
+    let mut selected = Vec::new();
     {
         let variables = variables.borrow();
         for (param_id, value_expression) in &node.arguments {
@@ -647,13 +654,28 @@ fn tick(
                 variable.set(value);
             };
 
-            locals.insert(*param_id, variable.clone());
             if param_id == &_RET_PARAM_ID {
+                locals.insert(*param_id, variable.clone());
                 continue;
             }
+            let value = if let Expression::Select { .. } = value_expression {
+                selected.push(*param_id);
+                // A selection over an absent value reads as absent (`Unit`).
+                Some(compute_expression(
+                    &variables,
+                    &node_parameters_variables,
+                    value_expression,
+                    caller,
+                    &node_parameter,
+                )?)
+                .filter(|value| *value != Value::Unit)
+            } else {
+                locals.insert(*param_id, variable.clone());
+                variable.get()
+            };
             call.args.push(StructureField {
                 id: *param_id,
-                value: Box::new(argument_value(variable, is_optional(function, param_id))),
+                value: Box::new(argument_value(value, is_optional(function, param_id))),
             });
         }
     }
@@ -663,6 +685,9 @@ fn tick(
         .map_err(BehaviorTreeError::CallError)?;
 
     for mutated in result.mutated {
+        if selected.contains(&mutated.id) {
+            continue;
+        }
         let variable = locals
             .get(&mutated.id)
             .ok_or(BehaviorTreeError::InternalError {
@@ -696,14 +721,14 @@ fn is_optional(function: &Function, parameter: &Uuid) -> bool {
         .is_some_and(|parameter| parameter.ty.is_option())
 }
 
-/// The argument a bound cell passes to a module function. To an optional
-/// parameter, a cell that holds nothing — a store key that is not set (yet) —
-/// passes `None`, so the function decides what an absent value means, and a
-/// value passes framed as `Some(value)` (unless it already is an optional).
-/// To any other parameter, an empty cell passes `()`, which the function
-/// refuses unless it takes it.
-fn argument_value(variable: &VariableCell, optional: bool) -> Value {
-    match (variable.get(), optional) {
+/// The argument a bound value passes to a module function. To an optional
+/// parameter, an absent value — a store key that is not set (yet), or a
+/// selection over one — passes `None`, so the function decides what an absent
+/// value means, and a value passes framed as `Some(value)` (unless it already
+/// is an optional). To any other parameter, an absent value passes `()`, which
+/// the function refuses unless it takes it.
+fn argument_value(value: Option<Value>, optional: bool) -> Value {
+    match (value, optional) {
         (Some(value @ Value::Option(_)), _) => value,
         (Some(value), true) => Value::Option(Some(Box::new(value))),
         (Some(value), false) => value,
@@ -1100,11 +1125,21 @@ fn compute_expression(
                 caller,
                 node_parameter,
             )?;
-            path.select(&value)
-                .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?
+            select(path, &value)?
         }
     };
     Ok(value)
+}
+
+/// Read `path` out of `value`. A selection over an absent value reads as
+/// absent (`Unit`), as the absent value itself does; a path the present value
+/// does not have is an error.
+fn select(path: &arora_types::data::Key, value: &Value) -> Result<Value, BehaviorTreeError> {
+    if *value == Value::Unit {
+        return Ok(Value::Unit);
+    }
+    path.select(value)
+        .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })
 }
 
 fn compute_uuid(
@@ -1145,10 +1180,7 @@ fn compute_uuid(
                 caller,
                 node_parameter,
             )?;
-            let selected = path
-                .select(&value)
-                .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?;
-            try_into_uuid(&selected, &None)
+            try_into_uuid(&select(path, &value)?, &None)
         }
     }
 }
