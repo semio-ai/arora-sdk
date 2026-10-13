@@ -251,6 +251,40 @@ fn parse_type(token: &str, package: &str) -> RosType {
     RosType { base, arr }
 }
 
+/// Parse the text of a `.action` for the action `package/name`: three
+/// `---`-separated `.msg` sections — goal, result, feedback — becoming the
+/// REP-2016 sub-messages `package/action/{name}_Goal`, `_Result` and
+/// `_Feedback`. (The SendGoal/GetResult service wrappers are wire-level
+/// conventions the action machinery composes; only the three payload types
+/// are real message definitions.)
+pub fn parse_action(package: &str, name: &str, text: &str) -> Result<Vec<MessageSpec>, String> {
+    let mut sections: Vec<String> = vec![String::new()];
+    for line in text.lines() {
+        if line.trim() == "---" {
+            sections.push(String::new());
+        } else {
+            let section = sections.last_mut().expect("at least one section");
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    if sections.len() != 3 {
+        return Err(format!(
+            "an action defines goal, result and feedback; {package}/{name} has {} sections",
+            sections.len()
+        ));
+    }
+    ["Goal", "Result", "Feedback"]
+        .iter()
+        .zip(&sections)
+        .map(|(suffix, section)| {
+            let mut spec = parse_msg(package, &format!("{name}_{suffix}"), section)?;
+            spec.namespace = "action".into();
+            Ok(spec)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,38 +350,4 @@ geometry_msgs/Point point
             }
         );
     }
-}
-
-/// Parse the text of a `.action` for the action `package/name`: three
-/// `---`-separated `.msg` sections — goal, result, feedback — becoming the
-/// REP-2016 sub-messages `package/action/{name}_Goal`, `_Result` and
-/// `_Feedback`. (The SendGoal/GetResult service wrappers are wire-level
-/// conventions the action machinery composes; only the three payload types
-/// are real message definitions.)
-pub fn parse_action(package: &str, name: &str, text: &str) -> Result<Vec<MessageSpec>, String> {
-    let mut sections: Vec<String> = vec![String::new()];
-    for line in text.lines() {
-        if line.trim() == "---" {
-            sections.push(String::new());
-        } else {
-            let section = sections.last_mut().expect("at least one section");
-            section.push_str(line);
-            section.push('\n');
-        }
-    }
-    if sections.len() != 3 {
-        return Err(format!(
-            "an action defines goal, result and feedback; {package}/{name} has {} sections",
-            sections.len()
-        ));
-    }
-    ["Goal", "Result", "Feedback"]
-        .iter()
-        .zip(&sections)
-        .map(|(suffix, section)| {
-            let mut spec = parse_msg(package, &format!("{name}_{suffix}"), section)?;
-            spec.namespace = "action".into();
-            Ok(spec)
-        })
-        .collect()
 }
