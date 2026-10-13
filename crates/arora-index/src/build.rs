@@ -1,7 +1,7 @@
 //! Exact public model pins for hardware-specific build scripts.
 
 use crate::version::Version;
-use crate::{io, valid_hash, Cache, Error, NoToken, Resolver, StudioConfig};
+use crate::{env_value, io, valid_hash, AssetType, Cache, Error, NoToken, Resolver, StudioConfig};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -41,7 +41,7 @@ pub fn models_with(
     let mut env = BTreeMap::new();
     for name in VARIABLES {
         emit(&format!("cargo:rerun-if-env-changed={name}"));
-        if let Some(value) = lookup(name) {
+        if let Some(value) = env_value(lookup(name)) {
             env.insert(*name, value);
         }
     }
@@ -98,16 +98,7 @@ pub fn models_with(
     if pins.is_empty() {
         return Ok(());
     }
-    let cache_dir = if let Some(dir) = get("ARORA_ASSETS_CACHE_DIR") {
-        PathBuf::from(dir)
-    } else if let Some(dir) = get("CARGO_HOME") {
-        PathBuf::from(dir).join("arora-assets")
-    } else {
-        PathBuf::from(get("HOME").ok_or_else(|| {
-            Error::Config("missing HOME (set ARORA_ASSETS_CACHE_DIR or CARGO_HOME)".into())
-        })?)
-        .join(".cargo/arora-assets")
-    };
+    let cache_dir = cache_directory(get)?;
     let cache = Cache::new(cache_dir)?;
     let offline = get("ARORA_ASSETS_OFFLINE").as_deref() == Some("1");
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -124,18 +115,14 @@ pub fn models_with(
                 return Err(fail("offline cache miss; fill the cache by building once with ARORA_ASSETS_OFFLINE unset and FIREBASE_PROJECT_ID and FIREBASE_STORAGE_BUCKET configured".into()));
             }
             let resolver = Resolver::new(StudioConfig::from_lookup(get)?, NoToken)?;
-            runtime.block_on(async {
-                let resolved = resolver.resolve(&pin.scoped_name, &pin.version).await?;
+            let fetched = runtime.block_on(async {
+                let resolved = resolver
+                    .resolve(&pin.scoped_name, &pin.version, AssetType::Model)
+                    .await?;
                 if resolved.private {
                     return Err(fail(format!(
                         "{}: build models must be public",
                         pin.scoped_name
-                    )));
-                }
-                if resolved.version != pin.version {
-                    return Err(fail(format!(
-                        "expected version {}, got {}",
-                        pin.version, resolved.version
                     )));
                 }
                 if resolved.content_hash != pin.content_hash {
@@ -145,9 +132,9 @@ pub fn models_with(
                         actual: resolved.content_hash,
                     });
                 }
-                let fetched = resolver.fetch(&resolved).await?;
-                cache.store(&fetched.content_hash, &fetched.bytes, false)
+                resolver.fetch(&resolved).await
             })?;
+            cache.store(&fetched.content_hash, &fetched.bytes, false)?;
         }
         let path = cache.public_path(&pin.content_hash)?;
         let absolute = path.canonicalize().map_err(|e| io(&path, e))?;
@@ -156,6 +143,21 @@ pub fn models_with(
             .filter(|p| !p.contains(['\n', '\r']))
             .ok_or_else(|| fail("cache path cannot be represented in a Cargo directive".into()))?;
         emit(&format!("cargo:rustc-env={variable}={path_text}"));
+        emit(&format!("cargo:rerun-if-changed={path_text}"));
     }
     Ok(())
+}
+
+/// Choose the shared build cache without reading the process environment.
+pub fn cache_directory(mut lookup: impl FnMut(&str) -> Option<String>) -> Result<PathBuf, Error> {
+    if let Some(dir) = env_value(lookup("ARORA_ASSETS_CACHE_DIR")) {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(dir) = env_value(lookup("CARGO_HOME")) {
+        return Ok(PathBuf::from(dir).join("arora-assets"));
+    }
+    Ok(PathBuf::from(env_value(lookup("HOME")).ok_or_else(|| {
+        Error::Config("missing HOME (set ARORA_ASSETS_CACHE_DIR or CARGO_HOME)".into())
+    })?)
+    .join(".cargo/arora-assets"))
 }

@@ -1,4 +1,4 @@
-use arora_index::{content_hash, Error, NoToken, Resolver, StudioConfig};
+use arora_index::{content_hash, AssetType, Error, NoToken, Resolver, StudioConfig};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,15 +6,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[tokio::test]
 #[ignore = "requires local Firebase emulators and ARORA_ASSETS_EMULATOR_TEST=1"]
 async fn public_and_private_models() {
-    assert_eq!(
-        std::env::var("ARORA_ASSETS_EMULATOR_TEST").as_deref(),
-        Ok("1")
-    );
+    if !emulator_enabled(|name| std::env::var(name).ok()) {
+        eprintln!("Skipping emulator test: ARORA_ASSETS_EMULATOR_TEST is unset or not 1");
+        return;
+    }
     for name in [
         "FIREBASE_FIRESTORE_EMULATOR_HOST",
         "FIREBASE_STORAGE_EMULATOR_HOST",
     ] {
-        let host = std::env::var(name).unwrap_or_else(|_| panic!("missing {name}"));
+        let host = env_value(std::env::var(name).ok()).unwrap_or_else(|| panic!("missing {name}"));
         let url = reqwest::Url::parse(&format!("http://{host}")).unwrap();
         assert!(
             matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")),
@@ -104,9 +104,31 @@ async fn public_and_private_models() {
         }
     }
     let resolver = Resolver::new(config, NoToken).unwrap();
-    let pin = resolver.resolve(&public_name, "*").await.unwrap();
+    let pin = resolver
+        .resolve(&public_name, "*", AssetType::Model)
+        .await
+        .unwrap();
     assert_eq!(resolver.fetch(&pin).await.unwrap().bytes, bytes);
-    let error = resolver.resolve(&private_name, "*").await.unwrap_err();
+    let error = resolver
+        .resolve(&private_name, "*", AssetType::Model)
+        .await
+        .unwrap_err();
     assert!(matches!(error, Error::NotFound { .. }));
     assert!(error.to_string().contains("not found, or not public"));
+}
+
+fn emulator_enabled(mut lookup: impl FnMut(&str) -> Option<String>) -> bool {
+    env_value(lookup("ARORA_ASSETS_EMULATOR_TEST")).as_deref() == Some("1")
+}
+
+#[test]
+fn emulator_opt_in_requires_one() {
+    for value in [None, Some(""), Some("0")] {
+        assert!(!emulator_enabled(|_| value.map(str::to_owned)));
+    }
+    assert!(emulator_enabled(|_| Some("1".into())));
+}
+
+fn env_value(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.is_empty())
 }

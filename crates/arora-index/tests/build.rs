@@ -61,6 +61,7 @@ async fn pinned_download_is_exposed_and_then_works_offline_without_configuration
         .strip_prefix("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL=")
         .unwrap();
     assert!(std::path::Path::new(path).is_absolute());
+    assert!(lines.contains(&format!("cargo:rerun-if-changed={path}")));
     assert_eq!(std::fs::read(path).unwrap(), BYTES);
     for var in [
         "CARGO_MANIFEST_DIR",
@@ -171,4 +172,28 @@ fn default_cache_paths_and_sealed_only_miss() {
         cache.store(&content_hash(BYTES), BYTES, false).unwrap();
         build::models_with(|key| env.get(key).cloned(), |_| {}).unwrap();
     }
+}
+
+#[test]
+fn online_cache_hit_without_firebase_and_empty_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = environment(dir.path(), None, "1.2.3", &content_hash(BYTES));
+    env.insert("ARORA_ASSETS_CACHE_DIR".into(), String::new());
+    env.insert("CARGO_HOME".into(), String::new());
+    env.insert("ARORA_ASSETS_OFFLINE".into(), String::new());
+    env.insert("HOME".into(), dir.path().to_str().unwrap().into());
+    let cache = Cache::new(dir.path().join(".cargo/arora-assets")).unwrap();
+    cache.store(&content_hash(BYTES), BYTES, false).unwrap();
+    let mut lines = Vec::new();
+    build::models_with(
+        |key| env.get(key).cloned(),
+        |line| lines.push(line.to_owned()),
+    )
+    .unwrap();
+    let path = cache
+        .public_path(&content_hash(BYTES))
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    assert!(lines.contains(&format!("cargo:rerun-if-changed={}", path.display())));
 }

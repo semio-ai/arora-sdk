@@ -33,7 +33,7 @@ pub(crate) struct Range {
 }
 
 impl Range {
-    pub fn parse(raw: &str) -> Result<Self, Error> {
+    pub fn parse(name: &str, raw: &str) -> Result<Self, Error> {
         let s = raw.trim();
         if s == "*" {
             return Ok(Self {
@@ -48,7 +48,10 @@ impl Range {
         // Range bounds may be below 1.0.0 even though releases cannot be.
         let rest = rest.strip_prefix('v').unwrap_or(rest);
         let parts: Vec<_> = rest.split('.').collect();
-        let invalid = || Error::InvalidRange { range: raw.into() };
+        let invalid = || Error::InvalidRange {
+            scoped_name: name.into(),
+            range: raw.into(),
+        };
         if parts.len() != 3 {
             return Err(invalid());
         }
@@ -93,14 +96,14 @@ mod tests {
             "1.2.3.4",
         ] {
             assert!(Version::parse(bad).is_none());
-            assert!(Range::parse(bad).is_err());
+            assert!(Range::parse("@test/model", bad).is_err());
         }
         for (range, yes, no) in [
             ("^1.2.3", "1.9.9", "2.0.0"),
             ("~1.2.3", "1.2.9", "1.3.0"),
             ("1.2.3", "1.2.3", "1.2.4"),
         ] {
-            let r = Range::parse(range).unwrap();
+            let r = Range::parse("@test/model", range).unwrap();
             assert!(r.contains(Version::parse(yes).unwrap()));
             assert!(!r.contains(Version::parse(no).unwrap()));
             assert!(!r.contains(Version::parse("1.2.2").unwrap()));
@@ -110,14 +113,14 @@ mod tests {
             "2.10.0",
             "18446744073709551615.18446744073709551615.18446744073709551615",
         ] {
-            assert!(Range::parse(" * ")
+            assert!(Range::parse("@test/model", " * ")
                 .unwrap()
                 .contains(Version::parse(v).unwrap()));
-            assert!(Range::parse(v)
+            assert!(Range::parse("@test/model", v)
                 .unwrap()
                 .contains(Version::parse(v).unwrap()));
         }
-        assert!(Range::parse("^0.9.0").is_ok());
-        assert!(Range::parse("^ 1.2.3").is_err());
+        assert!(Range::parse("@test/model", "^0.9.0").is_ok());
+        assert!(Range::parse("@test/model", "^ 1.2.3").is_err());
     }
 }

@@ -1,24 +1,11 @@
 mod support;
-use arora_index::{content_hash, Cache, Error, NoToken, ResolvedRef, Resolver};
+use arora_index::{content_hash, AssetType, Cache, Error, NoToken, Resolver};
+use serde_json::{json, Value};
 use std::fs;
+use std::time::Duration;
 use support::*;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-fn pin(private: bool) -> ResolvedRef {
-    ResolvedRef {
-        scoped_name: CURRENT.into(),
-        published_asset_id: "asset".into(),
-        version: "1.2.3".into(),
-        release_id: "release".into(),
-        artifact_key: "primary".into(),
-        content_hash: content_hash(BYTES),
-        storage_path: OBJECT.into(),
-        family: Some("test".into()),
-        private,
-        resolved_at: 123,
-    }
-}
 
 #[test]
 fn verified_hits_corruption_and_visibility_are_separate() {
@@ -54,7 +41,7 @@ fn assert_no_plaintext(dir: &std::path::Path) {
 fn private_bytes_stay_sealed_even_after_reading() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path()).unwrap();
-    let pin = pin(true);
+    let pin = model_pin(true);
     cache.store(&pin.content_hash, BYTES, true).unwrap();
     let sealed_path = dir
         .path()
@@ -90,6 +77,7 @@ fn changed_key_makes_private_blob_a_miss() {
     let cache = Cache::new(dir.path()).unwrap();
     let hash = content_hash(BYTES);
     cache.store(&hash, BYTES, true).unwrap();
+    assert_eq!(cache.read(&hash, true).unwrap().unwrap(), BYTES);
     fs::write(dir.path().join("key"), [0u8; 32]).unwrap();
     assert!(cache.read(&hash, true).unwrap().is_none());
     assert_eq!(fs::read_dir(dir.path().join("blobs")).unwrap().count(), 0);
@@ -99,7 +87,7 @@ fn changed_key_makes_private_blob_a_miss() {
 fn pins_use_requested_names_and_studio_field_names() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path()).unwrap();
-    let pin = pin(false);
+    let pin = model_pin(false);
     cache.save_pin(NAME, &pin).unwrap();
     cache.save_pin("@test/other", &pin).unwrap();
     let value: serde_json::Value =
@@ -112,6 +100,7 @@ fn pins_use_requested_names_and_studio_field_names() {
         keys,
         [
             "artifactKey",
+            "assetType",
             "contentHash",
             "family",
             "private",
@@ -125,7 +114,7 @@ fn pins_use_requested_names_and_studio_field_names() {
     assert_eq!(entry["scopedName"], CURRENT);
     assert_eq!(entry["resolvedAt"], 123);
     let mut offline_pin = pin.clone();
-    offline_pin.storage_path.clear();
+    offline_pin.storage_path = None;
     assert_eq!(cache.last_pin(NAME).unwrap(), Some(offline_pin));
     assert_eq!(serde_json::to_value(pin).unwrap()["storagePath"], OBJECT);
 }
@@ -138,7 +127,7 @@ fn independent_cache_handles_preserve_keys_and_all_pins() {
             let path = dir.path();
             scope.spawn(move || {
                 let cache = Cache::new(path).unwrap();
-                let mut pin = pin(true);
+                let mut pin = model_pin(true);
                 let bytes = format!("private bytes {i}");
                 pin.content_hash = content_hash(bytes.as_bytes());
                 cache
@@ -166,12 +155,12 @@ async fn only_network_errors_allow_a_compatible_last_pin() {
     let resolver = Resolver::new(config(&server), NoToken).unwrap();
     chain(&server, false).await;
     let online = resolver
-        .resolve_with_fallback(NAME, "*", &cache)
+        .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
         .await
         .unwrap();
     assert_eq!(
         cache.last_pin(NAME).unwrap().unwrap().version,
-        online.version
+        online.resolved.version
     );
     for status in [503, 403, 404, 400, 200] {
         server.reset().await;
@@ -179,11 +168,15 @@ async fn only_network_errors_allow_a_compatible_last_pin() {
             .respond_with(ResponseTemplate::new(status).set_body_string("not JSON"))
             .mount(&server)
             .await;
-        let result = resolver.resolve_with_fallback(NAME, "*", &cache).await;
+        let result = resolver
+            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+            .await;
         if status == 503 {
-            assert_eq!(result.unwrap().version, "1.2.3");
+            assert_eq!(result.unwrap().resolved.version, "1.2.3");
             assert!(matches!(
-                resolver.resolve_with_fallback(NAME, "2.0.0", &cache).await,
+                resolver
+                    .resolve_with_fallback(NAME, "2.0.0", AssetType::Model, &cache)
+                    .await,
                 Err(Error::Network { .. })
             ));
         } else {
@@ -193,13 +186,17 @@ async fn only_network_errors_allow_a_compatible_last_pin() {
     server.reset().await;
     documents(&server, false, "face").await;
     assert!(matches!(
-        resolver.resolve_with_fallback(NAME, "*", &cache).await,
+        resolver
+            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+            .await,
         Err(Error::WrongAssetType { .. })
     ));
     server.reset().await;
     chain(&server, false).await;
     assert!(matches!(
-        resolver.resolve_with_fallback(NAME, "2.0.0", &cache).await,
+        resolver
+            .resolve_with_fallback(NAME, "2.0.0", AssetType::Model, &cache)
+            .await,
         Err(Error::NoRelease { .. })
     ));
 }
@@ -216,4 +213,240 @@ fn decrypted_hash_is_verified() {
     fs::rename(source, &destination).unwrap();
     assert!(cache.read(&expected, true).unwrap().is_none());
     assert!(!destination.exists());
+}
+
+#[test]
+fn pins_recover_valid_entries_and_discard_bad_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let path = dir.path().join("resolved.json");
+    fs::write(
+        &path,
+        serde_json::to_vec(&json!({NAME: pin(), "@test/bad": {"version": 123}})).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cache.last_pin(NAME).unwrap().unwrap().storage_path, None);
+    assert!(cache.last_pin("@test/bad").unwrap().is_none());
+    cache.save_pin("@test/new", &pin()).unwrap();
+    let map: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(map.get(NAME).is_some() && map.get("@test/new").is_some());
+    assert!(map.get("@test/bad").is_none());
+    for bytes in [b"{truncated".as_slice(), b"[]"] {
+        fs::write(&path, bytes).unwrap();
+        assert!(cache.last_pin(NAME).unwrap().is_none());
+        cache.save_pin(NAME, &pin()).unwrap();
+        assert!(cache.last_pin(NAME).unwrap().is_some());
+    }
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    assert!(cache.last_pin(NAME).unwrap().is_none());
+}
+
+#[test]
+fn invalid_key_is_replaced_and_old_ciphertext_becomes_a_miss() {
+    capture_warnings();
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let hash = content_hash(BYTES);
+    cache.store(&hash, BYTES, true).unwrap();
+    assert_eq!(cache.read(&hash, true).unwrap().unwrap(), BYTES);
+    fs::write(dir.path().join("key"), b"partial").unwrap();
+    let other = content_hash(b"new bytes");
+    cache.store(&other, b"new bytes", true).unwrap();
+    assert_eq!(fs::read(dir.path().join("key")).unwrap().len(), 32);
+    assert!(cache.read(&hash, true).unwrap().is_none());
+    assert_eq!(cache.read(&other, true).unwrap().unwrap(), b"new bytes");
+    assert!(WARNINGS
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|m| m.contains("replacing key with invalid length")
+            && m.contains(dir.path().to_str().unwrap())));
+}
+
+#[cfg(unix)]
+#[test]
+fn verified_public_private_and_pin_reads_need_no_writable_directory_or_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let pin = pin();
+    cache.store(&pin.content_hash, BYTES, false).unwrap();
+    cache.store(&pin.content_hash, BYTES, true).unwrap();
+    cache.save_pin(NAME, &pin).unwrap();
+    fs::remove_file(dir.path().join(".lock")).unwrap();
+    fs::create_dir(dir.path().join(".lock")).unwrap();
+    let mut paths = vec![dir.path().to_owned(), dir.path().join("blobs")];
+    paths.extend(
+        fs::read_dir(dir.path().join("blobs"))
+            .unwrap()
+            .map(|e| e.unwrap().path()),
+    );
+    paths.extend([dir.path().join("key"), dir.path().join("resolved.json")]);
+    for path in &paths {
+        fs::set_permissions(
+            path,
+            fs::Permissions::from_mode(if path.is_dir() { 0o500 } else { 0o400 }),
+        )
+        .unwrap();
+    }
+    let public = cache.read(&pin.content_hash, false);
+    let private = cache.read(&pin.content_hash, true);
+    let saved = cache.last_pin(NAME);
+    for path in &paths {
+        fs::set_permissions(
+            path,
+            fs::Permissions::from_mode(if path.is_dir() { 0o700 } else { 0o600 }),
+        )
+        .unwrap();
+    }
+    assert_eq!(public.unwrap().unwrap(), BYTES);
+    assert_eq!(private.unwrap().unwrap(), BYTES);
+    assert!(saved.unwrap().is_some());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 4);
+    assert_eq!(fs::read_dir(dir.path().join("blobs")).unwrap().count(), 2);
+}
+
+#[tokio::test]
+async fn definitive_no_clears_only_its_pin_and_unreferenced_sealed_blobs() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let pin = pin();
+    for status in [404, 403] {
+        server.reset().await;
+        cache.save_pin(NAME, &pin).unwrap();
+        cache.save_pin("@test/remaining", &pin).unwrap();
+        cache.store(&pin.content_hash, BYTES, true).unwrap();
+        cache.store(&pin.content_hash, BYTES, false).unwrap();
+        let orphan = content_hash(b"orphan");
+        cache.store(&orphan, b"orphan", true).unwrap();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        let resolver = Resolver::new(config(&server), Token).unwrap();
+        let error = resolver
+            .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::NotFound { .. } | Error::Refused { .. }
+        ));
+        assert!(cache.last_pin(NAME).unwrap().is_none());
+        assert!(cache.last_pin("@test/remaining").unwrap().is_some());
+        assert!(cache.read(&pin.content_hash, true).unwrap().is_some());
+        assert!(!dir
+            .path()
+            .join("blobs")
+            .join(format!("{orphan}.sealed"))
+            .exists());
+        cache.remove_pin("@test/remaining").unwrap();
+        assert!(cache.read(&pin.content_hash, true).unwrap().is_none());
+        assert!(cache.read(&pin.content_hash, false).unwrap().is_some());
+        server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        assert!(matches!(
+            resolver
+                .resolve_with_fallback(NAME, "*", AssetType::Model, &cache)
+                .await,
+            Err(Error::Network { .. })
+        ));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_busy_cache_lock_does_not_block_the_async_executor() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.path().join(".lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    // The timeout only releases a regressed synchronous writer so the test cannot hang.
+    let release = std::thread::spawn(move || {
+        let executor_ran = release_rx.recv_timeout(Duration::from_secs(3)).is_ok();
+        drop(lock);
+        executor_ran
+    });
+    let asset = arora_index::FetchedAsset {
+        content_hash: content_hash(BYTES),
+        bytes: BYTES.to_vec(),
+        resolved: None,
+    };
+    let (stored, ()) = tokio::join!(biased;
+        cache.store_async(&asset),
+        async { let _ = release_tx.send(()); },
+    );
+    stored.unwrap();
+    assert!(
+        release.join().unwrap(),
+        "the executor must run while the cache writer waits for its lock"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn corrupt_read_only_blobs_are_misses_even_when_cleanup_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let hash = content_hash(BYTES);
+    cache.store(&hash, BYTES, true).unwrap();
+    cache.store(&hash, BYTES, false).unwrap();
+    fs::write(cache.public_path(&hash).unwrap(), b"wrong").unwrap();
+    fs::write(
+        dir.path().join("blobs").join(format!("{hash}.sealed")),
+        b"wrong",
+    )
+    .unwrap();
+    let blobs = dir.path().join("blobs");
+    fs::set_permissions(&blobs, fs::Permissions::from_mode(0o500)).unwrap();
+    let public = cache.read(&hash, false);
+    let private = cache.read(&hash, true);
+    fs::set_permissions(&blobs, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(public.unwrap().is_none());
+    assert!(private.unwrap().is_none());
+}
+
+#[test]
+fn old_pins_without_asset_type_are_models() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let mut value = serde_json::to_value(pin()).unwrap();
+    value.as_object_mut().unwrap().remove("assetType");
+    fs::write(
+        dir.path().join("resolved.json"),
+        serde_json::to_vec(&json!({NAME: value})).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        cache.last_pin(NAME).unwrap().unwrap().asset_type,
+        AssetType::Model
+    );
+}
+
+#[tokio::test]
+async fn async_cache_helpers_preserve_private_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path()).unwrap();
+    let pin = pin();
+    let asset = arora_index::FetchedAsset {
+        content_hash: pin.content_hash.clone(),
+        bytes: BYTES.to_vec(),
+        resolved: Some(pin.clone()),
+    };
+    cache.store_async(&asset).await.unwrap();
+    assert_eq!(cache.fetch_async(&pin).await.unwrap().unwrap().bytes, BYTES);
+    assert!(!cache.public_path(&pin.content_hash).unwrap().exists());
 }

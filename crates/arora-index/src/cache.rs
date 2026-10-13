@@ -55,7 +55,6 @@ impl Cache {
 
     pub fn read(&self, hash: &str, private: bool) -> Result<Option<Vec<u8>>, Error> {
         let path = self.blob_path(hash, private)?;
-        let _lock = self.lock()?;
         let Some(stored) = read_optional(&path)? else {
             return Ok(None);
         };
@@ -72,7 +71,11 @@ impl Cache {
         match bytes {
             Some(bytes) if verify(hash, hash, &bytes).is_ok() => Ok(Some(bytes)),
             _ => {
-                fs::remove_file(&path).map_err(|e| io(&path, e))?;
+                if let Err(error) = fs::remove_file(&path) {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        log::warn!(target: "arora-assets", "{}: could not remove corrupt blob: {error}", path.display());
+                    }
+                }
                 Ok(None)
             }
         }
@@ -106,14 +109,36 @@ impl Cache {
     }
 
     pub fn last_pin(&self, requested_name: &str) -> Result<Option<ResolvedRef>, Error> {
-        let _lock = self.lock()?;
-        Ok(self.pins()?.remove(requested_name))
+        Ok(self.pins().remove(requested_name))
     }
 
     pub fn save_pin(&self, requested_name: &str, pin: &ResolvedRef) -> Result<(), Error> {
         let _lock = self.lock()?;
-        let mut pins = self.pins()?;
+        let mut pins = self.pins();
         pins.insert(requested_name.into(), pin.clone());
+        self.write_pins(&pins)
+    }
+
+    /// Remove a revoked name and sealed blobs with no remaining pin.
+    pub fn remove_pin(&self, requested_name: &str) -> Result<(), Error> {
+        let _lock = self.lock()?;
+        let mut pins = self.pins();
+        pins.remove(requested_name);
+        self.write_pins(&pins)?;
+        let blobs = self.dir.join("blobs");
+        for entry in fs::read_dir(&blobs).map_err(|e| io(&blobs, e))? {
+            let entry = entry.map_err(|e| io(&blobs, e))?;
+            let file = entry.file_name();
+            if let Some(hash) = file.to_str().and_then(|s| s.strip_suffix(".sealed")) {
+                if !pins.values().any(|pin| pin.content_hash == hash) {
+                    fs::remove_file(entry.path()).map_err(|e| io(&entry.path(), e))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_pins(&self, pins: &BTreeMap<String, ResolvedRef>) -> Result<(), Error> {
         let mut value = serde_json::to_value(pins).map_err(|e| Error::Cache(e.to_string()))?;
         for pin in value.as_object_mut().unwrap().values_mut() {
             pin.as_object_mut().unwrap().remove("storagePath");
@@ -122,13 +147,44 @@ impl Cache {
         atomic_write(&self.dir.join("resolved.json"), &bytes)
     }
 
-    fn pins(&self) -> Result<BTreeMap<String, ResolvedRef>, Error> {
+    fn pins(&self) -> BTreeMap<String, ResolvedRef> {
         let path = self.dir.join("resolved.json");
-        match read_optional(&path)? {
-            None => Ok(BTreeMap::new()),
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| Error::Cache(format!("{}: {e}", path.display()))),
-        }
+        let Some(entries) = fs::read(&path).ok().and_then(|bytes| {
+            serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(&bytes).ok()
+        }) else {
+            return BTreeMap::new();
+        };
+        entries
+            .into_iter()
+            .filter_map(|(name, value)| {
+                let mut pin: ResolvedRef = serde_json::from_value(value).ok()?;
+                pin.storage_path = None;
+                Some((name, pin))
+            })
+            .collect()
+    }
+
+    pub(crate) async fn blocking<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(Self) -> Result<R, Error> + Send + 'static,
+    ) -> Result<R, Error> {
+        let cache = self.clone();
+        tokio::task::spawn_blocking(move || work(cache))
+            .await
+            .map_err(|e| Error::Cache(e.to_string()))?
+    }
+
+    pub async fn fetch_async(&self, pin: &ResolvedRef) -> Result<Option<FetchedAsset>, Error> {
+        let pin = pin.clone();
+        self.blocking(move |cache| cache.fetch(&pin)).await
+    }
+
+    pub async fn store_async(&self, asset: &FetchedAsset) -> Result<(), Error> {
+        let hash = asset.content_hash.clone();
+        let bytes = asset.bytes.clone();
+        let private = asset.resolved.as_ref().is_some_and(|pin| pin.private);
+        self.blocking(move |cache| cache.store(&hash, &bytes, private))
+            .await
     }
 
     fn read_key(&self) -> Result<Option<Key>, Error> {
@@ -140,26 +196,11 @@ impl Cache {
 
     fn key(&self) -> Result<Key, Error> {
         let path = self.dir.join("key");
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+        if let Some(key) = self.read_key()? {
+            return Ok(key);
         }
-        match options.open(&path) {
-            Ok(mut file) => {
-                let key = XSalsa20Poly1305::generate_key(&mut OsRng);
-                file.write_all(&key)
-                    .and_then(|_| file.sync_all())
-                    .map_err(|e| io(&path, e))?;
-                Ok(key)
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => self
-                .read_key()?
-                .ok_or_else(|| Error::Cache(format!("{} must contain 32 bytes", path.display()))),
-            Err(e) => Err(io(&path, e)),
-        }
+        let key = XSalsa20Poly1305::generate_key(&mut OsRng);
+        publish_key(&path, &key)
     }
 }
 
@@ -171,12 +212,67 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, Error> {
     }
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+fn private_temp(path: &Path, bytes: &[u8]) -> Result<tempfile::NamedTempFile, Error> {
     let mut temp =
         tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(|e| io(path, e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        temp.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|e| io(path, e))?;
+    }
     temp.write_all(bytes)
         .and_then(|_| temp.as_file().sync_all())
         .map_err(|e| io(path, e))?;
-    temp.persist(path).map_err(|e| io(path, e.error))?;
+    Ok(temp)
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+    private_temp(path, bytes)?
+        .persist(path)
+        .map_err(|e| io(path, e.error))?;
     Ok(())
+}
+
+fn publish_key(path: &Path, key: &Key) -> Result<Key, Error> {
+    let temp = private_temp(path, key)?;
+    match temp.persist_noclobber(path) {
+        Ok(_) => Ok(*key),
+        Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let bytes = fs::read(path).map_err(|e| io(path, e))?;
+            if bytes.len() != 32 {
+                log::warn!(target: "arora-assets",
+                    "{}: replacing key with invalid length {}",
+                    path.display(),
+                    bytes.len()
+                );
+                atomic_write(path, key)?;
+                return Ok(*key);
+            }
+            Ok(*Key::from_slice(&bytes))
+        }
+        Err(e) => Err(io(path, e.error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_publication_is_complete_and_never_clobbers_a_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key");
+        let first = Key::from([1; 32]);
+        let second = Key::from([2; 32]);
+        let temp = private_temp(&path, &first).unwrap();
+        assert!(!path.exists());
+        assert_eq!(fs::read(temp.path()).unwrap(), first.as_slice());
+        drop(temp);
+        assert_eq!(publish_key(&path, &first).unwrap(), first);
+        assert_eq!(publish_key(&path, &second).unwrap(), first);
+        assert_eq!(fs::read(path).unwrap(), first.as_slice());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 }

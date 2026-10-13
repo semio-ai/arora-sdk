@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use arora_index::{content_hash, StudioConfig};
+use arora_index::{content_hash, AssetType, Error, ResolvedRef, StudioConfig, TokenSource};
+use async_trait::async_trait;
 use serde_json::{json, Value};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -79,4 +80,69 @@ pub async fn storage(server: &MockServer, bytes: &[u8], status: u16) {
         .respond_with(ResponseTemplate::new(status).set_body_bytes(bytes))
         .mount(server)
         .await;
+}
+
+pub struct Token;
+#[async_trait]
+impl TokenSource for Token {
+    async fn token(&self) -> Result<Option<String>, Error> {
+        Ok(Some("test-token".into()))
+    }
+}
+pub fn pin() -> ResolvedRef {
+    ResolvedRef {
+        scoped_name: CURRENT.into(),
+        published_asset_id: "asset".into(),
+        version: "1.2.3".into(),
+        release_id: "release".into(),
+        artifact_key: "primary".into(),
+        content_hash: content_hash(BYTES),
+        storage_path: Some(OBJECT.into()),
+        family: None,
+        private: true,
+        resolved_at: 123,
+        asset_type: AssetType::Model,
+    }
+}
+pub async fn listing(server: &MockServer, documents: Vec<Value>) {
+    self::documents(server, false, "model").await;
+    Mock::given(path(format!("{ROOT}/publishedAssets/asset/releases")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"documents": documents})))
+        .mount(server)
+        .await;
+}
+
+pub struct Warnings(pub std::sync::Mutex<Vec<String>>);
+pub static WARNINGS: Warnings = Warnings(std::sync::Mutex::new(Vec::new()));
+impl log::Log for Warnings {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        self.0.lock().unwrap().push(record.args().to_string());
+    }
+    fn flush(&self) {}
+}
+pub fn capture_warnings() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        log::set_logger(&WARNINGS).unwrap();
+        log::set_max_level(log::LevelFilter::Warn);
+    });
+}
+
+pub fn model_pin(private: bool) -> ResolvedRef {
+    ResolvedRef {
+        scoped_name: CURRENT.into(),
+        published_asset_id: "asset".into(),
+        version: "1.2.3".into(),
+        release_id: "release".into(),
+        artifact_key: "primary".into(),
+        content_hash: content_hash(BYTES),
+        storage_path: Some(OBJECT.into()),
+        asset_type: AssetType::Model,
+        family: Some("test".into()),
+        private,
+        resolved_at: 123,
+    }
 }

@@ -6,7 +6,7 @@ mod resolver;
 mod version;
 
 pub use cache::Cache;
-pub use resolver::{NoToken, Resolver, StudioConfig, TokenSource};
+pub use resolver::{NoToken, Resolver, ResolverBuilder, StudioConfig, TokenSource};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -23,9 +23,11 @@ pub struct ResolvedRef {
     pub content_hash: String,
     /// Absent in cached pins; offline callers retrieve bytes by hash.
     #[serde(default)]
-    pub storage_path: String,
+    pub storage_path: Option<String>,
     pub family: Option<String>,
     pub private: bool,
+    #[serde(default)]
+    pub asset_type: AssetType,
     pub resolved_at: u64,
 }
 
@@ -36,7 +38,56 @@ pub struct FetchedAsset {
     pub resolved: Option<ResolvedRef>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AssetType {
+    #[default]
+    Model,
+    Animation,
+    Face,
+}
+
+impl AssetType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Animation => "animation",
+            Self::Face => "face",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResolutionSource {
+    Server,
+    Cache,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolution {
+    pub resolved: ResolvedRef,
+    pub source: ResolutionSource,
+}
+
+/// Failures remain extensible; downstream matches must include a fallback arm.
+///
+/// ```compile_fail
+/// use arora_index::Error;
+/// fn exhaustive(error: Error) {
+///     match error {
+///         Error::NotFound { .. } | Error::Refused { .. } |
+///         Error::WrongAssetType { .. } | Error::InvalidRange { .. } |
+///         Error::InvalidName { .. } | Error::Unauthorized { .. } |
+///         Error::ResponseTooLarge { .. } | Error::NoRelease { .. } |
+///         Error::HashMismatch { .. } | Error::Network { .. } |
+///         Error::UnexpectedResponse { .. } | Error::Config(_) |
+///         Error::Io { .. } | Error::Token(_) | Error::Cache(_) |
+///         Error::Build { .. } => {}
+///     }
+/// }
+/// ```
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("{scoped_name}: {step}: {cause}")]
     NotFound {
@@ -52,8 +103,18 @@ pub enum Error {
         expected: String,
         actual: String,
     },
-    #[error("invalid version range {range:?}")]
-    InvalidRange { range: String },
+    #[error("{scoped_name}: invalid version range {range:?}")]
+    InvalidRange { scoped_name: String, range: String },
+    #[error("{scoped_name}: invalid scoped name; expected @scope/name without colons")]
+    InvalidName { scoped_name: String },
+    #[error("{scoped_name}: {step}: unauthorized (HTTP 401); refresh the token or sign in again")]
+    Unauthorized { scoped_name: String, step: String },
+    #[error("{scoped_name}: {step}: response exceeds the {limit} byte cap")]
+    ResponseTooLarge {
+        scoped_name: String,
+        step: String,
+        limit: usize,
+    },
     #[error("{scoped_name}: no release in range {range:?}")]
     NoRelease { scoped_name: String, range: String },
     #[error("{asset}: SHA-256 mismatch: expected {expected}, got {actual}")]
@@ -130,4 +191,9 @@ pub async fn fetch_local(path: impl AsRef<Path>) -> Result<FetchedAsset, Error> 
         bytes,
         resolved: None,
     })
+}
+
+/// Empty environment values have the same meaning as missing variables.
+pub(crate) fn env_value(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.is_empty())
 }

@@ -7,16 +7,16 @@ this registry are unrelated.
 `Resolver` reads a scoped name, the published asset document, and every page of
 releases through Firestore REST. It selects the newest non-deprecated release
 in the range with a primary content hash, then `fetch` downloads that artifact
-through Storage REST and verifies its SHA-256. `resolve` expects a model;
-`resolve_as` accepts another asset type. `latestVersion` does not select a release.
+through Storage REST and verifies its SHA-256. `resolve` takes an `AssetType` (`Model`, `Animation`, or `Face`);
+`Model` is the default enum value. `latestVersion` does not select a release.
 An alias resolves to the asset's current scoped name.
 
 ```rust,no_run
-use arora_index::{NoToken, Resolver, StudioConfig};
+use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
 
 # async fn example() -> Result<(), arora_index::Error> {
 let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
-let pin = resolver.resolve("@scope/robot", "^1.2.3").await?;
+let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
 let fetched = resolver.fetch(&pin).await?;
 assert_eq!(fetched.content_hash, pin.content_hash);
 # Ok(())
@@ -27,8 +27,20 @@ assert_eq!(fetched.content_hash, pin.content_hash);
 never signs in. Firestore receives `Bearer` authorization, Storage receives
 `Firebase` authorization, and `NoToken` sends neither. Anonymous 403 responses
 are reported as “not found, or not public”; authenticated 403 responses are
-refused. Network failures, malformed responses, wrong types, invalid ranges,
-missing releases and hash mismatches have distinct errors.
+refused. `Error` is non-exhaustive. Its asset errors distinguish invalid scoped
+names and ranges, not found, refused, unauthorized, wrong asset type, no release,
+hash mismatch, network failure, unexpected response, and an oversized response.
+A 401 is `Unauthorized`: refresh the token or sign in again; it never permits
+fallback. HTTP 408, 429 and 5xx are transient `Network` errors. Connection and
+timeout errors include their source chain. Configuration, token-source, local
+I/O, cache and build failures carry their corresponding context.
+
+`Resolver::builder(config, tokens)` configures a 30-second `connect_timeout`
+and a 60-second per-read idle `read_timeout`. Both are settable; there is no
+total request deadline, so a large download may continue while bytes arrive.
+Firestore bodies are capped at 16 MiB. Storage bodies default to a 1 GiB cap,
+settable with `storage_limit(bytes)`. Bodies are consumed in chunks and stop
+when the cap would be exceeded; `ResponseTooLarge` names the asset and cap.
 
 `fetch_local(path)` returns the same `FetchedAsset` (bytes and lowercase hex
 SHA-256), with `resolved: None`. A published artifact carries a `ResolvedRef`;
@@ -40,6 +52,7 @@ decide whether it may serve those bytes. No HAL dependency is needed.
 
 `StudioConfig` accepts explicit endpoints or reads these variables through
 `from_env`. `from_lookup` accepts a lookup closure for deterministic configuration.
+An empty value is unset for every environment variable the crate reads.
 
 | Variable | Meaning |
 | --- | --- |
@@ -56,7 +69,12 @@ is the object path within the configured bucket.
 
 Versions contain three unsigned integer components, optionally preceded by
 `v`, and must be at least 1.0.0. Selection compares components numerically and
-keeps listing order for ties. Ranges are `*`, exact versions, `^X.Y.Z` (before
+keeps the first usable release in listing order for ties, replacing it only
+with a strictly newer version. Malformed release fields or versions are
+skipped; only a boolean `true` marks a release deprecated. Listing shapes and
+document names are checked separately. Requested names must be `@scope/name`,
+with both parts non-empty, exactly one slash and no colon. Server document ids
+cannot be empty, `.`, `..`, or contain a slash. Ranges are `*`, exact versions, `^X.Y.Z` (before
 `(X+1).0.0`), or `~X.Y.Z` (before `X.(Y+1).0`). Whitespace around the whole
 range is ignored. Components must fit `u64`; upper bounds use wider arithmetic
 so the maximum component remains usable.
@@ -78,22 +96,41 @@ The caller chooses a directory with `Cache::new`, usually `<device dir>/assets`:
 corrupt blobs and returning a miss. Public and private reads use distinct
 files. Private bytes use XSalsa20-Poly1305 with a random 24-byte nonce followed
 by ciphertext; encryption and decryption take place in memory. The key is
-created exclusively and shared under the cache lock. Blob and pin updates use
+written completely to a mode-0600 temporary file and published without
+replacing an existing key. An existing key of invalid length is replaced under
+the cache lock with a warning; old ciphertext then becomes a cache miss. Blob and pin updates use
 a temporary file in the same directory and an atomic rename. The lock also
-prevents concurrent pin updates from losing other names.
+prevents concurrent pin updates from losing other names. Reads take no lock
+and verified public and private hits work in read-only directories; a corrupt
+blob that cannot be removed still returns a miss, with a warning.
 
 `save_pin(requested_name, pin)` and `last_pin(requested_name)` maintain the
 resolution map, including aliases under the name requested. Each entry has
 `version`, `releaseId`, `artifactKey`, `contentHash`, `resolvedAt`, `scopedName`,
-`publishedAssetId`, `family`, and `private`. It omits `storagePath`: a restored
-pin has an empty path and `Cache::fetch(&pin)` supplies its verified bytes.
+`publishedAssetId`, `family`, `private`, and `assetType`. Pins written without
+`assetType` default to `Model`. It omits `storagePath`: the field is
+`Option<String>` and a restored pin has `None`. `Cache::fetch(&pin)` supplies
+its verified bytes; a Studio fetch without a storage path reports that the
+bytes must be read from the cache by hash.
 
-`resolve_with_fallback` always tries the server first and saves a successful
-model resolution. Only a network error (including a 5xx response) permits the
-last pin, and only if its version still satisfies the range. This method does
-not fetch bytes; use `Resolver::fetch` for an online pin or `Cache::fetch` for
-cached bytes. Cache methods perform synchronous filesystem I/O; applications
-with latency-sensitive async tasks can call them through `spawn_blocking`.
+Pins are parsed independently. Invalid entries are absent; an unreadable or
+truncated file reads as empty. A save retains every valid entry plus the new
+pin. Failure to save after a live resolve logs a warning and still returns
+the live result. Unreadable pins never replace a network error with a cache error.
+
+`resolve_with_fallback(name, range, expected_type, cache)` always tries the
+server first and returns `Resolution { resolved, source }`. `source` is
+`ResolutionSource::Server` or `ResolutionSource::Cache`. Only a network error
+permits a saved pin, and its version and asset type must still match.
+A live `NotFound` or `Refused` removes the requested name's pin and every sealed
+blob that no remaining pin references. Public blobs remain. Cleanup failures
+are surfaced as cache/I/O errors so the caller knows revocation could not be
+persisted; use a writable cache when resolving online.
+
+The async resolver dispatches cache work through `spawn_blocking`. Direct
+`Cache` methods are synchronous; `fetch_async` and `store_async` run their
+filesystem work off the executor. Resolution does not fetch bytes: choose
+`Resolver::fetch` or `Cache::fetch_async` according to the returned source.
 Use a separate cache per identity when storing private pins.
 
 ## Build scripts
@@ -137,14 +174,18 @@ same resolver; call it outside an existing async runtime.
 A verified public cache hit needs no Firebase configuration. To fill a missing
 pin, build once with offline mode unset and Firebase configuration supplied.
 The helper emits rerun directives for the manifest and every variable it reads,
-including the Firebase variables. `models_with` accepts environment lookup and
+including the Firebase variables, and for each absolute blob path so Cargo
+reruns the helper if a cached blob disappears. `cache_directory` exposes the
+cache-directory lookup with a closure. `models_with` accepts environment lookup and
 output closures for embedding and testing.
 
 ## Tests
 
 Normal tests use temporary directories and localhost `wiremock` servers.
 The ignored emulator test also requires `ARORA_ASSETS_EMULATOR_TEST=1`, both
-emulator hosts on localhost, and a project id starting with `demo-`.
+emulator hosts on localhost, and a project id starting with `demo-`. With an
+unset or empty opt-in variable it prints a skip message and returns, even
+when invoked with `--ignored`.
 
 From a semio_studio checkout, start the emulators explicitly with a demo project:
 
