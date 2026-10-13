@@ -69,6 +69,10 @@ pub enum Expression {
     },
     /// Local variable resulting from some computation.
     Call(Box<CallExpression>),
+    /// An array-valued port bound to a tuple of variables, one per element
+    /// (study prototype): a write of the port writes each element to its
+    /// variable; `None` skips an element. See `VariableCell::Spread`.
+    Spread(Vec<Option<Uuid>>),
 }
 
 /// An expression describing a function to call.

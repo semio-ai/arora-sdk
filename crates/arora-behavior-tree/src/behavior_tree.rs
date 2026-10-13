@@ -30,6 +30,11 @@ use crate::arora_generated::behavior_tree::tick_id::{
     TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
 };
 use crate::nodes::{
+    unpack_out_index, unpack_out_param_id, SET_VALUE_FUNCTION_ID, SET_VALUE_VALUE_PARAM_ID,
+    SET_VALUE_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID, UNPACK_LOOKUP_FUNCTION_ID,
+    UNPACK_VALUES_PARAM_ID,
+};
+use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
     RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
@@ -262,6 +267,9 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
             | WRITE_KEYS_FUNCTION_ID
+            | UNPACK_FUNCTION_ID
+            | UNPACK_LOOKUP_FUNCTION_ID
+            | SET_VALUE_FUNCTION_ID
     ) || core_nodes::core_node_parameters(function).is_some()
 }
 
@@ -322,6 +330,55 @@ fn tick_builtin(
                 }
                 _ => Status::Failure,
             }
+        }
+        UNPACK_FUNCTION_ID => {
+            let outs = key_table.ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
+                message: format!("Unpack node {} has no bound ports", node.id),
+            })?;
+            match argument(caller, UNPACK_VALUES_PARAM_ID)?.into_elements() {
+                Ok(values) if values.len() == outs.len() => {
+                    for (cell, value) in outs.iter().zip(values) {
+                        if let Some(cell) = cell.as_ref().filter(|_| value != Value::Unit) {
+                            cell.set(value);
+                        }
+                    }
+                    Status::Success
+                }
+                _ => Status::Failure,
+            }
+        }
+        UNPACK_LOOKUP_FUNCTION_ID => {
+            let count = key_table.map_or(0, <[_]>::len);
+            match argument(caller, UNPACK_VALUES_PARAM_ID)?.into_elements() {
+                Ok(values) if values.len() == count => {
+                    for (index, value) in values.into_iter().enumerate() {
+                        let port = NodeParameterId {
+                            node: node.id,
+                            parameter: unpack_out_param_id(index),
+                        };
+                        if let Some(cell) = node_parameters_variables
+                            .get(&port)
+                            .filter(|_| value != Value::Unit)
+                        {
+                            cell.set(value);
+                        }
+                    }
+                    Status::Success
+                }
+                _ => Status::Failure,
+            }
+        }
+        SET_VALUE_FUNCTION_ID => {
+            let value = argument(caller, SET_VALUE_VALUE_PARAM_ID)?;
+            get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: SET_VALUE_VARIABLE_PARAM_ID,
+                },
+                node_parameters_variables,
+            )?
+            .set(value);
+            Status::Success
         }
         SUCCEED_FUNCTION_ID => Status::Success,
         FAIL_FUNCTION_ID => Status::Failure,
@@ -883,6 +940,9 @@ pub fn load_behavior_tree_nodes_with(
         if let Some(table) = bind_data_node(node, resolver, names, &variables)? {
             key_tables.insert(node.id, table);
         }
+        if let Some(table) = bind_unpack(node, &node_parameters_variables) {
+            key_tables.insert(node.id, table);
+        }
     }
 
     Ok(BehaviorTree {
@@ -980,6 +1040,38 @@ pub(crate) fn bind_data_node(
     ))
 }
 
+/// An `Unpack` node's output cells, by port index up to the highest bound
+/// port, `None` for an unbound one: bound once, at lowering.
+fn bind_unpack(
+    node: &Node,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+) -> Option<KeyTable> {
+    if !matches!(
+        node.function,
+        UNPACK_FUNCTION_ID | UNPACK_LOOKUP_FUNCTION_ID
+    ) {
+        return None;
+    }
+    let count = node
+        .arguments
+        .keys()
+        .filter_map(|param| unpack_out_index(*param))
+        .max()
+        .map_or(0, |highest| highest + 1);
+    Some(
+        (0..count)
+            .map(|index| {
+                node_parameters_variables
+                    .get(&NodeParameterId {
+                        node: node.id,
+                        parameter: unpack_out_param_id(index),
+                    })
+                    .cloned()
+            })
+            .collect(),
+    )
+}
+
 /// The other node's argument `expression` reads, through any selection.
 fn read_argument(expression: &Expression) -> Option<&NodeParameterId> {
     match expression {
@@ -1062,6 +1154,23 @@ pub(crate) fn setup_node_parameter_variable(
             names,
         )?,
         Expression::Call(_) => VariableCell::local(),
+        Expression::Spread(ids) => {
+            let mut cells = Vec::with_capacity(ids.len());
+            for id in ids {
+                cells.push(match id {
+                    None => None,
+                    Some(id) => Some(setup_node_parameter_variable(
+                        node_parameter,
+                        &Expression::VariableId(*id),
+                        variables,
+                        node_parameters_variables,
+                        resolver,
+                        names,
+                    )?),
+                });
+            }
+            VariableCell::spread(cells)
+        }
     };
     node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
     Ok(variable)
@@ -1104,6 +1213,9 @@ fn compute_expression(
             )?;
             path.select(&value)
                 .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?
+        }
+        Expression::Spread(_) => {
+            get_node_parameter_variable(node_parameter, node_parameters_variables)?.get_or_unit()
         }
     };
     Ok(value)
@@ -1152,6 +1264,9 @@ fn compute_uuid(
                 .map_err(|message| BehaviorTreeError::InconsistentTreeError { message })?;
             try_into_uuid(&selected, &None)
         }
+        Expression::Spread(_) => Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!("{node_parameter}: a spread binding is not a uuid"),
+        }),
     }
 }
 

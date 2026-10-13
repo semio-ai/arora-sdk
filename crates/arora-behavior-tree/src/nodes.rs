@@ -267,6 +267,45 @@ pub const WRITE_KEYS_KEYS_PARAM_ID: Uuid = uuid::uuid!("06aa9c89-bb27-4705-b499-
 /// [`WRITE_KEYS_FUNCTION_ID`]'s values.
 pub const WRITE_KEYS_VALUES_PARAM_ID: Uuid = uuid::uuid!("638ac402-69dd-47bc-a04f-aec726ff4c47");
 
+// Study prototypes: the alternatives to `WriteKeys` that the `write_fanout`
+// bench compares. Not part of the `behavior-tree` format.
+
+/// `Unpack(values, out_0 … out_{n-1})`: writes `values[i]` to the cell bound
+/// to its variadic output port `out_i`, skipping an unbound port and a `Unit`
+/// value; fails, writing nothing, when `values` is not an array of the port
+/// count (one more than the highest bound port). The out cells are bound when
+/// the tree is lowered, as any port's.
+pub const UNPACK_FUNCTION_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e10");
+/// `Unpack` resolving its out cells by port id on every tick rather than at
+/// lowering: the cost of a variadic node that does not bind its ports.
+pub const UNPACK_LOOKUP_FUNCTION_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e11");
+/// [`UNPACK_FUNCTION_ID`]'s values.
+pub const UNPACK_VALUES_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e12");
+/// The base of [`UNPACK_FUNCTION_ID`]'s variadic output ports.
+const UNPACK_OUT_BASE: u128 = 0x7a3e_0000_0000_4000_8000_0000_0000_0000;
+/// The upper bound on `Unpack`'s output ports.
+pub const UNPACK_MAX_PORTS: usize = 4096;
+
+/// [`UNPACK_FUNCTION_ID`]'s output port `out_<index>`.
+pub fn unpack_out_param_id(index: usize) -> Uuid {
+    Uuid::from_u128(UNPACK_OUT_BASE + index as u128)
+}
+
+/// The index of `param` among [`UNPACK_FUNCTION_ID`]'s output ports.
+pub fn unpack_out_index(param: Uuid) -> Option<usize> {
+    let offset = param.as_u128().checked_sub(UNPACK_OUT_BASE)?;
+    (offset < UNPACK_MAX_PORTS as u128).then_some(offset as usize)
+}
+
+/// `Set(variable, value)`: `variable` takes `value`, of any type; `Success`.
+/// With a selection on `value`, one `Set` per element is the fan-out written
+/// with the expressions links already have.
+pub const SET_VALUE_FUNCTION_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e20");
+/// [`SET_VALUE_FUNCTION_ID`]'s written variable.
+pub const SET_VALUE_VARIABLE_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e21");
+/// [`SET_VALUE_FUNCTION_ID`]'s value.
+pub const SET_VALUE_VALUE_PARAM_ID: Uuid = uuid::uuid!("3f1c9a52-6a0e-4c8e-9a51-0d6a3b7c2e22");
+
 pub const SEQ_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0x32, 0x24, 0x6d, 0xf6, 0xab, 0x5d, 0x4f, 0x18, 0x92, 0x21, 0x23, 0xe2, 0x87, 0x31, 0xde, 0x93,
 ]);

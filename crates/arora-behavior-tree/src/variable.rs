@@ -20,6 +20,16 @@ pub enum VariableCell {
     Local(Rc<RefCell<Option<Value>>>),
     /// A handle into the host data store, resolved once at build.
     Stored(Rc<dyn Slot>),
+    /// An array-valued port bound to a tuple of cells, one per element (study
+    /// prototype): writing it writes `value[i]` to `cells[i]`, skipping a
+    /// `None` cell and a `Unit` element, and writes nothing when the array is
+    /// not of the tuple's length; reading it gives the value last written.
+    Spread {
+        /// The value last written, which the port reads back.
+        shadow: Rc<RefCell<Option<Value>>>,
+        /// One cell per element, bound when the tree is lowered.
+        cells: Rc<[Option<VariableCell>]>,
+    },
 }
 
 impl std::fmt::Debug for VariableCell {
@@ -54,11 +64,20 @@ impl VariableCell {
         VariableCell::Stored(Rc::from(slot))
     }
 
+    /// A tuple of cells, one per element of an array-valued port.
+    pub fn spread(cells: Vec<Option<VariableCell>>) -> Self {
+        VariableCell::Spread {
+            shadow: Rc::new(RefCell::new(None)),
+            cells: cells.into(),
+        }
+    }
+
     /// The current value, or `None` if absent (unset local cell / missing key).
     pub fn get(&self) -> Option<Value> {
         match self {
             VariableCell::Local(cell) => cell.borrow().clone(),
             VariableCell::Stored(slot) => slot.get(),
+            VariableCell::Spread { shadow, .. } => shadow.borrow().clone(),
         }
     }
 
@@ -83,6 +102,18 @@ impl VariableCell {
             // fail a tick.
             VariableCell::Stored(slot) => {
                 let _ = slot.set(value);
+            }
+            VariableCell::Spread { shadow, cells } => {
+                if let Some(Ok(elements)) = value.clone().map(Value::into_elements) {
+                    if elements.len() == cells.len() {
+                        for (cell, element) in cells.iter().zip(elements) {
+                            if let Some(cell) = cell.as_ref().filter(|_| element != Value::Unit) {
+                                cell.set(element);
+                            }
+                        }
+                    }
+                }
+                *shadow.borrow_mut() = value;
             }
         }
     }

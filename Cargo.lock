@@ -227,6 +227,7 @@ dependencies = [
  "arora-types",
  "derive_more 2.1.1",
  "lazy_static",
+ "libc",
  "quick-xml",
  "regex",
  "semver",

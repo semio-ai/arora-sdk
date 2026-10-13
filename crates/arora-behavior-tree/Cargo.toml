@@ -30,6 +30,18 @@ anyhow = "1"
 # library itself stays storage-agnostic (it depends only on the `Slot` trait).
 arora-simple-data-store = { path = "../arora-simple-data-store" }
 
+# The write-fanout bench counts the instructions its process retires (macOS
+# `proc_pid_rusage`), so it isolates the ticks from their setup.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libc = "0.2"
+
+# The cost of a tick that writes a module's array output to N store keys, for
+# each way a tree can bind the elements to the keys:
+# `cargo bench -p arora-behavior-tree --bench write_fanout`.
+[[bench]]
+name = "write_fanout"
+harness = false
+
 [build-dependencies]
 anyhow = "1"
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
