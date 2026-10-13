@@ -71,6 +71,10 @@ tests:
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |
   | the NAOqi device against a fake NAOqi | `crates/arora-hal-naoqi/tests/device.rs` |
   | guests through `arora-cli` | `tests/tests/integration.rs` |
+  | a public asset alias through paged releases and Storage | `crates/arora-index/tests/resolver.rs` |
+  | a private asset with Firestore and Storage authorization | `crates/arora-index/tests/resolver.rs` |
+  | a refused connection using the last pin, then a definitive 404 clearing it | `crates/arora-index/tests/resolver.rs` |
+  | a pinned model build, then an offline rebuild from its cached blob | `crates/arora-index/tests/build.rs` |
 
   A variant of a behaviour that a unit test can reach — another input, another
   error — belongs in a unit test, not in another end-to-end case.

@@ -212,3 +212,68 @@ fn private_assets_and_mismatched_pins_are_refused_before_storage() {
     resolved.content_hash = expected.content_hash.clone();
     validate_resolved("robot", &expected, &resolved).unwrap();
 }
+
+/// The build entry point rejects a private release before requesting Storage or writing a blob.
+#[tokio::test]
+async fn models_with_refuses_private_assets_before_storage() {
+    use serde_json::json;
+    use wiremock::matchers::{method, path, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    bounded(async {
+        let server = MockServer::start().await;
+        for (suffix, document) in [
+            (
+                "scopedNames/@test:old",
+                json!({"fields":{"publishedAssetId":{"stringValue":"asset"}}}),
+            ),
+            ("publishedAssets/asset", asset(true, "model")),
+            (
+                "publishedAssets/asset/releases",
+                json!({"documents":[release("release", "1.2.3")]}),
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(format!("{ROOT}/{suffix}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(document))
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path_regex("^/v0/"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(BYTES))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
+        env.insert("FIREBASE_PROJECT_ID".into(), "demo-test".into());
+        env.insert("FIREBASE_STORAGE_BUCKET".into(), "fixture".into());
+        for key in [
+            "FIREBASE_FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_STORAGE_EMULATOR_HOST",
+        ] {
+            env.insert(
+                key.into(),
+                server.uri().strip_prefix("http://").unwrap().into(),
+            );
+        }
+        let result =
+            tokio::task::spawn_blocking(move || models_with(|key| env.get(key).cloned(), |_| {}))
+                .await
+                .unwrap();
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| !request.url.path().starts_with("/v0/")));
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("cache/blobs"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert!(result.unwrap_err().to_string().contains("must be public"));
+    })
+    .await;
+}

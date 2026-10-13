@@ -90,7 +90,7 @@ async fn authenticated_private_chain_uses_each_services_header() {
     .await;
 }
 
-/// The socket failure, saved pin, cache bytes and definitive server response cross crate boundaries.
+/// A refused connection restores the saved pin and bytes; a definitive 404 clears the private pin and blob.
 #[tokio::test]
 async fn refused_connection_falls_back_and_definitive_404_clears() {
     bounded(async {

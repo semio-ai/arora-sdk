@@ -675,3 +675,68 @@ async fn idle_timeout_is_network_and_names_its_cause() {
     })
     .await;
 }
+
+/// The HTTP call sites enforce download verification, token-aware status errors and the Storage cap.
+#[tokio::test]
+async fn fetch_and_read_enforce_verification_identity_and_size_limit() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    struct Token;
+    #[async_trait::async_trait]
+    impl TokenSource for Token {
+        async fn token(&self) -> Result<Option<String>, Error> {
+            Ok(Some("test-token".into()))
+        }
+    }
+
+    bounded(async {
+        let server = MockServer::start().await;
+        let mut cfg = config();
+        cfg.firestore_url = server.uri();
+        cfg.storage_url = server.uri();
+        let url = Url::parse(&server.uri()).unwrap();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"wrong"))
+            .mount(&server)
+            .await;
+        let resolver = Resolver::new(cfg.clone(), NoToken).unwrap();
+        assert!(matches!(
+            resolver.fetch(&pin()).await,
+            Err(Error::HashMismatch { expected, actual, .. })
+                if expected == content_hash(BYTES) && actual == content_hash(b"wrong")
+        ));
+        let limited = Resolver::builder(cfg.clone(), NoToken)
+            .storage_limit(4)
+            .build()
+            .unwrap();
+        assert!(matches!(
+            limited.read(NAME, "Storage bytes", url.clone(), true).await,
+            Err(Error::ResponseTooLarge { limit: 4, .. })
+        ));
+
+        server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let error = resolver
+            .read(NAME, "asset document", url.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::NotFound {
+                http_status: 403,
+                ..
+            }
+        ));
+        assert!(error.to_string().contains("not found, or not public"));
+        let authenticated = Resolver::new(cfg, Token).unwrap();
+        assert!(matches!(
+            authenticated.read(NAME, "asset document", url, false).await,
+            Err(Error::Refused { .. })
+        ));
+    })
+    .await;
+}
