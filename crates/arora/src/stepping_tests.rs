@@ -28,13 +28,14 @@ use crate::Arora;
 
 const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-// The guest's `frame(length, revision, time_ns, values: &mut Vec<f64>) -> u64`:
-// it writes the values through `values` and returns the revision.
+// The guest's `frame(length, revision, time_ns, positioned_by: &mut Option<u64>)
+// -> Vec<f64>`: it returns the values and writes the revision through
+// `positioned_by`.
 const FRAME: Uuid = uuid!("5b44c60c-0e52-432f-9a4c-9e14ff7edb12");
 const FRAME_LENGTH: Uuid = uuid!("b1cce511-53dd-4754-9a15-71e0bafad3d5");
 const FRAME_REVISION: Uuid = uuid!("a54ac423-d9f6-455c-9b3f-f8e802ef2316");
 const FRAME_TIME_NS: Uuid = uuid!("e5a9f7c1-3b8d-4e26-9f0a-6c1d2b3e4f50");
-const FRAME_VALUES: Uuid = uuid!("b629962e-57c6-4fdf-bf8c-a5b0065bc1ca");
+const FRAME_POSITIONED_BY: Uuid = uuid!("8bc68040-2226-4e12-8f0c-0c947bcad035");
 
 const ROOT: Uuid = Uuid::from_u128(0x1);
 const STEP: Uuid = Uuid::from_u128(0x2);
@@ -45,9 +46,11 @@ const EQUAL: Uuid = Uuid::from_u128(0x6);
 const UNPACK: Uuid = Uuid::from_u128(0x7);
 const SKIP: Uuid = Uuid::from_u128(0x8);
 const RUN: Uuid = Uuid::from_u128(0x9);
-/// The frame's revision, a tree-local variable: `graph.variables` does not
-/// name it.
+/// The frame's revision, the tree-local variable `.revision`.
 const REVISION_VAR: Uuid = Uuid::from_u128(0xF0);
+/// The frame's values, the tree-local variable `.values`: the guest returns
+/// them, `Unpack` reads them, and no store key carries them.
+const VALUES_VAR: Uuid = Uuid::from_u128(0xF2);
 /// The clock, the store's `arora/time`.
 const TIME_VAR: Uuid = Uuid::from_u128(0xF1);
 
@@ -80,11 +83,11 @@ fn outputs(keys: &[&str]) -> (Vec<Link>, HashMap<Uuid, String>) {
 /// ```text
 /// Parallel
 /// ├─ Sequence
-/// │  ├─ frame(length 3, revision 1, time_ns ← arora/time)   → revision; values through its port
+/// │  ├─ frame(length 3, revision 1, time_ns ← arora/time)   → .values; positioned_by → .revision
 /// │  └─ Fallback
 /// │     ├─ Sequence
-/// │     │  ├─ Equal(revision, 1)
-/// │     │  └─ Unpack(frame.values) → out_i: one store key each
+/// │     │  ├─ Equal(.revision, 1)
+/// │     │  └─ Unpack(.values) → out_i: one store key each
 /// │     └─ Succeed
 /// └─ Run
 /// ```
@@ -115,26 +118,30 @@ fn stepping_graph(keys: &[&str]) -> Graph {
         link(CALL, FRAME_LENGTH, LinkSource::Literal(Value::U32(3))),
         link(CALL, FRAME_REVISION, LinkSource::Literal(Value::U64(1))),
         link(CALL, FRAME_TIME_NS, LinkSource::Variable(TIME_VAR)),
-        // The values parameter starts empty; the guest writes the frame's
-        // values through it, and `Unpack` reads them from that port.
+        // The frame's values are its return, bound to `.values`, which
+        // `Unpack` reads.
         link(
             CALL,
-            FRAME_VALUES,
-            LinkSource::Literal(Value::ArrayF64(Vec::new())),
+            FRAME_POSITIONED_BY,
+            LinkSource::Variable(REVISION_VAR),
         ),
-        link(CALL, _RET_PARAM_ID, LinkSource::Variable(REVISION_VAR)),
+        link(CALL, _RET_PARAM_ID, LinkSource::Variable(VALUES_VAR)),
         link(EQUAL, EQUAL_A_PARAM_ID, LinkSource::Variable(REVISION_VAR)),
         link(EQUAL, EQUAL_B_PARAM_ID, LinkSource::Literal(Value::U64(1))),
         link(
             UNPACK,
             UNPACK_VALUES_PARAM_ID,
-            LinkSource::Port(Port::new(CALL, FRAME_VALUES)),
+            LinkSource::Variable(VALUES_VAR),
         ),
     ];
     let (links, variables) = outputs(keys);
     graph.links.extend(links);
     graph.variables = variables;
     graph.variables.insert(TIME_VAR, "arora/time".to_string());
+    graph
+        .variables
+        .insert(REVISION_VAR, ".revision".to_string());
+    graph.variables.insert(VALUES_VAR, ".values".to_string());
     graph
 }
 
@@ -189,6 +196,11 @@ fn a_remote_spawns_a_stepping_graph_edits_its_outputs_and_halts_it() {
         "each value under its key, the run running"
     );
     assert_eq!(arora.store().read(&[Key::new("")]), vec![None]);
+    assert_eq!(
+        read(&arora, &[".values", ".revision"]),
+        vec![None, None],
+        "the intermediates are tree-local"
+    );
     step(&mut arora);
     assert_eq!(
         read(&arora, &["a/0"]),

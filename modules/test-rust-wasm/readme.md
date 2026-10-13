@@ -24,7 +24,7 @@ Exported functions:
 | `text` | `(length: u32) -> String` | A string of `length` bytes |
 | `window` | `(start_ns: u64, end_ns: Option<u64>) -> Option<u64>` | The window's length; `None` when `end_ns` is absent |
 | `greet` | `(name: Option<String>) -> String` | `"hello, <name>"`, or `"hello"` when `name` is absent |
-| `frame` | `(length: u32, revision: u64, time_ns: u64, values: &mut Vec<f64>) -> u64` | `revision`, with `length` values written into `values`, value `i` being the time in seconds plus `i` |
+| `frame` | `(length: u32, revision: u64, time_ns: u64, positioned_by: &mut Option<u64>) -> Vec<f64>` | `length` values, value `i` being the time in seconds plus `i`, with `revision` written into `positioned_by` |
 
 ## Requirements
 

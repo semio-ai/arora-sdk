@@ -2617,3 +2617,143 @@ mod data_nodes {
         assert!(interp.load(on_return).is_err(), "the return binding");
     }
 }
+
+/// Tree-local variables: a variable whose name starts with `.` is a cell of
+/// its lowered tree, never a store key.
+mod tree_locals {
+    use crate::behavior::BehaviorTreeInterpreter;
+    use crate::nodes::{self, UNPACK_OUT_PARAM_IDS as OUT};
+    use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::data::{DataStore, Key};
+    use arora_types::value::Value;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    const SEQ: Uuid = Uuid::from_u128(0x200);
+    const X: Uuid = Uuid::from_u128(0x2F0);
+
+    /// `Unpack` reading `values`, its outputs bound to `outputs`.
+    fn unpack(id: Uuid, values: LinkSource, outputs: &[Uuid]) -> (GraphNode, Vec<Link>) {
+        let node = GraphNode {
+            id,
+            function: nodes::UNPACK_FUNCTION_ID,
+            inputs: vec![Io::new(nodes::UNPACK_VALUES_PARAM_ID)],
+            ..GraphNode::default()
+        };
+        let links =
+            std::iter::once(Link::new(
+                Port::new(id, nodes::UNPACK_VALUES_PARAM_ID),
+                values,
+            ))
+            .chain(outputs.iter().enumerate().map(|(i, variable)| {
+                Link::new(Port::new(id, OUT[i]), LinkSource::Variable(*variable))
+            }))
+            .collect();
+        (node, links)
+    }
+
+    /// `Sequence(Unpack(values) → out_0: {x}, Unpack({x}) → out_i: {keys[i]})`
+    /// with `{x}` named `x_name`, or only the second `Unpack` when `values` is
+    /// `None`.
+    fn graph(x_name: &str, values: Option<Value>, keys: &[&str]) -> Graph {
+        let mut graph = Graph::empty();
+        graph.root = Some(SEQ);
+        let key_variables: Vec<Uuid> = (0..keys.len())
+            .map(|i| Uuid::from_u128(0x2A0 + i as u128))
+            .collect();
+        let mut parts = Vec::new();
+        if let Some(values) = values {
+            parts.push(unpack(
+                Uuid::from_u128(0x201),
+                LinkSource::Literal(values),
+                &[X],
+            ));
+        }
+        parts.push(unpack(
+            Uuid::from_u128(0x202),
+            LinkSource::Variable(X),
+            &key_variables,
+        ));
+        graph.nodes.insert(
+            SEQ,
+            GraphNode {
+                id: SEQ,
+                function: nodes::SEQ_FUNCTION_ID,
+                children: Some(parts.iter().map(|(node, _)| node.id).collect()),
+                ..GraphNode::default()
+            },
+        );
+        for (node, links) in parts {
+            graph.nodes.insert(node.id, node);
+            graph.links.extend(links);
+        }
+        graph.variables.insert(X, x_name.to_string());
+        for (variable, key) in key_variables.iter().zip(keys) {
+            graph.variables.insert(*variable, key.to_string());
+        }
+        graph
+    }
+
+    fn interpreter(graph: Graph) -> BehaviorTreeInterpreter {
+        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        interp.load(graph).unwrap();
+        interp
+    }
+
+    fn tick(store: &SimpleDataStore, interp: &mut BehaviorTreeInterpreter) {
+        let mut bridge = super::TestBridge::empty();
+        let mut ctx = BehaviorContext {
+            store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+    }
+
+    fn read(store: &SimpleDataStore, keys: &[&str]) -> Vec<Option<Value>> {
+        let keys: Vec<Key> = keys.iter().map(|key| Key::new(*key)).collect();
+        store.read(&keys)
+    }
+
+    fn pair() -> Value {
+        Value::ArrayValue(vec![Value::ArrayF64(vec![1.0, 2.0])])
+    }
+
+    /// The intermediate array passes through `.x`, which no store change
+    /// carries.
+    #[test]
+    fn a_dot_variable_never_creates_a_store_key() {
+        let store = SimpleDataStore::new();
+        let changes = store.subscribe();
+        let mut interp = interpreter(graph(".x", Some(pair()), &["a", "b"]));
+        tick(&store, &mut interp);
+        assert_eq!(
+            read(&store, &["a", "b", ".x"]),
+            vec![Some(Value::F64(1.0)), Some(Value::F64(2.0)), None]
+        );
+        let mut changed = Vec::new();
+        while let Some(change) = changes.try_recv() {
+            changed.extend(change.set.keys().map(|key| key.path.clone()));
+        }
+        changed.sort();
+        assert_eq!(changed, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    /// Two trees over one store each have their own `.x`, even under one
+    /// variable id: the tree that never writes its `.x` reads nothing. A
+    /// named `x` is one store key, which the second tree reads.
+    #[test]
+    fn two_trees_dot_x_are_independent() {
+        for (name, expected) in [(".x", None), ("x", Some(Value::F64(1.0)))] {
+            let store = SimpleDataStore::new();
+            let mut writer = interpreter(graph(name, Some(pair()), &["a"]));
+            let mut reader = interpreter(graph(name, None, &["b"]));
+            tick(&store, &mut writer);
+            tick(&store, &mut reader);
+            assert_eq!(read(&store, &["a"]), vec![Some(Value::F64(1.0))]);
+            assert_eq!(read(&store, &["b"]), vec![expected], "{name}");
+        }
+    }
+}

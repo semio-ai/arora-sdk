@@ -27,6 +27,7 @@ use crate::nodes::{
 };
 use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
+use crate::variable::TREE_LOCAL_PREFIX;
 use crate::ModuleFunction;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -424,13 +425,7 @@ fn builtin_port_text(
     variables: &mut HashMap<Uuid, String>,
 ) -> Result<String, BehaviorTreeError> {
     Ok(match expression {
-        Expression::VariableId(id) => {
-            let name = variables
-                .entry(*id)
-                .or_insert_with(|| id.to_string())
-                .clone();
-            format!("{{{name}}}")
-        }
+        Expression::VariableId(id) => format!("{{{}}}", groot_variable_name(*id, variables)),
         Expression::Value(Value::String(text)) if reads_back_as_plain(text) => text.clone(),
         Expression::Value(value) => {
             let json = serde_json::to_string(value).map_err(|e| {
@@ -529,8 +524,20 @@ fn groot_arg_to_expression(arg: &str, variables: &mut HashMap<String, Uuid>) -> 
     }
 }
 
+/// The Groot name of the variable `id`: its name, or, for a variable without
+/// one — a tree-local cell — `.` and its id, recorded in `variables` so that
+/// every reference to it exports the same name. A `.` name is tree-local
+/// ([`is_tree_local`](crate::variable::is_tree_local)), so the cell imports
+/// back as one tree-local variable, not as a store key.
+fn groot_variable_name(id: Uuid, variables: &mut HashMap<Uuid, String>) -> String {
+    variables
+        .entry(id)
+        .or_insert_with(|| format!("{TREE_LOCAL_PREFIX}{id}"))
+        .clone()
+}
+
 /// An argument expression as a Groot attribute value: a variable as `{name}`
-/// (named after its id when it has no name yet), a literal as its text.
+/// (see [`groot_variable_name`]), a literal as its text.
 /// `None` for an expression Groot cannot spell.
 fn expression_to_groot_arg(
     expression: &Expression,
@@ -538,8 +545,7 @@ fn expression_to_groot_arg(
 ) -> Option<String> {
     match expression {
         Expression::Uuid(id) | Expression::VariableId(id) => {
-            let name = variables.entry(*id).or_insert_with(|| id.to_string());
-            Some(format!("{{{name}}}"))
+            Some(format!("{{{}}}", groot_variable_name(*id, variables)))
         }
         Expression::Value(Value::String(value)) => Some(value.to_owned()),
         Expression::Value(value) => Some(value.to_string()),
@@ -639,15 +645,7 @@ fn arora_param_to_groot(
     if *param_arg.0 == _RET_PARAM_ID {
         let value = match param_arg.1 {
             Expression::Uuid(id) | Expression::VariableId(id) => {
-                let maybe_name = variables.get(id);
-                let name = if let Some(name) = maybe_name {
-                    name.to_owned()
-                } else {
-                    let id = Uuid::new_v4();
-                    variables.insert(id.to_owned(), id.to_string());
-                    id.to_string()
-                };
-                format!("{{{}}}", name)
+                format!("{{{}}}", groot_variable_name(*id, variables))
             }
             Expression::Value(value) => value.to_string(),
             _ => {
@@ -683,15 +681,7 @@ fn arora_param_to_groot(
             let function_parameter = param_matches.first().unwrap();
             let value = match param_arg.1 {
                 Expression::Uuid(id) | Expression::VariableId(id) => {
-                    let maybe_name = variables.get(id);
-                    let name = if let Some(name) = maybe_name {
-                        name.to_owned()
-                    } else {
-                        let id = Uuid::new_v4();
-                        variables.insert(id.to_owned(), id.to_string());
-                        id.to_string()
-                    };
-                    format!("{{{}}}", name)
+                    format!("{{{}}}", groot_variable_name(*id, variables))
                 }
                 Expression::Value(value) => value.to_string(),
                 _ => {
@@ -1457,5 +1447,91 @@ mod tests {
             tree(r#"<Parallel success_count="1"><Succeed/></Parallel>"#).is_ok(),
             "a control node's attribute is not an argument"
         );
+    }
+
+    /// Lower `graph` with a resolver that records each name it is asked for
+    /// and resolves none: the names the tree would take store slots for.
+    fn names_resolved(graph: &Graph) -> Vec<String> {
+        let asked = std::cell::RefCell::new(Vec::new());
+        crate::graph::build_behavior_tree(graph, &|name: &str| {
+            asked.borrow_mut().push(name.to_string());
+            None
+        })
+        .expect("the tree builds");
+        let mut asked = asked.into_inner();
+        asked.sort();
+        asked
+    }
+
+    /// A `{.x}` variable reads from Groot as the tree-local variable `.x`,
+    /// writes back as `{.x}`, and is never resolved to a store slot.
+    #[test]
+    fn a_dot_variable_round_trips_through_groot_as_a_local() {
+        let tree = groot(
+            r#"<Sequence>
+                 <Unpack values='json:{"f64s":[1.0]}' out_0="{.x}"/>
+                 <Equal a="{.x}" b="{out/a}"/>
+               </Sequence>"#,
+        );
+        assert_eq!(
+            names_resolved(&tree.into_graph(&HashMap::new()).unwrap()),
+            vec!["out/a".to_string()]
+        );
+        let mut names = HashMap::new();
+        let node = tree
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut names)
+            .unwrap();
+        let mut by_id = names.iter().map(|(name, id)| (*id, name.clone())).collect();
+        let exported = Node::try_from_tree_node(&node, &HashMap::new(), &mut by_id).unwrap();
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        assert!(xml.contains(r#"out_0="{.x}""#), "{xml}");
+        assert!(xml.contains(r#"a="{.x}""#), "{xml}");
+    }
+
+    /// A variable with no name — a tree-local cell — exports as one `.` name
+    /// wherever it is referenced, module leaves included, and imports back as
+    /// one tree-local variable.
+    #[test]
+    fn an_unnamed_local_round_trips_through_groot_as_a_local() {
+        let mut index = HashMap::new();
+        let walk = index_status_leaf(&mut index, Uuid::new_v4(), "walk");
+        let speed = index[&walk].function.parameter_ordering[0];
+        let local = Uuid::new_v4();
+        let node = TreeNode {
+            function: SEQ_FUNCTION_ID,
+            children: Some(vec![
+                TreeNode {
+                    function: UNPACK_FUNCTION_ID,
+                    children: None,
+                    parameters: HashMap::from([
+                        (
+                            UNPACK_VALUES_PARAM_ID,
+                            Expression::Value(Value::ArrayF32(vec![0.5])),
+                        ),
+                        (UNPACK_OUT_PARAM_IDS[0], Expression::VariableId(local)),
+                    ]),
+                },
+                TreeNode {
+                    function: walk,
+                    children: None,
+                    parameters: HashMap::from([(speed, Expression::VariableId(local))]),
+                },
+            ]),
+            parameters: HashMap::new(),
+        };
+        let exported = Node::try_from_tree_node(&node, &index, &mut HashMap::new()).unwrap();
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        let name = format!("{{.{local}}}");
+        assert_eq!(xml.matches(&name).count(), 2, "{xml}");
+
+        let again = BehaviorTree::try_from_groot_xml(&xml).unwrap();
+        let graph = again.into_graph(&index).unwrap();
+        assert_eq!(graph.variables.len(), 1, "one variable");
+        assert!(graph
+            .variables
+            .values()
+            .all(|name| crate::variable::is_tree_local(name)));
+        assert!(names_resolved(&graph).is_empty());
     }
 }

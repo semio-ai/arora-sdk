@@ -13,7 +13,7 @@ pub mod schema_groot;
 mod tests;
 pub mod tree_node;
 pub mod variable;
-use crate::variable::{VariableCell, VariableResolver};
+use crate::variable::{is_tree_local, VariableCell, VariableResolver};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::record::module::frozen::Function;
@@ -1050,9 +1050,11 @@ pub(crate) fn setup_node_parameter_variable(
             } else {
                 // First reference to this `{var}`: bind it to the host data store
                 // if the resolver knows its name (the Direct convention — variable
-                // name == store key), otherwise fall back to a tree-local cell.
+                // name == store key), otherwise fall back to a tree-local cell. A
+                // tree-local name never reaches the resolver.
                 let cell = names
                     .get(variable_id)
+                    .filter(|name| !is_tree_local(name))
                     .and_then(|n| resolver(n))
                     .map(VariableCell::stored)
                     .unwrap_or_else(VariableCell::local);
