@@ -74,7 +74,7 @@ jobs:
       # cache, pull requests restore it.
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: true
 
       # `cargo test --release` builds the wasm32-wasip1 guests automatically
       # via the integration-test crate's artifact dependencies (bindeps); the
@@ -110,7 +110,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: true
 
       - name: Test the ROS 2 bridge on the Zenoh backend
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
@@ -132,7 +132,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: true
 
       # Clippy runs the build scripts that emit each crate's
       # src/arora_generated.rs, which `cargo fmt --check` needs: it errors on an
@@ -165,7 +165,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: true
 
       - name: Install the wasm32-unknown-unknown target and wasm-pack
         run: |
