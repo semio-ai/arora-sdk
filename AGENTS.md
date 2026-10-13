@@ -135,6 +135,9 @@ Error: no such record "<uuid>"
 
 ### Running Tests
 
+[`docs/testing.md`](docs/testing.md) has coverage (`cargo-llvm-cov`) and the
+rules for adding a test.
+
 ```bash
 # All tests
 cargo test
