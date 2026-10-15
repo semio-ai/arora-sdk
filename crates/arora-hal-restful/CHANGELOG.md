@@ -4,7 +4,7 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [4.2.0] - 2026-10-12
+## [4.2.0] - 2026-10-16
 
 ### Added
 
@@ -24,7 +24,7 @@ All notable changes to `arora-hal-restful`. The format follows
 ### Changed
 
 - Requires `arora-hal` 4.3 and `arora-types` 3.1; the `runner` feature
-  requires `arora` 12.7, which states the description to the device's store.
+  requires `arora` 13, which states the description to the device's store.
 
 ## [4.1.0] - 2026-10-12
 

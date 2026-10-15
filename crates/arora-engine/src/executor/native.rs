@@ -65,6 +65,14 @@ impl Executor for NativeExecutor {
         Ok(Box::new(NativeModule { lib }))
     }
 
+    /// A native library cannot be closed safely while the process runs: a
+    /// library that started a thread, registered a thread-local destructor or
+    /// an exit handler, or handed out a pointer into its code would be
+    /// unmapped under them. The engine keeps a native module until it drops.
+    fn can_unload(&self) -> bool {
+        false
+    }
+
     fn unload_module(&mut self, module_id: uuid::Uuid) -> Result<(), super::UnloadModuleError> {
         if let Some(module) = self.modules.remove(&module_id) {
             module.lib.close().map_err(|err| {

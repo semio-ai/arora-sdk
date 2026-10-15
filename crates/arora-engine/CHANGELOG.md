@@ -4,6 +4,34 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.3.0] - 2026-10-16
+
+### Added
+
+- `Engine::reload_module(&CompiledModule)`: replace the module loaded under
+  the compiled module's id with a fresh instance of it. The new instance is
+  created before the old one is dropped, so a version that does not load
+  leaves the old one loaded and serving (`ReloadModuleError::Load`). An id
+  with no module fails with `ReloadModuleError::ModuleNotFound`.
+- `Engine::unload_module(&Uuid)`: remove a module from dispatch and drop its
+  instance; a call to it then fails with `ModuleNotFound`.
+- `Engine::contains_module(&Uuid)`: whether a module dispatches under an id.
+- `Executor::can_unload`, defaulting to `true`: whether the engine may drop
+  one of the executor's modules while it runs. `NativeExecutor` answers
+  `false`, because a native library cannot be closed safely while the
+  process runs. The engine refuses to reload or unload such a module with
+  `ReloadModuleError::Unsupported` / `UnloadModuleError::Unsupported`, before
+  loading anything. The new `Unsupported` variant of `UnloadModuleError` is
+  the first value any engine function returns of that enum.
+
+Neither `reload_module` nor `unload_module` is reachable from a dispatch: a
+module cannot drop an instance while a call into it is on the stack.
+
+### Changed
+
+- `WebAssemblyExecutor::unload_module` returns `Ok(())` instead of panicking:
+  the instance belongs to the engine, which drops it.
+
 ## [5.2.1] - 2026-10-16
 
 ### Fixed

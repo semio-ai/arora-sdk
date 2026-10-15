@@ -66,6 +66,13 @@ impl From<executor::LoadModuleError> for LoadModuleError {
 pub enum UnloadModuleError {
     ModuleNotFound,
     Internal(String),
+    /// The executor that loaded the module cannot unload it
+    /// ([`Executor::can_unload`]): the module stays loaded.
+    #[display("the {executor} executor cannot unload a module it loaded")]
+    #[from(ignore)]
+    Unsupported {
+        executor: &'static str,
+    },
 }
 
 impl std::error::Error for UnloadModuleError {}
@@ -79,12 +86,46 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
     }
 }
 
+/// [`Engine::reload_module`] failed: nothing was replaced.
+#[derive(Debug, Display, Clone)]
+pub enum ReloadModuleError {
+    /// No module is loaded under the id.
+    ModuleNotFound,
+    /// The executor that loaded the module cannot unload it
+    /// ([`Executor::can_unload`]): the module stays loaded.
+    #[display("the {executor} executor cannot unload a module it loaded")]
+    Unsupported { executor: &'static str },
+    /// The new version did not load; the old one is still loaded.
+    Load(LoadModuleError),
+}
+
+impl std::error::Error for ReloadModuleError {}
+
+impl From<LoadModuleError> for ReloadModuleError {
+    fn from(e: LoadModuleError) -> Self {
+        ReloadModuleError::Load(e)
+    }
+}
+
+impl From<executor::LoadModuleError> for ReloadModuleError {
+    fn from(e: executor::LoadModuleError) -> Self {
+        ReloadModuleError::Load(e.into())
+    }
+}
+
 /// [`Engine`] is the main encapsulation of the Arora runtime.
 /// It consists of a set of [`Executor`]s and [`Module`]s.
 pub struct Engine {
     executors: HashMap<&'static str, Box<dyn Executor>>,
-    modules: HashMap<Uuid, Box<dyn Module>>,
+    modules: HashMap<Uuid, Loaded>,
     callables: CallableRegistry,
+}
+
+/// A module the engine dispatches to, and the executor that loaded it —
+/// `None` for one registered already instantiated.
+struct Loaded {
+    executor: Option<&'static str>,
+    module: Box<dyn Module>,
 }
 
 impl Engine {
@@ -126,8 +167,14 @@ impl Engine {
             .get_mut(executor_name)
             .ok_or(LoadModuleError::ExecutorNotFound)?;
 
-        self.modules
-            .insert(module_id, executor.load_module(module_definition)?);
+        let module = executor.load_module(module_definition)?;
+        self.modules.insert(
+            module_id,
+            Loaded {
+                executor: Some(executor.name()),
+                module,
+            },
+        );
 
         Ok(())
     }
@@ -146,9 +193,92 @@ impl Engine {
             .executors
             .get_mut(module.header().executor.name.as_str())
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        self.modules
-            .insert(module_id, executor.load_compiled_module(module)?);
+        let instance = executor.load_compiled_module(module)?;
+        self.modules.insert(
+            module_id,
+            Loaded {
+                executor: Some(executor.name()),
+                module: instance,
+            },
+        );
         Ok(())
+    }
+
+    /// Replace the module loaded under `module`'s id with a fresh instance of
+    /// `module`: from the next dispatch, its functions run the new code, in a
+    /// new instance with its own memory and globals.
+    ///
+    /// The new instance is created before the old one is touched, so a module
+    /// that fails to load leaves the old one loaded and serving, and the error
+    /// is the load's. The old instance is dropped once replaced, which releases
+    /// its memory. An id with no module loaded fails with
+    /// [`ReloadModuleError::ModuleNotFound`]: loading is
+    /// [`load_compiled_module`](Self::load_compiled_module)'s job. A module
+    /// whose executor cannot unload it ([`Executor::can_unload`]) is refused
+    /// with [`ReloadModuleError::Unsupported`], before anything loads.
+    ///
+    /// Not reachable from a dispatch: a module cannot reload itself (or any
+    /// other) while a call into it is on the stack, since the instance it runs
+    /// in would be dropped under it. Call it between dispatches.
+    pub fn reload_module(&mut self, module: &CompiledModule) -> Result<(), ReloadModuleError> {
+        let module_id = module.header().id;
+        let loaded = self
+            .modules
+            .get(&module_id)
+            .ok_or(ReloadModuleError::ModuleNotFound)?;
+        if let Some(executor) = self.refusing_unload(loaded) {
+            return Err(ReloadModuleError::Unsupported { executor });
+        }
+        let executor = self
+            .executors
+            .get_mut(module.header().executor.name.as_str())
+            .ok_or(LoadModuleError::ExecutorNotFound)?;
+        let instance = executor.load_compiled_module(module)?;
+        self.modules.insert(
+            module_id,
+            Loaded {
+                executor: Some(executor.name()),
+                module: instance,
+            },
+        );
+        Ok(())
+    }
+
+    /// Whether a module — loaded or registered — dispatches under `id`.
+    pub fn contains_module(&self, id: &Uuid) -> bool {
+        self.modules.contains_key(id)
+    }
+
+    /// Remove the module loaded under `id` from dispatch and drop its
+    /// instance: a call to it then fails with
+    /// [`DispatchError::ModuleNotFound`]. Like
+    /// [`reload_module`](Self::reload_module), not reachable from a dispatch.
+    ///
+    /// Any module leaves this way, a host module registered with
+    /// [`register_module`](Self::register_module) included: which modules a
+    /// host lets go is the host's decision. A module whose executor cannot
+    /// unload it ([`Executor::can_unload`]) is refused with
+    /// [`UnloadModuleError::Unsupported`] and stays loaded.
+    pub fn unload_module(&mut self, id: &Uuid) -> Result<(), UnloadModuleError> {
+        let loaded = self
+            .modules
+            .get(id)
+            .ok_or(UnloadModuleError::ModuleNotFound)?;
+        if let Some(executor) = self.refusing_unload(loaded) {
+            return Err(UnloadModuleError::Unsupported { executor });
+        }
+        self.modules.remove(id);
+        Ok(())
+    }
+
+    /// The executor that loaded `loaded`, when it cannot unload it.
+    fn refusing_unload(&self, loaded: &Loaded) -> Option<&'static str> {
+        let executor = loaded.executor?;
+        let can_unload = self
+            .executors
+            .get(executor)
+            .is_none_or(|executor| executor.can_unload());
+        (!can_unload).then_some(executor)
     }
 
     /// Register an already-instantiated [`Module`] under `id`, making its
@@ -160,7 +290,13 @@ impl Engine {
     /// enter the same dispatch as guest code. Registering an id that is
     /// already present replaces the module.
     pub fn register_module(&mut self, id: Uuid, module: Box<dyn Module>) {
-        self.modules.insert(id, module);
+        self.modules.insert(
+            id,
+            Loaded {
+                executor: None,
+                module,
+            },
+        );
     }
 
     /// Dispatch a method call to a module. `arg` must be a raw Arora Buffer.
@@ -175,7 +311,7 @@ impl Engine {
             .get_mut(module_id)
             .ok_or(DispatchError::ModuleNotFound { id: *module_id })?;
 
-        module.dispatch(function_id, arg)
+        module.module.dispatch(function_id, arg)
     }
 }
 
@@ -299,6 +435,23 @@ mod tests {
         assert!(matches!(
             engine.arora_call(miss),
             Err(CallError::FunctionNotFound { .. })
+        ));
+
+        // An unloaded module is gone from dispatch.
+        assert!(engine.contains_module(&module_id));
+        engine.unload_module(&module_id).expect("unload");
+        assert!(!engine.contains_module(&module_id));
+        assert!(matches!(
+            engine.arora_call(Call {
+                module_id: Some(module_id),
+                id: function,
+                args: Vec::new(),
+            }),
+            Err(CallError::ModuleNotFound { .. })
+        ));
+        assert!(matches!(
+            engine.unload_module(&module_id),
+            Err(UnloadModuleError::ModuleNotFound)
         ));
 
         // An unregistered module id fails as before.

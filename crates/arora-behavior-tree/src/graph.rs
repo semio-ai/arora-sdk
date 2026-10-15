@@ -216,7 +216,7 @@ mod tests {
     fn run(graph: &Graph) -> crate::arora_generated::behavior_tree::status::Status {
         let tree = build_behavior_tree(graph, &|_| None).expect("tree builds");
         let mut bridge = NativeBridge::default();
-        run_behavior_tree(&tree, Rc::new(HashMap::new()), &mut bridge, false).expect("run")
+        run_behavior_tree(&tree, &HashMap::new(), &mut bridge, false).expect("run")
     }
 
     /// A `Select` link lowers to a `Select` expression wrapping the lowered

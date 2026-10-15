@@ -169,13 +169,14 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "12.13.0"
+version = "13.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
  "arora-behavior-tree",
  "arora-bridge",
  "arora-bridge-ws",
+ "arora-buffers",
  "arora-engine",
  "arora-hal",
  "arora-simple-data-store",
@@ -188,6 +189,7 @@ dependencies = [
  "env_logger",
  "futures",
  "gloo-timers",
+ "libc",
  "log",
  "ratatui",
  "rustls 0.23.43",
@@ -205,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.3.0"
+version = "9.4.0"
 dependencies = [
  "arora-types",
  "semver",
@@ -215,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "8.8.0"
+version = "9.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -354,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "5.2.1"
+version = "5.3.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -736,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "9.0.1"
+version = "10.0.0"
 dependencies = [
  "arora",
  "arora-behavior",

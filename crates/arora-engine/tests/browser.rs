@@ -191,3 +191,32 @@ fn an_undeclared_function_is_not_found_in_browser() {
         Err(arora_types::call::CallError::FunctionNotFound { id }) if id == undeclared
     ));
 }
+
+/// A reload replaces the instance a call reaches, in place: the new one
+/// dispatches, and an unload leaves the id with no module.
+#[wasm_bindgen_test]
+fn reloads_and_unloads_in_browser() {
+    console_error_panic_hook::set_once();
+    let header = header();
+    let module_id = header.id;
+    let compiled = CompiledModule::new(header, WASM).expect("compile test-rust-wasm");
+    let mut engine = EngineBuilder::new()
+        .add_executor(BrowserExecutor::new())
+        .build();
+    engine.load_compiled_module(&compiled).expect("load");
+    let succeed = || Call {
+        module_id: Some(module_id),
+        id: id(SUCCEED),
+        args: vec![],
+    };
+
+    for _ in 0..100 {
+        engine.reload_module(&compiled).expect("reload");
+        let result = engine.arora_call(succeed()).expect("dispatch succeed()");
+        assert_eq!(result.ret, Value::Boolean(true));
+    }
+
+    engine.unload_module(&module_id).expect("unload");
+    assert!(engine.arora_call(succeed()).is_err());
+    assert!(!engine.contains_module(&module_id));
+}

@@ -163,7 +163,9 @@ impl Executor for WebAssemblyExecutor {
     }
 
     fn unload_module(&mut self, _: Uuid) -> Result<(), UnloadModuleError> {
-        unimplemented!("unload_module");
+        // The instance is dropped along with the WebAssemblyModule held by
+        // the engine; nothing else to do.
+        Ok(())
     }
 }
 

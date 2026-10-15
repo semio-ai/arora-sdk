@@ -4,6 +4,35 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-10-16
+
+### Changed
+
+- **Breaking:** the interpreter holds no function index; the device hands it
+  over at each tick through `BehaviorContext::functions`, so a module loaded,
+  reloaded or unloaded on a running device is seen without rebuilding the
+  interpreter.
+  - `BehaviorTreeInterpreter::new()` takes no argument (and the interpreter
+    implements `Default`).
+  - `BehaviorTreeInterpreter::load_groot(xml, functions)` takes the index its
+    tags resolve against.
+  - `lower_behavior_tree`, `run_behavior_tree` and
+    `BehaviorTreeRuntime::setup` take `&FunctionIndex` instead of
+    `Rc<HashMap<Uuid, ModuleFunction>>`.
+- A lowered tree resolves each node's module function once, when it is
+  lowered, and keeps calling the module it resolved until it is lowered
+  again. A node whose function the index does not have fails when it ticks,
+  with `CallError::FunctionNotFound`, as before.
+- `spawn_graph` refuses a graph naming one of the interpreter module's
+  functions by id. It no longer refuses a graph naming a function the index
+  does not have: that node fails when it ticks, and the run ends `Failure`.
+- A selection feeding a parameter its function declares mutable is refused
+  when the graph is lowered (the next tick), not when it is applied: whether
+  a parameter is mutable is the index's to say. A selection feeding a return
+  binding is still refused when applied.
+- `ModuleFunction` moved to `arora-behavior`; `arora_behavior_tree` re-exports
+  it, with `FunctionIndex`. It now derives `Debug`, `Clone` and `PartialEq`.
+
 ## [8.8.0] - 2026-10-13
 
 ### Added

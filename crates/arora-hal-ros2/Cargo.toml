@@ -36,7 +36,7 @@ arora-types = { path = "../arora-types", version = "3.1" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-arora = { path = "../arora", version = "12.7", features = ["studio-bridge"], optional = true }
+arora = { path = "../arora", version = "13", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
@@ -55,7 +55,7 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] 
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "12.7" }
+arora = { path = "../arora", version = "13" }
 rand = "0.10"
 # `time` (tests only): the DDS round-trip tests sleep and time out around
 # discovery; the HAL itself needs no timers.

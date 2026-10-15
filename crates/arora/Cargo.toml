@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "12.13.0"
+version = "13.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "MIT"
@@ -61,9 +61,9 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "5.2", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "8.8" }
-arora-behavior = { path = "../arora-behavior", version = "9.2" }
+arora-engine = { path = "../arora-engine", version = "5.3", default-features = false }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "9.4" }
 arora-types = { path = "../arora-types", version = "3.5" }
 arora-bridge-ws = { path = "../arora-bridge-ws", version = "7", optional = true }
 anyhow = "1"
@@ -138,11 +138,19 @@ serde_yaml = "0.9"
 # by `cargo test` (the wasm32-wasip1 target is pinned in rust-toolchain.toml).
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 
+# The reload tests lay out their guests' result buffers.
+arora-buffers = { path = "../arora-buffers", version = "3" }
+
 # The local bridge tests' WebSocket client, speaking JSON. Native only: the
 # client needs sockets, and the bridge it reaches is the native build's.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 serde_json = "1"
 tokio-tungstenite = "0.24"
+
+# The reload measurement reads instructions retired and memory held from the
+# kernel (`proc_pid_rusage`).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libc = "0.2"
 
 # The metronome tests also run in a browser, where the cadence rides a JS timer.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

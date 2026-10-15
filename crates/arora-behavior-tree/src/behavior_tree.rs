@@ -13,6 +13,8 @@ pub mod schema_groot;
 mod tests;
 pub mod tree_node;
 pub mod variable;
+pub use arora_behavior::{FunctionIndex, ModuleFunction};
+
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
 use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
@@ -65,7 +67,7 @@ pub struct BehaviorTreeRuntime<'a> {
 impl<'a> BehaviorTreeRuntime<'a> {
     pub fn setup(
         tree: &'a BehaviorTree,
-        function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+        functions: &FunctionIndex,
         caller: &'a mut dyn CallBridge,
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
@@ -73,7 +75,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
         let tick = setup_tick_function(
             tree.root.clone(),
             &tree.node_index,
-            function_index.clone(),
+            functions,
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
             &tree.unpack_outputs,
@@ -108,9 +110,15 @@ pub struct LoweredTree {
 
 /// Lower `tree` onto `caller`: register every node's tick function and return
 /// the ready-to-tick [`LoweredTree`].
+///
+/// Each node calling a module function resolves it against `functions` here,
+/// once: the lowered tree calls the module the index names, with the
+/// signature it describes, until the tree is lowered again. A node whose
+/// function the index does not have fails when it ticks, with
+/// [`CallError::FunctionNotFound`].
 pub fn lower_behavior_tree(
     tree: BehaviorTree,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    functions: &FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
@@ -118,7 +126,7 @@ pub fn lower_behavior_tree(
     let root = setup_tick_function(
         tree.root.clone(),
         &tree.node_index,
-        function_index,
+        functions,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
         &tree.unpack_outputs,
@@ -167,11 +175,11 @@ impl LoweredTree {
 /// builtin) would spin forever here.
 pub fn run_behavior_tree(
     behavior: &BehaviorTree,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    functions: &FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<Status, BehaviorTreeError> {
-    let mut runtime = BehaviorTreeRuntime::setup(behavior, function_index, caller, trace)?;
+    let mut runtime = BehaviorTreeRuntime::setup(behavior, functions, caller, trace)?;
     let mut status = Status::Running;
     while status == Status::Running {
         status = runtime.tick()?;
@@ -189,7 +197,7 @@ enum TraceTick {
 fn setup_tick_function(
     node: Rc<Node>,
     node_index: &HashMap<Uuid, Rc<Node>>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     unpack_outputs: &HashMap<Uuid, UnpackOutputs>,
@@ -217,7 +225,7 @@ fn setup_tick_function(
             let tick_function_with_id = setup_tick_function(
                 child_node.clone(),
                 node_index,
-                function_index.clone(),
+                functions,
                 variables.clone(),
                 node_arg_variables.clone(),
                 unpack_outputs,
@@ -230,7 +238,7 @@ fn setup_tick_function(
     }
     let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
         node: node.clone(),
-        function_index,
+        function: functions.get(&node.function).cloned(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
         outputs: unpack_outputs.get(&node.id).cloned(),
@@ -516,7 +524,7 @@ fn tick_builtin(
 #[allow(clippy::too_many_arguments)]
 fn tick(
     caller: &mut dyn CallBridge,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function: Option<&ModuleFunction>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     outputs: Option<&[Option<VariableCell>]>,
@@ -542,11 +550,9 @@ fn tick(
     }
 
     let module_function =
-        function_index
-            .get(&node.function)
-            .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-                id: node.function,
-            }))?;
+        function.ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
+            id: node.function,
+        }))?;
     let function = &module_function.function;
 
     let mut call = Call {
@@ -781,7 +787,10 @@ impl Tickable for CallableId {
 /// The usual Tickable object in behavior trees, which is also Callable.
 struct TickFunction {
     node: Rc<Node>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    /// The module function the node calls, resolved against the device's
+    /// index when the tree was lowered; `None` for a function the index did
+    /// not have (or a native node, which needs none).
+    function: Option<ModuleFunction>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     /// The node's output cells, for an `Unpack` node.
@@ -794,7 +803,7 @@ impl Tickable for TickFunction {
     fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
         tick(
             caller,
-            self.function_index.clone(),
+            self.function.as_ref(),
             self.locals.clone(),
             self.node_arg_variables.clone(),
             self.outputs.as_deref(),
@@ -1267,9 +1276,9 @@ pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
         && [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function.function_id)
 }
 
-pub struct ModuleFunction {
-    pub module_id: Uuid,
-    pub function_id: Uuid,
-    pub function_name: String,
-    pub function: Function,
+/// Whether `function` is the id of one of the interpreter module's own
+/// functions; see [`is_interpreter_function`].
+pub(crate) fn is_interpreter_function_id(function: Uuid) -> bool {
+    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH};
+    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function)
 }

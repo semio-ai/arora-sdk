@@ -63,7 +63,6 @@
 //! re-fire.
 
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use arora_behavior::graph::{
     source_port, Graph, GraphDiff, GraphType, Io, Link, LinkSource, Node as GraphNode, Port,
@@ -80,13 +79,13 @@ use uuid::Uuid;
 
 use crate::arora_generated::behavior_tree::status::Status;
 use crate::graph::build_behavior_tree;
+use crate::is_interpreter_function_id;
 use crate::nodes::{
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_STATUS_FUNCTION_ID,
     RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
 };
 use crate::schema::_RET_PARAM_ID;
-use crate::{is_interpreter_function, is_native};
-use crate::{lower_behavior_tree, schema_groot, LoweredTree, ModuleFunction};
+use crate::{lower_behavior_tree, schema_groot, FunctionIndex, LoweredTree};
 
 /// The name of the language this interpreter reads: the [`GraphType::name`] a
 /// graph spawned on it states.
@@ -147,7 +146,6 @@ pub struct BehaviorTreeInterpreter {
     /// The status keys of the runs halted since the last tick: the next tick
     /// (which owns the store) writes their terminal status.
     halted: Vec<Key>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
     /// The persistent lowering; rebuilt when [`dirty`](Self::dirty).
     lowered: Option<LoweredTree>,
     /// The graph changed since the last lowering.
@@ -257,10 +255,7 @@ fn check_acyclic(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
 /// Check that no selection is written: a `Select` link reads part of its
 /// source, so it cannot feed a node's return (`_ret`) or a parameter its
 /// function declares mutable, whose writes would land on the whole source.
-fn check_selections(
-    graph: &Graph,
-    index: &HashMap<Uuid, ModuleFunction>,
-) -> Result<(), BehaviorError> {
+fn check_selections(graph: &Graph, index: &FunctionIndex) -> Result<(), BehaviorError> {
     for link in &graph.links {
         if !matches!(link.source, LinkSource::Select { .. }) {
             continue;
@@ -304,11 +299,18 @@ fn behavior_error(message: impl Into<String>) -> BehaviorError {
     }
 }
 
+impl Default for BehaviorTreeInterpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BehaviorTreeInterpreter {
-    /// Construct the interpreter over the module-function index its call nodes
-    /// resolve against. It hosts the runner scaffold immediately; with nothing
-    /// loaded the runner ticks no children and the interpreter idles.
-    pub fn new(function_index: Rc<HashMap<Uuid, ModuleFunction>>) -> Self {
+    /// Construct the interpreter. It hosts the runner scaffold immediately;
+    /// with nothing loaded the runner ticks no children and the interpreter
+    /// idles. The module functions its call nodes reach come from the device's
+    /// index, which each tick hands over ([`BehaviorContext::functions`]).
+    pub fn new() -> Self {
         let runner = Uuid::new_v4();
         let mut graph = Graph::empty();
         graph.nodes.insert(
@@ -328,20 +330,23 @@ impl BehaviorTreeInterpreter {
             runs: Vec::new(),
             finished: Vec::new(),
             halted: Vec::new(),
-            function_index,
             lowered: None,
             dirty: true,
         }
     }
 
     /// Load a behavior tree from Groot XML, replacing the main behavior. The
-    /// XML lowers onto the shared [`Graph`] (names → arora ids, `{var}` →
-    /// named variables) and grafts through [`load`](BehaviorInterpreter::load),
-    /// so a Groot-loaded behavior is editable and introspectable like any
-    /// other.
-    pub fn load_groot(&mut self, xml: &str) -> Result<(), crate::error::BehaviorTreeError> {
+    /// XML lowers onto the shared [`Graph`] (names → arora ids, resolved
+    /// against `functions`; `{var}` → named variables) and grafts through
+    /// [`load`](BehaviorInterpreter::load), so a Groot-loaded behavior is
+    /// editable and introspectable like any other.
+    pub fn load_groot(
+        &mut self,
+        xml: &str,
+        functions: &FunctionIndex,
+    ) -> Result<(), crate::error::BehaviorTreeError> {
         let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)?;
-        let graph = groot.into_graph(self.function_index.as_ref())?;
+        let graph = groot.into_graph(functions)?;
         self.load(graph)
             .map_err(|e| crate::error::BehaviorTreeError::InconsistentTreeError {
                 message: e.to_string(),
@@ -423,15 +428,19 @@ impl BehaviorTreeInterpreter {
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
     /// diff applies whole or not at all: it is refused when it fails, when the
     /// tree under the runner would name a child that is not a node or hold a
-    /// cycle, when a selection would be written, or when the graph would not
-    /// lower.
+    /// cycle, when a selection would feed a return binding, or when the graph
+    /// would not lower. A selection feeding a parameter the function declares
+    /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
             .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
         check_acyclic(&graph, self.runner)?;
-        check_selections(&graph, &self.function_index)?;
+        // Whether a parameter is mutable is the device's index's to say, which
+        // the tick hands over: here only the return binding is checked, and
+        // the lowering checks the rest.
+        check_selections(&graph, &FunctionIndex::new())?;
         build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
         self.graph = graph;
@@ -585,10 +594,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             if let Some(lowered) = self.lowered.take() {
                 lowered.unregister(ctx.call_bridge);
             }
+            check_selections(&self.graph, ctx.functions)?;
             let tree = build_behavior_tree(&self.graph, &direct_resolver(ctx.store))
                 .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?;
             self.lowered = Some(
-                lower_behavior_tree(tree, self.function_index.clone(), ctx.call_bridge, false)
+                lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
                     .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?,
             );
             self.dirty = false;
@@ -780,15 +790,13 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // of functions the interpreter runs, whose links stay among them and
         // lower, renaming no declared variable.
         check_tree(&graph, root)?;
-        if let Some(node) = graph.nodes.values().find(|node| {
-            !is_native(node.function)
-                && self
-                    .function_index
-                    .get(&node.function)
-                    .is_none_or(is_interpreter_function)
-        }) {
+        if let Some(node) = graph
+            .nodes
+            .values()
+            .find(|node| is_interpreter_function_id(node.function))
+        {
             return Err(behavior_error(format!(
-                "node {} calls function {}, which the device does not have for a tree",
+                "node {} calls the interpreter module's function {}, which a tree cannot call",
                 node.id, node.function
             )));
         }
