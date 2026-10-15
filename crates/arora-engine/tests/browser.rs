@@ -167,3 +167,27 @@ fn a_compiled_module_loads_into_several_engines() {
         .expect("dispatch succeed()");
     assert_eq!(result.ret, Value::Boolean(true));
 }
+
+/// A call to a function the module's header does not declare fails as a
+/// function the module does not have.
+#[wasm_bindgen_test]
+fn an_undeclared_function_is_not_found_in_browser() {
+    console_error_panic_hook::set_once();
+    let header = header();
+    let module_id = header.id;
+    let mut engine = EngineBuilder::new()
+        .add_executor(BrowserExecutor::new())
+        .build();
+    load_module_from_parts(&mut engine, header, WASM.to_vec().into_boxed_slice()).expect("load");
+
+    let undeclared = Uuid::from_u128(2);
+    let result = engine.arora_call(Call {
+        module_id: Some(module_id),
+        id: undeclared,
+        args: vec![],
+    });
+    assert!(matches!(
+        result,
+        Err(arora_types::call::CallError::FunctionNotFound { id }) if id == undeclared
+    ));
+}

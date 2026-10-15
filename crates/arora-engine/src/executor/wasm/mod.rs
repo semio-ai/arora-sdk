@@ -342,6 +342,13 @@ impl WebAssemblyModule {
 
 impl Module for WebAssemblyModule {
     fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+        // A function the header does not declare is refused before anything
+        // is allocated in the guest.
+        let func = self
+            .arora_functions
+            .get(method_id)
+            .cloned()
+            .ok_or(DispatchError::FunctionNotFound { id: *method_id })?;
         let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal {
             message: format!("failed to cast args size to u32 in module {}", self.name()),
         })?;
@@ -360,7 +367,6 @@ impl Module for WebAssemblyModule {
             })?;
 
         // Calling the function. It returns the address of the buffer of the result.
-        let func = self.arora_functions.get(method_id).unwrap();
         let result = func
             .call(&mut self.store, (arg_addr,))
             .map_err(|e| DispatchError::Trap {
@@ -424,5 +430,58 @@ impl Module for WebAssemblyModule {
         }
 
         Ok(result_buffer.into_boxed_slice())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::EngineBuilder;
+    use arora_types::module::low::{Executor as ExecutorName, Header};
+    use arora_types::SemanticVersion;
+
+    /// A guest declaring no function: a memory and the buffer allocator.
+    const GUEST: &str = r#"(module
+        (memory (export "memory") 1)
+        (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "arora_buffer_free") (param i32)))"#;
+
+    /// A call to a function the module's header does not declare fails as a
+    /// function the module does not have.
+    #[test]
+    fn a_function_the_header_does_not_declare_is_not_found() {
+        let module_id = Uuid::from_u128(1);
+        let header = Header {
+            id: module_id,
+            name: "empty".to_string(),
+            author: String::new(),
+            description: None,
+            license: String::new(),
+            version: SemanticVersion {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+            executor: ExecutorName {
+                name: "wasm".to_string(),
+                min_version: None,
+                max_version: None,
+            },
+            exports: Vec::new(),
+            imports: Vec::new(),
+            executable_mime: "application/wasm".to_string(),
+        };
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        engine
+            .load_compiled_module(&CompiledModule::new(header, GUEST.as_bytes()).expect("compiles"))
+            .expect("loads");
+
+        let undeclared = Uuid::from_u128(2);
+        assert!(matches!(
+            engine.dispatch(&module_id, &undeclared, &[]),
+            Err(DispatchError::FunctionNotFound { id }) if id == undeclared
+        ));
     }
 }

@@ -4,6 +4,16 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.2.1] - 2026-10-16
+
+### Fixed
+
+- A call to a function a WebAssembly guest's header does not declare fails
+  with `DispatchError::FunctionNotFound`. The wasmtime executor panicked on
+  it; the browser executor failed with `DispatchError::Internal` after
+  allocating the argument in guest memory, which it never freed. Both now
+  refuse the call before anything reaches the guest.
+
 ## [5.2.0] - 2026-10-05
 
 ### Added
