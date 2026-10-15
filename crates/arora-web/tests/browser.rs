@@ -2,14 +2,15 @@
 //! (built by the workspace's `arora-integration-tests` crate as a
 //! bindep, into `target/wasm32-wasip1/debug/test_rust_wasm.wasm`)
 //! through arora-web's JS-facing `Engine`, then calls its `ping`
-//! function; the others drive a device's client operations through
-//! `AroraRuntime`, stepping it by hand as a page does.
+//! function; the others drive a device's client operations and drain its
+//! store's changes through `AroraRuntime`, stepping it by hand as a page does.
 
 #![cfg(target_arch = "wasm32")]
 
 use arora::{Arora, ModuleBuilder};
 use arora_behavior::Status;
 use arora_types::call::{CallError, CallResult};
+use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::module::low::Header;
 use arora_types::record::module::frozen::{Function, Parameter};
 use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
@@ -321,6 +322,94 @@ async fn invoke_of_a_shared_name_needs_its_module() {
             .expect("the module disambiguates"),
     );
     assert_eq!(stopped, serde_json::json!({"str": "player stopped"}));
+}
+
+// =============================================================================
+// Draining the store's changes
+// =============================================================================
+
+/// A demo device and a sibling handle of its store, through which a test
+/// writes as the device's own writers do.
+fn device_and_store() -> (AroraWeb, Box<dyn DataStore>) {
+    let arora = Arora::builder().build().expect("build the device");
+    let store = arora.store().clone_box();
+    (AroraWeb::from(arora), store)
+}
+
+fn value_json(value: Value) -> serde_json::Value {
+    serde_json::to_value(value).expect("a value serializes")
+}
+
+/// A drain holds the net change since the previous one: a key set twice reads
+/// its second value, a key set then unset reads cleared.
+#[wasm_bindgen_test]
+fn a_drain_holds_the_net_change_since_the_previous_one() {
+    let (web, store) = device_and_store();
+    web.drain_changes().expect("the first drain");
+
+    let set = |path: &str, value: f64| {
+        store
+            .write(StateChange::set(path, Value::F64(value)))
+            .expect("set a key");
+    };
+    set("face/mouth", 0.25);
+    set("face/brow", 1.5);
+    web.step(10.0).expect("step");
+    set("face/mouth", 0.5);
+    set("face/brow", 2.5);
+    web.step(10.0).expect("step");
+    let mut unset = StateChange::new();
+    unset.unset.insert(Key::new("face/brow"));
+    store.write(unset).expect("unset a key");
+    web.step(10.0).expect("step");
+
+    let drained = json(web.drain_changes().expect("drain"));
+    assert_eq!(
+        drained["face/mouth"],
+        value_json(Value::F64(0.5)),
+        "{drained}"
+    );
+    assert_eq!(drained["face/brow"], serde_json::Value::Null, "{drained}");
+
+    let again = json(web.drain_changes().expect("drain again"));
+    assert_eq!(
+        again,
+        serde_json::json!({}),
+        "nothing changed since: {again}"
+    );
+}
+
+/// The first drain holds the store's whole state, the keys written before the
+/// device was wrapped included.
+#[wasm_bindgen_test]
+fn the_first_drain_holds_the_full_state() {
+    let arora = Arora::builder().build().expect("build the device");
+    let mut before = StateChange::new();
+    before
+        .set
+        .insert(Key::new("face/mouth"), Some(Value::F64(0.25)));
+    before
+        .set
+        .insert(Key::new("face/brow"), Some(Value::F64(1.5)));
+    arora.store().write(before).expect("write before wrapping");
+    let web = AroraWeb::from(arora);
+    for _ in 0..3 {
+        web.step(10.0).expect("step");
+    }
+
+    let drained = json(web.drain_changes().expect("the first drain"));
+    let snapshot = json(web.snapshot().expect("snapshot"));
+    assert_eq!(drained, snapshot, "the first drain is the store's state");
+    assert_eq!(
+        drained["face/mouth"],
+        value_json(Value::F64(0.25)),
+        "{drained}"
+    );
+    assert_eq!(
+        drained["face/brow"],
+        value_json(Value::F64(1.5)),
+        "{drained}"
+    );
 }
 
 fn jsval_to_string(v: JsValue) -> String {

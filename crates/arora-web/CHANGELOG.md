@@ -4,6 +4,18 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.1] - 2026-10-16
+
+### Fixed
+
+- `AroraRuntime` holds the store changes a page has not drained as the latest
+  value per key, folded on every step (`step()` or `run()`) and on every
+  `setValue`/`writeValues`. What a page that never calls `drainChanges` holds
+  is one entry per key changed since its last drain, rather than a copy of
+  every change of every step. A drain
+  answers as before: each changed key's latest value, `null` for a cleared
+  one, the store's whole state on the first drain.
+
 ## [9.0.0] - 2026-10-06
 
 ### Changed

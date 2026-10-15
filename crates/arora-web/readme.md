@@ -31,7 +31,7 @@ class AroraRuntime {
   writeValues(valuesJson: string): void;
   readValues(paths: string[]): Record<string, unknown>;
   snapshot(): Record<string, unknown>;
-  drainChanges(): Record<string, unknown>; // first drain = the store's whole state
+  drainChanges(): Record<string, unknown>; // each changed key's latest value; first drain = the store's whole state
 }
 
 // A run's handle: its id, and the paths of the keys that follow and steer it.
@@ -59,7 +59,12 @@ Values cross the JS boundary as JSON in the Arora `Value` vocabulary, e.g.
 `{"f32": 0.75}`. `drainChanges` is the poll-based counterpart to a store
 subscription (JavaScript can't await the std channel `DataStore::subscribe`
 delivers on); a subscription opens on the store's whole current state, so the
-first drain returns the full picture.
+first drain returns the full picture. Every step folds what the subscription
+received into the latest value per key, so a drain answers the net change
+since the previous one — a key set twice reads its second value, a key set
+then unset reads `null` — and what a page has not drained is one entry per
+key changed since its last drain, however many steps it goes without
+draining.
 
 `run()` hands the device to `arora::Arora::run` until `stop()` reclaims it —
 the loop ends at its next step boundary, the run promise resolves, and
