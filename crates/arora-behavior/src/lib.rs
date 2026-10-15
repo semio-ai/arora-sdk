@@ -25,10 +25,11 @@
 //!
 //! Each tick an interpreter gets a [`BehaviorContext`]: the shared
 //! [`DataStore`](arora_types::data::DataStore) (read inputs, write intent /
-//! outputs) and a [`CallBridge`](arora_types::call::CallBridge) (so a
-//! module-calling interpreter like the behavior tree can reach the engine). An
-//! interpreter uses whichever it needs — a graph reads/writes the store; the
-//! tree drives the caller.
+//! outputs), a [`CallBridge`](arora_types::call::CallBridge) (so a
+//! module-calling interpreter like the behavior tree can reach the engine),
+//! and the device's [`FunctionIndex`] (the module functions it can call, with
+//! their signatures). An interpreter uses whichever it needs — a graph
+//! reads/writes the store; the tree drives the caller.
 //!
 //! Timing is not a tick argument. The runtime publishes the frame's clock into
 //! the store under the [`built_in`] keys before it ticks, so an interpreter that
@@ -83,6 +84,29 @@ pub enum BehaviorStatus {
     Done(Result<(), BehaviorError>),
 }
 
+/// One module function a device can call: the module that serves it, its
+/// name, and its frozen signature.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleFunction {
+    /// The module a call to the function names.
+    pub module_id: Uuid,
+    /// The function's id.
+    pub function_id: Uuid,
+    /// The name it is described and found by.
+    pub function_name: String,
+    /// Its parameters (name, type, order) and return type.
+    pub function: frozen::Function,
+}
+
+/// The module functions a device can call, by function id: its method index.
+///
+/// The device owns it and changes it when its modules change — a module
+/// loaded, reloaded or unloaded between two steps — and hands it to its
+/// interpreter at each [`tick`](BehaviorInterpreter::tick), through
+/// [`BehaviorContext::functions`]. An interpreter reads it when it resolves
+/// what its behavior calls.
+pub type FunctionIndex = HashMap<Uuid, ModuleFunction>;
+
 /// What a [`BehaviorInterpreter`] receives each
 /// [`tick`](BehaviorInterpreter::tick).
 pub struct BehaviorContext<'a> {
@@ -90,6 +114,9 @@ pub struct BehaviorContext<'a> {
     pub store: &'a dyn DataStore,
     /// The module-call bridge (the engine), for interpreters that call modules.
     pub call_bridge: &'a mut dyn CallBridge,
+    /// The module functions the device can call this tick, with their
+    /// signatures.
+    pub functions: &'a FunctionIndex,
 }
 
 /// An interpreter failed to tick.

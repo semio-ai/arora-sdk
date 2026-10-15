@@ -40,7 +40,7 @@ async fn hello_polly() -> Result<()> {
     .await;
 
     let mut runtime =
-        BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+        BehaviorTreeRuntime::setup(&behavior, &index, &mut engine, true).unwrap();
     while runtime.tick().unwrap() == Status::Running {}
     Ok(())
 }
@@ -80,7 +80,7 @@ async fn polly_sequence_of_speech() -> Result<()> {
     .await;
 
     let mut runtime =
-        BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+        BehaviorTreeRuntime::setup(&behavior, &index, &mut engine, true).unwrap();
     let mut status = Status::Running;
     while status == Status::Running {
         status = runtime.tick().unwrap();
@@ -133,7 +133,7 @@ async fn fake_listen_polly_dialogue() -> Result<()> {
     .await;
 
     let mut runtime =
-        BehaviorTreeRuntime::setup(&behavior, Rc::new(index), &mut engine, true).unwrap();
+        BehaviorTreeRuntime::setup(&behavior, &index, &mut engine, true).unwrap();
     let mut status = Status::Running;
     let mut tick_count = 0;
     while status == Status::Running {

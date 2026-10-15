@@ -65,4 +65,16 @@ pub trait Executor {
     }
 
     fn unload_module(&mut self, module_id: Uuid) -> Result<(), UnloadModuleError>;
+
+    /// Whether the engine may drop one of this executor's modules while it
+    /// runs — to reload or unload it ([`Engine::reload_module`],
+    /// [`Engine::unload_module`]). The engine owns each module's instance, so
+    /// dropping it is the unload. An executor whose modules cannot be dropped
+    /// safely while the process runs says no, and the engine keeps them.
+    ///
+    /// [`Engine::reload_module`]: crate::engine::Engine::reload_module
+    /// [`Engine::unload_module`]: crate::engine::Engine::unload_module
+    fn can_unload(&self) -> bool {
+        true
+    }
 }

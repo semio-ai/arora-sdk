@@ -4,6 +4,18 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.4.0] - 2026-10-16
+
+### Added
+
+- `ModuleFunction` (moved from `arora-behavior-tree`, which re-exports it)
+  and `FunctionIndex`, the device's module functions by function id.
+- `BehaviorContext::functions`: the device's `FunctionIndex`, handed to the
+  interpreter at each tick. The device owns the index and changes it between
+  steps when its modules change; an interpreter reads it when it resolves
+  what its behavior calls. A `BehaviorContext` built by struct literal names
+  the new field; the device runtime is what builds it.
+
 ## [9.3.0] - 2026-10-13
 
 ### Changed

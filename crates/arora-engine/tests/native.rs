@@ -114,3 +114,39 @@ fn a_compiled_native_module_loads_into_several_engines() {
         assert_eq!(result.ret, Value::String("xxx".to_string()));
     }
 }
+
+/// A native library is neither reloaded nor unloaded: the engine refuses
+/// before loading anything, and the module keeps serving.
+#[test]
+fn a_native_module_is_neither_reloaded_nor_unloaded() {
+    use arora_engine::engine::{ReloadModuleError, UnloadModuleError};
+
+    let (mut engine, module_id) = engine_with_guest();
+    let header = test_rust_wasm::test_rust_wasm::header(Executor {
+        name: "native".to_string(),
+        min_version: None,
+        max_version: None,
+    });
+    let compiled = CompiledModule::new(header, &std::fs::read(DYLIB).expect("guest library"))
+        .expect("a native module keeps its bytes");
+
+    assert!(matches!(
+        engine.reload_module(&compiled),
+        Err(ReloadModuleError::Unsupported { executor: "native" })
+    ));
+    assert!(matches!(
+        engine.unload_module(&module_id),
+        Err(UnloadModuleError::Unsupported { executor: "native" })
+    ));
+    let result = engine
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: TEXT,
+            args: vec![StructureField {
+                id: TEXT_LENGTH,
+                value: Box::new(Value::U32(3)),
+            }],
+        })
+        .expect("call");
+    assert_eq!(result.ret, Value::String("xxx".to_string()));
+}

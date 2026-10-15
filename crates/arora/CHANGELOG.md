@@ -4,6 +4,42 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.0.0] - 2026-10-16
+
+### Added
+
+- Guest modules change on a running device, between steps:
+  - `Arora::load_module(&CompiledModule)` loads one under a free id.
+  - `Arora::reload_module(&CompiledModule)` replaces the guest module under
+    the compiled module's id in one step, all or nothing: a version that
+    does not load leaves the old one loaded, serving and described.
+  - `Arora::unload_module(id)` removes a guest module from dispatch and the
+    method index.
+
+  Each refuses with a `ModuleError`, with nothing changed: a module already
+  loaded under the id, no guest module under it (host modules — the HAL's,
+  the interpreter's, an embedder's — stay for the device's life), a function
+  id another module has, a native library (its executor cannot unload it:
+  restart the device), or a module that does not load.
+- What a remote or in-process caller asked of a reloaded or unloaded module
+  and the device has not finished is interrupted: a call to it the device
+  received and has not applied fails with the reason, as does a request to
+  start a task run calling it, and a task run calling it is halted (its
+  status key reports `Failure`; the log says it was interrupted, and why).
+  The behavior keeps running as it was: nothing checks a new version against
+  what the behavior calls, and a node calling a function the module no longer
+  has fails as any missing function does.
+
+### Changed
+
+- **Breaking:** requires `arora-behavior-tree` 9, whose
+  `BehaviorTreeInterpreter` (re-exported here) is built with `new()` and
+  receives the device's function index at each tick. `ModuleFunction` and
+  `FunctionIndex` are re-exported from `arora-behavior`.
+- Task runs started through `spawn_graph` are followed and logged like those
+  started through `spawn`. A run's start is logged at the end of the step it
+  started in, naming the function it calls.
+
 ## [12.13.0] - 2026-10-13
 
 ### Changed

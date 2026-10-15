@@ -17,10 +17,10 @@ use std::time::Duration;
 use arora_behavior::{
     built_in, BehaviorContext, BehaviorInterpreter, BehaviorStatus, Status, TaskId,
 };
-use arora_behavior_tree::ModuleFunction;
+use arora_behavior::{interpreter_module, FunctionIndex, RunPolicy, TaskHandle};
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound, MethodSignature};
 use arora_hal::Hal;
-use arora_types::call::{CallBridge, CallError, CallResult};
+use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, KeyMeta, StateChange, Subscription};
 use arora_types::value::Value;
 use futures::{FutureExt, Stream, StreamExt};
@@ -190,7 +190,7 @@ pub struct Pending {
 /// directly (web rAF, a preview loop) this is the whole inbound drain; under
 /// [`run`](Arora::run) it just picks up what arrived since the select last
 /// yielded, so both drivers see identical semantics.
-fn sweep_now(
+pub(crate) fn sweep_now(
     hal_feed: &mut (impl Stream<Item = StateChange> + Unpin),
     inbound: &mut (impl Stream<Item = (Option<usize>, Inbound)> + Unpin),
     pending: &mut Pending,
@@ -306,7 +306,7 @@ fn apply_sensors(
 /// telemetry.
 fn apply_events(
     store: &dyn DataStore,
-    function_index: &HashMap<Uuid, ModuleFunction>,
+    function_index: &FunctionIndex,
     call_bridge: &mut dyn CallBridge,
     events: Vec<(Option<usize>, Inbound)>,
     data_requested: &mut [bool],
@@ -341,7 +341,7 @@ fn apply_events(
 #[allow(deprecated)]
 fn apply_command(
     store: &dyn DataStore,
-    function_index: &HashMap<Uuid, ModuleFunction>,
+    function_index: &FunctionIndex,
     call_bridge: &mut dyn CallBridge,
     cmd: BridgeCommand,
 ) -> Result<(), RuntimeError> {
@@ -563,16 +563,84 @@ pub(crate) fn with_interpreter_value(
 }
 
 /// A task run the device started, followed to its end so the log says how it
-/// ended. The interpreter module's `SPAWN` adds one, its `HALT` marks it, and
-/// each step reads its status key once, after the behavior ticked.
+/// started and ended. The interpreter module's `SPAWN` and `SPAWN_GRAPH` add
+/// one, its `HALT` marks it, and each step reads its status key once, after
+/// the behavior ticked.
 pub(crate) struct TaskRun {
     pub id: TaskId,
-    /// What the run calls, as the log names it.
-    pub function: String,
+    /// What the run calls.
+    pub calls: RunCalls,
+    /// How the run coexists with the others.
+    pub policy: RunPolicy,
+    /// How the log names the run, once the device has said it started.
+    pub label: Option<String>,
     /// The key the run's status is written to.
     pub status: Key,
     /// A halt was requested: the run ends `Failure` because it was stopped.
     pub halted: bool,
+    /// Why the device halted the run itself: a change to a module it calls.
+    pub interrupted: Option<String>,
+}
+
+/// What a task run calls.
+pub(crate) enum RunCalls {
+    /// The one call it was spawned with.
+    Call {
+        module: Option<Uuid>,
+        function: Uuid,
+    },
+    /// The functions the nodes of the graph it was spawned with name.
+    Graph { functions: Vec<Uuid> },
+}
+
+impl TaskRun {
+    /// The run `handle` follows, just started, calling `calls`.
+    pub fn started(handle: &TaskHandle, calls: RunCalls, policy: RunPolicy) -> Self {
+        TaskRun {
+            id: handle.id,
+            calls,
+            policy,
+            label: None,
+            status: handle.status.clone(),
+            halted: false,
+            interrupted: None,
+        }
+    }
+
+    /// Whether the run calls module `module`, whose functions are `exports`.
+    pub fn calls_module(&self, module: Uuid, exports: &[Uuid]) -> bool {
+        match &self.calls {
+            RunCalls::Call {
+                module: called,
+                function,
+            } => *called == Some(module) && exports.contains(function),
+            RunCalls::Graph { functions } => functions.iter().any(|f| exports.contains(f)),
+        }
+    }
+}
+
+/// Whether `call` calls module `module`, whose functions are `exports`: a call
+/// to it, or a request to start a task run calling it.
+pub(crate) fn calls_module(call: &Call, module: Uuid, exports: &[Uuid]) -> bool {
+    if call.module_id == Some(module) {
+        return true;
+    }
+    if call.module_id != Some(interpreter_module::ID) {
+        return false;
+    }
+    if call.id == interpreter_module::SPAWN {
+        return interpreter_module::decode_spawn(call)
+            .is_ok_and(|(spawned, _)| spawned.module_id == Some(module));
+    }
+    if call.id == interpreter_module::SPAWN_GRAPH {
+        return interpreter_module::decode_spawn_graph(call).is_ok_and(|(_, graph, _)| {
+            graph
+                .nodes
+                .values()
+                .any(|node| exports.contains(&node.function))
+        });
+    }
+    false
 }
 
 /// The task runs the device started and has not yet seen end — shared, like
@@ -582,21 +650,32 @@ pub(crate) type TaskRuns = Rc<RefCell<Vec<TaskRun>>>;
 
 /// How the log names the function `call` reaches: its name in the device's
 /// function index, with its id; the bare id when the index does not know it.
-pub(crate) fn function_label(index: &HashMap<Uuid, ModuleFunction>, id: Uuid) -> String {
+pub(crate) fn function_label(index: &FunctionIndex, id: Uuid) -> String {
     match index.get(&id) {
         Some(function) => format!("'{}' ({id})", function.function_name),
         None => format!("function {id}"),
     }
 }
 
-/// Log each task run whose status key reached a terminal status, once, and
-/// stop following it.
-fn report_ended_runs(store: &dyn DataStore, runs: &TaskRuns) {
+/// Log each task run the device started since the previous step, naming
+/// what it calls from `functions`, and each whose status key reached a
+/// terminal status, once, then stop following it.
+fn report_task_runs(store: &dyn DataStore, runs: &TaskRuns, functions: &FunctionIndex) {
     let Ok(mut runs) = runs.try_borrow_mut() else {
         return;
     };
     if runs.is_empty() {
         return;
+    }
+    for run in runs.iter_mut().filter(|run| run.label.is_none()) {
+        let label = match &run.calls {
+            RunCalls::Call { function, .. } => function_label(functions, *function),
+            RunCalls::Graph { functions } => {
+                format!("a graph naming {} function(s)", functions.len())
+            }
+        };
+        log::info!("task {} started: {label}, {:?} run", run.id.0, run.policy);
+        run.label = Some(label);
     }
     runs.retain(|run| {
         let status = store
@@ -605,13 +684,15 @@ fn report_ended_runs(store: &dyn DataStore, runs: &TaskRuns) {
             .next()
             .flatten()
             .and_then(|value| Status::try_from(value).ok());
-        let outcome = match status {
-            Some(Status::Success) => "succeeded",
-            Some(Status::Failure) if run.halted => "halted",
-            Some(Status::Failure) => "failed",
-            Some(Status::Running) | None => return true,
+        let outcome = match (status, &run.interrupted) {
+            (Some(Status::Success), _) => "succeeded".to_string(),
+            (Some(Status::Failure), Some(why)) => format!("interrupted: {why}"),
+            (Some(Status::Failure), None) if run.halted => "halted".to_string(),
+            (Some(Status::Failure), None) => "failed".to_string(),
+            (Some(Status::Running) | None, _) => return true,
         };
-        log::info!("task {} ({}) {outcome}", run.id.0, run.function);
+        let label = run.label.as_deref().unwrap_or("");
+        log::info!("task {} ({label}) {outcome}", run.id.0);
         false
     });
 }
@@ -634,6 +715,7 @@ fn tick_behavior(
     interpreter: &mut Option<Box<dyn BehaviorInterpreter>>,
     store: &dyn DataStore,
     engine: &mut arora_engine::engine::PinnedEngine,
+    functions: &FunctionIndex,
     standing_error: &watch::Sender<Option<String>>,
 ) {
     let Some(behavior) = interpreter.as_mut() else {
@@ -642,6 +724,7 @@ fn tick_behavior(
     let mut ctx = BehaviorContext {
         store,
         call_bridge: engine,
+        functions,
     };
     // Raise a fault on the standing watch, deduplicated by message; `retried`
     // only changes the log line (the interpreter's fate is decided by the caller).
@@ -814,10 +897,12 @@ impl Arora {
             &mut self.interpreter.borrow_mut(),
             &*self.store,
             &mut self.engine,
+            &self.function_index,
             &self.behavior_error,
         );
-        //    The task runs this tick ended, said once each.
-        report_ended_runs(&*self.store, &self.task_runs);
+        //    The task runs started since the previous step, and those this
+        //    tick ended, said once each.
+        report_task_runs(&*self.store, &self.task_runs, &self.function_index);
         // 5. flush — everything this frame changed, as one change.
         let out = flush(&self.store_changes);
         // 6. writings — the hardware first (its own readings subtracted), then
@@ -1100,8 +1185,10 @@ mod tests {
     /// ready to hand to [`build_in_with`]. The tree binds to the device's store
     /// at its first tick (the scaffold lowers against the tick's context).
     fn groot_interpreter(xml: &str) -> Box<dyn BehaviorInterpreter> {
-        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
-        interpreter.load_groot(xml).expect("tree loads");
+        let mut interpreter = BehaviorTreeInterpreter::new();
+        interpreter
+            .load_groot(xml, &HashMap::new())
+            .expect("tree loads");
         Box::new(interpreter)
     }
 
@@ -1442,7 +1529,7 @@ mod tests {
         // find the cell borrowed by phase 4: the module function refuses with
         // an error instead of aborting the process.
         let interpreter: InterpreterCell = Rc::new(RefCell::new(Some(Box::new(
-            BehaviorTreeInterpreter::new(Rc::new(HashMap::new())),
+            BehaviorTreeInterpreter::new(),
         )
             as Box<dyn BehaviorInterpreter>)));
         let _phase_4_holds_it = interpreter.borrow_mut();
