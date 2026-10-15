@@ -63,7 +63,6 @@
 //! re-fire.
 
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use arora_behavior::graph::{
     source_port, Graph, GraphDiff, GraphType, Io, Link, LinkSource, Node as GraphNode, Port,
@@ -86,7 +85,7 @@ use crate::nodes::{
 };
 use crate::schema::_RET_PARAM_ID;
 use crate::{is_interpreter_function, is_native};
-use crate::{lower_behavior_tree, schema_groot, LoweredTree, ModuleFunction};
+use crate::{lower_behavior_tree, schema_groot, FunctionIndex, LoweredTree, ModuleFunction};
 
 /// The name of the language this interpreter reads: the [`GraphType::name`] a
 /// graph spawned on it states.
@@ -147,7 +146,7 @@ pub struct BehaviorTreeInterpreter {
     /// The status keys of the runs halted since the last tick: the next tick
     /// (which owns the store) writes their terminal status.
     halted: Vec<Key>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     /// The persistent lowering; rebuilt when [`dirty`](Self::dirty).
     lowered: Option<LoweredTree>,
     /// The graph changed since the last lowering.
@@ -308,7 +307,7 @@ impl BehaviorTreeInterpreter {
     /// Construct the interpreter over the module-function index its call nodes
     /// resolve against. It hosts the runner scaffold immediately; with nothing
     /// loaded the runner ticks no children and the interpreter idles.
-    pub fn new(function_index: Rc<HashMap<Uuid, ModuleFunction>>) -> Self {
+    pub fn new(function_index: FunctionIndex) -> Self {
         let runner = Uuid::new_v4();
         let mut graph = Graph::empty();
         graph.nodes.insert(
@@ -341,7 +340,7 @@ impl BehaviorTreeInterpreter {
     /// other.
     pub fn load_groot(&mut self, xml: &str) -> Result<(), crate::error::BehaviorTreeError> {
         let groot = schema_groot::BehaviorTree::try_from_groot_xml(xml)?;
-        let graph = groot.into_graph(self.function_index.as_ref())?;
+        let graph = groot.into_graph(&self.function_index.borrow())?;
         self.load(graph)
             .map_err(|e| crate::error::BehaviorTreeError::InconsistentTreeError {
                 message: e.to_string(),
@@ -431,7 +430,7 @@ impl BehaviorTreeInterpreter {
             .apply(diff)
             .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
         check_acyclic(&graph, self.runner)?;
-        check_selections(&graph, &self.function_index)?;
+        check_selections(&graph, &self.function_index.borrow())?;
         build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
         self.graph = graph;
@@ -784,6 +783,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             !is_native(node.function)
                 && self
                     .function_index
+                    .borrow()
                     .get(&node.function)
                     .is_none_or(is_interpreter_function)
         }) {
@@ -829,6 +829,33 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             root,
             fragment,
         )
+    }
+
+    fn called_functions(&self) -> HashSet<Uuid> {
+        // Every module function a node of the scaffold names — the main
+        // behavior's and every live run's — and the function each run-call
+        // leaf's literal call targets. A run-call leaf fed its call through a
+        // variable names no function until it ticks, so it is not counted.
+        let mut called: HashSet<Uuid> = self
+            .graph
+            .nodes
+            .values()
+            .map(|node| node.function)
+            .filter(|function| !is_native(*function))
+            .collect();
+        called.extend(self.graph.links.iter().filter_map(|link| {
+            let call_node = self.graph.nodes.get(&link.target.node)?;
+            if call_node.function != RUN_CALL_FUNCTION_ID || link.target.port != RUN_CALL_PARAM_ID {
+                return None;
+            }
+            let LinkSource::Literal(value) = &link.source else {
+                return None;
+            };
+            value_serde::from_value::<Call>(value.clone())
+                .ok()
+                .map(|call| call.id)
+        }));
+        called
     }
 
     fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {

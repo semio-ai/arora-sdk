@@ -342,6 +342,13 @@ impl WebAssemblyModule {
 
 impl Module for WebAssemblyModule {
     fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+        // A function the header does not declare is refused before anything
+        // is allocated in the guest.
+        let func = self
+            .arora_functions
+            .get(method_id)
+            .cloned()
+            .ok_or(DispatchError::FunctionNotFound { id: *method_id })?;
         let arg_size = u32::try_from(arg.len()).map_err(|_| DispatchError::Internal {
             message: format!("failed to cast args size to u32 in module {}", self.name()),
         })?;
@@ -360,7 +367,6 @@ impl Module for WebAssemblyModule {
             })?;
 
         // Calling the function. It returns the address of the buffer of the result.
-        let func = self.arora_functions.get(method_id).unwrap();
         let result = func
             .call(&mut self.store, (arg_addr,))
             .map_err(|e| DispatchError::Trap {

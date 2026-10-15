@@ -63,7 +63,7 @@ pub use runtime::RuntimeError;
 pub use arora_behavior_tree::behavior::BehaviorTreeInterpreter;
 /// Re-exported so a behavior-tree embedder can name the host-function metadata
 /// type a Groot tree binds its action/condition nodes to.
-pub use arora_behavior_tree::ModuleFunction;
+pub use arora_behavior_tree::{FunctionIndex, ModuleFunction};
 
 use crate::runtime::EndpointInbound;
 use anyhow::Result;
@@ -102,7 +102,7 @@ use futures::stream::{self, Fuse, SelectAll};
 use futures::StreamExt;
 use runtime::{Clock, Pending};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -138,7 +138,12 @@ pub struct Arora {
     /// and string nodes) are dispatched natively and are not in this index. A host module registered
     /// through [`AroraBuilder::with_host_module`] dispatches through the engine
     /// directly, so it does not appear here.
-    pub(crate) function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    pub(crate) function_index: FunctionIndex,
+    /// The guest modules the device loaded, by module id, each with the ids of
+    /// the functions its header exports: what [`Arora::reload_module`] and
+    /// [`Arora::unload_module`] act on. Host modules (the HAL's, the
+    /// interpreter's, an embedder's) are not here: they leave with the device.
+    pub(crate) guest_modules: HashMap<Uuid, Vec<Uuid>>,
     /// The one behavior interpreter, ticked each step — an executor injected once
     /// at [`build`](AroraBuilder::build), not swapped afterwards. It defaults to
     /// an empty, ready [`BehaviorTreeInterpreter`] (see
@@ -249,13 +254,183 @@ impl Arora {
         let tree = arora_behavior_tree::schema_groot::BehaviorTree::try_from_groot_xml(xml)
             .map_err(|e| anyhow::anyhow!("the Groot tree does not parse: {e:?}"))?;
         let graph = tree
-            .into_graph(&self.function_index)
+            .into_graph(&self.function_index.borrow())
             .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
         self.loading_groot.set(true);
         let loaded = self.call(interpreter_module::encode_load(&graph));
         self.loading_groot.set(false);
         loaded.map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
         Ok(())
+    }
+
+    /// Load a guest module into the running device: its functions dispatch
+    /// from the next call, and those [`with_module`](AroraBuilder::with_module)
+    /// would index join the method index. Refused when a module — guest or
+    /// host — is already loaded under its id (one module id, one module:
+    /// [`reload_module`](Self::reload_module) replaces one), or when it exports
+    /// a function id another module's function already has.
+    ///
+    /// Call it between steps, like [`call`](Self::call).
+    pub fn load_module(&mut self, module: &CompiledModule) -> Result<()> {
+        let header = module.header();
+        let id = header.id;
+        if self.engine.contains_module(&id) {
+            anyhow::bail!(
+                "a module is already loaded under id {id}: reload it to replace it with '{}'",
+                header.name
+            );
+        }
+        self.check_function_ids(header)?;
+        self.engine
+            .load_compiled_module(module)
+            .map_err(|e| anyhow::anyhow!("failed to load module '{}' ({id}): {e}", header.name))?;
+        self.function_index
+            .borrow_mut()
+            .extend(freeze_exports(header, |_| false).map(|f| (f.function_id, f)));
+        self.guest_modules.insert(id, export_ids(header));
+        log::info!(
+            "loaded module '{}' ({id}): {} function(s)",
+            header.name,
+            header.exports.len()
+        );
+        Ok(())
+    }
+
+    /// Replace the guest module loaded under `module`'s id with `module` — a
+    /// new version, or the same one rebuilt — in one step: from the next
+    /// call, its functions run the new code in a fresh instance, and the
+    /// method index describes the new header's exports in place of the old
+    /// one's.
+    ///
+    /// All or nothing. It is refused, leaving the old module loaded and
+    /// described, when no guest module is loaded under the id, when the new
+    /// version does not export a function the running behavior calls (the
+    /// main behavior's or a task run's, as
+    /// [`BehaviorInterpreter::called_functions`] reports them), when it
+    /// exports a function id another module's function has, or when it fails
+    /// to load. A behavior calling the module keeps running: its next call
+    /// reaches the new instance, which holds none of the old one's state.
+    ///
+    /// Call it between steps, like [`call`](Self::call).
+    pub fn reload_module(&mut self, module: &CompiledModule) -> Result<()> {
+        let header = module.header();
+        let id = header.id;
+        let Some(old) = self.guest_modules.get(&id) else {
+            anyhow::bail!(
+                "no guest module is loaded under id {id}: load '{}' instead",
+                header.name
+            );
+        };
+        self.check_function_ids(header)?;
+        let new = export_ids(header);
+        let called = self.called_functions();
+        let dropped: Vec<Uuid> = old
+            .iter()
+            .filter(|function| called.contains(function) && !new.contains(function))
+            .copied()
+            .collect();
+        if !dropped.is_empty() {
+            anyhow::bail!(
+                "the behavior calls {} of module {id}, which '{}' does not export: halt what \
+                 calls it, or load a behavior that does not, before reloading",
+                self.labels(&dropped),
+                header.name
+            );
+        }
+        self.engine.reload_module(module).map_err(|e| {
+            anyhow::anyhow!("failed to reload module '{}' ({id}): {e}", header.name)
+        })?;
+        let mut index = self.function_index.borrow_mut();
+        index.retain(|_, function| function.module_id != id);
+        index.extend(freeze_exports(header, |_| false).map(|f| (f.function_id, f)));
+        drop(index);
+        self.guest_modules.insert(id, new);
+        log::info!(
+            "reloaded module '{}' ({id}): {} function(s)",
+            header.name,
+            header.exports.len()
+        );
+        Ok(())
+    }
+
+    /// Unload the guest module loaded under `id`: its functions leave the
+    /// method index and dispatch, and its instance is dropped. A call to it
+    /// then fails as a call to a module the device never had.
+    ///
+    /// Refused while the running behavior calls one of its functions (the
+    /// main behavior or a task run, as
+    /// [`BehaviorInterpreter::called_functions`] reports them) — halt what
+    /// calls it, or load a behavior that does not, first — and for a module
+    /// the device did not load as a guest: the HAL's, the interpreter's, and
+    /// an embedder's host modules stay for the device's life.
+    ///
+    /// Call it between steps, like [`call`](Self::call).
+    pub fn unload_module(&mut self, id: Uuid) -> Result<()> {
+        let Some(exports) = self.guest_modules.get(&id) else {
+            anyhow::bail!("no guest module is loaded under id {id}");
+        };
+        let called = self.called_functions();
+        let in_use: Vec<Uuid> = exports
+            .iter()
+            .filter(|function| called.contains(function))
+            .copied()
+            .collect();
+        if !in_use.is_empty() {
+            anyhow::bail!(
+                "the behavior calls {} of module {id}: halt what calls it, or load a behavior \
+                 that does not, before unloading",
+                self.labels(&in_use)
+            );
+        }
+        self.engine
+            .unload_module(&id)
+            .map_err(|e| anyhow::anyhow!("failed to unload module {id}: {e}"))?;
+        self.function_index
+            .borrow_mut()
+            .retain(|_, function| function.module_id != id);
+        self.guest_modules.remove(&id);
+        log::info!("unloaded module {id}");
+        Ok(())
+    }
+
+    /// The module functions the running behavior calls.
+    fn called_functions(&self) -> HashSet<Uuid> {
+        self.interpreter
+            .borrow()
+            .as_ref()
+            .map(|interpreter| interpreter.called_functions())
+            .unwrap_or_default()
+    }
+
+    /// Refuse a header exporting a function id another module's function has:
+    /// a call names its function by id, so one id is one function.
+    fn check_function_ids(&self, header: &Header) -> Result<()> {
+        let index = self.function_index.borrow();
+        for function in export_ids(header) {
+            let owner = index.get(&function).map(|f| f.module_id).or_else(|| {
+                self.guest_modules
+                    .iter()
+                    .find(|(_, exports)| exports.contains(&function))
+                    .map(|(module, _)| *module)
+            });
+            if let Some(owner) = owner.filter(|owner| *owner != header.id) {
+                anyhow::bail!(
+                    "module '{}' ({}) exports function {function}, which module {owner} has",
+                    header.name,
+                    header.id
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The functions `ids`, by name where the method index has one.
+    fn labels(&self, ids: &[Uuid]) -> String {
+        let index = self.function_index.borrow();
+        ids.iter()
+            .map(|id| runtime::function_label(&index, *id))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Borrow the engine's call seam. [`call`](Arora::call) covers plain
@@ -809,6 +984,7 @@ impl AroraBuilder {
         // here, and the engine answers an already-loaded id with Ok — which
         // would dispatch the first and describe the last.
         let mut guest_modules: HashMap<Uuid, String> = HashMap::new();
+        let mut guest_exports: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
         for module in self.modules {
             let header = module.header();
             let module_id = header.id;
@@ -819,36 +995,13 @@ impl AroraBuilder {
                      device loads one module per id"
                 );
             }
-            for export in &header.exports {
-                let low::ExportSymbol::Function(function) = export;
-                // An export its declaration already indexed
-                // (`with_declared_module`) keeps that frozen signature; only a
-                // bare header's exports are frozen from their primitives here.
-                if functions.contains_key(&function.id) {
-                    continue;
-                }
-                match module_discovery::guest_function_signature(function) {
-                    Some(signature) => {
-                        functions.insert(
-                            function.id,
-                            ModuleFunction {
-                                module_id,
-                                function_id: function.id,
-                                function_name: function.name.clone(),
-                                function: signature,
-                            },
-                        );
-                    }
-                    None => log::warn!(
-                        "guest module {module_id} export '{}' ({}) has a parameter or return \
-                         type that is neither a primitive nor an optional over a scalar \
-                         primitive; it \
-                         dispatches but DescribeMethods does not list it",
-                        function.name,
-                        function.id
-                    ),
-                }
-            }
+            // An export its declaration already indexed
+            // (`with_declared_module`) keeps that frozen signature; only a
+            // bare header's exports are frozen from their primitives here.
+            let frozen: Vec<ModuleFunction> =
+                freeze_exports(header, |id| functions.contains_key(id)).collect();
+            functions.extend(frozen.into_iter().map(|f| (f.function_id, f)));
+            guest_exports.insert(module_id, export_ids(header));
             let function_count = header.exports.len();
             // A module given as bytes compiles here, for this device alone.
             let compiled = match module {
@@ -999,7 +1152,7 @@ impl AroraBuilder {
         inbound.push(caller_rx.map(|event| (None, event)).boxed());
 
         let endpoints = bridges.len();
-        let function_index = Rc::new(functions);
+        let function_index: FunctionIndex = Rc::new(RefCell::new(functions));
         // Default executor: an empty, ready behavior-tree interpreter over the
         // assembled function index. It is injected once here (never swapped); a
         // behavior is loaded into it as a separate step. With none loaded it
@@ -1066,7 +1219,7 @@ impl AroraBuilder {
                 move |call| {
                     let (spawned, policy) = interpreter_module::decode_spawn(&call)
                         .map_err(|message| CallError::Guest { message })?;
-                    let function = runtime::function_label(&function_index, spawned.id);
+                    let function = runtime::function_label(&function_index.borrow(), spawned.id);
                     let mut handle = None;
                     let result = runtime::with_interpreter_value(&cell, |interpreter| {
                         interpreter.spawn(spawned, policy).map(|spawned| {
@@ -1146,6 +1299,7 @@ impl AroraBuilder {
             store,
             engine,
             function_index,
+            guest_modules: guest_exports,
             interpreter,
             hal,
             bridges,
@@ -1171,6 +1325,48 @@ impl AroraBuilder {
         runtime::describe_hal_keys(&*arora.store, &mut arora.hal_keys, &mut arora.hal_stated);
         Ok(arora)
     }
+}
+
+/// The ids of the functions `header` exports.
+fn export_ids(header: &Header) -> Vec<Uuid> {
+    header.exports.iter().map(|export| *export.id()).collect()
+}
+
+/// The method-index entries a guest module's header gives its exports: each
+/// export whose parameters and return are all primitives or optionals over a
+/// scalar primitive, frozen from them. A header carries no type versions, so
+/// an export naming a record (which needs a registry to pin its version), a
+/// map or a fixed-length array dispatches but is not described; each one is
+/// logged. An export `described` says is already indexed is skipped.
+fn freeze_exports<'a>(
+    header: &'a Header,
+    described: impl Fn(&Uuid) -> bool + 'a,
+) -> impl Iterator<Item = ModuleFunction> + 'a {
+    let module_id = header.id;
+    header.exports.iter().filter_map(move |export| {
+        let low::ExportSymbol::Function(function) = export;
+        if described(&function.id) {
+            return None;
+        }
+        match module_discovery::guest_function_signature(function) {
+            Some(signature) => Some(ModuleFunction {
+                module_id,
+                function_id: function.id,
+                function_name: function.name.clone(),
+                function: signature,
+            }),
+            None => {
+                log::warn!(
+                    "guest module {module_id} export '{}' ({}) has a parameter or return type \
+                     that is neither a primitive nor an optional over a scalar primitive; it \
+                     dispatches but DescribeMethods does not list it",
+                    function.name,
+                    function.id
+                );
+                None
+            }
+        }
+    })
 }
 
 /// Build the engine with the right executor host for the target: the browser's
@@ -1255,7 +1451,9 @@ mod module_loading_tests {
         for declared in Module::exports() {
             let indexed = arora
                 .function_index
+                .borrow()
                 .get(&declared.id)
+                .cloned()
                 .unwrap_or_else(|| panic!("{} is indexed", declared.name));
             assert_eq!(indexed.module_id, Module::id());
             assert_eq!(indexed.function_name, declared.name);
@@ -1437,8 +1635,10 @@ mod module_loading_tests {
         let by_name = |name: &str| {
             arora
                 .function_index
+                .borrow()
                 .values()
                 .find(|f| f.function_name == name)
+                .cloned()
         };
 
         // `cos(angle: f32) -> f32`: one f32 parameter, f32 return.
@@ -1846,6 +2046,7 @@ mod module_loading_tests {
         assert!(
             arora
                 .function_index
+                .borrow()
                 .values()
                 .any(|f| f.function_name == "cos"),
             "the compiled module's exports join the method index"
@@ -2112,12 +2313,14 @@ mod host_module_tests {
 
         let entry = arora
             .function_index
+            .borrow()
             .get(&described)
+            .cloned()
             .expect("the described function is indexed");
         assert_eq!(entry.module_id, module_id);
         assert_eq!(entry.function_name, "look_at");
         assert_eq!(entry.function, signature);
-        assert!(arora.function_index.get(&undescribed).is_none());
+        assert!(arora.function_index.borrow().get(&undescribed).is_none());
     }
 
     /// An interpreter hosting `look_at` as a task run of its own.
@@ -2165,7 +2368,9 @@ mod host_module_tests {
 
         let entry = arora
             .function_index
+            .borrow()
             .get(&LOOK_AT)
+            .cloned()
             .expect("the interpreter's method is indexed");
         assert_eq!(entry.module_id, interpreter_module::ID);
         assert_eq!(entry.function_name, "look_at");
@@ -2210,6 +2415,9 @@ mod host_module_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod stepping_tests;
+
+#[cfg(all(test, feature = "native"))]
+mod module_reload_tests;
 
 /// The [`LocalCaller`]'s client operations on a device built and stepped in
 /// process: each is enqueued when the method returns and answered by the steps

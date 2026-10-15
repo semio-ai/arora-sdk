@@ -65,7 +65,7 @@ pub struct BehaviorTreeRuntime<'a> {
 impl<'a> BehaviorTreeRuntime<'a> {
     pub fn setup(
         tree: &'a BehaviorTree,
-        function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+        function_index: FunctionIndex,
         caller: &'a mut dyn CallBridge,
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
@@ -110,7 +110,7 @@ pub struct LoweredTree {
 /// the ready-to-tick [`LoweredTree`].
 pub fn lower_behavior_tree(
     tree: BehaviorTree,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
@@ -167,7 +167,7 @@ impl LoweredTree {
 /// builtin) would spin forever here.
 pub fn run_behavior_tree(
     behavior: &BehaviorTree,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<Status, BehaviorTreeError> {
@@ -189,7 +189,7 @@ enum TraceTick {
 fn setup_tick_function(
     node: Rc<Node>,
     node_index: &HashMap<Uuid, Rc<Node>>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     unpack_outputs: &HashMap<Uuid, UnpackOutputs>,
@@ -516,7 +516,7 @@ fn tick_builtin(
 #[allow(clippy::too_many_arguments)]
 fn tick(
     caller: &mut dyn CallBridge,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     outputs: Option<&[Option<VariableCell>]>,
@@ -541,12 +541,12 @@ fn tick(
         return Ok(status);
     }
 
-    let module_function =
-        function_index
-            .get(&node.function)
-            .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-                id: node.function,
-            }))?;
+    let index = function_index.borrow();
+    let module_function = index
+        .get(&node.function)
+        .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
+            id: node.function,
+        }))?;
     let function = &module_function.function;
 
     let mut call = Call {
@@ -781,7 +781,7 @@ impl Tickable for CallableId {
 /// The usual Tickable object in behavior trees, which is also Callable.
 struct TickFunction {
     node: Rc<Node>,
-    function_index: Rc<HashMap<Uuid, ModuleFunction>>,
+    function_index: FunctionIndex,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     /// The node's output cells, for an `Unpack` node.
@@ -1267,6 +1267,17 @@ pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
         && [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function.function_id)
 }
 
+/// The module-function index a tree's call nodes resolve against, shared by
+/// the interpreter, every tree it lowers, and the device that owns it.
+///
+/// Shared and mutable because a device's module set changes while it runs —
+/// a module loaded, reloaded or unloaded between steps: every holder resolves
+/// against the change from its next lookup, with nothing to re-lower. A tick
+/// borrows it for the call it builds; the device changes it between steps,
+/// never while a tree ticks. Single-threaded, like the device.
+pub type FunctionIndex = Rc<RefCell<HashMap<Uuid, ModuleFunction>>>;
+
+#[derive(Debug, Clone)]
 pub struct ModuleFunction {
     pub module_id: Uuid,
     pub function_id: Uuid,

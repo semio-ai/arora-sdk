@@ -34,7 +34,7 @@
 //! the store under the [`built_in`] keys before it ticks, so an interpreter that
 //! needs `dt` or elapsed time reads it from the store like any other slot.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arora_types::call::{Call, CallBridge};
 use arora_types::data::DataStore;
@@ -224,6 +224,20 @@ pub trait BehaviorInterpreter {
         Err(BehaviorError {
             message: "this interpreter does not support halting task runs".to_string(),
         })
+    }
+
+    /// The module functions the behavior it runs calls — the main behavior's
+    /// and every live task run's — by function id. The runtime asks it before
+    /// it unloads or reloads a module: a module whose function the behavior
+    /// calls is not unloaded, and a new version that drops one is not loaded,
+    /// so a running behavior never calls a function the device no longer has.
+    ///
+    /// A call whose target is only known when it runs (a call value read from
+    /// a variable) is not counted. The default reports none, which leaves the
+    /// guard to the caller: an interpreter that calls module functions
+    /// overrides it.
+    fn called_functions(&self) -> HashSet<Uuid> {
+        HashSet::new()
     }
 
     /// The methods this interpreter implements itself, by function id, each

@@ -251,15 +251,26 @@ pub(crate) fn build(node: TreeNode) -> BehaviorTree {
 /// Tick a tree (with only native nodes) exactly once.
 fn tick_once(tree: &BehaviorTree) -> Status {
     let mut bridge = TestBridge::empty();
-    let mut runtime = BehaviorTreeRuntime::setup(tree, Rc::new(HashMap::new()), &mut bridge, false)
-        .expect("runtime sets up");
+    let mut runtime = BehaviorTreeRuntime::setup(
+        tree,
+        Rc::new(RefCell::new(HashMap::new())),
+        &mut bridge,
+        false,
+    )
+    .expect("runtime sets up");
     runtime.tick().expect("tick succeeds")
 }
 
 /// Run a tree (with only native nodes) to a terminal status.
 fn run(tree: &BehaviorTree) -> Status {
     let mut bridge = TestBridge::empty();
-    run_behavior_tree(tree, Rc::new(HashMap::new()), &mut bridge, false).expect("run succeeds")
+    run_behavior_tree(
+        tree,
+        Rc::new(RefCell::new(HashMap::new())),
+        &mut bridge,
+        false,
+    )
+    .expect("run succeeds")
 }
 
 // seq
@@ -356,10 +367,10 @@ fn concurrent_runs_advance_independently() {
         (b, Status::Running),
     ])));
     let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
-    let function_index = Rc::new(HashMap::from([
+    let function_index = Rc::new(RefCell::new(HashMap::from([
         (a, scripted_leaf_function(a)),
         (b, scripted_leaf_function(b)),
-    ]));
+    ])));
     let tree = build(nodes::parallel(vec![scripted_leaf(a), scripted_leaf(b)]));
     let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
 
@@ -403,11 +414,11 @@ fn seq_star_resumes_and_resets() {
     ])));
     let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
 
-    let function_index = Rc::new(HashMap::from([
+    let function_index = Rc::new(RefCell::new(HashMap::from([
         (first, scripted_leaf_function(first)),
         (second, scripted_leaf_function(second)),
         (third, scripted_leaf_function(third)),
-    ]));
+    ])));
 
     let tree = build(nodes::seq_star(vec![
         scripted_leaf(first),
@@ -465,7 +476,8 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
     use arora_behavior::{BehaviorContext, BehaviorInterpreter, BehaviorStatus};
     use arora_simple_data_store::SimpleDataStore;
 
-    let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+    let mut interpreter =
+        BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
     // The scaffold is there before anything is loaded: one runner node.
     assert!(interpreter.graph().root.is_some(), "the runner is the root");
@@ -534,7 +546,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xA1);
         let (mut bridge, statuses, ticks) = scripted(leaf, Status::Running);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         // The default-reject is overridden: a handle comes back, its keys
         // namespaced under the run id.
@@ -594,7 +607,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xC2);
         let (mut bridge, _statuses, ticks) = scripted(leaf, Status::Running);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         let handle = interp
             .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
@@ -655,7 +669,8 @@ mod task_runs {
         let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
         let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         // The main behavior: a single run-call leaf graph invoking the
         // scripted main_leaf (dispatched through arora_call, like a module
@@ -717,7 +732,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xE5);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Running);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         let handle = interp
             .spawn(call_to(0xB0, leaf), RunPolicy::Concurrent)
@@ -775,7 +791,8 @@ mod task_runs {
         let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
         let mut bridge = TestBridge::new(statuses.clone(), ticks.clone());
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         let ha = interp
             .spawn(call_to(0xB0, a), RunPolicy::Concurrent)
@@ -881,7 +898,8 @@ mod task_runs {
             Port::new(node, nodes::IS_STR_SET_VALUE_PARAM_ID),
             LinkSource::Literal(Value::String("set".to_string())),
         ));
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let handle = interp
             .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
             .expect("a core node needs no module");
@@ -909,7 +927,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xF1);
         let (mut bridge, _statuses, ticks) = scripted(leaf, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
 
         let handle = interp
             .spawn_graph(
@@ -983,7 +1002,8 @@ mod task_runs {
         let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
         let mut bridge = TestBridge::new(statuses, ticks.clone());
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let [parallel, call_node, run] = [0x20, 0x21, 0x22].map(Uuid::from_u128);
         let handle = interp
             .spawn_graph(
@@ -1093,7 +1113,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xC1);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let mut decorators = Vec::new();
         for (n, ids) in [[0x40, 0x41, 0x42], [0x50, 0x51, 0x52], [0x60, 0x61, 0x62]]
             .into_iter()
@@ -1174,7 +1195,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xC2);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let [parallel, call_node, run] = [0x90, 0x91, 0x92].map(Uuid::from_u128);
         let handle = interp
             .spawn_graph(
@@ -1260,7 +1282,8 @@ mod task_runs {
         use arora_behavior::graph::{Graph, GraphType, Link, LinkSource, Node as GraphNode, Port};
 
         let leaf = Uuid::from_u128(0xD1);
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp
             .spawn_graph(
                 &graph_type(),
@@ -1359,7 +1382,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xE1);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let variable = Uuid::from_u128(0x6);
         let handle = interp
             .spawn_graph(
@@ -1397,7 +1421,8 @@ mod task_runs {
         let missing = Uuid::from_u128(0xF6);
         let (mut bridge, _statuses, ticks) = scripted(good, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let failing = interp
             .spawn_graph(
                 &graph_type(),
@@ -1442,7 +1467,8 @@ mod task_runs {
         let leaf = Uuid::from_u128(0xF7);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         let ids = [0x30, 0x31, 0x32];
         let first = interp
             .spawn_graph(
@@ -1500,7 +1526,8 @@ mod task_runs {
         use arora_behavior::graph::{GraphDiff, Node as GraphNode};
 
         let leaf = Uuid::from_u128(0xF8);
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp
             .spawn_graph(
                 &graph_type(),
@@ -1601,7 +1628,7 @@ fn a_tree_does_not_call_the_interpreter_module_s_functions() {
             ..GraphNode::default()
         },
     );
-    let mut interp = BehaviorTreeInterpreter::new(Rc::new(index));
+    let mut interp = BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(index)));
     assert!(interp
         .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
         .is_err());
@@ -1632,7 +1659,8 @@ mod core_string_nodes {
 
     /// An interpreter with no module (an empty function index) running `body`.
     fn interpreter(body: &str) -> BehaviorTreeInterpreter {
-        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interpreter =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interpreter
             .load_groot(&groot(body))
             .expect("the core nodes need no module");
@@ -1760,9 +1788,13 @@ mod core_string_nodes {
         let reply = VariableCell::local();
         let tree = crate::tests::build(nodes::wait_str_set(Expression::Variable(reply.clone())));
         let mut bridge = TestBridge::empty();
-        let mut runtime =
-            BehaviorTreeRuntime::setup(&tree, Rc::new(HashMap::new()), &mut bridge, false)
-                .expect("runtime sets up");
+        let mut runtime = BehaviorTreeRuntime::setup(
+            &tree,
+            Rc::new(std::cell::RefCell::new(HashMap::new())),
+            &mut bridge,
+            false,
+        )
+        .expect("runtime sets up");
         assert_eq!(runtime.tick().unwrap(), Status::Running);
         assert_eq!(runtime.tick().unwrap(), Status::Running);
         reply.set(Value::String("ok".into()));
@@ -1802,9 +1834,13 @@ mod core_string_nodes {
         let value = VariableCell::local_with(Value::F32(1.0));
         let tree = crate::tests::build(nodes::is_str_set(Expression::Variable(value)));
         let mut bridge = TestBridge::empty();
-        let mut runtime =
-            BehaviorTreeRuntime::setup(&tree, Rc::new(HashMap::new()), &mut bridge, false)
-                .expect("runtime sets up");
+        let mut runtime = BehaviorTreeRuntime::setup(
+            &tree,
+            Rc::new(std::cell::RefCell::new(HashMap::new())),
+            &mut bridge,
+            false,
+        )
+        .expect("runtime sets up");
         assert!(runtime.tick().is_err());
     }
 }
@@ -1934,7 +1970,7 @@ mod optional_parameters {
     #[test]
     fn an_absent_key_binds_none_and_an_optional_output_maps_to_the_key() {
         let store = SimpleDataStore::new();
-        let mut tree = BehaviorTreeInterpreter::new(Rc::new(echo_index()));
+        let mut tree = BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(echo_index())));
         tree.load_groot(
             r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
                  <Echo input="{in}" output="{out}"/>
@@ -2075,7 +2111,8 @@ mod data_nodes {
 
     /// Load `graph` as the main behavior over `store` and tick it once.
     fn tick_once(store: &SimpleDataStore, graph: Graph) -> Result<(), String> {
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp.load(graph).map_err(|e| e.message)?;
         let mut bridge = super::TestBridge::empty();
         let mut ctx = BehaviorContext {
@@ -2343,8 +2380,13 @@ mod data_nodes {
         ));
         let tree = build_behavior_tree(&graph, &|_| None).expect("the tree lowers");
         let mut bridge = super::TestBridge::empty();
-        let status =
-            crate::run_behavior_tree(&tree, Rc::new(HashMap::new()), &mut bridge, false).unwrap();
+        let status = crate::run_behavior_tree(
+            &tree,
+            Rc::new(std::cell::RefCell::new(HashMap::new())),
+            &mut bridge,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             status,
             crate::arora_generated::behavior_tree::status::Status::Success
@@ -2379,7 +2421,8 @@ mod data_nodes {
     #[test]
     fn an_edit_breaking_an_unpack_is_refused() {
         use arora_behavior::graph::GraphDiff;
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp
             .load(guarded_unpack(
                 literal(Value::U8(1)),
@@ -2414,7 +2457,8 @@ mod data_nodes {
     fn unpack_writes_a_key_only_when_its_value_moves() {
         use arora_behavior::graph::GraphDiff;
         let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp
             .load(guarded_unpack(
                 literal(Value::U8(1)),
@@ -2575,7 +2619,8 @@ mod data_nodes {
             if let Some(stored) = stored {
                 store.write(StateChange::set("frame", stored)).unwrap();
             }
-            let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(false)));
+            let mut interp =
+                BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(index(false))));
             interp.load(graph).unwrap();
             let mut bridge = Recording::default();
             let calls = bridge.calls.clone();
@@ -2607,13 +2652,15 @@ mod data_nodes {
 
         // A selection is read-only: refused on a mutable parameter and on the
         // return binding.
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(true)));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(index(true))));
         assert!(interp.load(from_variable).is_err(), "a mutable parameter");
         let on_return = graph(
             select(LinkSource::Variable(frame)),
             crate::schema::_RET_PARAM_ID,
         );
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(index(false)));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(index(false))));
         assert!(interp.load(on_return).is_err(), "the return binding");
     }
 }
@@ -2698,7 +2745,8 @@ mod tree_locals {
     }
 
     fn interpreter(graph: Graph) -> BehaviorTreeInterpreter {
-        let mut interp = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interp =
+            BehaviorTreeInterpreter::new(Rc::new(std::cell::RefCell::new(HashMap::new())));
         interp.load(graph).unwrap();
         interp
     }

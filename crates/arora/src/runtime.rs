@@ -801,7 +801,7 @@ impl Arora {
         //    frame's sensor value. Commands dispatch and reply here.
         apply_events(
             &*self.store,
-            &self.function_index,
+            &self.function_index.borrow(),
             &mut self.engine,
             std::mem::take(&mut self.pending.events),
             &mut self.data_requested,
@@ -1100,7 +1100,7 @@ mod tests {
     /// ready to hand to [`build_in_with`]. The tree binds to the device's store
     /// at its first tick (the scaffold lowers against the tick's context).
     fn groot_interpreter(xml: &str) -> Box<dyn BehaviorInterpreter> {
-        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(HashMap::new()));
+        let mut interpreter = BehaviorTreeInterpreter::new(Rc::new(RefCell::new(HashMap::new())));
         interpreter.load_groot(xml).expect("tree loads");
         Box::new(interpreter)
     }
@@ -1230,7 +1230,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::Call(interpreter_module::encode_edit(
@@ -1253,7 +1253,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::Call(interpreter_module::encode_load(
@@ -1290,7 +1290,7 @@ mod tests {
         );
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Call(spawn), tx),
         )
@@ -1311,7 +1311,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Call(handle.stop.clone()), tx),
         )
@@ -1379,7 +1379,7 @@ mod tests {
         );
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Call(spawn), tx),
         )
@@ -1421,7 +1421,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Call(handle.stop.clone()), tx),
         )
@@ -1442,7 +1442,7 @@ mod tests {
         // find the cell borrowed by phase 4: the module function refuses with
         // an error instead of aborting the process.
         let interpreter: InterpreterCell = Rc::new(RefCell::new(Some(Box::new(
-            BehaviorTreeInterpreter::new(Rc::new(HashMap::new())),
+            BehaviorTreeInterpreter::new(Rc::new(RefCell::new(HashMap::new()))),
         )
             as Box<dyn BehaviorInterpreter>)));
         let _phase_4_holds_it = interpreter.borrow_mut();
@@ -1534,7 +1534,7 @@ mod tests {
         };
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Update(change), tx),
         )
@@ -1545,7 +1545,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Get(vec![key]), tx),
         )
@@ -1591,7 +1591,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::Get(vec![Key::from("from_behavior")]), tx),
         )
@@ -1623,7 +1623,7 @@ mod tests {
             let (tx, rx) = oneshot::channel();
             apply_command(
                 &*arora.store,
-                &arora.function_index,
+                &arora.function_index.borrow(),
                 &mut arora.engine,
                 BridgeCommand::new(op, tx),
             )
@@ -1691,7 +1691,7 @@ mod tests {
             let (tx, mut rx) = oneshot::channel();
             apply_command(
                 &*arora.store,
-                &arora.function_index,
+                &arora.function_index.borrow(),
                 &mut arora.engine,
                 BridgeCommand::new(op, tx),
             )
@@ -1893,7 +1893,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::ListKeys {
@@ -1934,7 +1934,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::ListMethods { prefix: None }, tx),
         )
@@ -1952,7 +1952,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(BridgeOp::DescribeMethods { prefix: None }, tx),
         )
@@ -1960,7 +1960,7 @@ mod tests {
         let described = rx.await.unwrap().expect("describe_methods ok");
         let signatures: Vec<MethodSignature> = arora_types::value_serde::from_value(described.ret)
             .expect("describe_methods reply deserializes to Vec<MethodSignature>");
-        assert_eq!(signatures.len(), arora.function_index.len());
+        assert_eq!(signatures.len(), arora.function_index.borrow().len());
     }
 
     /// A behavior that writes one key/value and is then `Done` — the minimal
@@ -2013,7 +2013,7 @@ mod tests {
         set.insert(Key::from("greeting"), Some(Value::String("hi".into())));
         apply_command(
             &*arora.store,
-            &arora.function_index,
+            &arora.function_index.borrow(),
             &mut arora.engine,
             BridgeCommand::new(
                 BridgeOp::Update(StateChange {

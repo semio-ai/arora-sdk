@@ -292,19 +292,18 @@ struct BrowserModule {
 
 impl Module for BrowserModule {
     fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+        // A function the header does not declare is refused before anything
+        // is allocated in the guest.
+        let func = self
+            .arora_functions
+            .get(function_id)
+            .ok_or(DispatchError::FunctionNotFound { id: *function_id })?;
         let arg_size = arg.len() as u32;
 
         let arg_addr = call_u32_u32(&self.malloc, arg_size).map_err(|e| DispatchError::Trap {
             message: format!("malloc({arg_size}) failed: {e:?}"),
         })?;
         write_bytes(&self.memory, arg_addr, arg);
-
-        let func =
-            self.arora_functions
-                .get(function_id)
-                .ok_or_else(|| DispatchError::Internal {
-                    message: format!("no exported function {}", function_id),
-                })?;
         let result_addr = func
             .call1(&JsValue::NULL, &JsValue::from(arg_addr))
             .map_err(|e| DispatchError::Trap {

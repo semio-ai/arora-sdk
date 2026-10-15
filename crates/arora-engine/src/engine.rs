@@ -79,6 +79,29 @@ impl From<executor::UnloadModuleError> for UnloadModuleError {
     }
 }
 
+/// [`Engine::reload_module`] failed: nothing was replaced.
+#[derive(Debug, Display, Clone)]
+pub enum ReloadModuleError {
+    /// No module is loaded under the id.
+    ModuleNotFound,
+    /// The new version did not load; the old one is still loaded.
+    Load(LoadModuleError),
+}
+
+impl std::error::Error for ReloadModuleError {}
+
+impl From<LoadModuleError> for ReloadModuleError {
+    fn from(e: LoadModuleError) -> Self {
+        ReloadModuleError::Load(e)
+    }
+}
+
+impl From<executor::LoadModuleError> for ReloadModuleError {
+    fn from(e: executor::LoadModuleError) -> Self {
+        ReloadModuleError::Load(e.into())
+    }
+}
+
 /// [`Engine`] is the main encapsulation of the Arora runtime.
 /// It consists of a set of [`Executor`]s and [`Module`]s.
 pub struct Engine {
@@ -149,6 +172,54 @@ impl Engine {
         self.modules
             .insert(module_id, executor.load_compiled_module(module)?);
         Ok(())
+    }
+
+    /// Replace the module loaded under `module`'s id with a fresh instance of
+    /// `module`: from the next dispatch, its functions run the new code, in a
+    /// new instance with its own memory and globals.
+    ///
+    /// The new instance is created before the old one is touched, so a module
+    /// that fails to load leaves the old one loaded and serving, and the error
+    /// is the load's. The old instance is dropped once replaced, which releases
+    /// its memory. An id with no module loaded fails with
+    /// [`ReloadModuleError::ModuleNotFound`]: loading is
+    /// [`load_compiled_module`](Self::load_compiled_module)'s job.
+    ///
+    /// Not reachable from a dispatch: a module cannot reload itself (or any
+    /// other) while a call into it is on the stack, since the instance it runs
+    /// in would be dropped under it. Call it between dispatches.
+    pub fn reload_module(&mut self, module: &CompiledModule) -> Result<(), ReloadModuleError> {
+        let module_id = module.header().id;
+        if !self.modules.contains_key(&module_id) {
+            return Err(ReloadModuleError::ModuleNotFound);
+        }
+        let executor = self
+            .executors
+            .get_mut(module.header().executor.name.as_str())
+            .ok_or(LoadModuleError::ExecutorNotFound)?;
+        let instance = executor.load_compiled_module(module)?;
+        self.modules.insert(module_id, instance);
+        Ok(())
+    }
+
+    /// Whether a module — loaded or registered — dispatches under `id`.
+    pub fn contains_module(&self, id: &Uuid) -> bool {
+        self.modules.contains_key(id)
+    }
+
+    /// Remove the module loaded under `id` from dispatch and drop its
+    /// instance: a call to it then fails with
+    /// [`DispatchError::ModuleNotFound`]. Like
+    /// [`reload_module`](Self::reload_module), not reachable from a dispatch.
+    ///
+    /// Any module leaves this way, a host module registered with
+    /// [`register_module`](Self::register_module) included: which modules a
+    /// host lets go is the host's decision.
+    pub fn unload_module(&mut self, id: &Uuid) -> Result<(), UnloadModuleError> {
+        self.modules
+            .remove(id)
+            .map(drop)
+            .ok_or(UnloadModuleError::ModuleNotFound)
     }
 
     /// Register an already-instantiated [`Module`] under `id`, making its
@@ -299,6 +370,23 @@ mod tests {
         assert!(matches!(
             engine.arora_call(miss),
             Err(CallError::FunctionNotFound { .. })
+        ));
+
+        // An unloaded module is gone from dispatch.
+        assert!(engine.contains_module(&module_id));
+        engine.unload_module(&module_id).expect("unload");
+        assert!(!engine.contains_module(&module_id));
+        assert!(matches!(
+            engine.arora_call(Call {
+                module_id: Some(module_id),
+                id: function,
+                args: Vec::new(),
+            }),
+            Err(CallError::ModuleNotFound { .. })
+        ));
+        assert!(matches!(
+            engine.unload_module(&module_id),
+            Err(UnloadModuleError::ModuleNotFound)
         ));
 
         // An unregistered module id fails as before.
