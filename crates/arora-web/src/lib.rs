@@ -165,21 +165,39 @@ pub mod store_json {
         to_js_object(out)
     }
 
-    /// Drain the changes the subscription accumulated, as a JS object mapping
-    /// path → new Arora [`Value`] (or `null` for a cleared key). Poll-based
-    /// counterpart to a push subscription: [`DataStore::subscribe`] delivers
-    /// over a std channel JavaScript cannot await, so changes accumulate and
-    /// are handed over on demand. A subscription opens on the store's whole
-    /// current state, so the first drain returns the full picture.
+    /// Drain the changes the subscription holds, as a JS object mapping each
+    /// changed path to its latest Arora [`Value`] (or `null` for a cleared
+    /// key). Poll-based counterpart to a push subscription:
+    /// [`DataStore::subscribe`] delivers over a std channel JavaScript cannot
+    /// await, so the channel holds every change until it is drained here. A
+    /// subscription opens on the store's whole current state, so the first
+    /// drain returns the full picture.
+    ///
+    /// [`AroraWeb`] does not leave its subscription's channel to grow between
+    /// drains: it folds it into the latest value per key on every step.
     pub fn drain_changes(changes: &Subscription) -> Result<JsValue, JsValue> {
-        let mut out = serde_json::Map::new();
+        let mut latest = HashMap::new();
         while let Some(change) = changes.try_recv() {
-            for (key, value) in change.set {
-                out.insert(key.path, value_to_json(value)?);
-            }
-            for key in change.unset {
-                out.insert(key.path, serde_json::Value::Null);
-            }
+            fold_change(&mut latest, change);
+        }
+        latest_to_js(latest.drain())
+    }
+
+    /// Fold `change` into `latest`, the latest value per key: a key `change`
+    /// sets holds its new value, a key it unsets holds `None`.
+    pub(crate) fn fold_change(latest: &mut HashMap<Key, Option<Value>>, change: StateChange) {
+        latest.extend(change.set);
+        latest.extend(change.unset.into_iter().map(|key| (key, None)));
+    }
+
+    /// The latest value per key as a JS object mapping path → Arora [`Value`]
+    /// (`null` for a cleared key).
+    pub(crate) fn latest_to_js(
+        latest: impl Iterator<Item = (Key, Option<Value>)>,
+    ) -> Result<JsValue, JsValue> {
+        let mut out = serde_json::Map::new();
+        for (key, value) in latest {
+            out.insert(key.path, value_to_json(value)?);
         }
         to_js_object(out)
     }
@@ -205,6 +223,45 @@ pub mod store_json {
     }
 }
 
+/// The store changes a page has not drained yet, as the latest value per key.
+///
+/// The subscription's channel takes a copy of every change the store applies;
+/// a device changing a few hundred keys per step at 100 steps a second fills
+/// it with tens of thousands of entries a second, all held until a drain.
+/// Folded on every step and on every write the page makes, the channel holds
+/// no more than one step's changes, and `latest` one entry per key changed
+/// since the last drain: what a page has not drained grows with the keys that
+/// change, not with the steps it goes without draining. A drain hands over the
+/// net change since the previous one — a key set twice reads its second value,
+/// a key set then unset reads cleared — which is what a page shows.
+struct Undrained {
+    subscription: Subscription,
+    latest: HashMap<Key, Option<Value>>,
+}
+
+impl Undrained {
+    fn new(subscription: Subscription) -> Self {
+        Self {
+            subscription,
+            latest: HashMap::new(),
+        }
+    }
+
+    /// Move what the subscription's channel holds into `latest`.
+    fn fold(&mut self) {
+        while let Some(change) = self.subscription.try_recv() {
+            store_json::fold_change(&mut self.latest, change);
+        }
+    }
+
+    /// Everything not drained yet, as a path → Value JS object; `latest`
+    /// keeps its capacity for the changes that follow.
+    fn drain(&mut self) -> Result<JsValue, JsValue> {
+        self.fold();
+        store_json::latest_to_js(self.latest.drain())
+    }
+}
+
 /// The browser Arora device, exported to JavaScript as `AroraRuntime`.
 ///
 /// The JS constructor builds the self-contained demo device — the runtime's
@@ -217,15 +274,16 @@ pub mod store_json {
 /// Drive it by calling [`step`](Self::step) from your own clock (e.g.
 /// `requestAnimationFrame`) or by awaiting [`run`](Self::run), which hands the
 /// device to [`Arora::run`] until [`stop`](AroraWeb::stop) reclaims it.
-/// Either way the rest of the surface stays
-/// live: `setValue`/`readValues`/`snapshot` work on a sibling handle of the
-/// store, `drainChanges` on its subscription, and the client operations —
-/// `call`, `invoke`, `spawn`, `halt`, `listKeys`, `describeMethods` — on the
-/// device's in-process [`LocalCaller`], the same operations a remote client has
-/// over a bridge. None of them touch the stepping device: each is queued
-/// before the method returns and applied by the next step, so the device must
-/// be stepping (a `run()` loop, or your own `step` calls) for its promise to
-/// settle.
+/// Either way the rest of the surface stays live: `setValue`/`readValues`/
+/// `snapshot` work on a sibling handle of the store, `drainChanges` on its
+/// subscription — folded into the latest value per key on every step, so what
+/// a page has not drained is one entry per changed key however many steps it
+/// goes without draining — and the client operations — `call`, `invoke`,
+/// `spawn`, `halt`, `listKeys`, `describeMethods` — on the device's in-process
+/// [`LocalCaller`], the same operations a remote client has over a bridge.
+/// None of them touch the stepping device: each is queued before the method
+/// returns and applied by the next step, so the device must be stepping (a
+/// `run()` loop, or your own `step` calls) for its promise to settle.
 ///
 /// Every method is an ordinary Rust method too, for a Rust crate that wraps
 /// this device in its own `wasm_bindgen` type; [`caller`](Self::caller) hands
@@ -241,7 +299,9 @@ pub struct AroraWeb {
     stop: RefCell<Option<futures::channel::oneshot::Sender<()>>>,
     caller: LocalCaller,
     store: Box<dyn DataStore>,
-    changes: Subscription,
+    // Shared with the run future, which folds the subscription after every
+    // step it takes.
+    changes: Rc<RefCell<Undrained>>,
     // The device's standing-error watch, taken before `run` can own the
     // device, so the reading stays available while it self-paces.
     behavior_error: tokio::sync::watch::Receiver<Option<String>>,
@@ -259,7 +319,7 @@ impl From<Arora> for AroraWeb {
         install_panic_hook();
         let caller = arora.caller();
         let store = arora.store().clone_box();
-        let changes = store.subscribe();
+        let changes = Rc::new(RefCell::new(Undrained::new(store.subscribe())));
         let behavior_error = arora.behavior_error();
         let behavior_error_changes = Rc::new(RefCell::new(Some(arora.behavior_error())));
         Self {
@@ -298,9 +358,9 @@ impl AroraWeb {
         let device = slot
             .as_mut()
             .ok_or_else(|| JsValue::from_str("run() drives the device; step() is unavailable"))?;
-        device
-            .step(Duration::from_secs_f64(dt_ms / 1_000.0))
-            .map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
+        let stepped = device.step(Duration::from_secs_f64(dt_ms / 1_000.0));
+        self.changes.borrow_mut().fold();
+        stepped.map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
     }
 
     /// Hand the device to [`Arora::run`]: a self-paced loop at `period_ms`
@@ -317,6 +377,7 @@ impl AroraWeb {
             return js_sys::Promise::reject(&JsValue::from_str("the device is already running"));
         };
         let slot = self.device.clone();
+        let changes = self.changes.clone();
         let (stop_tx, stop_rx) = futures::channel::oneshot::channel::<()>();
         *self.stop.borrow_mut() = Some(stop_tx);
         wasm_bindgen_futures::future_to_promise(async move {
@@ -325,7 +386,16 @@ impl AroraWeb {
                 .unwrap_or(Arora::DEFAULT_STEP_PERIOD);
             let outcome = {
                 use futures::FutureExt;
-                let run = device.run(period).fuse();
+                let run = device.run(period);
+                futures::pin_mut!(run);
+                // Each step runs inside one poll of the loop: folding after
+                // every poll folds every step's changes.
+                let run = futures::future::poll_fn(|cx| {
+                    let polled = run.as_mut().poll(cx);
+                    changes.borrow_mut().fold();
+                    polled
+                })
+                .fuse();
                 let mut stop_rx = stop_rx.fuse();
                 futures::pin_mut!(run);
                 futures::select_biased! {
@@ -551,14 +621,18 @@ impl AroraWeb {
     /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
     #[wasm_bindgen(js_name = setValue)]
     pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
-        store_json::set_value(&*self.store, path, value_json)
+        let written = store_json::set_value(&*self.store, path, value_json);
+        self.changes.borrow_mut().fold();
+        written
     }
 
     /// Write several keys at once, as one store change (a JSON object mapping
     /// each key path to an Arora [`Value`]).
     #[wasm_bindgen(js_name = writeValues)]
     pub fn write_values(&self, values_json: &str) -> Result<(), JsValue> {
-        store_json::write_values(&*self.store, values_json)
+        let written = store_json::write_values(&*self.store, values_json);
+        self.changes.borrow_mut().fold();
+        written
     }
 
     /// Read keys from the store; `paths` is a `string[]`, result maps path→Value.
@@ -573,11 +647,14 @@ impl AroraWeb {
     }
 
     /// Drain the keys that changed since the last call, as a path→Value object
-    /// (`null` for a cleared key). The first drain returns the store's whole
-    /// current state — the subscription opens on it.
+    /// holding each key's latest value (`null` for a cleared key): the net
+    /// change since the previous drain. The first drain returns the store's
+    /// whole current state — the subscription opens on it. What is not
+    /// drained is held as one value per key, however long the page goes
+    /// without draining.
     #[wasm_bindgen(js_name = drainChanges)]
     pub fn drain_changes(&self) -> Result<JsValue, JsValue> {
-        store_json::drain_changes(&self.changes)
+        self.changes.borrow_mut().drain()
     }
 }
 
@@ -1334,5 +1411,112 @@ impl Registry {
 impl Default for Registry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// What a page has not drained stays one entry per changed key, whichever
+/// way the device steps. Run in a browser with `wasm-pack test --headless
+/// --firefox crates/arora-web --lib`.
+#[cfg(test)]
+mod undrained_tests {
+    use super::*;
+    use wasm_bindgen_futures::JsFuture;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    /// The keys a busy device changes on each of its steps.
+    const KEYS: usize = 200;
+
+    /// Write every one of the [`KEYS`] to `value`, as one store change.
+    fn frame(store: &dyn DataStore, value: f32) {
+        let mut change = StateChange::new();
+        for key in 0..KEYS {
+            change
+                .set
+                .insert(Key::new(format!("face/{key}")), Some(Value::F32(value)));
+        }
+        store.write(change).expect("write a frame");
+    }
+
+    /// A demo device and a sibling handle of its store, through which a test
+    /// writes as the device's own writers do.
+    fn device() -> (AroraWeb, Box<dyn DataStore>) {
+        let arora = Arora::builder().build().expect("build the device");
+        let store = arora.store().clone_box();
+        (AroraWeb::from(arora), store)
+    }
+
+    /// Whether the subscription's channel is empty: every change it received
+    /// has been folded.
+    fn channel_is_empty(web: &AroraWeb) -> bool {
+        web.changes.borrow().subscription.try_recv().is_none()
+    }
+
+    /// The value the backlog holds for `face/{key}`.
+    fn held(web: &AroraWeb, key: usize) -> Option<Value> {
+        web.changes
+            .borrow()
+            .latest
+            .get(&Key::new(format!("face/{key}")))
+            .cloned()
+            .flatten()
+    }
+
+    async fn sleep(ms: i32) {
+        let timer = js_sys::Promise::new(&mut |resolve, _| {
+            let set_timeout: js_sys::Function =
+                js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("setTimeout"))
+                    .expect("a global setTimeout")
+                    .into();
+            set_timeout
+                .call2(&JsValue::NULL, &resolve, &JsValue::from(ms))
+                .expect("setTimeout");
+        });
+        JsFuture::from(timer).await.expect("the timer fires");
+    }
+
+    #[wasm_bindgen_test]
+    fn stepping_without_a_drain_holds_one_value_per_key() {
+        let (web, store) = device();
+        for step in 0..1_000 {
+            frame(&*store, step as f32);
+            web.step(10.0).expect("step");
+            assert!(channel_is_empty(&web), "step {step} left changes unfolded");
+        }
+        let keys = store.snapshot().storage.len();
+        assert!(keys >= KEYS, "the store holds the frame's keys");
+        assert!(
+            web.changes.borrow().latest.len() <= keys,
+            "the backlog holds no more than one entry per key"
+        );
+        assert_eq!(held(&web, 7), Some(Value::F32(999.0)));
+    }
+
+    #[wasm_bindgen_test]
+    async fn a_running_device_folds_every_step() {
+        let (web, store) = device();
+        let running = web.run(Some(1.0));
+        for step in 0..50 {
+            frame(&*store, step as f32);
+            // Several periods: the loop steps, and folds, before this resumes.
+            sleep(5).await;
+            assert!(channel_is_empty(&web), "step {step} left changes unfolded");
+            assert_eq!(held(&web, 0), Some(Value::F32(step as f32)));
+        }
+        web.stop();
+        JsFuture::from(running).await.expect("the run stops");
+    }
+
+    #[wasm_bindgen_test]
+    fn a_page_write_is_folded_at_once() {
+        let (web, _store) = device();
+        web.drain_changes().expect("the first drain");
+        for value in 0..100 {
+            web.set_value("face/0", &format!(r#"{{"f32": {value}}}"#))
+                .expect("set a key");
+            assert!(channel_is_empty(&web));
+        }
+        assert_eq!(held(&web, 0), Some(Value::F32(99.0)));
     }
 }

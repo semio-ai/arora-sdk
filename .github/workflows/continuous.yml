@@ -199,7 +199,7 @@ jobs:
       # arora-web's JS surface over the browser runtime.
       - name: arora-web browser test (headless Firefox)
         if: needs.select.outputs.test-arora-web
-        run: wasm-pack test --headless --firefox crates/arora-web --test browser
+        run: wasm-pack test --headless --firefox crates/arora-web --lib --test browser
 
   # Line and region coverage of the native tests on main, as the job summary
   # and an lcov artifact; it gates nothing. docs/testing.md has the command and
