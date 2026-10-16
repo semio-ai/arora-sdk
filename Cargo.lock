@@ -462,6 +462,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-index"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crypto_secretbox",
+ "log",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "arora-integration-tests"
 version = "0.0.0"
 dependencies = [
