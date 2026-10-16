@@ -3,11 +3,12 @@
 //!
 //! The fixture is the behavior `Status` (`arora_behavior::Status`, a
 //! `#[derive(AroraType)]` enum) and a `Report` structure that holds one and an
-//! array of them, with an export taking a `Status` and returning a `Report`:
+//! array of them, with an export taking a `Status` and returning a `Report`,
+//! and an import taking an array of `Status` and returning a `Report`:
 //!
 //!  * declared in [`ExternTypes`], `Status` is not generated: `Report` and the
-//!    export shim name `arora_behavior::Status`, and a call through the shim
-//!    reads and writes it;
+//!    export and import shims name `arora_behavior::Status`, and a call
+//!    through the export shim reads and writes it;
 //!  * not declared, `Status` is generated, and the generated enum and
 //!    `arora_behavior::Status` produce identical `Value`s and buffer bytes.
 
@@ -24,6 +25,7 @@ use arora_registry::{
     EditableRegistry,
 };
 use arora_types::module::high::ModuleDefinition;
+use arora_types::record::module::unfrozen::{Export, ExportKind, Function, Module, Parameter};
 use arora_types::record::structure::unfrozen::{Structure, StructureField};
 use arora_types::record::ty::{UnfrozenArray, UnfrozenScalar, UnfrozenTy};
 use arora_types::record::{UnfrozenReference, VersionReq};
@@ -38,6 +40,9 @@ const REPORT_HISTORY_ID: &str = "e7a1c0de-0000-4000-8000-000000000012";
 const MODULE_ID: &str = "e7a1c0de-0000-4000-8000-000000000100";
 const REPORT_FN_ID: &str = "e7a1c0de-0000-4000-8000-000000000101";
 const REPORT_FN_STATUS_ID: &str = "e7a1c0de-0000-4000-8000-000000000102";
+const LEDGER_MODULE_ID: &str = "e7a1c0de-0000-4000-8000-000000000200";
+const LATEST_FN_ID: &str = "e7a1c0de-0000-4000-8000-000000000103";
+const LATEST_FN_STATUS_ID: &str = "e7a1c0de-0000-4000-8000-000000000104";
 
 fn id(s: &str) -> Uuid {
     Uuid::parse_str(s).unwrap()
@@ -91,6 +96,44 @@ async fn build_registry() -> LocalRegistry {
         )
         .await
         .unwrap();
+
+    // The module the fixture imports `latest` from.
+    let mut ledger = Module {
+        parent: ROOT_ID,
+        name: "ledger".to_string(),
+        ..Default::default()
+    };
+    ledger.add_export(
+        id(LATEST_FN_ID),
+        Export {
+            name: "latest".to_string(),
+            kind: ExportKind::Function(Function {
+                parameters: [(
+                    id(LATEST_FN_STATUS_ID),
+                    Parameter {
+                        name: "status".to_string(),
+                        ty: UnfrozenTy::UnfrozenArray(UnfrozenArray {
+                            reference: status_reference(),
+                        }),
+                        mutable: false,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                parameter_ordering: vec![id(LATEST_FN_STATUS_ID)],
+                return_ty: UnfrozenTy::UnfrozenScalar(UnfrozenScalar {
+                    reference: UnfrozenReference {
+                        id: id(REPORT_ID),
+                        version_req: VersionReq::any(),
+                    },
+                }),
+            }),
+        },
+    );
+    registry
+        .tag_module(id(LEDGER_MODULE_ID), Version::new(1, 0, 0), ledger)
+        .await
+        .unwrap();
     registry
 }
 
@@ -114,7 +157,16 @@ exports:
         name: status
         type: {{ kind: scalar, id: {STATUS_ENUMERATION_ID} }}
     ret: {{ kind: scalar, id: {REPORT_ID} }}
-imports: []
+imports:
+  - type: function
+    module: {LEDGER_MODULE_ID}
+    id: {LATEST_FN_ID}
+    name: latest
+    parameters:
+      - id: {LATEST_FN_STATUS_ID}
+        name: status
+        type: {{ kind: array, id: {STATUS_ENUMERATION_ID} }}
+    ret: {{ kind: scalar, id: {REPORT_ID} }}
 executable_mime: application/wasm
 "#
     )
@@ -199,6 +251,11 @@ async fn a_declared_record_is_referenced_not_generated() {
     assert!(
         report.contains("arora_behavior :: Status"),
         "a field of a declared record names its declared type:\n{report}"
+    );
+    let import = file_text(&generated, "ledger.rs").expect("ledger.rs");
+    assert!(
+        import.contains("arora_behavior :: Status"),
+        "an import shim names the declared type:\n{import}"
     );
 
     let shim = format!("arora_function_{}", REPORT_FN_ID.replace('-', "_"));
