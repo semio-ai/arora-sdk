@@ -11,7 +11,8 @@ All notable changes to `arora-module-rust`. The format follows
 - `ExternTypes`: the records whose Rust type is declared elsewhere (a
   `#[derive(AroraType)]` type), each with the path generated code names it
   by. Such a record is not generated; fields, parameters and returns of it
-  name the declared type.
+  name the declared type. A module using such a record at another version
+  than its declared type's fails to generate.
 
 ### Changed
 
@@ -32,12 +33,21 @@ All notable changes to `arora-module-rust`. The format follows
   `struct_field_intermediate_variable_ident`, `enum_variant_ident`,
   `enum_variant_const_id_ident`, `PrefixWithMod` and `CheckType`.
 - A generated enumeration also derives `Copy` and `Eq`.
+- A record named `String`, `Uuid`, `Value`, `Vec`, `Option`, `Box`,
+  `HashMap`, `BTreeMap` or `HashSet` fails to generate: the derive would read
+  a field of that type as the standard one.
 - A structure field that is an optional reference to its own structure is
   boxed (`Option<Box<T>>`).
 - These records cannot be declared with `#[derive(AroraType)]` and fail to
   generate: an enumeration variant carrying a value (it generated as a unit
   variant), a field holding a dynamic array value or an array of dynamic
   values, and an optional array or optional dynamic value field.
+
+### Fixed
+
+- An import shim whose signature names a record type compiles: it imports
+  `arora_generated` when it names a generated type, and no longer emits the
+  types it names as bare paths.
 
 ## [2.0.0] - 2026-09-25
 

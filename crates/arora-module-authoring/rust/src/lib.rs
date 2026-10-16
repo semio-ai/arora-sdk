@@ -12,7 +12,6 @@ use arora_types::record::Selector;
 use arora_types::record::{
     module::frozen::{ExportKind, Parameter},
     ty::{FrozenTy, Primitive},
-    FrozenReference,
 };
 use arora_types::ty::{
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, KEY_VALUE_ID, STRING_ID, U16_ID,
@@ -49,7 +48,9 @@ pub async fn generate_sources(
     for asset in assets {
         match asset {
             // A record with a declared Rust type is not generated.
-            ModuleAsset::Type(id, _, _) if extern_types.contains(&id) => {}
+            ModuleAsset::Type(id, version, _) if extern_types.contains(&id) => {
+                extern_types.check_version(&id, &version)?;
+            }
             ModuleAsset::Type(id, version, ty) => match ty {
                 TypeDefinitionFrozen::Primitive(_kind) => {}
                 TypeDefinitionFrozen::Enumeration(enumeration) => {
@@ -374,7 +375,7 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
 /// other generators and with remote registries.
 #[derive(Debug, Clone, Default)]
 pub struct ExternTypes {
-    paths: HashMap<Uuid, String>,
+    paths: HashMap<Uuid, (String, Version)>,
 }
 
 impl ExternTypes {
@@ -386,7 +387,10 @@ impl ExternTypes {
     /// ([`AroraType::arora_type_id`]), referenced in generated code as `path`
     /// (for example `arora_behavior::Status`).
     pub fn declare<T: AroraType>(&mut self, path: &str) -> &mut Self {
-        self.paths.insert(T::arora_type_id(), path.to_string());
+        self.paths.insert(
+            T::arora_type_id(),
+            (path.to_string(), T::arora_type_version().0),
+        );
         self
     }
 
@@ -395,11 +399,25 @@ impl ExternTypes {
         self.paths.contains_key(id)
     }
 
+    /// Checks that the declared type of the record `id` is the record at
+    /// `version`: a declared type pins one version of its record.
+    fn check_version(&self, id: &Uuid, version: &Version) -> Result<(), GenerationError> {
+        match self.paths.get(id) {
+            Some((path, declared)) if declared != version => {
+                Err(GenerationError::Generic(format!(
+                    "record {id} is used at version {version}, but its declared type `{path}` is \
+                 version {declared}"
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// The path of the declared Rust type of the record `id`, if it has one.
     fn path(&self, id: &Uuid) -> Result<Option<TokenStream>, GenerationError> {
         self.paths
             .get(id)
-            .map(|path| {
+            .map(|(path, _)| {
                 path.parse::<TokenStream>().map_err(|err| {
                     GenerationError::Generic(format!(
                         "`{path}`, declared for record {id}, is not a Rust path: {err}"
@@ -493,7 +511,15 @@ pub async fn generate_structure_source(
             },
             _ => false,
         };
-        references_generated |= references_generated_record(&field.ty, extern_types);
+        let self_reference = match &field.ty {
+            FrozenTy::FrozenScalar(scalar) => scalar.reference.id == *id,
+            FrozenTy::FrozenOption(option) => {
+                matches!(&*option.element, FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *id)
+            }
+            _ => false,
+        };
+        references_generated |=
+            !self_reference && references_generated_record(&field.ty, extern_types);
         // A reference back to this very structure would make it infinitely
         // sized, so it is boxed. (An array of it needs no box: a `Vec` is
         // already heap-allocated.)
@@ -540,6 +566,16 @@ fn type_attribute(
     name: &str,
     ident: &Ident,
 ) -> Result<TokenStream, GenerationError> {
+    // `#[derive(AroraType)]` reads a field type by its last path segment, so a
+    // type named like one it interprets would be read as that type.
+    const INTERPRETED_NAMES: [&str; 9] = [
+        "String", "Uuid", "Value", "Vec", "Option", "Box", "HashMap", "BTreeMap", "HashSet",
+    ];
+    if INTERPRETED_NAMES.contains(&ident.to_string().as_str()) {
+        return Err(GenerationError::Generic(format!(
+            "{name}: a type named `{ident}` cannot be declared with #[derive(AroraType)]"
+        )));
+    }
     let id = id.to_string();
     let mut arguments = vec![quote! { id = #id }];
     if !version.pre.is_empty() || !version.build.is_empty() {
@@ -623,32 +659,20 @@ async fn generate_imports_from_module_source(
     registry: &mut dyn ReadableRegistry,
     extern_types: &ExternTypes,
 ) -> Result<Directory, GenerationError> {
-    // Using dependent types.
-    let uses = {
-        let mut dependencies = HashSet::<&FrozenReference>::new();
-        for import in imports {
-            import.import.dependencies(&mut dependencies);
-        }
-        let mut uses = Vec::new();
-        for dep in dependencies {
-            let dep_selector = Selector::Id(dep.id);
-            let type_def = match registry
-                .get_type(
-                    &dep_selector,
-                    &VersionReq::parse(dep.version.to_string().as_str()).unwrap(),
-                )
-                .await
-            {
-                Ok(TypeDefinitionFrozen::Primitive(_)) => continue,
-                Ok(type_definition) => type_definition,
-                Err(RegistryError::NotAType { selector: _ }) => continue,
-                Err(err) => return Err(GenerationError::RegistryError(err)),
-            };
-            let type_ident =
-                type_ident_from_definition(&type_def, &dep.id, registry, extern_types).await?;
-            uses.push(type_ident);
-        }
-        uses
+    // Parameters and returns of generated types name them
+    // `arora_generated::<module>::…`; every other type is named by its full path.
+    let references_generated = imports.iter().any(|import| {
+        let ExportKind::Function(function_symbol) = &import.import.kind;
+        references_generated_record(&function_symbol.return_ty, extern_types)
+            || function_symbol
+                .parameters
+                .values()
+                .any(|param| references_generated_record(&param.ty, extern_types))
+    });
+    let generated_modules_use = if references_generated {
+        quote! { use crate::arora_generated; }
+    } else {
+        quote! {}
     };
 
     let splitted_module_path: Vec<&str> = module_path.split(".").collect();
@@ -866,7 +890,7 @@ async fn generate_imports_from_module_source(
 
     // This makes a module import.
     let source = quote! {
-      #(#uses)*
+      #generated_modules_use
       use arora_buffers::*;
       use crate::arora_generated::arora::arora_dispatch;
       #module_id_declaration
