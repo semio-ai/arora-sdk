@@ -1,733 +1,233 @@
+use crate::selection::validate_name;
 use crate::version::{Range, Version};
 use crate::{
-    env_value, verify, AssetType, Cache, Error, FetchedAsset, Resolution, ResolutionSource,
-    ResolvedRef,
+    select_release, valid_hash, Cache, Error, FetchedAsset, Kind, Release, Resolution,
+    ResolutionSource, ResolvedRef, Source, SourceError, SourceOptions,
 };
-use async_trait::async_trait;
-use futures_util::{Stream, StreamExt};
-use reqwest::{Client, Url};
-use serde_json::{Map, Value};
-use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Debug)]
-pub struct StudioConfig {
-    pub project_id: String,
-    pub storage_bucket: String,
-    pub firestore_url: String,
-    pub storage_url: String,
+/// A source and a caller-owned cache directory, usually `<device dir>/assets`.
+pub struct Resolver<S: Source> {
+    source: S,
+    cache: Cache,
+    options: SourceOptions,
 }
-
-impl StudioConfig {
-    pub fn from_env() -> Result<Self, Error> {
-        Self::from_lookup(|name| std::env::var(name).ok())
-    }
-
-    pub fn from_lookup(mut lookup: impl FnMut(&str) -> Option<String>) -> Result<Self, Error> {
-        let mut required =
-            |name| env_value(lookup(name)).ok_or_else(|| Error::Config(format!("missing {name}")));
-        let project_id = required("FIREBASE_PROJECT_ID")?;
-        let storage_bucket = required("FIREBASE_STORAGE_BUCKET")?;
-        let firestore_url = env_value(lookup("FIREBASE_FIRESTORE_EMULATOR_HOST"))
-            .map(|host| format!("http://{host}"))
-            .unwrap_or_else(|| "https://firestore.googleapis.com".into());
-        let storage_url = env_value(lookup("FIREBASE_STORAGE_EMULATOR_HOST"))
-            .map(|host| format!("http://{host}"))
-            .unwrap_or_else(|| "https://firebasestorage.googleapis.com".into());
-        Ok(Self {
-            project_id,
-            storage_bucket,
-            firestore_url,
-            storage_url,
-        })
-    }
+pub struct ResolverBuilder<S: Source> {
+    resolver: Resolver<S>,
 }
-
-/// Supplies identity only; the resolver never signs in.
-#[async_trait]
-pub trait TokenSource: Send + Sync {
-    async fn token(&self) -> Result<Option<String>, Error>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoToken;
-
-#[async_trait]
-impl TokenSource for NoToken {
-    async fn token(&self) -> Result<Option<String>, Error> {
-        Ok(None)
-    }
-}
-
-const FIRESTORE_LIMIT: usize = 16 * 1024 * 1024;
-const STORAGE_LIMIT: usize = 1024 * 1024 * 1024;
-
-pub struct Resolver<T = NoToken> {
-    config: StudioConfig,
-    tokens: T,
-    client: Client,
-    storage_limit: usize,
-}
-
-pub struct ResolverBuilder<T = NoToken> {
-    config: StudioConfig,
-    tokens: T,
-    client: reqwest::ClientBuilder,
-    storage_limit: usize,
-}
-
-impl<T: TokenSource> ResolverBuilder<T> {
+impl<S: Source> ResolverBuilder<S> {
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.client = self.client.connect_timeout(timeout);
+        self.resolver.options.connect_timeout = timeout;
         self
     }
     pub fn read_timeout(mut self, timeout: Duration) -> Self {
-        self.client = self.client.read_timeout(timeout);
+        self.resolver.options.read_timeout = timeout;
         self
     }
     pub fn storage_limit(mut self, bytes: usize) -> Self {
-        self.storage_limit = bytes;
+        self.resolver.options.storage_limit = bytes;
         self
     }
-
-    pub fn build(self) -> Result<Resolver<T>, Error> {
-        let client = self
-            .client
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!(
-                env!("CARGO_PKG_NAME"),
-                "/",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .build()
-            .map_err(|e| Error::Config(e.to_string()))?;
-        Ok(Resolver {
-            config: self.config,
-            tokens: self.tokens,
-            client,
-            storage_limit: self.storage_limit,
-        })
+    pub fn build(self) -> Resolver<S> {
+        self.resolver
     }
 }
-
-impl<T: TokenSource> Resolver<T> {
-    pub fn new(config: StudioConfig, tokens: T) -> Result<Self, Error> {
-        Self::builder(config, tokens).build()
+impl<S: Source> Resolver<S> {
+    pub fn new(source: S, cache: Cache) -> Self {
+        Self {
+            source,
+            cache,
+            options: SourceOptions::default(),
+        }
     }
-
-    pub fn builder(config: StudioConfig, tokens: T) -> ResolverBuilder<T> {
+    pub fn builder(source: S, cache: Cache) -> ResolverBuilder<S> {
         ResolverBuilder {
-            config,
-            tokens,
-            client: Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .read_timeout(Duration::from_secs(60)),
-            storage_limit: STORAGE_LIMIT,
+            resolver: Self::new(source, cache),
         }
     }
 
+    /// Resolve live and record the pin under the requested name. Does not download bytes.
     pub async fn resolve(
         &self,
-        scoped_name: &str,
+        name: &str,
         range: &str,
-        expected_type: AssetType,
+        kind: Kind,
+        artifact_key: &str,
     ) -> Result<ResolvedRef, Error> {
-        validate_name(scoped_name)?;
-        let parsed = Range::parse(scoped_name, range)?;
-        let key = scoped_name.replace('/', ":");
-        let name = self
-            .document(scoped_name, "name lookup", &["scopedNames", &key])
-            .await?;
-        let name = Fields::document(&name, scoped_name, "name lookup")?;
-        let id = name.string("publishedAssetId")?;
-        validate_id(id, scoped_name, "name lookup")?;
-        let asset = self
-            .document(scoped_name, "asset document", &["publishedAssets", id])
-            .await?;
-        let (current_name, private) = asset_identity(&asset, scoped_name, expected_type)?;
-        let mut releases = Vec::new();
-        let mut page: Option<String> = None;
-        let mut seen = HashSet::new();
-        loop {
-            let mut url = self.firestore(&["publishedAssets", id, "releases"])?;
-            url.query_pairs_mut().append_pair("pageSize", "100");
-            if let Some(page) = &page {
-                url.query_pairs_mut().append_pair("pageToken", page);
-            }
-            let value = self.json(scoped_name, "release listing", url).await?;
-            page = release_page(&value, scoped_name, &mut releases, &mut seen)?;
-            if page.is_none() {
-                break;
-            }
+        validate_name(name)?;
+        Range::parse(name, range)?;
+        let releases = self.source.releases(name, &kind, self.options).await?;
+        let release = select_release(&releases, name, range, artifact_key)?;
+        validate_release(release, &kind)?;
+        let pin = ResolvedRef {
+            scoped_name: release.scoped_name.clone(),
+            version: Version::parse(&release.version).unwrap().to_string(),
+            release_id: release.release_id.clone(),
+            artifact_key: artifact_key.into(),
+            content_hash: release.artifacts[artifact_key].content_hash.clone(),
+            family: release.family.clone(),
+            private: release.private,
+            asset_type: kind,
+            resolved_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        let saved = pin.clone();
+        let requested = name.to_owned();
+        if let Err(error) = self
+            .cache
+            .blocking(move |cache| cache.save_pin(&requested, &saved))
+            .await
+        {
+            log::warn!(target: "arora-assets", "{name}: could not save resolved pin: {error}");
         }
-        resolved_release(
-            &releases,
-            scoped_name,
-            range,
-            &parsed,
-            &current_name,
-            id,
-            private,
-            expected_type,
-        )
+        Ok(pin)
     }
 
-    /// Always resolve online first. Only transient network failures permit a compatible saved pin.
+    /// Only a network failure permits a saved pin compatible with kind, key and range.
     pub async fn resolve_with_fallback(
         &self,
-        scoped_name: &str,
-        range: &str,
-        expected_type: AssetType,
-        cache: &Cache,
-    ) -> Result<Resolution, Error> {
-        validate_name(scoped_name)?;
-        let parsed = Range::parse(scoped_name, range)?;
-        finish_resolution(
-            self.resolve(scoped_name, range, expected_type).await,
-            scoped_name,
-            &parsed,
-            expected_type,
-            cache,
-        )
-        .await
-    }
-
-    /// Always contact Storage and verify the returned bytes.
-    pub async fn fetch(&self, resolved: &ResolvedRef) -> Result<FetchedAsset, Error> {
-        let url = storage_endpoint(&self.config, resolved)?;
-        let bytes = self
-            .read(&resolved.scoped_name, "Storage bytes", url, true)
-            .await?;
-        verified_asset(resolved, bytes).await
-    }
-
-    pub(crate) fn body_limit(&self, storage: bool) -> usize {
-        if storage {
-            self.storage_limit
-        } else {
-            FIRESTORE_LIMIT
-        }
-    }
-
-    fn firestore(&self, path: &[&str]) -> Result<Url, Error> {
-        let mut parts = vec![
-            "v1",
-            "projects",
-            &self.config.project_id,
-            "databases",
-            "(default)",
-            "documents",
-        ];
-        parts.extend_from_slice(path);
-        endpoint(&self.config.firestore_url, &parts)
-    }
-
-    async fn document(&self, name: &str, step: &str, path: &[&str]) -> Result<Value, Error> {
-        self.json(name, step, self.firestore(path)?).await
-    }
-
-    async fn json(&self, name: &str, step: &str, url: Url) -> Result<Value, Error> {
-        let bytes = self.read(name, step, url, false).await?;
-        serde_json::from_slice(&bytes).map_err(|e| unexpected(name, step, &e.to_string()))
-    }
-
-    async fn read(
-        &self,
         name: &str,
-        step: &str,
-        url: Url,
-        storage: bool,
-    ) -> Result<Vec<u8>, Error> {
-        let token = self.tokens.token().await?;
-        let mut request = self.client.get(url);
-        if let Some(token) = &token {
-            request = request.header(
-                reqwest::header::AUTHORIZATION,
-                format!("{} {token}", if storage { "Firebase" } else { "Bearer" }),
-            );
+        range: &str,
+        kind: Kind,
+        artifact_key: &str,
+    ) -> Result<Resolution, Error> {
+        let parsed = Range::parse(name, range)?;
+        match self.resolve(name, range, kind.clone(), artifact_key).await {
+            Ok(resolved) => Ok(Resolution {
+                resolved,
+                source: ResolutionSource::Source,
+            }),
+            Err(error) => {
+                match &error {
+                    Error::Source(SourceError::Network(_)) => {
+                        let requested = name.to_owned();
+                        if let Ok(Some(pin)) = self
+                            .cache
+                            .blocking(move |cache| cache.last_pin(&requested))
+                            .await
+                        {
+                            if pin.asset_type == kind
+                                && pin.artifact_key == artifact_key
+                                && valid_hash(&pin.content_hash)
+                                && Version::parse(&pin.version).is_some_and(|v| parsed.contains(v))
+                            {
+                                return Ok(Resolution {
+                                    resolved: pin,
+                                    source: ResolutionSource::Cache,
+                                });
+                            }
+                        }
+                    }
+                    Error::Source(SourceError::NotFound(_)) => {
+                        let requested = name.to_owned();
+                        if let Err(cleanup) = self
+                            .cache
+                            .blocking(move |cache| cache.remove_pin(&requested))
+                            .await
+                        {
+                            log::warn!(target: "arora-assets", "{name}: could not clear resolved pin: {cleanup}");
+                        }
+                    }
+                    _ => {}
+                }
+                Err(error)
+            }
         }
-        let network = |e| network_error(name, step, e);
-        let response = request.send().await.map_err(network)?;
-        let status = response.status();
-        classify_status(status, token.is_some(), name, step)?;
-        let limit = self.body_limit(storage);
-        read_body(
-            response.bytes_stream().map(|chunk| chunk.map_err(network)),
-            limit,
-            name,
-            step,
-        )
+    }
+
+    /// Return verified cached bytes or check the exact release and hash before download.
+    /// This method stores blobs but never records or replaces a resolved pin.
+    pub async fn fetch(&self, pin: &ResolvedRef) -> Result<FetchedAsset, Error> {
+        if let Some(asset) = self.cache.fetch_async(pin).await? {
+            return Ok(asset);
+        }
+        validate_name(&pin.scoped_name)?;
+        let releases = self
+            .source
+            .releases(&pin.scoped_name, &pin.asset_type, self.options)
+            .await?;
+        let release = releases
+            .iter()
+            .find(|r| {
+                r.release_id == pin.release_id
+                    && r.scoped_name == pin.scoped_name
+                    && Version::parse(&r.version).is_some_and(|v| v.to_string() == pin.version)
+            })
+            .ok_or_else(|| {
+                SourceError::NotFound(format!(
+                    "{}: pinned release {} at {}",
+                    pin.scoped_name, pin.release_id, pin.version
+                ))
+            })?;
+        validate_release(release, &pin.asset_type)?;
+        if release.private != pin.private {
+            return Err(SourceError::Malformed(format!(
+                "{}: pinned visibility differs",
+                pin.scoped_name
+            ))
+            .into());
+        }
+        let artifact = release.artifacts.get(&pin.artifact_key).ok_or_else(|| {
+            SourceError::NotFound(format!(
+                "{}: artifact {}",
+                pin.scoped_name, pin.artifact_key
+            ))
+        })?;
+        if artifact.content_hash != pin.content_hash {
+            return Err(Error::HashMismatch {
+                asset: pin.scoped_name.clone(),
+                expected: pin.content_hash.clone(),
+                actual: artifact.content_hash.clone(),
+            });
+        }
+        if artifact
+            .size
+            .is_some_and(|size| size > self.options.storage_limit as u64)
+        {
+            return Err(self.too_large(pin));
+        }
+        let bytes = self
+            .source
+            .fetch(release, &pin.artifact_key, self.options)
+            .await?;
+        if bytes.len() > self.options.storage_limit {
+            return Err(self.too_large(pin));
+        }
+        let pin = pin.clone();
+        let cache = self.cache.clone();
+        crate::blocking(move || {
+            cache.store(&pin.content_hash, &bytes, pin.private)?;
+            Ok(FetchedAsset {
+                bytes,
+                content_hash: pin.content_hash.clone(),
+                resolved: Some(pin),
+            })
+        })
         .await
     }
+    fn too_large(&self, pin: &ResolvedRef) -> Error {
+        Error::ResponseTooLarge {
+            scoped_name: pin.scoped_name.clone(),
+            step: "artifact bytes".into(),
+            limit: self.options.storage_limit,
+        }
+    }
 }
-
-pub(crate) fn asset_identity(
-    asset: &Value,
-    scoped_name: &str,
-    expected_type: AssetType,
-) -> Result<(String, bool), Error> {
-    let asset = Fields::document(asset, scoped_name, "asset document")?;
-    let actual = asset.string("assetType")?;
-    if actual != expected_type.as_str() {
+fn validate_release(release: &Release, kind: &Kind) -> Result<(), Error> {
+    validate_name(&release.scoped_name)?;
+    if release.kind != *kind {
         return Err(Error::WrongAssetType {
-            scoped_name: scoped_name.into(),
-            expected: expected_type.as_str().into(),
-            actual: actual.into(),
+            scoped_name: release.scoped_name.clone(),
+            expected: kind.as_str().into(),
+            actual: release.kind.as_str().into(),
         });
     }
-    let current_name = asset.string("scopedName")?.to_owned();
-    let private = asset.optional_string("publicRole")?.is_none();
-    Ok((current_name, private))
-}
-
-pub(crate) fn release_page(
-    value: &Value,
-    scoped_name: &str,
-    releases: &mut Vec<Value>,
-    seen: &mut HashSet<String>,
-) -> Result<Option<String>, Error> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| unexpected(scoped_name, "release listing", "expected an object"))?;
-    if let Some(documents) = object.get("documents") {
-        let documents = documents.as_array().ok_or_else(|| {
-            unexpected(scoped_name, "release listing", "documents must be an array")
-        })?;
-        releases.extend(documents.iter().cloned());
-    }
-    match object.get("nextPageToken") {
-        None => Ok(None),
-        Some(Value::String(token)) if !token.is_empty() && seen.insert(token.clone()) => {
-            Ok(Some(token.clone()))
-        }
-        _ => Err(unexpected(
-            scoped_name,
-            "release listing",
-            "invalid or repeated nextPageToken",
-        )),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolved_release(
-    releases: &[Value],
-    scoped_name: &str,
-    range: &str,
-    parsed: &Range,
-    current_name: &str,
-    id: &str,
-    private: bool,
-    expected_type: AssetType,
-) -> Result<ResolvedRef, Error> {
-    let (release, version) = select(releases, scoped_name, range, parsed)?;
-    let release_id = release["name"]
-        .as_str()
-        .unwrap()
-        .rsplit('/')
-        .next()
-        .unwrap()
-        .to_owned();
-    let step = format!("release {release_id}");
-    let fields = Fields::document(release, scoped_name, &step)?;
-    let primary = fields.map("artifacts")?.unwrap().map("primary")?.unwrap();
-    let hash = primary.string("contentHash")?;
-    if !crate::valid_hash(hash) {
-        return Err(primary.error("contentHash must be 64 lowercase hex digits"));
-    }
-    let storage = primary
-        .map("storage")?
-        .ok_or_else(|| primary.error("missing storage"))?;
-    let storage_path = storage.string("fileBucket")?.to_owned();
-    validate_storage_path(&storage_path, scoped_name, &step)?;
-    let family = fields.fields.get("family").and_then(|value| {
-            let family = value.get("stringValue").and_then(Value::as_str);
-            if family.is_none() {
-                log::warn!(target: "arora-assets", "{scoped_name}: {step}: family must be a string; treating family as absent");
-            }
-            family.map(str::to_owned)
-        });
-    Ok(ResolvedRef {
-        scoped_name: current_name.into(),
-        published_asset_id: id.into(),
-        version: version.to_string(),
-        release_id,
-        artifact_key: "primary".into(),
-        content_hash: hash.into(),
-        storage_path: Some(storage_path),
-        asset_type: expected_type,
-        family,
-        private,
-        resolved_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| Error::Config(e.to_string()))?
-            .as_millis() as u64,
-    })
-}
-
-pub(crate) async fn finish_resolution(
-    result: Result<ResolvedRef, Error>,
-    scoped_name: &str,
-    parsed: &Range,
-    expected_type: AssetType,
-    cache: &Cache,
-) -> Result<Resolution, Error> {
-    match result {
-        Ok(pin) => {
-            let name = scoped_name.to_owned();
-            let saved = pin.clone();
-            if let Err(error) = cache
-                .blocking(move |cache| cache.save_pin(&name, &saved))
-                .await
-            {
-                log::warn!(target: "arora-assets", "{scoped_name}: could not save resolved pin: {error}");
-            }
-            Ok(Resolution {
-                resolved: pin,
-                source: ResolutionSource::Server,
-            })
-        }
-        Err(e @ Error::Network { .. }) => {
-            let name = scoped_name.to_owned();
-            let pin = cache
-                .blocking(move |cache| cache.last_pin(&name))
-                .await
-                .ok()
-                .flatten();
-            match pin {
-                Some(pin)
-                    if pin.asset_type == expected_type
-                        && Version::parse(&pin.version).is_some_and(|v| parsed.contains(v)) =>
-                {
-                    Ok(Resolution {
-                        resolved: pin,
-                        source: ResolutionSource::Cache,
-                    })
-                }
-                _ => Err(e),
-            }
-        }
-        Err(
-            e @ (Error::NotFound {
-                http_status: 404, ..
-            }
-            | Error::Refused { .. }),
-        ) => {
-            let name = scoped_name.to_owned();
-            if let Err(error) = cache.blocking(move |cache| cache.remove_pin(&name)).await {
-                log::warn!(target: "arora-assets", "{scoped_name}: could not clear resolved pin: {error}");
-            }
-            Err(e)
-        }
-        Err(e) => Err(e),
-    }
-}
-
-pub(crate) fn storage_endpoint(
-    config: &StudioConfig,
-    resolved: &ResolvedRef,
-) -> Result<Url, Error> {
-    let storage_path = resolved.storage_path.as_deref().ok_or_else(|| {
-        Error::Cache(format!(
-            "{}: offline pin has no storage path; read the bytes from the cache by hash {}",
-            resolved.scoped_name, resolved.content_hash
-        ))
-    })?;
-    validate_storage_path(
-        storage_path,
-        &resolved.scoped_name,
-        &format!("release {}", resolved.release_id),
-    )?;
-    let mut url = endpoint(
-        &config.storage_url,
-        &["v0", "b", &config.storage_bucket, "o", storage_path],
-    )?;
-    url.query_pairs_mut().append_pair("alt", "media");
-    Ok(url)
-}
-
-pub(crate) async fn verified_asset(
-    resolved: &ResolvedRef,
-    bytes: Vec<u8>,
-) -> Result<FetchedAsset, Error> {
-    let resolved = resolved.clone();
-    crate::blocking(move || {
-        verify(&resolved.scoped_name, &resolved.content_hash, &bytes)?;
-        Ok(FetchedAsset {
-            bytes,
-            content_hash: resolved.content_hash.clone(),
-            resolved: Some(resolved),
-        })
-    })
-    .await
-}
-
-pub(crate) fn network_error(name: &str, step: &str, e: reqwest::Error) -> Error {
-    if e.is_builder() {
-        unexpected(name, step, "invalid request or authorization header")
-    } else {
-        Error::Network {
-            scoped_name: name.into(),
-            step: step.into(),
-            detail: error_chain(&e.without_url()),
-        }
-    }
-}
-
-pub(crate) fn classify_status(
-    status: reqwest::StatusCode,
-    authenticated: bool,
-    name: &str,
-    step: &str,
-) -> Result<(), Error> {
-    if status.as_u16() == 401 {
-        return Err(Error::Unauthorized {
-            scoped_name: name.into(),
-            step: step.into(),
-        });
-    }
-    if status.as_u16() == 403 && authenticated {
-        return Err(Error::Refused {
-            scoped_name: name.into(),
-            step: step.into(),
-        });
-    }
-    if status.as_u16() == 404 || (status.as_u16() == 403 && !authenticated) {
-        return Err(Error::NotFound {
-            scoped_name: name.into(),
-            step: step.into(),
-            http_status: status.as_u16(),
-            cause: if status.as_u16() == 403 {
-                "not found, or not public"
-            } else {
-                "not found"
-            }
-            .into(),
-        });
-    }
-    if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
-        return Err(Error::Network {
-            scoped_name: name.into(),
-            step: step.into(),
-            detail: format!("HTTP {status}"),
-        });
-    }
-    if !status.is_success() {
-        return Err(unexpected(name, step, &format!("HTTP {status}")));
+    if release.release_id.is_empty() {
+        return Err(SourceError::Malformed("empty release id".into()).into());
     }
     Ok(())
 }
-
-fn endpoint(base: &str, parts: &[&str]) -> Result<Url, Error> {
-    let mut url = Url::parse(base).map_err(|e| Error::Config(format!("invalid endpoint: {e}")))?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(Error::Config("endpoint must be an HTTP(S) URL".into()));
-    }
-    url.set_query(None);
-    url.set_fragment(None);
-    url.path_segments_mut()
-        .map_err(|_| Error::Config("endpoint cannot hold path segments".into()))?
-        .pop_if_empty()
-        .extend(parts);
-    Ok(url)
-}
-
-fn unexpected(name: &str, step: &str, detail: &str) -> Error {
-    Error::UnexpectedResponse {
-        scoped_name: name.into(),
-        step: step.into(),
-        detail: detail.into(),
-    }
-}
-
-struct Fields<'a> {
-    fields: &'a Map<String, Value>,
-    name: &'a str,
-    step: &'a str,
-}
-
-impl<'a> Fields<'a> {
-    fn document(value: &'a Value, name: &'a str, step: &'a str) -> Result<Self, Error> {
-        let fields = value
-            .get("fields")
-            .and_then(Value::as_object)
-            .ok_or_else(|| unexpected(name, step, "missing document fields"))?;
-        Ok(Self { fields, name, step })
-    }
-    fn error(&self, detail: &str) -> Error {
-        unexpected(self.name, self.step, detail)
-    }
-    fn optional_string(&self, key: &str) -> Result<Option<&'a str>, Error> {
-        match self.fields.get(key) {
-            None => Ok(None),
-            Some(value) if value.get("nullValue") == Some(&Value::Null) => Ok(None),
-            Some(value) => value
-                .get("stringValue")
-                .and_then(Value::as_str)
-                .map(Some)
-                .ok_or_else(|| self.error(&format!("{key} must be a string"))),
-        }
-    }
-    fn string(&self, key: &str) -> Result<&'a str, Error> {
-        self.optional_string(key)?
-            .ok_or_else(|| self.error(&format!("missing {key}")))
-    }
-    fn map(&self, key: &str) -> Result<Option<Self>, Error> {
-        let Some(value) = self.fields.get(key) else {
-            return Ok(None);
-        };
-        let map = value
-            .get("mapValue")
-            .and_then(Value::as_object)
-            .ok_or_else(|| self.error(&format!("{key} must be a map")))?;
-        // Firestore omits fields for an empty map.
-        let fields = match map.get("fields") {
-            Some(value) => value
-                .as_object()
-                .ok_or_else(|| self.error("map fields must be an object"))?,
-            None if map.is_empty() => map,
-            None => return Err(self.error("missing map fields")),
-        };
-        Ok(Some(Self {
-            fields,
-            name: self.name,
-            step: self.step,
-        }))
-    }
-}
-
-fn select<'a>(
-    releases: &'a [Value],
-    name: &str,
-    raw_range: &str,
-    range: &Range,
-) -> Result<(&'a Value, Version), Error> {
-    let mut newest: Option<(&Value, Version)> = None;
-    for release in releases {
-        let document_name = release
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| unexpected(name, "release listing", "missing document name"))?;
-        validate_id(
-            document_name.rsplit('/').next().unwrap_or_default(),
-            name,
-            "release listing",
-        )?;
-        let Ok(fields) = Fields::document(release, name, "release selection") else {
-            continue;
-        };
-        if fields
-            .fields
-            .get("deprecated")
-            .and_then(|v| v.get("booleanValue"))
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            continue;
-        }
-        let Some(version) = fields.string("version").ok().and_then(Version::parse) else {
-            continue;
-        };
-        if !range.contains(version) {
-            continue;
-        }
-        let usable = (|| {
-            let primary = fields.map("artifacts").ok()??.map("primary").ok()??;
-            let hash = primary.string("contentHash").ok()?;
-            if hash.is_empty() {
-                return None;
-            }
-            Some(())
-        })();
-        if usable.is_some() && newest.is_none_or(|(_, kept)| version > kept) {
-            newest = Some((release, version));
-        }
-    }
-    newest.ok_or_else(|| Error::NoRelease {
-        scoped_name: name.into(),
-        range: raw_range.into(),
-    })
-}
-
-pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
-    let valid = name
-        .strip_prefix('@')
-        .and_then(|s| s.split_once('/'))
-        .is_some_and(|(scope, asset)| {
-            !scope.is_empty() && !asset.is_empty() && !asset.contains('/')
-        })
-        && !name.contains(':');
-    if !valid {
-        return Err(Error::InvalidName {
-            scoped_name: name.into(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_storage_path(path: &str, name: &str, step: &str) -> Result<(), Error> {
-    if path.is_empty() || matches!(path, "." | "..") {
-        return Err(unexpected(
-            name,
-            step,
-            &format!("invalid storage path {path:?}"),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_id(id: &str, name: &str, step: &str) -> Result<(), Error> {
-    if id.is_empty() || matches!(id, "." | "..") || id.contains('/') {
-        return Err(unexpected(
-            name,
-            step,
-            &format!("invalid document id {id:?}"),
-        ));
-    }
-    Ok(())
-}
-
-fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
-    let mut detail = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        detail.push_str(": ");
-        detail.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    detail
-}
-
-async fn read_body<B: AsRef<[u8]>>(
-    stream: impl Stream<Item = Result<B, Error>>,
-    limit: usize,
-    name: &str,
-    step: &str,
-) -> Result<Vec<u8>, Error> {
-    futures_util::pin_mut!(stream);
-    let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        append_chunk(&mut bytes, chunk?.as_ref(), limit, name, step)?;
-    }
-    Ok(bytes)
-}
-
-fn append_chunk(
-    bytes: &mut Vec<u8>,
-    chunk: &[u8],
-    limit: usize,
-    name: &str,
-    step: &str,
-) -> Result<(), Error> {
-    if chunk.len() > limit.saturating_sub(bytes.len()) {
-        return Err(Error::ResponseTooLarge {
-            scoped_name: name.into(),
-            step: step.into(),
-            limit,
-        });
-    }
-    bytes.extend_from_slice(chunk);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests;

@@ -1,242 +1,227 @@
 # arora-index
 
-This crate is the asset registry: it resolves and fetches published Studio
-assets. Behavior trees use “index” for their function lookup; that lookup and
-this registry are unrelated.
+Neutral asset types, release selection, verification and caching. Arora can
+use a local directory or a source supplied by another crate. The Studio source
+lives in studio-bridge.
 
-`Resolver` reads a scoped name, the published asset document, and every page of
-releases through Firestore REST. It selects the newest non-deprecated release in
-the range with a primary content hash, then `fetch` downloads that artifact
-through Storage REST and verifies its SHA-256. `resolve` takes an `AssetType`
-(`Model`, `Animation`, or `Face`); `Model` is the default enum value.
-`latestVersion` does not select a release. An alias resolves to the asset's
-current scoped name.
+## Features
 
-```rust
-use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
+With no default features, the crate provides `Kind`, `Release`, `ArtifactRef`,
+`ResolvedRef`, version and range parsing, `select_release`, `content_hash`, `verify` and
+error types. It builds for `wasm32-unknown-unknown` without an HTTP client,
+Tokio or temporary files.
 
-async fn example() -> Result<(), arora_index::Error> {
-    let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
-    let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
+The default `client` feature adds `Source`, `DirSource`, `Resolver` and `Cache`.
+The `build` feature adds the build helper for bespoke HALs.
+
+## Releases and pins
+
+`Kind` is a string newtype. Its constants are `MODEL`, `FACE`, `ANIMATION`,
+`MODULE`, `TYPE_RECORD` and `BEHAVIOR`. Unknown kinds round-trip unchanged.
+Pins keep the serialized field name `assetType`. An omitted kind defaults to
+`model` when reading a pin.
+
+A `Release` has a scoped name, version and opaque source `release_id`. It has
+no UUID. Its `artifacts` map holds a content hash and optional byte size for
+each key. Hashes are lowercase SHA-256 hex. Models use `primary`. Modules
+conventionally use `interface` and one executable key per executor and target,
+for example `wasm` and `native/<target-triple>`. The index does not restrict keys.
+A `ResolvedRef` pins one artifact key and hash.
+
+Versions contain three unsigned integer components, optionally preceded by
+`v`, and are at least 1.0.0. Ranges are `*`, exact, `^X.Y.Z` (before the next
+major version), or `~X.Y.Z` (before the next minor version). Whole-range
+whitespace is ignored. Numeric components must fit `u64`.
+
+Selection skips invalid versions, deprecated releases, and releases without
+the requested artifact or a non-empty hash. The newest matching release wins.
+Equal versions keep listing order. A malformed selected hash is an error;
+selection does not try an older release. Returned versions are canonical.
+
+## Sources and resolution
+
+`Source` is async, `Send + Sync` and object safe through `async_trait`.
+It lists releases of one named asset of a kind and fetches one artifact by key.
+A source maps its protocol to these `SourceError` categories:
+
+| Category | Meaning | Resolver fallback policy |
+| --- | --- | --- |
+| `Network` | Transient failure, including timeouts, refused connections, 408, 429 and 5xx | Use a compatible last pin |
+| `NotFound` | Definitive absence or denial for the calling identity | Clear only the requested pin and its unshared sealed blob |
+| `Unauthorized` | Rejected credentials, such as 401 | Return the error and preserve pins |
+| `Malformed` | Invalid metadata or protocol data | Return the error and preserve pins |
+| `AccessDenied` | Ambiguous denial, such as an anonymous 403 | Return the error and preserve pins |
+| `TooLarge` | A source reached its byte cap | Return the error and preserve pins |
+
+`TokenSource` and `NoToken` are optional credential interfaces for sources.
+They do not sign in or choose an authorization scheme.
+
+```rust,no_run
+use arora_index::{Cache, DirSource, Kind, Resolver};
+
+async fn models() -> Result<(), arora_index::Error> {
+    let source = DirSource::new("releases");
+    let cache = Cache::new("device/assets")?;
+    let resolver = Resolver::new(source, cache);
+    let pin = resolver.resolve("@demo/robot", "^1.0.0", Kind::MODEL, "primary").await?;
     let fetched = resolver.fetch(&pin).await?;
     assert_eq!(fetched.content_hash, pin.content_hash);
     Ok(())
 }
 ```
 
-`TokenSource` supplies an optional Firebase ID token asynchronously. The crate
-never signs in. Firestore receives `Bearer` authorization, Storage receives
-`Firebase` authorization, and `NoToken` sends neither. Anonymous 403 responses
-are reported as “not found, or not public”; authenticated 403 responses are
-refused. `Error` is non-exhaustive. Its asset errors distinguish invalid scoped
-names and ranges, not found, refused, unauthorized, wrong asset type, no release,
-hash mismatch, network failure, unexpected response, and an oversized response.
-A 401 is `Unauthorized`: refresh the token or sign in again; it never permits
-fallback. HTTP 408, 429 and 5xx are transient `Network` errors. Connection and
-timeout errors include their source chain. Configuration, token-source, local
-I/O, cache and build failures carry their corresponding context.
+`resolve` records the live pin under the requested name. A source can return
+the current name for an alias. `resolve_with_fallback` tries the source first
+and reports `ResolutionSource::Source` or `Cache`. Only a network failure
+permits fallback. The saved pin must match the requested kind, artifact key
+and range. An absent or unreadable pin leaves the network error unchanged.
 
-`Resolver::builder(config, tokens)` configures a 30-second `connect_timeout`
-and a 60-second per-read idle `read_timeout`. Both are settable; there is no
-total request deadline, so a large download may continue while bytes arrive.
-Firestore bodies are capped at 16 MiB. Storage bodies default to a 1 GiB cap,
-settable with `storage_limit(bytes)`. Bodies are consumed in chunks and stop
-when the cap would be exceeded; `ResponseTooLarge` names the asset and cap.
+`fetch(pin)` returns verified cached bytes without asking the source. On a
+miss, it looks up the exact release by name, version and source id. It checks
+the pinned artifact hash before downloading. It verifies the downloaded bytes,
+stores them, and returns `FetchedAsset`. It never writes `resolved.json`.
+A pin supplied by another party cannot replace a resolved pin.
 
-`fetch_local(path)` returns the same `FetchedAsset` (bytes and lowercase hex
-SHA-256), with `resolved: None`. A published artifact carries a `ResolvedRef`;
-its `scoped_name`, canonical `version`, and `content_hash` are plain strings
-that a runtime can copy into its model reference. `private` lets the runtime
-decide whether it may serve those bytes. No HAL dependency is needed.
+`Resolver::builder(source, cache)` sets `connect_timeout`, `read_timeout` and
+`storage_limit`. Defaults are 30 seconds, 60 seconds and 1 GiB. Both source
+methods receive `SourceOptions`. A remote source enforces the connect timeout
+per connection and the read timeout per idle read. There is no total download
+deadline. Sources stop reading when the byte cap is exceeded. The resolver
+also checks declared sizes before download and returned sizes before caching.
+Hashing and cache I/O run on blocking workers.
 
-## Configuration
+## Directory source
 
-`StudioConfig` accepts explicit endpoints or reads these variables through
-`from_env`. `from_lookup` accepts a lookup closure for deterministic configuration.
-An empty value is unset for every environment variable the crate reads.
+`DirSource::new(root)` reads this layout. The scope directory omits `@`:
 
-| Variable | Meaning |
-| --- | --- |
-| `FIREBASE_PROJECT_ID` | Required Firebase project id |
-| `FIREBASE_STORAGE_BUCKET` | Required Storage bucket |
-| `FIREBASE_FIRESTORE_EMULATOR_HOST` | Optional `host:port`, used as `http://host:port` |
-| `FIREBASE_STORAGE_EMULATOR_HOST` | Optional `host:port`, used as `http://host:port` |
+```text
+<root>/demo/robot/1.2.3/
+├── release.json
+├── models.glb
+└── module.wasm
+```
 
-Without emulator variables, the endpoints are `https://firestore.googleapis.com`
-and `https://firebasestorage.googleapis.com`. Documents use the `(default)`
-database: `scopedNames/{name-with-colons}`, `publishedAssets/{id}`, and
-`publishedAssets/{id}/releases`. The primary artifact's `storage.fileBucket`
-is the object path within the configured bucket.
+`release.json` describes this release:
 
-Versions contain three unsigned integer components, optionally preceded by
-`v`, and must be at least 1.0.0. Selection compares components numerically and
-keeps the first candidate in listing order for ties, replacing it only
-with a strictly newer version. A candidate needs a valid version and a non-empty
-string at `primary.contentHash`; only a boolean `true` marks it deprecated.
-Releases without fields, a valid version, or a primary hash are skipped.
-The selected release must have a 64-digit lowercase hexadecimal hash and a
-storage path other than an empty string, `.` or `..`. Invalid selected fields
-are errors naming that release; they do not select an older release instead.
-A non-string `family` is absent, with a warning. Listing shapes and
-document names are checked separately. Requested names must be `@scope/name`,
-with both parts non-empty, exactly one slash and no colon. Server document ids
-cannot be empty, `.`, `..`, or contain a slash. Ranges are `*`, exact versions, `^X.Y.Z` (before
-`(X+1).0.0`), or `~X.Y.Z` (before `X.(Y+1).0`). Whitespace around the whole
-range is ignored. Components must fit `u64`; upper bounds use wider arithmetic
-so the maximum component remains usable.
+```json
+{
+  "version": "1.2.3",
+  "kind": "model",
+  "deprecated": false,
+  "private": false,
+  "family": "robot",
+  "artifacts": {
+    "primary": {
+      "file": "models.glb",
+      "contentHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "size": 1234
+    }
+  }
+}
+```
+
+Use the actual file's hash and size. `size` and `family` are optional.
+`deprecated` and `private` default to false. The version must equal the
+directory name, which is also the source release id. Listing order is the
+sorted directory order. Artifact files are relative to the release directory.
+They can use subdirectories. Dot components, absolute paths and symbolic links
+that escape the directory are refused. Metadata reads have a 16 MiB cap;
+artifact reads use `storage_limit`. The source verifies artifact hashes.
+Local files have no connection or socket read timeout.
 
 ## Cache
 
-The caller chooses a directory with `Cache::new`, usually `<device dir>/assets`:
+The caller passes the cache directory, usually `<device dir>/assets`:
 
 ```text
-<dir>/
-├── blobs/<contentHash>          public bytes
-├── blobs/<contentHash>.sealed   encrypted private bytes
-├── key                          32-byte key, mode 0600 on Unix
-├── resolved.json                requested scoped name → last pin
-└── .lock                        coordination across processes
+<device dir>/assets/
+├── blobs/
+│   ├── <hash>            public bytes
+│   └── <hash>.sealed     encrypted private bytes
+├── key                   32-byte key, mode 0600 on Unix
+├── resolved.json         requested scoped name → last pin
+└── .lock                 writer coordination
 ```
 
-`store` verifies bytes before writing. `read` verifies every hit. A failed
-verification returns a miss and takes the write lock to re-read and verify the
-file before deleting it, so a concurrent writer's valid replacement is safe.
-Public and private reads use distinct files. Private bytes use XSalsa20-Poly1305
-with a random 24-byte nonce followed by ciphertext; encryption and decryption
-take place in memory. The key is written completely to a mode-0600 temporary
-file and published without replacing an existing key. An existing key of invalid
-length is replaced under the cache lock with a warning; old ciphertext then
-becomes a cache miss. Blob and pin updates use a temporary file in the same
-directory and an atomic rename. The lock also prevents concurrent pin updates
-from losing other names. Verified reads take no lock and public and private hits
-work in read-only directories; a corrupt blob that cannot be removed still
-returns a miss, with a warning.
+The device runtime, CLI and build-script processes that use the same cache
+coordinate writes through `.lock`. Use a separate cache per identity for
+private pins. `store` verifies bytes before writing. `read` verifies every hit.
+Verified reads take no lock and work in read-only directories. A corrupt hit
+is a miss. Cleanup takes the lock and checks the file again before deleting
+it, so it cannot remove a valid concurrent replacement.
 
-`save_pin(requested_name, pin)` and `last_pin(requested_name)` maintain the
-resolution map, including aliases under the name requested. Each entry has
-`version`, `releaseId`, `artifactKey`, `contentHash`, `resolvedAt`, `scopedName`,
-`publishedAssetId`, `family`, `private`, and `assetType`. Pins written without
-`assetType` default to `Model`. It omits `storagePath`: the field is
-`Option<String>` and a restored pin has `None`. `Cache::fetch(&pin)` supplies
-its verified bytes; a Studio fetch without a storage path reports that the
-bytes must be read from the cache by hash.
+Private bytes use XSalsa20-Poly1305 with a random 24-byte nonce followed by
+ciphertext. They are decrypted only in memory. The key is published atomically
+without replacing a valid existing key. An invalid key is replaced under the
+lock with a warning. Old ciphertext then becomes a cache miss. Blob and pin
+writes use a temporary file in the same directory and atomic rename.
 
-Pins are parsed independently. Invalid entries cannot supply a pin, but saving
-or clearing preserves every untouched entry verbatim as raw JSON. An unreadable
-file reads as empty; writes leave it untouched and warn. A file that can be read
-but is not a JSON object holds no recoverable pins, and the next save replaces
-it. Failure to save after a live resolve logs a warning and still returns the
-live result. Unreadable pins never replace a network error with a cache error.
+`save_pin` and `last_pin` maintain `resolved.json`. Its entries carry
+`scopedName`, `version`, `releaseId`, `artifactKey`, `contentHash`, `assetType`,
+`family`, `private` and `resolvedAt`. Pins are parsed independently. Updates
+preserve untouched entries as raw JSON. Unreadable files are never overwritten.
+Save and cleanup failures warn and preserve the live result or source error.
+Clearing a pin deletes its sealed blob only when no other raw entry references
+the hash. Public blobs and blobs without pins remain.
 
-`resolve_with_fallback(name, range, expected_type, cache)` always tries the
-server first and returns `Resolution { resolved, source }`. `source` is
-`ResolutionSource::Server` or `ResolutionSource::Cache`. Only a network error
-permits a saved pin, and its version and asset type must still match.
-A live 404 or authenticated 403 (`Refused`) clears only the requested name's
-parseable pin. Its sealed blob is deleted only if no other raw entry references
-that hash, including entries that cannot supply a pin. An anonymous 403 leaves
-pins intact. An absent or unparsable pin changes nothing; unrelated blobs and
-public blobs remain, including bytes stored before their pin is saved.
-Cleanup failures warn and preserve the original asset error.
-
-The async resolver dispatches cache work, including pin saves and clears,
-through `spawn_blocking`. Hashing and verification for Storage and local files
-also run off the executor. Direct `Cache` methods are synchronous; `fetch_async`
-and `store_async` run their filesystem and verification work on blocking workers.
-`store_async` accepts an owned `FetchedAsset` or `Arc<FetchedAsset>`, moving or
-sharing the bytes without copying the body on the executor. Resolution does not
-fetch bytes: choose `Resolver::fetch` or `Cache::fetch_async` according to the returned source.
-Use a separate cache per identity when storing private pins.
+Direct `Cache` methods are synchronous. `fetch_async` and `store_async` use
+blocking workers. Async stores accept owned or shared bytes without copying
+the body on the executor.
 
 ## Build scripts
 
-A hardware-specific crate can pin public models in its manifest. A generic HAL
-loads models at runtime and need not pin a robot model.
+A bespoke HAL can pin public models at exact versions and hashes. Its
+`build.rs` passes a Studio source from studio-bridge or a `DirSource`.
+A generic HAL loads models at runtime. The project tool will pass the same
+`ARORA_MODEL_<NAME>` variables from a project's pins.
 
 ```toml
 [build-dependencies]
-arora-index = { path = "../arora-index" }
+arora-index = { path = "../arora-index", features = ["build"] }
 
-[package.metadata.arora.models.robot]
-scoped_name = "@scope/robot"
+[package.metadata.arora.models.robot_models]
+scoped_name = "@demo/robot"
 version = "1.2.3"
 content_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Replace the example hash with the published artifact's SHA-256. In `build.rs`:
+Use the artifact's actual hash. In `build.rs`:
 
-```rust
+```rust,no_run
 fn main() -> Result<(), arora_index::Error> {
-    arora_index::build::models()
+    let source = arora_index::DirSource::new("releases");
+    arora_index::build::models_with(&source)
 }
 ```
 
-The helper emits `cargo:rustc-env=ARORA_MODEL_ROBOT=<absolute path>`, usable as
-`include_bytes!(env!("ARORA_MODEL_ROBOT"))`. Names accept lowercase letters,
-digits, `_` and `-`; output names are uppercase with `-` replaced by `_`.
-Colliding output names are an error. Versions must be exact canonical versions
-(no ranges, `v` prefix, whitespace or leading zeroes); a lowercase 64-digit
-hash is mandatory. Every entry's scoped name, version and hash is validated
-before any cache lookup or blob is exposed. A download must match both the
-version and hash. Private
-assets are refused. The helper uses a current-thread Tokio runtime and the
-same resolver; call it outside an existing async runtime.
+The helper emits `cargo:rustc-env=ARORA_MODEL_ROBOT_MODELS=<absolute path>`.
+Use `include_bytes!(env!("ARORA_MODEL_ROBOT_MODELS"))` in the HAL's code.
+Names use lowercase letters, digits, `_` and `-`. Output names are uppercase
+with `-` replaced by `_`. Colliding output names are errors. Versions must be
+canonical and exact: no ranges, `v`, whitespace or leading zeroes. Hashes must
+be 64 lowercase hex digits. All entries are validated before any cache lookup.
+A fetched release must be public and match both version and hash.
 
-| Variable | Build helper meaning |
+| Variable | Cache and build behavior |
 | --- | --- |
 | `CARGO_MANIFEST_DIR` | Manifest directory supplied by Cargo |
 | `ARORA_ASSETS_CACHE_DIR` | Explicit cache directory |
 | `CARGO_HOME` | Otherwise use `$CARGO_HOME/arora-assets` |
 | `HOME` | Otherwise use `$HOME/.cargo/arora-assets` |
-| `ARORA_ASSETS_OFFLINE` | `1` forbids network access |
+| `ARORA_ASSETS_OFFLINE` | `1` forbids source access on a cache miss |
 
-A verified public cache hit needs no Firebase configuration. To fill a missing
-pin, build once with offline mode unset and Firebase configuration supplied.
-The helper emits rerun directives for the manifest and every variable it reads,
-including the Firebase variables, and for each absolute blob path so Cargo
-reruns the helper if a cached blob disappears. `cache_directory` exposes the
-cache-directory lookup with a closure. `models_with` accepts environment lookup and
-output closures for embedding and testing.
+A verified public cache hit needs no source access. `models_with_env` accepts
+explicit environment and output closures. `cache_directory` exposes the cache
+lookup. The helper watches the manifest, these environment variables and each
+absolute blob path. It reruns if a blob disappears. It downloads on a thread
+of its own, so a build script may call it inside or outside a Tokio runtime.
+Sources supply any watches
+needed for their own configuration in the caller's build script.
 
 ## Tests
 
-Run `cargo test --release` for this package. Unit tests beside the implementation
-exercise version selection, typed Firestore values, validation, status and
-fallback decisions, bounded streams, environment lookup, build pins, and cache
-files. Cache tests use temporary directories for encryption, atomic publication,
-permissions and locking. The transport timeout test uses a bounded local TCP
-peer; decision tests need no HTTP server.
-
-Four end-to-end tests use `tests/fake_studio`: a public alias through paged
-releases and Storage, an authenticated private chain, refused-connection
-fallback followed by definitive revocation, and a pinned build followed by an
-offline rebuild. Their waits have deadlines. Assertion-specific test comments
-identify distinctions that line coverage cannot show. No normal test contacts
-a Google or Firebase host.
-
-The ignored emulator test also requires `ARORA_ASSETS_EMULATOR_TEST=1`, both
-emulator hosts on localhost, and a project id starting with `demo-`. With an
-unset or empty opt-in variable it prints a skip message and returns, even
-when invoked with `--ignored`.
-
-From a semio_studio checkout, start the emulators explicitly with a demo project:
-
-```sh
-firebase emulators:start --only firestore,storage --project demo-arora-assets
-```
-
-Then, from the SDK workspace:
-
-```sh
-ARORA_ASSETS_EMULATOR_TEST=1 \
-FIREBASE_PROJECT_ID=demo-arora-assets \
-FIREBASE_STORAGE_BUCKET=demo-arora-assets.appspot.com \
-FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
-FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199 \
-cargo test --manifest-path crates/arora-index/Cargo.toml --test emulator -- --ignored
-```
-
-The `demo-` project keeps requests local. Always supply `--project`; the Studio
-checkout's default project is production. The test seeds public and private
-fixtures, fetches the public model anonymously, and checks that the private
-model returns “not found, or not public”.
+`cargo test -p arora-index --all-features` runs unit tests, one directory-source
+resolve and fetch path, one directory-source build path, and a local doctest.
+Unit tests use an in-memory source for fallback, exact pins and resolver limits.
+Cache tests cover sealing, verification, publication, locking and raw pin
+preservation. No test uses a remote service. See [testing](../../docs/testing.md).

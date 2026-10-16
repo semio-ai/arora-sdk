@@ -1,63 +1,97 @@
 #![allow(dead_code)]
-use crate::{content_hash, AssetType, ResolvedRef};
-use serde_json::{json, Value};
+use crate::{
+    content_hash, ArtifactRef, Kind, Release, ResolvedRef, Source, SourceError, SourceOptions,
+};
+use async_trait::async_trait;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 pub(crate) const NAME: &str = "@test/old";
 pub(crate) const CURRENT: &str = "@test/current";
 pub(crate) const BYTES: &[u8] = b"fixture model bytes";
-pub(crate) const OBJECT: &str = "publishedAssets/asset/releases/release/artifacts/primary";
-pub(crate) const ROOT: &str = "/v1/projects/demo-test/databases/(default)/documents";
-
-pub(crate) fn asset(private: bool, asset_type: &str) -> Value {
-    json!({"name": "publishedAssets/asset", "fields": {
-        "scopedName": {"stringValue": CURRENT}, "assetType": {"stringValue": asset_type},
-        "publicRole": if private { json!({"nullValue": null}) } else { json!({"stringValue": "viewer"}) },
-        "latestVersion": {"stringValue": "99.0.0"}, "deprecated": {"booleanValue": false}
-    }})
-}
-
-pub(crate) fn release(id: &str, version: &str) -> Value {
-    json!({"name": format!("publishedAssets/asset/releases/{id}"), "fields": {
-        "version": {"stringValue": version}, "family": {"stringValue": "test"},
-        "artifacts": {"mapValue": {"fields": {"primary": {"mapValue": {"fields": {
-            "contentHash": {"stringValue": content_hash(BYTES)},
-            "storage": {"mapValue": {"fields": {"fileBucket": {"stringValue": OBJECT}}}},
-            "role": {"stringValue": "model"}, "minRole": {"stringValue": "viewer"}
-        }}}}}}
-    }})
-}
-
 pub(crate) fn pin() -> ResolvedRef {
-    ResolvedRef {
-        scoped_name: CURRENT.into(),
-        published_asset_id: "asset".into(),
-        version: "1.2.3".into(),
-        release_id: "release".into(),
-        artifact_key: "primary".into(),
-        content_hash: content_hash(BYTES),
-        storage_path: Some(OBJECT.into()),
-        family: None,
-        private: true,
-        resolved_at: 123,
-        asset_type: AssetType::Model,
-    }
+    model_pin(true)
 }
-
 pub(crate) fn model_pin(private: bool) -> ResolvedRef {
     ResolvedRef {
         scoped_name: CURRENT.into(),
-        published_asset_id: "asset".into(),
         version: "1.2.3".into(),
         release_id: "release".into(),
         artifact_key: "primary".into(),
         content_hash: content_hash(BYTES),
-        storage_path: Some(OBJECT.into()),
-        asset_type: AssetType::Model,
-        family: Some("test".into()),
+        family: None,
         private,
         resolved_at: 123,
+        asset_type: Kind::MODEL,
     }
 }
-
+pub(crate) fn release() -> Release {
+    Release {
+        scoped_name: CURRENT.into(),
+        version: "1.2.3".into(),
+        release_id: "release".into(),
+        kind: Kind::MODEL,
+        deprecated: false,
+        private: true,
+        family: None,
+        artifacts: BTreeMap::from([(
+            "primary".into(),
+            ArtifactRef {
+                content_hash: content_hash(BYTES),
+                size: None,
+            },
+        )]),
+    }
+}
+pub(crate) struct FakeSource {
+    pub releases: Vec<Release>,
+    pub error: Option<SourceError>,
+    pub bytes: Vec<u8>,
+    pub downloads: AtomicUsize,
+    pub listings: AtomicUsize,
+    pub options: Mutex<Vec<SourceOptions>>,
+    pub keys: Mutex<Vec<String>>,
+}
+impl Default for FakeSource {
+    fn default() -> Self {
+        Self {
+            releases: vec![release()],
+            error: None,
+            bytes: BYTES.to_vec(),
+            downloads: AtomicUsize::new(0),
+            listings: AtomicUsize::new(0),
+            options: Mutex::new(Vec::new()),
+            keys: Mutex::new(Vec::new()),
+        }
+    }
+}
+#[async_trait]
+impl Source for FakeSource {
+    async fn releases(
+        &self,
+        _: &str,
+        _: &Kind,
+        options: SourceOptions,
+    ) -> Result<Vec<Release>, SourceError> {
+        self.listings.fetch_add(1, Ordering::SeqCst);
+        self.options.lock().unwrap().push(options);
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+        Ok(self.releases.clone())
+    }
+    async fn fetch(
+        &self,
+        _: &Release,
+        key: &str,
+        options: SourceOptions,
+    ) -> Result<Vec<u8>, SourceError> {
+        self.keys.lock().unwrap().push(key.into());
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.options.lock().unwrap().push(options);
+        Ok(self.bytes.clone())
+    }
+}
 pub(crate) struct Warnings(pub(crate) std::sync::Mutex<Vec<String>>);
 pub(crate) static HASH_THREADS: std::sync::Mutex<Vec<(String, std::thread::ThreadId)>> =
     std::sync::Mutex::new(Vec::new());

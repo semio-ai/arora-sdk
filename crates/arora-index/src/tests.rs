@@ -1,8 +1,6 @@
 use super::*;
-use crate::test_support::*;
-use std::fs;
 
-/// Asserts hashes match known answers.
+/// Pins the SHA-256 algorithm and lowercase wire format against known answers.
 #[test]
 fn hashes_match_known_answers() {
     assert_eq!(
@@ -15,40 +13,21 @@ fn hashes_match_known_answers() {
     );
 }
 
-/// Asserts local file returns bytes hash and no release.
-#[tokio::test]
-async fn local_file_returns_bytes_hash_and_no_release() {
-    bounded(async {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("model.glb");
-        std::fs::write(&path, BYTES).unwrap();
-        let fetched = fetch_local(&path).await.unwrap();
-        assert_eq!(fetched.bytes, BYTES);
-        assert_eq!(fetched.content_hash, content_hash(BYTES));
-        assert!(fetched.resolved.is_none());
-        let missing = dir.path().join("missing.glb");
-        assert!(fetch_local(&missing)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains(missing.to_str().unwrap()));
-    })
-    .await;
-}
-
-/// Asserts local hashing runs off the executor.
-#[tokio::test(flavor = "current_thread")]
-async fn local_hashing_runs_off_the_executor() {
-    bounded(async {
-        capture_warnings();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("model");
-        let bytes = vec![42; 1231];
-        fs::write(&path, &bytes).unwrap();
-        let since = lock(&HASH_THREADS).len();
-        let fetched = fetch_local(path).await.unwrap();
-        assert_eq!(fetched.bytes, bytes);
-        assert_hash_off_executor(bytes.len(), since);
-    })
-    .await;
+/// Kinds are strings, including future kinds; constants pin the shared vocabulary.
+#[test]
+fn kinds_round_trip_without_a_closed_vocabulary() {
+    for (kind, text) in [
+        (Kind::MODEL, "model"),
+        (Kind::FACE, "face"),
+        (Kind::ANIMATION, "animation"),
+        (Kind::MODULE, "module"),
+        (Kind::TYPE_RECORD, "type-record"),
+        (Kind::BEHAVIOR, "behavior"),
+        (Kind::from("future-kind"), "future-kind"),
+    ] {
+        assert_eq!(kind.as_str(), text);
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, format!("\"{text}\""));
+        assert_eq!(serde_json::from_str::<Kind>(&json).unwrap(), kind);
+    }
 }

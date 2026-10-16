@@ -1,8 +1,9 @@
 use crate::Error;
 use std::fmt;
 
+/// A numeric major, minor and patch version. Parsing requires at least 1.0.0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Version(pub [u64; 3]);
+pub struct Version(pub [u64; 3]);
 
 impl Version {
     pub fn parse(raw: &str) -> Option<Self> {
@@ -27,7 +28,8 @@ impl fmt::Display for Version {
     }
 }
 
-pub(crate) struct Range {
+/// A wildcard, exact, caret or tilde range with overflow-safe upper bounds.
+pub struct Range {
     min: [u128; 3],
     max: Option<[u128; 3]>,
 }

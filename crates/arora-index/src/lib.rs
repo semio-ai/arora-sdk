@@ -1,48 +1,136 @@
-//! The asset registry: resolves a published Studio asset (a scoped name and a
-//! semver range) to a release, and fetches its bytes verified against the
-//! release's SHA-256. `readme.md` covers configuration, the cache, the build
-//! helper and the tests.
+//! Neutral asset types, release selection and SHA-256 verification.
+//! The default `client` feature adds a source trait, a directory source and a
+//! resolver with a sealed cache. The `build` feature adds bespoke HAL build pins.
+//! No default features are needed for `wasm32-unknown-unknown`.
 //!
-//! ```rust,no_run
-//! use arora_index::{AssetType, NoToken, Resolver, StudioConfig};
+//! Module artifact keys conventionally include `interface`, `wasm` and
+//! `native/<target-triple>`. Keys are open strings. Models use `primary`.
 //!
-//! # async fn example() -> Result<(), arora_index::Error> {
-//! let resolver = Resolver::new(StudioConfig::from_env()?, NoToken)?;
-//! let pin = resolver.resolve("@scope/robot", "^1.2.3", AssetType::Model).await?;
-//! let fetched = resolver.fetch(&pin).await?;
-//! assert_eq!(fetched.content_hash, pin.content_hash);
-//! # Ok(())
-//! # }
+//! ```
+//! # #[cfg(feature = "client")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use arora_index::{content_hash, Cache, DirSource, Kind, Resolver};
+//! let dir = tempfile::tempdir()?;
+//! let release = dir.path().join("source/demo/robot/1.0.0");
+//! std::fs::create_dir_all(&release)?;
+//! std::fs::write(release.join("model.glb"), b"model bytes")?;
+//! std::fs::write(release.join("release.json"), serde_json::to_vec(&serde_json::json!({
+//!     "version": "1.0.0", "kind": "model", "deprecated": false,
+//!     "artifacts": {"primary": {"file": "model.glb", "contentHash": content_hash(b"model bytes")}}
+//! }))?)?;
+//! let resolver = Resolver::new(DirSource::new(dir.path().join("source")),
+//!     Cache::new(dir.path().join("assets"))?);
+//! tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
+//!     let pin = resolver.resolve("@demo/robot", "^1.0.0", Kind::MODEL, "primary").await?;
+//!     assert_eq!(resolver.fetch(&pin).await?.bytes, b"model bytes");
+//!     Ok::<_, arora_index::Error>(())
+//! })?;
+//! # Ok(()) }
+//! # #[cfg(not(feature = "client"))]
+//! # fn main() {}
 //! ```
 
+#[cfg(feature = "build")]
 pub mod build;
+#[cfg(feature = "client")]
 mod cache;
+#[cfg(feature = "client")]
+mod dir_source;
+#[cfg(feature = "client")]
 mod resolver;
-mod version;
+mod selection;
+#[cfg(feature = "client")]
+mod source;
+pub mod version;
 
+#[cfg(feature = "client")]
 pub use cache::Cache;
-pub use resolver::{NoToken, Resolver, ResolverBuilder, StudioConfig, TokenSource};
+#[cfg(feature = "client")]
+pub use dir_source::DirSource;
+#[cfg(feature = "client")]
+pub use resolver::{Resolver, ResolverBuilder};
+pub use selection::select_release;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+#[cfg(feature = "client")]
+pub use source::{NoToken, Source, SourceOptions, TokenSource};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+#[cfg(feature = "client")]
+use std::path::Path;
+use std::path::PathBuf;
 
-/// A published artifact. Identity strings can be copied directly into a HAL reference.
+/// An extensible kind, serialized as a plain string. Unknown kinds are preserved.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
+pub struct Kind(pub Cow<'static, str>);
+
+impl Kind {
+    pub const MODEL: Self = Self(Cow::Borrowed("model"));
+    pub const FACE: Self = Self(Cow::Borrowed("face"));
+    pub const ANIMATION: Self = Self(Cow::Borrowed("animation"));
+    pub const MODULE: Self = Self(Cow::Borrowed("module"));
+    pub const TYPE_RECORD: Self = Self(Cow::Borrowed("type-record"));
+    pub const BEHAVIOR: Self = Self(Cow::Borrowed("behavior"));
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl From<String> for Kind {
+    fn from(value: String) -> Self {
+        Self(Cow::Owned(value))
+    }
+}
+impl From<&str> for Kind {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+impl Default for Kind {
+    fn default() -> Self {
+        Self::MODEL
+    }
+}
+
+/// Content identity for one key in a release. Size is in bytes.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRef {
+    pub content_hash: String,
+    #[serde(default)]
+    pub size: Option<u64>,
+}
+
+/// Metadata returned by a source. `release_id` is opaque to the index.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    pub scoped_name: String,
+    pub version: String,
+    pub release_id: String,
+    pub kind: Kind,
+    #[serde(default)]
+    pub deprecated: bool,
+    pub artifacts: BTreeMap<String, ArtifactRef>,
+    #[serde(default)]
+    pub family: Option<String>,
+    #[serde(default)]
+    pub private: bool,
+}
+
+/// An exact artifact pin. `assetType` is the serialized kind field in resolved.json.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedRef {
     pub scoped_name: String,
-    pub published_asset_id: String,
     pub version: String,
     pub release_id: String,
     pub artifact_key: String,
     pub content_hash: String,
-    /// Absent in cached pins; offline callers retrieve bytes by hash.
-    #[serde(default)]
-    pub storage_path: Option<String>,
     pub family: Option<String>,
     pub private: bool,
     #[serde(default)]
-    pub asset_type: AssetType,
+    pub asset_type: Kind,
     pub resolved_at: u64,
 }
 
@@ -53,28 +141,9 @@ pub struct FetchedAsset {
     pub resolved: Option<ResolvedRef>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AssetType {
-    #[default]
-    Model,
-    Animation,
-    Face,
-}
-
-impl AssetType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::Animation => "animation",
-            Self::Face => "face",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolutionSource {
-    Server,
+    Source,
     Cache,
 }
 
@@ -84,35 +153,35 @@ pub struct Resolution {
     pub source: ResolutionSource,
 }
 
-/// Failures remain extensible; downstream matches must include a fallback arm.
-///
-/// ```compile_fail
-/// use arora_index::Error;
-/// fn exhaustive(error: Error) {
-///     match error {
-///         Error::NotFound { .. } | Error::Refused { .. } |
-///         Error::WrongAssetType { .. } | Error::InvalidRange { .. } |
-///         Error::InvalidName { .. } | Error::Unauthorized { .. } |
-///         Error::ResponseTooLarge { .. } | Error::NoRelease { .. } |
-///         Error::HashMismatch { .. } | Error::Network { .. } |
-///         Error::UnexpectedResponse { .. } | Error::Config(_) |
-///         Error::Io { .. } | Error::Token(_) | Error::Cache(_) |
-///         Error::Build { .. } => {}
-///     }
-/// }
-/// ```
+/// Protocol categories used by the fallback policy. Sources preserve diagnostic context.
+#[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SourceError {
+    /// Transient failures: timeouts, refused connections, HTTP 408, 429 and 5xx.
+    #[error("network: {0}")]
+    Network(String),
+    /// Definitive absence or denial for this identity. Clears the named saved pin.
+    #[error("not found or no access: {0}")]
+    NotFound(String),
+    /// Rejected credentials (HTTP 401). Never allows fallback or pin removal.
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+    /// Invalid metadata or protocol data. Never allows fallback or pin removal.
+    #[error("malformed data: {0}")]
+    Malformed(String),
+    /// Ambiguous denial, such as an anonymous HTTP 403. Preserves pins without fallback.
+    #[error("access denied: {0}")]
+    AccessDenied(String),
+    /// A source stopped reading at its byte cap. Preserves pins without fallback.
+    #[error("response exceeds the {limit} byte cap")]
+    TooLarge { limit: usize },
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("{scoped_name}: {step}: {cause}")]
-    NotFound {
-        scoped_name: String,
-        step: String,
-        cause: String,
-        http_status: u16,
-    },
-    #[error("{scoped_name}: {step}: access refused (HTTP 403 with a token)")]
-    Refused { scoped_name: String, step: String },
+    #[error(transparent)]
+    Source(#[from] SourceError),
     #[error("{scoped_name}: expected asset type {expected}, got {actual}")]
     WrongAssetType {
         scoped_name: String,
@@ -123,8 +192,6 @@ pub enum Error {
     InvalidRange { scoped_name: String, range: String },
     #[error("{scoped_name}: invalid scoped name; expected @scope/name without colons")]
     InvalidName { scoped_name: String },
-    #[error("{scoped_name}: {step}: unauthorized (HTTP 401); refresh the token or sign in again")]
-    Unauthorized { scoped_name: String, step: String },
     #[error("{scoped_name}: {step}: response exceeds the {limit} byte cap")]
     ResponseTooLarge {
         scoped_name: String,
@@ -138,18 +205,6 @@ pub enum Error {
         asset: String,
         expected: String,
         actual: String,
-    },
-    #[error("{scoped_name}: {step}: network error: {detail}")]
-    Network {
-        scoped_name: String,
-        step: String,
-        detail: String,
-    },
-    #[error("{scoped_name}: {step}: unexpected response: {detail}")]
-    UnexpectedResponse {
-        scoped_name: String,
-        step: String,
-        detail: String,
     },
     #[error("configuration: {0}")]
     Config(String),
@@ -167,6 +222,7 @@ pub enum Error {
     Build { entry: String, detail: String },
 }
 
+#[cfg(feature = "client")]
 pub(crate) fn io(path: &Path, source: std::io::Error) -> Error {
     Error::Io {
         path: path.to_owned(),
@@ -187,7 +243,8 @@ pub(crate) fn valid_hash(hash: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-pub(crate) fn verify(asset: &str, expected: &str, bytes: &[u8]) -> Result<(), Error> {
+/// Verify bytes against a lowercase SHA-256 content identity.
+pub fn verify(asset: &str, expected: &str, bytes: &[u8]) -> Result<(), Error> {
     let actual = content_hash(bytes);
     if actual != expected {
         return Err(Error::HashMismatch {
@@ -199,25 +256,13 @@ pub(crate) fn verify(asset: &str, expected: &str, bytes: &[u8]) -> Result<(), Er
     Ok(())
 }
 
-/// Read a local override through the same byte container as a published asset.
-pub async fn fetch_local(path: impl AsRef<Path>) -> Result<FetchedAsset, Error> {
-    let path = path.as_ref().to_owned();
-    blocking(move || {
-        let bytes = std::fs::read(&path).map_err(|e| io(&path, e))?;
-        Ok(FetchedAsset {
-            content_hash: content_hash(&bytes),
-            bytes,
-            resolved: None,
-        })
-    })
-    .await
-}
-
 /// Empty environment values have the same meaning as missing variables.
+#[cfg(feature = "build")]
 pub(crate) fn env_value(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.is_empty())
 }
 
+#[cfg(feature = "client")]
 pub(crate) async fn blocking<R: Send + 'static>(
     work: impl FnOnce() -> Result<R, Error> + Send + 'static,
 ) -> Result<R, Error> {
@@ -226,7 +271,7 @@ pub(crate) async fn blocking<R: Send + 'static>(
         .map_err(|e| Error::Cache(e.to_string()))?
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client"))]
 mod test_support;
 
 #[cfg(test)]

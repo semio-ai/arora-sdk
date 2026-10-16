@@ -15,26 +15,18 @@ fn environment(dir: &std::path::Path, version: &str, hash: &str) -> BTreeMap<Str
     ])
 }
 
-/// Offline misses name the entry and remedy; online misses name the missing Firebase variable.
+/// Offline misses name the entry and remedy without contacting the source.
 #[test]
-fn offline_misses_and_missing_configuration_are_actionable() {
+fn offline_misses_are_actionable() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
     env.insert("ARORA_ASSETS_OFFLINE".into(), "1".into());
-    let err = models_with(|key| env.get(key).cloned(), |_| {})
+    let source = FakeSource::default();
+    let err = models_with_env(&source, |key| env.get(key).cloned(), |_| {})
         .unwrap_err()
         .to_string();
     assert!(err.contains("robot-model") && err.contains("fill the cache"));
-    env.remove("ARORA_ASSETS_OFFLINE");
-    assert!(models_with(|key| env.get(key).cloned(), |_| {})
-        .unwrap_err()
-        .to_string()
-        .contains("FIREBASE_PROJECT_ID"));
-    env.insert("FIREBASE_PROJECT_ID".into(), "demo-test".into());
-    assert!(models_with(|key| env.get(key).cloned(), |_| {})
-        .unwrap_err()
-        .to_string()
-        .contains("FIREBASE_STORAGE_BUCKET"));
+    assert_eq!(source.listings.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
 /// Asserts default cache paths and sealed only miss.
@@ -56,18 +48,20 @@ fn default_cache_paths_and_sealed_only_miss() {
         });
         let cache = Cache::new(path).unwrap();
         cache.store(&content_hash(BYTES), BYTES, true).unwrap();
-        assert!(models_with(|key| env.get(key).cloned(), |_| {})
-            .unwrap_err()
-            .to_string()
-            .contains("offline cache miss"));
+        assert!(
+            models_with_env(&FakeSource::default(), |key| env.get(key).cloned(), |_| {})
+                .unwrap_err()
+                .to_string()
+                .contains("offline cache miss")
+        );
         cache.store(&content_hash(BYTES), BYTES, false).unwrap();
-        models_with(|key| env.get(key).cloned(), |_| {}).unwrap();
+        models_with_env(&FakeSource::default(), |key| env.get(key).cloned(), |_| {}).unwrap();
     }
 }
 
 /// Asserts online cache hit without firebase and empty overrides.
 #[test]
-fn online_cache_hit_without_firebase_and_empty_overrides() {
+fn public_cache_hit_and_empty_overrides() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
     env.insert("ARORA_ASSETS_CACHE_DIR".into(), String::new());
@@ -77,7 +71,8 @@ fn online_cache_hit_without_firebase_and_empty_overrides() {
     let cache = Cache::new(dir.path().join(".cargo/arora-assets")).unwrap();
     cache.store(&content_hash(BYTES), BYTES, false).unwrap();
     let mut lines = Vec::new();
-    models_with(
+    models_with_env(
+        &FakeSource::default(),
         |key| env.get(key).cloned(),
         |line| lines.push(line.to_owned()),
     )
@@ -118,7 +113,7 @@ fn every_pin_is_validated_before_any_cache_hit() {
         let error = validate_pins(&entries).err().unwrap().to_string();
         assert!(error.contains("z-invalid") && error.contains(detail));
     }
-    for version in ["~1.2.3", "*", "1.2.3-beta", "0.9.9"] {
+    for version in ["~1.2.3", "*", "1.2.3-beta", "0.9.9", " 1.2.3", "1.02.3"] {
         let entries: toml::Table = toml::from_str(&format!(
             "robot = {{ scoped_name = '{NAME}', version = '{version}', content_hash = '{}' }}",
             content_hash(BYTES)
@@ -133,7 +128,11 @@ fn every_pin_is_validated_before_any_cache_hit() {
     for name in ["UPPER", "bad.name", ""] {
         let mut entries = toml::Table::new();
         entries.insert(name.into(), toml::Value::Table(toml::Table::new()));
-        assert!(validate_pins(&entries).is_err());
+        assert!(validate_pins(&entries)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("name must match"));
     }
     let entries:toml::Table=toml::from_str(&format!("a-b = {{scoped_name='{NAME}',version='1.2.3',content_hash='{}'}}\na_b = {{scoped_name='{NAME}',version='1.2.3',content_hash='{}'}}",content_hash(BYTES),content_hash(BYTES))).unwrap();
     assert!(validate_pins(&entries)
@@ -147,27 +146,6 @@ fn every_pin_is_validated_before_any_cache_hit() {
 #[test]
 fn empty_environment_values_are_unset_and_cache_order_is_explicit() {
     assert_eq!(env_value(Some(String::new())), None);
-    let cfg = crate::StudioConfig::from_lookup(|key| {
-        Some(
-            match key {
-                "FIREBASE_PROJECT_ID" => "demo-test",
-                "FIREBASE_STORAGE_BUCKET" => "fixture",
-                _ => "",
-            }
-            .into(),
-        )
-    })
-    .unwrap();
-    assert_eq!(cfg.firestore_url, "https://firestore.googleapis.com");
-    assert_eq!(cfg.storage_url, "https://firebasestorage.googleapis.com");
-    for missing in ["FIREBASE_PROJECT_ID", "FIREBASE_STORAGE_BUCKET"] {
-        assert!(crate::StudioConfig::from_lookup(|key| Some(
-            if key == missing { "" } else { "fixture" }.into()
-        ))
-        .unwrap_err()
-        .to_string()
-        .contains(missing));
-    }
     for (explicit, cargo, expected) in [
         ("chosen", "cargo", "chosen"),
         ("", "cargo", "cargo/arora-assets"),
@@ -210,70 +188,52 @@ fn private_assets_and_mismatched_pins_are_refused_before_storage() {
         Err(Error::HashMismatch { .. })
     ));
     resolved.content_hash = expected.content_hash.clone();
+    resolved.version = "2.0.0".into();
+    assert!(validate_resolved("robot", &expected, &resolved).is_err());
+    resolved.version = expected.version.clone();
     validate_resolved("robot", &expected, &resolved).unwrap();
 }
 
-/// The build entry point rejects a private release before requesting Storage or writing a blob.
-#[tokio::test]
-async fn models_with_refuses_private_assets_before_storage() {
-    use serde_json::json;
-    use wiremock::matchers::{method, path, path_regex};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    bounded(async {
-        let server = MockServer::start().await;
-        for (suffix, document) in [
-            (
-                "scopedNames/@test:old",
-                json!({"fields":{"publishedAssetId":{"stringValue":"asset"}}}),
-            ),
-            ("publishedAssets/asset", asset(true, "model")),
-            (
-                "publishedAssets/asset/releases",
-                json!({"documents":[release("release", "1.2.3")]}),
-            ),
-        ] {
-            Mock::given(method("GET"))
-                .and(path(format!("{ROOT}/{suffix}")))
-                .respond_with(ResponseTemplate::new(200).set_body_json(document))
-                .mount(&server)
-                .await;
-        }
-        Mock::given(method("GET"))
-            .and(path_regex("^/v0/"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(BYTES))
-            .mount(&server)
-            .await;
-        let dir = tempfile::tempdir().unwrap();
-        let mut env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
-        env.insert("FIREBASE_PROJECT_ID".into(), "demo-test".into());
-        env.insert("FIREBASE_STORAGE_BUCKET".into(), "fixture".into());
-        for key in [
-            "FIREBASE_FIRESTORE_EMULATOR_HOST",
-            "FIREBASE_STORAGE_EMULATOR_HOST",
-        ] {
-            env.insert(
-                key.into(),
-                server.uri().strip_prefix("http://").unwrap().into(),
-            );
-        }
-        let result =
-            tokio::task::spawn_blocking(move || models_with(|key| env.get(key).cloned(), |_| {}))
-                .await
-                .unwrap();
-        assert!(server
-            .received_requests()
-            .await
+/// The build entry point refuses private source metadata before a byte fetch or public cache write.
+#[test]
+fn models_with_refuses_private_assets_before_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
+    let source = FakeSource::default();
+    let result = models_with_env(&source, |key| env.get(key).cloned(), |_| {});
+    assert!(result.unwrap_err().to_string().contains("must be public"));
+    assert_eq!(
+        source.downloads.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("cache/blobs"))
             .unwrap()
-            .iter()
-            .all(|request| !request.url.path().starts_with("/v0/")));
-        assert_eq!(
-            std::fs::read_dir(dir.path().join("cache/blobs"))
-                .unwrap()
-                .count(),
-            0
-        );
-        assert!(result.unwrap_err().to_string().contains("must be public"));
-    })
-    .await;
+            .count(),
+        0
+    );
+}
+
+/// The helper fetches on a thread of its own, so a build script already inside
+/// a Tokio runtime can call it.
+#[tokio::test]
+async fn fetches_from_inside_a_tokio_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = environment(dir.path(), "1.2.3", &content_hash(BYTES));
+    let mut source = FakeSource::default();
+    source.releases[0].private = false;
+    let mut lines = Vec::new();
+    models_with_env(
+        &source,
+        |key| env.get(key).cloned(),
+        |line| lines.push(line.to_owned()),
+    )
+    .unwrap();
+    assert_eq!(
+        source.downloads.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert!(lines
+        .iter()
+        .any(|line| line.starts_with("cargo:rustc-env=ARORA_MODEL_ROBOT_MODEL=")));
 }

@@ -1,7 +1,9 @@
-//! Exact public model pins for hardware-specific build scripts.
+//! Exact public models for bespoke HAL build scripts.
+//! Pass a Studio source from studio-bridge or a `DirSource`. The project tool
+//! will pass the same `ARORA_MODEL_<NAME>` variables from project pins.
 
 use crate::version::Version;
-use crate::{env_value, io, valid_hash, AssetType, Cache, Error, NoToken, Resolver, StudioConfig};
+use crate::{env_value, io, valid_hash, Cache, Error, Kind, Resolver, Source};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -12,10 +14,6 @@ const VARIABLES: &[&str] = &[
     "CARGO_HOME",
     "HOME",
     "ARORA_ASSETS_OFFLINE",
-    "FIREBASE_PROJECT_ID",
-    "FIREBASE_STORAGE_BUCKET",
-    "FIREBASE_FIRESTORE_EMULATOR_HOST",
-    "FIREBASE_STORAGE_EMULATOR_HOST",
 ];
 
 #[derive(Deserialize)]
@@ -27,13 +25,18 @@ struct Pin {
 }
 
 /// Read package metadata, prepare the public blobs, and emit Cargo directives.
-pub fn models() -> Result<(), Error> {
-    models_with(|name| std::env::var(name).ok(), |line| println!("{line}"))
+pub fn models_with(source: &(impl Source + ?Sized)) -> Result<(), Error> {
+    models_with_env(
+        source,
+        |name| std::env::var(name).ok(),
+        |line| println!("{line}"),
+    )
 }
 
 /// The build helper with explicit environment lookup and directive output.
-/// This synchronous function owns a current-thread runtime; call outside a Tokio runtime.
-pub fn models_with(
+/// It downloads on a thread of its own, so it works inside or outside a Tokio runtime.
+pub fn models_with_env(
+    source: &(impl Source + ?Sized),
     mut lookup: impl FnMut(&str) -> Option<String>,
     mut emit: impl FnMut(&str),
 ) -> Result<(), Error> {
@@ -69,10 +72,6 @@ pub fn models_with(
     let cache_dir = cache_directory(get)?;
     let cache = Cache::new(cache_dir)?;
     let offline = get("ARORA_ASSETS_OFFLINE").as_deref() == Some("1");
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| Error::Config(format!("could not start async runtime: {e}")))?;
     for (name, variable, pin) in pins {
         let fail = |detail: String| Error::Build {
             entry: name.clone(),
@@ -80,17 +79,9 @@ pub fn models_with(
         };
         if cache.read(&pin.content_hash, false)?.is_none() {
             if offline {
-                return Err(fail("offline cache miss; fill the cache by building once with ARORA_ASSETS_OFFLINE unset and FIREBASE_PROJECT_ID and FIREBASE_STORAGE_BUCKET configured".into()));
+                return Err(fail("offline cache miss; fill the cache by building once with ARORA_ASSETS_OFFLINE unset and the source available".into()));
             }
-            let resolver = Resolver::new(StudioConfig::from_lookup(get)?, NoToken)?;
-            let fetched = runtime.block_on(async {
-                let resolved = resolver
-                    .resolve(&pin.scoped_name, &pin.version, AssetType::Model)
-                    .await?;
-                validate_resolved(name, &pin, &resolved)?;
-                resolver.fetch(&resolved).await
-            })?;
-            cache.store(&fetched.content_hash, &fetched.bytes, false)?;
+            fetch_into_cache(source, &cache, name, &pin)?;
         }
         let path = cache.public_path(&pin.content_hash)?;
         let absolute = path.canonicalize().map_err(|e| io(&path, e))?;
@@ -143,7 +134,7 @@ fn validate_pins(
             .clone()
             .try_into()
             .map_err(|e: toml::de::Error| fail(e.to_string()))?;
-        crate::resolver::validate_name(&pin.scoped_name).map_err(|e| fail(e.to_string()))?;
+        crate::selection::validate_name(&pin.scoped_name).map_err(|e| fail(e.to_string()))?;
         if Version::parse(&pin.version).is_none_or(|v| v.to_string() != pin.version) {
             return Err(fail(format!(
                 "version {:?} must be an exact canonical version at least 1.0.0",
@@ -158,6 +149,36 @@ fn validate_pins(
     Ok(pins)
 }
 
+/// Resolve one pin and store its bytes in the cache. A build script may already
+/// run inside a Tokio runtime, where starting another on the same thread panics,
+/// so the work runs on a scoped thread with a current-thread runtime of its own.
+fn fetch_into_cache(
+    source: &(impl Source + ?Sized),
+    cache: &Cache,
+    name: &str,
+    pin: &Pin,
+) -> Result<(), Error> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| Error::Config(format!("could not start async runtime: {e}")))?;
+                let resolver = Resolver::new(source, cache.clone());
+                runtime.block_on(async {
+                    let resolved = resolver
+                        .resolve(&pin.scoped_name, &pin.version, Kind::MODEL, "primary")
+                        .await?;
+                    validate_resolved(name, pin, &resolved)?;
+                    resolver.fetch(&resolved).await.map(|_| ())
+                })
+            })
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
 fn validate_resolved(name: &str, pin: &Pin, resolved: &crate::ResolvedRef) -> Result<(), Error> {
     let fail = |detail| Error::Build {
         entry: name.into(),
@@ -168,6 +189,9 @@ fn validate_resolved(name: &str, pin: &Pin, resolved: &crate::ResolvedRef) -> Re
             "{}: build models must be public",
             pin.scoped_name
         )));
+    }
+    if resolved.version != pin.version {
+        return Err(fail("resolved version differs from the build pin".into()));
     }
     if resolved.content_hash != pin.content_hash {
         return Err(Error::HashMismatch {

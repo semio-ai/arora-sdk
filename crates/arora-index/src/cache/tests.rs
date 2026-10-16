@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_support::*;
-use crate::{content_hash, AssetType};
+use crate::{content_hash, Kind};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -106,7 +106,6 @@ fn pins_use_requested_names_and_studio_field_names() {
             "contentHash",
             "family",
             "private",
-            "publishedAssetId",
             "releaseId",
             "resolvedAt",
             "scopedName",
@@ -115,10 +114,12 @@ fn pins_use_requested_names_and_studio_field_names() {
     );
     assert_eq!(entry["scopedName"], CURRENT);
     assert_eq!(entry["resolvedAt"], 123);
-    let mut offline_pin = pin.clone();
-    offline_pin.storage_path = None;
+    let offline_pin = pin.clone();
     assert_eq!(cache.last_pin(NAME).unwrap(), Some(offline_pin));
-    assert_eq!(serde_json::to_value(pin).unwrap()["storagePath"], OBJECT);
+    assert!(serde_json::to_value(pin)
+        .unwrap()
+        .get("storagePath")
+        .is_none());
 }
 
 /// Asserts decrypted hash is verified.
@@ -147,7 +148,6 @@ fn pins_recover_valid_entries_and_discard_bad_files() {
         serde_json::to_vec(&json!({NAME: pin(), "@test/bad": {"version": 123}})).unwrap(),
     )
     .unwrap();
-    assert_eq!(cache.last_pin(NAME).unwrap().unwrap().storage_path, None);
     assert!(cache.last_pin("@test/bad").unwrap().is_none());
     cache.save_pin("@test/new", &pin()).unwrap();
     let map: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -320,7 +320,7 @@ fn old_pins_without_asset_type_are_models() {
     .unwrap();
     assert_eq!(
         cache.last_pin(NAME).unwrap().unwrap().asset_type,
-        AssetType::Model
+        Kind::MODEL
     );
 }
 

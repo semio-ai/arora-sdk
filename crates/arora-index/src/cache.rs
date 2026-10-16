@@ -129,8 +129,7 @@ impl Cache {
     pub fn last_pin(&self, requested_name: &str) -> Result<Option<ResolvedRef>, Error> {
         Ok(self.raw_pins().ok().and_then(|mut entries| {
             let entry = entries.remove(requested_name)?;
-            let mut pin: ResolvedRef = serde_json::from_str(entry.get()).ok()?;
-            pin.storage_path = None;
+            let pin: ResolvedRef = serde_json::from_str(entry.get()).ok()?;
             Some(pin)
         }))
     }
@@ -144,8 +143,7 @@ impl Cache {
                 return Ok(());
             }
         };
-        let mut value = serde_json::to_value(pin).map_err(|e| Error::Cache(e.to_string()))?;
-        value.as_object_mut().unwrap().remove("storagePath");
+        let value = serde_json::to_value(pin).map_err(|e| Error::Cache(e.to_string()))?;
         let value =
             serde_json::value::to_raw_value(&value).map_err(|e| Error::Cache(e.to_string()))?;
         pins.insert(requested_name.into(), value);
