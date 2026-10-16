@@ -90,7 +90,7 @@ Each decision has its reason.
    - A public release at an exact version, verified by its hash, is reproducible. It changes only when someone changes the pin.
    - A build never gets a private model, with any identity, because licensed meshes must not be in build output.
    - A build never resolves a range, because the result would depend on the time of the build.
-   - Only a bespoke HAL that targets specific hardware, for example `arora-hal-naoqi`, uses a build pin. A generic HAL, for example `arora-hal-ros2`, names no robot. Its device resolves the model at run time.
+   - Only a bespoke HAL that targets specific hardware, for example `arora-hal-naoqi`, uses a build pin. Its build helper takes a source: the Studio source from studio-bridge, or a `DirSource`. A generic HAL, for example `arora-hal-ros2`, names no robot. Its device resolves the model at run time. The project tool will pass the same `ARORA_MODEL_<NAME>` variables from project pins.
 3. **A person or an organization owns a device, as with a project. A device is never an organization member**. Membership would give the device all members-only assets and organization projects. It would also give the device the right to create resources in the organization.
 4. **A device can get exactly the assets that a project with the same owner can use** (STUDIO-312).
    - A device that an organization owns gets public assets, assets that the organization owns, and assets granted to the organization.
@@ -100,11 +100,11 @@ Each decision has its reason.
 6. **The compatibility check compares only `family`**. Studio uses the same rule to offer a device for a binding.
 7. **The HAL config names the model of the device**. The model stays with the joint map of the HAL, which depends on it.
 8. **A device encrypts private models in its device directory**.
-9. **The resolver is a new crate, `arora-index`. It is the first part of the unified registry**. It does not use the current `ReadableRegistry`. The registry merge replaces `RecordType` and identity by UUID or folder path. The merged registry uses the Studio v2 shape and terms. The resolver becomes part of `arora-registry` when the registry covers all asset types.
+9. **The neutral index is in arora-sdk. The Studio source is in studio-bridge**. `arora-index` holds the types, release selection, hash verification, cache, source trait and local directory source. The Studio source owns Firestore and Storage REST, credentials and `FIREBASE_*` settings. Workspace and device views differ only where their use requires it. Asset documents carry no UUIDs. Content keeps the ids it uses; the runtime assigns its own.
 10. **An operator can grant a private model to one device, but only when one account owns both**. This applies until Stage 2 lets a device use the entitlement of its owner.
 11. **The Studio account of a developer can download models on a development machine, never on a deployed device**. It reads exactly what that person can read, with Studio unchanged. A deployed device acts for its owner (decision 4), not for a person.
 12. **Resolution gives the default model**. A client sometimes must set a specific model or config on one device, deterministically. Resolution cannot express that. How a client does it is open (2.5).
-13. **The device runtime resolves the model, not the HAL**. The runtime gives each HAL component the bytes, a `ModelReference` and whether the component can serve them. A HAL never reads a model from Studio. Thus one cache and one token source serve all components. The models stay fixed for the life of the device ([HAL components](proposal-hal-components.md)).
+13. **The device runtime resolves the model, not the HAL**. The runtime gives each HAL component the bytes, a `ModelReference` and whether the component can serve them. A HAL never reads a model from Studio. Thus one cache and one token source serve all components. The models stay fixed for the run ([HAL components](proposal-hal-components.md)).
 14. **A pin names the asset as it is now**. A transfer makes the old name an alias of the same asset. The requested name is the key of the pin in `resolved.json`, as the name of a dependency is the key in `project.resolved`.
 15. **Only a definitive answer clears a pin**: a 404, or a 403 to a request with a token. A 403 to a request without a token means "not found, or not public", so it clears nothing. Only a network error lets a device use its last pin. Clearing deletes the pin, and the sealed blob of the pin when no other pin uses it. Thus a later start without a connection cannot use that model.
 16. **Release selection is the same as in Studio**. For the same releases and the same range, a device and a project select the same release. If the selected release is broken, resolution fails. It does not use an older release.
@@ -186,18 +186,18 @@ The parts are independent, except where this table names a dependency:
 A Semio client resolves and downloads models from Studio. It runs in three places: on a device at start, in a build script, and on a developer's machine. Public models and the Studio account of a developer need no Studio change, so this part does not wait for 2.1. Only the device-credential identity comes later, with 2.1 and 2.3.
 
 - **The resolver crate** (`arora-index`) changes a reference `{scopedName, range}` into verified bytes:
-  - It resolves with the rules of the Studio function `resolveDependency`. A version is `MAJOR.MINOR.PATCH` and 1.0.0 or higher. Deprecated releases and releases without a `primary` content hash are not candidates. The newest candidate in the range is the result.
+  - It resolves with the rules of the Studio function `resolveDependency`. A version is `MAJOR.MINOR.PATCH` and 1.0.0 or higher. Deprecated releases and releases without the requested artifact or a non-empty content hash are not candidates. The newest candidate in the range is the result.
   - It downloads the artifact and verifies the SHA-256 hash against `contentHash`.
-  - It has two backends: Studio v2, and a local file.
-  - Its errors name their cause. Reads go to the server, not to a local Firestore cache. Thus a failed read never looks like a missing asset.
+  - It takes a source. The Studio source is in studio-bridge. `DirSource` reads releases and artifact files from a local directory.
+  - Its errors name their cause. The Studio source reads from the server. It maps protocol failures to source error categories, so a failed connection never looks like a missing asset.
   - It does not depend on the asset type. A model is its first use.
-- **Identities**. The resolver uses one of three identities:
+- **Identities**. The Studio source uses one of three identities:
   - No token: public models only.
   - The Studio account of a developer, on a development machine: the models that this person can read. The CLI gets its own session through the code approval of 2.1, not the session of the browser.
   - The device credential, after 2.1: the models that the owner of the device can use (2.3).
 
   A deployed device never uses the account of a person.
-- **Build time**. A build script can depend on a public model at an exact version, `{scopedName, version}`, with its `contentHash`. Only a bespoke HAL does this (decision 2). The pins are in `[package.metadata.arora.models]` in `Cargo.toml`. The resolver downloads the model, verifies the hash, and caches the model by hash. Later builds then work offline. A build script never resolves a range, and it never downloads a private model.
+- **Build time**. A build script can depend on a public model at an exact version, `{scopedName, version}`, with its `contentHash`. Only a bespoke HAL does this (decision 2). The pins are in `[package.metadata.arora.models]` in `Cargo.toml`. The build helper takes a source. The source supplies the models, and the resolver verifies and caches their bytes by hash. Later builds then work offline. A build script never resolves a range, and it never downloads a private model.
 - **The device directory** keeps the result of resolution at run time:
 
   ```text
@@ -208,14 +208,14 @@ A Semio client resolves and downloads models from Studio. It runs in three place
   └── resolved.json                requested scopedName → pin
   ```
 
-  - The device resolves again at each start. If a network error stops it, it uses the pin in `resolved.json`. It uses the pin only if the pin has the requested asset type and a version in the requested range. A definitive answer clears the pin (decision 15).
-  - `resolved.json` is a map, not one model slot. Each entry has the fields of `project.resolved`, and five more for an offline start: `scopedName`, `publishedAssetId`, `assetType`, `family` and `private`.
+  - The device resolves again at each start. If a network error stops it, it uses the pin in `resolved.json`. It uses the pin only if the pin has the requested kind, artifact key and a version in the requested range. A definitive answer clears the pin (decision 15).
+  - `resolved.json` is a map, not one model slot. Each entry has the fields of `project.resolved`, and four more for an offline start: `scopedName`, `assetType`, `family` and `private`. A pin names its artifact key. The release id is an opaque string from the source.
   - The device encrypts private bytes with the scheme of its refresh token (XSalsa20-Poly1305, a key file, permissions for the OS user only). This protects a copy of the cache. It does not protect against a person who controls the OS account.
   - The device decrypts private bytes into memory and gives them to the HAL as bytes.
-- **The HAL config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override. The resolver reads the local file through its local-file backend, so each model reaches the HAL in the same way.
+- **The HAL config** gets `model: {scopedName, versionRange}`. `model_glb_path` stays as a local override. A `DirSource` supplies local releases. The runtime can also read a `model_glb_path` override directly and give its bytes to the HAL.
 - **Family check:** the device refuses a release when its `family` is different from `model_family`. It uses a release without `family` and logs a warning. Registration takes its family from the HAL config.
 - **No private model through the bridge:** a device serves the bytes of a model only when the model is servable. A private model is never servable ([HAL components](proposal-hal-components.md) 3.4), because anything that can call the device receives what it serves. The enforcing bridge router authenticates devices and people. The open router has no transport-level authentication.
-- **The joint map of the HAL** goes behind one interface. An explicit assignment or a binding (2.5) can replace it.
+- **The joint map of the HAL** goes behind one interface. Each component's models and joint map stay fixed for the run ([HAL components](proposal-hal-components.md)). The binding interface in 2.5 stays open.
 - **Registration** writes `publishedAssetReference`. Both device shapes accept this field today.
 - **A device of several HAL components** has one model per component, each with its mount ([HAL components](proposal-hal-components.md)). Registration then writes one reference per component, and Studio's device document holds a list of them instead of one.
 
@@ -282,12 +282,12 @@ These changes do not touch the rules.
 
 This section gives the intended model from the "Data Model" board. No stage builds all of it.
 
-- The Device Identity, which is the device document, relates only to the physical device. It has no relation to a project, a session or a model asset.
+- The Device Identity describes the physical device. It references each HAL component's published models ([HAL components §3.7](proposal-hal-components.md#37-what-studio-needs)). It does not assign the device to a project or session.
 - A project entity is "Model + Behavior → Engine". Studio assembles the entity into a behavior package. Studio sends the package with its binding to the engine instance.
 - Thus the session pushes project content to the engine instance. A Studio client that has the project open does the push. A device never needs read access to a project. The person who makes the binding decides.
 - A device can move between sessions during one run. No durable record connects a device to a project. On the board, the only persisted network configuration is the Session Preset.
-- The model of the device describes the hardware. It is also the model that the engine instance uses when no binding and no explicit assignment exists. While a binding or an explicit assignment exists, it controls the model.
-- The joint table of Stage 2.5 is the first content of a binding. A later stage adds the behavior package, for example for animation playback on the device (ARORA-70).
+- The models of the device describe its hardware and stay fixed for the run. A binding checks the entity against the device's models: family and joint table. It brings the entity's behavior package. It does not replace or control the device's models.
+- Stage 2.5 leaves the binding interface open. A binding can supply a joint table for the compatibility check and a behavior package, for example for animation playback on the device (ARORA-70).
 
 ## Operational risks
 
