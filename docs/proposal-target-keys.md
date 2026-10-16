@@ -1,0 +1,410 @@
+# Proposal: target keys as an entity, `k/target.c`
+
+Status: draft, for review.
+Date: 2026-10-12.
+
+A device's inputs are mostly targets: the value a client asks one component of
+an entity to reach — a joint's position, its velocity, its torque. This
+document proposes one key form for every target, `k/target.c`, states the forms
+it replaces, and sets the rule by which devices and clients use both until
+every client writes the new one.
+
+In short:
+
+- **A target is an entity under the entity it targets.** The target for the
+  component `c` of the entity at path `k` is `k/target.c`:
+  `hip_yaw/target.position`, `hip_yaw/target.velocity`,
+  `hip_yaw/target.torque`. The measured value stays `k.c`
+  (`hip_yaw.position`).
+- **One form for every value type and component.** No `target_` prefix spelled
+  per component, and no name of its own for the value a client sends:
+  `studio_value` is retired as a name.
+- **Devices accept both forms** and list both as open inputs; a client writes
+  the form the device lists, preferring `k/target.c`.
+- **A change that sets both forms of one target applies `k/target.c`.** A
+  device whose own consumers read targets from the store may keep the two
+  forms in agreement.
+- **The axis of a structured value comes after the component:**
+  `eye/target.position.x` targets `eye.position.x`, the field `x` of the
+  value `eye.position` (§5). Studio's per-axis keys, axis first today
+  (`eye.x.target_position`, `eye.x.position`), move to it in stages that are
+  each safe to ship (§6).
+
+Keys are paths, and an `.attribute` is a naming convention of the consumers that
+adopt it ([keys are paths](design_decisions.md#keys-are-paths-attributes-are-a-convention)).
+This proposal is a change to that convention as the HALs and their clients use
+it; stores, bridges and key meta are unaffected.
+
+---
+
+## 1. What exists
+
+- **Measured values** are `k.c`, the entity's path with the component as its
+  attribute: `hip_yaw.position`; from a ROS 2 `JointState`, also
+  `hip_yaw.velocity` and `hip_yaw.effort`.
+- **Targets** are `k.target_c`, the component prefixed with `target_`:
+
+  | Reader | Target keys | Measured key it drives |
+  |---|---|---|
+  | `FakeHal` (arora-hal) | `<joint>.target_position` | `<joint>.position`, mirrored |
+  | `RestfulHal` (arora-hal-restful) | `<joint>.target_position`, `<joint>.target_velocity` | `<joint>.position`, `<joint>.velocity`, mirrored |
+  | `Ros2Hal` (arora-hal-ros2), joint commands | root-namespace `<joint>.target_position` | `<joint>.position`, from the robot |
+  | `Ros2Hal`, `JointTrajectory` | `common.target_trajectory` | — |
+
+- **Semio Studio** writes, for each animatable a device pairs with,
+  `<id>.studio_value` with the raw value of any type; for a number also
+  `<id>.target_position`, and `<id>.target_velocity` while an animation plays.
+  No device reads `studio_value`. A string or boolean target has no key a
+  device reads; under the current form it would be `k.target_value`.
+- **Studio's structured values are numbers, one per axis.** A vector, euler or
+  colour animatable is stored as one number animatable per axis, with the id
+  `<id>.<axis>` and a group naming the axis (§6.1). Its keys put the axis
+  first: `<id>.<axis>.target_position` for the input, `<id>.<axis>.position`
+  for the feedback. In arora's key grammar the component is the first
+  attribute (`Key::get_component`), so to a HAL the component of
+  `eye.x.target_position` is `x`, and `set_targets` reads it as no target.
+- **A device's inputs are its key meta.** A remote may write only a key whose
+  meta is `editable`, stated on the key or on a prefix that covers it, and
+  `ListKeys` lists the keys a device holds or describes, with their meta. No HAL
+  describes its keys yet; that is the key-description trait of
+  [HAL components](proposal-hal-components.md) 3.5
+  ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)).
+
+## 2. The convention
+
+The target for the component `c` of the entity at path `k` is the key
+`k/target.c`: an entity named `target` under `k`, its attribute the component
+it targets.
+
+| Value | Measured | Target | Target, current form |
+|---|---|---|---|
+| A joint's position | `hip_yaw.position` | `hip_yaw/target.position` | `hip_yaw.target_position` |
+| A joint's velocity | `hip_yaw.velocity` | `hip_yaw/target.velocity` | `hip_yaw.target_velocity` |
+| A joint's torque | `hip_yaw.torque` | `hip_yaw/target.torque` | `hip_yaw.target_torque` |
+| A string or a boolean | `k.value` | `k/target.value` (see 8) | `k.target_value` |
+| A namespaced joint | `robot/hip_yaw.position` | `robot/hip_yaw/target.position` | `robot/hip_yaw.target_position` |
+| One axis of a structured value | `eye.position.x` | `eye/target.position.x` | `eye.target_position.x` |
+
+Attributes after the component carry over to the measured key:
+`eye/target.position.x` targets `eye.position.x`. They select a field of the
+component's value, so the axis of a vector, an euler or a colour comes after
+the component, never before it (§5). A key whose last
+segment is `target` with no attribute, or a `target.c` at the root (no `k`), is
+not a target. Under a namespace, a last segment `target.c` is always this form:
+`x/target.target_position` targets `x.target_position`, so a joint named
+`target` keeps the current form only at the root.
+
+### Why
+
+- **One form for every value type and component.** A target is `target.` plus
+  the component's own name, so a component a device adds — torque, stiffness,
+  a colour — has its target without a new name. The current form spells a
+  `target_` variant of each component, and the value a client sends for any
+  other type needed a name of its own (`studio_value`); neither is needed.
+- **A target and its measurement name the same entity and component.**
+  `hip_yaw/target.position` and `hip_yaw.position` differ only by `/target`, so
+  a reader derives one from the other without a table of component names.
+- **The targets of an entity are a subtree.** A prefix covers keys on `/`
+  boundaries, so the prefix `hip_yaw` covers `hip_yaw/target.position` and
+  `hip_yaw/target.velocity` and not `hip_yaw.position`: a device opens an
+  entity's targets with one prefix meta, and its measured values stay closed.
+- **The name says what the key is, not who writes it.** A target is a target
+  whether Studio, a behavior or another device sets it; `studio_value` named
+  the writer.
+
+## 3. Both forms during the transition
+
+Studio and the devices ship separately, so for a while a device may meet a
+client that writes either form, and a client a device that reads only the
+current one. The rule:
+
+1. **A device accepts both forms.** A HAL reads a target from `k/target.c` and
+   from `k.target_c` alike. `arora_hal::set_targets` reads both from a change;
+   the HALs in arora-sdk use it (§4,
+   [arora-sdk#334](https://github.com/semio-ai/arora-sdk/pull/334)).
+2. **A device lists both forms as open inputs.** Where it declares an input
+   by key, it states `editable` meta on `k/target.c` and on `k.target_c`; a HAL
+   that describes its keys (HAL components 3.5) describes both for each target
+   it reads.
+3. **A client resolves each input's key from what the device lists**
+   (`ListKeys`): `k/target.c` when listed, `k.target_c` otherwise. A key the
+   device does not list by name is written in the current form, which every
+   device reads.
+4. **A client writes one form per target.** A change that sets both forms of
+   one target applies `k/target.c` and ignores `k.target_c`, whatever value
+   `k/target.c` holds: the keys of a `StateChange` carry no order, so "last
+   write wins" cannot apply within one change, and the form decides. Across
+   changes, the later write wins, whichever form each was written in; a HAL
+   that merges a backlog of changes into one keeps that
+   (`arora_hal::fold_newest_wins`). The two forms are distinct keys of the
+   store: a store or a bridge never merges them.
+5. **A device may keep the two forms of a target in agreement.** A device
+   whose own consumers read targets from the store, rather than from the
+   change it is handed, writes the value that wins by rule 4 into both keys,
+   and an unset of either form, with neither set, into both. On such a device
+   a client sees both keys move together, whichever form it wrote, and the
+   write to the form it did not use is the device's own. A device whose HAL
+   resolves targets from each change (every HAL in arora-sdk, through
+   `set_targets`) has no need to: each key holds what was last written to it.
+   - **Why it is allowed:** a node graph, like Vizij's, reads each input's
+     current value every tick. It cannot tell which of two keys was written
+     last, or that both arrived in one change; the store's `write` sees each
+     change whole, the unit `set_targets` reads, so the rule is applied there
+     and the graph reads one form
+     ([vizij-rs#199](https://github.com/vizij-ai/vizij-rs/pull/199)).
+   - **Why not a third key:** the alternative is an internal key holding the
+     resolved target, which every bridge would relay and every client would
+     see as one more key with no writer of its own.
+6. **Nothing new emits `studio_value`.** A client sends a string or boolean
+   target as `k/target.value` (see 8).
+
+The current form is retired by a major of each HAL crate once Studio writes
+`k/target.c` and no device in use depends on `k.target_c`.
+
+## 4. What changes per HAL
+
+| HAL | Reads, current form | Reads, added | Both in one change |
+|---|---|---|---|
+| `FakeHal` (arora-hal 4.2) | `<joint>.target_position` | `<joint>/target.position` | `<joint>/target.position`'s value is held and sensed back |
+| `RestfulHal` (arora-hal-restful 4.1) | `<joint>.target_position`, `<joint>.target_velocity` | `<joint>/target.position`, `<joint>/target.velocity` | the `<joint>/target.…` value is requested and mirrored |
+| `Ros2Hal` (arora-hal-ros2 5.2) | root-namespace `<joint>.target_position` | root-namespace `<joint>/target.position` | the `<joint>/target.position` value is commanded |
+
+- `Ros2Hal`'s joint commands carry positions only, so no velocity or effort
+  target is read in either form. `common.target_trajectory` is unchanged
+  until 8 settles it.
+- A HAL outside arora-sdk's main line that reads `k.target_c` keys — the NAOqi
+  HAL ([arora-sdk#258](https://github.com/semio-ai/arora-sdk/pull/258)), the
+  MuJoCo HAL of the policy-modules example
+  ([arora-sdk#243](https://github.com/semio-ai/arora-sdk/pull/243)) — reads
+  its targets through `set_targets` to accept both.
+- No HAL declares inputs today; the device opens them through its store's key
+  meta. Rule 2 applies to a device that does, and to HALs once they describe
+  their keys.
+
+On the Studio side, the device commander resolves each animatable's target key
+by rule 3 and stops writing `<id>.studio_value`; §6 covers its per-axis keys.
+
+## 5. Components of a structured value: the axis after the component
+
+A component's value may be structured: a vector, an euler, a colour, a
+quaternion. An axis is a field of that value, and its key names the field
+after the component:
+
+| | The whole value | One axis |
+|---|---|---|
+| Measured | `eye.position` | `eye.position.x` |
+| Target | `eye/target.position` | `eye/target.position.x` |
+| Target, current form | `eye.target_position` | `eye.target_position.x` |
+
+`set_targets` (arora-hal 4.2) reads every target of this table, each for the
+measured key beside it. A key with the axis before the component —
+`eye.x.target_position`, `eye.x/target.position` — is no target.
+
+A device lists what it takes: the whole value, its axes, or both. Writing
+`eye/target.position` with a whole vector and writing `eye/target.position.x`
+with a number are one contract: both set the target of `eye`'s position, the
+second one field of it.
+
+### Why the axis comes after
+
+- **The component names the quantity; the axis selects a field of its value.**
+  `eye.position` is the position, whole: a vector. `eye.position.x` is a field
+  of it. This is the order of arora-types' selector paths: `Key::select`
+  descends one attribute per level (`.<field>.<index>`), so `eye.position.x`
+  is the field `x` of the value `eye.position` holds, and the path that reads
+  it out of that value. In `eye.x.position`, `x` would be a value holding a
+  `position`, and there is no such value.
+- **Axis first has no spelling in the `k/target.c` form.** `eye.x/target.position`
+  puts a `.` before the last `/`, and attributes belong to the last segment
+  only ([keys are paths](design_decisions.md#keys-are-paths-attributes-are-a-convention));
+  `eye/target.x.position` makes `x` the targeted component. Keeping the axis
+  first would mean keeping `k.target_c` for structured values for good, or a
+  second grammar for them.
+- **arora's grammar already reads it this way.** The component is the first
+  attribute (`Key::get_component`), and `set_targets` keeps the attributes
+  after it when it derives the measured key, so `eye/target.position.x`
+  targets `eye.position.x` with no rule of its own, and `FakeHal` senses it
+  back as a position. To the same grammar the component of
+  `eye.x.target_position` is `x`: no HAL in arora-sdk reads it as a target.
+- **One target per quantity.** The target of `eye`'s position is
+  `eye/target.position`, and its axes are fields of it, so a device that
+  takes the vector whole and one that takes it per axis name the same target,
+  and a client moves from one to the other by the select path alone.
+- **Paths and prefixes, as they are today.** A store, a bridge and a
+  subscription give `.` no meaning: prefix meta and prefix subscriptions match
+  on `/` boundaries (`prefix_covers`). So `eye.position` covers the key
+  `eye.position` alone, not `eye.position.x`, and `eye.x` does not cover
+  `eye.x.position` either: neither order makes a quantity's axes a prefix
+  today. What does is the target form: the prefix `eye` covers
+  `eye/target.position.x` with every other target of `eye`. Should prefixes
+  ever match on `.` boundaries too, axis after makes `eye.position` cover the
+  whole quantity and `eye/target.position` its whole target; axis first makes
+  `eye.x` cover one axis across unrelated quantities (`eye.x.position`,
+  `eye.x.velocity`), a grouping no consumer reads.
+- **The formats keys meet name fields the same way.** A ROS 2 message field is
+  its path from the message root, quantity before axis: `pose.position.x`,
+  `twist.linear.x` (`ros2 topic echo --field pose.position.x`), so an exposure
+  profile maps a key's attributes onto a field path as they are. Vizij's
+  `TypedPath` is `namespace/…/node.field.subfield`: a node's `translation`,
+  then `.x`. Studio's live-data layout states a component's attribute the same
+  way (`left_arm/shoulder.position.x`).
+
+### Objections
+
+| Objection | Answer |
+|---|---|
+| Axis first keeps an axis's target and its measurement side by side (`eye.x.target_position`, `eye.x.position`). | Under `k/target.c` a target is an entity of its own, `eye/target.…`, in either order, so neither order keeps the two side by side. A target and its measurement are paired by a rule — remove `/target` — not by sorting. What axis after keeps together is the quantity: `eye.position.x`, `.y` and `.z` sort and group as one, which is what a plot, a key tree and a reader of the whole vector want. |
+| Studio's data and its saved layouts use axis first. | Studio persists animatable ids (`<id>.<axis>`) and outputs, not device keys. They stay, and the device key is derived from them (§6.1). The device keys Studio persists verbatim are the rows of saved live-data layouts, handled by stage (d) of §6.3. Recordings are not persisted. |
+| Studio's per-axis animatables are first-class: each axis has its own id, name, range, track and row. | They stay first-class in Studio; only the device key the World spells for them changes. A device key names the device's value, and on a device an axis is a field of a quantity. Studio already records which value an axis belongs to (`group.id`, `group.type`, `group.axis`), so the key carries what Studio knows, in the device's terms. A device that takes each axis on its own lists `eye/target.position.x` and is written per axis; nothing makes it take the whole value. |
+
+### What it costs
+
+- **Studio's per-axis keys change spelling, feedback included:**
+  `<id>.<axis>.target_position` becomes `<id>/target.position.<axis>`, and
+  `<id>.<axis>.position` becomes `<id>.position.<axis>`.
+- **A device with per-axis keys carries both spellings for a while:** it lists
+  both as inputs and publishes its feedback under both (§6.3 a).
+- **Saved live-data rows that name a per-axis key** are rewritten (§6.3 d).
+
+Production Studio sends no per-axis target today (§6.1), so the change of
+input spelling breaks nothing in production.
+
+## 6. Studio's per-axis keys
+
+Paths below are semio_studio's. *Main* is Studio's production line; *the
+stack* is the Studio-on-Arora branch `feat/studio-arora-target-keys`, whose
+top is semio_studio PR 542 (each bound device resolves its own input key per
+animatable).
+
+### 6.1 How Studio spells an axis
+
+- **Ids.** A vector (`x`, `y`, `z`), euler (`r`, `p`, `y`), RGB (`r`, `g`,
+  `b`) or HSL (`h`, `s`, `l`) animatable is split into number animatables,
+  one per axis, with the id `<id>.<axis>`, the output `<output>.<axis>` and
+  `group: { id, type, axis, order }` (`AnimatableGroupInfo`,
+  `packages/utils/src/animated-values.ts`). The split happens on load
+  (`packages/scene/src/functions/gltf-loading/map-features.ts`,
+  `packages/vizij/src/functions/gltf-loading/map-features.ts`) and in the
+  animation migration (`packages/animation/src/functions/migrate-animation-data.ts`,
+  `normalize-track-data.ts`). Studio has no quaternion animatable.
+- **Device keys, on the stack.** The World's key for an animatable is its
+  output or its id (`packages/studio-arora/src/animatable.rs`), so an axis's
+  key `k` is `<id>.<axis>`. `TargetForm::key` gives `<id>.<axis>.target_position`
+  for the current form and `<id>.<axis>/target.position` for `k/target.c`,
+  which arora's grammar reads as no target. The feedback is
+  `<id>.<axis>.position` (`Declared::feedback`, and `feedbackKey` in
+  `packages/utils/src/scene-binding.ts`). The World's `Animatable` does not
+  read `group`.
+- **Device keys, on main.** The device commander
+  (`apps/studio/src/store/subscriptions/device-subscriptions.ts`) reads
+  feedback as any `<name>.position`, so it reads `<id>.<axis>.position`. It
+  takes the animatable id of a values-store key as the text between its first
+  and second `.`, so an axis id `<id>.<axis>` matches no animatable and no
+  per-axis target is sent.
+- **The `vizij` device** takes `<id>.<axis>.target_position` and, with
+  [vizij-rs#199](https://github.com/vizij-ai/vizij-rs/pull/199),
+  `<id>/target.position.<axis>`, kept in agreement (§3 rule 5). It publishes
+  feedback as `<id>.<axis>.position`.
+
+### 6.2 What changes, by surface
+
+- **The World's per-device resolution** (stack). An axis animatable's key
+  becomes its group's key `k` (its key without the trailing `.<axis>`), and
+  its forms put the axis last: `k/target.c.<axis>`, then Studio's
+  `k.<axis>.target_c`, then the bare `k.<axis>`, in that order of preference,
+  under the rules PR 542 sets for a scalar (the first form listed open; not
+  driven when a target form is listed closed; `k.<axis>.target_c`, unchecked,
+  when none is listed). `Animatable` reads `group.axis`, and the key
+  uniqueness check applies to the pair of `k` and axis. `undriven` names the
+  keys tried, as for a scalar.
+- **The scene binding** (`packages/utils/src/scene-binding.ts`). Inputs need
+  no change: the binding reads each device's input keys from the World
+  (`inputKeys`) and spells none. `feedbackKey` takes the axis and gives
+  `k.position.<axis>`. `AnimatableKeys.feedback` is one key for every device;
+  it stays one while devices publish both spellings (§6.3 a).
+- **Device pairing.** Pairing lists the device's keys (`ListKeys`) and the
+  World resolves each animatable from them, axes included; a device that
+  lists only one spelling of an axis is written in that one.
+- **The live-data table** (`apps/studio/src/components/widgets/live-data-table.tsx`).
+  It builds its tree from `/` and `.` segments, so axis after groups `x`, `y`,
+  `z` under their quantity instead of each axis holding its own quantities. A
+  row the device does not stream directly is resolved by navigating from the
+  key's *first* `.` into the entity's value; a row `eye.position.x` over a
+  streamed whole `eye.position` needs navigation from the longest streamed
+  prefix instead.
+- **Saved layouts.** A live-data layout (`liveDataViewConfigs`, per user and
+  device, `apps/studio/src/hooks/use-live-data-layout.ts`) stores rows as raw
+  device keys and collapsed groups as key prefixes, so a row or group naming
+  a per-axis key in the old spelling shows nothing once the device stops
+  publishing it.
+- **Recordings** (`packages/animation/src/functions/recorder.ts`). A recording
+  names `{ device, key }` pairs and is kept in memory only. It takes its keys
+  from the World's per-device keys, so it follows the resolution; nothing
+  recorded is persisted to migrate.
+- **Timeline and animation tracks.** A track addresses an animatable id, one
+  scalar track per axis (`<id>.<axis>`), never a device key. An animation
+  delivered to an emulated device is keyed `animation/<instance>/<k>`, which
+  for an axis is `animation/<instance>/<id>.<axis>`: a bare key whose field
+  follows the value, the order of §5, so it stays. Each track's route goes to
+  the input key the device resolved, so routes follow the resolution with no
+  change of their own.
+
+### 6.3 The plan
+
+Each stage is safe to ship on its own: none removes a spelling something still
+writes or reads.
+
+| Stage | What ships | Gated by | If skipped |
+|---|---|---|---|
+| **(a) Devices take both spellings.** | A device with per-axis keys — the `vizij` device first — lists `k/target.c.<axis>` and `k.<axis>.target_c` as open inputs, keeps them in agreement where its graph reads the store (§3 rule 5), and publishes its feedback under both `k.c.<axis>` and `k.<axis>.c`. | Nothing: it adds keys. vizij-rs#199 ships the inputs; the feedback under `k.c.<axis>` is to add. | A device that moves to axis after alone is not driven by a Studio before (b), and its feedback is not seen by a Studio before (c). |
+| **(b) Studio resolves axes per device.** | The World resolves an axis's input as in §6.2, with its own spelling and feedback unchanged (`k.<axis>.target_c`, `k.<axis>.c`). | semio_studio PR 542 merged. | Studio cannot drive a device that lists only axis after, and setting `DECLARED_FORM` to `k/target.c` would declare `<id>.<axis>/target.position`, which no device reads as a target. |
+| **(c) Studio switches its spelling.** | `DECLARED_FORM` becomes `k/target.c` for every animatable: emulated devices declare `k/target.c.<axis>` and report `k.c.<axis>`; `feedbackKey` gives `k.c.<axis>`; the live-data table resolves from the longest streamed prefix. | This proposal accepted; (a) shipped on every device Studio drives per axis; (b). | Studio keeps writing a spelling meant to retire, and (e) cannot start. Shipped before (a), it loses the per-axis feedback of every device not yet at (a): the scene's device rows and the live-data table show nothing for those axes. |
+| **(d) Saved data.** | Projects and animations: nothing, their ids do not change. Live-data layouts: a row or collapsed group whose key the device no longer lists is rewritten to the other spelling when the device lists that one, and the layout saved; or a one-time migration of `liveDataViewConfigs`. Recordings: nothing, none is persisted. | (c). | Once (e) ships, saved per-axis rows go blank, silently. |
+| **(e) The axis-first spelling retires.** | Devices stop listing `k.<axis>.target_c` and publishing `k.<axis>.c` (a major of each); the World drops the form from its preference. | Studio in production at (c); (d) shipped; no device in use relying on axis first. As for `k.target_c` (§3). | Retired early, a Studio before (b) or (c) loses the inputs and the feedback of every axis. |
+
+Feedback could instead be resolved per device, as inputs are, from which
+spelling the device lists; that would make `AnimatableKeys.feedback` a
+per-device table. Publishing both spellings for the transition keeps Studio's
+feedback one key per animatable, and the device that carries the cost — the
+`vizij` device, the device outside Studio with per-axis targets — already keeps two forms of
+each target.
+
+## 7. Alternatives
+
+| Alternative | Why not |
+|---|---|
+| Keep `k.target_c` | A name per component, and a second name (`studio_value`) for the value of any other type. |
+| `k.c.target` | Attributes after the component are a path into the value (`Key::select`); `target` would read as a field of the position. |
+| `target/k.c`, all targets under one root | An entity's keys no longer share its path, and a namespaced device has two candidate spellings (`target/robot/hip_yaw.position`, `robot/target/hip_yaw.position`). |
+| Accept only the new form | Studio and devices ship separately; a device updated before Studio would lose every input. |
+| The axis before the component, `k.<axis>.c` | No spelling in the `k/target.c` form, and the axis becomes the component in arora's grammar (§5). |
+| A third, internal key for the resolved target, instead of keeping the two forms in agreement | Every bridge relays it, and every client sees one more key with no writer of its own (§3 rule 5). |
+
+## 8. Open questions
+
+1. **Strings and booleans: `k/target.value` or `k/target`?** `k/target.value`
+   keeps "a target has components" for every type. `k/target` is shorter, but
+   makes `target` a value for some entities and a holder of components for
+   others, and leaves the measured counterpart (`k`? `k.value`?) to be named.
+2. **Trajectories.** A `JointTrajectory` spans joints, so it is no one joint's
+   component. Candidates: `common/target.trajectory` (the convention with
+   `common` as the entity), `target.trajectory` under the device's root, or
+   keeping `common.target_trajectory` as a key outside the convention.
+3. **Torque or effort.** ROS 2's `JointState` reports `effort`, the HAL
+   mirrors it as `<joint>.effort`, and a torque target would be
+   `<joint>/target.torque`. One name per quantity keeps a target and its
+   measurement aligned.
+4. **Transports.** A ROS 2 topic name has no `.`, so neither form travels as a
+   topic path as it is; an exposure profile names each one it carries. Whether
+   the `/target` segment changes how profiles group a joint's keys is open.
+5. **The component of a number that is not a joint.** Studio names the
+   component of every number `position` (`animatable.rs`), so a colour's axis
+   reads `light.position.r`. Whether a group's type names its component
+   (`light.color.r`, `light.value.r`) is Studio's key rule to settle; the order
+   of §5 holds whatever the component is.
+6. **A whole value and one of its fields in one change.** `eye/target.position`
+   and `eye/target.position.x` target different measured keys, so `set_targets`
+   returns both, and rule 4's precedence between forms does not order them. A
+   device that takes both would apply the whole value, then the field; whether
+   that is stated as a rule, or a client is held to write one of them per
+   change, is open.

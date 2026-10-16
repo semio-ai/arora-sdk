@@ -658,6 +658,11 @@ So:
   `with_component`, `from_parts`) serve the consumers of the convention. Code
   that does not adopt it ignores them, and a key it names needs no attribute.
 
+A proposal, [target keys](proposal-target-keys.md), names a target as an
+entity under the entity it targets — `hip_yaw/target.position` beside the
+measured `hip_yaw.position` — in place of `hip_yaw.target_position`, with both
+forms accepted while clients move.
+
 ### Predetermined keys are conventions, not wiring
 
 Behaviors read their inputs from store paths and write outputs back; the
