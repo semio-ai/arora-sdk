@@ -4,8 +4,8 @@
 //! a structure with optional fields. The generated Rust is compiled into a
 //! throwaway crate and run natively:
 //!
-//!  * the structure round-trips through `Value` and through buffers, and its
-//!    bytes match the `serde_uuid` codec;
+//!  * the structure round-trips through `Value` and through the buffer value
+//!    codec;
 //!  * the export shim is called with an optional argument absent, present,
 //!    explicitly `None`, and bare (a present value);
 //!  * the `module.yaml` the generator writes declares the optionals, and reads
@@ -16,7 +16,7 @@ use std::process::Command;
 
 use arora_module_core::header::module_frozen_from_header_file;
 use arora_module_core::{analyze_module, ModuleAsset};
-use arora_module_rust::generate_sources;
+use arora_module_rust::{generate_sources, ExternTypes};
 use arora_registry::{local::LocalRegistry, EditableRegistry};
 use arora_types::module::high::ModuleDefinition;
 use arora_types::record::module::frozen::ExportKind;
@@ -250,12 +250,10 @@ fn main() {{
     ] {{
         let value: Value = maybe.clone().into();
         assert_eq!(Maybe::try_from(value.clone()).expect("from Value"), maybe);
-        let bytes: Box<[u8]> = maybe.clone().into();
-        assert_eq!(Maybe::try_from(&bytes[..]).expect("from bytes"), maybe);
+        let bytes = arora_buffers::froto_value::serialize(&value);
         assert_eq!(
-            &bytes[..],
-            &arora_buffers::serde_uuid::serialize(&value)[..],
-            "the generated codec and serde_uuid disagree on optionals"
+            Maybe::try_from(arora_buffers::froto_value::deserialize(&bytes)).expect("from bytes"),
+            maybe
         );
         let echoed = call(arora_generated::export::{echo_shim}, "{ECHO_ID}", vec![field("{ECHO_MAYBE_ID}", value.clone())]);
         assert_eq!(echoed, value, "an optional field crosses the shim");
@@ -327,7 +325,7 @@ async fn optionals_generate_compile_run_and_export() {
         optional(FrozenTy::from(PrimitiveKind::String))
     );
 
-    let generated = generate_sources(assets, &mut registry)
+    let generated = generate_sources(assets, &mut registry, &ExternTypes::new())
         .await
         .expect("generate_sources");
     let dir = std::env::temp_dir().join(format!("arora-optional-fixture-{}", Uuid::new_v4()));

@@ -19,13 +19,20 @@
 //! type is `Value`, and through `value_serde` (name-hashed, unseeded)
 //! otherwise.
 //!
+//! An optional field reads `Value::Option`, or its bare element as a present
+//! value; an absent optional field reads as `None`.
+//!
+//! `#[arora(name = "…")]` on a field or a variant names it in arora when that
+//! name is not its Rust identifier.
+//!
 //! Mirrors the type-directed walk it feeds: named-field structs whose fields are
-//! primitive scalars, `String`, `Uuid`, other `#[derive(AroraType)]` types, a
-//! `Vec<T>` of any of those (a homogeneous array), an `Option<T>`, or a
-//! `#[arora(keyvalue)]` field carrying dynamically-typed values; and enums with
-//! **unit variants** (a `ty::low` enumeration, each variant id pinned like a
-//! field). Maps and payload-carrying enum variants are rejected pending a
-//! `ty::low` model extension.
+//! primitive scalars, `()`, `String`, `Uuid`, other `#[derive(AroraType)]`
+//! types, a `Box<T>` of one (a type that contains itself), a `Vec<T>` of any of
+//! those (a homogeneous array), an `Option<T>`, or a `#[arora(keyvalue)]` field
+//! carrying dynamically-typed values; and enums with **unit variants** (a
+//! `ty::low` enumeration, each variant id pinned like a field). Maps and
+//! payload-carrying enum variants are rejected pending a `ty::low` model
+//! extension.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -91,11 +98,15 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     // A raw identifier (`r#type`, for a field whose ROS name is a Rust keyword)
     // names the plain word in arora, so its name and id match the ROS field.
     let fname_raw = fname.to_string();
-    let fname_str = fname_raw
-      .strip_prefix("r#")
-      .unwrap_or(&fname_raw)
-      .to_string();
     let field_meta = parse_arora_meta(&field.attrs)?;
+    // The arora field name: an `#[arora(name = "…")]` override (a record field
+    // whose name is not its Rust identifier), else the identifier.
+    let fname_str = field_meta.name.clone().unwrap_or_else(|| {
+      fname_raw
+        .strip_prefix("r#")
+        .unwrap_or(&fname_raw)
+        .to_string()
+    });
     let field_id_expr = id_expr(field_meta.id, &fname_str, name_hash_mode, field.span())?;
     // A `#[arora(keyvalue)]` field is an opaque bag of dynamically-typed arora
     // values: it references the well-known KeyValue type by id and has no nested
@@ -137,15 +148,24 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     });
     let decode = shape.decode(&what);
     let temp = format_ident!("__field_{}", field_idents.len());
+    // An absent optional field is `None`; any other absent field is an error.
+    let absent = if matches!(shape, Shape::Option(_)) {
+      quote! { None }
+    } else {
+      quote! {
+        return Err(arora_types::value::ConversionError { message: format!("missing {}", #what) })
+      }
+    };
     decode_fields.push(quote! {
       let #temp = {
         let __id = #field_id_expr;
-        let __value = __fields
-          .iter()
-          .find(|__field| __field.id == __id)
-          .map(|__field| (*__field.value).clone())
-          .ok_or_else(|| arora_types::value::ConversionError { message: format!("missing {}", #what) })?;
-        #decode
+        match __fields.iter().find(|__field| __field.id == __id) {
+          Some(__field) => {
+            let __value = (*__field.value).clone();
+            #decode
+          }
+          None => #absent,
+        }
       };
     });
     field_temps.push(temp);
@@ -252,9 +272,14 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
          `ty::low` reference, pending a model extension)",
       ));
     }
-    let vname = variant.ident.to_string();
     let vident = &variant.ident;
     let variant_meta = parse_arora_meta(&variant.attrs)?;
+    // The arora variant name: an `#[arora(name = "…")]` override, else the
+    // Rust identifier.
+    let vname = variant_meta
+      .name
+      .clone()
+      .unwrap_or_else(|| variant.ident.to_string());
     let variant_id_expr = id_expr(variant_meta.id, &vname, name_hash_mode, variant.span())?;
     encode_arms.push(quote! { #name::#vident => #variant_id_expr });
     decode_arms.push(quote! { x if x == #variant_id_expr => #name::#vident });
@@ -456,6 +481,14 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     return Ok((expr, nested));
   }
 
+  // `()` -> the unit primitive.
+  if is_unit_type(ty) {
+    let expr = quote! {
+      arora_types::module::low::TypeRef::Scalar { id: *arora_types::ty::UNIT_ID }
+    };
+    return Ok((expr, None));
+  }
+
   let Type::Path(type_path) = ty else {
     return Err(syn::Error::new(
       ty.span(),
@@ -468,6 +501,12 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     .last()
     .ok_or_else(|| syn::Error::new(ty.span(), "empty type path"))?;
   let ident = segment.ident.to_string();
+
+  // `Box<T>` -> the same reference as `T`: the box only gives a type that
+  // contains itself a finite size.
+  if ident == "Box" {
+    return type_ref_for(single_type_arg(segment, "Box")?);
+  }
 
   // `Vec<T>` -> a homogeneous array whose element type is `T`.
   if ident == "Vec" {
@@ -493,7 +532,7 @@ fn type_ref_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
   // `TypeRef` exists but the derive does not emit it yet, and an array carries a
   // single element id only (so no nested arrays) — so reject rather than
   // mis-encode.
-  if matches!(ident.as_str(), "HashMap" | "BTreeMap" | "HashSet" | "Box") {
+  if matches!(ident.as_str(), "HashMap" | "BTreeMap" | "HashSet") {
     return Err(syn::Error::new(
       ty.span(),
       format!("`{ident}` fields are not supported by #[derive(AroraType)] yet"),
@@ -526,9 +565,14 @@ fn element_id_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
     .ok_or_else(|| syn::Error::new(ty.span(), "empty type path"))?
     .ident
     .to_string();
+  // A boxed element is referenced as the type it holds.
+  if ident == "Box" {
+    let segment = type_path.path.segments.last().expect("checked above");
+    return element_id_for(single_type_arg(segment, "Box")?);
+  }
   if matches!(
     ident.as_str(),
-    "Vec" | "Option" | "HashMap" | "BTreeMap" | "HashSet" | "Box"
+    "Vec" | "Option" | "HashMap" | "BTreeMap" | "HashSet"
   ) {
     return Err(syn::Error::new(
       ty.span(),
@@ -546,8 +590,8 @@ fn element_id_for(ty: &Type) -> syn::Result<(TokenStream2, Option<&Type>)> {
   }
 }
 
-/// The single type argument `T` of a `Container<T>` path segment (a `Vec<T>` or
-/// an `Option<T>`); `container` names it for the error messages.
+/// The single type argument `T` of a `Container<T>` path segment (a `Vec<T>`,
+/// an `Option<T>` or a `Box<T>`); `container` names it for the error messages.
 fn single_type_arg<'a>(segment: &'a syn::PathSegment, container: &str) -> syn::Result<&'a Type> {
   let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
     return Err(syn::Error::new(
@@ -604,8 +648,12 @@ enum Shape {
   Primitive {
     variant: &'static str,
   },
+  /// `()`.
+  Unit,
   /// `Option<T>`.
   Option(Box<Shape>),
+  /// `Box<T>`: crosses the value plane as `T`.
+  Boxed(Box<Shape>),
   /// `Vec<T>`.
   Vec(Box<Shape>),
   /// `[T; N]`.
@@ -618,6 +666,9 @@ enum Shape {
 }
 
 fn shape_of(ty: &Type) -> syn::Result<Shape> {
+  if is_unit_type(ty) {
+    return Ok(Shape::Unit);
+  }
   if let Type::Array(array) = ty {
     return Ok(Shape::FixedArray(
       Box::new(shape_of(&array.elem)?),
@@ -642,6 +693,9 @@ fn shape_of(ty: &Type) -> syn::Result<Shape> {
     )?)?))),
     "Option" => Ok(Shape::Option(Box::new(shape_of(single_type_arg(
       segment, "Option",
+    )?)?))),
+    "Box" => Ok(Shape::Boxed(Box::new(shape_of(single_type_arg(
+      segment, "Box",
     )?)?))),
     _ => Ok(match primitive_variant(&ident) {
       Some(variant) => Shape::Primitive { variant },
@@ -677,20 +731,27 @@ impl Shape {
       Shape::Primitive { .. } | Shape::Nested(_) => {
         quote! { <arora_types::value::Value as ::std::convert::From<_>>::from(#expr) }
       }
+      Shape::Unit => quote! { { let () = #expr; arora_types::value::Value::Unit } },
+      Shape::Boxed(inner) => inner.encode(quote! { *#expr }),
       Shape::Option(inner) => {
         let e = inner.encode(quote! { __inner });
         quote! {
           arora_types::value::Value::Option((#expr).map(|__inner| ::std::boxed::Box::new(#e)))
         }
       }
+      // An array of a nested type is built from that type, so an empty one
+      // still says whether its elements are structures or enumerations.
       Shape::Vec(inner) | Shape::FixedArray(inner, _) => {
         let e = inner.encode(quote! { __element });
-        let element_id = inner.element_id();
-        quote! {
-          arora_types::value::Value::array_of(
-            #element_id,
-            (#expr).into_iter().map(|__element| #e).collect(),
-          )
+        let elements = quote! { (#expr).into_iter().map(|__element| #e).collect() };
+        match inner.nested_type() {
+          Some(ty) => quote! {
+            arora_types::value::Value::array_of_type::<#ty>(#elements)
+          },
+          None => {
+            let element_id = inner.element_id();
+            quote! { arora_types::value::Value::array_of(#element_id, #elements) }
+          }
         }
       }
       Shape::KeyValue(ty) => {
@@ -703,6 +764,15 @@ impl Shape {
           }
         }
       }
+    }
+  }
+
+  /// The nested type this shape holds, through a box.
+  fn nested_type(&self) -> Option<&Type> {
+    match self {
+      Shape::Nested(ty) => Some(ty),
+      Shape::Boxed(inner) => inner.nested_type(),
+      _ => None,
     }
   }
 
@@ -731,6 +801,8 @@ impl Shape {
         quote! { *arora_types::ty::#id }
       }
       Shape::Nested(ty) => quote! { <#ty as arora_types::AroraType>::arora_type_id() },
+      Shape::Unit => quote! { *arora_types::ty::UNIT_ID },
+      Shape::Boxed(inner) => inner.element_id(),
       Shape::Option(_) => quote! { *arora_types::ty::OPTION_ID },
       Shape::Vec(_) | Shape::FixedArray(..) => quote! { *arora_types::ty::ARRAY_VALUE_ID },
       Shape::KeyValue(_) => quote! { *arora_types::ty::KEY_VALUE_ID },
@@ -755,14 +827,23 @@ impl Shape {
         <#ty as ::std::convert::TryFrom<arora_types::value::Value>>::try_from(__value)
           .map_err(|e| arora_types::value::ConversionError { message: format!("{}: {}", #what, e) })?
       },
+      Shape::Unit => {
+        let mismatch = fail(quote! { format!("{}: unexpected value {}", #what, other) });
+        quote! { match __value { arora_types::value::Value::Unit => (), other => #mismatch } }
+      }
+      Shape::Boxed(inner) => {
+        let d = inner.decode(what);
+        quote! { ::std::boxed::Box::new({ #d }) }
+      }
+      // An optional arrives as `Value::Option`, or as its bare element when
+      // present.
       Shape::Option(inner) => {
         let d = inner.decode(what);
-        let mismatch = fail(quote! { format!("{}: expected an option, got {}", #what, other) });
         quote! {
           match __value {
             arora_types::value::Value::Option(None) => None,
             arora_types::value::Value::Option(Some(__boxed)) => Some({ let __value = *__boxed; #d }),
-            other => #mismatch,
+            __value => Some({ #d }),
           }
         }
       }
@@ -807,6 +888,11 @@ impl Shape {
       }
     }
   }
+}
+
+/// Whether a type is the unit type `()`.
+fn is_unit_type(ty: &Type) -> bool {
+  matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
 }
 
 /// Whether a type path names arora's `Value` itself.

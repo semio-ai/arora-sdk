@@ -18,7 +18,6 @@ use arora_types::value::{ConversionError, Value};
 use regex::Regex;
 use uuid::Uuid;
 
-use crate::arora_generated::behavior_tree::status::Status;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
     IS_STR_SET_FUNCTION_ID, IS_STR_SET_VALUE_PARAM_ID, REGEX_MATCH_FIRST_MATCH_PARAM_ID,
@@ -27,6 +26,7 @@ use crate::nodes::{
     UNSET_STR_VARIABLE_PARAM_ID, WAIT_STR_SET_FUNCTION_ID, WAIT_STR_SET_VALUE_PARAM_ID,
 };
 use crate::variable::VariableCell;
+use arora_behavior::Status;
 
 // The node functions
 //==============================================================

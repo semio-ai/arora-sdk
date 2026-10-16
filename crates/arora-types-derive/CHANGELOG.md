@@ -2,6 +2,26 @@
 
 All notable changes.
 
+## [1.4.0] - 2026-10-16
+
+### Added
+
+- A `Box<T>` field (or `Option<Box<T>>`, `Vec<Box<T>>` element) is referenced
+  and converted as `T`: a type can contain itself.
+- A `()` field: the unit primitive, `Value::Unit`.
+- `#[arora(name = "…")]` on a field or a variant names it in arora when that
+  name is not its Rust identifier.
+
+### Changed
+
+- An optional field also reads its bare element as a present value, and an
+  absent optional field reads as `None` instead of failing.
+
+### Fixed
+
+- An empty `Vec` of an enumeration converts to `Value::ArrayEnumeration`. It
+  converted to `Value::ArrayStructure`.
+
 ## [1.3.0] - 2026-09-22
 
 ### Added

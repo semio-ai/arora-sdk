@@ -4,6 +4,14 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.7.0] - 2026-10-16
+
+### Changed
+
+- `#[derive(AroraType)]` is arora-types-derive 1.4: `Box<T>` and `()` fields,
+  field and variant `name` overrides, optional fields read bare or absent, and
+  an empty array of an enumeration as `Value::ArrayEnumeration`.
+
 ## [3.6.0] - 2026-10-13
 
 ### Changed

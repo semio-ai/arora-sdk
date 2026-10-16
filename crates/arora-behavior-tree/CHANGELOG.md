@@ -32,6 +32,11 @@ All notable changes to `arora-behavior-tree`. The format follows
   binding is still refused when applied.
 - `ModuleFunction` moved to `arora-behavior`; `arora_behavior_tree` re-exports
   it, with `FunctionIndex`. It now derives `Debug`, `Clone` and `PartialEq`.
+- **Breaking:** the `arora_generated` module is gone. The runtime returns
+  `arora_behavior::Status`, and a control node's children are
+  `arora_behavior_tree_types::TickId`; the generated twins of those types,
+  with their buffer functions and raw id constants, are removed. The crate
+  has no build script.
 
 ## [8.8.0] - 2026-10-13
 

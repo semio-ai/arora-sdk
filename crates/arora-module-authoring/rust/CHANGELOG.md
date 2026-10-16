@@ -4,6 +4,41 @@ All notable changes to `arora-module-rust`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-10-16
+
+### Added
+
+- `ExternTypes`: the records whose Rust type is declared elsewhere (a
+  `#[derive(AroraType)]` type), each with the path generated code names it
+  by. Such a record is not generated; fields, parameters and returns of it
+  name the declared type.
+
+### Changed
+
+- **Breaking:** a generated enumeration or structure is a declared type: it
+  derives `AroraType` under the record's id, version, and variant or field
+  ids, and its `Value` conversions are the derive's. Generated code needs
+  arora-types 3.7. The type's module holds the type only: no
+  `serialize_to_writer`, `deserialize_from_reader`, `Into<Box<[u8]>>`,
+  `TryFrom<&[u8]>` or `*_RAW_ID` constants.
+- **Breaking:** export and import shims carry a value of a record type as its
+  `Value`, through `arora_buffers::froto_value`.
+- **Breaking:** `generate_sources` takes `&ExternTypes`;
+  `generate_enumeration_source` takes the record version and returns a
+  `GenerationError`; `generate_structure_source` takes the record version and
+  `&ExternTypes`.
+- **Breaking:** removed `generate_into_impl`, `generate_try_from_impl`,
+  `struct_field_const_id_ident`, `struct_field_ident`,
+  `struct_field_intermediate_variable_ident`, `enum_variant_ident`,
+  `enum_variant_const_id_ident`, `PrefixWithMod` and `CheckType`.
+- A generated enumeration also derives `Copy` and `Eq`.
+- A structure field that is an optional reference to its own structure is
+  boxed (`Option<Box<T>>`).
+- These records cannot be declared with `#[derive(AroraType)]` and fail to
+  generate: an enumeration variant carrying a value (it generated as a unit
+  variant), a field holding a dynamic array value or an array of dynamic
+  values, and an optional array or optional dynamic value field.
+
 ## [2.0.0] - 2026-09-25
 
 ### Added

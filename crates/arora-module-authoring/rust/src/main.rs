@@ -1,5 +1,5 @@
 use arora_module_core::{ModuleAsset, Reader, Writer};
-use arora_module_rust::generate_sources;
+use arora_module_rust::{generate_sources, ExternTypes};
 use arora_registry::{local::LocalRegistry, EditableRegistry, TypeDefinitionFrozen};
 use arora_vfs::Entry;
 use clap::Parser;
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         assets.push(asset);
     }
 
-    let generated_sources = generate_sources(assets, &mut registry).await?;
+    let generated_sources = generate_sources(assets, &mut registry, &ExternTypes::new()).await?;
 
     let mut stdout = stdout();
     let mut writer = Writer::new(&mut stdout);

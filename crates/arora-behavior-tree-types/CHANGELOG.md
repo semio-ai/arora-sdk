@@ -4,6 +4,13 @@ All notable changes to `arora-behavior-tree-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-10-16
+
+### Added
+
+- `TickId`: the Rust type of the `behavior_tree.TickId` record, deriving
+  `AroraType` under its ids.
+
 ## [2.0.0] - 2026-09-25
 
 ### Changed

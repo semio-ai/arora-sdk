@@ -3,10 +3,9 @@
 #[allow(clippy::all, dead_code)]
 mod arora_generated;
 
-use crate::arora_generated::{
-    arora::arora_dispatch_indirect,
-    behavior_tree::{status, status::Status, tick_id::TickId},
-};
+use crate::arora_generated::arora::arora_dispatch_indirect;
+use arora_behavior::Status;
+use arora_behavior_tree_types::TickId;
 use arora_buffers::BufferReader;
 use regex::Regex;
 
@@ -210,7 +209,10 @@ fn call_tick_function(tick_id: &TickId) -> Status {
     let input =
         unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
     let mut reader = BufferReader::new(input);
-    status::deserialize_from_reader(&mut reader, true).unwrap()
+    Status::try_from(arora_buffers::froto_value::deserialize_from_reader(
+        &mut reader,
+    ))
+    .unwrap()
 }
 
 // Calling tick functions through arora_call_indirect.

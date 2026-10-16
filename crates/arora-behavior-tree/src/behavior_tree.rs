@@ -1,7 +1,3 @@
-// Generated code: lint hygiene is the generator's responsibility, not this
-// repo's. Allow clippy/dead_code over the whole generated subtree.
-#[allow(clippy::all, dead_code)]
-pub mod arora_generated;
 pub mod behavior;
 pub mod core_nodes;
 pub mod error;
@@ -16,9 +12,11 @@ pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
 
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
-use arora_generated::behavior_tree::{status::Status, tick_id::TickId};
+use arora_behavior::Status;
+use arora_behavior_tree_types::TickId;
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::record::module::frozen::Function;
+use arora_types::AroraType;
 use arora_types::{
     call::Call,
     value::{ConversionError, StructureField, Value},
@@ -28,9 +26,6 @@ use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
-use crate::arora_generated::behavior_tree::tick_id::{
-    TICK_ID_CALLABLE_ID_FIELD_RAW_ID, TICK_ID_STRUCT_RAW_ID,
-};
 use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
@@ -464,9 +459,9 @@ fn tick_builtin(
                     return Err(error);
                 }
             };
-            out.set(status.clone().into());
+            out.set(status.into());
             if status != Status::Running {
-                latch.set(status.clone().into());
+                latch.set(status.into());
             }
             status
         }
@@ -528,7 +523,7 @@ fn tick(
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     outputs: Option<&[Option<VariableCell>]>,
-    child_tick_ids: &Vec<TickId>,
+    child_tick_ids: &[TickId],
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
@@ -599,7 +594,7 @@ fn tick(
             })?
             .reference
             .id;
-        if first_parameter_type_id != Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID) {
+        if first_parameter_type_id != TickId::arora_type_id() {
             Err(BehaviorTreeError::MissingChildrenParameter {
                 node: node.id,
                 function: node.function.to_owned(),
@@ -607,21 +602,11 @@ fn tick(
         }
 
         // Pass the tick ids of the children.
-        let mut children_arg = Vec::with_capacity(child_tick_ids.len());
-        for child_tick_id in child_tick_ids {
-            children_arg.push(arora_types::value::StructureWithoutId {
-                fields: vec![StructureField {
-                    id: Uuid::from_bytes(TICK_ID_CALLABLE_ID_FIELD_RAW_ID),
-                    value: Box::new(Value::U64(child_tick_id.callable_id)),
-                }],
-            });
-        }
         call.args.push(StructureField {
             id: *first_parameter_id,
-            value: Box::new(Value::ArrayStructure {
-                id: Uuid::from_bytes(TICK_ID_STRUCT_RAW_ID),
-                elements: children_arg,
-            }),
+            value: Box::new(Value::array_of_type::<TickId>(
+                child_tick_ids.iter().copied().map(Value::from).collect(),
+            )),
         })
     }
 
