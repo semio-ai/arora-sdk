@@ -179,7 +179,7 @@ A generic HAL loads models at runtime. The project tool will pass the same
 [build-dependencies]
 arora-index = { path = "../arora-index", features = ["build"] }
 
-[package.metadata.arora.models.robot_models]
+[package.metadata.arora.models.robot]
 scoped_name = "@demo/robot"
 version = "1.2.3"
 content_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -194,8 +194,10 @@ fn main() -> Result<(), arora_index::Error> {
 }
 ```
 
-The helper emits `cargo:rustc-env=ARORA_MODEL_ROBOT_MODELS=<absolute path>`.
-Use `include_bytes!(env!("ARORA_MODEL_ROBOT_MODELS"))` in the HAL's code.
+The helper emits `cargo:rustc-env=ARORA_MODEL_ROBOT=<absolute path>`.
+Use `include_bytes!(env!("ARORA_MODEL_ROBOT"))` in the HAL's code. The table
+is plural because a crate can pin several models; each entry emits one
+variable, named for that one model.
 Names use lowercase letters, digits, `_` and `-`. Output names are uppercase
 with `-` replaced by `_`. Colliding output names are errors. Versions must be
 canonical and exact: no ranges, `v`, whitespace or leading zeroes. Hashes must
