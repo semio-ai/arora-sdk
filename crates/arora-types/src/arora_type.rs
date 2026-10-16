@@ -60,6 +60,7 @@ mod tests {
   // (for `#[derive(AroraType)]`) into scope — same name, different namespaces.
   use crate::module::low::TypeRef;
   use crate::ty::low::TypeKind;
+  use crate::value::Value;
   use crate::AroraType;
   use crate::{gen_uuid_from_str, ty};
 
@@ -421,5 +422,145 @@ mod tests {
     }
     assert_eq!(Pinned::arora_type_version().to_string(), "1.1.0");
     assert_eq!(Unpinned::arora_type_version().to_string(), "1.0.0");
+  }
+
+  #[test]
+  fn a_boxed_self_reference_and_a_unit_field_round_trip() {
+    #[derive(AroraType, Debug, Clone, PartialEq)]
+    #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000001")]
+    struct Chain {
+      #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000011")]
+      head: i32,
+      #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000012")]
+      tail: Option<Box<Chain>>,
+      #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000013")]
+      marker: (),
+    }
+    #[derive(AroraType, Debug, Clone, PartialEq)]
+    #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000002")]
+    struct Holder {
+      #[arora(id = "cccccccc-cccc-4ccc-8ccc-000000000021")]
+      chain: Box<Chain>,
+    }
+
+    let TypeKind::Structure(structure) = Holder::arora_type().kind else {
+      panic!("expected a structure type");
+    };
+    // A box is referenced as the type it holds.
+    assert!(matches!(
+      &structure.fields.values().next().unwrap().type_ref,
+      TypeRef::Scalar { id } if *id == Chain::arora_type_id()
+    ));
+    let TypeKind::Structure(chain) = Chain::arora_type().kind else {
+      panic!("expected a structure type");
+    };
+    assert!(matches!(
+      &chain.fields[&crate::Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-000000000013").unwrap()].type_ref,
+      TypeRef::Scalar { id } if *id == *ty::UNIT_ID
+    ));
+
+    let holder = Holder {
+      chain: Box::new(Chain {
+        head: 1,
+        tail: Some(Box::new(Chain {
+          head: 2,
+          tail: None,
+          marker: (),
+        })),
+        marker: (),
+      }),
+    };
+    let value = Value::from(holder.clone());
+    let Value::Structure(outer) = &value else {
+      panic!("a structure value");
+    };
+    // The box is transparent: the field holds the chain's own structure.
+    assert!(
+      matches!(&*outer.fields[0].value, Value::Structure(s) if s.id == Chain::arora_type_id())
+    );
+    assert_eq!(Holder::try_from(value).unwrap(), holder);
+  }
+
+  #[test]
+  fn an_optional_field_reads_absent_bare_or_framed() {
+    #[derive(AroraType, Debug, Clone, PartialEq)]
+    #[arora(id = "dddddddd-dddd-4ddd-8ddd-000000000001")]
+    struct Maybe {
+      #[arora(id = "dddddddd-dddd-4ddd-8ddd-000000000011")]
+      rate: Option<f32>,
+    }
+    let id = Maybe::arora_type_id();
+    let field_id = crate::Uuid::parse_str("dddddddd-dddd-4ddd-8ddd-000000000011").unwrap();
+    let with = |fields| Value::Structure(crate::value::Structure { id, fields });
+    let field = |value| {
+      vec![crate::value::StructureField {
+        id: field_id,
+        value: Box::new(value),
+      }]
+    };
+    assert_eq!(Maybe::try_from(with(vec![])).unwrap(), Maybe { rate: None });
+    assert_eq!(
+      Maybe::try_from(with(field(Value::F32(2.0)))).unwrap(),
+      Maybe { rate: Some(2.0) }
+    );
+    assert_eq!(
+      Maybe::try_from(with(field(Value::Option(Some(Box::new(Value::F32(3.0))))))).unwrap(),
+      Maybe { rate: Some(3.0) }
+    );
+    assert_eq!(
+      Maybe::try_from(with(field(Value::Option(None)))).unwrap(),
+      Maybe { rate: None }
+    );
+    assert!(Maybe::try_from(with(field(Value::String("fast".into())))).is_err());
+  }
+
+  #[test]
+  fn an_empty_array_of_an_enumeration_is_an_enumeration_array() {
+    #[derive(AroraType, Debug, Clone, Copy, PartialEq)]
+    #[arora(id = "eeeeeeee-eeee-4eee-8eee-000000000001")]
+    enum Mode {
+      #[arora(id = "eeeeeeee-eeee-4eee-8eee-000000000011")]
+      On,
+    }
+    #[derive(AroraType, Debug, Clone, PartialEq)]
+    #[arora(id = "eeeeeeee-eeee-4eee-8eee-000000000002")]
+    struct Modes {
+      #[arora(id = "eeeeeeee-eeee-4eee-8eee-000000000021")]
+      modes: Vec<Mode>,
+    }
+    let Value::Structure(structure) = Value::from(Modes { modes: vec![] }) else {
+      panic!("a structure value");
+    };
+    assert_eq!(
+      *structure.fields[0].value,
+      Value::ArrayEnumeration {
+        id: Mode::arora_type_id(),
+        elements: vec![]
+      }
+    );
+  }
+
+  #[test]
+  fn a_field_and_a_variant_take_their_arora_name() {
+    #[derive(AroraType)]
+    #[arora(id = "ffffffff-ffff-4fff-8fff-000000000001")]
+    struct Renamed {
+      #[arora(id = "ffffffff-ffff-4fff-8fff-000000000011", name = "callableId")]
+      callable_id: u64,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "ffffffff-ffff-4fff-8fff-000000000002")]
+    enum Light {
+      #[arora(id = "ffffffff-ffff-4fff-8fff-000000000021", name = "ON")]
+      On,
+    }
+    let TypeKind::Structure(structure) = Renamed::arora_type().kind else {
+      panic!("expected a structure type");
+    };
+    assert_eq!(structure.fields.values().next().unwrap().name, "callableId");
+    let TypeKind::Enumeration(enumeration) = Light::arora_type().kind else {
+      panic!("expected an enumeration type");
+    };
+    assert_eq!(enumeration.values.values().next().unwrap().name, "ON");
   }
 }

@@ -8,23 +8,24 @@ use arora_registry::{
     StructureFrozen, TypeDefinitionFrozen,
 };
 use arora_types::record::ty::PrimitiveKind;
+use arora_types::record::Selector;
 use arora_types::record::{
     module::frozen::{ExportKind, Parameter},
-    ty::{FrozenScalar, FrozenTy, Primitive},
+    ty::{FrozenTy, Primitive},
     FrozenReference,
 };
-use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{
-    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
-    U8_ID, UNIT_ID,
+    BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, KEY_VALUE_ID, STRING_ID, U16_ID,
+    U32_ID, U64_ID, U8_ID, UNIT_ID,
 };
+use arora_types::AroraType;
 use arora_vfs::{Directory, Entry as VfsEntry, File, VfsError};
 use async_recursion::async_recursion;
 use convert_case::{Case, Casing};
 use derive_more::Display;
 use proc_macro2::Ident;
 use quote::{__private::TokenStream, format_ident, quote, ToTokens};
-use semver::VersionReq;
+use semver::{Version, VersionReq};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Display,
@@ -35,24 +36,29 @@ use uuid::Uuid;
 /// Generates a set of sources organized in a virtual directory
 /// from a set of assets as produced by [`arora_module_core::analyze_module`].
 /// First, the types, then the modules, then the imports.
+/// A record in `extern_types` is not generated: code naming it names its
+/// declared type.
 pub async fn generate_sources(
     assets: Vec<ModuleAsset>,
     registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
 ) -> Result<Directory, GenerationError> {
     let mut result = generate_common_sources()?;
     let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
     let mut current_module = Option::<(Uuid, ModuleFrozen, String)>::None;
     for asset in assets {
         match asset {
-            ModuleAsset::Type(id, _, ty) => match ty {
+            // A record with a declared Rust type is not generated.
+            ModuleAsset::Type(id, _, _) if extern_types.contains(&id) => {}
+            ModuleAsset::Type(id, version, ty) => match ty {
                 TypeDefinitionFrozen::Primitive(_kind) => {}
                 TypeDefinitionFrozen::Enumeration(enumeration) => {
                     let parent_path = registry
                         .resolve_id(&enumeration.parent)
                         .await
                         .map_err(GenerationError::RegistryError)?;
-                    let enum_sources = generate_enumeration_source(&id, &enumeration, &parent_path)
-                        .map_err(GenerationError::VfsError)?;
+                    let enum_sources =
+                        generate_enumeration_source(&id, &version, &enumeration, &parent_path)?;
                     result = result.merge_with(&enum_sources);
                 }
                 TypeDefinitionFrozen::Structure(structure) => {
@@ -60,8 +66,15 @@ pub async fn generate_sources(
                         .resolve_id(&structure.parent)
                         .await
                         .map_err(GenerationError::RegistryError)?;
-                    let struct_sources =
-                        generate_structure_source(&id, &structure, registry, &parent_path).await?;
+                    let struct_sources = generate_structure_source(
+                        &id,
+                        &version,
+                        &structure,
+                        registry,
+                        extern_types,
+                        &parent_path,
+                    )
+                    .await?;
                     result = result.merge_with(&struct_sources);
                 }
             },
@@ -74,7 +87,7 @@ pub async fn generate_sources(
                 }
             }
             ModuleAsset::Module(ref module_id, _, ref module, ref executor) => {
-                let module_sources = generate_module_source(module, registry).await?;
+                let module_sources = generate_module_source(module, registry, extern_types).await?;
                 result = result.merge_with(&module_sources);
                 assert!(current_module.is_none()); // Only one module to generate at a time.
                 current_module =
@@ -90,9 +103,14 @@ pub async fn generate_sources(
             .resolve_id(&module_id)
             .await
             .map_err(GenerationError::RegistryError)?;
-        let imports_sources =
-            generate_imports_from_module_source(&module_id, &module_path, imports, registry)
-                .await?;
+        let imports_sources = generate_imports_from_module_source(
+            &module_id,
+            &module_path,
+            imports,
+            registry,
+            extern_types,
+        )
+        .await?;
         result = result.merge_with(&imports_sources);
         all_imports.append(imports);
     }
@@ -345,579 +363,254 @@ pub fn generate_common_sources() -> Result<Directory, GenerationError> {
     token_stream_to_file("error.rs", &source).map_err(GenerationError::VfsError)
 }
 
-/// Generates a Rust source file for the given enumeration.
-/// It contains the type declaration and some functions
-/// to serialize and deserialize values.
-/// It depends on `arora_buffers`, `arora_types` and `uuid`.
-pub fn generate_enumeration_source(
-    id: &Uuid,
-    enumeration: &EnumerationFrozen,
-    parent_path: &str,
-) -> Result<Directory, VfsError> {
-    let uses = quote! {
-      use crate::arora_generated::error::DeserializationError;
-      use arora_buffers::*;
-      use arora_types::value::{ConversionError, Enumeration, Value};
-      use uuid::Uuid;
-    };
-
-    // Enum declaration.
-    let name = &enumeration.name;
-    let enum_name = name.to_case(Case::UpperCamel);
-    let enum_ident = type_ident(&enum_name);
-    let variants = enumeration.variants.iter();
-    let enum_contents = variants.clone().map(|(_, variant)| {
-        let variant_ident = format_ident!("{}", variant.name.to_case(Case::UpperCamel));
-        quote! { #variant_ident, }
-    });
-    let enum_declaration = quote! {
-      #[derive(Debug, PartialEq, Clone)]
-      pub enum #enum_ident {
-        #(#enum_contents)*
-      }
-    };
-
-    // Enum IDs.
-    let enum_id = id.to_string();
-    let enum_id_bytes = RawUuidValue(id);
-    let enum_upper_name = format_ident!("{}", enum_name.to_case(Case::UpperSnake));
-    let enum_const_id_ident = format_ident!("{}_ENUM_RAW_ID", enum_upper_name);
-    let enum_const_id_doc = format!("{}: {}", enum_name, enum_id);
-    let enum_id_declaration = quote! {
-      #[doc = #enum_const_id_doc]
-      pub const #enum_const_id_ident: [u8; 16] = #enum_id_bytes;
-    };
-
-    let variant_id_declarations = variants.clone().map(|(id, variant)| {
-        let id_string = id.to_string();
-        let id_bytes = RawUuidValue(id);
-        let variant_const_id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-        let variant_doc = format!(
-            "{}: {}",
-            enum_variant_ident(&enum_name, &variant.name),
-            id_string
-        );
-        quote! {
-          #[doc = #variant_doc]
-          pub const #variant_const_id_ident: [u8; 16] = #id_bytes;
-        }
-    });
-
-    // Enum Serialization.
-    let serialization_match_branches: Vec<TokenStream> = variants
-        .clone()
-        .map(|(_, variant)| {
-            let variant_ident = enum_variant_ident(&enum_name, &variant.name);
-            let id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-            quote! {
-              #variant_ident => #id_ident.as_slice(),
-            }
-        })
-        .collect();
-
-    let into_impl = generate_into_impl(&enum_ident);
-    let serialization = quote! {
-      #into_impl
-
-      pub fn serialize_to_writer(value: &#enum_ident, writer: &mut BufferWriter) {
-        let enumeration_id = #enum_const_id_ident.as_slice();
-        let variant_id = match value {
-          #(#serialization_match_branches)*
-        };
-        writer.add_enumeration_value(enumeration_id, variant_id);
-        writer.add_unit();
-      }
-
-      /// Serializes the enumeration as a *raw* element — the variant id and its
-      /// payload only, without the leading `TYPE_ENUMERATION` tag or the 16-byte
-      /// enumeration id (carried once by the array header). Mirrors
-      /// `arora_buffers::serde_uuid`'s `Value::ArrayEnumeration` so an array of
-      /// enumerations marshals identically across the `arora_call` boundary.
-      pub fn serialize_to_writer_raw(value: &#enum_ident, writer: &mut BufferWriter) {
-        let variant_id = match value {
-          #(#serialization_match_branches)*
-        };
-        writer.add_enumeration_value_raw(variant_id);
-        writer.add_unit();
-      }
-    };
-
-    // Enum Deserialization.
-    let deserialization_cases = variants.clone().map(|(_, variant)| {
-        let variant_const_id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-        let variant_ident = enum_variant_ident(&enum_name, &variant.name);
-        quote! {
-          #variant_const_id_ident => Ok(#variant_ident),
-        }
-    });
-
-    let deserialization = quote! {
-      impl TryFrom<&[u8]> for #enum_ident {
-        type Error = DeserializationError;
-
-        fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
-          let mut reader = BufferReader::new(buffer);
-          return deserialize_from_reader(&mut reader, true)
-        }
-      }
-
-      pub fn deserialize_from_reader(reader: &mut BufferReader, check_type: bool) -> Result<#enum_ident, DeserializationError> {
-        if check_type {
-          let type_raw_id_opt = reader.next_type();
-          if type_raw_id_opt.is_none() {
-            return Err(DeserializationError{ message: "missing next type information".to_string() })
-          }
-          if type_raw_id_opt.unwrap() != TYPE_ENUMERATION {
-            return Err(DeserializationError{ message: "next type is not an enumeration".to_string() })
-          }
-          // The enumeration id is only present in the full (non-raw) encoding.
-          // In the raw element form used inside arrays it is carried once by the
-          // array header, so it is not read per element.
-          if #enum_const_id_ident != reader.get_structure_field() {
-            return Err(DeserializationError{ message: "missing variant information".to_string() })
-          }
-        }
-
-        let variant_raw_id = reader.get_enumeration_value_raw();
-        // Consume the variant's payload written by `add_unit` on the
-        // serialization side (enumeration values carry a `Unit`). Without this
-        // the reader is left one byte short, corrupting whatever value follows
-        // (for example the next element of an array of enumerations).
-        reader.next_type();
-        match variant_raw_id.try_into().expect("enum id is of unexpected length") {
-          #(#deserialization_cases)*
-          _ => Err(DeserializationError{ message: "unexpected variant".to_string() })
-        }
-      }
-    };
-
-    // Conversion to generic `Value`.
-    let to_value_cases = variants.clone().map(|(_, variant)| {
-        let variant_ident = enum_variant_ident(&enum_name, &variant.name);
-        let id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-        quote! {
-          #variant_ident => Value::Enumeration(Enumeration {
-            id: Uuid::from_bytes(#enum_const_id_ident),
-            variant_id: Uuid::from_bytes(#id_ident),
-            value: Box::new(Value::Unit),
-          }),
-        }
-    });
-
-    let to_value = quote! {
-      impl Into<Value> for #enum_ident {
-        fn into(self) -> Value {
-          match self {
-            #(#to_value_cases)*
-          }
-        }
-      }
-    };
-
-    // Conversion from generic `Value`.
-    let from_value_cases = variants.map(|(_, variant)| {
-        let variant_const_id_ident = enum_variant_const_id_ident(&enum_name, &variant.name);
-        let variant_ident = enum_variant_ident(&enum_name, &variant.name);
-        quote! {
-          #variant_const_id_ident => Ok(#variant_ident),
-        }
-    });
-
-    let from_value = quote! {
-      impl TryFrom<Value> for #enum_ident {
-        type Error = ConversionError;
-        fn try_from(value: Value) -> Result<Self, Self::Error> {
-          if let Value::Enumeration(as_enum) = value {
-            if *as_enum.id.as_bytes() == #enum_const_id_ident {
-              match *as_enum.variant_id.as_bytes() {
-                #(#from_value_cases)*
-                _ => Err(Self::Error { message: "unexpected variant".to_string() }),
-              }
-            } else {
-              Err(Self::Error {
-                message: "unexpected enum type ID".to_string(),
-              })
-            }
-          } else {
-            Err(Self::Error {
-              message: "unexpected kind".to_string(),
-            })
-          }
-        }
-      }
-    };
-
-    // Putting it all together.
-    let type_source = quote! {
-      #uses
-      #enum_declaration
-      #serialization
-      #deserialization
-      #to_value
-      #from_value
-      #enum_id_declaration
-      #(#variant_id_declarations)*
-    };
-
-    let base_file_name = enumeration.name.to_case(Case::Snake);
-    let file_path = if parent_path.is_empty() {
-        format!("{}.rs", base_file_name)
-    } else {
-        format!("{}/{}.rs", parent_path.replace('.', "/"), base_file_name)
-    };
-    token_stream_to_file(file_path, &type_source)
+/// The records whose Rust type is declared outside the generated sources — a
+/// `#[derive(AroraType)]` type, usually in another crate — each with the path
+/// generated code names it by. The generator references such a type at its
+/// path instead of generating one, so a record has one Rust type wherever it
+/// is used.
+///
+/// A Rust path belongs to the Rust output only, so it is given to the Rust
+/// generator rather than stored with the record: records are shared with the
+/// other generators and with remote registries.
+#[derive(Debug, Clone, Default)]
+pub struct ExternTypes {
+    paths: HashMap<Uuid, String>,
 }
 
-/// Generates a Rust source file for the given structure.
-/// It contains the type declaration and some functions
-/// to serialize and deserialize values.
-/// It depends on `arora-buffers`, `arora-types`, `arora-registry` and `uuid`.
-pub async fn generate_structure_source(
+impl ExternTypes {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Declares `T` as the Rust type of the record it names
+    /// ([`AroraType::arora_type_id`]), referenced in generated code as `path`
+    /// (for example `arora_behavior::Status`).
+    pub fn declare<T: AroraType>(&mut self, path: &str) -> &mut Self {
+        self.paths.insert(T::arora_type_id(), path.to_string());
+        self
+    }
+
+    /// Whether the record `id` has a declared Rust type.
+    fn contains(&self, id: &Uuid) -> bool {
+        self.paths.contains_key(id)
+    }
+
+    /// The path of the declared Rust type of the record `id`, if it has one.
+    fn path(&self, id: &Uuid) -> Result<Option<TokenStream>, GenerationError> {
+        self.paths
+            .get(id)
+            .map(|path| {
+                path.parse::<TokenStream>().map_err(|err| {
+                    GenerationError::Generic(format!(
+                        "`{path}`, declared for record {id}, is not a Rust path: {err}"
+                    ))
+                })
+            })
+            .transpose()
+    }
+}
+
+/// Generates a Rust source file declaring the given enumeration: a unit-variant
+/// enum deriving `AroraType` under the record's id, version and variant ids,
+/// so it converts to and from `Value` like any other declared type.
+/// It depends on `arora_types`.
+pub fn generate_enumeration_source(
     id: &Uuid,
-    structure: &StructureFrozen,
-    registry: &mut dyn ReadableRegistry,
+    version: &Version,
+    enumeration: &EnumerationFrozen,
     parent_path: &str,
 ) -> Result<Directory, GenerationError> {
-    // Struct declaration.
-    let name = &structure.name;
-    let struct_ident = type_ident(name);
-    // A field that is a *scalar* reference back to this very structure would make
-    // the Rust type infinitely sized, so it is `Box`-wrapped. (Array/`Vec`
-    // self-references don't need this — a `Vec` is already heap-allocated — and
-    // are what make a recursive type actually constructible.)
-    let is_self_ref = |field: &arora_types::record::structure::frozen::StructureField| matches!(&field.ty, FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *id);
-    let mut field_declarations = Vec::new();
-    for (_, field) in &structure.fields {
-        let field_ident = variable_ident(&field.name);
-        let mut field_type_ident =
-            type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
-        if is_self_ref(field) {
-            field_type_ident = quote! { Box<#field_type_ident> };
+    let enum_ident = type_ident(&enumeration.name);
+    let type_attribute = type_attribute(id, version, &enumeration.name, &enum_ident)?;
+    let mut variants = Vec::new();
+    for (variant_id, variant) in &enumeration.variants {
+        // `#[derive(AroraType)]` declares unit variants only.
+        if variant.ty != FrozenTy::Primitive(Primitive::UNIT) {
+            return Err(GenerationError::Generic(format!(
+                "enumeration {} variant {}: a variant carrying a value cannot be declared \
+                 with #[derive(AroraType)]",
+                enumeration.name, variant.name
+            )));
         }
-        field_declarations.push(quote! { pub #field_ident: #field_type_ident });
+        let variant_ident = type_ident(&variant.name);
+        let attribute = member_attribute(variant_id, &variant.name, &variant_ident, false);
+        variants.push(quote! { #attribute #variant_ident });
     }
-    let struct_declaration = quote! {
-      #[derive(Debug, PartialEq, Clone)]
-      pub struct #struct_ident {
-        #(#field_declarations),*
+    let source = quote! {
+      #[derive(Debug, Clone, Copy, PartialEq, Eq, arora_types::AroraType)]
+      #type_attribute
+      pub enum #enum_ident {
+        #(#variants),*
       }
     };
+    token_stream_to_file(type_file_path(&enumeration.name, parent_path), &source)
+        .map_err(GenerationError::VfsError)
+}
 
-    // Struct IDs.
-    let id_str = id.to_string();
-    let id_bytes = RawUuidValue(id);
-    let upper_name = format_ident!("{}", name.to_case(Case::UpperSnake));
-    let const_id_ident = format_ident!("{}_STRUCT_RAW_ID", upper_name);
-    let const_id_doc = format!("{}: {}", name, id_str);
-    let id_declaration = quote! {
-      #[doc = #const_id_doc]
-      pub const #const_id_ident: [u8; 16] = #id_bytes;
-    };
-
-    let field_id_declarations = structure.fields.iter().map(|(field_id, field)| {
-        let field_id_bytes = RawUuidValue(field_id);
-        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        let field_doc = format!("{}: {}", struct_field_ident(name, &field.name), field_id,);
-        quote! {
-          #[doc = #field_doc]
-          pub const #field_const_id_ident: [u8; 16] = #field_id_bytes;
-        }
-    });
-
-    // Struct Serialization.
-    let mut fields_serialization = Vec::new();
-    for (_, field) in &structure.fields {
-        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        let field_ident = variable_ident(&field.name);
-        let value_expression = quote! { value.#field_ident };
-        let serialize =
-            generate_serialize_from_frozen(&field.ty, value_expression, registry).await?;
-        // The trailing `;` terminates the field's serialization statement so
-        // that consecutive fields don't run together (a struct with more than
-        // one field would otherwise emit `writer.add_f32(..) writer.add_..`).
-        fields_serialization.push(quote! {
-          writer.add_structure_field(&#field_const_id_ident);
-          #serialize;
-        });
-    }
-    let field_count = fields_serialization.len() as u32;
-
-    let into_impl = generate_into_impl(&struct_ident);
-    let serialization = quote! {
-      #into_impl
-
-      pub fn serialize_to_writer(value: &#struct_ident, writer: &mut BufferWriter) {
-        let structure_id = #const_id_ident.as_slice();
-        writer.begin_structure(structure_id, #field_count);
-        #(#fields_serialization)*
-      }
-
-      /// Serializes the structure as a *raw* element — the field count and
-      /// fields only, without the leading `TYPE_STRUCTURE` tag or the 16-byte
-      /// structure id. This is the on-wire encoding of an element inside an
-      /// array of structures, where the id is carried once by the array header.
-      /// It mirrors `arora_buffers::serde_uuid`'s `Value::ArrayStructure` so the
-      /// generated codegen and the generic value codec agree across the
-      /// `arora_call` boundary.
-      pub fn serialize_to_writer_raw(value: &#struct_ident, writer: &mut BufferWriter) {
-        writer.begin_structure_raw(#field_count);
-        #(#fields_serialization)*
-      }
-    };
-
-    // Struct Deserialization.
-    // We convert each field we read into an optional,
-    // then we move all of them into the result structure.
-    let mut field_variable_declarations = Vec::new();
-    for (_, field) in &structure.fields {
-        let variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
-        let mut type_ident =
-            type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
-        if is_self_ref(field) {
-            type_ident = quote! { Box<#type_ident> };
-        }
-        field_variable_declarations
-            .push(quote! { let mut #variable_ident: Option<#type_ident> = None; });
-    }
-
-    let mut deserialization_cases = Vec::new();
-    for (_, field) in &structure.fields {
-        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        let field_variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
-        let deserialize =
-            generate_deserialize_from_frozen(&field.ty, registry, CheckType::Yes).await?;
-        let deserialize = if is_self_ref(field) {
-            quote! { Box::new(#deserialize) }
-        } else {
-            deserialize
+/// Generates a Rust source file declaring the given structure: a struct
+/// deriving `AroraType` under the record's id, version and field ids, so it
+/// converts to and from `Value` like any other declared type. A field of a
+/// record in `extern_types` names that record's declared type.
+/// It depends on `arora_types`.
+pub async fn generate_structure_source(
+    id: &Uuid,
+    version: &Version,
+    structure: &StructureFrozen,
+    registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
+    parent_path: &str,
+) -> Result<Directory, GenerationError> {
+    let struct_ident = type_ident(&structure.name);
+    let type_attribute = type_attribute(id, version, &structure.name, &struct_ident)?;
+    let mut fields = Vec::new();
+    let mut references_generated = false;
+    for (field_id, field) in &structure.fields {
+        let unsupported = |shape: &str| {
+            GenerationError::Generic(format!(
+                "structure {} field {}: {shape} cannot be declared with #[derive(AroraType)]",
+                structure.name, field.name
+            ))
         };
-        deserialization_cases.push(quote! {
-          if field_raw_id == #field_const_id_ident {
-            #field_variable_ident = Some(#deserialize);
-          }
-        });
-    }
-
-    let struct_field_assignment = structure.fields.iter().map(|(_, field)| {
-        let field_ident = variable_ident(&field.name);
-        let variable_ident = struct_field_intermediate_variable_ident(name, &field.name);
-        quote! { #field_ident: #variable_ident.unwrap() }
-    });
-
-    let try_from_impl = generate_try_from_impl(&struct_ident);
-    let expected_field_count = structure.fields.len();
-    let deserialization = quote! {
-      #try_from_impl
-
-      pub fn deserialize_from_reader(reader: &mut BufferReader, check_type: bool) -> Result<#struct_ident, DeserializationError> {
-        let field_count = if check_type {
-          let type_raw_id_opt = reader.next_type();
-          if type_raw_id_opt.is_none() {
-            return Err(DeserializationError{ message: "missing next type information".to_string() })
-          }
-          if type_raw_id_opt.unwrap() != TYPE_STRUCTURE {
-            return Err(DeserializationError{ message: "next type is not a structure".to_string() })
-          }
-          let (structure_raw_id, field_count) = reader.get_structure();
-          if #const_id_ident != structure_raw_id {
-            return Err(DeserializationError{ message: "structure id does not match".to_string() })
-          }
-          field_count
-        } else {
-          reader.get_structure_raw()
-        };
-        if #expected_field_count != field_count as usize {
-          return Err(DeserializationError{
-            message: format!("expected {} fields, found {}", #expected_field_count, field_count)
-          })
-        }
-
-        #(#field_variable_declarations)*
-        for _ in 0..field_count {
-          let field_raw_id = reader.get_structure_field();
-          #(#deserialization_cases) else* else {
-            return Err(DeserializationError {
-              message: format!("unexpected struct field {}", Uuid::from_slice(field_raw_id).unwrap().to_string())
-            })
-          }
-        }
-
-        Ok(#struct_ident {
-          #(#struct_field_assignment,)*
-        })
-      }
-    };
-
-    // Conversion to/from the generic `Value` vocabulary (mirrors the enum path).
-    // Without this, generated structs only round-trip through the binary buffer
-    // format; with it they flow through the Arora data store as `Value::Structure`.
-    let mut to_value_fields = Vec::new();
-    for (_, field) in &structure.fields {
-        let field_ident = variable_ident(&field.name);
-        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        // Deref the `Box` on a self-referential field back to the owned value.
-        let field_access = if is_self_ref(field) {
-            quote! { *self.#field_ident }
-        } else {
-            quote! { self.#field_ident }
-        };
-        let field_value = generate_value_from_frozen(&field.ty, field_access, registry).await?;
-        to_value_fields.push(quote! {
-          StructureField {
-            id: Uuid::from_bytes(#field_const_id_ident),
-            value: Box::new(#field_value),
-          }
-        });
-    }
-    let to_value = quote! {
-      impl Into<Value> for #struct_ident {
-        fn into(self) -> Value {
-          Value::Structure(Structure {
-            id: Uuid::from_bytes(#const_id_ident),
-            fields: vec![#(#to_value_fields),*],
-          })
-        }
-      }
-    };
-
-    let mut from_value_field_vars = Vec::new();
-    let mut from_value_cases = Vec::new();
-    let mut from_value_assignments = Vec::new();
-    for (_, field) in &structure.fields {
-        let field_ident = variable_ident(&field.name);
-        let field_const_id_ident = struct_field_const_id_ident(name, &field.name);
-        let field_var = struct_field_intermediate_variable_ident(name, &field.name);
-        let mut field_type_ident =
-            type_ident_from_frozen(&field.ty, registry, PrefixWithMod::Yes).await?;
-        let extract = generate_field_from_value_frozen(
-            &field.ty,
-            quote! { *field.value },
-            &field.name,
-            registry,
-        )
-        .await?;
-        let extract = if is_self_ref(field) {
-            field_type_ident = quote! { Box<#field_type_ident> };
-            quote! { Box::new(#extract) }
-        } else {
-            extract
-        };
-        from_value_field_vars
-            .push(quote! { let mut #field_var: Option<#field_type_ident> = None; });
-        from_value_cases.push(quote! { #field_const_id_ident => { #field_var = Some(#extract); } });
-        let missing_message = format!("missing field {}", field.name);
-        from_value_assignments.push(if field.ty.is_option() {
-            quote! { #field_ident: #field_var.flatten() }
-        } else {
-            quote! {
-              #field_ident: #field_var.ok_or_else(|| ConversionError { message: #missing_message.to_string() })?
+        // A dynamic field carries a `Value` as-is: the derive's `keyvalue`.
+        let keyvalue = match &field.ty {
+            FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *KEY_VALUE_ID => true,
+            FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
+                return Err(unsupported("a dynamic array value"))
             }
-        });
+            FrozenTy::FrozenArray(array) if is_dynamic_value_id(&array.reference.id) => {
+                return Err(unsupported("an array of dynamic values"))
+            }
+            FrozenTy::FrozenOption(option) => match &*option.element {
+                FrozenTy::Primitive(primitive) if is_primitive_array(&primitive.kind) => {
+                    return Err(unsupported("an optional array"))
+                }
+                FrozenTy::FrozenArray(_) => return Err(unsupported("an optional array")),
+                FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
+                    return Err(unsupported("an optional dynamic value"))
+                }
+                FrozenTy::FrozenOption(_) => return Err(unsupported("an optional optional")),
+                _ => false,
+            },
+            _ => false,
+        };
+        references_generated |= references_generated_record(&field.ty, extern_types);
+        // A reference back to this very structure would make it infinitely
+        // sized, so it is boxed. (An array of it needs no box: a `Vec` is
+        // already heap-allocated.)
+        let field_type = match &field.ty {
+            FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *id => {
+                quote! { Box<#struct_ident> }
+            }
+            FrozenTy::FrozenOption(option) if matches!(&*option.element, FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *id) =>
+            {
+                quote! { Option<Box<#struct_ident>> }
+            }
+            ty => type_ident_from_frozen(ty, registry, extern_types).await?,
+        };
+        let field_ident = variable_ident(&field.name);
+        let attribute = member_attribute(field_id, &field.name, &field_ident, keyvalue);
+        fields.push(quote! { #attribute pub #field_ident: #field_type });
     }
-    let from_value = quote! {
-      impl TryFrom<Value> for #struct_ident {
-        type Error = ConversionError;
-        fn try_from(value: Value) -> Result<Self, Self::Error> {
-          if let Value::Structure(as_struct) = value {
-            if *as_struct.id.as_bytes() != #const_id_ident {
-              return Err(ConversionError { message: "unexpected structure type ID".to_string() });
-            }
-            #(#from_value_field_vars)*
-            for field in as_struct.fields {
-              match *field.id.as_bytes() {
-                #(#from_value_cases)*
-                _ => return Err(ConversionError { message: "unexpected struct field".to_string() }),
-              }
-            }
-            Ok(#struct_ident {
-              #(#from_value_assignments,)*
-            })
-          } else {
-            Err(ConversionError { message: "unexpected kind".to_string() })
-          }
-        }
-      }
-    };
 
-    // Structures with fields of other *declared* types refer to sibling
-    // generated modules as `arora_generated::<module>::…`, so `arora_generated`
-    // must be in scope here. Structures made only of primitives or dynamic
-    // `Value` fields don't (and an unused import would trip `-D warnings`).
-    let references_generated_modules = structure.fields.values().any(|field| match &field.ty {
-        FrozenTy::Primitive(_) => false,
-        FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
-        FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
-        FrozenTy::FrozenOption(option) => match &*option.element {
-            FrozenTy::Primitive(_) => false,
-            FrozenTy::FrozenScalar(scalar) => !is_dynamic_value_id(&scalar.reference.id),
-            FrozenTy::FrozenArray(array) => !is_dynamic_value_id(&array.reference.id),
-            FrozenTy::FrozenOption(_) => true,
-        },
-    });
-    let generated_modules_use = if references_generated_modules {
+    // Fields of other generated types name them `arora_generated::<module>::…`.
+    let generated_modules_use = if references_generated {
         quote! { use crate::arora_generated; }
     } else {
         quote! {}
     };
-
-    // The `Value`-vocabulary conversions for array-of-structure /
-    // array-of-enumeration fields reference extra value types; import them only
-    // when a field needs them so structs without such fields don't carry unused
-    // imports (which would trip `-D warnings` in consumers).
-    let mut needs_structure_without_id = false;
-    let mut needs_enumeration_value_types = false;
-    for field in structure.fields.values() {
-        if let FrozenTy::FrozenArray(array) = &field.ty {
-            if is_dynamic_value_id(&array.reference.id) {
-                continue;
-            }
-            match registry
-                .type_of(&Selector::Id(array.reference.id.to_owned()))
-                .await
-                .map_err(GenerationError::RegistryError)?
-            {
-                RecordType::Structure => needs_structure_without_id = true,
-                RecordType::Enumeration => needs_enumeration_value_types = true,
-                _ => {}
-            }
-        }
-    }
-    let mut value_imports: Vec<TokenStream> = vec![
-        quote! { ConversionError },
-        quote! { Structure },
-        quote! { StructureField },
-        quote! { Value },
-    ];
-    if needs_structure_without_id {
-        value_imports.push(quote! { StructureWithoutId });
-    }
-    if needs_enumeration_value_types {
-        value_imports.push(quote! { Enumeration });
-        value_imports.push(quote! { EnumerationWithoutId });
-    }
-
-    let type_source = quote! {
-      use arora_buffers::*;
-      use uuid::Uuid;
-      use arora_types::value::{ #(#value_imports),* };
-      use crate::arora_generated::error::DeserializationError;
+    let source = quote! {
       #generated_modules_use
-      #struct_declaration
-      #serialization
-      #deserialization
-      #to_value
-      #from_value
-      #id_declaration
-      #(#field_id_declarations)*
-    };
 
-    let base_file_name = structure.name.to_case(Case::Snake);
-    let file_path = if parent_path.is_empty() {
+      #[derive(Debug, Clone, PartialEq, arora_types::AroraType)]
+      #type_attribute
+      pub struct #struct_ident {
+        #(#fields),*
+      }
+    };
+    token_stream_to_file(type_file_path(&structure.name, parent_path), &source)
+        .map_err(GenerationError::VfsError)
+}
+
+/// The `#[arora(…)]` attribute of a generated type: its record id, its record
+/// version when not the derive's default, and its record name when not its
+/// Rust identifier.
+fn type_attribute(
+    id: &Uuid,
+    version: &Version,
+    name: &str,
+    ident: &Ident,
+) -> Result<TokenStream, GenerationError> {
+    let id = id.to_string();
+    let mut arguments = vec![quote! { id = #id }];
+    if !version.pre.is_empty() || !version.build.is_empty() {
+        return Err(GenerationError::Generic(format!(
+            "{name}: version {version} has a pre-release or build part, which \
+             #[derive(AroraType)] cannot pin"
+        )));
+    }
+    if *version != Version::new(1, 0, 0) {
+        let version = version.to_string();
+        arguments.push(quote! { version = #version });
+    }
+    if *ident != name {
+        arguments.push(quote! { name = #name });
+    }
+    Ok(quote! { #[arora(#(#arguments),*)] })
+}
+
+/// The `#[arora(…)]` attribute of a generated field or variant: its record id,
+/// and its record name when not its Rust identifier.
+fn member_attribute(id: &Uuid, name: &str, ident: &Ident, keyvalue: bool) -> TokenStream {
+    let id = id.to_string();
+    let mut arguments = vec![quote! { id = #id }];
+    if *ident != name {
+        arguments.push(quote! { name = #name });
+    }
+    if keyvalue {
+        arguments.push(quote! { keyvalue });
+    }
+    quote! { #[arora(#(#arguments),*)] }
+}
+
+/// The file a generated type is written to: its record path, in snake case.
+fn type_file_path(name: &str, parent_path: &str) -> String {
+    let base_file_name = name.to_case(Case::Snake);
+    if parent_path.is_empty() {
         format!("{}.rs", base_file_name)
     } else {
         format!("{}/{}.rs", parent_path.replace('.', "/"), base_file_name)
-    };
-    token_stream_to_file(file_path, &type_source).map_err(GenerationError::VfsError)
+    }
+}
+
+/// Whether a field of type `ty` names a type generated beside it.
+fn references_generated_record(ty: &FrozenTy, extern_types: &ExternTypes) -> bool {
+    let generated = |id: &Uuid| !is_dynamic_value_id(id) && !extern_types.contains(id);
+    match ty {
+        FrozenTy::Primitive(_) => false,
+        FrozenTy::FrozenScalar(scalar) => generated(&scalar.reference.id),
+        FrozenTy::FrozenArray(array) => generated(&array.reference.id),
+        FrozenTy::FrozenOption(option) => {
+            references_generated_record(&option.element, extern_types)
+        }
+    }
+}
+
+fn is_primitive_array(kind: &PrimitiveKind) -> bool {
+    matches!(
+        kind,
+        PrimitiveKind::ArrayBoolean
+            | PrimitiveKind::ArrayU8
+            | PrimitiveKind::ArrayU16
+            | PrimitiveKind::ArrayU32
+            | PrimitiveKind::ArrayU64
+            | PrimitiveKind::ArrayI8
+            | PrimitiveKind::ArrayI16
+            | PrimitiveKind::ArrayI32
+            | PrimitiveKind::ArrayI64
+            | PrimitiveKind::ArrayF32
+            | PrimitiveKind::ArrayF64
+            | PrimitiveKind::ArrayString
+    )
 }
 
 /// Generates a virtual source file with wrappers for every symbol imported by the module.
@@ -928,6 +621,7 @@ async fn generate_imports_from_module_source(
     module_path: &str,
     imports: &Vec<ImportAsset>,
     registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
 ) -> Result<Directory, GenerationError> {
     // Using dependent types.
     let uses = {
@@ -951,8 +645,7 @@ async fn generate_imports_from_module_source(
                 Err(err) => return Err(GenerationError::RegistryError(err)),
             };
             let type_ident =
-                type_ident_from_definition(&type_def, &dep.id, registry, PrefixWithMod::Yes)
-                    .await?;
+                type_ident_from_definition(&type_def, &dep.id, registry, extern_types).await?;
             uses.push(type_ident);
         }
         uses
@@ -986,14 +679,13 @@ async fn generate_imports_from_module_source(
             };
             let param_name_ident = format_ident!("{}", param.name);
             let param_type_ident =
-                type_ident_from_frozen(&param.ty, registry, PrefixWithMod::Yes).await?;
+                type_ident_from_frozen(&param.ty, registry, extern_types).await?;
             parameters_declarations.push(quote! {
               #maybe_mut #param_name_ident: #param_type_ident
             });
         }
         let ret_type_ident =
-            type_ident_from_frozen(&function_symbol.return_ty, registry, PrefixWithMod::Yes)
-                .await?;
+            type_ident_from_frozen(&function_symbol.return_ty, registry, extern_types).await?;
 
         // And implement the call.
         // First declare the const ids.
@@ -1035,6 +727,7 @@ async fn generate_imports_from_module_source(
                     &param.ty,
                     param_name_ident.into_token_stream(),
                     registry,
+                    extern_types,
                 )
                 .await?;
                 add_args.push(quote! {
@@ -1091,9 +784,13 @@ async fn generate_imports_from_module_source(
         // plus one field for each param.
         // Mutate the mutable parameters
         // and return.
-        let deserialize_ret =
-            generate_deserialize_from_frozen(&function_symbol.return_ty, registry, CheckType::Yes)
-                .await?;
+        let deserialize_ret = generate_deserialize_from_frozen(
+            &function_symbol.return_ty,
+            registry,
+            extern_types,
+            CheckType::Yes,
+        )
+        .await?;
 
         let process_params = if nof_args > 1 {
             let declare_mutable_params = {
@@ -1116,9 +813,13 @@ async fn generate_imports_from_module_source(
                         let param_name_ident = format_ident!("{}", param.name);
                         let function_param_const_id_ident =
                             function_param_const_id_ident(function_name, &param.name);
-                        let deserialize_param =
-                            generate_deserialize_from_frozen(&param.ty, registry, CheckType::Yes)
-                                .await?;
+                        let deserialize_param = generate_deserialize_from_frozen(
+                            &param.ty,
+                            registry,
+                            extern_types,
+                            CheckType::Yes,
+                        )
+                        .await?;
                         deserialize_params.push(quote! {
               x if *x == #function_param_const_id_ident => *#param_name_ident = #deserialize_param,
             });
@@ -1190,6 +891,7 @@ async fn generate_imports_from_module_source(
 async fn generate_module_source(
     module: &ModuleFrozen,
     registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
 ) -> Result<Directory, GenerationError> {
     // Function Uses.
     let exports = &module.exports;
@@ -1253,7 +955,7 @@ async fn generate_module_source(
                         other => other,
                     };
                     let param_type_ident =
-                        type_ident_from_frozen(declared_ty, registry, PrefixWithMod::Yes).await?;
+                        type_ident_from_frozen(declared_ty, registry, extern_types).await?;
                     param_declarations.push(
                         quote! { let mut #param_var_ident: Option<#param_type_ident> = None; },
                     );
@@ -1267,9 +969,13 @@ async fn generate_module_source(
                     let param_const_id_ident =
                         function_param_const_id_ident(&export.name, &param.name);
                     let param_var_ident = param_ident(param_id, param);
-                    let deserialize =
-                        generate_deserialize_from_frozen(&param.ty, registry, CheckType::YesResult)
-                            .await?;
+                    let deserialize = generate_deserialize_from_frozen(
+                        &param.ty,
+                        registry,
+                        extern_types,
+                        CheckType::YesResult,
+                    )
+                    .await?;
                     let assign = if param.ty.is_option() {
                         quote! { #param_var_ident = #deserialize; }
                     } else {
@@ -1323,6 +1029,7 @@ async fn generate_module_source(
                     &function_symbol.return_ty,
                     result_ident.clone(),
                     registry,
+                    extern_types,
                 )
                 .await?;
                 quote! {
@@ -1343,8 +1050,13 @@ async fn generate_module_source(
                         } else {
                             quote! { #param_var_ident.unwrap() }
                         };
-                        let serialize_param =
-                            generate_serialize_from_frozen(&param.ty, written, registry).await?;
+                        let serialize_param = generate_serialize_from_frozen(
+                            &param.ty,
+                            written,
+                            registry,
+                            extern_types,
+                        )
+                        .await?;
                         write_mutated_params.push(quote! {
                           writer.add_structure_field(&#param_const_id_ident);
                           #serialize_param;
@@ -1397,283 +1109,31 @@ async fn generate_module_source(
         function_declarations
     };
 
+    // Parameters and returns of generated types name them
+    // `arora_generated::<module>::…`.
+    let references_generated = exports.values().any(|export| {
+        let ExportKind::Function(function_symbol) = &export.kind;
+        references_generated_record(&function_symbol.return_ty, extern_types)
+            || function_symbol
+                .parameters
+                .values()
+                .any(|param| references_generated_record(&param.ty, extern_types))
+    });
+    let generated_modules_use = if references_generated {
+        quote! { use crate::arora_generated; }
+    } else {
+        quote! {}
+    };
+
     // Putting it all together.
     let source = quote! {
       use arora_buffers::*;
-      use crate::{arora_generated, #(#use_functions),*};
+      #generated_modules_use
+      use crate::{#(#use_functions),*};
       #(#function_declarations)*
       #(#function_ids)*
     };
     token_stream_to_file("export.rs", &source).map_err(GenerationError::VfsError)
-}
-
-pub fn generate_into_impl(type_ident: &Ident) -> TokenStream {
-    quote! {
-      impl Into<Box<[u8]>> for #type_ident {
-        fn into(self) -> Box<[u8]> {
-          let mut writer = BufferWriter::new();
-          serialize_to_writer(&self, &mut writer);
-          writer.finalize()
-        }
-      }
-    }
-}
-
-pub fn generate_try_from_impl(type_ident: &Ident) -> TokenStream {
-    quote! {
-      impl TryFrom<&[u8]> for #type_ident {
-        type Error = DeserializationError;
-
-        fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
-          let mut reader = BufferReader::new(buffer);
-          return deserialize_from_reader(&mut reader, true)
-        }
-      }
-    }
-}
-
-/// Generate an expression building a generic `Value` from a Rust field value.
-/// Counterpart of [`generate_serialize_from_frozen`] for the in-memory `Value`
-/// vocabulary instead of the binary buffer format.
-#[async_recursion(?Send)]
-async fn generate_value_from_frozen(
-    ty: &FrozenTy,
-    value_expression: TokenStream,
-    registry: &mut dyn ReadableRegistry,
-) -> Result<TokenStream, GenerationError> {
-    Ok(match ty {
-        // `Value::Option` of the element's own conversion.
-        FrozenTy::FrozenOption(option) => {
-            let element =
-                generate_value_from_frozen(&option.element, quote! { __element }, registry).await?;
-            quote! { Value::Option((#value_expression).map(|__element| Box::new(#element))) }
-        }
-        FrozenTy::Primitive(primitive) => match primitive.kind {
-            PrimitiveKind::Unit => quote! { Value::Unit },
-            PrimitiveKind::Boolean => quote! { Value::Boolean(#value_expression) },
-            PrimitiveKind::U8 => quote! { Value::U8(#value_expression) },
-            PrimitiveKind::U16 => quote! { Value::U16(#value_expression) },
-            PrimitiveKind::U32 => quote! { Value::U32(#value_expression) },
-            PrimitiveKind::U64 => quote! { Value::U64(#value_expression) },
-            PrimitiveKind::I8 => quote! { Value::I8(#value_expression) },
-            PrimitiveKind::I16 => quote! { Value::I16(#value_expression) },
-            PrimitiveKind::I32 => quote! { Value::I32(#value_expression) },
-            PrimitiveKind::I64 => quote! { Value::I64(#value_expression) },
-            PrimitiveKind::F32 => quote! { Value::F32(#value_expression) },
-            PrimitiveKind::F64 => quote! { Value::F64(#value_expression) },
-            PrimitiveKind::String => quote! { Value::String(#value_expression) },
-            PrimitiveKind::ArrayBoolean => quote! { Value::ArrayBoolean(#value_expression) },
-            PrimitiveKind::ArrayU8 => quote! { Value::ArrayU8(#value_expression) },
-            PrimitiveKind::ArrayU16 => quote! { Value::ArrayU16(#value_expression) },
-            PrimitiveKind::ArrayU32 => quote! { Value::ArrayU32(#value_expression) },
-            PrimitiveKind::ArrayU64 => quote! { Value::ArrayU64(#value_expression) },
-            PrimitiveKind::ArrayI8 => quote! { Value::ArrayI8(#value_expression) },
-            PrimitiveKind::ArrayI16 => quote! { Value::ArrayI16(#value_expression) },
-            PrimitiveKind::ArrayI32 => quote! { Value::ArrayI32(#value_expression) },
-            PrimitiveKind::ArrayI64 => quote! { Value::ArrayI64(#value_expression) },
-            PrimitiveKind::ArrayF32 => quote! { Value::ArrayF32(#value_expression) },
-            PrimitiveKind::ArrayF64 => quote! { Value::ArrayF64(#value_expression) },
-            PrimitiveKind::ArrayString => quote! { Value::ArrayString(#value_expression) },
-        },
-        // A dynamic-value field already holds a `Value`; pass it through.
-        FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
-            quote! { #value_expression }
-        }
-        // Nested struct/enum types implement `Into<Value>`.
-        FrozenTy::FrozenScalar(_) => quote! { Into::<Value>::into(#value_expression) },
-        // A dynamic array is already a `Vec<Value>`.
-        FrozenTy::FrozenArray(array) if is_dynamic_value_id(&array.reference.id) => {
-            quote! { Value::ArrayValue(#value_expression.into_iter().collect()) }
-        }
-        // Arrays of structures/enumerations become the corresponding typed
-        // `Value::ArrayStructure` / `Value::ArrayEnumeration` (the id carried
-        // once), matching `serde_uuid` — so `T -> Value -> serde_uuid` produces
-        // the same bytes as the direct buffer path.
-        FrozenTy::FrozenArray(array) => {
-            let raw_id = RawUuidValue(&array.reference.id);
-            match registry
-                .type_of(&Selector::Id(array.reference.id.to_owned()))
-                .await
-                .map_err(GenerationError::RegistryError)?
-            {
-                RecordType::Structure => quote! {
-                    Value::ArrayStructure {
-                        id: Uuid::from_bytes(#raw_id),
-                        elements: #value_expression
-                            .into_iter()
-                            .map(|__element| match Into::<Value>::into(__element) {
-                                Value::Structure(__s) => StructureWithoutId { fields: __s.fields },
-                                _ => unreachable!("generated structure did not convert to Value::Structure"),
-                            })
-                            .collect(),
-                    }
-                },
-                RecordType::Enumeration => quote! {
-                    Value::ArrayEnumeration {
-                        id: Uuid::from_bytes(#raw_id),
-                        elements: #value_expression
-                            .into_iter()
-                            .map(|__element| match Into::<Value>::into(__element) {
-                                Value::Enumeration(__e) => EnumerationWithoutId {
-                                    variant_id: __e.variant_id,
-                                    value: __e.value,
-                                },
-                                _ => unreachable!("generated enumeration did not convert to Value::Enumeration"),
-                            })
-                            .collect(),
-                    }
-                },
-                _ => unreachable!("unexpected array element record type"),
-            }
-        }
-    })
-}
-
-/// Generate an expression extracting a Rust field value out of a generic `Value`.
-/// Counterpart of [`generate_deserialize_from_frozen`]. The produced expression
-/// may `return Err(ConversionError { .. })` from the enclosing `try_from`.
-#[async_recursion(?Send)]
-async fn generate_field_from_value_frozen(
-    ty: &FrozenTy,
-    value_expression: TokenStream,
-    field_name: &str,
-    registry: &mut dyn ReadableRegistry,
-) -> Result<TokenStream, GenerationError> {
-    match ty {
-        // An optional arrives as `Value::Option`, or as its bare element when
-        // present.
-        FrozenTy::FrozenOption(option) => {
-            let boxed = generate_field_from_value_frozen(
-                &option.element,
-                quote! { (*__boxed) },
-                field_name,
-                registry,
-            )
-            .await?;
-            let bare = generate_field_from_value_frozen(
-                &option.element,
-                quote! { __bare },
-                field_name,
-                registry,
-            )
-            .await?;
-            Ok(quote! {
-                match #value_expression {
-                    Value::Option(None) => None,
-                    Value::Option(Some(__boxed)) => Some(#boxed),
-                    __bare => Some(#bare),
-                }
-            })
-        }
-        FrozenTy::Primitive(primitive) => {
-            let mismatch = format!("field {}: unexpected value kind", field_name);
-            let arm = match primitive.kind {
-                PrimitiveKind::Unit => quote! { Value::Unit => () },
-                PrimitiveKind::Boolean => quote! { Value::Boolean(__v) => __v },
-                PrimitiveKind::U8 => quote! { Value::U8(__v) => __v },
-                PrimitiveKind::U16 => quote! { Value::U16(__v) => __v },
-                PrimitiveKind::U32 => quote! { Value::U32(__v) => __v },
-                PrimitiveKind::U64 => quote! { Value::U64(__v) => __v },
-                PrimitiveKind::I8 => quote! { Value::I8(__v) => __v },
-                PrimitiveKind::I16 => quote! { Value::I16(__v) => __v },
-                PrimitiveKind::I32 => quote! { Value::I32(__v) => __v },
-                PrimitiveKind::I64 => quote! { Value::I64(__v) => __v },
-                PrimitiveKind::F32 => quote! { Value::F32(__v) => __v },
-                PrimitiveKind::F64 => quote! { Value::F64(__v) => __v },
-                PrimitiveKind::String => quote! { Value::String(__v) => __v },
-                PrimitiveKind::ArrayBoolean => quote! { Value::ArrayBoolean(__v) => __v },
-                PrimitiveKind::ArrayU8 => quote! { Value::ArrayU8(__v) => __v },
-                PrimitiveKind::ArrayU16 => quote! { Value::ArrayU16(__v) => __v },
-                PrimitiveKind::ArrayU32 => quote! { Value::ArrayU32(__v) => __v },
-                PrimitiveKind::ArrayU64 => quote! { Value::ArrayU64(__v) => __v },
-                PrimitiveKind::ArrayI8 => quote! { Value::ArrayI8(__v) => __v },
-                PrimitiveKind::ArrayI16 => quote! { Value::ArrayI16(__v) => __v },
-                PrimitiveKind::ArrayI32 => quote! { Value::ArrayI32(__v) => __v },
-                PrimitiveKind::ArrayI64 => quote! { Value::ArrayI64(__v) => __v },
-                PrimitiveKind::ArrayF32 => quote! { Value::ArrayF32(__v) => __v },
-                PrimitiveKind::ArrayF64 => quote! { Value::ArrayF64(__v) => __v },
-                PrimitiveKind::ArrayString => quote! { Value::ArrayString(__v) => __v },
-            };
-            Ok(quote! {
-                match #value_expression {
-                    #arm,
-                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
-                }
-            })
-        }
-        FrozenTy::FrozenScalar(scalar) if is_dynamic_value_id(&scalar.reference.id) => {
-            // The field already is a `Value`; take it verbatim.
-            Ok(quote! { #value_expression })
-        }
-        FrozenTy::FrozenScalar(_) => {
-            let type_ident = type_ident_from_frozen(ty, registry, PrefixWithMod::Yes).await?;
-            Ok(quote! { <#type_ident as TryFrom<Value>>::try_from(#value_expression)? })
-        }
-        // A dynamic array is a `Vec<Value>` taken verbatim.
-        FrozenTy::FrozenArray(array) if is_dynamic_value_id(&array.reference.id) => {
-            let mismatch = format!("field {}: expected array value", field_name);
-            Ok(quote! {
-                match #value_expression {
-                    Value::ArrayValue(__items) => __items,
-                    _ => return Err(ConversionError { message: #mismatch.to_string() }),
-                }
-            })
-        }
-        // Arrays of structures/enumerations are extracted from the typed
-        // `Value::ArrayStructure` / `Value::ArrayEnumeration`; each element is
-        // rebuilt into a full `Value::Structure` / `Value::Enumeration` (the id
-        // reattached from the array header) and converted through the element's
-        // own `TryFrom<Value>`.
-        FrozenTy::FrozenArray(array) => {
-            let type_ident =
-                type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
-            match registry
-                .type_of(&Selector::Id(array.reference.id.to_owned()))
-                .await
-                .map_err(GenerationError::RegistryError)?
-            {
-                RecordType::Structure => {
-                    let mismatch = format!("field {}: expected array of structures", field_name);
-                    Ok(quote! {
-                        match #value_expression {
-                            Value::ArrayStructure { id: __id, elements: __items } => {
-                                let mut __out = Vec::with_capacity(__items.len());
-                                for __swi in __items {
-                                    __out.push(<#type_ident as TryFrom<Value>>::try_from(
-                                        Value::Structure(Structure { id: __id, fields: __swi.fields })
-                                    )?);
-                                }
-                                __out
-                            }
-                            _ => return Err(ConversionError { message: #mismatch.to_string() }),
-                        }
-                    })
-                }
-                RecordType::Enumeration => {
-                    let mismatch = format!("field {}: expected array of enumerations", field_name);
-                    Ok(quote! {
-                        match #value_expression {
-                            Value::ArrayEnumeration { id: __id, elements: __items } => {
-                                let mut __out = Vec::with_capacity(__items.len());
-                                for __ewi in __items {
-                                    __out.push(<#type_ident as TryFrom<Value>>::try_from(
-                                        Value::Enumeration(Enumeration {
-                                            id: __id,
-                                            variant_id: __ewi.variant_id,
-                                            value: __ewi.value,
-                                        })
-                                    )?);
-                                }
-                                __out
-                            }
-                            _ => return Err(ConversionError { message: #mismatch.to_string() }),
-                        }
-                    })
-                }
-                _ => unreachable!("unexpected array element record type"),
-            }
-        }
-    }
 }
 
 #[async_recursion(?Send)]
@@ -1681,14 +1141,19 @@ async fn generate_serialize_from_frozen(
     ty: &FrozenTy,
     value_expression: TokenStream,
     registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
         // A presence flag, then the element when present — the framing
-        // `serde_uuid` gives `Value::Option`.
+        // `froto_value` gives `Value::Option`.
         FrozenTy::FrozenOption(option) => {
-            let element =
-                generate_serialize_from_frozen(&option.element, quote! { (*__element) }, registry)
-                    .await?;
+            let element = generate_serialize_from_frozen(
+                &option.element,
+                quote! { (*__element) },
+                registry,
+                extern_types,
+            )
+            .await?;
             Ok(quote! {
               match &#value_expression {
                 Some(__element) => {
@@ -1767,63 +1232,45 @@ async fn generate_serialize_from_frozen(
                 }
             })
         }
+        // A value of a record type crosses the buffer as its `Value`, through
+        // the generic value codec: the encoding the engine reads it with.
         FrozenTy::FrozenScalar(scalar) => {
-            // Dynamic-value fields carry a generic `Value`; delegate to the
-            // runtime's self-describing value serializer.
+            // A dynamic value already is a `Value`.
             if is_dynamic_value_id(&scalar.reference.id) {
                 return Ok(quote! {
-                  arora_buffers::serde_uuid::serialize_to_writer(&#value_expression, writer)
+                  arora_buffers::froto_value::serialize_to_writer(&#value_expression, writer)
                 });
             }
-            let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
-                .await
-                .map_err(GenerationError::RegistryError)?;
-            // `writer` is always a `&mut BufferWriter` binding, so reborrow it
-            // (`&mut writer` would be a `&mut &mut BufferWriter`).
-            Ok(quote! { #mod_prefix serialize_to_writer(&#value_expression, writer) })
+            // `writer` is always a `&mut BufferWriter` binding.
+            Ok(quote! {
+              arora_buffers::froto_value::serialize_to_writer(
+                &arora_types::value::Value::from(::std::clone::Clone::clone(&#value_expression)),
+                writer,
+              )
+            })
         }
         FrozenTy::FrozenArray(array) => {
-            let type_def = registry
-                .get_type(
-                    &Selector::Id(array.reference.id),
-                    &VersionReq::parse(array.reference.version.0.to_string().as_str()).unwrap(),
-                )
-                .await
-                .map_err(GenerationError::RegistryError)?;
-            let id_bytes = RawUuidValue(&array.reference.id);
-            // `add_array_{structure,enumeration}` take the type id as `&[u8]`;
-            // `#id_bytes` expands to a `[u8; 16]` literal, so borrow it.
-            let add_array_args = quote! { &#id_bytes, #value_expression.len() as u32 };
-            let prepare_array = match type_def {
-                TypeDefinitionFrozen::Primitive(_) => {
-                    unreachable!("got an array of primitive type instead of a primitive array type")
-                }
-                TypeDefinitionFrozen::Enumeration(_) => {
-                    quote! { writer.add_array_enumeration(#add_array_args); }
-                }
-                TypeDefinitionFrozen::Structure(_) => {
-                    quote! { writer.add_array_structure(#add_array_args); }
-                }
-            };
-            let mod_prefix = generated_mod_ident_from_id(&array.reference.id, registry)
-                .await
-                .map_err(GenerationError::RegistryError)?;
-            // Serialize each element (borrowing the vector so we don't move the
-            // field out of `&value`), not the whole vector. Elements take the
-            // value by reference, and `element` is already a reference because we
-            // iterate over `&value.field`.
-            //
-            // Elements (structures and enumerations alike) are written in the
-            // *raw* encoding (`serialize_to_writer_raw`: no per-element type tag
-            // or id — the id is carried once by the array header) to match
-            // `serde_uuid`'s `Value::ArrayStructure` / `Value::ArrayEnumeration`,
-            // so the codegen and the generic value codec agree across the
-            // `arora_call` boundary.
+            if is_dynamic_value_id(&array.reference.id) {
+                return Ok(quote! {
+                  arora_buffers::froto_value::serialize_to_writer(
+                    &arora_types::value::Value::ArrayValue(::std::clone::Clone::clone(&#value_expression)),
+                    writer,
+                  )
+                });
+            }
+            let element_type =
+                type_ident_from_id(&array.reference.id, registry, extern_types).await?;
             Ok(quote! {
-              #prepare_array
-              for element in &#value_expression {
-                #mod_prefix serialize_to_writer_raw(element, writer);
-              }
+              arora_buffers::froto_value::serialize_to_writer(
+                &arora_types::value::Value::array_of_type::<#element_type>(
+                  #value_expression
+                    .iter()
+                    .cloned()
+                    .map(arora_types::value::Value::from)
+                    .collect(),
+                ),
+                writer,
+              )
             })
         }
     }
@@ -1833,6 +1280,7 @@ async fn generate_serialize_from_frozen(
 async fn generate_deserialize_from_frozen(
     ty: &FrozenTy,
     registry: &mut dyn ReadableRegistry,
+    extern_types: &ExternTypes,
     check_type: CheckType,
 ) -> Result<TokenStream, GenerationError> {
     match ty {
@@ -1845,8 +1293,13 @@ async fn generate_deserialize_from_frozen(
             } else {
                 CheckType::Yes
             };
-            let element =
-                generate_deserialize_from_frozen(&option.element, registry, element_check).await?;
+            let element = generate_deserialize_from_frozen(
+                &option.element,
+                registry,
+                extern_types,
+                element_check,
+            )
+            .await?;
             Ok(quote! {{
               if reader.peek_type() == Some(TYPE_OPTION) {
                 reader.next_type();
@@ -1879,7 +1332,6 @@ async fn generate_deserialize_from_frozen(
                         }
                       }
                     },
-                    CheckType::No => quote! {},
                 };
                 quote! {{
                     #type_check
@@ -1987,104 +1439,65 @@ async fn generate_deserialize_from_frozen(
                 }
             })
         }
+        // A value of a record type is read as a `Value`, through the generic
+        // value codec, and converted to its Rust type.
         FrozenTy::FrozenScalar(scalar) => {
-            // Dynamic-value fields read back a self-describing generic `Value`.
+            // A dynamic value is kept as the `Value` read.
             if is_dynamic_value_id(&scalar.reference.id) {
                 return Ok(quote! {
-                  arora_buffers::serde_uuid::deserialize_from_reader(reader)
+                  arora_buffers::froto_value::deserialize_from_reader(reader)
                 });
             }
-            let mod_prefix = generated_mod_ident_from_id(&scalar.reference.id, registry)
-                .await
-                .map_err(GenerationError::RegistryError)?;
-            let check_type_bool = check_type != CheckType::No;
             let type_ident =
-                type_ident_from_id(&scalar.reference.id, registry, PrefixWithMod::Yes).await?;
+                type_ident_from_id(&scalar.reference.id, registry, extern_types).await?;
             let type_str = type_ident.to_string();
-            // `reader` is always a `&mut BufferReader` binding (the generated
-            // `deserialize_from_reader` takes it by mutable reference, and the
-            // export/import handlers rebind it as one). Pass it through by
-            // reborrow — `&mut reader` would be a `&mut &mut BufferReader`.
-            Ok(match check_type {
-                CheckType::YesResult => quote! {
-                  #mod_prefix deserialize_from_reader(reader, #check_type_bool)
-                    .map_err(|e| format!("failed to deserialize {}: {}", #type_str, e))?
-                },
-                _ => quote! {
-                  #mod_prefix deserialize_from_reader(reader, #check_type_bool)
-                    .expect(&format!("failed to deserialize {}", #type_str))
-                },
-            })
+            // `reader` is always a `&mut BufferReader` binding.
+            let read = quote! {
+              <#type_ident as ::std::convert::TryFrom<arora_types::value::Value>>::try_from(
+                arora_buffers::froto_value::deserialize_from_reader(reader),
+              )
+            };
+            Ok(fail_deserialization(read, &type_str, check_type))
         }
         FrozenTy::FrozenArray(array) => {
-            let type_ident =
-                type_ident_from_id(&array.reference.id, registry, PrefixWithMod::Yes).await?;
-            let element_record_type = registry
-                .type_of(&Selector::Id(array.reference.id.to_owned()))
-                .await
-                .map_err(GenerationError::RegistryError)?;
-            // Elements (structures and enumerations) are stored raw — no
-            // per-element tag/id; the id is carried once by the array header,
-            // matching `serde_uuid`'s `Value::ArrayStructure` /
-            // `Value::ArrayEnumeration`. `CheckType::No` invokes the raw read
-            // path (`get_structure_raw` for structures; the variant id + payload
-            // without the enumeration id for enumerations).
-            let element_check_type = CheckType::No;
-            let deserialize_element = generate_deserialize_from_frozen(
-                &FrozenTy::FrozenScalar(FrozenScalar {
-                    reference: array.reference.to_owned(),
-                }),
-                registry,
-                element_check_type,
-            )
-            .await?;
-            let type_enum = match element_record_type {
-                RecordType::Enumeration => quote! { TYPE_ENUMERATION },
-                RecordType::Structure => quote! { TYPE_STRUCTURE },
-                _ => unreachable!("unexpected type of element in array"),
+            let (type_ident, convert) = if is_dynamic_value_id(&array.reference.id) {
+                (dynamic_value_type(), quote! { Ok(__element) })
+            } else {
+                let type_ident =
+                    type_ident_from_id(&array.reference.id, registry, extern_types).await?;
+                let convert = quote! {
+                  <#type_ident as ::std::convert::TryFrom<arora_types::value::Value>>::try_from(__element)
+                    .map_err(|e| e.to_string())
+                };
+                (type_ident, convert)
             };
-            let raw_id = RawUuidValue(&array.reference.id);
-            let array_checks = match check_type {
-                CheckType::Yes => quote! {
-                  {
-                    let _at = reader.next_type();
-                    assert_eq!(_at, Some(TYPE_ARRAY));
-                  }
-                  let (ty, count) = reader.get_array();
-                  assert_eq!(ty, #type_enum);
-                  {
-                    let _id = reader.get_structure_field();
-                    assert_eq!(_id, &#raw_id);
-                  }
-                },
-                _ => quote! {
-                  {
-                    let _at = reader.next_type();
-                    if _at != Some(TYPE_ARRAY) {
-                      return Err(format!("expected array, got {:?}", _at));
-                    }
-                  }
-                  let (ty, count) = reader.get_array();
-                  if ty != #type_enum {
-                    return Err(format!("expected array element type {:?}, got {:?}", #type_enum, ty));
-                  }
-                  {
-                    let _id = reader.get_structure_field();
-                    if _id != &#raw_id {
-                      return Err("array type id mismatch".to_string());
-                    }
-                  }
-                },
+            let type_str = format!("array of {}", type_ident);
+            let read = quote! {
+              arora_buffers::froto_value::deserialize_from_reader(reader)
+                .into_elements()
+                .and_then(|__elements| {
+                  __elements
+                    .into_iter()
+                    .map(|__element| #convert)
+                    .collect::<::std::result::Result<::std::vec::Vec<#type_ident>, ::std::string::String>>()
+                })
             };
-            Ok(quote! {{
-              #array_checks
-              let mut res = Vec::<#type_ident>::with_capacity(count as usize);
-              for _i in 0..count {
-                res.push(#deserialize_element);
-              }
-              res
-            }})
+            Ok(fail_deserialization(read, &type_str, check_type))
         }
+    }
+}
+
+/// An expression unwrapping `read`, a `Result` whose error displays: a
+/// `return Err(String)` from the enclosing export shim under
+/// [`CheckType::YesResult`], a panic otherwise.
+fn fail_deserialization(read: TokenStream, type_str: &str, check_type: CheckType) -> TokenStream {
+    match check_type {
+        CheckType::YesResult => quote! {
+          #read.map_err(|e| format!("failed to deserialize {}: {}", #type_str, e))?
+        },
+        _ => quote! {
+          #read.unwrap_or_else(|e| panic!("failed to deserialize {}: {}", #type_str, e))
+        },
     }
 }
 
@@ -2107,53 +1520,6 @@ pub fn token_stream_to_file<P: AsRef<path::Path>>(
 
 pub fn type_ident(type_name: &String) -> Ident {
     format_ident!("{}", type_name.to_case(Case::UpperCamel))
-}
-
-pub fn struct_field_const_id_ident(struct_name: &String, field_name: &String) -> Ident {
-    format_ident!(
-        "{}_{}_FIELD_RAW_ID",
-        struct_name.to_case(Case::UpperSnake),
-        field_name.to_case(Case::UpperSnake)
-    )
-}
-
-pub fn struct_field_ident(struct_name: &String, field_name: &String) -> TokenStream {
-    format!(
-        "{}::{}",
-        struct_name.to_case(Case::UpperCamel),
-        field_name.to_case(Case::UpperCamel)
-    )
-    .parse()
-    .unwrap()
-}
-
-pub fn struct_field_intermediate_variable_ident(
-    struct_name: &String,
-    field_name: &String,
-) -> Ident {
-    format_ident!(
-        "{}_{}",
-        struct_name.to_case(Case::Snake),
-        field_name.to_case(Case::Snake),
-    )
-}
-
-pub fn enum_variant_ident(enum_name: &String, variant_name: &String) -> TokenStream {
-    format!(
-        "{}::{}",
-        enum_name.to_case(Case::UpperCamel),
-        variant_name.to_case(Case::UpperCamel),
-    )
-    .parse()
-    .unwrap()
-}
-
-pub fn enum_variant_const_id_ident(enum_name: &String, variant_name: &String) -> Ident {
-    format_ident!(
-        "{}_{}_VARIANT_RAW_ID",
-        enum_name.to_case(Case::UpperSnake),
-        variant_name.to_case(Case::UpperSnake),
-    )
 }
 
 /// Generates the const declaration of the ID associated to the given name (and ident).
@@ -2208,11 +1574,11 @@ pub fn variable_ident(name: &String) -> Ident {
 async fn type_ident_from_frozen(
     ty: &FrozenTy,
     registry: &mut dyn ReadableRegistry,
-    with_mod: PrefixWithMod,
+    extern_types: &ExternTypes,
 ) -> Result<TokenStream, GenerationError> {
     Ok(match ty {
         FrozenTy::FrozenOption(option) => {
-            let element = type_ident_from_frozen(&option.element, registry, with_mod).await?;
+            let element = type_ident_from_frozen(&option.element, registry, extern_types).await?;
             quote! { Option<#element> }
         }
         FrozenTy::Primitive(primitive) => match *primitive {
@@ -2243,10 +1609,11 @@ async fn type_ident_from_frozen(
             Primitive::ARRAY_STRING => quote!(Vec<String>),
         },
         FrozenTy::FrozenScalar(scalar) => {
-            type_ident_from_id(&scalar.reference.id, registry, with_mod).await?
+            type_ident_from_id(&scalar.reference.id, registry, extern_types).await?
         }
         FrozenTy::FrozenArray(array) => {
-            let type_ident = type_ident_from_id(&array.reference.id, registry, with_mod).await?;
+            let type_ident =
+                type_ident_from_id(&array.reference.id, registry, extern_types).await?;
             quote! { Vec<#type_ident> }
         }
     })
@@ -2269,24 +1636,30 @@ fn dynamic_value_type() -> TokenStream {
 async fn type_ident_from_id(
     id: &Uuid,
     registry: &mut dyn ReadableRegistry,
-    with_mod: PrefixWithMod,
+    extern_types: &ExternTypes,
 ) -> Result<TokenStream, GenerationError> {
     if is_dynamic_value_id(id) {
         return Ok(dynamic_value_type());
+    }
+    if let Some(path) = extern_types.path(id)? {
+        return Ok(path);
     }
     let type_def = registry
         .get_type(&Selector::Id(id.to_owned()), &VersionReq::STAR)
         .await
         .map_err(GenerationError::RegistryError)?;
-    type_ident_from_definition(&type_def, id, registry, with_mod).await
+    type_ident_from_definition(&type_def, id, registry, extern_types).await
 }
 
 async fn type_ident_from_definition(
     type_def: &TypeDefinitionFrozen,
     id: &Uuid,
     registry: &mut dyn ReadableRegistry,
-    with_mod: PrefixWithMod,
+    extern_types: &ExternTypes,
 ) -> Result<TokenStream, GenerationError> {
+    if let Some(path) = extern_types.path(id)? {
+        return Ok(path);
+    }
     Ok(match type_def {
         TypeDefinitionFrozen::Primitive(primitive) => match primitive {
             PrimitiveKind::Unit => quote! { () },
@@ -2316,30 +1689,28 @@ async fn type_ident_from_definition(
             PrimitiveKind::ArrayString => quote!(Vec<String>),
         },
         TypeDefinitionFrozen::Enumeration(enumeration) => {
-            type_ident_from_name_and_id(&enumeration.name, id, registry, with_mod)
+            generated_type_path(&enumeration.name, id, registry)
                 .await
                 .map_err(GenerationError::RegistryError)?
         }
         TypeDefinitionFrozen::Structure(structure) => {
-            type_ident_from_name_and_id(&structure.name, id, registry, with_mod)
+            generated_type_path(&structure.name, id, registry)
                 .await
                 .map_err(GenerationError::RegistryError)?
         }
     })
 }
 
-async fn type_ident_from_name_and_id(
+/// The path of the type generated for the record `id`, named `name`.
+async fn generated_type_path(
     name: &String,
     id: &Uuid,
     registry: &mut dyn ReadableRegistry,
-    with_mod: PrefixWithMod,
 ) -> Result<TokenStream, RegistryError> {
-    let mod_prefix = match with_mod {
-        PrefixWithMod::Yes => generated_mod_ident_from_id(id, registry).await?,
-        PrefixWithMod::No => quote! {},
-    };
+    let mod_path = registry.resolve_id(id).await?;
+    let mod_ident = mod_ident_from_path(&mod_path);
     let type_ident = type_ident(name);
-    Ok(quote! { #mod_prefix #type_ident })
+    Ok(quote! { arora_generated::#mod_ident #type_ident })
 }
 
 fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
@@ -2372,16 +1743,6 @@ fn type_kind_ident_from_primitive(primitive: &PrimitiveKind) -> TokenStream {
     }
 }
 
-/// Generates the identifier for the mod publishing the record of the given id.
-async fn generated_mod_ident_from_id(
-    id: &Uuid,
-    registry: &mut dyn ReadableRegistry,
-) -> Result<TokenStream, RegistryError> {
-    let mod_path = registry.resolve_id(id).await?;
-    let mod_ident = mod_ident_from_path(&mod_path);
-    Ok(quote! { arora_generated::#mod_ident })
-}
-
 fn mod_ident_from_path(path: &str) -> TokenStream {
     let path_parts = path.split(".").collect::<Vec<&str>>();
     let path_parts = path_parts
@@ -2390,19 +1751,13 @@ fn mod_ident_from_path(path: &str) -> TokenStream {
     quote! { #(#path_parts ::)* }
 }
 
+/// How generated deserialization reacts to a value of an unexpected type.
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CheckType {
-    /// assert_eq!-based checks — panics on mismatch (struct/import deserialization contexts)
+enum CheckType {
+    /// Panics (import shims).
     Yes,
-    /// return Err(String) — for export handler Result<Box<[u8]>, String> closure context
+    /// Returns `Err(String)` from the enclosing export shim.
     YesResult,
-    No,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum PrefixWithMod {
-    Yes,
-    No,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

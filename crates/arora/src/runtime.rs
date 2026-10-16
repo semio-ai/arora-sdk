@@ -1416,7 +1416,7 @@ mod tests {
     /// half of a ROS 2 action, exercised end to end without ROS.
     #[tokio::test]
     async fn a_look_at_run_advances_and_halts_through_the_device() {
-        use arora_behavior_tree::arora_generated::behavior_tree::status::Status;
+        use arora_behavior::Status;
         use arora_types::call::Call;
         use arora_types::Uuid;
 

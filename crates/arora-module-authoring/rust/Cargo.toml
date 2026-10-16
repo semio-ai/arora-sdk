@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-rust"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 description = "Rust source generation for Arora modules (types and bindings from type records)."
 license = "MIT"
@@ -29,6 +29,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
+arora-behavior = { path = "../../arora-behavior", version = "9.4" }
 indexmap = "2"
 
 # Declared explicitly because the `include` field above disables target
@@ -41,3 +42,7 @@ path = "tests/nested_structs.rs"
 [[test]]
 name = "optional"
 path = "tests/optional.rs"
+
+[[test]]
+name = "extern_types"
+path = "tests/extern_types.rs"

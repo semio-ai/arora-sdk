@@ -15,8 +15,8 @@
 //!    generated as the raw runtime `Value` rather than a declared struct.
 //!
 //! The generated Rust is written to a throwaway crate that is actually compiled
-//! and run, round-tripping values through both `Into<Value>` / `TryFrom<Value>`
-//! and the binary buffer `Into<Box<[u8]>>` / `TryFrom<&[u8]>` conversions.
+//! and run, round-tripping values through `Into<Value>` / `TryFrom<Value>` and
+//! through the buffer value codec.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,7 +24,7 @@ use std::process::Command;
 use arora_module_core::{analyze_module, ModuleAsset};
 use arora_module_rust::{
     generate_common_sources, generate_enumeration_source, generate_mods_in_directories,
-    generate_structure_source,
+    generate_structure_source, ExternTypes,
 };
 use arora_registry::{
     local::LocalRegistry, EditableRegistry, ReadableRegistry, TypeDefinitionFrozen,
@@ -454,17 +454,16 @@ fn sample_dynamic() -> Dynamic {
 
 fn round_trip<T>(value: T, what: &str)
 where
-    T: Clone + PartialEq + std::fmt::Debug + Into<Value> + Into<Box<[u8]>>
-        + for<'a> TryFrom<&'a [u8]> + TryFrom<Value>,
+    T: Clone + PartialEq + std::fmt::Debug + Into<Value> + TryFrom<Value>,
     <T as TryFrom<Value>>::Error: std::fmt::Debug,
-    for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Debug,
 {
     let as_value: Value = value.clone().into();
-    let from_value = T::try_from(as_value).expect("Value round-trip failed");
+    let from_value = T::try_from(as_value.clone()).expect("Value round-trip failed");
     assert_eq!(value, from_value, "{} Value round-trip mismatch", what);
 
-    let bytes: Box<[u8]> = value.clone().into();
-    let from_bytes = T::try_from(&bytes[..]).expect("buffer round-trip failed");
+    let bytes = arora_buffers::froto_value::serialize(&as_value);
+    let from_bytes = T::try_from(arora_buffers::froto_value::deserialize(&bytes))
+        .expect("buffer round-trip failed");
     assert_eq!(value, from_bytes, "{} buffer round-trip mismatch", what);
 }
 
@@ -478,55 +477,11 @@ fn track_has_array_enumeration(v: &Value) -> bool {
         if s.fields.iter().any(|f| matches!(f.value.as_ref(), Value::ArrayEnumeration { .. })))
 }
 
-// Buffer-level cross-boundary conformance: the bytes the generated codegen
-// writes for an array-of-struct (`points`) and an array-of-enum (`modes`) MUST
-// be exactly what `arora_buffers::serde_uuid` (the generic `Value` codec that
-// marshals the `arora_call` boundary) reads and writes, BOTH directions. Guards
-// `serde_uuid <-> generated-codegen`, not just codegen<->codegen.
-fn cross_boundary_buffer() {
-    let track = sample_track();
-
-    // (1) generated codegen ENCODES -> serde_uuid (generic Value codec) DECODES.
-    let gen_bytes: Box<[u8]> = track.clone().into();
-    let decoded: Value = arora_buffers::serde_uuid::deserialize(&gen_bytes);
-
-    // Elements must decode in the raw layout: `ArrayStructure` / `ArrayEnumeration`
-    // (the old full-element encoding would misparse here).
-    assert!(
-        track_has_array_structure(&decoded),
-        "buffer: `points` did not decode via serde_uuid as an ArrayStructure: {decoded:?}"
-    );
-    assert!(
-        track_has_array_enumeration(&decoded),
-        "buffer: `modes` did not decode via serde_uuid as an ArrayEnumeration: {decoded:?}"
-    );
-
-    // (2) serde_uuid RE-ENCODES; it must be byte-identical to the generated one.
-    let su_bytes = arora_buffers::serde_uuid::serialize(&decoded);
-    assert_eq!(
-        &gen_bytes[..],
-        &su_bytes[..],
-        "generated codegen and serde_uuid disagree on array-of-struct/enum wire bytes"
-    );
-
-    // (3) generated codegen DECODES serde_uuid's bytes back to the value.
-    let from_serde =
-        Track::try_from(&su_bytes[..]).expect("generated codegen failed to decode serde_uuid bytes");
-    assert_eq!(
-        track, from_serde,
-        "serde_uuid -> generated codegen buffer round-trip mismatch"
-    );
-}
-
-// Value-level cross-boundary conformance: `Into<Value>` must produce the typed
-// `ArrayStructure` / `ArrayEnumeration` (NOT `ArrayValue`), so that encoding
-// *that* `Value` through serde_uuid yields the same bytes as the direct buffer
-// path. Closes the `Track -> Value -> serde_uuid` route, and `TryFrom<Value>`
-// round-trips it.
-fn cross_boundary_value() {
-    let track = sample_track();
-
-    let value: Value = track.clone().into();
+// An array of structures (`points`) and of enumerations (`modes`) is the typed
+// `ArrayStructure` / `ArrayEnumeration` (not `ArrayValue`), the form the
+// buffer codec carries with the element id once.
+fn typed_arrays() {
+    let value: Value = sample_track().into();
     assert!(
         track_has_array_structure(&value),
         "Value: `points` must be ArrayStructure (not ArrayValue): {value:?}"
@@ -535,25 +490,13 @@ fn cross_boundary_value() {
         track_has_array_enumeration(&value),
         "Value: `modes` must be ArrayEnumeration (not ArrayValue): {value:?}"
     );
-
-    let value_bytes = arora_buffers::serde_uuid::serialize(&value);
-    let buffer_bytes: Box<[u8]> = track.clone().into();
-    assert_eq!(
-        &value_bytes[..],
-        &buffer_bytes[..],
-        "Track -> Value -> serde_uuid bytes differ from the direct buffer path"
-    );
-
-    let back = Track::try_from(value).expect("Value cross-boundary round-trip failed");
-    assert_eq!(track, back, "Value cross-boundary round-trip mismatch");
 }
 
 fn main() {
     round_trip(sample_track(), "Track (array-of-struct + array-of-enum + nested)");
     round_trip(sample_tree(), "Tree (recursive via Vec<Self>)");
     round_trip(sample_dynamic(), "Dynamic (raw Value field)");
-    cross_boundary_buffer();
-    cross_boundary_value();
+    typed_arrays();
     println!("ROUNDTRIP_OK");
 }
 "#;
@@ -609,19 +552,26 @@ async fn nested_and_array_of_struct_generate_compile_and_round_trip() {
     // two bugs, so it skips the export-handler wrappers.
     let mut generated = generate_common_sources().expect("generate_common_sources failed");
     for asset in &assets {
-        let ModuleAsset::Type(type_id, _, type_def) = asset else {
+        let ModuleAsset::Type(type_id, version, type_def) = asset else {
             continue;
         };
         let sources = match type_def {
             TypeDefinitionFrozen::Structure(structure) => {
                 let parent_path = registry.resolve_id(&structure.parent).await.unwrap();
-                generate_structure_source(type_id, structure, &mut registry, &parent_path)
-                    .await
-                    .expect("generate_structure_source failed")
+                generate_structure_source(
+                    type_id,
+                    version,
+                    structure,
+                    &mut registry,
+                    &ExternTypes::new(),
+                    &parent_path,
+                )
+                .await
+                .expect("generate_structure_source failed")
             }
             TypeDefinitionFrozen::Enumeration(enumeration) => {
                 let parent_path = registry.resolve_id(&enumeration.parent).await.unwrap();
-                generate_enumeration_source(type_id, enumeration, &parent_path)
+                generate_enumeration_source(type_id, version, enumeration, &parent_path)
                     .expect("generate_enumeration_source failed")
             }
             TypeDefinitionFrozen::Primitive(_) => continue,

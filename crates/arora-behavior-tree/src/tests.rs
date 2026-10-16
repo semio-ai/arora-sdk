@@ -3,12 +3,12 @@
 //! The basic control nodes (seq, seq_star, fallback, parallel, succeed, fail,
 //! run) are dispatched natively, so their execution can be exercised here with a
 //! minimal registry-backed [`CallBridge`] — no wasm module, no engine.
-use crate::arora_generated::behavior_tree::status::Status;
 use crate::load_behavior_tree_yaml;
 use crate::nodes;
 use crate::tree_node::TreeNode;
 use crate::{run_behavior_tree, BehaviorTree, BehaviorTreeRuntime, ModuleFunction};
 use anyhow::Result;
+use arora_behavior::Status;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::record::module::frozen::Function;
 use arora_types::record::ty::{FrozenTy, PrimitiveKind};
@@ -496,9 +496,9 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
 /// outcome to the run's status key.
 mod task_runs {
     use super::{LeafStatuses, LeafTicks, TestBridge};
-    use crate::arora_generated::behavior_tree::status::Status;
     use crate::behavior::{graph_type, BehaviorTreeInterpreter};
     use crate::nodes;
+    use arora_behavior::Status;
     use arora_behavior::{BehaviorContext, BehaviorInterpreter, BehaviorStatus, RunPolicy, TaskId};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::call::Call;
@@ -1625,12 +1625,12 @@ fn a_tree_does_not_call_the_interpreter_module_s_functions() {
 /// no module loaded: their ports bind to store keys that need not exist yet.
 mod core_string_nodes {
     use super::{LeafStatuses, LeafTicks, TestBridge};
-    use crate::arora_generated::behavior_tree::status::Status;
     use crate::behavior::BehaviorTreeInterpreter;
     use crate::nodes;
     use crate::schema::Expression;
     use crate::variable::VariableCell;
     use crate::BehaviorTreeRuntime;
+    use arora_behavior::Status;
     use arora_behavior::{BehaviorContext, BehaviorInterpreter};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::data::{DataStore, Key, StateChange};
@@ -2386,10 +2386,7 @@ mod data_nodes {
         let tree = build_behavior_tree(&graph, &|_| None).expect("the tree lowers");
         let mut bridge = super::TestBridge::empty();
         let status = crate::run_behavior_tree(&tree, &HashMap::new(), &mut bridge, false).unwrap();
-        assert_eq!(
-            status,
-            crate::arora_generated::behavior_tree::status::Status::Success
-        );
+        assert_eq!(status, arora_behavior::Status::Success);
     }
 
     /// An `Unpack` at the root of a tree built from `TreeNode`s gets its
@@ -2409,10 +2406,7 @@ mod data_nodes {
                 (OUT[0], Expression::VariableId(variable("out/a"))),
             ]),
         });
-        assert_eq!(
-            super::run(&tree),
-            crate::arora_generated::behavior_tree::status::Status::Success
-        );
+        assert_eq!(super::run(&tree), arora_behavior::Status::Success);
     }
 
     /// An edit that would leave an `Unpack` unlowerable is refused, and the
@@ -2526,7 +2520,7 @@ mod data_nodes {
             fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
                 self.calls.borrow_mut().push(call);
                 Ok(CallResult {
-                    ret: crate::arora_generated::behavior_tree::status::Status::Success.into(),
+                    ret: arora_behavior::Status::Success.into(),
                     mutated: Vec::new(),
                 })
             }

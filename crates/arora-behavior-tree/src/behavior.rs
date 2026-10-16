@@ -77,7 +77,6 @@ use arora_types::value::Value;
 use arora_types::value_serde;
 use uuid::Uuid;
 
-use crate::arora_generated::behavior_tree::status::Status;
 use crate::graph::build_behavior_tree;
 use crate::is_interpreter_function_id;
 use crate::nodes::{
@@ -86,6 +85,7 @@ use crate::nodes::{
 };
 use crate::schema::_RET_PARAM_ID;
 use crate::{lower_behavior_tree, schema_groot, FunctionIndex, LoweredTree};
+use arora_behavior::Status;
 
 /// The name of the language this interpreter reads: the [`GraphType::name`] a
 /// graph spawned on it states.

@@ -213,7 +213,7 @@ mod tests {
         }
     }
 
-    fn run(graph: &Graph) -> crate::arora_generated::behavior_tree::status::Status {
+    fn run(graph: &Graph) -> arora_behavior::Status {
         let tree = build_behavior_tree(graph, &|_| None).expect("tree builds");
         let mut bridge = NativeBridge::default();
         run_behavior_tree(&tree, &HashMap::new(), &mut bridge, false).expect("run")
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn seq_of_builtins_lowers_and_runs() {
-        use crate::arora_generated::behavior_tree::status::Status;
+        use arora_behavior::Status;
         let root = Uuid::from_u128(0x100);
         let a = Uuid::from_u128(0x1);
         let b = Uuid::from_u128(0x2);
@@ -309,8 +309,8 @@ mod tests {
     /// is now Groot → `Graph` → `BehaviorTree`. Builtins need no function index.
     #[test]
     fn groot_lowers_to_graph_and_runs() {
-        use crate::arora_generated::behavior_tree::status::Status;
         use crate::schema_groot::BehaviorTree as GrootTree;
+        use arora_behavior::Status;
 
         let xml = r#"<root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
