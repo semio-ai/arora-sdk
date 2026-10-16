@@ -59,7 +59,7 @@ fn polly_say(text: Expression) -> TreeNode {
 #[ignore]
 #[tokio::test]
 async fn polly_sequence_of_speech() -> Result<()> {
-    const NAMES: [&'static str; 3] = ["Ross", "Braden", "Victor"];
+    const NAMES: [&str; 3] = ["Ross", "Braden", "Victor"];
     let name = NAMES.choose(&mut rng()).unwrap();
     let behavior = seq_star(vec![
         polly_say(Expression::Value(Value::String("Hello!".to_string()))),
@@ -189,7 +189,7 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
     registry
         .add_module(module_id.to_owned(), module_version.into(), module)
         .await
-        .expect(format!("failed to add module {} to registry", module_id).as_str());
+        .unwrap_or_else(|_| panic!("failed to add module {} to registry", module_id));
 
     let (module_target_dir, executable_prefix, executable_extension) =
         match header.executor.name.as_str() {
@@ -225,7 +225,7 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
     ));
     let mut executable_file = File::open(&module_path)
         .await
-        .expect(format!("could not open executable file {}", module_path.display()).as_str());
+        .unwrap_or_else(|_| panic!("could not open executable file {}", module_path.display()));
     let mut executable = Vec::new();
     executable_file.read_to_end(&mut executable).await.unwrap();
     let executable = executable.into_boxed_slice();
@@ -261,7 +261,7 @@ async fn read_header_from_module_root(module_root: PathBuf) -> Header {
     serde_yaml::from_str(
         &read_to_string(header_path.clone())
             .await
-            .expect(format!("header file {} could not be read", header_path.display()).as_str()),
+            .unwrap_or_else(|_| panic!("header file {} could not be read", header_path.display())),
     )
     .expect("invalid yaml")
 }

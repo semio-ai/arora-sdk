@@ -31,6 +31,7 @@ jobs:
       test-arora-engine: ${{ steps.affected.outputs.test-arora-engine }}
       test-arora-web: ${{ steps.affected.outputs.test-arora-web }}
       build-arora-web: ${{ steps.affected.outputs.build-arora-web }}
+      test-polly: ${{ steps.affected.outputs.test-polly }}
       test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
     steps:
@@ -118,7 +119,7 @@ jobs:
 
   lint:
     needs: select
-    if: needs.select.outputs.any == 'true'
+    if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -140,12 +141,23 @@ jobs:
       # `cargo fmt --check` needs: it errors on an unresolved
       # `mod arora_generated;` when those files are absent.
       - name: Clippy
+        if: needs.select.outputs.any == 'true'
         run: cargo clippy ${{ needs.select.outputs.test-args }} --all-targets -- -D warnings
 
       # An unselected package has no changed file, so its formatting is
       # unchanged (a rustfmt.toml or toolchain change selects everything).
       - name: Check formatting
+        if: needs.select.outputs.any == 'true'
         run: cargo fmt --check ${{ needs.select.outputs.test-args }}
+
+      # polly stays out of the default members so the default build skips the
+      # AWS SDK; it is linted, tests included, whenever a change reaches it.
+      # Its tests call AWS Polly and stay ignored.
+      - name: Clippy and formatting (polly)
+        if: needs.select.outputs.test-polly
+        run: |
+          cargo clippy -p polly --all-targets -- -D warnings
+          cargo fmt --check -p polly
 
   # The engine's web host (executor::browser) and the run loop's JS-timer
   # cadence only compile for wasm32, so the native jobs never exercise them.
