@@ -77,16 +77,13 @@ fn say(text: String) -> Status {
 
     // First tick for this utterance: spawn synthesis + playback off the tick
     // thread and record the run. Later ticks fall straight through to the poll.
-    if !runs.contains_key(&key) {
-        runs.insert(key, spawn_say(text));
-    }
+    let handle = runs.entry(key).or_insert_with(|| spawn_say(text));
 
     // Poll the run's `JoinHandle` — the `Future` — once. This call is one `poll`:
     // the tick loop is the executor, and a no-op waker suffices because the runtime
     // re-ticks us every step regardless of any wake-up. A completed `JoinHandle`
     // must never be polled again, so a terminal result drops the run.
     let mut cx = Context::from_waker(Waker::noop());
-    let handle = runs.get_mut(&key).expect("just inserted");
     match Future::poll(Pin::new(handle), &mut cx) {
         // Still speaking — the runtime re-ticks me next step.
         Poll::Pending => Status::Running,
