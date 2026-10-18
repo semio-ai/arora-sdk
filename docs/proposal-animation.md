@@ -302,8 +302,10 @@ play the same values at the same device time.
   as it does today.
 - **The editor** evaluates through the library, in the page's wasm: a
   track and a batch of times in one call, values and velocities back, for
-  the curves it draws, the playhead's readouts and a value it inserts. A
-  batch crosses into wasm once per track, not once per sample.
+  the playhead's readouts, a value it inserts and the checks it marks
+  violations with; the curves it draws come from `Curve::polyline`, points
+  on the curve spaced by a segment's parameter. A batch crosses into wasm
+  once per track, not once per sample.
 - **The transport** sends commands; the engine owns looping and bouncing,
   and the timeline's playhead follows the engine's player.
 

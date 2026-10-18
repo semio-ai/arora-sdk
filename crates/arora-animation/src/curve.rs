@@ -176,6 +176,59 @@ impl Curve {
         true
     }
 
+    /// A number track drawn from `start` to `end` (clip-local nanoseconds)
+    /// as `count` points `(time, value)` on the curve, appended to `out`, in
+    /// increasing time: the first at `start`, the last at `end`. Where the
+    /// range lies within one segment the points are evenly spaced in its
+    /// Bézier's parameter, as a cubic is drawn, which solves for time only at
+    /// the two ends; elsewhere they are evenly spaced in time. Each value is
+    /// the one [`Curve::sample`] gives at that point's time, to rounding.
+    /// Returns `false`, appending nothing, for a track that is not a number
+    /// track.
+    pub fn polyline(&self, start: f64, end: f64, count: usize, out: &mut Vec<(f64, f64)>) -> bool {
+        if self.kind != Some(Kind::Number) {
+            return false;
+        }
+        out.reserve(count);
+        let last = count.saturating_sub(1).max(1) as f64;
+        let index = self.segments.partition_point(|s| (s.end as f64) < end);
+        let within = self
+            .segments
+            .get(index)
+            .filter(|s| start < end && s.start as f64 <= start);
+        if let Some(segment) = within {
+            let bezier = segment
+                .bezier
+                .as_ref()
+                .expect("a number segment has a curve");
+            let origin = segment.start as f64;
+            let first = solve(&bezier.x, start - origin);
+            let span = solve(&bezier.x, end - origin) - first;
+            for i in 0..count {
+                let u = first + span * (i as f64 / last);
+                let time = if i == 0 {
+                    start
+                } else if i + 1 == count {
+                    end
+                } else {
+                    origin + bernstein(&bezier.x, u)
+                };
+                out.push((time, bernstein(&bezier.y, u)));
+            }
+            return true;
+        }
+        let mut cursor = Cursor::default();
+        for i in 0..count {
+            let time = if i + 1 == count && count > 1 {
+                end
+            } else {
+                start + (end - start) * (i as f64 / last)
+            };
+            out.push((time, self.number_at(time, &mut cursor).0));
+        }
+        true
+    }
+
     fn sample_with(&self, t: f64, cursor: &mut Cursor) -> Option<Sample> {
         let kind = self.kind?;
         if kind == Kind::Number {
@@ -516,6 +569,76 @@ mod tests {
             (at - difference).abs() < 1e-3 * at.abs(),
             "{at} vs {difference}"
         );
+    }
+
+    #[test]
+    fn a_polyline_lies_on_the_curve_and_spaces_a_segment_by_its_parameter() {
+        let mut points = vec![
+            keypoint(-S, Value::Number(-1.0)),
+            keypoint(S, Value::Number(4.0)),
+            keypoint(2 * S, Value::Number(0.5)),
+        ];
+        points[0].transitions.leave = Some(Transition::Easing(Easing::Expo));
+        points[1].transitions.arrive = Some(Transition::Handle {
+            dt: -0.9e9,
+            dv: 3.0,
+        });
+        points[1].transitions.leave = Some(Transition::Easing(Easing::Back));
+        let curve = Curve::new(&track(points));
+        let ranges = [
+            // A whole segment, part of one, and one ending at a keypoint.
+            (-1e9, 1e9),
+            (-0.7e9, 0.2e9),
+            (1.3e9, 2e9),
+            // A hold before the first keypoint, after the last, and a range
+            // across a keypoint.
+            (-3e9, -1e9),
+            (2e9, 5e9),
+            (0.5e9, 1.5e9),
+        ];
+        for (start, end) in ranges {
+            let mut out = Vec::new();
+            assert!(curve.polyline(start, end, 51, &mut out));
+            assert_eq!(out.len(), 51);
+            assert_eq!(out[0].0, start);
+            assert_eq!(out[50].0, end);
+            for pair in out.windows(2) {
+                assert!(pair[0].0 <= pair[1].0, "{start}..{end}: {pair:?}");
+            }
+            for &(time, value) in &out {
+                let expected = curve.sample(time).unwrap().value.as_number().unwrap();
+                assert!(
+                    (value - expected).abs() <= 1e-12 * expected.abs().max(1.0),
+                    "{start}..{end} at {time}: {value} vs {expected}"
+                );
+            }
+        }
+        // Within a segment the points are evenly spaced in its parameter.
+        let segment = curve.played_segments()[0];
+        let mut out = Vec::new();
+        curve.polyline(-1e9, 1e9, 3, &mut out);
+        let x: Vec<f64> = segment.control_points.iter().map(|p| p.0).collect();
+        let middle = bernstein(&[x[0], x[1], x[2], x[3]], 0.5);
+        assert!(
+            (out[1].0 - middle).abs() <= 1e-6,
+            "{} vs {middle}",
+            out[1].0
+        );
+        // Elsewhere, evenly in time.
+        out.clear();
+        curve.polyline(0.5e9, 1.5e9, 3, &mut out);
+        assert_eq!(out[1].0, 1e9);
+    }
+
+    #[test]
+    fn a_polyline_draws_only_a_number_track() {
+        let curve = Curve::new(&track(vec![
+            keypoint(0, Value::Bool(false)),
+            keypoint(S, Value::Bool(true)),
+        ]));
+        let mut out = Vec::new();
+        assert!(!curve.polyline(0.0, 1e9, 5, &mut out));
+        assert!(out.is_empty());
     }
 
     #[test]

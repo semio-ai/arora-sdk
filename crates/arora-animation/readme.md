@@ -52,7 +52,10 @@ format 3, whose editor fields (its id, groups, colours) are ignored here.
 `Curve::new(track)` compiles a track; `sample(t)` evaluates it at a
 clip-local time in nanoseconds, `sample_many` and `sample_numbers` over a
 batch of times in one call. A sample is a value and, for a number, a velocity
-in value units per second.
+in value units per second. `polyline` gives the points an editor draws a
+number track with between two times: on the curve, evenly spaced in a
+segment's Bézier parameter, so drawing a segment solves for time only at its
+ends.
 
 - **Exact.** A number segment is a cubic Bézier in (time, value); its time is
   solved for the curve's parameter to double precision, its value and
