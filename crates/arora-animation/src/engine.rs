@@ -133,6 +133,8 @@ struct PlayerSlot {
     id: PlayerId,
     name: String,
     player: Player,
+    /// The timeline's length as set; none, the latest end of the instances.
+    length: Option<Nanos>,
     instances: Vec<Instance>,
     /// Each played track of each instance: its position in the output table.
     routes: Vec<Vec<usize>>,
@@ -155,8 +157,8 @@ pub struct PlayerInfo {
     pub name: String,
     pub state: State,
     pub position: Nanos,
-    /// The player's length: the latest end of its instances on its
-    /// timeline.
+    /// The player's length: as set, else the latest end of its instances
+    /// on its timeline.
     pub length: Nanos,
     pub speed: f64,
     pub reversed: bool,
@@ -268,6 +270,7 @@ impl Engine {
             id,
             name: name.to_string(),
             player: Player::new(),
+            length: None,
             instances: Vec::new(),
             routes: Vec::new(),
         });
@@ -386,6 +389,19 @@ impl Engine {
 
     pub fn set_window(&mut self, player: PlayerId, start: Nanos, end: Option<Nanos>) -> bool {
         self.command(player, Command::Window(start, end))
+    }
+
+    /// Sets the length of `player`'s timeline, the bounds it plays within
+    /// until it enters its window and the end of a window that states none;
+    /// `None` returns it to the latest end of its instances. A host whose
+    /// timeline is longer than the clips on it (Studio's, at least a second
+    /// and as long as its viewport) gives every player that timeline.
+    pub fn set_length(&mut self, player: PlayerId, length: Option<Nanos>) -> bool {
+        let Some(slot) = self.players.iter_mut().find(|p| p.id == player) else {
+            return false;
+        };
+        slot.length = length.map(|l| l.max(0));
+        true
     }
 
     pub fn set_mode(&mut self, player: PlayerId, mode: LoopMode) -> bool {
@@ -562,9 +578,12 @@ impl Engine {
         }
     }
 
-    /// A player's length: the latest end of its instances on its timeline,
-    /// and never before 0.
+    /// A player's length: as set, else the latest end of its instances on
+    /// its timeline, and never before 0.
     fn length(&self, slot: &PlayerSlot) -> Nanos {
+        if let Some(length) = slot.length {
+            return length;
+        }
         slot.instances
             .iter()
             .filter_map(|i| {
@@ -790,6 +809,26 @@ mod tests {
         let sample = out[0].sample.as_ref().unwrap();
         assert!((sample.value.as_number().unwrap() - 5.0).abs() < 1e-9);
         assert!((sample.velocity.unwrap() - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_length_set_bounds_the_timeline_beyond_the_clips() {
+        let mut engine = Engine::new();
+        let anim = engine.load(ramp_clip(), vec![]);
+        let player = engine.create_player("p");
+        engine
+            .add_instance(player, anim, 1.0, Timing::default())
+            .unwrap();
+        engine.set_mode(player, LoopMode::Loop);
+        assert!(engine.set_length(player, Some(3_000_000_000)));
+        engine.play(player);
+        engine.step(0, 0);
+        engine.step(2_500_000_000, 2_500_000_000);
+        assert_eq!(engine.players()[0].position, 2_500_000_000);
+        assert_eq!(engine.players()[0].length, 3_000_000_000);
+        engine.set_length(player, None);
+        assert_eq!(engine.players()[0].length, 1_000_000_000);
+        assert!(!engine.set_length(PlayerId(99), None));
     }
 
     #[test]
