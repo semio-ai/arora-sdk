@@ -18,9 +18,11 @@
 //! ```
 //!
 //! The declaration yields `polly::ids`, `polly::header(executor)`,
-//! `polly::record(parent)`, `polly::exports()`, `polly::client::say(…)` and
-//! the marker type `polly::Module`, which implements [`AroraModule`]. A host
-//! registers the module with `HostModule::of::<polly::Module>()`.
+//! `polly::record(parent)`, `polly::type_records(parent)` — the records of
+//! the types its functions name, which the `#[derive(AroraType)]` types
+//! produce — `polly::exports()`, `polly::client::say(…)` and the marker type
+//! `polly::Module`, which implements [`AroraModule`]. A host registers the
+//! module with `HostModule::of::<polly::Module>()`.
 //!
 //! A **contract** declares functions that several modules implement, each
 //! under its own module id — one `say` served by two speech providers, say.
@@ -40,7 +42,8 @@
 //! ```
 //!
 //! The declaration yields `say::ids`, `say::NAME`, `say::descriptions()`,
-//! `say::record(parent)` and `say::exports(implementation)`. A contract has no artifact entry points:
+//! `say::record(parent)`, `say::type_records(parent)` and
+//! `say::exports(implementation)`. A contract has no artifact entry points:
 //! an artifact exports one module's functions, declared with `#[module]`.
 //!
 //! **The executor is not the declaration's to name.** Only the step that

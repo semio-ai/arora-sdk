@@ -2,6 +2,23 @@
 
 All notable changes.
 
+## [2.0.0] - 2026-10-18
+
+### Changed
+
+- **Breaking:** the derived impl implements `AroraType::record` and
+  `AroraType::register_records`, which arora-types declares from 3.8: the
+  derive builds only against arora-types 3.8 or later, which re-exports it.
+
+### Added
+
+- The derived type's record: `record(parent)` is a structure (each field typed
+  as a record names it: a primitive by kind, a derived type by a reference at
+  that type's `arora_type_version`, a uuid or a `keyvalue` field by a
+  reference at `1.0.0`) or an enumeration of unit variants, in the folder
+  `parent`; `register_records` adds the records of every type it names. A
+  struct with a fixed-length array field has no record.
+
 ## [1.4.0] - 2026-10-16
 
 ### Added
