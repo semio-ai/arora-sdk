@@ -420,45 +420,7 @@ fn apply_command(
             .arora_call(call.clone())
             .map_err(|e| format!("call failed: {e:?}")),
         BridgeOp::ListKeys { prefix } => {
-            // Introspection: every key the device holds a value for, plus every
-            // key the store has meta for — a key can be described before
-            // anything writes it. Sorted for a deterministic reply.
-            let snapshot = store.snapshot();
-            let mut listed: Vec<(Key, Option<Value>)> = snapshot
-                .storage
-                .into_iter()
-                .filter(|(_, value)| value.is_some())
-                .collect();
-            // A key can be described before anything writes it.
-            let held: std::collections::HashSet<Key> =
-                listed.iter().map(|(key, _)| key.clone()).collect();
-            listed.extend(
-                store
-                    .all_meta()
-                    .into_keys()
-                    .filter(|key| !held.contains(key))
-                    .map(|key| (key, None)),
-            );
-            listed.retain(|(key, _)| {
-                prefix
-                    .as_ref()
-                    .is_none_or(|p| key.path.starts_with(p.as_str()))
-            });
-            let paths: Vec<Key> = listed.iter().map(|(key, _)| key.clone()).collect();
-            let mut keys: Vec<(String, KeyMeta)> = listed
-                .into_iter()
-                .zip(store.meta(&paths))
-                .map(|((key, value), meta)| {
-                    let mut meta = meta.unwrap_or_default();
-                    // The value shows its own shape; the store says the rest.
-                    if meta.ty.is_none() {
-                        meta.ty = value.as_ref().map(|value| value.kind());
-                    }
-                    (key.path, meta)
-                })
-                .collect();
-            keys.sort_by(|left, right| left.0.cmp(&right.0));
-            match arora_types::value_serde::to_value(&keys) {
+            match arora_types::value_serde::to_value(&list_keys(store, prefix.as_deref())) {
                 Ok(ret) => Ok(CallResult {
                     ret,
                     mutated: Vec::new(),
@@ -482,30 +444,14 @@ fn apply_command(
             })
         }
         BridgeOp::DescribeMethods { prefix } => {
-            // Introspection with full signatures: each registered method's
-            // parameters (name, type, order) and return type, filtered by name
-            // prefix and sorted for a deterministic reply. Encoded as JSON over
-            // the value plane (a `Value::String`) so a remote can deserialise the
-            // `FrozenTy`s and build a typed call — or, like arora-bridge-ros2,
-            // synthesise a typed service from them.
-            let mut signatures: Vec<MethodSignature> = function_index
-                .values()
-                .filter(|f| {
-                    prefix
-                        .as_ref()
-                        .is_none_or(|p| f.function_name.starts_with(p.as_str()))
-                })
-                .map(|f| MethodSignature {
-                    module_id: f.module_id,
-                    id: f.function_id,
-                    name: f.function_name.clone(),
-                    function: f.function.clone(),
-                })
-                .collect();
-            signatures.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
-            // Encode over the value plane with Arora's own type system (each
-            // signature becomes a `Value::Structure`), not an ad-hoc format.
-            match arora_types::value_serde::to_value(&signatures) {
+            // Encoded over the value plane with Arora's own type system (each
+            // signature a `Value::Structure`), so a remote deserialises the
+            // `FrozenTy`s and builds a typed call, or, like arora-bridge-ros2,
+            // synthesises a typed service from them.
+            match arora_types::value_serde::to_value(&describe_methods(
+                function_index,
+                prefix.as_deref(),
+            )) {
                 Ok(ret) => Ok(CallResult {
                     ret,
                     mutated: Vec::new(),
@@ -516,6 +462,69 @@ fn apply_command(
     };
     cmd.reply(result);
     Ok(())
+}
+
+/// The keys `store` holds under `prefix` (every key when `None`), sorted by
+/// path, each with what the store says it is: every key that holds a value
+/// and every key the store has meta for, since a key can be described before
+/// anything writes it. A key nothing has described carries the default meta,
+/// whose only statement is the shape of the value it holds.
+///
+/// It is what a device answers `ListKeys` with, over its own store; an
+/// embedder holding a sibling handle of the store lists the same keys without
+/// a step, including while [`run`](Arora::run) owns the device.
+pub fn list_keys(store: &dyn DataStore, prefix: Option<&str>) -> Vec<(String, KeyMeta)> {
+    let snapshot = store.snapshot();
+    let mut listed: Vec<(Key, Option<Value>)> = snapshot
+        .storage
+        .into_iter()
+        .filter(|(_, value)| value.is_some())
+        .collect();
+    let held: std::collections::HashSet<Key> = listed.iter().map(|(key, _)| key.clone()).collect();
+    listed.extend(
+        store
+            .all_meta()
+            .into_keys()
+            .filter(|key| !held.contains(key))
+            .map(|key| (key, None)),
+    );
+    listed.retain(|(key, _)| prefix.is_none_or(|p| key.path.starts_with(p)));
+    let paths: Vec<Key> = listed.iter().map(|(key, _)| key.clone()).collect();
+    let mut keys: Vec<(String, KeyMeta)> = listed
+        .into_iter()
+        .zip(store.meta(&paths))
+        .map(|((key, value), meta)| {
+            let mut meta = meta.unwrap_or_default();
+            // The value shows its own shape; the store says the rest.
+            if meta.ty.is_none() {
+                meta.ty = value.as_ref().map(|value| value.kind());
+            }
+            (key.path, meta)
+        })
+        .collect();
+    keys.sort_by(|left, right| left.0.cmp(&right.0));
+    keys
+}
+
+/// The methods of `function_index` whose name starts with `prefix` (all of
+/// them when `None`), each with its full signature, sorted by name then id:
+/// what a device answers `DescribeMethods` with.
+pub(crate) fn describe_methods(
+    function_index: &FunctionIndex,
+    prefix: Option<&str>,
+) -> Vec<MethodSignature> {
+    let mut signatures: Vec<MethodSignature> = function_index
+        .values()
+        .filter(|f| prefix.is_none_or(|p| f.function_name.starts_with(p)))
+        .map(|f| MethodSignature {
+            module_id: f.module_id,
+            id: f.function_id,
+            name: f.function_name.clone(),
+            function: f.function.clone(),
+        })
+        .collect();
+    signatures.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    signatures
 }
 
 /// The shared cell holding the device's one behavior interpreter: the step
