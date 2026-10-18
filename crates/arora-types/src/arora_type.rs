@@ -1,7 +1,11 @@
-//! A Rust type that describes itself as an arora [`low::Type`].
+//! A Rust type that describes itself as an arora [`low::Type`] and as a type
+//! record.
+
+use std::collections::BTreeMap;
 
 use uuid::Uuid;
 
+use crate::record::{FrozenReference, TypeDefinitionFrozen};
 use crate::ty::{low, TypeRegistry};
 
 /// A Rust type that can produce its own arora [`low::Type`] and the
@@ -51,6 +55,30 @@ pub trait AroraType {
     let mut registry = TypeRegistry::new();
     Self::register_types(&mut registry);
     (Self::arora_type(), registry)
+  }
+
+  /// This type's record: the structure or enumeration a registry holds under
+  /// [`arora_type_id`](AroraType::arora_type_id) at
+  /// [`arora_type_version`](AroraType::arora_type_version), in the folder
+  /// `parent`. Each type it names is pinned at that type's own version.
+  ///
+  /// `None` for a type with no record of its own — one that travels as a
+  /// well-known type, as a [`Key`](crate::data::Key) travels as a string —
+  /// and for one whose shape a record cannot express: a fixed-length array.
+  fn record(_parent: Uuid) -> Option<TypeDefinitionFrozen> {
+    None
+  }
+
+  /// Insert this type's [`record`](AroraType::record), and the record of
+  /// every type it names, in the folder `parent`, into `records`, each under
+  /// the reference that pins it. Idempotent, and safe for a type reachable
+  /// from itself. A type without a record inserts nothing, so a record
+  /// naming one names a record `records` does not hold: a registry's
+  /// `missing_dependencies` reports it.
+  fn register_records(
+    _parent: Uuid,
+    _records: &mut BTreeMap<FrozenReference, TypeDefinitionFrozen>,
+  ) {
   }
 }
 
@@ -562,5 +590,214 @@ mod tests {
       panic!("expected an enumeration type");
     };
     assert_eq!(enumeration.values.values().next().unwrap().name, "ON");
+  }
+
+  // ---- the records the derive emits -----------------------------------------
+
+  /// A struct's record is a structure under the folder given, its fields in
+  /// declared order, each typed as a record names it: a primitive by kind, a
+  /// nested type by a reference pinned at that type's version, a well-known
+  /// type (a uuid, a dynamic value) by a reference at 1.0.0.
+  #[test]
+  fn a_struct_s_record_pins_each_type_it_names_at_that_type_s_version() {
+    use crate::record::ty::{FrozenArray, FrozenOption, FrozenScalar, FrozenTy, PrimitiveKind};
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, Version};
+
+    #[derive(AroraType)]
+    #[arora(id = "12121212-1212-4121-8121-000000000001", version = "1.2.0")]
+    struct Leaf {
+      #[arora(id = "12121212-1212-4121-8121-000000000011")]
+      x: f32,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "12121212-1212-4121-8121-000000000002", version = "2.0.1")]
+    struct Shape {
+      #[arora(id = "12121212-1212-4121-8121-000000000021")]
+      count: u32,
+      #[arora(id = "12121212-1212-4121-8121-000000000022")]
+      leaf: Leaf,
+      #[arora(id = "12121212-1212-4121-8121-000000000023")]
+      leaves: Vec<Leaf>,
+      #[arora(id = "12121212-1212-4121-8121-000000000024")]
+      maybe: Option<Box<Leaf>>,
+      #[arora(id = "12121212-1212-4121-8121-000000000025")]
+      samples: Vec<f64>,
+      #[arora(id = "12121212-1212-4121-8121-000000000026")]
+      limit: Option<u64>,
+      #[arora(id = "12121212-1212-4121-8121-000000000027")]
+      source: crate::Uuid,
+      #[arora(id = "12121212-1212-4121-8121-000000000028", keyvalue)]
+      payload: Value,
+      #[arora(id = "12121212-1212-4121-8121-000000000029")]
+      key: crate::data::Key,
+    }
+
+    let folder = crate::Uuid::from_u128(0xf01d);
+    let Some(TypeDefinitionFrozen::Structure(record)) = Shape::record(folder) else {
+      panic!("a struct's record is a structure");
+    };
+    assert_eq!(record.parent, folder);
+    assert_eq!(record.name, "Shape");
+    let names: Vec<&str> = record.fields.values().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+      names,
+      ["count", "leaf", "leaves", "maybe", "samples", "limit", "source", "payload", "key"]
+    );
+    let leaf = FrozenReference {
+      id: Leaf::arora_type_id(),
+      version: Version::parse("1.2.0").unwrap(),
+    };
+    let well_known = |id: crate::Uuid| FrozenReference {
+      id,
+      version: Version::parse("1.0.0").unwrap(),
+    };
+    let types: Vec<FrozenTy> = record.fields.values().map(|f| f.ty.clone()).collect();
+    assert_eq!(
+      types,
+      vec![
+        FrozenTy::from(PrimitiveKind::U32),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: leaf.clone()
+        }),
+        FrozenTy::FrozenArray(FrozenArray {
+          reference: leaf.clone()
+        }),
+        FrozenTy::FrozenOption(FrozenOption {
+          element: Box::new(FrozenTy::FrozenScalar(FrozenScalar { reference: leaf })),
+        }),
+        FrozenTy::from(PrimitiveKind::ArrayF64),
+        FrozenTy::FrozenOption(FrozenOption {
+          element: Box::new(FrozenTy::from(PrimitiveKind::U64)),
+        }),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: well_known(*ty::UUID_ID)
+        }),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: well_known(*ty::KEY_VALUE_ID)
+        }),
+        // A key travels as a string.
+        FrozenTy::from(PrimitiveKind::String),
+      ]
+    );
+  }
+
+  /// An enum's record is an enumeration whose variants carry unit, as the
+  /// value plane's enumerations do.
+  #[test]
+  fn an_enum_s_record_is_an_enumeration_of_unit_variants() {
+    use crate::record::ty::{FrozenTy, PrimitiveKind};
+    use crate::record::TypeDefinitionFrozen;
+
+    #[derive(AroraType)]
+    #[arora(id = "13131313-1313-4131-8131-000000000001")]
+    enum Mode {
+      #[arora(id = "13131313-1313-4131-8131-000000000011")]
+      Idle,
+      #[arora(id = "13131313-1313-4131-8131-000000000012", name = "RUN")]
+      Run,
+    }
+    let Some(TypeDefinitionFrozen::Enumeration(record)) = Mode::record(crate::Uuid::nil()) else {
+      panic!("an enum's record is an enumeration");
+    };
+    assert_eq!(record.name, "Mode");
+    let variants: Vec<(String, String, FrozenTy)> = record
+      .variants
+      .iter()
+      .map(|(id, variant)| (id.to_string(), variant.name.clone(), variant.ty.clone()))
+      .collect();
+    let unit = FrozenTy::from(PrimitiveKind::Unit);
+    assert_eq!(
+      variants,
+      vec![
+        (
+          "13131313-1313-4131-8131-000000000011".to_string(),
+          "Idle".to_string(),
+          unit.clone()
+        ),
+        (
+          "13131313-1313-4131-8131-000000000012".to_string(),
+          "RUN".to_string(),
+          unit
+        ),
+      ]
+    );
+  }
+
+  /// `register_records` holds a type's record and those of every type it
+  /// names, transitively, each once — a type reachable from itself included —
+  /// all in the folder given, under the references that pin them.
+  #[test]
+  fn register_records_collects_every_record_a_type_reaches_once() {
+    use crate::record::{FrozenReference, TypeDefinitionFrozen};
+    use std::collections::BTreeMap;
+
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000001")]
+    enum Kind {
+      #[arora(id = "14141414-1414-4141-8141-000000000011")]
+      Leaf,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000002", version = "3.0.0")]
+    struct Node {
+      #[arora(id = "14141414-1414-4141-8141-000000000021")]
+      kind: Kind,
+      #[arora(id = "14141414-1414-4141-8141-000000000022")]
+      children: Vec<Node>,
+      #[arora(id = "14141414-1414-4141-8141-000000000023")]
+      key: crate::data::Key,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000003")]
+    struct Tree {
+      #[arora(id = "14141414-1414-4141-8141-000000000031")]
+      root: Option<Box<Node>>,
+    }
+
+    let folder = crate::Uuid::from_u128(0xf01d);
+    let mut records = BTreeMap::new();
+    Tree::register_records(folder, &mut records);
+    Tree::register_records(folder, &mut records);
+    let reference = |id: crate::Uuid, version: &str| FrozenReference {
+      id,
+      version: crate::record::Version::parse(version).unwrap(),
+    };
+    assert_eq!(
+      records
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>(),
+      std::collections::BTreeSet::from([
+        reference(Tree::arora_type_id(), "1.0.0"),
+        reference(Node::arora_type_id(), "3.0.0"),
+        reference(Kind::arora_type_id(), "1.0.0"),
+      ])
+    );
+    for record in records.values() {
+      let parent = match record {
+        TypeDefinitionFrozen::Structure(s) => s.parent,
+        TypeDefinitionFrozen::Enumeration(e) => e.parent,
+        TypeDefinitionFrozen::Primitive(_) => panic!("a primitive has no record"),
+      };
+      assert_eq!(parent, folder);
+    }
+  }
+
+  /// A fixed-length array has no record form, so neither has a type holding
+  /// one; it registers no record.
+  #[test]
+  fn a_type_with_a_fixed_length_array_has_no_record() {
+    use std::collections::BTreeMap;
+
+    #[derive(AroraType)]
+    #[arora(id = "15151515-1515-4151-8151-000000000001")]
+    struct Pose {
+      #[arora(id = "15151515-1515-4151-8151-000000000011")]
+      covariance: [f64; 4],
+    }
+    assert!(Pose::record(crate::Uuid::nil()).is_none());
+    let mut records = BTreeMap::new();
+    Pose::register_records(crate::Uuid::nil(), &mut records);
+    assert!(records.is_empty());
   }
 }

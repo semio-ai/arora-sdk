@@ -182,6 +182,45 @@ fn the_declaration_is_also_the_store_record() {
     assert_eq!(read.exports.len(), record.exports.len());
 }
 
+/// The records of the types a module's signatures name come with its own:
+/// each under the reference the module record pins it at, in the folder
+/// given — so a registry holding them all holds every record the module
+/// record depends on.
+#[test]
+fn the_declaration_carries_the_records_of_the_types_it_names() {
+    use arora_types::record::{FrozenReference, TypeDefinitionFrozen};
+
+    let parent = Uuid::parse_str("11112222-3333-4444-8555-0000000000ff").unwrap();
+    let records = geometry::Module::type_records(parent);
+    let record = geometry::Module::record(parent);
+    let named: std::collections::BTreeSet<FrozenReference> =
+        record.dependencies.iter().cloned().collect();
+    assert_eq!(
+        records
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        named,
+        "one record per type the signatures name: {named:?}"
+    );
+    let point = FrozenReference {
+        id: Point::arora_type_id(),
+        version: Point::arora_type_version(),
+    };
+    let Some(TypeDefinitionFrozen::Structure(structure)) = records.get(&point) else {
+        panic!("Point's record is a structure: {records:?}");
+    };
+    assert_eq!(structure.parent, parent);
+    assert_eq!(structure.name, "Point");
+    assert!(matches!(
+        records.get(&FrozenReference {
+            id: Status::arora_type_id(),
+            version: Status::arora_type_version(),
+        }),
+        Some(TypeDefinitionFrozen::Enumeration(_))
+    ));
+}
+
 #[test]
 fn a_frozen_signature_pins_its_types_at_a_version() {
     let record = geometry::Module::record(Uuid::nil());

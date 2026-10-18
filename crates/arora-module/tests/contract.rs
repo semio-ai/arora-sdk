@@ -235,6 +235,20 @@ fn the_record_describes_the_contract_s_functions_in_declaration_order() {
 }
 
 #[test]
+fn a_contract_carries_the_records_of_the_types_it_names() {
+    let parent = Uuid::from_u128(0xf01de5);
+    let records = tally::type_records(parent);
+    assert_eq!(
+        records.keys().cloned().collect::<Vec<_>>(),
+        tally::record(parent).dependencies
+    );
+    assert_eq!(
+        records.values().next().map(|record| record.name()),
+        Some("Receipt".to_string())
+    );
+}
+
+#[test]
 fn the_descriptions_are_the_record_s_exports() {
     assert_eq!(tally::descriptions(), tally::record(Uuid::nil()).exports);
     assert_eq!(

@@ -10,9 +10,12 @@
 //!
 //! [`AroraType`]: crate::AroraType
 
+use std::collections::BTreeMap;
+
 use crate::call::{Call, CallError, CallResult};
 use crate::module::low::{Executor, Header};
 use crate::record::module::frozen::{self, Function};
+use crate::record::{FrozenReference, TypeDefinitionFrozen};
 use crate::Uuid;
 
 /// One function a declared module exports, callable: a [`Call`] in —
@@ -47,6 +50,15 @@ pub trait AroraModule {
 
   /// The module as a store record, under the folder `parent`.
   fn record(parent: Uuid) -> frozen::Module;
+
+  /// The records of the types the module's functions name, and of the types
+  /// those name, in the folder `parent`, each under the reference that pins
+  /// it: with [`record`](Self::record), what a registry holds to describe the
+  /// module. A type without a record of its own
+  /// ([`AroraType::record`](crate::AroraType::record)) is not among them.
+  fn type_records(_parent: Uuid) -> BTreeMap<FrozenReference, TypeDefinitionFrozen> {
+    BTreeMap::new()
+  }
 
   /// Every exported function, callable.
   fn exports() -> Vec<AroraFunction>;

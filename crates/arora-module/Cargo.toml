@@ -1,6 +1,6 @@
 [package]
 name = "arora-module"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2021"
 description = "Write an Arora module in Rust: the declaration macros and the traits they implement."
 license = "MIT"
@@ -8,8 +8,12 @@ repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 
 [dependencies]
-arora-module-macros = { path = "../arora-module-macros", version = "2.1" }
-arora-types = { path = "../arora-types", version = "3" }
+# 3: a declaration's `type_records(parent)`, which implements
+# `AroraModule::type_records` (arora-types 3.8).
+arora-module-macros = { path = "../arora-module-macros", version = "3" }
+# 3.8: what the declarations generate reaches `TypeDefinitionFrozen` and the
+# derived types' `register_records`.
+arora-types = { path = "../arora-types", version = "3.8" }
 # The artifact entry points the macros emit speak the engine's buffer wire
 # format; a host-linked module never calls into it.
 arora-buffers = { path = "../arora-buffers", version = "3" }

@@ -4,6 +4,13 @@ All notable changes to `arora-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-10-18
+
+### Added
+
+- A declaration's `type_records(parent)`, the records of the types its
+  functions name; see arora-module-macros 3.0.0. Requires arora-types 3.8.
+
 ## [2.1.0] - 2026-09-28
 
 ### Added

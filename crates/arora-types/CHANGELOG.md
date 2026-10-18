@@ -4,6 +4,26 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.8.0] - 2026-10-18
+
+### Added
+
+- `AroraType::record(parent)`: a type's structure or enumeration record, at
+  its `arora_type_version`, in the folder `parent`; and
+  `AroraType::register_records(parent, records)`, the records of every type it
+  names with its own. Both default to none, which a well-known type (a `Key`,
+  a `TaskId`) keeps. `#[derive(AroraType)]` (arora-types-derive 2.0) produces
+  them.
+- `AroraModule::type_records(parent)`: the records of the types a declared
+  module's functions name, beside its `record`. Defaults to none;
+  arora-module-macros 3.0 produces it.
+- `record::TypeDefinitionFrozen`, a type's frozen definition (a primitive, a
+  structure or an enumeration record), with `references()`, the pinned
+  references its fields or variants name. arora-registry re-exports it.
+- `FrozenTy::from_type_ref(type_ref, version)`, a header's type reference
+  frozen as a record names it; `PrimitiveKind::from_id` and
+  `PrimitiveKind::array_of`.
+
 ## [3.7.0] - 2026-10-16
 
 ### Changed

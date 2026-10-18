@@ -43,17 +43,51 @@ Generators then turn frozen records into language bindings
 (`arora-module-rust`, `arora-module-cpp`) — the same records drive Rust and
 C++ code generation.
 
+## Records from Rust declarations
+
+A type that derives `AroraType` is also its record:
+`AroraType::record(parent)` is the structure or enumeration under the type's
+id, at the version `#[arora(version = "…")]` gives (`1.0.0` by default), in
+the folder `parent`, and `register_records` collects it with the records of
+every type it names, each pinned at that type's own version. A type with a
+fixed-length array field has no record: a record has no fixed-length form.
+
+A module declared with `arora-module` carries the records of the types its
+functions name the same way (`type_records(parent)`), beside its module
+record (`record(parent)`). `LocalRegistry::add_declared_module` adds both at
+the version the module's header carries, and fails, naming them, when the
+module names a type without a record:
+
+```rust
+let mut registry = LocalRegistry::new();
+registry.add_folder(folder_id, FolderPublic { name: "vizij".into(), parent: ROOT_ID }).await?;
+registry.add_declared_module::<animation::Module>(header.version.clone().into(), folder_id).await?;
+write_records_to_yaml_dir(&registry, artifact_dir.join("records"))?;
+```
+
 ## Record files
 
 Frozen records serialize to YAML, one file per record version
-(`records/structure/<uuid>@<version>.yaml`, …). This serde shape is a wire
+(`records/structure/<uuid>@<version>.yaml`, …; a folder, which has no
+version, as `records/folder/<uuid>.yaml`). This serde shape is a wire
 contract with the Semio store and is pinned by golden tests
 (→ [design note](design_decisions.md#the-frozen-serde-shape-is-a-wire-contract)).
+
+`arora_registry::local_yaml` reads a record directory into a registry
+(`load_records_from_yaml_dir`, or `load_records` from records already in
+memory) and writes what a registry holds back out
+(`write_records_to_yaml_dir`, `records_as_yaml`). The same records write the
+same files each time.
 
 ## Registries
 
 [`arora-registry`](../crates/arora-registry/readme.md) is the local registry:
-it stores, tags (freezes) and looks up records, entirely in-process. The
+it stores, tags (freezes) and looks up records, entirely in-process. It holds
+one record per id and version: adding the record it already holds there
+keeps it, and a different one is refused. `module_at` and `type_at` look a
+record up by its exact id and version, from memory, and
+`missing_dependencies` lists what a record depends on that the registry does
+not hold. The
 registries backed by Semio's hosted store live in the private
 `arora-registry-remote` crate
 (→ [design note](design_decisions.md#the-remote-registry-is-a-separate-private-crate)).

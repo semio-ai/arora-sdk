@@ -4,6 +4,35 @@ All notable changes to `arora-registry`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-10-18
+
+### Added
+
+- `LocalRegistry::module_at` and `LocalRegistry::type_at`: a record by its
+  exact id and version, answered from memory.
+- `LocalRegistry::missing_dependencies`: the records a record depends on,
+  transitively, that the registry does not hold; a well-known type is never
+  missing.
+- `LocalRegistry::add_declared_module::<M>(version, parent)`: a Rust-declared
+  module's record and the records of the types its functions name. Fails,
+  naming them, when the module names a type without a record.
+- `local_yaml::records_as_yaml` and `local_yaml::write_records_to_yaml_dir`:
+  the records a registry holds, in the form `load_records` and
+  `load_records_from_yaml_dir` read. The same records write the same YAML.
+- `RecordKind::directory` and `RecordKind::from_directory`.
+
+### Changed
+
+- A `LocalRegistry` keeps a record it already holds identically under its
+  id and version (a structure's fields and an enumeration's variants in the
+  same order) instead of failing; a different record there still fails.
+  Several versions of one record are held side by side.
+- `load_records` and `load_records_from_yaml_dir` add each folder after its
+  parent, whatever order the folders come in.
+- `TypeDefinitionFrozen` is arora-types' (3.8), re-exported here unchanged.
+- `tokio` is a development dependency only; `anyhow` and `url`, unused, are
+  gone.
+
 ## [2.0.0] - 2026-09-25
 
 ### Changed

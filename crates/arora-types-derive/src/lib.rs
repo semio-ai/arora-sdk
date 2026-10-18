@@ -4,9 +4,12 @@
 //!
 //! The generated impls produce the type's own `ty::low::Type`, the id it is
 //! referenced by, the record version it is pinned at, a `TypeRegistry`
-//! carrying it and its transitive dependencies, and the value-plane
-//! conversions `From<T> for Value` and `TryFrom<Value> for T` — a structure
-//! under the type's id with each field under its id, in declared order; a
+//! carrying it and its transitive dependencies, its record — a structure or
+//! enumeration record in a folder the caller names, each type it names pinned
+//! at that type's version — with the records of the types it names, and the
+//! value-plane conversions `From<T> for Value` and `TryFrom<Value> for T` — a
+//! structure under the type's id with each field under its id, in declared
+//! order; a
 //! unit-variant enum as an enumeration under its variant's id. Type and field
 //! ids must be pinned with `#[arora(id = "…")]`: a name-hash id silently changes when
 //! a type or field is renamed, so it is not a reliable identity. A ROS type
@@ -32,7 +35,8 @@
 //! carrying dynamically-typed values; and enums with **unit variants** (a
 //! `ty::low` enumeration, each variant id pinned like a field). Maps and
 //! payload-carrying enum variants are rejected pending a `ty::low` model
-//! extension.
+//! extension. A struct with a fixed-length array field (`[T; N]`) has a
+//! `ty::low` type but no record: a record has no fixed-length form.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -88,7 +92,9 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
   )?;
 
   let mut field_entries = Vec::new();
+  let mut record_fields = Vec::new();
   let mut register_calls = Vec::new();
+  let mut register_record_calls = Vec::new();
   let mut field_idents = Vec::new();
   let mut field_temps = Vec::new();
   let mut encode_fields = Vec::new();
@@ -128,9 +134,27 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         },
       )
     });
+    // In the record, a nested type is pinned at its own version; any other
+    // id the field names is a well-known type's, which no record versions.
+    let version = match nested {
+      Some(ty) => quote! { <#ty as arora_types::AroraType>::arora_type_version() },
+      None => well_known_version(),
+    };
+    record_fields.push(quote! {
+      (
+        #field_id_expr,
+        arora_types::record::structure::frozen::StructureField {
+          name: #fname_str.to_string(),
+          ty: arora_types::record::ty::FrozenTy::from_type_ref(&#type_ref_expr, &#version)?,
+        },
+      )
+    });
     if let Some(ty) = nested {
       register_calls.push(quote! {
         <#ty as arora_types::AroraType>::register_types(registry);
+      });
+      register_record_calls.push(quote! {
+        <#ty as arora_types::AroraType>::register_records(parent, records);
       });
     }
 
@@ -172,6 +196,7 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     field_idents.push(fname.clone());
   }
   let version_fn = version_fn(&meta);
+  let register_self = register_self_record();
   let mismatch = format!("expected a `{}` structure", name_str);
 
   Ok(quote! {
@@ -204,6 +229,24 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         }
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
         #(#register_calls)*
+      }
+
+      fn record(parent: arora_types::Uuid) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Structure(
+          arora_types::record::structure::frozen::Structure {
+            parent,
+            name: #type_name.to_string(),
+            fields: [ #(#record_fields),* ].into_iter().collect(),
+          },
+        ))
+      }
+
+      fn register_records(
+        parent: arora_types::Uuid,
+        records: &mut ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen>,
+      ) {
+        #register_self
+        #(#register_record_calls)*
       }
 
       #version_fn
@@ -259,9 +302,11 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
     Span::call_site(),
   )?;
   let version_fn = version_fn(&meta);
+  let register_self = register_self_record();
   let mismatch = format!("expected a `{}` enumeration", name_str);
 
   let mut value_entries = Vec::new();
+  let mut record_variants = Vec::new();
   let mut encode_arms = Vec::new();
   let mut decode_arms = Vec::new();
   for variant in &data.variants {
@@ -283,6 +328,15 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
     let variant_id_expr = id_expr(variant_meta.id, &vname, name_hash_mode, variant.span())?;
     encode_arms.push(quote! { #name::#vident => #variant_id_expr });
     decode_arms.push(quote! { x if x == #variant_id_expr => #name::#vident });
+    record_variants.push(quote! {
+      (
+        #variant_id_expr,
+        arora_types::record::enumeration::frozen::EnumerationVariant {
+          name: #vname.to_string(),
+          ty: arora_types::record::ty::FrozenTy::from(arora_types::record::ty::PrimitiveKind::Unit),
+        },
+      )
+    });
     value_entries.push(quote! {
       (
         #variant_id_expr,
@@ -323,6 +377,23 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
       }
 
+      fn record(parent: arora_types::Uuid) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Enumeration(
+          arora_types::record::enumeration::frozen::Enumeration {
+            parent,
+            name: #type_name.to_string(),
+            variants: [ #(#record_variants),* ].into_iter().collect(),
+          },
+        ))
+      }
+
+      fn register_records(
+        parent: arora_types::Uuid,
+        records: &mut ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen>,
+      ) {
+        #register_self
+      }
+
       #version_fn
     }
 
@@ -356,6 +427,35 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
       }
     }
   })
+}
+
+/// The start of `register_records`: insert the type's own record under the
+/// reference that pins it, and return when it is already there (a type
+/// reachable from itself is visited once) or has no record (its shape has no
+/// record form, so the types it names are not reached through it).
+fn register_self_record() -> TokenStream2 {
+  quote! {
+    let reference = arora_types::record::FrozenReference {
+      id: <Self as arora_types::AroraType>::arora_type_id(),
+      version: <Self as arora_types::AroraType>::arora_type_version(),
+    };
+    if records.contains_key(&reference) {
+      return;
+    }
+    let ::std::option::Option::Some(record) = <Self as arora_types::AroraType>::record(parent) else {
+      return;
+    };
+    records.insert(reference, record);
+  }
+}
+
+/// The version a record names a well-known type (a uuid, a dynamic value) at:
+/// `1.0.0`, as a declared module's record names a dynamic value. A well-known
+/// type has no record of its own to version.
+fn well_known_version() -> TokenStream2 {
+  quote! {
+    arora_types::record::Version::from(arora_types::SemanticVersion { major: 1, minor: 0, patch: 0 })
+  }
 }
 
 /// The `arora_type_version` override, when `#[arora(version = "…")]` is set.

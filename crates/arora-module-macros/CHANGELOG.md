@@ -4,6 +4,24 @@ All notable changes to `arora-module-macros`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-10-18
+
+### Changed
+
+- **Breaking:** a module's `Module` implements `AroraModule::type_records`,
+  and the generated code names `TypeDefinitionFrozen` and
+  `AroraType::register_records`, which arora-types declares from 3.8: a
+  declaration builds only against arora-types 3.8 or later, through
+  arora-module 2.2.
+
+### Added
+
+- A module declaration's and a contract's `type_records(parent)`: the records
+  of the types their functions name, and of the types those name, in the
+  folder `parent`. A module's `Module` implements
+  `AroraModule::type_records` with it. Each export's declaration carries
+  `register_records(parent, records)`.
+
 ## [2.1.0] - 2026-09-28
 
 ### Added

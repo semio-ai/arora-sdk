@@ -1,6 +1,6 @@
 pub mod local;
 pub mod local_yaml;
-use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+use arora_types::record::ty::PrimitiveKind;
 use arora_types::record::{RecordType, Selector};
 use arora_types::ty::{
     BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID, U64_ID,
@@ -9,8 +9,6 @@ use arora_types::ty::{
 use async_trait::async_trait;
 use derive_more::Display;
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use uuid::Uuid;
 
 #[async_trait]
@@ -140,43 +138,10 @@ pub type EnumerationFrozen = arora_types::record::enumeration::frozen::Enumerati
 pub type StructureFrozen = arora_types::record::structure::frozen::Structure;
 pub type ModuleFrozen = arora_types::record::module::frozen::Module;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeDefinitionFrozen {
-    Primitive(PrimitiveKind),
-    Enumeration(EnumerationFrozen),
-    Structure(StructureFrozen),
-}
-
-impl TypeDefinitionFrozen {
-    pub fn name(&self) -> String {
-        match self {
-            Self::Primitive(primitive) => primitive.to_string(),
-            Self::Enumeration(enumeration, ..) => enumeration.name.to_owned(),
-            Self::Structure(structure, ..) => structure.name.to_owned(),
-        }
-    }
-
-    pub fn direct_dependencies(&self) -> HashSet<Uuid> {
-        let mut dependencies = HashSet::new();
-        let mut maybe_insert = |ty: &FrozenTy| {
-            let mut references = HashSet::new();
-            ty.dependencies(&mut references);
-            dependencies.extend(references.into_iter().map(|reference| reference.id));
-        };
-        match self {
-            Self::Primitive(_) => {}
-            Self::Enumeration(enumeration, ..) => enumeration
-                .variants
-                .iter()
-                .for_each(|(_, variant)| maybe_insert(&variant.ty)),
-            Self::Structure(structure, ..) => structure
-                .fields
-                .iter()
-                .for_each(|(_, field)| maybe_insert(&field.ty)),
-        }
-        dependencies
-    }
-}
+/// A type's frozen definition, as the registry answers it: a primitive, or a
+/// structure or an enumeration record. Defined by `arora-types`, where
+/// `#[derive(AroraType)]` produces it.
+pub use arora_types::record::TypeDefinitionFrozen;
 
 #[derive(Display, Debug)]
 pub enum RegistryError {
