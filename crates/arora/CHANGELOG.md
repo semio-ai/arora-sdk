@@ -25,8 +25,8 @@ All notable changes to `arora`. The format follows
   arora-registry's layout. `module_dir::registry(&modules)` loads every
   module directory's records into one registry (`ModuleFiles::records_dir`),
   and the `arora` runner hands it to the device. A record two directories
-  carry identically is held once, so modules sharing a type that declares
-  its folder load together.
+  carry identically is held once, so modules of different scopes sharing a
+  type that states its scope load together.
 - `LocalRegistry` is re-exported.
 
 ### Changed

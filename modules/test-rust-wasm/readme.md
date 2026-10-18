@@ -32,12 +32,14 @@ Exported functions:
 `AroraType`, so the module's declaration carries their records
 (`test_rust_wasm::type_records`) beside its own (`test_rust_wasm::record`): a
 device describes `reading` and `readings` only when it holds those records.
-`Reading` declares its folder, `TRIGONOMETRY`, where `Quadrant`, named only
-through it, lives too.
+The module's records live in the `tests` scope (`TESTS`). `Reading` states its
+scope, `trigonometry` (`TRIGONOMETRY`), where `Quadrant`, named only through
+it, lives too.
 
 The same artifact holds a second module, `compass` (`bearing(degrees: f32) ->
-Reading`), so a device can load two modules sharing a type: both ship the
-same `Reading` and `Quadrant` records.
+Reading`), in the `navigation` scope, so a device can load two modules of
+different scopes sharing a type: both ship the same `Reading` and `Quadrant`
+records.
 
 ## Requirements
 
