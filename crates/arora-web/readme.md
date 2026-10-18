@@ -21,13 +21,13 @@ class AroraRuntime {
   readonly running: boolean;              // whether run() currently owns the device
   readonly behaviorError?: string;        // the behavior's standing error; undefined while healthy
   behaviorErrorChanged(): Promise<string | undefined>; // resolves on the next standing-error change
-  call(callJson: string): Promise<string>; // in-process Call, applied by the next step; resolves to result JSON
+  call(callJson: string): Promise<string>; // in-process Call; resolves to result JSON once applied
   invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown | Run>; // by name; a Value's JSON, or a run's handle
   spawn(callJson: string): Promise<Run>;  // starts a task run; resolves to its handle
   halt(runId: string): Promise<void>;     // stops the run its handle's `run` names
-  listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>;
-  describeMethods(prefix?: string): Promise<unknown[]>; // as a bridge lists methods, plus each one's `module` id
-  setValue(path: string, valueJson: string): void;
+  listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>; // answers at once, no step
+  describeMethods(prefix?: string): Promise<unknown[]>; // as a bridge lists methods, plus each one's `module` id; no step
+  setValue(path: string, valueJson: string): void;    // in the store at once; a step carries it to the HAL
   writeValues(valuesJson: string): void;
   readValues(paths: string[]): Record<string, unknown>;
   snapshot(): Record<string, unknown>;
@@ -79,18 +79,65 @@ draining.
 `run()` hands the device to `arora::Arora::run` until `stop()` reclaims it —
 the loop ends at its next step boundary, the run promise resolves, and
 `step()` (or another `run()`) works again; while it runs, `step()` is
-unavailable. The rest of the surface keeps working while the
-device runs, because none of it touches the stepping device: `setValue`/
-`readValues`/`snapshot` work on a sibling handle of the store, `drainChanges`
-on its subscription, and the client operations — `call`, `invoke`, `spawn`,
-`halt`, `listKeys`, `describeMethods`, the ones a remote client has over a
-bridge — go through the device's in-process `arora::LocalCaller`: queued
-before the method returns, applied at the next step's event phase exactly like
-a remote's, resolved on that step's reply. A page that calls and then
-`step()`s in the same turn has the operation applied by that step. `invoke`
-reads the method's signature on one step and applies its call on the next. The
-device must be stepping (`run()` or your own `step` calls) for an operation to
-land.
+unavailable. The rest of the surface keeps working while the device runs:
+`setValue`/`readValues`/`snapshot` work on a sibling handle of the store,
+`drainChanges` on its subscription, and the client operations are the ones a
+remote client has over a bridge.
+
+### When an operation settles
+
+The operations that change the device — `call`, `invoke`, `spawn`, `halt` —
+are queued on the device's in-process `arora::LocalCaller` before the method
+returns, and their promise settles on the reply of the step that applies them:
+
+- **No `run()` ongoing:** the operation asks for a step at a zero dt, taken in
+  the next microtask. A device nobody steps still settles every operation.
+  The operations issued in one turn share one such step, which applies them
+  in the order they were issued, with whatever the bridges delivered, and
+  writes the HAL and the bridges what changed. A page that steps in the same
+  turn (`call(…)` then `step(16)`) applies them with its own step, and no
+  step at a zero dt follows.
+- **`run()` ongoing:** the run's next step applies the operation. The page
+  adds no step, so the run's cadence is its own. An operation the run leaves
+  unapplied as `stop()` ends it takes a step at a zero dt once the device is
+  back.
+
+A page's writes to the store, `setValue` and `writeValues`, are in the store
+when the method returns. The same steps carry them to the HAL and the
+bridges: a step at a zero dt shared with the turn's operations, or the run's
+next step.
+
+A step at a zero dt is an ordinary step with no time elapsed. It applies what
+was asked, publishes `arora/dt` as zero, ticks the behavior once and writes
+the HAL, so precedence and change notifications are those of any step. What
+runs on time holds still, while a node that counts ticks (a behavior tree's
+`Repeat`, say) advances one tick. On a device the page steps itself, an
+operation or a write made outside the turn of a `step()` takes a step at a
+zero dt before the page's next one.
+
+A step that fails, the page's own or one at a zero dt, rejects each operation
+it left unanswered with its error, and a step at a zero dt says so on the
+console. The operation is not withdrawn: if the step failed before applying
+it, a later step still does.
+
+The operations that only read, `listKeys` and `describeMethods`, never step.
+They answer at once from the device's current state, whether or not `run()`
+owns it: the keys from the store, and the methods from the method index read
+when the device was wrapped. That index changes only through `Arora`'s module
+methods, which `AroraWeb` does not call. `invoke` reads its method's signature
+the same way, so its call is applied like `call`'s. A read does not see an
+operation that is still queued, so await the operation first.
+
+A call into this surface from a callback the step itself invokes (a module
+calling a page function during a tick, which calls back into the device) is
+an ordinary call. A step cannot nest, so an operation is queued and applied
+by a step at a zero dt that runs as a task once the current step has ended,
+or by the run's next step. A write is carried by the current step, or by the
+next one if the current step has already flushed. `step()` from there is
+refused. Because the step follows as a task, a callback that asks for one on
+every tick does not starve the event loop, but it does keep the device
+stepping. Don't rely on such calls. What a step needs done belongs in a
+behavior, where it is part of the step.
 
 `invoke` names a method by the bare name its module exports; when two modules
 export one name, pass the module id (`describeMethods` gives each method's
@@ -106,7 +153,9 @@ A downstream device (e.g. Vizij) composes its own `arora::Arora` with
 cannot cross the JS boundary — and wraps it with `AroraWeb::from`, reusing the
 same JS surface. The `store_json` module exposes the Value↔JSON accessors over
 any store for wrappers that add their own methods, and `AroraWeb::caller` the
-typed client operations.
+typed client operations. An operation through the caller is a remote's: it
+applies at the device's next step. `AroraWeb::complete(reply)` settles it as
+this surface's operations settle.
 
 ## Engine / BehaviorTreeRunner JS surface (see [src/lib.rs](src/lib.rs)):
 
@@ -176,7 +225,9 @@ GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox crates/aror
 ```
 
 The test loads `test-rust-wasm.wasm` through `Engine.loadModule` and
-calls `ping`, asserting the round-trip works.
+calls `ping`, asserting the round-trip works. The others drive
+`AroraRuntime`'s operations on a device nobody steps, one the page steps, and
+one `run()` owns, counting the steps each one takes.
 
 > **Browser pick:** `wasm-pack` downloads a pinned `chromedriver`; if it
 > doesn't match the locally installed Chrome it 404s. Firefox /

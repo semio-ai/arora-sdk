@@ -57,20 +57,21 @@ fn install_panic_hook() {
 // The browser device
 // =============================================================================
 
-use arora::{Arora, AroraBuilder, Caller, Invoked, LocalCaller, TaskId};
+use arora::{Arora, AroraBuilder, Caller, LocalCaller, MethodSignature, TaskId};
 use arora_bridge::client::{self, KeyInfo};
+use arora_types::call::CallError;
 use arora_types::data::{DataStore, Key, StateChange, Subscription};
+use futures::future::Either;
+use futures::FutureExt;
+use std::cell::Cell;
 use std::future::Future;
+use std::task::Poll;
 use std::time::Duration;
+use tokio::sync::watch;
 
-/// Hand `future` to JavaScript as a Promise, having polled it once already.
-///
-/// Every device operation goes on the device's inbound queue at its future's
-/// first poll; a `future_to_promise` alone would first poll it a microtask
-/// later. Polling once here means the operation is queued before the method
-/// returns, so a page that calls and then `step()`s in the same turn has it
-/// applied by that step. A future that is already done settles the promise
-/// at once.
+/// Hand `future` to JavaScript as a Promise, having polled it once already: a
+/// future that is already done settles the promise at once, and one that is
+/// not is polled on from wasm-bindgen-futures' queue.
 fn promise(future: impl Future<Output = Result<JsValue, JsValue>> + 'static) -> js_sys::Promise {
     let mut future = Box::pin(future);
     let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
@@ -262,6 +263,131 @@ impl Undrained {
     }
 }
 
+#[wasm_bindgen]
+extern "C" {
+    /// The global `queueMicrotask`, in a page, a worker and Node alike.
+    #[wasm_bindgen(js_name = queueMicrotask)]
+    fn queue_microtask(callback: &js_sys::Function);
+
+    /// The global `setTimeout`, in a page, a worker and Node alike.
+    #[wasm_bindgen(js_name = setTimeout)]
+    fn set_timeout(callback: &js_sys::Function, ms: i32);
+
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str);
+}
+
+/// What the device's steps did that a waiting operation acts on, sent to every
+/// operation awaiting its reply.
+#[derive(Clone, Debug)]
+enum Stepped {
+    /// Nothing an operation waits on has happened yet.
+    Idle,
+    /// A step failed with this message, so an operation it left unanswered
+    /// rejects with it rather than waiting for a step that may fail the same
+    /// way.
+    Failed(String),
+    /// [`run`](AroraWeb::run) gave the device back. An operation its steps
+    /// left unanswered asks for a step at a zero dt, since no run step
+    /// will apply it now.
+    Parked,
+}
+
+/// Steps the device at a zero dt for what the page asked of it while no
+/// [`run`](AroraWeb::run) is ongoing.
+///
+/// The requests of one turn — the page's operations and its writes to the
+/// store — share one step, taken in the next microtask. It applies everything
+/// queued on the device's inbound channel (the page's operations in the order
+/// it issued them, and what bridges delivered), ticks the behavior with no
+/// time elapsed, and writes the HAL and the bridges what changed, the page's
+/// writes with it. A step that runs first takes the place of the requested
+/// one: a page's own [`step`](AroraWeb::step) clears the request, and while
+/// `run()` owns the device its next step applies the queue, so the request
+/// lapses.
+///
+/// A request made from inside a step cannot nest one: its step follows the
+/// current one as a task (`setTimeout`), not a microtask, so a callback that
+/// asks for one on every tick paces a chain of steps on the event loop
+/// instead of starving it.
+#[derive(Clone)]
+struct StepScheduler {
+    device: Rc<RefCell<Option<Arora>>>,
+    changes: Rc<RefCell<Undrained>>,
+    // Whether a step at a zero dt is due; a microtask or a task is queued
+    // whenever it is.
+    due: Rc<Cell<bool>>,
+    stepped: Rc<watch::Sender<Stepped>>,
+}
+
+impl StepScheduler {
+    fn new(device: Arora, changes: Rc<RefCell<Undrained>>) -> Self {
+        Self {
+            device: Rc::new(RefCell::new(Some(device))),
+            changes,
+            due: Rc::new(Cell::new(false)),
+            stepped: Rc::new(watch::channel(Stepped::Idle).0),
+        }
+    }
+
+    /// Whether a step holds the device: a page's own, or one at a zero dt.
+    fn mid_step(&self) -> bool {
+        self.device.try_borrow_mut().is_err()
+    }
+
+    /// Ask for a step at a zero dt: in the next microtask, or after the
+    /// current step when asked from inside one. Requests made before it runs
+    /// share it.
+    fn request(&self) {
+        if self.due.replace(true) {
+            return;
+        }
+        let scheduler = self.clone();
+        let callback = Closure::once_into_js(move || scheduler.step_if_due());
+        if self.mid_step() {
+            set_timeout(callback.unchecked_ref(), 0);
+        } else {
+            queue_microtask(callback.unchecked_ref());
+        }
+    }
+
+    /// A step is about to apply the queue: the request is met by it.
+    fn met(&self) {
+        self.due.set(false);
+    }
+
+    /// A step failed: what it left unanswered rejects with `message`.
+    fn failed(&self, message: String) {
+        self.stepped.send_replace(Stepped::Failed(message));
+    }
+
+    fn step_if_due(&self) {
+        if !self.due.replace(false) {
+            return;
+        }
+        let Ok(mut parked) = self.device.try_borrow_mut() else {
+            // A microtask or a task runs between steps, never inside one;
+            // ask again after this one all the same.
+            self.request();
+            return;
+        };
+        // While `run()` owns the device, the run's next step applies the
+        // queue.
+        let Some(device) = parked.as_mut() else {
+            return;
+        };
+        let stepped = device.step(Duration::ZERO);
+        drop(parked);
+        self.changes.borrow_mut().fold();
+        if let Err(e) = stepped {
+            let message = e.to_string();
+            // A page's write has no promise to reject: the console says it.
+            console_error(&format!("arora-web: a step at a zero dt failed: {message}"));
+            self.failed(message);
+        }
+    }
+}
+
 /// The browser Arora device, exported to JavaScript as `AroraRuntime`.
 ///
 /// The JS constructor builds the self-contained demo device — the runtime's
@@ -278,55 +404,95 @@ impl Undrained {
 /// `snapshot` work on a sibling handle of the store, `drainChanges` on its
 /// subscription — folded into the latest value per key on every step, so what
 /// a page has not drained is one entry per changed key however many steps it
-/// goes without draining — and the client operations — `call`, `invoke`,
-/// `spawn`, `halt`, `listKeys`, `describeMethods` — on the device's in-process
-/// [`LocalCaller`], the same operations a remote client has over a bridge.
-/// None of them touch the stepping device: each is queued before the method
-/// returns and applied by the next step, so the device must be stepping (a
-/// `run()` loop, or your own `step` calls) for its promise to settle.
+/// goes without draining — and the client operations are the ones a remote
+/// client has over a bridge.
+///
+/// The operations that change the device — `call`, `invoke`, `spawn`, `halt` —
+/// are queued on its in-process [`LocalCaller`] before the method returns,
+/// and settle on the reply of the step that applies them:
+/// - while no `run()` is ongoing, a step at a zero dt the operation asks for:
+///   the operations issued in one turn share one such step, applied in the
+///   order they were issued, so a page that never steps the device has them
+///   applied all the same. A page that steps in the same turn applies them
+///   with its own step, and none at a zero dt follows;
+/// - while `run()` owns the device, the run's next step: the cadence is the
+///   run's alone.
+///
+/// A step at a zero dt is an ordinary step with no time elapsed: it publishes
+/// `arora/dt` as zero and ticks the behavior once, so what runs on time holds
+/// while a node that counts ticks advances one. A step that fails rejects each
+/// operation it left unanswered with its error. That operation is not
+/// withdrawn: if the step failed before applying the queue, a later step still
+/// applies it.
+///
+/// A page's writes to the store — `setValue`, `writeValues` — hold in the store
+/// when the method returns, and reach the HAL and the bridges by the same
+/// steps: a step at a zero dt they share with the turn's operations while no
+/// `run()` is ongoing, the run's next step while one is.
+///
+/// The operations that only read — `listKeys`, `describeMethods` — answer
+/// from the device's current state, with no step, in both modes: the keys
+/// from the store's sibling handle, the methods from the method index read
+/// when the device was wrapped (it changes only through `Arora`'s module
+/// methods, which this wrapper does not call). A read does not see an
+/// operation still queued, so a page awaits that operation's promise first.
+///
+/// A call into this surface from a callback the step itself invokes is an
+/// ordinary call: a step cannot nest, so an operation it issues is queued, and
+/// applied by a step at a zero dt taken as a task once the current step has
+/// ended (or by the run's next step). A write it makes is carried out by the
+/// current step, or by the next one if the current step has already flushed.
+/// A page should not rely on such calls: what a step needs done belongs in a
+/// behavior, where it is part of the step.
 ///
 /// Every method is an ordinary Rust method too, for a Rust crate that wraps
 /// this device in its own `wasm_bindgen` type; [`caller`](Self::caller) hands
-/// such a crate the typed operations.
+/// such a crate the typed operations, and [`complete`](Self::complete) has
+/// them settle as this surface's do.
 #[wasm_bindgen(js_name = AroraRuntime)]
 pub struct AroraWeb {
-    // The device parks here between manual steps; `run` takes it out and
-    // `stop` puts it back. Shared with the run future, which returns the
-    // device on a stop.
-    device: Rc<RefCell<Option<Arora>>>,
+    // The device and the zero-dt steps taken for the page. The device parks
+    // in the scheduler between steps; `run` takes it out and the run
+    // future puts it back.
+    steps: StepScheduler,
     // Ends the current `run` loop at its next step boundary; `None` while no
     // loop runs (the sender is consumed by `stop`).
     stop: RefCell<Option<futures::channel::oneshot::Sender<()>>>,
     caller: LocalCaller,
     store: Box<dyn DataStore>,
+    // The device's method index, read when it was wrapped: `describeMethods`
+    // and `invoke` answer from it without a step.
+    methods: Vec<MethodSignature>,
     // Shared with the run future, which folds the subscription after every
     // step it takes.
     changes: Rc<RefCell<Undrained>>,
     // The device's standing-error watch, taken before `run` can own the
     // device, so the reading stays available while it self-paces.
-    behavior_error: tokio::sync::watch::Receiver<Option<String>>,
+    behavior_error: watch::Receiver<Option<String>>,
     // The awaitable end of the same watch: taken out for the duration of one
     // `behaviorErrorChanged` await, so sequential awaits share one seen
     // cursor and no change is missed between them.
-    behavior_error_changes: Rc<RefCell<Option<tokio::sync::watch::Receiver<Option<String>>>>>,
+    behavior_error_changes: Rc<RefCell<Option<watch::Receiver<Option<String>>>>>,
 }
 
 impl From<Arora> for AroraWeb {
     /// Wrap a composed device: keep its in-process [`LocalCaller`], a sibling
-    /// handle of its store, and a subscription (opening on the whole current
-    /// state), then expose it all to JavaScript.
+    /// handle of its store, its method index, and a subscription (opening on
+    /// the whole current state), then expose it all to JavaScript.
     fn from(arora: Arora) -> Self {
         install_panic_hook();
         let caller = arora.caller();
         let store = arora.store().clone_box();
+        let methods = arora.describe_methods(None);
         let changes = Rc::new(RefCell::new(Undrained::new(store.subscribe())));
         let behavior_error = arora.behavior_error();
         let behavior_error_changes = Rc::new(RefCell::new(Some(arora.behavior_error())));
         Self {
-            device: Rc::new(RefCell::new(Some(arora))),
+            steps: StepScheduler::new(arora, changes.clone()),
             stop: RefCell::new(None),
             caller,
             store,
+            methods,
             changes,
             behavior_error,
             behavior_error_changes,
@@ -349,34 +515,53 @@ impl AroraWeb {
     /// the previous step — a plain JS number, exactly what a
     /// `requestAnimationFrame` timestamp delta gives. This is the only place
     /// the rAF millisecond unit is converted to the core `Duration` dt.
-    /// Unavailable once [`run`](Self::run) has taken the device.
+    /// It applies every operation queued so far, so none of them takes a step
+    /// at a zero dt. Unavailable once [`run`](Self::run) has taken the device,
+    /// and from a callback the step itself invokes.
     pub fn step(&self, dt_ms: f64) -> Result<(), JsValue> {
-        let mut slot = self
+        let mut parked = self
+            .steps
             .device
             .try_borrow_mut()
             .map_err(|_| JsValue::from_str("the device is mid-step; call between steps"))?;
-        let device = slot
+        let device = parked
             .as_mut()
             .ok_or_else(|| JsValue::from_str("run() drives the device; step() is unavailable"))?;
+        self.steps.met();
         let stepped = device.step(Duration::from_secs_f64(dt_ms / 1_000.0));
+        drop(parked);
         self.changes.borrow_mut().fold();
-        stepped.map_err(|e| JsValue::from_str(&format!("step failed: {e}")))
+        stepped.map_err(|e| {
+            // The operations this step left unanswered reject with its error
+            // rather than wait for a step that may fail the same way.
+            self.steps.failed(e.to_string());
+            JsValue::from_str(&format!("step failed: {e}"))
+        })
     }
 
     /// Hand the device to [`Arora::run`]: a self-paced loop at `period_ms`
     /// (default: the runtime's ~100 Hz) that owns the device until stepping
     /// fails — the promise rejects — or [`stop`](Self::stop) reclaims it — the
     /// promise resolves and `step()` works again. While it runs the rest of
-    /// the surface keeps working: it never touches the stepping device.
+    /// the surface keeps working, and the operations that change the device
+    /// apply at the run's next step, adding no step of their own.
     ///
     /// `run` awaits between steps, so it shares its thread; see
     /// [`Arora::run`] for where a cadence survives in a browser (main thread
     /// vs dedicated worker).
     pub fn run(&self, period_ms: Option<f64>) -> js_sys::Promise {
-        let Some(mut device) = self.device.borrow_mut().take() else {
+        let taken = match self.steps.device.try_borrow_mut() {
+            Ok(mut parked) => parked.take(),
+            Err(_) => {
+                return js_sys::Promise::reject(&JsValue::from_str(
+                    "the device is mid-step; call between steps",
+                ))
+            }
+        };
+        let Some(mut device) = taken else {
             return js_sys::Promise::reject(&JsValue::from_str("the device is already running"));
         };
-        let slot = self.device.clone();
+        let steps = self.steps.clone();
         let changes = self.changes.clone();
         let (stop_tx, stop_rx) = futures::channel::oneshot::channel::<()>();
         *self.stop.borrow_mut() = Some(stop_tx);
@@ -385,7 +570,6 @@ impl AroraWeb {
                 .map(|ms| Duration::from_secs_f64(ms / 1_000.0))
                 .unwrap_or(Arora::DEFAULT_STEP_PERIOD);
             let outcome = {
-                use futures::FutureExt;
                 let run = device.run(period);
                 futures::pin_mut!(run);
                 // Each step runs inside one poll of the loop: folding after
@@ -403,10 +587,12 @@ impl AroraWeb {
                     _ = stop_rx => None,
                 }
             };
-            // Whatever ended the loop, the device parks back in its slot: a
+            // Whatever ended the loop, the device parks back in the scheduler: a
             // failed run leaves a device the embedder can still step, probe
-            // ([`Arora::behavior_error`]), or run again.
-            slot.borrow_mut().replace(device);
+            // ([`Arora::behavior_error`]), or run again. An operation the
+            // run's steps left unanswered now takes a step at a zero dt.
+            steps.device.borrow_mut().replace(device);
+            steps.stepped.send_replace(Stepped::Parked);
             match outcome {
                 // `Arora::run` only returns by failing; surface that.
                 Some(result) => {
@@ -431,7 +617,11 @@ impl AroraWeb {
     /// Whether [`run`](Self::run) currently owns the device.
     #[wasm_bindgen(getter)]
     pub fn running(&self) -> bool {
-        self.device.borrow().is_none()
+        // Held mid-step by a page's own step or a zero-dt one: not running.
+        self.steps
+            .device
+            .try_borrow()
+            .is_ok_and(|parked| parked.is_none())
     }
 
     /// The behavior's standing error — the message of its latest failed
@@ -455,11 +645,11 @@ impl AroraWeb {
                 "a behaviorErrorChanged await is already pending",
             ));
         };
-        let slot = self.behavior_error_changes.clone();
+        let home = self.behavior_error_changes.clone();
         wasm_bindgen_futures::future_to_promise(async move {
             let outcome = errors.changed().await;
             let value = errors.borrow_and_update().clone();
-            slot.borrow_mut().replace(errors);
+            home.borrow_mut().replace(errors);
             outcome.map_err(|_| JsValue::from_str("the device is gone"))?;
             Ok(match value {
                 Some(message) => JsValue::from_str(&message),
@@ -468,19 +658,18 @@ impl AroraWeb {
         })
     }
 
-    /// Dispatch a [`Call`] into the device through its in-process caller. The
-    /// call is queued before this returns, and the promise resolves after the
-    /// step that applies it — the device must be stepping (a `run()` loop, or
-    /// your own `step` calls) for it to land. `call_json` is an
-    /// `arora_types::call::Call` as JSON; the result is the `CallResult` as a
-    /// JSON string.
+    /// Dispatch a [`Call`] into the device through its in-process caller.
+    /// `call_json` is an `arora_types::call::Call` as JSON; the promise
+    /// resolves to the `CallResult` as a JSON string once the call is applied
+    /// (see [`AroraWeb`] for which step applies it).
     pub fn call(&self, call_json: &str) -> js_sys::Promise {
-        let parsed: Result<Call, _> = serde_json::from_str(call_json)
-            .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));
-        let caller = self.caller.clone();
+        let call: Call = match serde_json::from_str(call_json) {
+            Ok(call) => call,
+            Err(e) => return reject(format!("invalid call json: {e}")),
+        };
+        let reply = self.call_now(call);
         promise(async move {
-            let result = caller
-                .call(parsed?)
+            let result = reply
                 .await
                 .map_err(|e| JsValue::from_str(&format!("call failed: {e}")))?;
             let json = serde_json::to_string(&result)
@@ -496,42 +685,50 @@ impl AroraWeb {
     /// [`Value`] in the JSON form `call` takes, e.g. `{"x": {"f64": 2.5}}`. The
     /// promise resolves to the return value, as a plain JS value of that JSON
     /// form. A task-shaped method — one returning the behavior `Status` — is
-    /// spawned as a run instead, and resolves at once to the run's handle, the
-    /// plain object [`spawn`](Self::spawn) answers with.
+    /// spawned as a run instead, and resolves to the run's handle, the plain
+    /// object [`spawn`](Self::spawn) answers with.
     ///
     /// Names are the bare names modules export, so two modules may share one:
     /// `module_id` (a uuid string) names the exporting module to choose. A name
     /// more than one module exports, without `module_id`, rejects naming those
     /// modules. An argument the method does not declare rejects too.
     ///
-    /// Queued before this returns, like every operation; it reads the method's
-    /// signature on the next step and applies its call on the step after.
+    /// The method's signature is read at once, from the device's method
+    /// index; its call is applied as `call`'s is.
     pub fn invoke(
         &self,
         method: &str,
         args_json: &str,
         module_id: Option<String>,
     ) -> js_sys::Promise {
-        let args: Result<HashMap<String, Value>, _> = serde_json::from_str(args_json)
-            .map_err(|e| JsValue::from_str(&format!("invalid args json: {e}")));
-        let module = module_id
-            .map(|id| {
-                Uuid::parse_str(&id)
-                    .map_err(|e| JsValue::from_str(&format!("'{id}' is not a module id: {e}")))
-            })
-            .transpose();
-        let caller = self.caller.clone();
+        let failed = |e: String| reject(format!("invoke {method} failed: {e}"));
+        let args: HashMap<String, Value> = match serde_json::from_str(args_json) {
+            Ok(args) => args,
+            Err(e) => return reject(format!("invalid args json: {e}")),
+        };
+        let module = match module_id.map(|id| Uuid::parse_str(&id).map_err(|e| (id, e))) {
+            None => None,
+            Some(Ok(module)) => Some(module),
+            Some(Err((id, e))) => return reject(format!("'{id}' is not a module id: {e}")),
+        };
+        let signature = match client::find_method(&self.methods, method, module) {
+            Ok(signature) => signature,
+            Err(e) => return failed(e),
+        };
+        let call = match client::call_of(signature, args) {
+            Ok(call) => call,
+            Err(e) => return failed(e),
+        };
         let method = method.to_string();
-        promise(async move {
-            let invoked = caller
-                .invoke(&method, args?, module?)
-                .await
-                .map_err(|e| JsValue::from_str(&format!("invoke {method} failed: {e}")))?;
-            match invoked {
-                Invoked::Returned(value) => value_to_js(&value),
-                Invoked::Started(handle) => run_to_js(&handle),
-            }
-        })
+        let failed = move |e: CallError| JsValue::from_str(&format!("invoke {method} failed: {e}"));
+        if client::task_shaped(&signature.function) {
+            let caller = self.caller.clone();
+            let started = self.complete(async move { caller.spawn(call).await });
+            promise(async move { run_to_js(&started.await.map_err(failed)?) })
+        } else {
+            let returned = self.call_now(call);
+            promise(async move { value_to_js(&returned.await.map_err(failed)?.ret) })
+        }
     }
 
     /// Start `call_json` (an `arora_types::call::Call` as JSON) as a task run,
@@ -540,15 +737,17 @@ impl AroraWeb {
     /// the run id (a uuid string, which [`halt`](Self::halt) takes), `status`
     /// the path of the key that reports how the run goes and ends, and
     /// `feedback`, `result` and `update` the paths of the keys carrying its
-    /// progress, its result, and what steers it. Queued before this returns;
-    /// applied by the next step.
+    /// progress, its result, and what steers it. It resolves once the spawn is
+    /// applied, as `call`'s does.
     pub fn spawn(&self, call_json: &str) -> js_sys::Promise {
-        let parsed: Result<Call, _> = serde_json::from_str(call_json)
-            .map_err(|e| JsValue::from_str(&format!("invalid call json: {e}")));
+        let call: Call = match serde_json::from_str(call_json) {
+            Ok(call) => call,
+            Err(e) => return reject(format!("invalid call json: {e}")),
+        };
         let caller = self.caller.clone();
+        let started = self.complete(async move { caller.spawn(call).await });
         promise(async move {
-            let handle = caller
-                .spawn(parsed?)
+            let handle = started
                 .await
                 .map_err(|e| JsValue::from_str(&format!("spawn failed: {e}")))?;
             run_to_js(&handle)
@@ -557,15 +756,17 @@ impl AroraWeb {
 
     /// Stop the run `run_id` names (the `run` of its handle, a uuid string):
     /// it ends `Failure` on the step after the halt is applied. Idempotent —
-    /// halting a finished or unknown run resolves all the same. Queued before
-    /// this returns; applied by the next step.
+    /// halting a finished or unknown run resolves all the same. It resolves
+    /// once the halt is applied, as `call`'s does.
     pub fn halt(&self, run_id: &str) -> js_sys::Promise {
-        let run = Uuid::parse_str(run_id)
-            .map_err(|e| JsValue::from_str(&format!("'{run_id}' is not a run id: {e}")));
+        let run = match Uuid::parse_str(run_id) {
+            Ok(run) => TaskId(run),
+            Err(e) => return reject(format!("'{run_id}' is not a run id: {e}")),
+        };
         let caller = self.caller.clone();
+        let halted = self.complete(async move { caller.halt(run).await });
         promise(async move {
-            caller
-                .halt(TaskId(run?))
+            halted
                 .await
                 .map_err(|e| JsValue::from_str(&format!("halt failed: {e}")))?;
             Ok(JsValue::UNDEFINED)
@@ -576,20 +777,15 @@ impl AroraWeb {
     /// absent), sorted by path. The promise resolves to an array of
     /// `{path, __meta}` objects: each key with what its store says it is — the
     /// shape it holds, its range and unit, where it rests, whether a client may
-    /// write it — as every Arora bridge lists keys. Queued before this returns;
-    /// applied by the next step.
+    /// write it — as every Arora bridge lists keys. It answers from the store
+    /// as it is, with no step, and resolves at once.
     #[wasm_bindgen(js_name = listKeys)]
     pub fn list_keys(&self, prefix: Option<String>) -> js_sys::Promise {
-        let listed = self.caller.list_keys(prefix);
-        promise(async move {
-            let keys: Vec<KeyInfo> = listed
-                .await
-                .map_err(|e| JsValue::from_str(&format!("listKeys failed: {e}")))?
-                .into_iter()
-                .map(|(path, meta)| KeyInfo { path, meta })
-                .collect();
-            to_js(&keys)
-        })
+        let keys: Vec<KeyInfo> = arora::list_keys(&*self.store, prefix.as_deref())
+            .into_iter()
+            .map(|(path, meta)| KeyInfo { path, meta })
+            .collect();
+        settled(to_js(&keys))
     }
 
     /// The device's callable methods whose name starts with `prefix` (all of
@@ -598,41 +794,45 @@ impl AroraWeb {
     /// `params` (each `name`, `param_type`, `required`, in declaration order),
     /// `return_type`, `task` (whether invoking it starts a run) — plus `module`,
     /// the exporting module's id, which [`invoke`](Self::invoke) takes when two
-    /// modules export one name. Queued before this returns; applied by the next
-    /// step.
+    /// modules export one name. It answers from the device's method index,
+    /// with no step, and resolves at once.
     #[wasm_bindgen(js_name = describeMethods)]
     pub fn describe_methods(&self, prefix: Option<String>) -> js_sys::Promise {
-        let described = self.caller.describe_methods(prefix);
-        promise(async move {
-            let signatures = described
-                .await
-                .map_err(|e| JsValue::from_str(&format!("describeMethods failed: {e}")))?;
-            let mut methods = Vec::with_capacity(signatures.len());
-            for signature in &signatures {
+        let described = self
+            .methods
+            .iter()
+            .filter(|signature| {
+                prefix
+                    .as_deref()
+                    .is_none_or(|prefix| signature.name.starts_with(prefix))
+            })
+            .map(|signature| {
                 let mut method = serde_json::to_value(client::method_info(signature))
                     .map_err(|e| JsValue::from_str(&format!("serialize failed: {e}")))?;
                 method["module"] = serde_json::Value::String(signature.module_id.to_string());
-                methods.push(method);
-            }
-            to_js(&methods)
-        })
+                Ok(method)
+            })
+            .collect::<Result<Vec<_>, JsValue>>();
+        settled(described.and_then(|methods| to_js(&methods)))
     }
 
     /// Write one key into the store (Arora [`Value`] as JSON, e.g. `{"f32": 1}`).
+    /// The store holds it when this returns; the step that carries it to the
+    /// HAL and the bridges is the one a client operation takes (see
+    /// [`AroraWeb`]).
     #[wasm_bindgen(js_name = setValue)]
     pub fn set_value(&self, path: &str, value_json: &str) -> Result<(), JsValue> {
         let written = store_json::set_value(&*self.store, path, value_json);
-        self.changes.borrow_mut().fold();
-        written
+        self.wrote(written)
     }
 
     /// Write several keys at once, as one store change (a JSON object mapping
-    /// each key path to an Arora [`Value`]).
+    /// each key path to an Arora [`Value`]). The store holds them when this
+    /// returns, and a step carries them out as `setValue`'s.
     #[wasm_bindgen(js_name = writeValues)]
     pub fn write_values(&self, values_json: &str) -> Result<(), JsValue> {
         let written = store_json::write_values(&*self.store, values_json);
-        self.changes.borrow_mut().fold();
-        written
+        self.wrote(written)
     }
 
     /// Read keys from the store; `paths` is a `string[]`, result maps path→Value.
@@ -660,10 +860,108 @@ impl AroraWeb {
 
 impl AroraWeb {
     /// The device's in-process caller: the typed operations behind `call`,
-    /// `invoke`, `spawn`, `halt`, `listKeys` and `describeMethods`, for a Rust
-    /// crate that wraps this device and wants them unserialized.
+    /// `invoke`, `spawn` and `halt`, for a Rust crate that wraps this device
+    /// and wants them unserialized. An operation through it is a remote's: it
+    /// applies at the device's next step. Hand its reply to
+    /// [`complete`](Self::complete) to have it settle as this surface's
+    /// operations do.
     pub fn caller(&self) -> LocalCaller {
         self.caller.clone()
+    }
+
+    /// Settle `reply`, the reply of an operation that changes the device, as
+    /// this surface's own `call`, `invoke`, `spawn` and `halt` settle: applied
+    /// by a step at a zero dt while no [`run`](Self::run) is ongoing — the
+    /// operations issued in one turn sharing one — and by the run's next step
+    /// while one is.
+    ///
+    /// `reply` is polled once before this returns, so an operation that
+    /// queues itself at its future's first poll (a [`LocalCaller`] call
+    /// wrapped in an `async` block) is queued by then, behind those issued
+    /// before it. A reply that is already there settles at once. A step that
+    /// fails rejects every operation it left unanswered with its error,
+    /// without withdrawing it (see [`AroraWeb`]). A read-only operation has nothing to apply: answer it from the
+    /// device's state instead (`listKeys`, `describeMethods`).
+    pub fn complete<V: 'static>(
+        &self,
+        reply: impl Future<Output = Result<V, CallError>> + 'static,
+    ) -> impl Future<Output = Result<V, CallError>> + 'static {
+        let mut reply = Box::pin(reply);
+        let first = reply.as_mut().poll(&mut std::task::Context::from_waker(
+            futures::task::noop_waker_ref(),
+        ));
+        let mut stepped = self.steps.stepped.subscribe();
+        let steps = self.steps.clone();
+        if first.is_pending() {
+            steps.request();
+        }
+        async move {
+            if let Poll::Ready(answer) = first {
+                return answer;
+            }
+            loop {
+                {
+                    // The sender lives in `steps`, which this future holds:
+                    // the channel stays open while it waits.
+                    let changed = std::pin::pin!(stepped.changed());
+                    if let Either::Left((answer, _)) =
+                        futures::future::select(reply.as_mut(), changed).await
+                    {
+                        return answer;
+                    }
+                }
+                let event = stepped.borrow_and_update().clone();
+                match event {
+                    Stepped::Idle => {}
+                    Stepped::Failed(message) => {
+                        return match reply.as_mut().now_or_never() {
+                            Some(answer) => answer,
+                            None => Err(CallError::Generic {
+                                message: format!("step failed: {message}"),
+                            }),
+                        }
+                    }
+                    Stepped::Parked => steps.request(),
+                }
+            }
+        }
+    }
+
+    /// After a page's write to the store: fold it into what the page has not
+    /// drained, and have a step carry it to the HAL and the bridges — a step
+    /// at a zero dt while no run is ongoing, the run's next step while one is.
+    ///
+    /// A write from inside a step asks for none: the step that holds the
+    /// device flushes it, or, written once that step has flushed, the next
+    /// step does.
+    fn wrote(&self, written: Result<(), JsValue>) -> Result<(), JsValue> {
+        self.changes.borrow_mut().fold();
+        if written.is_ok() && !self.steps.mid_step() {
+            self.steps.request();
+        }
+        written
+    }
+
+    /// Queue `call` and settle its reply as [`complete`](Self::complete) does.
+    fn call_now(
+        &self,
+        call: Call,
+    ) -> impl Future<Output = Result<arora_types::call::CallResult, CallError>> + 'static {
+        let caller = self.caller.clone();
+        self.complete(async move { caller.call(call).await })
+    }
+}
+
+/// A promise rejected with `message`.
+fn reject(message: String) -> js_sys::Promise {
+    js_sys::Promise::reject(&JsValue::from_str(&message))
+}
+
+/// A promise already settled with `answer`.
+fn settled(answer: Result<JsValue, JsValue>) -> js_sys::Promise {
+    match answer {
+        Ok(value) => js_sys::Promise::resolve(&value),
+        Err(error) => js_sys::Promise::reject(&error),
     }
 }
 

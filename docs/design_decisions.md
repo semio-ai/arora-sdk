@@ -466,6 +466,31 @@ reader of `arora/dt` would see one frame that long. A running device has no
 clock setter: a jump in `arora/time` would be the same gap seen from the other
 key.
 
+### A page's operations settle through a step at a zero dt
+
+In the browser, a page's client operations (`call`, `invoke`, `spawn`, `halt`)
+and its store writes, made while no `run()` is ongoing, are carried out by
+`arora-web` asking for `Arora::step(Duration::ZERO)`. That step is taken in
+the next microtask, and every request of one turn shares it. Nothing else
+applies them outside a step. The step applies the inbound queue as every step
+does (the page's operations in issue order, and the bridges' too), ticks the
+behavior, and writes the HAL. So precedence, the meta checks, and change
+notifications stay those of the one step spine, and a device nobody steps
+still answers its page. A dedicated path that applied a call between steps
+would leave the HAL unwritten and the behavior unaware until the next step.
+It would also be a second order of writers to keep consistent with the step.
+No time elapses in that step: what runs on time holds still, and only a
+node that counts ticks advances.
+
+While `run()` owns the device, its next step applies them, and the page adds
+no step: the cadence is the run's. Read-only operations (`listKeys`,
+`describeMethods`) never step. They read the store's sibling handle and the
+method index (`list_keys`, `Arora::describe_methods`). A call from a callback
+the step invokes cannot nest a step, so it is queued like any other. Its step
+then follows as a task rather than a microtask, so a callback that asks on
+every tick cannot starve the event loop. A behavior is where such work
+belongs.
+
 ### A remote write is checked once, by the runtime
 
 Every bridge's inbound `Update` reaches the device through the runtime's
