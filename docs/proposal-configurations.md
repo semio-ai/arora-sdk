@@ -32,7 +32,8 @@ In short:
   of the account that publishes it, as a scoped name says. A module and its
   own types live in the module's scope; a type modules of different scopes
   share states its own, so they ship one record and load together on a
-  device.
+  device. Its owner declares a scope's id in code; where records are
+  published or exchanged, the store's ownership of the scope decides.
 - **A guest module is indexed from its module record.** The header stays as it
   is; the record, checked against it, gives every export its frozen signature
   in the method index. This unblocks behaviors calling `step_values`
@@ -66,9 +67,10 @@ In short:
 |---|---|---|---|---|
 | Type records | `arora-types`, `record` | Versioned declarations — structures, enumerations, modules, folders — unfrozen (version requirements) or frozen (pinned versions); `Freeze` and `Resolver` pin them. The frozen serde shape is the store's wire contract. A module record carries an `executable` id, attached at publication. | Registries, module authoring, the behavior tree | Merged |
 | `arora-registry` 2.0 | arora-sdk | Local record registry: adds, tags (freezes) and looks up records by id or folder path and version requirement; loads record directories (`records/{folder,enumeration,structure,module}/<uuid>@<version>.yaml`) and in-memory records (`load_records`). | `arora-module-cli` and its generators, `arora-cli`, `arora-behavior-tree`'s build | Merged, published |
-| `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private |
-| semio-db, semio-client, semio-record, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, the folder tree, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Maintained, tested end to end; no production deployment found |
-| semio-cli | semio-cli | CLI over semio-db: create, tag and read records per kind, blob upload and download, login. | Developers | Maintained |
+| `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private; over semio-db |
+| semio-record | semio-record | A record vocabulary over `arora-types`' references and freezing: record kinds — users, organizations, folders, modules, structures, enumerations, animations, scenes — with private, public, unfrozen and frozen facets, the actions that build them, and access control lists. | semio-db and its clients; a newer store client | Maintained, reused |
+| semio-db, semio-client, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, a folder tree rooted at its user and organization records, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Deprecated |
+| semio-cli | semio-cli | CLI over semio-db: create, tag and read records per kind, blob upload and download, login. | Developers | Maintained; over semio-db |
 | `arora-index` | arora-sdk, `crates/arora-index` | Resolves a published Studio v2 asset `{scopedName, range}` to a release with Studio's selection rules; fetches its primary artifact verified by SHA-256; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `build::models()`. Reads Firestore and Storage directly. | Nothing yet | [#360](https://github.com/semio-ai/arora-sdk/pull/360), open, `publish = false` |
 | `feat/type-registry` | arora-sdk branch | Emitted `records/` and a `records.json` id→name index per module; a wasm `Registry` in `arora-web` resolving ids to names. | Nothing | Unmerged; the crate it changes no longer exists |
 | Module directories | `arora`, `module_dir` | A device loads every `<device dir>/modules/*/` (a `header.json` beside one artifact) at start, and each `--module` directory. | The `arora` runner | Merged |
@@ -110,7 +112,7 @@ a registry on the device, and records to fill it.
 | Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through a **registry source** trait in `arora-registry`, one implementation per backend | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. For now the store's only backend is Studio's, and its source lives in studio-bridge's client. `arora-index`'s selection, verification and sealing become that source's implementation. |
 | Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | studio-bridge's client | Arora works without Studio. The bridge client already holds the Studio connection and the device's credentials. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
-| Publishing | semio-cli (semio-db); Studio's web publishing | semio-cli for records, and the store's backend | semio-cli already creates and tags records and uploads blobs. |
+| Publishing | semio-cli (semio-db); Studio's web publishing | The store's backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2). semio-cli publishes to semio-db, which is deprecated. |
 | Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-registry`'s resolution, with the source supplying versions and metadata | One rule for a range: the newest tagged, non-yanked version that satisfies it. A source that mirrors Studio maps deprecation to `yanked`. |
 
 ---
@@ -170,12 +172,11 @@ declaration.
   derive produces only the header vocabulary's `Type`.
 - **Scopes.** The top folders are scopes, `arora-index`'s term: a scope is
   the `@handle` of the account — a person or an organization — that
-  publishes the records in it, one level deep, and a name is unique within
-  it. A scope is declared once by its owner as a `Scope`: a fixed id, and
-  the handle as its folder's name. Every record published to the store
-  states its scope, modules and types alike; a local registry also holds
-  records with none, at the root — an operator's hand-installed module, a
-  test's.
+  publishes the records in it, one level deep. A scope is declared once by
+  its owner, in code, as a `Scope`: a fixed id, and the handle as its
+  folder's name. Every record published to the store states its scope,
+  modules and types alike; a local registry also holds records with none,
+  at the root — an operator's hand-installed module, a test's.
   - A module's declaration states its scope (`scope = VIZIJ`), and its own
     types take it: the module macros pass it to the types its functions
     name, and those to the types they name.
@@ -184,15 +185,33 @@ declaration.
     A module naming it ships that record and the scope's folder, nothing
     else: `Status` and `TickId` live in the `arora` scope (`arora.Status`),
     vizij's types in `vizij`.
-  - A registry refuses a second record under a path another record holds,
-    so two records cannot take one name in a scope.
+  - A name is unique within a scope by the registry's rule: a registry, on
+    a device or a client, refuses a second record under a path another
+    record holds, so two records cannot take one name in a scope there.
+    The store is not required to keep names unique under a parent.
+  - Code declares a scope; the store imposes scopes where records are
+    exchanged. A local registry takes a scope as its code declares it.
+    When records are published to the store or exchanged through it, the
+    store's ownership of the scope decides: a scope declared in code is
+    challenged against the backend's ownership of that scope, and the
+    backend's answer prevails.
   - Scope ids follow each owner's fixed-id convention, outside the ranges
     its types, modules and functions use: `arora` is
     `61726f72-6100-0000-f01d-000000000000` and `vizij`
     `76697a69-6a00-0000-f01d-000000000000` (each led by the ASCII of the
     name, `f01d` marking a folder), and `semio` would be
     `73656d69-6f00-0000-f01d-000000000000`. An id is not derived from the
-    handle: a handle can be renamed, and records name their scope by id.
+    handle, so a handle can be renamed.
+  - Renaming a scope changes its handle in one place, the scope's folder
+    record, and every registry and source holding that folder takes the
+    update consistently, since a path is read from it. Records refer to
+    their scope by UUID (`parent`), never by handle, so a renamed scope
+    breaks no record: the UUID is the scope's identity and the handle its
+    readable address, two complementary ways to reach it.
+  - Moving an asset to another scope re-parents its later versions only:
+    each version published after the move names the new scope, and
+    earlier versions keep theirs. The asset keeps its UUID, and so does
+    each scope, so a reference by id and version resolves across the move.
 - **An export step** writes `records/` beside the header: for a declared
   module from `AroraModule::record` and the derived types; for a `module.yaml`
   module from `arora-module-cli`'s analysis, which already produces both.
@@ -281,7 +300,7 @@ its frozen content:
 - the content hash of each artifact, by key: for a module, the header and one
   executable per executor (`wasm`, then native targets); the module record's
   `executable` id becomes this map;
-- `yanked`, which semio-db already stores per tag;
+- `yanked`, per tag, which keeps a version out of range selection (1.3);
 - the scoped name a source publishes it under, when it has one.
 
 A module's published form is therefore its module record, its header and
@@ -309,8 +328,10 @@ pub trait RegistrySource {
 - **Implementations:** record directories (local, no network); Studio's
   backend, in studio-bridge's client, with its connection, credentials,
   private-artifact sealing and offline fallback — what `arora-index`
-  implements today; Studio's page, backed by its own store client; semio-db
-  (`arora-registry-remote`), which has no deployment.
+  implements today; Studio's page, backed by its own store client.
+- **semio-db is not a backend.** It is deprecated, so the design is not
+  shaped by its structure — its account-rooted tree, its naming rules. Its
+  record vocabulary, semio-record, is reused by a newer store client.
 - **The store is the only source of records.** A client — Studio, a CLI —
   reads a record from the store through a source, as a device does; a device
   does not serve the records it holds. No arora-sdk code names a store: the
@@ -338,11 +359,10 @@ own, in its scope (`vizij.StepValues`) or in the scope they state
 depends on, not as parts of its scoped name. A configuration is an asset the
 same way, under the scope of whoever publishes it.
 
-Records reference each other by id, so a scope's renamed handle or an asset
-handed to another scope breaks no reference: the path follows the scope's
-current handle, a moved module's later versions name its new scope while
-earlier ones keep theirs, and resolving an old address (an alias in Studio)
-is the source's.
+Records reference each other and their scope by UUID, so renaming a scope
+or moving an asset to another scope (2.2) breaks no reference: the path
+follows the scope's current handle, and resolving an old address (an alias
+in Studio) is the source's.
 
 The bridge operation takes the frozen form — id, exact version and the
 configuration record's content hash — because a device applies only what is
@@ -658,13 +678,6 @@ Each stage lands on its own.
   version; Studio identifies an asset by scoped name and release. Is the
   scoped name a `Selector::Path` over the same UUID identity in every source
   (proposed)?
-- **Where a scope's id comes from.** Proposed: its owner declares it once in
-  code (2.2). Studio's accounts have Firestore document ids, not UUIDs, and
-  semio-db's top level is its user and organization records, named uniquely
-  at the root, whose ids semio-db mints: a scope there is the account
-  record. Taking the id from the store's account instead would need a UUID
-  per account and the store to hand it to whoever declares records; keeping
-  declared ids needs semio-db to accept the declared id for the account.
 - **Models, animations and faces as records.** The same registry would hold
   them as record kinds; this proposal needs only modules, types, behaviors and
   configurations.
@@ -722,8 +735,34 @@ type modules of different scopes share states its scope. Placing a type in
 the folder of each module naming it gives two records under one id and
 version, which no registry holds together. A scope is one level deep and is
 a scoped name's `@scope`, so a published record's path and its scoped name
-agree; its id is declared rather than derived from the handle, because a
-handle can be renamed.
+agree.
+
+### A scope is reached by UUID and by handle
+
+Records refer to their scope by UUID, declared rather than derived from the
+handle, so a renamed handle leaves every record intact: a rename is an
+update of the scope's folder record, the one record that carries the
+handle. The handle is the address people read and type; the UUID is what
+records hold. Moving an asset to another scope re-parents only the versions
+published after the move, because an earlier version is frozen: a
+configuration pins it, and changing its parent would change a record others
+have already resolved. The asset's UUID does not change, so every reference
+to it still resolves.
+
+### Code declares a scope; the store decides at exchange
+
+A scope declared in code lets a module's records be built, loaded and
+tested in a local registry without a store. But anyone can write
+`scope = ARORA`: only the store knows who owns a scope. So where records
+are published or exchanged, a declared scope is challenged against the
+backend's ownership of it, and the backend's answer prevails.
+
+### Names are unique in a scope by the registry's rule
+
+A path resolves to a record in a registry, on a device or a client, so that
+is where a name must be unique in its scope: the registry refuses a second
+record under a path another holds. The store keeps records by id and is not
+required to keep names unique under a parent.
 
 ### One frozen form for a header type
 
