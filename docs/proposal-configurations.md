@@ -66,7 +66,7 @@ In short:
 | Component | Where | What it does | Used by | Status |
 |---|---|---|---|---|
 | Type records | `arora-types`, `record` | Versioned declarations — structures, enumerations, modules, folders — unfrozen (version requirements) or frozen (pinned versions); `Freeze` and `Resolver` pin them. The frozen serde shape is the store's wire contract. A module record carries an `executable` id, attached at publication. | Registries, module authoring, the behavior tree | Merged |
-| `arora-registry` 2.0 | arora-sdk | Local record registry: adds, tags (freezes) and looks up records by id or folder path and version requirement; loads record directories (`records/{folder,enumeration,structure,module}/<uuid>@<version>.yaml`) and in-memory records (`load_records`). | `arora-module-cli` and its generators, `arora-cli`, `arora-behavior-tree`'s build | Merged, published |
+| `arora-registry` 2.1 | arora-sdk | Local record registry: adds, tags (freezes) and looks up records by id or folder path and version requirement, or by exact id and version (`module_at`, `type_at`); loads record directories (`records/{folder,enumeration,structure,module}/<uuid>@<version>.yaml`) and in-memory records (`load_records`). | `arora`'s devices, `arora-module-cli` and its generators, `arora-cli`, `arora-behavior-tree`'s build | Merged, published |
 | `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private; over semio-db |
 | semio-record | semio-record | A record vocabulary over `arora-types`' references and freezing: record kinds — users, organizations, folders, modules, structures, enumerations, animations, scenes — with private, public, unfrozen and frozen facets, the actions that build them, and access control lists. | semio-db and its clients; a newer store client | Maintained, reused |
 | semio-db, semio-client, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, a folder tree rooted at its user and organization records, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Deprecated |
@@ -74,25 +74,33 @@ In short:
 | `arora-index` | arora-sdk, `crates/arora-index` | Resolves a published Studio v2 asset `{scopedName, range}` to a release with Studio's selection rules; fetches its primary artifact verified by SHA-256; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `build::models()`. Reads Firestore and Storage directly. | Nothing yet | [#360](https://github.com/semio-ai/arora-sdk/pull/360), open, `publish = false` |
 | `feat/type-registry` | arora-sdk branch | Emitted `records/` and a `records.json` id→name index per module; a wasm `Registry` in `arora-web` resolving ids to names. | Nothing | Unmerged; the crate it changes no longer exists |
 | Module directories | `arora`, `module_dir` | A device loads every `<device dir>/modules/*/` (a `header.json` beside one artifact) at start, and each `--module` directory. | The `arora` runner | Merged |
-| Guest module indexing | `arora`, `module_discovery` | A header-loaded guest export joins the method index only when its parameters and return are primitives or optional scalar primitives. `with_declared_module` indexes every export from a Rust declaration. | Every device | Merged (arora 12.13) |
-| Module reload | arora-sdk branch `spike/unload-modules` | `Arora::load_module`, `reload_module`, `unload_module` on a running device, between steps; a shared, mutable method index; the engine's `reload_module`, `unload_module`, `contains_module`. | Nothing yet | Spike, becoming a PR |
-| Module declarations | `arora-module`, `arora-module-macros` | A Rust declaration produces the header, the frozen **module record** (`AroraModule::record`), the exports and client stubs. Derived types produce a `ty::low::Type`, not a structure record. | polly, test-rust-wasm, vizij modules | Merged |
+| Guest module indexing | `arora`, `module_discovery` | A guest module whose module record the device's registry holds (`AroraBuilder::with_registry`, or `records/` in its module directory) has every export indexed with the record's frozen signature, checked against the header. Without a record, an export joins the method index only when its parameters and return are primitives or optional scalar primitives; a module loaded or reloaded on a running device is indexed from its header. `with_declared_module` indexes every export from a Rust declaration. | Every device | Merged (records: arora 13.1) |
+| Module reload | `arora` | `Arora::load_module`, `reload_module`, `unload_module` on a running device, between steps, one module at a time, all or nothing; a shared, mutable method index; the engine's `reload_module`, `unload_module`, `contains_module`. What a caller asked of a reloaded or unloaded module and the device has not finished is interrupted, and a task run calling it is halted. A native library is refused. | Nothing yet | Merged (arora 13.0) |
+| Module declarations | `arora-module`, `arora-module-macros` | A Rust declaration produces the header, the frozen **module record** (`AroraModule::record`), the exports and client stubs, and states the module's scope. A derived type produces its structure or enumeration record (`AroraType::record`), in the scope it states or its module's (`AroraModule::type_records`). | polly, test-rust-wasm, the animation modules | Merged (arora-types 3.8) |
 | `module.yaml` pipeline | `arora-module-cli`, `arora-module-authoring` | Analyzes a `module.yaml` against a registry into a frozen module record and frozen type records, then generates C++/Rust bindings. | C++ modules, importing Rust modules | Merged |
-| `arora-web` | arora-sdk | Browser runtime: `AroraRuntimeBuilder.withModule(headerJson, bytes)`, `withCompiledModule`. No records. | arora-sdk demos | Merged |
+| `arora-web` | arora-sdk | Browser runtime: `AroraRuntimeBuilder.withModule(headerJson, bytes)`, `withCompiledModule`, and `withRecords(records)`, the records its guest modules are described by. | arora-sdk demos | Merged (records: 10.1) |
 | Bridge operations | `arora-bridge` 6.1 | `Get`, `Update`, `Call`, `ListKeys`, `ListMethods` (deprecated), `DescribeMethods`. Behaviors travel as calls to the interpreter module (`LOAD`, `EDIT`, `SPAWN`, `HALT`). Nothing carries modules or records. | Every bridge | Merged |
 | Studio Bridge | studio-bridge | `AroraOp` mirrors `BridgeOp` (msgs 6.x); sender-addressed command keys `rpc/{device}/{principal}/{op}/{target}` the router authorizes per operation; protocol token `mgmt/{device}/liveliness/protocol/2`; the device's Studio credentials. | Studio, `arora --features studio-bridge` | Merged |
 | Studio v2 assets | semio_studio | `scopedNames`, `publishedAssets/{id}/releases`; a release has `artifacts: {key → {storage, contentHash, role}}`; asset types `Model`, `Animation`, `Face`; `resolveDependency`. No module, type or configuration asset. | Studio | Merged |
-| `studio-arora` | semio_studio, Studio-on-Arora branches | Studio's wasm crate on arora 12.13. Loads `@vizij/animation-module` (header and wasm from npm) once as a `CompiledModule`; builds each emulated device with `with_compiled_module`; pushes the stepping behavior by `spawn_graph`, relinks it by `edit`. | Studio | Branch |
-| `vizij-animation-module` | vizij-rs | The animation module, declared in Rust; the npm package `@vizij/animation-module` 4.0.0 ships its header beside the wasm. Its declaration produces the module record; nothing exports it. | Studio, vizij devices | Merged, published |
+| `studio-arora` | semio_studio, Studio-on-Arora branches | Studio's wasm crate on arora 13 (`^13.1`). Loads `@vizij/animation-module` 4.1 (header, wasm and records from npm) once as a `CompiledModule`; builds each emulated device with `with_compiled_module` and `with_registry`; pushes the stepping behavior by `spawn_graph`, relinks it by `edit`. | Studio | Branch ([semio_studio#610](https://github.com/semio-ai/semio_studio/pull/610)) |
+| `vizij-animation-module` | vizij-rs | The animation module (module record 2.0.0, `@vizij/animation`), declared in Rust. The npm package `@vizij/animation-module` ships its header beside the wasm and, from 4.1.0, its records under `artifact/records/`: the module record and the records of the structures its functions name, in the `vizij` scope. | Studio, vizij devices | Merged, published |
+| `arora-animation-module` | arora-sdk, `modules/animation` | The animation module, moved from vizij-rs ([#372](https://github.com/semio-ai/arora-sdk/pull/372)) with every id kept: module record 3.0.0, named `arora-animation` (to be renamed `animation`), its records in the `arora` scope. `module_dir::write` writes its module directory, `records/` included. | Studio's `feature/studio-arora-animation` branch | Merged, unpublished |
 
 ### 1.2 The gap behind STUDIO-347
 
-`AroraBuilder::build` freezes a guest export's signature from its header. A
-header's `TypeRef` names a type by id without a version, and a frozen signature
-pins every record reference to a version, so an export that names a record —
-`step_values` returns `StepValues`, `player_states` returns `PlayerState[]` —
-dispatches but is not indexed. A behavior tree resolves its leaves against the
-method index, so a graph calling either is refused.
+Without a module record, `AroraBuilder::build` freezes a guest export's
+signature from its header. A header's `TypeRef` names a type by id without a
+version, and a frozen signature pins every record reference to a version, so
+an export that names a record — `step_values` returns `StepValues`,
+`player_states` returns `PlayerState[]` — dispatches but is not indexed.
+
+A graph calling either is accepted, and its run fails. arora-behavior-tree 9
+resolves a graph's functions against the device's method index when it lowers
+the graph, at the tick after `spawn_graph`, not when it takes it.
+`spawn_graph` returns the run's handle; at the run's first tick, the node
+calling `step_values` fails with `CallError::FunctionNotFound`, that tick
+reports the error once, the run's status key reads `Failure`, and the
+device's other runs tick on.
 
 `with_declared_module::<M>()` indexes those exports, because the declaration
 carries frozen signatures. It needs the declaring crate linked into the host.
@@ -100,8 +108,10 @@ Studio's devices take the module as header and wasm from npm, and the `arora`
 runner takes module directories, so neither can use it.
 
 The frozen signatures exist: the declaration produces them as the module
-record (`AroraModule::record`), the form a registry holds. What is missing is
-a registry on the device, and records to fill it.
+record (`AroraModule::record`), the form a registry holds. arora 13.1 gives
+the device a registry and fills it from module directories (section 2), so a
+module built with its records has those exports indexed. A module loaded or
+reloaded on a running device is still indexed from its header (4.3).
 
 ### 1.3 Overlaps, and which component owns each concern
 
@@ -121,6 +131,13 @@ a registry on the device, and records to fill it.
 
 This part needs no store, no protocol change and no configuration. It unblocks
 STUDIO-347 on both kinds of devices.
+
+It has landed in arora-sdk: arora 13.1 (`with_registry`, `records/` in module
+directories), arora-registry 2.1, arora-types 3.8 with its derive and the
+module macros (records and scopes), and arora-web 10.1 (`withRecords`).
+`@vizij/animation-module` 4.1.0 ships its records, and `arora-animation-module`
+writes them into its module directory. Studio passes them in
+[semio_studio#610](https://github.com/semio-ai/semio_studio/pull/610), open.
 
 ### 2.1 The runtime
 
@@ -150,7 +167,7 @@ STUDIO-347 on both kinds of devices.
   ├── animation.wasm
   └── records/
       ├── folder/<scope id>.yaml
-      ├── module/<module id>@4.0.0.yaml
+      ├── module/<module id>@2.0.0.yaml
       └── structure/<StepValues id>@1.0.0.yaml …
   ```
 
@@ -168,8 +185,7 @@ declaration.
   record for each `AroraType` (`AroraType::record`), at the version
   `arora_type_version()` already returns, so a declared module exports the
   closure of its records. The module macros and the derive freeze a `Key` as
-  the string primitive, the one form the device's check accepts. Today the
-  derive produces only the header vocabulary's `Type`.
+  the string primitive, the one form the device's check accepts.
 - **Scopes.** The top folders are scopes, `arora-index`'s term: a scope is
   the `@handle` of the account — a person or an organization — that
   publishes the records in it, one level deep. A scope is declared once by
@@ -588,12 +604,13 @@ records and artifacts through its own source, as itself.
 
 ### 4.3 STUDIO-347, end to end
 
-1. vizij-rs publishes `@vizij/animation-module` 4.0.0: its module record with
-   the header and `wasm` artifacts, and the records of `StepValues`,
-   `OutputKeys`, `PlayerState`, `InstanceState`, `AnimationClip` and the
-   types they reference.
-2. A Studio project depends on the module `^4.0.0`. Studio freezes the
-   project's configuration: the module record at 4.0.0, and the
+1. arora-sdk publishes its animation module (`arora-animation-module`, module
+   record 3.0.0, in the `arora` scope): its module record with the header
+   and `wasm` artifacts, and the records of `StepValues`, `OutputKeys`,
+   `PlayerState`, `InstanceState`, `AnimationClip`, `Clip` and the types
+   they reference.
+2. A Studio project depends on the module `^3.0.0`. Studio freezes the
+   project's configuration: the module record at 3.0.0, and the
    `animation-stepping` behavior record (`behavior-tree` 1.1), checked against
    the module record's `step_values` and `player_states`.
 3. **Emulated device:** Studio applies it on the loopback bridge; the page's
@@ -606,10 +623,16 @@ records and artifacts through its own source, as itself.
 5. When the output key table changes, Studio edits the running behavior with
    a call (`EDIT` today, `edit_graph` on the branch once branches exist); the
    configuration is unchanged.
-6. vizij-rs publishes 4.1.0 with a fix. Studio applies the configuration
-   frozen against it: the device reloads the animation module between two
-   steps, and the stepping behavior keeps running, its next `step_values`
-   reaching the new instance.
+6. arora-sdk publishes the module record 3.0.1 with a fix. Studio applies
+   the configuration frozen against it: the device reloads the animation
+   module between two steps, indexes it from its record, and the stepping
+   behavior keeps running, its next `step_values` reaching the new instance
+   (3.6). Configurations are meant to provide this; arora 13.1's
+   `reload_module` does not. It halts a task run calling the reloaded
+   module, so the stepping run ends `Failure`, and it indexes the new
+   version from its header only, so `step_values` leaves the method index: a
+   stepping graph spawned again is accepted and fails at its first tick
+   (1.2).
 7. The device restarts: it applies its persisted configuration again, from
    the cache when offline.
 
@@ -648,14 +671,18 @@ Each stage lands on its own.
    indexing from module records, `records/` in module directories.
    `arora-types-derive`: structure and enumeration records. `arora-web`:
    records. vizij-rs: export and ship the records. Studio: pass them.
-   Unblocks STUDIO-347.
+   Unblocks STUDIO-347. Landed, except Studio's part
+   ([semio_studio#610](https://github.com/semio-ai/semio_studio/pull/610)).
 2. **Module reload** on a running device, from the module-reload work: load,
    reload and unload between steps, instantiation before any old instance is
    dropped, interrupted commands, native modules refused. A module loaded or
    reloaded with its record in the registry is checked as at build. Its
    record failures — a record that does not describe the header, a missing
    dependency — are one `ModuleError` variant, `Record(RecordError)`, and
-   `ModuleError` stays exhaustive.
+   `ModuleError` stays exhaustive. arora 13.0 has load, reload and unload
+   between steps, one module at a time, interrupted commands and the native
+   refusal; a module it loads or reloads is indexed from its header, so the
+   record check and `ModuleError::Record` are still to do.
 3. **Record kinds and sources.** `arora-types`: behavior and configuration
    records; release metadata on record versions. `arora-registry`: the source
    trait, exact lookup, freezing a configuration with its checks. Sources:
