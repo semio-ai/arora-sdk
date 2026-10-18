@@ -44,9 +44,16 @@ fn call_test_rust_wasm_from_engine() {
         serde_yaml::to_string(&header).expect("the declared header serializes"),
     )
     .expect("writing the header");
+    // arora-cli freezes the header against its registry, so it is given the
+    // records of the types the module's functions name.
+    let records = std::env::temp_dir().join("arora-test-rust-wasm-records");
+    let _ = std::fs::remove_dir_all(&records);
+    write_type_records::<test_rust_wasm::test_rust_wasm::Module>(&records);
     // Use the artifact dependency path from build script
     let wasm = PathBuf::from(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
     run(&[
+        "--include",
+        records.to_str().unwrap(),
         "--header",
         module_yaml.to_str().unwrap(),
         "--exe",
@@ -54,6 +61,29 @@ fn call_test_rust_wasm_from_engine() {
         "--call",
         "id: 00cd31a8-2cf4-48e6-a957-69a55de90424",
     ]);
+}
+
+/// Write the records of the types module `M`'s functions name into `dir`, in
+/// the record-directory layout `--include` reads.
+fn write_type_records<M: arora_types::module::declared::AroraModule>(dir: &std::path::Path) {
+    use arora_registry::local::{LocalRegistry, ROOT_ID};
+    use arora_registry::{EditableRegistry, TypeDefinitionFrozen};
+    let mut registry = LocalRegistry::new();
+    futures::executor::block_on(async {
+        for (reference, record) in M::type_records(ROOT_ID) {
+            let (id, version) = (reference.id, reference.version.0);
+            match record {
+                TypeDefinitionFrozen::Structure(s) => registry.add_structure(id, version, s).await,
+                TypeDefinitionFrozen::Enumeration(e) => {
+                    registry.add_enumeration(id, version, e).await
+                }
+                TypeDefinitionFrozen::Primitive(_) => Ok(()),
+            }
+            .expect("a type record is added");
+        }
+    });
+    arora_registry::local_yaml::write_records_to_yaml_dir(&registry, dir)
+        .expect("the records are written");
 }
 
 /// A C++ module's optional parameter and return, through the generated

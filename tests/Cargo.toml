@@ -30,8 +30,11 @@ arora-buffers = { path = "../crates/arora-buffers" }
 arora-types = { path = "../crates/arora-types", version = "3" }
 serde_yaml = "0.9"
 uuid = "1"
-# The declared guest, host-side: its header is what the engine loads it with.
+# The declared guest, host-side: its header is what the engine loads it with,
+# and its type records what arora-cli freezes that header against.
 test-rust-wasm = { path = "../modules/test-rust-wasm" }
+arora-registry = { path = "../crates/arora-registry" }
+futures = "0.3"
 
 [build-dependencies]
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
