@@ -43,6 +43,7 @@ fn main() {
     // not the convenience CARGO_CDYLIB_FILE_<DEP>. arora-buffers/arora-util are
     // NOT artifact dependencies of this crate, so they are intentionally absent.
     forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm");
+    forward_env_var("CARGO_CDYLIB_FILE_ARORA_ANIMATION_MODULE_arora_animation_module");
     forward_env_var("CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component");
 
     println!("cargo:rerun-if-changed=build.rs");

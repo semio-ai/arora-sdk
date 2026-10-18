@@ -32,8 +32,10 @@ serde_yaml = "0.9"
 uuid = "1"
 # The declared guest, host-side: its header is what the engine loads it with.
 test-rust-wasm = { path = "../modules/test-rust-wasm" }
+arora-animation-module = { path = "../modules/animation", version = "1" }
 
 [build-dependencies]
+arora-animation-module = { path = "../modules/animation", artifact = "cdylib", target = "wasm32-wasip1" }
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }

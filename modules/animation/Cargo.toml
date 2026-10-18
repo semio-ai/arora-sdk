@@ -1,22 +1,23 @@
 [package]
-name = "vizij-animation-module"
-version = "0.0.0"
+name = "arora-animation-module"
+version = "1.0.0"
 edition = "2021"
-publish = false
-description = "vizij-animation-core packaged as an Arora wasm module (build once, run in any Arora runtime)."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "readme.md"
+description = "Arora animation playback and baking as a host-linked module or WebAssembly guest."
 
 [lib]
+# The `cdylib` is the wasm guest the device loads; the `rlib` lets the same
+# crate run in-process and carries the declaration (ids, header, signatures)
+# to whoever loads the guest.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-arora-module = "2"
-arora-types = "3"
-vizij-animation-core = { path = "../../animation/vizij-animation-core" }
-vizij-arora = { path = "../vizij-arora" }
-vizij-api-core = { path = "../../api/vizij-api-core" }
+arora-module = { path = "../../crates/arora-module", version = "2" }
+arora-types = { path = "../../crates/arora-types", version = "3" }
+arora-animation = { path = "../../crates/arora-animation", version = "1" }
 
 [dev-dependencies]
-arora-engine = "5"
-arora-types = "3"
+arora-engine = { path = "../../crates/arora-engine", version = "5" }
 serde_json = "1"
-vizij-arora = { path = "../vizij-arora" }

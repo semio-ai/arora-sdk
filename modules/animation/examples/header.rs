@@ -1,12 +1,11 @@
-//! Print the module's Arora header, as the wasm executor loads it, in JSON —
-//! what `npm/@vizij/animation-module`'s artifact build ships.
+//! Print the declared header for the wasm executor as JSON.
 //!
 //! ```text
-//! cargo run -q -p vizij-animation-module --example header
+//! cargo run --offline -q -p arora-animation-module --example header
 //! ```
 
+use arora_animation_module::animation;
 use arora_types::module::low::Executor;
-use vizij_animation_module::animation;
 
 fn main() {
     let header = animation::header(Executor {
