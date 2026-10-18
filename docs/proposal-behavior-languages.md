@@ -449,7 +449,7 @@ the engine, its generic node vocabulary and its interpreter.
 | `vizij-arora-behavior` 5.1 | **`arora-node-graph-interpreter`**: the component, its codec, the `layers` and `flow` composites | the `look_at`, `play_viseme` and `say` registrations and the rig prefix of a skill's controls, into `vizij-arora-host` |
 | `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `arora-node-graph` |
 | `vizij-arora-host` | — | the face's composition, the standard and ROS4HRI mappings, the profiles, the skills |
-| `vizij-animation-core` | — | as is, over `arora-shape` |
+| `vizij-animation-core`, `vizij-animation-module` | **`arora-animation`** and **`arora-animation-module`**: the clip format, its evaluation and players, and the module ([animation](proposal-animation.md)) | — |
 
 - **No Vizij node kind enters `arora-node-graph`.** The node vocabulary that
   moves is generic. What is specific to Vizij is content — the face's sources,

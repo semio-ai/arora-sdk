@@ -33,10 +33,14 @@ uuid = "1"
 # The declared guest, host-side: its header is what the engine loads it with,
 # and its type records what arora-cli freezes that header against.
 test-rust-wasm = { path = "../modules/test-rust-wasm" }
+arora-animation-module = { path = "../modules/animation", version = "1", features = ["module-dir"] }
+# A device loading the animation guest from its module directory.
+arora = { path = "../crates/arora" }
 arora-registry = { path = "../crates/arora-registry" }
 futures = "0.3"
 
 [build-dependencies]
+arora-animation-module = { path = "../modules/animation", artifact = "cdylib", target = "wasm32-wasip1" }
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }

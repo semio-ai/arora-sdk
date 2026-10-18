@@ -17,6 +17,8 @@ arora-sdk/
 │   ├── arora-buffers          wire buffers + serde straight to the wire
 │   ├── arora-behavior         BehaviorInterpreter seam, interpreter module
 │   │                          ids (load/edit), built-in store keys (time/dt)
+│   ├── arora-animation        keyframe clips, exact evaluation, players on the
+│   │                          device clock (no runtime dependency)
 │   ├── arora-behavior-tree         behavior-tree interpreter
 │   ├── arora-behavior-tree-types       BT primitive types
 │   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records
@@ -44,6 +46,8 @@ arora-sdk/
 │   ├── test-behavior-tree-nodes  test-only module exercising BT dispatch
 │   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
 │   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
+│   ├── animation              arora-animation as a module: a wasm32-wasip1
+│   │                          guest in a module directory, or host-linked
 │   ├── say-silent             the Say contract without a speaker (host)
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
 │   └── transcribe             speech-to-text module

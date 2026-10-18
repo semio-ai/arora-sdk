@@ -1,0 +1,21 @@
+[package]
+name = "arora-animation"
+version = "1.0.0"
+edition = "2021"
+description = "Keyframe animation for Arora: the clip format, exact evaluation with velocities, and players that run unattended on a device clock."
+license = "MIT"
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "readme.md"
+keywords = ["arora", "animation", "keyframe", "robotics"]
+categories = ["science::robotics", "wasm"]
+# The conformance fixtures are the reference results the tests hold the crate
+# to; a published crate does not need them to build.
+exclude = ["fixtures/"]
+
+[dependencies]
+# The clip's document form (a stored animation) is JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }

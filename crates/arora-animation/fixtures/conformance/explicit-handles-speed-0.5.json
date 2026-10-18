@@ -1,0 +1,2413 @@
+{
+  "animation": {
+    "id": "explicit-handles",
+    "name": "explicit-handles",
+    "formatVersion": 2,
+    "groups": [],
+    "tracks": [
+      {
+        "id": "track",
+        "name": "track",
+        "animatableId": "target",
+        "points": [
+          {
+            "id": "key-0",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 400,
+                "y": 0
+              }
+            }
+          },
+          {
+            "id": "key-1000",
+            "stamp": 1000,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -100,
+                "y": 0
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 0.5,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "track": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 134.890625,
+      "tracks": {
+        "track": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "track": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "track": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "track": {
+          "value": 5.208330801556348e-12,
+          "velocity": 0.00001041665907123674
+        }
+      }
+    },
+    {
+      "worldTimeMs": 142.78125,
+      "tracks": {
+        "track": {
+          "value": 0.0001735897930729248,
+          "velocity": 0.059968635993153836
+        }
+      }
+    },
+    {
+      "worldTimeMs": 150.671875,
+      "tracks": {
+        "track": {
+          "value": 0.0009671238380492791,
+          "velocity": 0.14101065359911263
+        }
+      }
+    },
+    {
+      "worldTimeMs": 158.5625,
+      "tracks": {
+        "track": {
+          "value": 0.0023965045597180525,
+          "velocity": 0.2211365273205281
+        }
+      }
+    },
+    {
+      "worldTimeMs": 166.453125,
+      "tracks": {
+        "track": {
+          "value": 0.004454568551150863,
+          "velocity": 0.30036279693409695
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.34375,
+      "tracks": {
+        "track": {
+          "value": 0.007134281215448696,
+          "velocity": 0.37870557390395887
+        }
+      }
+    },
+    {
+      "worldTimeMs": 182.234375,
+      "tracks": {
+        "track": {
+          "value": 0.010428733441252166,
+          "velocity": 0.45618055526953805
+        }
+      }
+    },
+    {
+      "worldTimeMs": 190.125,
+      "tracks": {
+        "track": {
+          "value": 0.014331138385637661,
+          "velocity": 0.5328030369806914
+        }
+      }
+    },
+    {
+      "worldTimeMs": 198.015625,
+      "tracks": {
+        "track": {
+          "value": 0.018834828360140263,
+          "velocity": 0.6085879267058026
+        }
+      }
+    },
+    {
+      "worldTimeMs": 205.90625,
+      "tracks": {
+        "track": {
+          "value": 0.023933251815841602,
+          "velocity": 0.6835497561371031
+        }
+      }
+    },
+    {
+      "worldTimeMs": 213.796875,
+      "tracks": {
+        "track": {
+          "value": 0.0296199704236465,
+          "velocity": 0.7577026928161978
+        }
+      }
+    },
+    {
+      "worldTimeMs": 221.6875,
+      "tracks": {
+        "track": {
+          "value": 0.03588865624604964,
+          "velocity": 0.8310605515015812
+        }
+      }
+    },
+    {
+      "worldTimeMs": 229.578125,
+      "tracks": {
+        "track": {
+          "value": 0.042733088996860166,
+          "velocity": 0.9036368050987788
+        }
+      }
+    },
+    {
+      "worldTimeMs": 237.46875,
+      "tracks": {
+        "track": {
+          "value": 0.05014715338551113,
+          "velocity": 0.9754445951726866
+        }
+      }
+    },
+    {
+      "worldTimeMs": 245.359375,
+      "tracks": {
+        "track": {
+          "value": 0.058124836542730644,
+          "velocity": 1.0464967420606626
+        }
+      }
+    },
+    {
+      "worldTimeMs": 253.25,
+      "tracks": {
+        "track": {
+          "value": 0.06666022552449499,
+          "velocity": 1.1168057546039856
+        }
+      }
+    },
+    {
+      "worldTimeMs": 261.140625,
+      "tracks": {
+        "track": {
+          "value": 0.07574750489131832,
+          "velocity": 1.186383839514389
+        }
+      }
+    },
+    {
+      "worldTimeMs": 269.03125,
+      "tracks": {
+        "track": {
+          "value": 0.08538095436006296,
+          "velocity": 1.2552429103915395
+        }
+      }
+    },
+    {
+      "worldTimeMs": 276.921875,
+      "tracks": {
+        "track": {
+          "value": 0.09555494652557588,
+          "velocity": 1.32339459640653
+        }
+      }
+    },
+    {
+      "worldTimeMs": 284.8125,
+      "tracks": {
+        "track": {
+          "value": 0.10626394464957319,
+          "velocity": 1.3908502506657119
+        }
+      }
+    },
+    {
+      "worldTimeMs": 292.703125,
+      "tracks": {
+        "track": {
+          "value": 0.11750250051430396,
+          "velocity": 1.4576209582684638
+        }
+      }
+    },
+    {
+      "worldTimeMs": 300.59375,
+      "tracks": {
+        "track": {
+          "value": 0.12926525233863043,
+          "velocity": 1.5237175440718471
+        }
+      }
+    },
+    {
+      "worldTimeMs": 308.484375,
+      "tracks": {
+        "track": {
+          "value": 0.14154692275426023,
+          "velocity": 1.5891505801744423
+        }
+      }
+    },
+    {
+      "worldTimeMs": 316.375,
+      "tracks": {
+        "track": {
+          "value": 0.15434231683996152,
+          "velocity": 1.6539303931310754
+        }
+      }
+    },
+    {
+      "worldTimeMs": 324.265625,
+      "tracks": {
+        "track": {
+          "value": 0.1676463202116821,
+          "velocity": 1.7180670709095789
+        }
+      }
+    },
+    {
+      "worldTimeMs": 332.15625,
+      "tracks": {
+        "track": {
+          "value": 0.18145389716657875,
+          "velocity": 1.7815704696001768
+        }
+      }
+    },
+    {
+      "worldTimeMs": 340.046875,
+      "tracks": {
+        "track": {
+          "value": 0.19576008887904517,
+          "velocity": 1.8444502198876
+        }
+      }
+    },
+    {
+      "worldTimeMs": 347.9375,
+      "tracks": {
+        "track": {
+          "value": 0.210560011646905,
+          "velocity": 1.906715733295548
+        }
+      }
+    },
+    {
+      "worldTimeMs": 355.828125,
+      "tracks": {
+        "track": {
+          "value": 0.22584885518600928,
+          "velocity": 1.968376208212651
+        }
+      }
+    },
+    {
+      "worldTimeMs": 363.71875,
+      "tracks": {
+        "track": {
+          "value": 0.24162188097154905,
+          "velocity": 2.0294406357086636
+        }
+      }
+    },
+    {
+      "worldTimeMs": 371.609375,
+      "tracks": {
+        "track": {
+          "value": 0.2578744206244622,
+          "velocity": 2.089917805149225
+        }
+      }
+    },
+    {
+      "worldTimeMs": 379.5,
+      "tracks": {
+        "track": {
+          "value": 0.27460187434137484,
+          "velocity": 2.1498163096171
+        }
+      }
+    },
+    {
+      "worldTimeMs": 387.390625,
+      "tracks": {
+        "track": {
+          "value": 0.29179970936658145,
+          "velocity": 2.2091445511474874
+        }
+      }
+    },
+    {
+      "worldTimeMs": 395.28125,
+      "tracks": {
+        "track": {
+          "value": 0.3094634585046252,
+          "velocity": 2.2679107457846075
+        }
+      }
+    },
+    {
+      "worldTimeMs": 403.171875,
+      "tracks": {
+        "track": {
+          "value": 0.3275887186720958,
+          "velocity": 2.3261229284664555
+        }
+      }
+    },
+    {
+      "worldTimeMs": 411.0625,
+      "tracks": {
+        "track": {
+          "value": 0.346171149487315,
+          "velocity": 2.383788957744299
+        }
+      }
+    },
+    {
+      "worldTimeMs": 418.953125,
+      "tracks": {
+        "track": {
+          "value": 0.3652064718966286,
+          "velocity": 2.4409165203432046
+        }
+      }
+    },
+    {
+      "worldTimeMs": 426.84375,
+      "tracks": {
+        "track": {
+          "value": 0.38469046683608066,
+          "velocity": 2.4975131355695757
+        }
+      }
+    },
+    {
+      "worldTimeMs": 434.734375,
+      "tracks": {
+        "track": {
+          "value": 0.40461897392727625,
+          "velocity": 2.5535861595714215
+        }
+      }
+    },
+    {
+      "worldTimeMs": 442.625,
+      "tracks": {
+        "track": {
+          "value": 0.42498789020630173,
+          "velocity": 2.6091427894568624
+        }
+      }
+    },
+    {
+      "worldTimeMs": 450.515625,
+      "tracks": {
+        "track": {
+          "value": 0.4457931688845985,
+          "velocity": 2.664190067276038
+        }
+      }
+    },
+    {
+      "worldTimeMs": 458.40625,
+      "tracks": {
+        "track": {
+          "value": 0.46703081814073333,
+          "velocity": 2.7187348838714733
+        }
+      }
+    },
+    {
+      "worldTimeMs": 466.296875,
+      "tracks": {
+        "track": {
+          "value": 0.4886968999420485,
+          "velocity": 2.7727839826016156
+        }
+      }
+    },
+    {
+      "worldTimeMs": 474.1875,
+      "tracks": {
+        "track": {
+          "value": 0.5107875288952088,
+          "velocity": 2.826343962942173
+        }
+      }
+    },
+    {
+      "worldTimeMs": 482.078125,
+      "tracks": {
+        "track": {
+          "value": 0.5332988711246948,
+          "velocity": 2.879421283969548
+        }
+      }
+    },
+    {
+      "worldTimeMs": 489.96875,
+      "tracks": {
+        "track": {
+          "value": 0.556227143178333,
+          "velocity": 2.9320222677305847
+        }
+      }
+    },
+    {
+      "worldTimeMs": 497.859375,
+      "tracks": {
+        "track": {
+          "value": 0.5795686109589797,
+          "velocity": 2.984153102502609
+        }
+      }
+    },
+    {
+      "worldTimeMs": 505.75,
+      "tracks": {
+        "track": {
+          "value": 0.6033195886815094,
+          "velocity": 3.0358198459475707
+        }
+      }
+    },
+    {
+      "worldTimeMs": 513.640625,
+      "tracks": {
+        "track": {
+          "value": 0.6274764378542825,
+          "velocity": 3.0870284281639417
+        }
+      }
+    },
+    {
+      "worldTimeMs": 521.53125,
+      "tracks": {
+        "track": {
+          "value": 0.6520355662843066,
+          "velocity": 3.137784654639868
+        }
+      }
+    },
+    {
+      "worldTimeMs": 529.421875,
+      "tracks": {
+        "track": {
+          "value": 0.6769934271053195,
+          "velocity": 3.1880942091109277
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537.3125,
+      "tracks": {
+        "track": {
+          "value": 0.7023465178280532,
+          "velocity": 3.2379626563256534
+        }
+      }
+    },
+    {
+      "worldTimeMs": 545.203125,
+      "tracks": {
+        "track": {
+          "value": 0.7280913794119734,
+          "velocity": 3.287395444721949
+        }
+      }
+    },
+    {
+      "worldTimeMs": 553.09375,
+      "tracks": {
+        "track": {
+          "value": 0.754224595357785,
+          "velocity": 3.3363979090172506
+        }
+      }
+    },
+    {
+      "worldTimeMs": 560.984375,
+      "tracks": {
+        "track": {
+          "value": 0.7807427908200557,
+          "velocity": 3.3849752727152973
+        }
+      }
+    },
+    {
+      "worldTimeMs": 568.875,
+      "tracks": {
+        "track": {
+          "value": 0.8076426317392899,
+          "velocity": 3.433132650532174
+        }
+      }
+    },
+    {
+      "worldTimeMs": 576.765625,
+      "tracks": {
+        "track": {
+          "value": 0.8349208239928441,
+          "velocity": 3.4808750507441717
+        }
+      }
+    },
+    {
+      "worldTimeMs": 584.65625,
+      "tracks": {
+        "track": {
+          "value": 0.8625741125640586,
+          "velocity": 3.5282073774599643
+        }
+      }
+    },
+    {
+      "worldTimeMs": 592.546875,
+      "tracks": {
+        "track": {
+          "value": 0.8905992807290379,
+          "velocity": 3.5751344328194112
+        }
+      }
+    },
+    {
+      "worldTimeMs": 600.4375,
+      "tracks": {
+        "track": {
+          "value": 0.9189931492604889,
+          "velocity": 3.621660919121267
+        }
+      }
+    },
+    {
+      "worldTimeMs": 608.328125,
+      "tracks": {
+        "track": {
+          "value": 0.947752575648082,
+          "velocity": 3.6677914408819348
+        }
+      }
+    },
+    {
+      "worldTimeMs": 616.21875,
+      "tracks": {
+        "track": {
+          "value": 0.9768744533347882,
+          "velocity": 3.71353050682732
+        }
+      }
+    },
+    {
+      "worldTimeMs": 624.109375,
+      "tracks": {
+        "track": {
+          "value": 1.0063557109686763,
+          "velocity": 3.758882531819746
+        }
+      }
+    },
+    {
+      "worldTimeMs": 632,
+      "tracks": {
+        "track": {
+          "value": 1.0361933116696653,
+          "velocity": 3.8038518387218514
+        }
+      }
+    },
+    {
+      "worldTimeMs": 639.890625,
+      "tracks": {
+        "track": {
+          "value": 1.0663842523107414,
+          "velocity": 3.8484426601992126
+        }
+      }
+    },
+    {
+      "worldTimeMs": 647.78125,
+      "tracks": {
+        "track": {
+          "value": 1.0969255628131627,
+          "velocity": 3.8926591404634423
+        }
+      }
+    },
+    {
+      "worldTimeMs": 655.671875,
+      "tracks": {
+        "track": {
+          "value": 1.1278143054551864,
+          "velocity": 3.9365053369574117
+        }
+      }
+    },
+    {
+      "worldTimeMs": 663.5625,
+      "tracks": {
+        "track": {
+          "value": 1.1590475741938742,
+          "velocity": 3.9799852219841263
+        }
+      }
+    },
+    {
+      "worldTimeMs": 671.453125,
+      "tracks": {
+        "track": {
+          "value": 1.1906224939995307,
+          "velocity": 4.023102684280805
+        }
+      }
+    },
+    {
+      "worldTimeMs": 679.34375,
+      "tracks": {
+        "track": {
+          "value": 1.2225362202023522,
+          "velocity": 4.065861530539524
+        }
+      }
+    },
+    {
+      "worldTimeMs": 687.234375,
+      "tracks": {
+        "track": {
+          "value": 1.254785937850866,
+          "velocity": 4.108265486875845
+        }
+      }
+    },
+    {
+      "worldTimeMs": 695.125,
+      "tracks": {
+        "track": {
+          "value": 1.2873688610817569,
+          "velocity": 4.150318200246668
+        }
+      }
+    },
+    {
+      "worldTimeMs": 703.015625,
+      "tracks": {
+        "track": {
+          "value": 1.3202822325006893,
+          "velocity": 4.192023239818583
+        }
+      }
+    },
+    {
+      "worldTimeMs": 710.90625,
+      "tracks": {
+        "track": {
+          "value": 1.3535233225737315,
+          "velocity": 4.233384098287867
+        }
+      }
+    },
+    {
+      "worldTimeMs": 718.796875,
+      "tracks": {
+        "track": {
+          "value": 1.387089429029009,
+          "velocity": 4.27440419315323
+        }
+      }
+    },
+    {
+      "worldTimeMs": 726.6875,
+      "tracks": {
+        "track": {
+          "value": 1.4209778762682164,
+          "velocity": 4.31508686794238
+        }
+      }
+    },
+    {
+      "worldTimeMs": 734.578125,
+      "tracks": {
+        "track": {
+          "value": 1.4551860147876328,
+          "velocity": 4.355435393393411
+        }
+      }
+    },
+    {
+      "worldTimeMs": 742.46875,
+      "tracks": {
+        "track": {
+          "value": 1.4897112206082792,
+          "velocity": 4.395452968591914
+        }
+      }
+    },
+    {
+      "worldTimeMs": 750.359375,
+      "tracks": {
+        "track": {
+          "value": 1.5245508947148825,
+          "velocity": 4.435142722064761
+        }
+      }
+    },
+    {
+      "worldTimeMs": 758.25,
+      "tracks": {
+        "track": {
+          "value": 1.559702462503293,
+          "velocity": 4.474507712831335
+        }
+      }
+    },
+    {
+      "worldTimeMs": 766.140625,
+      "tracks": {
+        "track": {
+          "value": 1.5951633732360402,
+          "velocity": 4.5135509314130555
+        }
+      }
+    },
+    {
+      "worldTimeMs": 774.03125,
+      "tracks": {
+        "track": {
+          "value": 1.6309310995056903,
+          "velocity": 4.552275300801879
+        }
+      }
+    },
+    {
+      "worldTimeMs": 781.921875,
+      "tracks": {
+        "track": {
+          "value": 1.6670031367056792,
+          "velocity": 4.5906836773884985
+        }
+      }
+    },
+    {
+      "worldTimeMs": 789.8125,
+      "tracks": {
+        "track": {
+          "value": 1.703377002508326,
+          "velocity": 4.628778851850871
+        }
+      }
+    },
+    {
+      "worldTimeMs": 797.703125,
+      "tracks": {
+        "track": {
+          "value": 1.7400502363496892,
+          "velocity": 4.666563550003662
+        }
+      }
+    },
+    {
+      "worldTimeMs": 805.59375,
+      "tracks": {
+        "track": {
+          "value": 1.7770203989209814,
+          "velocity": 4.704040433609145
+        }
+      }
+    },
+    {
+      "worldTimeMs": 813.484375,
+      "tracks": {
+        "track": {
+          "value": 1.8142850716662307,
+          "velocity": 4.741212101150071
+        }
+      }
+    },
+    {
+      "worldTimeMs": 821.375,
+      "tracks": {
+        "track": {
+          "value": 1.851841856285888,
+          "velocity": 4.778081088564959
+        }
+      }
+    },
+    {
+      "worldTimeMs": 829.265625,
+      "tracks": {
+        "track": {
+          "value": 1.889688374246098,
+          "velocity": 4.814649869946187
+        }
+      }
+    },
+    {
+      "worldTimeMs": 837.15625,
+      "tracks": {
+        "track": {
+          "value": 1.9278222662933233,
+          "velocity": 4.850920858201281
+        }
+      }
+    },
+    {
+      "worldTimeMs": 845.046875,
+      "tracks": {
+        "track": {
+          "value": 1.966241191974046,
+          "velocity": 4.886896405677693
+        }
+      }
+    },
+    {
+      "worldTimeMs": 852.9375,
+      "tracks": {
+        "track": {
+          "value": 2.0049428291592615,
+          "velocity": 4.922578804751372
+        }
+      }
+    },
+    {
+      "worldTimeMs": 860.828125,
+      "tracks": {
+        "track": {
+          "value": 2.043924873573462,
+          "velocity": 4.957970288379283
+        }
+      }
+    },
+    {
+      "worldTimeMs": 868.71875,
+      "tracks": {
+        "track": {
+          "value": 2.0831850383278554,
+          "velocity": 4.993073030616158
+        }
+      }
+    },
+    {
+      "worldTimeMs": 876.609375,
+      "tracks": {
+        "track": {
+          "value": 2.122721053457501,
+          "velocity": 5.027889147095527
+        }
+      }
+    },
+    {
+      "worldTimeMs": 884.5,
+      "tracks": {
+        "track": {
+          "value": 2.1625306654621173,
+          "velocity": 5.062420695475131
+        }
+      }
+    },
+    {
+      "worldTimeMs": 892.390625,
+      "tracks": {
+        "track": {
+          "value": 2.202611636850253,
+          "velocity": 5.0966696758468295
+        }
+      }
+    },
+    {
+      "worldTimeMs": 900.28125,
+      "tracks": {
+        "track": {
+          "value": 2.2429617456865625,
+          "velocity": 5.130638031110902
+        }
+      }
+    },
+    {
+      "worldTimeMs": 908.171875,
+      "tracks": {
+        "track": {
+          "value": 2.28357878514188,
+          "velocity": 5.164327647314735
+        }
+      }
+    },
+    {
+      "worldTimeMs": 916.0625,
+      "tracks": {
+        "track": {
+          "value": 2.3244605630458413,
+          "velocity": 5.197740353955833
+        }
+      }
+    },
+    {
+      "worldTimeMs": 923.953125,
+      "tracks": {
+        "track": {
+          "value": 2.3656049014417446,
+          "velocity": 5.230877924248896
+        }
+      }
+    },
+    {
+      "worldTimeMs": 931.84375,
+      "tracks": {
+        "track": {
+          "value": 2.407009636143372,
+          "velocity": 5.2637420753568955
+        }
+      }
+    },
+    {
+      "worldTimeMs": 939.734375,
+      "tracks": {
+        "track": {
+          "value": 2.4486726162935146,
+          "velocity": 5.296334468585788
+        }
+      }
+    },
+    {
+      "worldTimeMs": 947.625,
+      "tracks": {
+        "track": {
+          "value": 2.490591703923858,
+          "velocity": 5.328656709542604
+        }
+      }
+    },
+    {
+      "worldTimeMs": 955.515625,
+      "tracks": {
+        "track": {
+          "value": 2.532764773515991,
+          "velocity": 5.360710348256564
+        }
+      }
+    },
+    {
+      "worldTimeMs": 963.40625,
+      "tracks": {
+        "track": {
+          "value": 2.575189711563224,
+          "velocity": 5.3924968792627785
+        }
+      }
+    },
+    {
+      "worldTimeMs": 971.296875,
+      "tracks": {
+        "track": {
+          "value": 2.617864416132896,
+          "velocity": 5.424017741648057
+        }
+      }
+    },
+    {
+      "worldTimeMs": 979.1875,
+      "tracks": {
+        "track": {
+          "value": 2.660786796428927,
+          "velocity": 5.455274319058326
+        }
+      }
+    },
+    {
+      "worldTimeMs": 987.078125,
+      "tracks": {
+        "track": {
+          "value": 2.703954772354236,
+          "velocity": 5.486267939667007
+        }
+      }
+    },
+    {
+      "worldTimeMs": 994.96875,
+      "tracks": {
+        "track": {
+          "value": 2.747366274072785,
+          "velocity": 5.516999876103741
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1002.859375,
+      "tracks": {
+        "track": {
+          "value": 2.791019241570894,
+          "velocity": 5.547471345342694
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1010.75,
+      "tracks": {
+        "track": {
+          "value": 2.8349116242174985,
+          "velocity": 5.577683508549673
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1018.640625,
+      "tracks": {
+        "track": {
+          "value": 2.879041380323047,
+          "velocity": 5.607637470887164
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1026.53125,
+      "tracks": {
+        "track": {
+          "value": 2.9234064766966936,
+          "velocity": 5.637334281276347
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1034.421875,
+      "tracks": {
+        "track": {
+          "value": 2.9680048882014396,
+          "velocity": 5.666774932115086
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1042.3125,
+      "tracks": {
+        "track": {
+          "value": 3.0128345973068513,
+          "velocity": 5.6959603589507335
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1050.203125,
+      "tracks": {
+        "track": {
+          "value": 3.0578935936390566,
+          "velocity": 5.724891440106632
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1058.09375,
+      "tracks": {
+        "track": {
+          "value": 3.103179873527557,
+          "velocity": 5.7535689962609275
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1065.984375,
+      "tracks": {
+        "track": {
+          "value": 3.148691439548567,
+          "velocity": 5.781993789976412
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1073.875,
+      "tracks": {
+        "track": {
+          "value": 3.194426300064416,
+          "velocity": 5.810166525179832
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1081.765625,
+      "tracks": {
+        "track": {
+          "value": 3.240382468758649,
+          "velocity": 5.838087846589119
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1089.65625,
+      "tracks": {
+        "track": {
+          "value": 3.2865579641664104,
+          "velocity": 5.865758339086833
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1097.546875,
+      "tracks": {
+        "track": {
+          "value": 3.332950809199629,
+          "velocity": 5.893178527037973
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1105.4375,
+      "tracks": {
+        "track": {
+          "value": 3.379559030666634,
+          "velocity": 5.920348873550241
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1113.328125,
+      "tracks": {
+        "track": {
+          "value": 3.4263806587856718,
+          "velocity": 5.9472697796746665
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1121.21875,
+      "tracks": {
+        "track": {
+          "value": 3.473413726691896,
+          "velocity": 5.973941583544386
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1129.109375,
+      "tracks": {
+        "track": {
+          "value": 3.520656269937282,
+          "velocity": 6.000364559449169
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1137,
+      "tracks": {
+        "track": {
+          "value": 3.5681063259830004,
+          "velocity": 6.026538916843244
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1144.890625,
+      "tracks": {
+        "track": {
+          "value": 3.6157619336836935,
+          "velocity": 6.052464799283679
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1152.78125,
+      "tracks": {
+        "track": {
+          "value": 3.6636211327630637,
+          "velocity": 6.078142283296432
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1160.671875,
+      "tracks": {
+        "track": {
+          "value": 3.7116819632802414,
+          "velocity": 6.103571377167094
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1168.5625,
+      "tracks": {
+        "track": {
+          "value": 3.7599424650862936,
+          "velocity": 6.1287520196529925
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1176.453125,
+      "tracks": {
+        "track": {
+          "value": 3.808400677270269,
+          "velocity": 6.15368407861322
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1184.34375,
+      "tracks": {
+        "track": {
+          "value": 3.8570546375940618,
+          "velocity": 6.178367349552898
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1192.234375,
+      "tracks": {
+        "track": {
+          "value": 3.905902381915463,
+          "velocity": 6.202801554077706
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1200.125,
+      "tracks": {
+        "track": {
+          "value": 3.954941943598646,
+          "velocity": 6.226986338254531
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1208.015625,
+      "tracks": {
+        "track": {
+          "value": 4.00417135291133,
+          "velocity": 6.250921270873699
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1215.90625,
+      "tracks": {
+        "track": {
+          "value": 4.053588636407812,
+          "velocity": 6.274605841608057
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1223.796875,
+      "tracks": {
+        "track": {
+          "value": 4.103191816297089,
+          "velocity": 6.298039459063853
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1231.6875,
+      "tracks": {
+        "track": {
+          "value": 4.152978909795102,
+          "velocity": 6.321221448717899
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1239.578125,
+      "tracks": {
+        "track": {
+          "value": 4.202947928460284,
+          "velocity": 6.344151050735331
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1247.46875,
+      "tracks": {
+        "track": {
+          "value": 4.253096877511367,
+          "velocity": 6.366827417661735
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1255.359375,
+      "tracks": {
+        "track": {
+          "value": 4.303423755126476,
+          "velocity": 6.389249611983069
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1263.25,
+      "tracks": {
+        "track": {
+          "value": 4.353926551722414,
+          "velocity": 6.411416603546354
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1271.140625,
+      "tracks": {
+        "track": {
+          "value": 4.404603249213034,
+          "velocity": 6.433327266833607
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1279.03125,
+      "tracks": {
+        "track": {
+          "value": 4.455451820245488,
+          "velocity": 6.454980378081011
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1286.921875,
+      "tracks": {
+        "track": {
+          "value": 4.506470227413098,
+          "velocity": 6.476374612234711
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1294.8125,
+      "tracks": {
+        "track": {
+          "value": 4.557656422443543,
+          "velocity": 6.497508539734095
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1302.703125,
+      "tracks": {
+        "track": {
+          "value": 4.60900834536096,
+          "velocity": 6.518380623112713
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1310.59375,
+      "tracks": {
+        "track": {
+          "value": 4.660523923620441,
+          "velocity": 6.538989213406357
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1318.484375,
+      "tracks": {
+        "track": {
+          "value": 4.712201071213413,
+          "velocity": 6.559332546357007
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1326.375,
+      "tracks": {
+        "track": {
+          "value": 4.764037687742223,
+          "velocity": 6.579408738400635
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1334.265625,
+      "tracks": {
+        "track": {
+          "value": 4.81603165746216,
+          "velocity": 6.599215782425908
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1342.15625,
+      "tracks": {
+        "track": {
+          "value": 4.868180848289041,
+          "velocity": 6.618751543289932
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1350.046875,
+      "tracks": {
+        "track": {
+          "value": 4.9204831107704585,
+          "velocity": 6.638013753076178
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1357.9375,
+      "tracks": {
+        "track": {
+          "value": 4.9729362770184835,
+          "velocity": 6.657000006078592
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1365.828125,
+      "tracks": {
+        "track": {
+          "value": 5.025538159601705,
+          "velocity": 6.675707753494712
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1373.71875,
+      "tracks": {
+        "track": {
+          "value": 5.078286550394138,
+          "velocity": 6.694134297809394
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1381.609375,
+      "tracks": {
+        "track": {
+          "value": 5.131179219378566,
+          "velocity": 6.71227678684921
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1389.5,
+      "tracks": {
+        "track": {
+          "value": 5.18421391340159,
+          "velocity": 6.730132207486208
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1397.390625,
+      "tracks": {
+        "track": {
+          "value": 5.237388354877521,
+          "velocity": 6.747697378967977
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1405.28125,
+      "tracks": {
+        "track": {
+          "value": 5.290700240438129,
+          "velocity": 6.764968945849206
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1413.171875,
+      "tracks": {
+        "track": {
+          "value": 5.344147239524894,
+          "velocity": 6.781943370497939
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1421.0625,
+      "tracks": {
+        "track": {
+          "value": 5.3977269929204255,
+          "velocity": 6.798616925147689
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1428.953125,
+      "tracks": {
+        "track": {
+          "value": 5.451437111215213,
+          "velocity": 6.814985683464065
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1436.84375,
+      "tracks": {
+        "track": {
+          "value": 5.50527517320586,
+          "velocity": 6.831045511592291
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1444.734375,
+      "tracks": {
+        "track": {
+          "value": 5.5592387242204495,
+          "velocity": 6.8467920586489655
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1452.625,
+      "tracks": {
+        "track": {
+          "value": 5.613325274366641,
+          "velocity": 6.862220746618614
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1460.515625,
+      "tracks": {
+        "track": {
+          "value": 5.667532296697464,
+          "velocity": 6.877326759612065
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1468.40625,
+      "tracks": {
+        "track": {
+          "value": 5.721857225289769,
+          "velocity": 6.892105032440246
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1476.296875,
+      "tracks": {
+        "track": {
+          "value": 5.776297453229599,
+          "velocity": 6.906550238452879
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1484.1875,
+      "tracks": {
+        "track": {
+          "value": 5.830850330498537,
+          "velocity": 6.920656776587245
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1492.078125,
+      "tracks": {
+        "track": {
+          "value": 5.885513161754565,
+          "velocity": 6.934418757567392
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1499.96875,
+      "tracks": {
+        "track": {
+          "value": 5.940283204000434,
+          "velocity": 6.94782998918885
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1507.859375,
+      "tracks": {
+        "track": {
+          "value": 5.99515766413211,
+          "velocity": 6.960883960618177
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1515.75,
+      "tracks": {
+        "track": {
+          "value": 6.05013369635917,
+          "velocity": 6.973573825630139
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1523.640625,
+      "tracks": {
+        "track": {
+          "value": 6.10520839948849,
+          "velocity": 6.9858923846983725
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1531.53125,
+      "tracks": {
+        "track": {
+          "value": 6.160378814061767,
+          "velocity": 6.997832065847533
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1539.421875,
+      "tracks": {
+        "track": {
+          "value": 6.215641919336764,
+          "velocity": 7.009384904166222
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1547.3125,
+      "tracks": {
+        "track": {
+          "value": 6.270994630101244,
+          "velocity": 7.020542519870532
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1555.203125,
+      "tracks": {
+        "track": {
+          "value": 6.326433793307679,
+          "velocity": 7.031296094797376
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1563.09375,
+      "tracks": {
+        "track": {
+          "value": 6.381956184515902,
+          "velocity": 7.04163634719498
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1570.984375,
+      "tracks": {
+        "track": {
+          "value": 6.437558504129585,
+          "velocity": 7.05155350466487
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1578.875,
+      "tracks": {
+        "track": {
+          "value": 6.493237373411466,
+          "velocity": 7.061037275095084
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1586.765625,
+      "tracks": {
+        "track": {
+          "value": 6.54898933026065,
+          "velocity": 7.07007681540807
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1594.65625,
+      "tracks": {
+        "track": {
+          "value": 6.604810824734105,
+          "velocity": 7.078660697928668
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1602.546875,
+      "tracks": {
+        "track": {
+          "value": 6.6606982142926725,
+          "velocity": 7.086776874157235
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1610.4375,
+      "tracks": {
+        "track": {
+          "value": 6.716647758750229,
+          "velocity": 7.094412635710322
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1618.328125,
+      "tracks": {
+        "track": {
+          "value": 6.772655614902595,
+          "velocity": 7.101554572165843
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1626.21875,
+      "tracks": {
+        "track": {
+          "value": 6.828717830810657,
+          "velocity": 7.108188525521184
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1634.109375,
+      "tracks": {
+        "track": {
+          "value": 6.8848303397097474,
+          "velocity": 7.114299540940454
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1642,
+      "tracks": {
+        "track": {
+          "value": 6.940988953514534,
+          "velocity": 7.119871813431013
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1649.890625,
+      "tracks": {
+        "track": {
+          "value": 6.997189355885837,
+          "velocity": 7.124888630048525
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1657.78125,
+      "tracks": {
+        "track": {
+          "value": 7.053427094822258,
+          "velocity": 7.129332307183599
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1665.671875,
+      "tracks": {
+        "track": {
+          "value": 7.1096975747360105,
+          "velocity": 7.133184122430887
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1673.5625,
+      "tracks": {
+        "track": {
+          "value": 7.165996047967878,
+          "velocity": 7.136424240482137
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1681.453125,
+      "tracks": {
+        "track": {
+          "value": 7.222317605691899,
+          "velocity": 7.1390316324174075
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1689.34375,
+      "tracks": {
+        "track": {
+          "value": 7.278657168154781,
+          "velocity": 7.140983987691782
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1697.234375,
+      "tracks": {
+        "track": {
+          "value": 7.335009474189567,
+          "velocity": 7.142257618027477
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1705.125,
+      "tracks": {
+        "track": {
+          "value": 7.39136906993602,
+          "velocity": 7.1428273523210235
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1713.015625,
+      "tracks": {
+        "track": {
+          "value": 7.447730296693101,
+          "velocity": 7.142666421560524
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1720.90625,
+      "tracks": {
+        "track": {
+          "value": 7.504087277820259,
+          "velocity": 7.141746332616152
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1728.796875,
+      "tracks": {
+        "track": {
+          "value": 7.560433904594773,
+          "velocity": 7.140036729615502
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1736.6875,
+      "tracks": {
+        "track": {
+          "value": 7.616763820921505,
+          "velocity": 7.137505241440288
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1744.578125,
+      "tracks": {
+        "track": {
+          "value": 7.673070406779189,
+          "velocity": 7.134117313678674
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1752.46875,
+      "tracks": {
+        "track": {
+          "value": 7.72934676027319,
+          "velocity": 7.129836023132673
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1760.359375,
+      "tracks": {
+        "track": {
+          "value": 7.785585678148746,
+          "velocity": 7.124621872707509
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1768.25,
+      "tracks": {
+        "track": {
+          "value": 7.841779634600317,
+          "velocity": 7.1184325641916795
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1776.140625,
+      "tracks": {
+        "track": {
+          "value": 7.897920758191466,
+          "velocity": 7.11122274606491
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1784.03125,
+      "tracks": {
+        "track": {
+          "value": 7.954000806675619,
+          "velocity": 7.102943733035468
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1791.921875,
+      "tracks": {
+        "track": {
+          "value": 8.010011139479914,
+          "velocity": 7.093543193495941
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1799.8125,
+      "tracks": {
+        "track": {
+          "value": 8.065942687581998,
+          "velocity": 7.082964800482326
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1807.703125,
+      "tracks": {
+        "track": {
+          "value": 8.121785920472089,
+          "velocity": 7.071147841006113
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1815.59375,
+      "tracks": {
+        "track": {
+          "value": 8.177530809848847,
+          "velocity": 7.0580267777798635
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1823.484375,
+      "tracks": {
+        "track": {
+          "value": 8.233166789646528,
+          "velocity": 7.043530756344975
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1831.375,
+      "tracks": {
+        "track": {
+          "value": 8.28868271193118,
+          "velocity": 7.027583049399989
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1839.265625,
+      "tracks": {
+        "track": {
+          "value": 8.34406679813323,
+          "velocity": 7.010100428674933
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1847.15625,
+      "tracks": {
+        "track": {
+          "value": 8.399306585001096,
+          "velocity": 6.990992452945583
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1855.046875,
+      "tracks": {
+        "track": {
+          "value": 8.454388864562226,
+          "velocity": 6.970160658661472
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1862.9375,
+      "tracks": {
+        "track": {
+          "value": 8.509299617261494,
+          "velocity": 6.947497637083641
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1870.828125,
+      "tracks": {
+        "track": {
+          "value": 8.564023937307745,
+          "velocity": 6.922885978679819
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1878.71875,
+      "tracks": {
+        "track": {
+          "value": 8.618545949092697,
+          "velocity": 6.8961970616606125
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1886.609375,
+      "tracks": {
+        "track": {
+          "value": 8.672848713345852,
+          "velocity": 6.867289656774004
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1894.5,
+      "tracks": {
+        "track": {
+          "value": 8.72691412144654,
+          "velocity": 6.836008314564902
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1902.390625,
+      "tracks": {
+        "track": {
+          "value": 8.780722776019665,
+          "velocity": 6.802181493935949
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1910.28125,
+      "tracks": {
+        "track": {
+          "value": 8.834253855581736,
+          "velocity": 6.765619381600309
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1918.171875,
+      "tracks": {
+        "track": {
+          "value": 8.887484960561833,
+          "velocity": 6.726111340347776
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1926.0625,
+      "tracks": {
+        "track": {
+          "value": 8.940391937476175,
+          "velocity": 6.6834229092194555
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1933.953125,
+      "tracks": {
+        "track": {
+          "value": 8.992948677356397,
+          "velocity": 6.637292259718646
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1941.84375,
+      "tracks": {
+        "track": {
+          "value": 9.04512688368289,
+          "velocity": 6.587425987739891
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1949.734375,
+      "tracks": {
+        "track": {
+          "value": 9.09689580400531,
+          "velocity": 6.533494089145138
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1957.625,
+      "tracks": {
+        "track": {
+          "value": 9.148221918076018,
+          "velocity": 6.475123925326474
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1965.515625,
+      "tracks": {
+        "track": {
+          "value": 9.199068573587322,
+          "velocity": 6.411892930136278
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1973.40625,
+      "tracks": {
+        "track": {
+          "value": 9.249395558366562,
+          "velocity": 6.34331973624839
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1981.296875,
+      "tracks": {
+        "track": {
+          "value": 9.299158594972711,
+          "velocity": 6.2688533002063025
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1989.1875,
+      "tracks": {
+        "track": {
+          "value": 9.348308739814797,
+          "velocity": 6.187859470794944
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1997.078125,
+      "tracks": {
+        "track": {
+          "value": 9.396791663838098,
+          "velocity": 6.099604259792895
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2004.96875,
+      "tracks": {
+        "track": {
+          "value": 9.444546785013088,
+          "velocity": 6.003232815067607
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2012.859375,
+      "tracks": {
+        "track": {
+          "value": 9.491506213609632,
+          "velocity": 5.897742729239836
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2020.75,
+      "tracks": {
+        "track": {
+          "value": 9.537593458503268,
+          "velocity": 5.78194979023496
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2028.640625,
+      "tracks": {
+        "track": {
+          "value": 9.58272182497764,
+          "velocity": 5.654443510564619
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2036.53125,
+      "tracks": {
+        "track": {
+          "value": 9.626792409264104,
+          "velocity": 5.51352862823427
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2044.421875,
+      "tracks": {
+        "track": {
+          "value": 9.669691558660972,
+          "velocity": 5.357147037758551
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2052.3125,
+      "tracks": {
+        "track": {
+          "value": 9.711287612536708,
+          "velocity": 5.182771922323455
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2060.203125,
+      "tracks": {
+        "track": {
+          "value": 9.751426659084748,
+          "velocity": 4.987261592067613
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2068.09375,
+      "tracks": {
+        "track": {
+          "value": 9.78992691894477,
+          "velocity": 4.766653575636944
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2075.984375,
+      "tracks": {
+        "track": {
+          "value": 9.826571171249734,
+          "velocity": 4.515867812444003
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2083.875,
+      "tracks": {
+        "track": {
+          "value": 9.861096319107869,
+          "velocity": 4.22826742498307
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2091.765625,
+      "tracks": {
+        "track": {
+          "value": 9.8931786542381,
+          "velocity": 3.8949886507898035
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2099.65625,
+      "tracks": {
+        "track": {
+          "value": 9.922412436920386,
+          "velocity": 3.5038815012861053
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2107.546875,
+      "tracks": {
+        "track": {
+          "value": 9.948277670005918,
+          "velocity": 3.0377624528940967
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2115.4375,
+      "tracks": {
+        "track": {
+          "value": 9.970089560600785,
+          "velocity": 2.4713806085249135
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2123.328125,
+      "tracks": {
+        "track": {
+          "value": 9.986915098659814,
+          "velocity": 1.765804801109817
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2131.21875,
+      "tracks": {
+        "track": {
+          "value": 9.997426122115376,
+          "velocity": 0.8571656485962471
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2136.999,
+      "tracks": {
+        "track": {
+          "value": 9.999999999916668,
+          "velocity": 0.00016666305569214697
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137,
+      "tracks": {
+        "track": {
+          "value": 10,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137.001,
+      "tracks": {
+        "track": {
+          "value": 10,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2139.109375,
+      "tracks": {
+        "track": {
+          "value": 10,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2147,
+      "tracks": {
+        "track": {
+          "value": 10,
+          "velocity": 0
+        }
+      }
+    }
+  ]
+}

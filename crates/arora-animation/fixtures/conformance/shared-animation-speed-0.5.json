@@ -1,0 +1,7448 @@
+{
+  "animation": {
+    "id": "shared-animation",
+    "name": "Shared Animation",
+    "duration": 2000,
+    "tracks": [
+      {
+        "id": "position.x",
+        "name": "x",
+        "animatableId": "position.x",
+        "points": [
+          {
+            "id": "px0.x",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.x",
+            "stamp": 200,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.x",
+            "stamp": 800,
+            "value": 5
+          },
+          {
+            "id": "px3.x",
+            "stamp": 1400,
+            "value": -5,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.x",
+            "stamp": 2000,
+            "value": 0
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF"
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "position.y",
+        "name": "y",
+        "animatableId": "position.y",
+        "points": [
+          {
+            "id": "px0.y",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.y",
+            "stamp": 200,
+            "value": 20,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.y",
+            "stamp": 800,
+            "value": 10
+          },
+          {
+            "id": "px3.y",
+            "stamp": 1400,
+            "value": 5,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.y",
+            "stamp": 2000,
+            "value": 0
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF"
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "position.z",
+        "name": "z",
+        "animatableId": "position.z",
+        "points": [
+          {
+            "id": "px0.z",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.z",
+            "stamp": 200,
+            "value": -15,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.z",
+            "stamp": 800,
+            "value": 0
+          },
+          {
+            "id": "px3.z",
+            "stamp": 1400,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.z",
+            "stamp": 2000,
+            "value": 14
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF"
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "scale",
+        "name": "Scale",
+        "animatableId": "scale",
+        "points": [
+          {
+            "id": "s0",
+            "stamp": 400,
+            "value": 1,
+            "transitions": {
+              "out": {
+                "x": 240,
+                "y": 0.05
+              }
+            }
+          },
+          {
+            "id": "s1",
+            "stamp": 800,
+            "value": 1.5,
+            "transitions": {
+              "in": {
+                "x": -300,
+                "y": -0.075
+              },
+              "out": {
+                "x": 110,
+                "y": -0.21
+              }
+            }
+          },
+          {
+            "id": "s2",
+            "stamp": 1000,
+            "value": 0.8,
+            "transitions": {
+              "out": {
+                "x": 420,
+                "y": 0.12
+              }
+            }
+          },
+          {
+            "id": "s3",
+            "stamp": 1600,
+            "value": 1
+          }
+        ],
+        "settings": {
+          "color": "#96CEB4"
+        }
+      },
+      {
+        "id": "opacity",
+        "name": "Opacity",
+        "animatableId": "opacity",
+        "points": [
+          {
+            "id": "o0",
+            "stamp": 0,
+            "value": 0
+          },
+          {
+            "id": "o1",
+            "stamp": 300,
+            "value": 1,
+            "transitions": {
+              "in": {
+                "x": -240,
+                "y": 0
+              },
+              "out": {
+                "x": 240,
+                "y": 0
+              },
+              "pairing": "paired"
+            }
+          },
+          {
+            "id": "o2",
+            "stamp": 1200,
+            "value": 1,
+            "transitions": {
+              "out": {
+                "x": 450,
+                "y": 0
+              }
+            }
+          },
+          {
+            "id": "o3",
+            "stamp": 2000,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -480,
+                "y": 0.2
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#FFEAA7"
+        }
+      }
+    ],
+    "groups": [],
+    "formatVersion": 2,
+    "defaultViewportExtent": 2000
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 0.5,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 0,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 0,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 0,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "position.x": {
+          "value": 0.000005000071666990327,
+          "velocity": 5.000143334232783
+        },
+        "position.y": {
+          "value": 0.000005000155000675515,
+          "velocity": 5.000310001955014
+        },
+        "position.z": {
+          "value": 0.000004999863332777358,
+          "velocity": 4.999726664927209
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 2.191545744135151e-12,
+          "velocity": 0.000004383096579298129
+        }
+      }
+    },
+    {
+      "worldTimeMs": 142.703125,
+      "tracks": {
+        "position.x": {
+          "value": 0.030903749171310883,
+          "velocity": 5.847766053494703
+        },
+        "position.y": {
+          "value": 0.033681265311869386,
+          "velocity": 6.833875831846631
+        },
+        "position.z": {
+          "value": 0.023959958819914633,
+          "velocity": 3.382491607614881
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.00007224030214450474,
+          "velocity": 0.025504364390634606
+        }
+      }
+    },
+    {
+      "worldTimeMs": 158.40625,
+      "tracks": {
+        "position.x": {
+          "value": 0.14313516080920688,
+          "velocity": 8.54250474924728
+        },
+        "position.y": {
+          "value": 0.18515445550574686,
+          "velocity": 12.667365717846183
+        },
+        "position.z": {
+          "value": 0.03808692406785702,
+          "velocity": -1.7696476722499885
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.0010572152806420719,
+          "velocity": 0.10140383159313619
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.109375,
+      "tracks": {
+        "position.x": {
+          "value": 0.30274251593192275,
+          "velocity": 11.918554497477363
+        },
+        "position.y": {
+          "value": 0.43924634049326144,
+          "velocity": 19.98425865720799
+        },
+        "position.z": {
+          "value": -0.03851704547142402,
+          "velocity": -8.245705901849206
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.003307130690388925,
+          "velocity": 0.18690343699720194
+        }
+      }
+    },
+    {
+      "worldTimeMs": 189.8125,
+      "tracks": {
+        "position.x": {
+          "value": 0.5224280234339875,
+          "velocity": 16.24979065879396
+        },
+        "position.y": {
+          "value": 0.8236346996570879,
+          "velocity": 29.384043973727376
+        },
+        "position.z": {
+          "value": -0.23058866712376302,
+          "velocity": -16.585842628539584
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.006987734255563593,
+          "velocity": 0.28399648554909396
+        }
+      }
+    },
+    {
+      "worldTimeMs": 205.515625,
+      "tracks": {
+        "position.x": {
+          "value": 0.8202144360647632,
+          "velocity": 21.9490725149337
+        },
+        "position.y": {
+          "value": 1.3776599765478057,
+          "velocity": 41.773001035852324
+        },
+        "position.z": {
+          "value": -0.5733994151428432,
+          "velocity": -27.610748787362855
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.012300462130138573,
+          "velocity": 0.3952665585571765
+        }
+      }
+    },
+    {
+      "worldTimeMs": 221.21875,
+      "tracks": {
+        "position.x": {
+          "value": 1.2220292185238013,
+          "velocity": 29.61447051571598
+        },
+        "position.y": {
+          "value": 2.158055013846984,
+          "velocity": 58.47043605939889
+        },
+        "position.z": {
+          "value": -1.118035269784156,
+          "velocity": -42.525443343491276
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.01949340586384894,
+          "velocity": 0.5241186982629764
+        }
+      }
+    },
+    {
+      "worldTimeMs": 236.921875,
+      "tracks": {
+        "position.x": {
+          "value": 1.7642965097582222,
+          "velocity": 39.93909001966821
+        },
+        "position.y": {
+          "value": 3.244829523676456,
+          "velocity": 81.02511537074818
+        },
+        "position.z": {
+          "value": -1.9370360250373635,
+          "velocity": -62.77597335803167
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.028876734745822648,
+          "velocity": 0.6751242053273806
+        }
+      }
+    },
+    {
+      "worldTimeMs": 252.625,
+      "tracks": {
+        "position.x": {
+          "value": 2.4905897855198798,
+          "velocity": 52.867362988925194
+        },
+        "position.y": {
+          "value": 4.734497626291841,
+          "velocity": 109.39913600718627
+        },
+        "position.z": {
+          "value": -3.119179816410024,
+          "velocity": -88.4620695567275
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.040844837258410156,
+          "velocity": 0.8545456554444509
+        }
+      }
+    },
+    {
+      "worldTimeMs": 268.328125,
+      "tracks": {
+        "position.x": {
+          "value": 3.420319479808259,
+          "velocity": 64.73236857871433
+        },
+        "position.y": {
+          "value": 6.672561383928626,
+          "velocity": 135.71429771399826
+        },
+        "position.z": {
+          "value": -4.710285280492657,
+          "velocity": -112.72245425949558
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.05590880213121603,
+          "velocity": 1.0711518625440948
+        }
+      }
+    },
+    {
+      "worldTimeMs": 284.03125,
+      "tracks": {
+        "position.x": {
+          "value": 4.473828692900618,
+          "velocity": 67.37500154772813
+        },
+        "position.y": {
+          "value": 8.889458305322067,
+          "velocity": 142.13422516184232
+        },
+        "position.z": {
+          "value": -6.565245338153005,
+          "velocity": -119.52305748755728
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.07474507919953247,
+          "velocity": 1.3375002511903664
+        }
+      }
+    },
+    {
+      "worldTimeMs": 299.734375,
+      "tracks": {
+        "position.x": {
+          "value": 5.479727683108749,
+          "velocity": 59.579303600835225
+        },
+        "position.y": {
+          "value": 11.012558219885998,
+          "velocity": 125.70373395059453
+        },
+        "position.z": {
+          "value": -8.352348658834371,
+          "velocity": -105.73177227356315
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.09826961998216648,
+          "velocity": 1.6719497807535675
+        }
+      }
+    },
+    {
+      "worldTimeMs": 315.4375,
+      "tracks": {
+        "position.x": {
+          "value": 6.330034064754121,
+          "velocity": 48.74232709976082
+        },
+        "position.y": {
+          "value": 12.803465776877232,
+          "velocity": 102.40826996967
+        },
+        "position.z": {
+          "value": -9.85354521555366,
+          "velocity": -85.42253007501216
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.1277512264589609,
+          "velocity": 2.1016691399939913
+        }
+      }
+    },
+    {
+      "worldTimeMs": 331.140625,
+      "tracks": {
+        "position.x": {
+          "value": 7.018304553437419,
+          "velocity": 39.26491446784434
+        },
+        "position.y": {
+          "value": 14.244873449013937,
+          "velocity": 81.91023227812849
+        },
+        "position.z": {
+          "value": -11.048117685503877,
+          "velocity": -67.34838005786604
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.1649784942908677,
+          "velocity": 2.6662312294468595
+        }
+      }
+    },
+    {
+      "worldTimeMs": 346.84375,
+      "tracks": {
+        "position.x": {
+          "value": 7.574143981411518,
+          "velocity": 31.851486363018612
+        },
+        "position.y": {
+          "value": 15.39936943606464,
+          "velocity": 65.82398533668479
+        },
+        "position.z": {
+          "value": -11.988919655221283,
+          "velocity": -53.079761071146784
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.21246407548704574,
+          "velocity": 3.417180983711935
+        }
+      }
+    },
+    {
+      "worldTimeMs": 362.546875,
+      "tracks": {
+        "position.x": {
+          "value": 8.027536801712044,
+          "velocity": 26.137449304245134
+        },
+        "position.y": {
+          "value": 16.331327095208806,
+          "velocity": 53.39865679493126
+        },
+        "position.z": {
+          "value": -12.731938932029857,
+          "velocity": -42.0155694224702
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.27348070291258647,
+          "velocity": 4.389729931441026
+        }
+      }
+    },
+    {
+      "worldTimeMs": 378.25,
+      "tracks": {
+        "position.x": {
+          "value": 8.401549928682915,
+          "velocity": 21.67427900668171
+        },
+        "position.y": {
+          "value": 17.090535070519472,
+          "velocity": 43.67807936836874
+        },
+        "position.z": {
+          "value": -13.320912925908473,
+          "velocity": -33.33522189753585
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.35096004446349827,
+          "velocity": 5.467438601061083
+        }
+      }
+    },
+    {
+      "worldTimeMs": 393.953125,
+      "tracks": {
+        "position.x": {
+          "value": 8.712970112937093,
+          "velocity": 18.117361209659734
+        },
+        "position.y": {
+          "value": 17.713334150456195,
+          "velocity": 35.9216629441831
+        },
+        "position.z": {
+          "value": -13.787939980860658,
+          "velocity": -26.393393126648707
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.4430518588485227,
+          "velocity": 6.1282824257033335
+        }
+      }
+    },
+    {
+      "worldTimeMs": 409.65625,
+      "tracks": {
+        "position.x": {
+          "value": 8.974012621983933,
+          "velocity": 15.224727062206982
+        },
+        "position.y": {
+          "value": 18.226220948346352,
+          "velocity": 29.607370535320992
+        },
+        "position.z": {
+          "value": -14.156508193922118,
+          "velocity": -20.731881620578058
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.5381227866168501,
+          "velocity": 5.819091354064336
+        }
+      }
+    },
+    {
+      "worldTimeMs": 425.359375,
+      "tracks": {
+        "position.x": {
+          "value": 9.19371197397994,
+          "velocity": 12.828591965161362
+        },
+        "position.y": {
+          "value": 18.64882134416253,
+          "velocity": 24.37233080281029
+        },
+        "position.z": {
+          "value": -14.444061451476536,
+          "velocity": -16.03075512896095
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.6225294271756181,
+          "velocity": 4.888525867010628
+        }
+      }
+    },
+    {
+      "worldTimeMs": 441.0625,
+      "tracks": {
+        "position.x": {
+          "value": 9.37888795413566,
+          "velocity": 10.811320610071062
+        },
+        "position.y": {
+          "value": 18.995967264858944,
+          "velocity": 19.961691235794046
+        },
+        "position.z": {
+          "value": -14.66381032267255,
+          "velocity": -12.06460595423639
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.691624125302936,
+          "velocity": 3.9355467468095386
+        }
+      }
+    },
+    {
+      "worldTimeMs": 456.765625,
+      "tracks": {
+        "position.x": {
+          "value": 9.534794470093239,
+          "velocity": 9.08889983220917
+        },
+        "position.y": {
+          "value": 19.27909601356851,
+          "velocity": 16.193199457600688
+        },
+        "position.z": {
+          "value": -14.825959388594935,
+          "velocity": -8.67184923126962
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.7471185484273599,
+          "velocity": 3.165258309966384
+        }
+      }
+    },
+    {
+      "worldTimeMs": 472.46875,
+      "tracks": {
+        "position.x": {
+          "value": 9.665556413489764,
+          "velocity": 7.600106504940413
+        },
+        "position.y": {
+          "value": 19.50719440467923,
+          "velocity": 12.933900650263134
+        },
+        "position.z": {
+          "value": -14.938538564483895,
+          "velocity": -5.734378858366388
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.7919775587492638,
+          "velocity": 2.57456217839612
+        }
+      }
+    },
+    {
+      "worldTimeMs": 488.171875,
+      "tracks": {
+        "position.x": {
+          "value": 9.774468137508645,
+          "velocity": 6.299438961388707
+        },
+        "position.y": {
+          "value": 19.687444834420763,
+          "velocity": 10.08489352009286
+        },
+        "position.z": {
+          "value": -15.007973604771646,
+          "velocity": -3.1641974353716793
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.8286884859083433,
+          "velocity": 2.120293303174546
+        }
+      }
+    },
+    {
+      "worldTimeMs": 503.875,
+      "tracks": {
+        "position.x": {
+          "value": 9.864201231274082,
+          "velocity": 5.152452830721863
+        },
+        "position.y": {
+          "value": 19.825675570569544,
+          "velocity": 7.571253605845903
+        },
+        "position.z": {
+          "value": -15.039484616964577,
+          "velocity": -0.8945491070882363
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.8590812825170517,
+          "velocity": 1.764455874872946
+        }
+      }
+    },
+    {
+      "worldTimeMs": 519.578125,
+      "tracks": {
+        "position.x": {
+          "value": 9.936951989536402,
+          "velocity": 4.132631281875985
+        },
+        "position.y": {
+          "value": 19.926680669567567,
+          "velocity": 5.335262281252128
+        },
+        "position.z": {
+          "value": -15.037369710541507,
+          "velocity": 1.1260537834356208
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.8844742475024756,
+          "velocity": 1.4797429494021708
+        }
+      }
+    },
+    {
+      "worldTimeMs": 535.28125,
+      "tracks": {
+        "position.x": {
+          "value": 9.994548066552134,
+          "velocity": 3.2192456057038155
+        },
+        "position.y": {
+          "value": 19.99445154412849,
+          "velocity": 3.331773142521507
+        },
+        "position.z": {
+          "value": -15.005210627388752,
+          "velocity": 2.9379267636595867
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9058271420712132,
+          "velocity": 1.2473149481467931
+        }
+      }
+    },
+    {
+      "worldTimeMs": 536.999,
+      "tracks": {
+        "position.x": {
+          "value": 9.999996874972737,
+          "velocity": 3.125054524918344
+        },
+        "position.y": {
+          "value": 19.999996874940184,
+          "velocity": 3.1251196292969374
+        },
+        "position.z": {
+          "value": -15.000003124945883,
+          "velocity": 3.124891763971859
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9079500256235185,
+          "velocity": 1.2244641350703938
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537,
+      "tracks": {
+        "position.x": {
+          "value": 10,
+          "velocity": 3.125
+        },
+        "position.y": {
+          "value": 20,
+          "velocity": 3.125
+        },
+        "position.z": {
+          "value": -15,
+          "velocity": 3.125
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9079512500810685,
+          "velocity": 1.2244509653372386
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537.001,
+      "tracks": {
+        "position.x": {
+          "value": 9.999998809521685,
+          "velocity": -1.1904804421826016
+        },
+        "position.y": {
+          "value": 19.999998809519322,
+          "velocity": -1.1904851663010296
+        },
+        "position.z": {
+          "value": -15.000001190468868,
+          "velocity": -1.1904615457088894
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9079524745254491,
+          "velocity": 1.2244377957573342
+        }
+      }
+    },
+    {
+      "worldTimeMs": 550.984375,
+      "tracks": {
+        "position.x": {
+          "value": 9.982930895027467,
+          "velocity": -1.2510767174086777
+        },
+        "position.y": {
+          "value": 19.982462892546273,
+          "velocity": -1.3184497550864707
+        },
+        "position.z": {
+          "value": -15.015197095047762,
+          "velocity": -0.9815845666975057
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9238525464700266,
+          "velocity": 1.0541419389539772
+        }
+      }
+    },
+    {
+      "worldTimeMs": 566.6875,
+      "tracks": {
+        "position.x": {
+          "value": 9.962732529588676,
+          "velocity": -1.3219685286992753
+        },
+        "position.y": {
+          "value": 19.960591628447464,
+          "velocity": -1.4682543632227987
+        },
+        "position.z": {
+          "value": -15.028703865846479,
+          "velocity": -0.7368251906051818
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9390908751688967,
+          "velocity": 0.8910642843811664
+        }
+      }
+    },
+    {
+      "worldTimeMs": 582.390625,
+      "tracks": {
+        "position.x": {
+          "value": 9.94139601272697,
+          "velocity": -1.396072133748876
+        },
+        "position.y": {
+          "value": 19.936314426241758,
+          "velocity": -1.6249576877415703
+        },
+        "position.z": {
+          "value": -15.038277641332172,
+          "velocity": -0.4805299177780979
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9519603700526857,
+          "velocity": 0.7515113129030517
+        }
+      }
+    },
+    {
+      "worldTimeMs": 598.09375,
+      "tracks": {
+        "position.x": {
+          "value": 9.918869119413385,
+          "velocity": -1.4736190706122951
+        },
+        "position.y": {
+          "value": 19.90951906549045,
+          "velocity": -1.7890629055132778
+        },
+        "position.z": {
+          "value": -15.043730664894877,
+          "velocity": -0.21184373100836557
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9627907701131564,
+          "velocity": 0.6306715066660603
+        }
+      }
+    },
+    {
+      "worldTimeMs": 613.796875,
+      "tracks": {
+        "position.x": {
+          "value": 9.895095813421163,
+          "velocity": -1.5548636456635354
+        },
+        "position.y": {
+          "value": 19.880085039306497,
+          "velocity": -1.9611232003070027
+        },
+        "position.z": {
+          "value": -15.044861090120174,
+          "velocity": 0.07017457291033366
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9718463944349399,
+          "velocity": 0.5249519944364844
+        }
+      }
+    },
+    {
+      "worldTimeMs": 629.5,
+      "tracks": {
+        "position.x": {
+          "value": 9.870015868177303,
+          "velocity": -1.6400857504963091
+        },
+        "position.y": {
+          "value": 19.847882721102966,
+          "velocity": -2.1417480183286655
+        },
+        "position.z": {
+          "value": -15.04145154352535,
+          "velocity": 0.3665633208331159
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.979342283576209,
+          "velocity": 0.4316210880075331
+        }
+      }
+    },
+    {
+      "worldTimeMs": 645.203125,
+      "tracks": {
+        "position.x": {
+          "value": 9.843564440203917,
+          "velocity": -1.7295940939946808
+        },
+        "position.y": {
+          "value": 19.81277242596804,
+          "velocity": -2.3316102577238866
+        },
+        "position.z": {
+          "value": -15.033267502852564,
+          "velocity": 0.6784705609221433
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9854557109983293,
+          "velocity": 0.3485674644262792
+        }
+      }
+    },
+    {
+      "worldTimeMs": 660.90625,
+      "tracks": {
+        "position.x": {
+          "value": 9.815671588098756,
+          "velocity": -1.8237299191362382
+        },
+        "position.y": {
+          "value": 19.77460335078569,
+          "velocity": -2.531454551231481
+        },
+        "position.z": {
+          "value": -15.020055462648976,
+          "velocity": 1.007168609244733
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9903345472956708,
+          "velocity": 0.27413479684139735
+        }
+      }
+    },
+    {
+      "worldTimeMs": 676.609375,
+      "tracks": {
+        "position.x": {
+          "value": 9.786261728816315,
+          "velocity": -1.9228712866339728
+        },
+        "position.y": {
+          "value": 19.733212374497004,
+          "velocity": -2.742106830650986
+        },
+        "position.z": {
+          "value": -15.001540853906441,
+          "velocity": 1.3540708894340783
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9941034441047468,
+          "velocity": 0.20700605919911766
+        }
+      }
+    },
+    {
+      "worldTimeMs": 692.3125,
+      "tracks": {
+        "position.x": {
+          "value": 9.755253021608734,
+          "velocity": -2.0274380222701893
+        },
+        "position.y": {
+          "value": 19.688422696667526,
+          "velocity": -2.9644853967273344
+        },
+        "position.z": {
+          "value": -14.977425678626437,
+          "velocity": 1.7207514755583888
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9968684797383719,
+          "velocity": 0.14612114155570777
+        }
+      }
+    },
+    {
+      "worldTimeMs": 708.015625,
+      "tracks": {
+        "position.x": {
+          "value": 9.72255666833308,
+          "velocity": -2.1378974419856287
+        },
+        "position.y": {
+          "value": 19.640042288700148,
+          "velocity": -3.1996137592452554
+        },
+        "position.z": {
+          "value": -14.947385813135188,
+          "velocity": 2.1089678270528815
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9987207007581204,
+          "velocity": 0.09061720926113076
+        }
+      }
+    },
+    {
+      "worldTimeMs": 723.71875,
+      "tracks": {
+        "position.x": {
+          "value": 9.68807611688814,
+          "velocity": -2.2547709886460816
+        },
+        "position.y": {
+          "value": 19.587862127506497,
+          "velocity": -3.448635560274762
+        },
+        "position.z": {
+          "value": -14.911067925585282,
+          "velocity": 2.5206872978686357
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.999738858384485,
+          "velocity": 0.039784860910613236
+        }
+      }
+    },
+    {
+      "worldTimeMs": 736.999,
+      "tracks": {
+        "position.x": {
+          "value": 9.65744553063311,
+          "velocity": -2.359047672196347
+        },
+        "position.y": {
+          "value": 19.54059917517932,
+          "velocity": -3.6710225962526124
+        },
+        "position.z": {
+          "value": -14.87516904755173,
+          "velocity": 2.888852024028716
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9999999999985532,
+          "velocity": 0.000002893525928350603
+        }
+      }
+    },
+    {
+      "worldTimeMs": 737,
+      "tracks": {
+        "position.x": {
+          "value": 9.657443171581415,
+          "velocity": -2.359055722197859
+        },
+        "position.y": {
+          "value": 19.54059550414814,
+          "velocity": -3.671039771597134
+        },
+        "position.z": {
+          "value": -14.875166158685479,
+          "velocity": 2.888880475399242
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 737.001,
+      "tracks": {
+        "position.x": {
+          "value": 9.657440812521662,
+          "velocity": -2.359063772229945
+        },
+        "position.y": {
+          "value": 19.54059183309977,
+          "velocity": -3.671056947008025
+        },
+        "position.z": {
+          "value": -14.875163269790775,
+          "velocity": 2.8889089268823787
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 739.421875,
+      "tracks": {
+        "position.x": {
+          "value": 9.651706152267305,
+          "velocity": -2.378641936932304
+        },
+        "position.y": {
+          "value": 19.53165417610913,
+          "velocity": -3.7128319490656865
+        },
+        "position.z": {
+          "value": -14.868085943099985,
+          "velocity": 2.9581181116012263
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 755.125,
+      "tracks": {
+        "position.x": {
+          "value": 9.613331857064873,
+          "velocity": -2.5101643476592796
+        },
+        "position.y": {
+          "value": 19.47116906937598,
+          "velocity": -3.9936418399116733
+        },
+        "position.z": {
+          "value": -14.818016992179547,
+          "velocity": 3.4237456213502955
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 770.828125,
+      "tracks": {
+        "position.x": {
+          "value": 9.572827420220943,
+          "velocity": -2.6500734790601266
+        },
+        "position.y": {
+          "value": 19.406133455781866,
+          "velocity": -4.292685553073667
+        },
+        "position.z": {
+          "value": -14.760396722022744,
+          "velocity": 3.920374816994041
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 786.53125,
+      "tracks": {
+        "position.x": {
+          "value": 9.530054769327862,
+          "velocity": -2.7991978880527135
+        },
+        "position.y": {
+          "value": 19.3362469376791,
+          "velocity": -4.611792410057615
+        },
+        "position.z": {
+          "value": -14.694713904077087,
+          "velocity": 4.45118019996689
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 802.234375,
+      "tracks": {
+        "position.x": {
+          "value": 9.484861997990034,
+          "velocity": -2.9584734751196673
+        },
+        "position.y": {
+          "value": 19.26117854305483,
+          "velocity": -4.953032920719915
+        },
+        "position.z": {
+          "value": -14.620404182269144,
+          "velocity": 5.019764307281327
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 817.9375,
+      "tracks": {
+        "position.x": {
+          "value": 9.437081555658782,
+          "velocity": -3.128959734585411
+        },
+        "position.y": {
+          "value": 19.18056265133639,
+          "velocity": -5.318756246415058
+        },
+        "position.z": {
+          "value": -14.53684282705165,
+          "velocity": 5.630226312733172
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 833.640625,
+      "tracks": {
+        "position.x": {
+          "value": 9.386528163346574,
+          "velocity": -3.3118584542528247
+        },
+        "position.y": {
+          "value": 19.093994284970393,
+          "velocity": -5.711633624211454
+        },
+        "position.z": {
+          "value": -14.443336323148696,
+          "velocity": 6.287242225581695
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 849.34375,
+      "tracks": {
+        "position.x": {
+          "value": 9.332996415236968,
+          "velocity": -3.508535040975198
+        },
+        "position.y": {
+          "value": 19.00102366830482,
+          "velocity": -6.134708344778033
+        },
+        "position.z": {
+          "value": -14.33911259703444,
+          "velocity": 6.996158174236137
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 865.046875,
+      "tracks": {
+        "position.x": {
+          "value": 9.27625802451655,
+          "velocity": -3.7205424911133416
+        },
+        "position.y": {
+          "value": 18.90114994780072,
+          "velocity": -6.591452607895551
+        },
+        "position.z": {
+          "value": -14.223309668620132,
+          "velocity": 7.76309797601549
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 880.75,
+      "tracks": {
+        "position.x": {
+          "value": 9.216058673678095,
+          "velocity": -3.949647707402565
+        },
+        "position.y": {
+          "value": 18.79381396658663,
+          "velocity": -7.085830990726663
+        },
+        "position.z": {
+          "value": -14.094962497956043,
+          "velocity": 8.595085425893823
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 896.453125,
+      "tracks": {
+        "position.x": {
+          "value": 9.152114438437208,
+          "velocity": -4.197859268239426
+        },
+        "position.y": {
+          "value": 18.678389998644043,
+          "velocity": -7.622369107245086
+        },
+        "position.z": {
+          "value": -13.952987802390131,
+          "velocity": 9.500180087783214
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 912.15625,
+      "tracks": {
+        "position.x": {
+          "value": 9.084107776068636,
+          "velocity": -4.467454681624067
+        },
+        "position.y": {
+          "value": 18.554176385424473,
+          "velocity": -8.206223888843258
+        },
+        "position.z": {
+          "value": -13.7961666613547,
+          "velocity": 10.487622147252699
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 927.859375,
+      "tracks": {
+        "position.x": {
+          "value": 9.011683113332593,
+          "velocity": -4.761003267188421
+        },
+        "position.y": {
+          "value": 18.420385101182287,
+          "velocity": -8.843248056028907
+        },
+        "position.z": {
+          "value": -13.623124838066177,
+          "velocity": 11.567975888173523
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 936.999,
+      "tracks": {
+        "position.x": {
+          "value": 8.967340169428228,
+          "velocity": -4.9440097363151825
+        },
+        "position.y": {
+          "value": 18.337759082820163,
+          "velocity": -9.241072589338867
+        },
+        "position.z": {
+          "value": -13.514335484139513,
+          "velocity": 12.244241675779557
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 937,
+      "tracks": {
+        "position.x": {
+          "value": 8.967335225408222,
+          "velocity": -4.944030278677018
+        },
+        "position.y": {
+          "value": 18.337749841725234,
+          "velocity": -9.241117274579162
+        },
+        "position.z": {
+          "value": -13.514323239859824,
+          "velocity": 12.244317704931563
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 937.001,
+      "tracks": {
+        "position.x": {
+          "value": 8.96733028136767,
+          "velocity": -4.944050821154881
+        },
+        "position.y": {
+          "value": 18.33774060058561,
+          "velocity": -9.241161960078525
+        },
+        "position.z": {
+          "value": -13.5143109955041,
+          "velocity": 12.244393734539695
+        },
+        "scale": {
+          "value": 1.0000001041672515,
+          "velocity": 0.10416783613345935
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 943.5625,
+      "tracks": {
+        "position.x": {
+          "value": 8.934442153062317,
+          "velocity": -5.081377544197458
+        },
+        "position.y": {
+          "value": 18.27613043834753,
+          "velocity": -9.540034566301708
+        },
+        "position.z": {
+          "value": -13.432310988078529,
+          "velocity": 12.753250544219553
+        },
+        "scale": {
+          "value": 1.000709067926515,
+          "velocity": 0.11197528644541338
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 959.265625,
+      "tracks": {
+        "position.x": {
+          "value": 8.851939170205526,
+          "velocity": -5.431740437732602
+        },
+        "position.y": {
+          "value": 18.12041731129993,
+          "velocity": -10.303915098780827
+        },
+        "position.z": {
+          "value": -13.2219733941721,
+          "velocity": 14.056958206460305
+        },
+        "scale": {
+          "value": 1.002620992199455,
+          "velocity": 0.13181589207561395
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 974.96875,
+      "tracks": {
+        "position.x": {
+          "value": 8.763676834515216,
+          "velocity": -5.815486269493663
+        },
+        "position.y": {
+          "value": 17.952130227175697,
+          "velocity": -11.142866703466197
+        },
+        "position.z": {
+          "value": -12.990136736126702,
+          "velocity": 15.49403546639647
+        },
+        "scale": {
+          "value": 1.0048583813640608,
+          "velocity": 0.1534671638914615
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 990.671875,
+      "tracks": {
+        "position.x": {
+          "value": 8.669103554148823,
+          "velocity": -6.236098108812459
+        },
+        "position.y": {
+          "value": 17.77002493189319,
+          "velocity": -12.065247522024533
+        },
+        "position.z": {
+          "value": -12.734581956828645,
+          "velocity": 17.080499544035828
+        },
+        "scale": {
+          "value": 1.0074516497129669,
+          "velocity": 0.17718901899476502
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1006.375,
+      "tracks": {
+        "position.x": {
+          "value": 8.56761410083789,
+          "velocity": -6.696859457834622
+        },
+        "position.y": {
+          "value": 17.57272637135628,
+          "velocity": -13.07922870559281
+        },
+        "position.z": {
+          "value": -12.452834981235666,
+          "velocity": 18.832617533198132
+        },
+        "scale": {
+          "value": 1.0104356777678392,
+          "velocity": 0.20329219758324268
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1022.078125,
+      "tracks": {
+        "position.x": {
+          "value": 8.458556526055629,
+          "velocity": -7.200320863025202
+        },
+        "position.y": {
+          "value": 17.358739302352742,
+          "velocity": -14.19170667857862
+        },
+        "position.z": {
+          "value": -12.14217457913282,
+          "velocity": 20.765222399188467
+        },
+        "scale": {
+          "value": 1.0138507039416325,
+          "velocity": 0.2321506959777813
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037.78125,
+      "tracks": {
+        "position.x": {
+          "value": 8.341250326948677,
+          "velocity": -7.747370416087382
+        },
+        "position.y": {
+          "value": 17.1264821541046,
+          "velocity": -15.40636273658754
+        },
+        "position.z": {
+          "value": -11.799676981675017,
+          "velocity": 22.88859886591324
+        },
+        "scale": {
+          "value": 1.01774343798955,
+          "velocity": 0.26421773708241747
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1053.484375,
+      "tracks": {
+        "position.x": {
+          "value": 8.215023649898743,
+          "velocity": -8.335699705752072
+        },
+        "position.y": {
+          "value": 16.874361043488538,
+          "velocity": -16.72040071214727
+        },
+        "position.z": {
+          "value": -11.422325924460441,
+          "velocity": 25.203104319828725
+        },
+        "scale": {
+          "value": 1.0221684597662162,
+          "velocity": 0.3000463339315805
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1069.1875,
+      "tracks": {
+        "position.x": {
+          "value": 8.079280879784708,
+          "velocity": -8.95743155343615
+        },
+        "position.y": {
+          "value": 16.600909002734657,
+          "velocity": -18.11941541552353
+        },
+        "position.z": {
+          "value": -11.007231612015085,
+          "velocity": 27.690503894913373
+        },
+        "scale": {
+          "value": 1.0271899852995368,
+          "velocity": 0.3403157431485905
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1084.890625,
+      "tracks": {
+        "position.x": {
+          "value": 7.933615041246401,
+          "velocity": -9.595788373604009
+        },
+        "position.y": {
+          "value": 16.305023078103446,
+          "velocity": -19.570049170373288
+        },
+        "position.z": {
+          "value": -10.552017106181772,
+          "velocity": 30.301254813473097
+        },
+        "scale": {
+          "value": 1.0328841040378414,
+          "velocity": 0.38586526721607
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1100.59375,
+      "tracks": {
+        "position.x": {
+          "value": 7.777978322827225,
+          "velocity": -10.221148070583396
+        },
+        "position.y": {
+          "value": 15.986331186512214,
+          "velocity": -21.011058826059934
+        },
+        "position.z": {
+          "value": -10.055433131912729,
+          "velocity": 32.938494951322745
+        },
+        "scale": {
+          "value": 1.0393416134638622,
+          "velocity": 0.43773670274670284
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1116.296875,
+      "tracks": {
+        "position.x": {
+          "value": 7.612910852973434,
+          "velocity": -10.787944383394434
+        },
+        "position.y": {
+          "value": 15.64569432683477,
+          "velocity": -22.34580129372637
+        },
+        "position.z": {
+          "value": -9.518223042471908,
+          "velocity": 35.44348325793333
+        },
+        "scale": {
+          "value": 1.0466715908963116,
+          "velocity": 0.4972256311376465
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1132,
+      "tracks": {
+        "position.x": {
+          "value": 7.439791913167664,
+          "velocity": -11.235579476334086
+        },
+        "position.y": {
+          "value": 15.285773578917114,
+          "velocity": -23.44296519156063
+        },
+        "position.z": {
+          "value": -8.944134749830138,
+          "velocity": 37.593963384572106
+        },
+        "scale": {
+          "value": 1.0550058224667904,
+          "velocity": 0.5659382212834851
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1147.703125,
+      "tracks": {
+        "position.x": {
+          "value": 7.261017647568254,
+          "velocity": -11.497500529760764
+        },
+        "position.y": {
+          "value": 14.911459085756263,
+          "velocity": -24.154878048947737
+        },
+        "position.z": {
+          "value": -8.340748105183783,
+          "velocity": 39.13200954698711
+        },
+        "scale": {
+          "value": 1.0645040942287487,
+          "velocity": 0.6458407643564266
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1163.40625,
+      "tracks": {
+        "position.x": {
+          "value": 7.079959059284374,
+          "velocity": -11.519784186674183
+        },
+        "position.y": {
+          "value": 14.529839796145083,
+          "velocity": -24.35717117735951
+        },
+        "position.z": {
+          "value": -7.71956388815846,
+          "velocity": 39.829763776067146
+        },
+        "scale": {
+          "value": 1.0753599928250988,
+          "velocity": 0.7392658145576468
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1179.109375,
+      "tracks": {
+        "position.x": {
+          "value": 6.900591455762463,
+          "velocity": -11.282471704033794
+        },
+        "position.y": {
+          "value": 14.1494581378155,
+          "velocity": -23.996129750563313
+        },
+        "position.z": {
+          "value": -7.094875272449681,
+          "velocity": 39.57216048208425
+        },
+        "scale": {
+          "value": 1.0878059262577582,
+          "velocity": 0.8487843972868342
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1194.8125,
+      "tracks": {
+        "position.x": {
+          "value": 6.726856436243449,
+          "velocity": -10.809975742315142
+        },
+        "position.y": {
+          "value": 13.778953192845117,
+          "velocity": -23.114051379630716
+        },
+        "position.z": {
+          "value": -6.481530590163221,
+          "velocity": 38.406326806947156
+        },
+        "scale": {
+          "value": 1.1021138394844678,
+          "velocity": 0.9767359428664477
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1210.515625,
+      "tracks": {
+        "position.x": {
+          "value": 6.562011216303649,
+          "velocity": -10.16204359233482
+        },
+        "position.y": {
+          "value": 13.425628395915282,
+          "velocity": -21.83264294413692
+        },
+        "position.z": {
+          "value": -5.892457502142884,
+          "velocity": 36.52035381487358
+        },
+        "scale": {
+          "value": 1.1185832444843828,
+          "velocity": 1.1239870891845625
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1226.21875,
+      "tracks": {
+        "position.x": {
+          "value": 6.408239210000634,
+          "velocity": -9.411716112132552
+        },
+        "position.y": {
+          "value": 13.094549214120864,
+          "velocity": -20.30668227842143
+        },
+        "position.z": {
+          "value": -5.33700080648029,
+          "velocity": 34.16814855302297
+        },
+        "scale": {
+          "value": 1.1374992327068252,
+          "velocity": 1.2872195709873326
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1241.921875,
+      "tracks": {
+        "position.x": {
+          "value": 6.2666130582460475,
+          "velocity": -8.624736529912818
+        },
+        "position.y": {
+          "value": 12.788397800544187,
+          "velocity": -18.678914978665187
+        },
+        "position.z": {
+          "value": -4.820525910946509,
+          "velocity": 31.59197726509668
+        },
+        "scale": {
+          "value": 1.1590324943939418,
+          "velocity": 1.4542768527706122
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1257.625,
+      "tracks": {
+        "position.x": {
+          "value": 6.137305675029896,
+          "velocity": -7.849136133193787
+        },
+        "position.y": {
+          "value": 12.507881923216534,
+          "velocity": -17.056023848834762
+        },
+        "position.z": {
+          "value": -4.344999317716646,
+          "velocity": 28.978414729370108
+        },
+        "scale": {
+          "value": 1.1830609400594174,
+          "velocity": 1.5995867108346962
+        },
+        "opacity": {
+          "value": 1.0000000000000002,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1273.328125,
+      "tracks": {
+        "position.x": {
+          "value": 6.0198849410404,
+          "velocity": -7.114345589898182
+        },
+        "position.y": {
+          "value": 12.252348801235154,
+          "velocity": -15.505283369840583
+        },
+        "position.z": {
+          "value": -3.9099704997386215,
+          "velocity": 26.449405529871427
+        },
+        "scale": {
+          "value": 1.2089678925399294,
+          "velocity": 1.6875502293001623
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1289.03125,
+      "tracks": {
+        "position.x": {
+          "value": 5.913578186980146,
+          "velocity": -6.435127319450695
+        },
+        "position.y": {
+          "value": 12.020352072190287,
+          "velocity": -14.062159558666572
+        },
+        "position.z": {
+          "value": -3.5135173538604216,
+          "velocity": 24.07300163741281
+        },
+        "scale": {
+          "value": 1.2356155357671428,
+          "velocity": 1.6916239814834044
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1304.734375,
+      "tracks": {
+        "position.x": {
+          "value": 5.817463827277069,
+          "velocity": -5.816454474455061
+        },
+        "position.y": {
+          "value": 11.810071361261954,
+          "velocity": -12.740447745717045
+        },
+        "position.z": {
+          "value": -3.1529663086624655,
+          "velocity": 21.879518610592875
+        },
+        "scale": {
+          "value": 1.2616692741521405,
+          "velocity": 1.615229080818732
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1320.4375,
+      "tracks": {
+        "position.x": {
+          "value": 5.730591911060486,
+          "velocity": -5.257531057435876
+        },
+        "position.y": {
+          "value": 11.619581947029456,
+          "velocity": -11.540862191393886
+        },
+        "position.z": {
+          "value": -2.825368232815394,
+          "velocity": 19.87579347839617
+        },
+        "scale": {
+          "value": 1.2860755663793992,
+          "velocity": 1.487636149556171
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1336.140625,
+      "tracks": {
+        "position.x": {
+          "value": 5.652051413997745,
+          "velocity": -4.754558507144943
+        },
+        "position.y": {
+          "value": 11.447009547371902,
+          "velocity": -10.457063957239074
+        },
+        "position.z": {
+          "value": -2.527781119498889,
+          "velocity": 18.05546329323158
+        },
+        "scale": {
+          "value": 1.308294703139362,
+          "velocity": 1.3413411444983325
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1351.84375,
+      "tracks": {
+        "position.x": {
+          "value": 5.581002799131197,
+          "velocity": -4.302444385195441
+        },
+        "position.y": {
+          "value": 11.290608794706028,
+          "velocity": -9.479452919390136
+        },
+        "position.z": {
+          "value": -2.2574211831681326,
+          "velocity": 16.405589751583335
+        },
+        "scale": {
+          "value": 1.3282186658059474,
+          "velocity": 1.1978194431500966
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1367.546875,
+      "tracks": {
+        "position.x": {
+          "value": 5.516689933557251,
+          "velocity": -3.8957750101120783
+        },
+        "position.y": {
+          "value": 11.148795470612097,
+          "velocity": -8.597372705493186
+        },
+        "position.z": {
+          "value": -2.0117322146621412,
+          "velocity": 14.91061577141235
+        },
+        "scale": {
+          "value": 1.345981603051091,
+          "velocity": 1.067035869045992
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1383.25,
+      "tracks": {
+        "position.x": {
+          "value": 5.458440666516801,
+          "velocity": -3.5293255624799955
+        },
+        "position.y": {
+          "value": 11.020152720173996,
+          "velocity": -7.800301756072271
+        },
+        "position.z": {
+          "value": -1.788407548111976,
+          "velocity": 13.554579211889104
+        },
+        "scale": {
+          "value": 1.3618125525474583,
+          "velocity": 0.9518695241633514
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1398.953125,
+      "tracks": {
+        "position.x": {
+          "value": 5.405661731836787,
+          "velocity": -3.198298081606391
+        },
+        "position.y": {
+          "value": 10.90342375222132,
+          "velocity": -7.078437947620357
+        },
+        "position.z": {
+          "value": -1.585386349701343,
+          "velocity": 12.322261382449474
+        },
+        "scale": {
+          "value": 1.3759557907153688,
+          "velocity": 0.8518612070238126
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1414.65625,
+      "tracks": {
+        "position.x": {
+          "value": 5.357831225757639,
+          "velocity": -2.898407645295948
+        },
+        "position.y": {
+          "value": 10.797498332233076,
+          "velocity": -6.422938233600346
+        },
+        "position.z": {
+          "value": -1.400837200144105,
+          "velocity": 11.199714707921641
+        },
+        "scale": {
+          "value": 1.388636825113977,
+          "velocity": 0.7653162536484899
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1430.359375,
+      "tracks": {
+        "position.x": {
+          "value": 5.314490430386975,
+          "velocity": -2.6258884790551065
+        },
+        "position.y": {
+          "value": 10.701397134771952,
+          "velocity": -5.825971510658836
+        },
+        "position.z": {
+          "value": -1.2331363871529315,
+          "velocity": 10.174443647359807
+        },
+        "scale": {
+          "value": 1.4000517113987976,
+          "velocity": 0.6902787628667404
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1446.0625,
+      "tracks": {
+        "position.x": {
+          "value": 5.275235886636224,
+          "velocity": -2.3774610953157067
+        },
+        "position.y": {
+          "value": 10.614256098863617,
+          "velocity": -5.280676731821875
+        },
+        "position.z": {
+          "value": -1.0808449622733454,
+          "velocity": 9.235401450708968
+        },
+        "scale": {
+          "value": 1.4103665110231929,
+          "velocity": 0.6249203965082285
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1461.765625,
+      "tracks": {
+        "position.x": {
+          "value": 5.23971213205663,
+          "velocity": -2.1502831904724498
+        },
+        "position.y": {
+          "value": 10.535311827558907,
+          "velocity": -4.781078079710231
+        },
+        "position.z": {
+          "value": -0.9426866499524837,
+          "velocity": 8.372896366478681
+        },
+        "scale": {
+          "value": 1.419720473757126,
+          "velocity": 0.5676628374524871
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1477.46875,
+      "tracks": {
+        "position.x": {
+          "value": 5.207605253508957,
+          "velocity": -1.9418963719801265
+        },
+        "position.y": {
+          "value": 10.463888461570672,
+          "velocity": -4.321985386863553
+        },
+        "position.z": {
+          "value": -0.8175275787378966,
+          "velocity": 7.578459687553585
+        },
+        "scale": {
+          "value": 1.4282301459219457,
+          "velocity": 0.5171902524954778
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1493.171875,
+      "tracks": {
+        "position.x": {
+          "value": 5.178637266904953,
+          "velocity": -1.75017476247388
+        },
+        "position.y": {
+          "value": 10.39938613065436,
+          "velocity": -3.8988944390956832
+        },
+        "position.z": {
+          "value": -0.7043581880926683,
+          "velocity": 6.844703944013332
+        },
+        "scale": {
+          "value": 1.4359933040635644,
+          "velocity": 0.4724219517735213
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1508.875,
+      "tracks": {
+        "position.x": {
+          "value": 5.152561270040871,
+          "velocity": -1.573278202883651
+        },
+        "position.y": {
+          "value": 10.341270922126801,
+          "velocity": -3.507894191486743
+        },
+        "position.z": {
+          "value": -0.6022773383028492,
+          "velocity": 6.1651857515287185
+        },
+        "scale": {
+          "value": 1.4430923555932307,
+          "velocity": 0.4324748127191687
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1524.578125,
+      "tracks": {
+        "position.x": {
+          "value": 5.129157287272873,
+          "velocity": -1.4096109957417902
+        },
+        "position.y": {
+          "value": 10.289066231581247,
+          "velocity": -3.145583761400296
+        },
+        "position.z": {
+          "value": -0.5104784899606243,
+          "velocity": 5.534280066892235
+        },
+        "scale": {
+          "value": 1.4495971507458232,
+          "velocity": 0.3966269483362927
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1540.28125,
+      "tracks": {
+        "position.x": {
+          "value": 5.108228717996313,
+          "velocity": -1.257786217857623
+        },
+        "position.y": {
+          "value": 10.242345335067453,
+          "velocity": -2.808999859887764
+        },
+        "position.z": {
+          "value": -0.428237750288248,
+          "velocity": 4.947068350262941
+        },
+        "scale": {
+          "value": 1.4555672610948311,
+          "velocity": 0.36428637546947223
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1555.984375,
+      "tracks": {
+        "position.x": {
+          "value": 5.089599304276722,
+          "velocity": -1.116595199797451
+        },
+        "position.y": {
+          "value": 10.200725021314902,
+          "velocity": -2.49555422230158
+        },
+        "position.z": {
+          "value": -0.35490356387599736,
+          "velocity": 4.3992408902190645
+        },
+        "scale": {
+          "value": 1.461053810458262,
+          "velocity": 0.33496530934936264
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1571.6875,
+      "tracks": {
+        "position.x": {
+          "value": 5.073110540895422,
+          "velocity": -0.9849815973678275
+        },
+        "position.y": {
+          "value": 10.163860133913063,
+          "velocity": -2.2029801066208647
+        },
+        "position.z": {
+          "value": -0.2898878311751467,
+          "velocity": 3.88701243964432
+        },
+        "scale": {
+          "value": 1.4661009432463117,
+          "velocity": 0.30825956412004724
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1587.390625,
+      "tracks": {
+        "position.x": {
+          "value": 5.058619460510768,
+          "velocity": -0.8620194434147849
+        },
+        "position.y": {
+          "value": 10.131438889592097,
+          "velocity": -1.9292867623977064
+        },
+        "position.z": {
+          "value": -0.2326582558145443,
+          "velocity": 3.4070498325169
+        },
+        "scale": {
+          "value": 1.4707470039664914,
+          "velocity": 0.28383221921343144
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1603.09375,
+      "tracks": {
+        "position.x": {
+          "value": 5.0459967360661695,
+          "velocity": -0.7468945978194538
+        },
+        "position.y": {
+          "value": 10.103178856105686,
+          "velocity": -1.6727207756763327
+        },
+        "position.z": {
+          "value": -0.1827317440918923,
+          "velocity": 2.9564101136080607
+        },
+        "scale": {
+          "value": 1.4750254881980713,
+          "velocity": 0.2614007150584906
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1618.796875,
+      "tracks": {
+        "position.x": {
+          "value": 5.03512505127978,
+          "velocity": -0.6388890720349893
+        },
+        "position.y": {
+          "value": 10.078823489827151,
+          "velocity": -1.431733277502895
+        },
+        "position.z": {
+          "value": -0.1396687029097022,
+          "velocity": 2.532487749836634
+        },
+        "scale": {
+          "value": 1.478965813031048,
+          "velocity": 0.24072665444506552
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1634.5,
+      "tracks": {
+        "position.x": {
+          "value": 5.025897697747632,
+          "velocity": -0.5373677719730683
+        },
+        "position.y": {
+          "value": 10.0581391481931,
+          "velocity": -1.2049521177018636
+        },
+        "position.z": {
+          "value": -0.10306810403423532,
+          "velocity": 2.132969610942112
+        },
+        "scale": {
+          "value": 1.482593944658298,
+          "velocity": 0.22160772041650406
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1650.203125,
+      "tracks": {
+        "position.x": {
+          "value": 5.018217363828733,
+          "velocity": -0.4417672694628857
+        },
+        "position.y": {
+          "value": 10.040912505286679,
+          "velocity": -0.9911582261729867
+        },
+        "position.z": {
+          "value": -0.07256320200304685,
+          "velocity": 1.7557965573775192
+        },
+        "scale": {
+          "value": 1.4859329125530036,
+          "velocity": 0.20387124519058428
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1665.90625,
+      "tracks": {
+        "position.x": {
+          "value": 5.011995086115576,
+          "velocity": -0.3515862732396023
+        },
+        "position.y": {
+          "value": 10.026948310153458,
+          "velocity": -0.7892654985359905
+        },
+        "position.z": {
+          "value": -0.0478178100359531,
+          "velocity": 1.3991306279459501
+        },
+        "scale": {
+          "value": 1.4890032331915721,
+          "velocity": 0.1873690677221628
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1681.609375,
+      "tracks": {
+        "position.x": {
+          "value": 5.007149339031609,
+          "velocity": -0.2663775237482915
+        },
+        "position.y": {
+          "value": 10.016067437030639,
+          "velocity": -0.5983036460150312
+        },
+        "position.z": {
+          "value": -0.028523052964505417,
+          "velocity": 1.0613269653186674
+        },
+        "scale": {
+          "value": 1.4918232612628546,
+          "velocity": 0.17197339969911618
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1697.3125,
+      "tracks": {
+        "position.x": {
+          "value": 5.003605242058268,
+          "velocity": -0.1857408817523376
+        },
+        "position.y": {
+          "value": 10.0081051847431,
+          "velocity": -0.4174035392746224
+        },
+        "position.z": {
+          "value": -0.014394528681056382,
+          "velocity": 0.7409097483368015
+        },
+        "scale": {
+          "value": 1.4944094824282934,
+          "velocity": 0.15757348375206262
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1713.015625,
+      "tracks": {
+        "position.x": {
+          "value": 5.001293867394272,
+          "velocity": -0.10931741931254309
+        },
+        "position.y": {
+          "value": 10.002909789285544,
+          "velocity": -0.2457846526803262
+        },
+        "position.z": {
+          "value": -0.005169820170817164,
+          "velocity": 0.4365515141585892
+        },
+        "scale": {
+          "value": 1.4967767587060217,
+          "velocity": 0.14407287690068368
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1728.71875,
+      "tracks": {
+        "position.x": {
+          "value": 5.000151633595106,
+          "velocity": -0.0367843539557276
+        },
+        "position.y": {
+          "value": 10.000341119266098,
+          "velocity": -0.08274428025331855
+        },
+        "position.z": {
+          "value": -0.0006063090888627227,
+          "velocity": 0.14705535123463623
+        },
+        "scale": {
+          "value": 1.4989385352390676,
+          "velocity": 0.13138722995358065
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1736.999,
+      "tracks": {
+        "position.x": {
+          "value": 5.000000000002191,
+          "velocity": -0.000004383088312930956
+        },
+        "position.y": {
+          "value": 10.000000000004931,
+          "velocity": -0.00000986194841142018
+        },
+        "position.z": {
+          "value": -8.766171566052992e-12,
+          "velocity": 0.00001753235208102595
+        },
+        "scale": {
+          "value": 1.4999998749996204,
+          "velocity": 0.1250007592606883
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1737,
+      "tracks": {
+        "position.x": {
+          "value": 5,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 10,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 0,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1.5,
+          "velocity": 0.12499999999999992
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1737.001,
+      "tracks": {
+        "position.x": {
+          "value": 4.999999999996712,
+          "velocity": -0.000006574631756400945
+        },
+        "position.y": {
+          "value": 9.999999999999451,
+          "velocity": -0.0000010957727398652
+        },
+        "position.z": {
+          "value": 7.670398864135502e-12,
+          "velocity": 0.00001534080430974203
+        },
+        "scale": {
+          "value": 1.4999990454506449,
+          "velocity": -0.9545532557314146
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1744.421875,
+      "tracks": {
+        "position.x": {
+          "value": 4.999817574881715,
+          "velocity": -0.04934162588491176
+        },
+        "position.y": {
+          "value": 9.99996948803814,
+          "velocity": -0.00826736136575057
+        },
+        "position.z": {
+          "value": 0.00042522750741114584,
+          "velocity": 0.11495543219173301
+        },
+        "scale": {
+          "value": 1.4926958846964336,
+          "velocity": -1.0143752731906948
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1760.125,
+      "tracks": {
+        "position.x": {
+          "value": 4.998200622872301,
+          "velocity": -0.15746018843900364
+        },
+        "position.y": {
+          "value": 9.999696749827757,
+          "velocity": -0.026684603196214577
+        },
+        "position.z": {
+          "value": 0.004185130694126455,
+          "velocity": 0.36564215253215254
+        },
+        "scale": {
+          "value": 1.4756891847250508,
+          "velocity": -1.1550623120941534
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1775.828125,
+      "tracks": {
+        "position.x": {
+          "value": 4.994844305369247,
+          "velocity": -0.2709359379528519
+        },
+        "position.y": {
+          "value": 9.999124374324381,
+          "velocity": -0.046449184446038835
+        },
+        "position.z": {
+          "value": 0.011964581189780644,
+          "velocity": 0.6270110760744005
+        },
+        "scale": {
+          "value": 1.4563005148417065,
+          "velocity": -1.3185607681706584
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1791.53125,
+      "tracks": {
+        "position.x": {
+          "value": 4.989661427250192,
+          "velocity": -0.39016606878199833
+        },
+        "position.y": {
+          "value": 9.998230273534933,
+          "velocity": -0.06768174554916928
+        },
+        "position.z": {
+          "value": 0.023936812389155408,
+          "velocity": 0.8997712241493178
+        },
+        "scale": {
+          "value": 1.4341301589591513,
+          "velocity": -1.5103770103194514
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1807.234375,
+      "tracks": {
+        "position.x": {
+          "value": 4.98255825678164,
+          "velocity": -0.5155866366585296
+        },
+        "position.y": {
+          "value": 9.996990360702076,
+          "velocity": -0.09051650095486755
+        },
+        "position.z": {
+          "value": 0.04028667246337999,
+          "velocity": 1.184693906156118
+        },
+        "scale": {
+          "value": 1.408681106540706,
+          "velocity": -1.7374170301976752
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1822.9375,
+      "tracks": {
+        "position.x": {
+          "value": 4.973433879626118,
+          "velocity": -0.6476772114633166
+        },
+        "position.y": {
+          "value": 9.995378322997906,
+          "velocity": -0.11510308651528295
+        },
+        "position.z": {
+          "value": 0.06121165311326816,
+          "velocity": 1.482619288328818
+        },
+        "scale": {
+          "value": 1.3793371992771428,
+          "velocity": -2.00787762000265
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1838.640625,
+      "tracks": {
+        "position.x": {
+          "value": 4.962179474855455,
+          "velocity": -0.7869661729626639
+        },
+        "position.y": {
+          "value": 9.993365362968659,
+          "velocity": -0.1416087000568471
+        },
+        "position.z": {
+          "value": 0.08692302730826787,
+          "velocity": 1.794463718660603
+        },
+        "scale": {
+          "value": 1.3453499348779245,
+          "velocity": -2.3300485640250668
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1854.34375,
+      "tracks": {
+        "position.x": {
+          "value": 4.948677502134994,
+          "velocity": -0.9340367457920633
+        },
+        "position.y": {
+          "value": 9.990919903727058,
+          "velocity": -0.17022058754452668
+        },
+        "position.z": {
+          "value": 0.11764710850323964,
+          "velocity": 2.121227887198083
+        },
+        "scale": {
+          "value": 1.305864834506875,
+          "velocity": -2.707951745189336
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1870.046875,
+      "tracks": {
+        "position.x": {
+          "value": 4.932800787623607,
+          "velocity": -1.089533883971415
+        },
+        "position.y": {
+          "value": 9.988007251988815,
+          "velocity": -0.2011489373929374
+        },
+        "position.z": {
+          "value": 0.1536266450844393,
+          "velocity": 2.4640059023424974
+        },
+        "scale": {
+          "value": 1.2600694668967753,
+          "velocity": -3.1291718515711735
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1885.75,
+      "tracks": {
+        "position.x": {
+          "value": 4.914411494283929,
+          "velocity": -1.2541721305365212
+        },
+        "position.y": {
+          "value": 9.984589211974958,
+          "velocity": -0.2346302576247178
+        },
+        "position.z": {
+          "value": 0.19512236504804092,
+          "velocity": 2.8239953611106916
+        },
+        "scale": {
+          "value": 1.2076356285494707,
+          "velocity": -3.5389568132889724
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1901.453125,
+      "tracks": {
+        "position.x": {
+          "value": 4.8933599601986,
+          "velocity": -1.4287445940901768
+        },
+        "position.y": {
+          "value": 9.980623641918017,
+          "velocity": -0.27093132507156636
+        },
+        "position.z": {
+          "value": 0.24241468707626104,
+          "velocity": 3.202508481984265
+        },
+        "scale": {
+          "value": 1.1496298269189358,
+          "velocity": -3.812223857211639
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1917.15625,
+      "tracks": {
+        "position.x": {
+          "value": 4.869483386132589,
+          "velocity": -1.6141332004393791
+        },
+        "position.y": {
+          "value": 9.976063943378332,
+          "velocity": -0.31035381302148346
+        },
+        "position.z": {
+          "value": 0.295805615115561,
+          "velocity": 3.6009843492322022
+        },
+        "scale": {
+          "value": 1.0894574318784813,
+          "velocity": -3.7939641956738046
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1932.859375,
+      "tracks": {
+        "position.x": {
+          "value": 4.842604350976399,
+          "velocity": -1.8113203925860624
+        },
+        "position.y": {
+          "value": 9.970858471750756,
+          "velocity": -0.35323972398443115
+        },
+        "position.z": {
+          "value": 0.35562083407382095,
+          "velocity": 4.021002281820463
+        },
+        "scale": {
+          "value": 1.0322110158619973,
+          "velocity": -3.4512832489954435
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1948.5625,
+      "tracks": {
+        "position.x": {
+          "value": 4.812529130887528,
+          "velocity": -2.0214024637597676
+        },
+        "position.y": {
+          "value": 9.964949854172184,
+          "velocity": -0.39997777784097377
+        },
+        "position.z": {
+          "value": 0.42221202402615493,
+          "velocity": 4.464296279915409
+        },
+        "scale": {
+          "value": 0.9820184394678,
+          "velocity": -2.926812628706699
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1964.265625,
+      "tracks": {
+        "position.x": {
+          "value": 4.779045795004491,
+          "velocity": -2.245604711909713
+        },
+        "position.y": {
+          "value": 9.958274198473312,
+          "velocity": -0.45101093261178615
+        },
+        "position.z": {
+          "value": 0.49595940887977596,
+          "velocity": 4.932770405281996
+        },
+        "scale": {
+          "value": 0.9403625920441432,
+          "velocity": -2.3853087977395253
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1979.96875,
+      "tracks": {
+        "position.x": {
+          "value": 4.741922047706865,
+          "velocity": -2.4852985936071055
+        },
+        "position.y": {
+          "value": 9.95076017380261,
+          "velocity": -0.5068452450790734
+        },
+        "position.z": {
+          "value": 0.5772745520898461,
+          "velocity": 5.428514800505024
+        },
+        "scale": {
+          "value": 0.9067510020565197,
+          "velocity": -1.9092312667724933
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1995.671875,
+      "tracks": {
+        "position.x": {
+          "value": 4.700902784834603,
+          "velocity": -2.742021020261198
+        },
+        "position.y": {
+          "value": 9.942327940047582,
+          "velocity": -0.5680603103587408
+        },
+        "position.z": {
+          "value": 0.6666034056865152,
+          "velocity": 5.95382181934863
+        },
+        "scale": {
+          "value": 0.8799621329579635,
+          "velocity": -1.516180955450303
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2011.375,
+      "tracks": {
+        "position.x": {
+          "value": 4.655707329564837,
+          "velocity": -3.0174958635401645
+        },
+        "position.y": {
+          "value": 9.9328878991752,
+          "velocity": -0.6353215507217684
+        },
+        "position.z": {
+          "value": 0.7644296080062891,
+          "velocity": 6.51120138773342
+        },
+        "scale": {
+          "value": 0.858742850621852,
+          "velocity": -1.1976083161359528
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2027.078125,
+      "tracks": {
+        "position.x": {
+          "value": 4.606026313604718,
+          "velocity": -3.313657594287514
+        },
+        "position.y": {
+          "value": 9.922339237156246,
+          "velocity": -0.7093946495319658
+        },
+        "position.z": {
+          "value": 0.8712780078108301,
+          "velocity": 7.10339418473468
+        },
+        "scale": {
+          "value": 0.8420354310416348,
+          "velocity": -0.9391407131251722
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2042.78125,
+      "tracks": {
+        "position.x": {
+          "value": 4.551518172329257,
+          "velocity": -3.6326767302890293
+        },
+        "position.y": {
+          "value": 9.910568220379176,
+          "velocity": -0.7911624370440091
+        },
+        "position.z": {
+          "value": 0.9877183645289296,
+          "velocity": 7.733380442691052
+        },
+        "scale": {
+          "value": 0.8290030987399295,
+          "velocity": -0.7275477944211272
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2058.484375,
+      "tracks": {
+        "position.x": {
+          "value": 4.491805230589853,
+          "velocity": -3.9769863517967594
+        },
+        "position.y": {
+          "value": 9.897446205742687,
+          "velocity": -0.8816445151005998
+        },
+        "position.z": {
+          "value": 1.1143691312011879,
+          "velocity": 8.404380994987878
+        },
+        "scale": {
+          "value": 0.8189961933905285,
+          "velocity": -0.5522792708946849
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2074.1875,
+      "tracks": {
+        "position.x": {
+          "value": 4.426469372454575,
+          "velocity": -4.349308266440123
+        },
+        "position.y": {
+          "value": 9.882827319616684,
+          "velocity": -0.9820198303802186
+        },
+        "position.z": {
+          "value": 1.251901161103003,
+          "velocity": 9.119845477799492
+        },
+        "scale": {
+          "value": 0.8115102978917531,
+          "velocity": -0.40530972060567166
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2089.890625,
+      "tracks": {
+        "position.x": {
+          "value": 4.355047318241557,
+          "velocity": -4.752676326344502
+        },
+        "position.y": {
+          "value": 9.866545758810162,
+          "velocity": -1.0936522255451873
+        },
+        "position.z": {
+          "value": 1.4010410805159732,
+          "velocity": 9.88342007685276
+        },
+        "scale": {
+          "value": 0.8061506135367842,
+          "velocity": -0.2806120843752052
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2105.59375,
+      "tracks": {
+        "position.x": {
+          "value": 4.2770255837120414,
+          "velocity": -5.190452711141091
+        },
+        "position.y": {
+          "value": 9.848412668732644,
+          "velocity": -1.218118640377242
+        },
+        "position.z": {
+          "value": 1.5625739237944534,
+          "velocity": 10.698883571914307
+        },
+        "scale": {
+          "value": 0.8026046651618267,
+          "velocity": -0.1736526601178715
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2121.296875,
+      "tracks": {
+        "position.x": {
+          "value": 4.191835281018264,
+          "velocity": -5.666330388491379
+        },
+        "position.y": {
+          "value": 9.828212563722607,
+          "velocity": -1.3572389819779773
+        },
+        "position.z": {
+          "value": 1.737344411835637,
+          "velocity": 11.57003523756223
+        },
+        "scale": {
+          "value": 0.8006221194689741,
+          "velocity": -0.08099362498814633
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2136.999,
+      "tracks": {
+        "position.x": {
+          "value": 4.09885324073103,
+          "velocity": -6.184276610570796
+        },
+        "position.y": {
+          "value": 9.80570079114168,
+          "velocity": -1.5130950403023218
+        },
+        "position.z": {
+          "value": 1.9262434423736359,
+          "velocity": 12.5004496705031
+        },
+        "scale": {
+          "value": 0.8000000000024162,
+          "velocity": -0.0000048323665786137255
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137,
+      "tracks": {
+        "position.x": {
+          "value": 4.098847056437211,
+          "velocity": -6.184311026075364
+        },
+        "position.y": {
+          "value": 9.805699278041386,
+          "velocity": -1.5131055483945937
+        },
+        "position.z": {
+          "value": 1.9262559428539163,
+          "velocity": 12.500510884647719
+        },
+        "scale": {
+          "value": 0.8,
+          "velocity": -8.369373570251184e-16
+        },
+        "opacity": {
+          "value": 0.9999999999999999,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137.001,
+      "tracks": {
+        "position.x": {
+          "value": 4.098840872108975,
+          "velocity": -6.1843454417678565
+        },
+        "position.y": {
+          "value": 9.805697764930585,
+          "velocity": -1.513116056564362
+        },
+        "position.z": {
+          "value": 1.9262684433954111,
+          "velocity": 12.500572099046119
+        },
+        "scale": {
+          "value": 0.8000001428572091,
+          "velocity": 0.14285727513243796
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2152.703125,
+      "tracks": {
+        "position.x": {
+          "value": 3.9973666712286864,
+          "velocity": -6.748641800551874
+        },
+        "position.y": {
+          "value": 9.780591482923873,
+          "velocity": -1.6881079920139725
+        },
+        "position.z": {
+          "value": 2.1302659180094308,
+          "velocity": 13.493493433599731
+        },
+        "scale": {
+          "value": 0.8022598257627671,
+          "velocity": 0.14497526753741252
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2168.40625,
+      "tracks": {
+        "position.x": {
+          "value": 3.886632053865493,
+          "velocity": -7.363686180708516
+        },
+        "position.y": {
+          "value": 9.752567890332305,
+          "velocity": -1.8849467421789197
+        },
+        "position.z": {
+          "value": 2.3503753997327377,
+          "velocity": 14.551271573409869
+        },
+        "scale": {
+          "value": 0.8045535769084238,
+          "velocity": 0.1471788830924166
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2184.109375,
+      "tracks": {
+        "position.x": {
+          "value": 3.76581312907072,
+          "velocity": -8.033692283343544
+        },
+        "position.y": {
+          "value": 9.721262410091978,
+          "velocity": -2.1066230337708296
+        },
+        "position.z": {
+          "value": 2.58761025315575,
+          "velocity": 15.674584714947322
+        },
+        "scale": {
+          "value": 0.8068826393176022,
+          "velocity": 0.14947359746655203
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2199.8125,
+      "tracks": {
+        "position.x": {
+          "value": 3.6340164117794513,
+          "velocity": -8.7624077936923
+        },
+        "position.y": {
+          "value": 9.686259765421692,
+          "velocity": -2.35638660913527
+        },
+        "position.z": {
+          "value": 2.8429898263484117,
+          "velocity": 16.861676944535823
+        },
+        "scale": {
+          "value": 0.8092484908148798,
+          "velocity": 0.15186552182520294
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2215.515625,
+      "tracks": {
+        "position.x": {
+          "value": 3.4902972819956988,
+          "velocity": -9.552474319028773
+        },
+        "position.y": {
+          "value": 9.64709244246094,
+          "velocity": -2.6376123718612106
+        },
+        "position.z": {
+          "value": 3.1174779238566632,
+          "velocity": 18.10697346964148
+        },
+        "scale": {
+          "value": 0.8116527095047736,
+          "velocity": 0.15436132696198307
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2231.21875,
+      "tracks": {
+        "position.x": {
+          "value": 3.3336840181347887,
+          "velocity": -10.404521763871083
+        },
+        "position.y": {
+          "value": 9.603240392898963,
+          "velocity": -2.953565251704335
+        },
+        "position.z": {
+          "value": 3.4119095171914884,
+          "velocity": 19.39930428479591
+        },
+        "scale": {
+          "value": 0.8140969830502128,
+          "velocity": 0.15696830709311893
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2246.921875,
+      "tracks": {
+        "position.x": {
+          "value": 3.163218914613834,
+          "velocity": -11.315887523773265
+        },
+        "position.y": {
+          "value": 9.554135642592263,
+          "velocity": -3.3070011044036454
+        },
+        "position.z": {
+          "value": 3.726885826527551,
+          "velocity": 20.71965815370521
+        },
+        "scale": {
+          "value": 0.8165831190175799,
+          "velocity": 0.1596944520905052
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2262.625,
+      "tracks": {
+        "position.x": {
+          "value": 2.978022711808271,
+          "velocity": -12.278930370421042
+        },
+        "position.y": {
+          "value": 9.49917482217792,
+          "velocity": -3.699548283967799
+        },
+        "position.z": {
+          "value": 4.062631153286864,
+          "velocity": 22.038597975391927
+        },
+        "scale": {
+          "value": 0.8191130564299981,
+          "velocity": 0.16254852934711633
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2278.328125,
+      "tracks": {
+        "position.x": {
+          "value": 2.7773881989516713,
+          "velocity": -13.279032776652091
+        },
+        "position.y": {
+          "value": 9.437743388018507,
+          "velocity": -4.130835217071858
+        },
+        "position.z": {
+          "value": 4.418808955219017,
+          "velocity": 23.313757461668853
+        },
+        "scale": {
+          "value": 0.821688878690497,
+          "velocity": 0.1655401766197913
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2294.03125,
+      "tracks": {
+        "position.x": {
+          "value": 2.5609056430762216,
+          "velocity": -14.292628706951529
+        },
+        "position.y": {
+          "value": 9.369255386360893,
+          "velocity": -4.597398207472681
+        },
+        "position.z": {
+          "value": 4.794304616214905,
+          "velocity": 24.488293290963853
+        },
+        "scale": {
+          "value": 0.8243128280589944,
+          "velocity": 0.1686800073485009
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2309.734375,
+      "tracks": {
+        "position.x": {
+          "value": 2.328614664121167,
+          "velocity": -15.285958473632595
+        },
+        "position.y": {
+          "value": 9.293211073386386,
+          "velocity": -5.091544381251332
+        },
+        "position.z": {
+          "value": 5.187000301182042,
+          "velocity": 25.491697895892464
+        },
+        "scale": {
+          "value": 0.8269873218917541,
+          "velocity": 0.17197973009622197
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2325.4375,
+      "tracks": {
+        "position.x": {
+          "value": 2.0811631267232764,
+          "velocity": -16.215618756764368
+        },
+        "position.y": {
+          "value": 9.209270402104423,
+          "velocity": -5.600549165940556
+        },
+        "position.z": {
+          "value": 5.593592228247861,
+          "velocity": 26.24465960653088
+        },
+        "scale": {
+          "value": 0.8297149708787457,
+          "velocity": 0.17545228386882236
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2341.140625,
+      "tracks": {
+        "position.x": {
+          "value": 1.8199357541807069,
+          "velocity": -17.03202552612847
+        },
+        "position.y": {
+          "value": 9.117332890243148,
+          "velocity": -6.10674588103911
+        },
+        "position.z": {
+          "value": 6.009524298430472,
+          "velocity": 26.66909305422898
+        },
+        "scale": {
+          "value": 0.8324985995424907,
+          "velocity": 0.1791119911251894
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2356.84375,
+      "tracks": {
+        "position.x": {
+          "value": 1.5471019078497878,
+          "velocity": -17.686206690628943
+        },
+        "position.y": {
+          "value": 9.017605514743108,
+          "velocity": -6.589023648156527
+        },
+        "position.z": {
+          "value": 6.4291163354230685,
+          "velocity": 26.702525479260725
+        },
+        "scale": {
+          "value": 0.8353412692900375,
+          "velocity": 0.18297473021705177
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2372.546875,
+      "tracks": {
+        "position.x": {
+          "value": 1.2655369050986507,
+          "velocity": -18.13876262548707
+        },
+        "position.y": {
+          "value": 8.91063511049719,
+          "velocity": -7.025801997345864
+        },
+        "position.z": {
+          "value": 6.845929726692802,
+          "velocity": 26.313079887077752
+        },
+        "scale": {
+          "value": 0.8382463043351672,
+          "velocity": 0.18705812871269192
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2388.25,
+      "tracks": {
+        "position.x": {
+          "value": 0.9786037505877719,
+          "velocity": -18.36810357894496
+        },
+        "position.y": {
+          "value": 8.797286565919606,
+          "velocity": -7.398775985804164
+        },
+        "position.z": {
+          "value": 7.253335011915105,
+          "velocity": 25.50920679361824
+        },
+        "scale": {
+          "value": 0.84121732082626,
+          "velocity": 0.1913817784093965
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2403.953125,
+      "tracks": {
+        "position.x": {
+          "value": 0.6898336416479802,
+          "velocity": -18.374624124265658
+        },
+        "position.y": {
+          "value": 8.678664628675179,
+          "velocity": -7.696116198849244
+        },
+        "position.z": {
+          "value": 7.6451575897567725,
+          "velocity": 24.33940757740001
+        },
+        "scale": {
+          "value": 0.8442582595190511,
+          "velocity": 0.19596747158603425
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2419.65625,
+      "tracks": {
+        "position.x": {
+          "value": 0.4025856711640645,
+          "velocity": -18.17912307599758
+        },
+        "position.y": {
+          "value": 8.555998012222904,
+          "velocity": -7.913926653209221
+        },
+        "position.z": {
+          "value": 8.016235035399422,
+          "velocity": 22.88166261515586
+        },
+        "scale": {
+          "value": 0.8473734223104984,
+          "velocity": 0.20083945580548393
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2435.359375,
+      "tracks": {
+        "position.x": {
+          "value": 0.11977117572966178,
+          "velocity": -17.816538285519695
+        },
+        "position.y": {
+          "value": 8.430517211482275,
+          "velocity": -8.05562042437476
+        },
+        "position.z": {
+          "value": 8.36275531874012,
+          "velocity": 21.227133159060035
+        },
+        "scale": {
+          "value": 0.8505675128801625,
+          "velocity": 0.2060247007323175
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2451.0625,
+      "tracks": {
+        "position.x": {
+          "value": -0.15630549004744942,
+          "velocity": -17.327921709154126
+        },
+        "position.y": {
+          "value": 8.303354892352655,
+          "velocity": -8.129827557470687
+        },
+        "position.z": {
+          "value": 8.68233603955297,
+          "velocity": 19.46445489757963
+        },
+        "scale": {
+          "value": 0.8538456815366584,
+          "velocity": 0.21155316400099441
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2466.765625,
+      "tracks": {
+        "position.x": {
+          "value": -0.42398564249876436,
+          "velocity": -16.753488373194838
+        },
+        "position.y": {
+          "value": 8.17548391960384,
+          "velocity": -8.147862019298548
+        },
+        "position.z": {
+          "value": 8.973892605911653,
+          "velocity": 17.66901704239033
+        },
+        "scale": {
+          "value": 0.857213574086798,
+          "velocity": 0.21745803257920313
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2482.46875,
+      "tracks": {
+        "position.x": {
+          "value": -0.6822047570464853,
+          "velocity": -16.128187085483397
+        },
+        "position.y": {
+          "value": 8.04769296175065,
+          "velocity": -8.121568110159076
+        },
+        "position.z": {
+          "value": 9.237386118142057,
+          "velocity": 15.898288815813878
+        },
+        "scale": {
+          "value": 0.8606773840504652,
+          "velocity": 0.22377589879663284
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2498.171875,
+      "tracks": {
+        "position.x": {
+          "value": -0.9303920672141384,
+          "velocity": -15.479821587554456
+        },
+        "position.y": {
+          "value": 7.920590318429596,
+          "velocity": -8.061901235737627
+        },
+        "position.z": {
+          "value": 9.473537475360803,
+          "velocity": 14.191859819712864
+        },
+        "scale": {
+          "value": 0.864243906700804,
+          "velocity": 0.23054680220983376
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2513.875,
+      "tracks": {
+        "position.x": {
+          "value": -1.1683561273841678,
+          "velocity": -14.828996019902357
+        },
+        "position.y": {
+          "value": 7.794624258970254,
+          "velocity": -7.978219755069521
+        },
+        "position.z": {
+          "value": 9.683565418033524,
+          "velocity": 12.574109039428983
+        },
+        "scale": {
+          "value": 0.8679205920018034,
+          "velocity": 0.23781402329241058
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2529.578125,
+      "tracks": {
+        "position.x": {
+          "value": -1.396178240552954,
+          "velocity": -14.19004325045575
+        },
+        "position.y": {
+          "value": 7.670110149841284,
+          "velocity": -7.878090755230988
+        },
+        "position.z": {
+          "value": 9.868975321024,
+          "velocity": 11.05776673044329
+        },
+        "scale": {
+          "value": 0.871715591199628,
+          "velocity": 0.24562344232784275
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2536.999,
+      "tracks": {
+        "position.x": {
+          "value": -1.500383053628199,
+          "velocity": -13.895055233469103
+        },
+        "position.y": {
+          "value": 7.611836873966881,
+          "velocity": -7.8267938216641015
+        },
+        "position.z": {
+          "value": 9.948496656752123,
+          "velocity": 10.377990413750908
+        },
+        "scale": {
+          "value": 0.8735526927399674,
+          "velocity": 0.24951614011592693
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2537,
+      "tracks": {
+        "position.x": {
+          "value": -1.500396948663734,
+          "velocity": -13.895015837236079
+        },
+        "position.y": {
+          "value": 7.611829047176584,
+          "velocity": -7.826786774877576
+        },
+        "position.z": {
+          "value": 9.948507034697538,
+          "velocity": 10.377900412197937
+        },
+        "scale": {
+          "value": 0.8735529422563745,
+          "velocity": 0.24951667376907052
+        },
+        "opacity": {
+          "value": 1,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2537.001,
+      "tracks": {
+        "position.x": {
+          "value": -1.5004108436598782,
+          "velocity": -13.89497644110246
+        },
+        "position.y": {
+          "value": 7.611821220393329,
+          "velocity": -7.826779728057801
+        },
+        "position.z": {
+          "value": 9.948517412552953,
+          "velocity": 10.377810411076188
+        },
+        "scale": {
+          "value": 0.873553191773315,
+          "velocity": 0.2495172074246941
+        },
+        "opacity": {
+          "value": 0.9999999999996708,
+          "velocity": -6.584369434545377e-7
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2545.28125,
+      "tracks": {
+        "position.x": {
+          "value": -1.6141238463402372,
+          "velocity": -13.572301182622214
+        },
+        "position.y": {
+          "value": 7.547258030301553,
+          "velocity": -7.767394674319047
+        },
+        "position.z": {
+          "value": 10.031403660226925,
+          "velocity": 9.647324850590453
+        },
+        "scale": {
+          "value": 0.8756377880524948,
+          "velocity": 0.2540221607809826
+        },
+        "opacity": {
+          "value": 0.9999772834899144,
+          "velocity": -0.005503151212290197
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2560.984375,
+      "tracks": {
+        "position.x": {
+          "value": -1.8225741101697492,
+          "velocity": -12.98136730820444
+        },
+        "position.y": {
+          "value": 7.426197310147331,
+          "velocity": -7.650565430213962
+        },
+        "position.z": {
+          "value": 10.172511571098575,
+          "velocity": 8.341840203757478
+        },
+        "scale": {
+          "value": 0.8796967995938492,
+          "velocity": 0.26305589827881526
+        },
+        "opacity": {
+          "value": 0.9998071966228876,
+          "velocity": -0.016222807931320585
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2576.6875,
+      "tracks": {
+        "position.x": {
+          "value": -2.021975859928788,
+          "velocity": -12.420165843001671
+        },
+        "position.y": {
+          "value": 7.306997328662407,
+          "velocity": -7.530865248169699
+        },
+        "position.z": {
+          "value": 10.293916894435991,
+          "velocity": 7.137036536326209
+        },
+        "scale": {
+          "value": 0.8839029215812924,
+          "velocity": 0.2727643902858196
+        },
+        "opacity": {
+          "value": 0.9994657513158589,
+          "velocity": -0.02733120819597908
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2592.390625,
+      "tracks": {
+        "position.x": {
+          "value": -2.2128064740618267,
+          "velocity": -11.889784117749318
+        },
+        "position.y": {
+          "value": 7.189683690298361,
+          "velocity": -7.410642128625448
+        },
+        "position.z": {
+          "value": 10.397154183378925,
+          "velocity": 6.026783838746151
+        },
+        "scale": {
+          "value": 0.8882669783962311,
+          "velocity": 0.2831735718926607
+        },
+        "opacity": {
+          "value": 0.9989466842739232,
+          "velocity": -0.03884879277131423
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2608.09375,
+      "tracks": {
+        "position.x": {
+          "value": -2.3955501782379947,
+          "velocity": -11.390094591539643
+        },
+        "position.y": {
+          "value": 7.074250845852328,
+          "velocity": -7.291548789830444
+        },
+        "position.z": {
+          "value": 10.483653918123292,
+          "velocity": 5.004088615297156
+        },
+        "scale": {
+          "value": 0.8928000133378787,
+          "velocity": 0.2942826912155986
+        },
+        "opacity": {
+          "value": 0.9982434008676903,
+          "velocity": -0.05079733601514954
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2623.796875,
+      "tracks": {
+        "position.x": {
+          "value": -2.5706826720698897,
+          "velocity": -10.920200761257169
+        },
+        "position.y": {
+          "value": 6.960671573007775,
+          "velocity": -7.174718774054009
+        },
+        "position.z": {
+          "value": 10.554734308240768,
+          "velocity": 4.0617271875554675
+        },
+        "scale": {
+          "value": 0.897512719607378,
+          "velocity": 0.3060436359971784
+        },
+        "opacity": {
+          "value": 0.9973489534557591,
+          "velocity": -0.06320004055374873
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2639.5,
+      "tracks": {
+        "position.x": {
+          "value": -2.7386616461737643,
+          "velocity": -10.478747997848718
+        },
+        "position.y": {
+          "value": 6.848904007211386,
+          "velocity": -7.060903274280728
+        },
+        "position.z": {
+          "value": 10.61160096736684,
+          "velocity": 3.192630896423234
+        },
+        "scale": {
+          "value": 0.9024144620919415,
+          "velocity": 0.3183288104096105
+        },
+        "opacity": {
+          "value": 0.996256018176233,
+          "velocity": -0.07608163757988054
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2655.203125,
+      "tracks": {
+        "position.x": {
+          "value": -2.8999213588927892,
+          "velocity": -10.064135126776035
+        },
+        "position.y": {
+          "value": 6.738896791131406,
+          "velocity": -6.950575072805186
+        },
+        "position.z": {
+          "value": 10.655351241203995,
+          "velocity": 2.390105089107366
+        },
+        "scale": {
+          "value": 0.9075116774926466,
+          "velocity": 0.3308834214099839
+        },
+        "opacity": {
+          "value": 0.994956870120067,
+          "velocity": -0.0894684926073078
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2670.90625,
+      "tracks": {
+        "position.x": {
+          "value": -3.0548699468398386,
+          "velocity": -9.67465514692646
+        },
+        "position.y": {
+          "value": 6.630592805850858,
+          "velocity": -6.844006314585617
+        },
+        "position.z": {
+          "value": 10.686981063922946,
+          "velocity": 1.6479401824369144
+        },
+        "scale": {
+          "value": 0.9128053831099548,
+          "velocity": 0.34325957645411964
+        },
+        "opacity": {
+          "value": 0.9934433568031292,
+          "velocity": -0.10338871631686615
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2686.609375,
+      "tracks": {
+        "position.x": {
+          "value": -3.203888532410764,
+          "velocity": -9.30858640210215
+        },
+        "position.y": {
+          "value": 6.5239318463705676,
+          "velocity": -6.741326102006779
+        },
+        "position.z": {
+          "value": 10.707392982714563,
+          "velocity": 0.9604547982793354
+        },
+        "scale": {
+          "value": 0.9182875281759071,
+          "velocity": 0.3547365589443957
+        },
+        "opacity": {
+          "value": 0.9917068698615837,
+          "velocity": -0.11787227986175795
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2702.3125,
+      "tracks": {
+        "position.x": {
+          "value": -3.3473314783906214,
+          "velocity": -8.96424967031876
+        },
+        "position.y": {
+          "value": 6.418852518214287,
+          "velocity": -6.64256283210546
+        },
+        "position.z": {
+          "value": 10.71740450802901,
+          "velocity": 0.32249768253443534
+        },
+        "scale": {
+          "value": 0.9239361124550881,
+          "velocity": 0.3642495420924615
+        },
+        "opacity": {
+          "value": 0.9897383149077987,
+          "velocity": -0.13295113364354066
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2718.015625,
+      "tracks": {
+        "position.x": {
+          "value": -3.485527345653109,
+          "velocity": -8.640042143244022
+        },
+        "position.y": {
+          "value": 6.315293563064328,
+          "velocity": -6.5476751431873845
+        },
+        "position.z": {
+          "value": 10.717756289216638,
+          "velocity": -0.27057414301747695
+        },
+        "scale": {
+          "value": 0.9297095848354158,
+          "velocity": 0.37038165090980846
+        },
+        "opacity": {
+          "value": 0.9875280795030315,
+          "velocity": -0.1486593280999841
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2733.71875,
+      "tracks": {
+        "position.x": {
+          "value": -3.618780254886482,
+          "velocity": -8.33445595968219
+        },
+        "position.y": {
+          "value": 6.213194768004179,
+          "velocity": -6.456574427601458
+        },
+        "position.z": {
+          "value": 10.709119836676159,
+          "velocity": -0.8229298313592602
+        },
+        "scale": {
+          "value": 0.9355421921476231,
+          "velocity": 0.3715095697042686
+        },
+        "opacity": {
+          "value": 0.9850659992306772,
+          "velocity": -0.16503313442917728
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2749.421875,
+      "tracks": {
+        "position.x": {
+          "value": -3.7473714539353056,
+          "velocity": -8.046086584328135
+        },
+        "position.y": {
+          "value": 6.112497572507907,
+          "velocity": -6.369141133162318
+        },
+        "position.z": {
+          "value": 10.692104651837546,
+          "velocity": -1.3383047796648553
+        },
+        "scale": {
+          "value": 0.9413433812989521,
+          "velocity": 0.36618057440255974
+        },
+        "opacity": {
+          "value": 0.9823413218924926,
+          "velocity": -0.18211116236997993
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2765.125,
+      "tracks": {
+        "position.x": {
+          "value": -3.8715609615260034,
+          "velocity": -7.773634650556754
+        },
+        "position.y": {
+          "value": 6.013145457089839,
+          "velocity": -6.285236505853354
+        },
+        "position.z": {
+          "value": 10.667264712937367,
+          "velocity": -1.8200420717431531
+        },
+        "scale": {
+          "value": 0.9470047226293821,
+          "velocity": 0.35366581531395747
+        },
+        "opacity": {
+          "value": 0.9793426699032867,
+          "velocity": -0.19993447111542267
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2780.828125,
+      "tracks": {
+        "position.x": {
+          "value": -3.9915892052648436,
+          "velocity": -7.51590372085839
+        },
+        "position.y": {
+          "value": 5.9150841751292305,
+          "velocity": -6.20471099448055
+        },
+        "position.z": {
+          "value": 10.635104316311452,
+          "velocity": -2.2711328153470305
+        },
+        "scale": {
+          "value": 0.952415192662486,
+          "velocity": 0.3344090600142513
+        },
+        "opacity": {
+          "value": 0.9760580010312966,
+          "velocity": -0.21854666808814516
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2796.53125,
+      "tracks": {
+        "position.x": {
+          "value": -4.10767860361313,
+          "velocity": -7.271795613511364
+        },
+        "position.y": {
+          "value": 5.818261872875281,
+          "velocity": -6.1274102152860115
+        },
+        "position.z": {
+          "value": 10.596083302340514,
+          "velocity": -2.694254020609956
+        },
+        "scale": {
+          "value": 0.9574802689447356,
+          "velocity": 0.3100183916726366
+        },
+        "opacity": {
+          "value": 0.9724745677272831,
+          "velocity": -0.237993988574446
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2812.234375,
+      "tracks": {
+        "position.x": {
+          "value": -4.220035062819628,
+          "velocity": -7.040304391374456
+        },
+        "position.y": {
+          "value": 5.722629130506197,
+          "velocity": -6.05317913570022
+        },
+        "position.z": {
+          "value": 10.550621710483673,
+          "velocity": -3.091803368677515
+        },
+        "scale": {
+          "value": 0.9621366180474509,
+          "velocity": 0.28274187107152293
+        },
+        "opacity": {
+          "value": 0.9685788754120618,
+          "velocity": -0.25832534699596643
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2827.9375,
+      "tracks": {
+        "position.x": {
+          "value": -4.328849373845984,
+          "velocity": -6.820509731217173
+        },
+        "position.y": {
+          "value": 5.628138948216172,
+          "velocity": -5.98186496060034
+        },
+        "position.z": {
+          "value": 10.499103914402644,
+          "velocity": -3.465930648749841
+        },
+        "scale": {
+          "value": 0.9663565905547676,
+          "velocity": 0.25476974555713694
+        },
+        "opacity": {
+          "value": 0.9643566402582684,
+          "velocity": -0.27959234777290354
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2843.640625,
+      "tracks": {
+        "position.x": {
+          "value": -4.4342985034584155,
+          "velocity": -6.611570135541229
+        },
+        "position.y": {
+          "value": 5.534746694779129,
+          "velocity": -5.913319075412551
+        },
+        "position.z": {
+          "value": 10.44188228949176,
+          "velocity": -3.8185658950265187
+        },
+        "scale": {
+          "value": 0.970143142262605,
+          "velocity": 0.22776095247147737
+        },
+        "opacity": {
+          "value": 0.9597927472183551,
+          "velocity": -0.3018492401518129
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2859.34375,
+      "tracks": {
+        "position.x": {
+          "value": -4.536546779463276,
+          "velocity": -6.4127162755884015
+        },
+        "position.y": {
+          "value": 5.442410031254721,
+          "velocity": -5.8473983058317005
+        },
+        "position.z": {
+          "value": 10.379280463408712,
+          "velocity": -4.151444396561601
+        },
+        "scale": {
+          "value": 0.9735200938901358,
+          "velocity": 0.20271777160849702
+        },
+        "opacity": {
+          "value": 0.9548712093302603,
+          "velocity": -0.32515279685929394
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2875.046875,
+      "tracks": {
+        "position.x": {
+          "value": -4.635746973623665,
+          "velocity": -6.2232446380076265
+        },
+        "position.y": {
+          "value": 5.351088818995155,
+          "velocity": -5.783965684643429
+        },
+        "position.z": {
+          "value": 10.311596196851617,
+          "velocity": -4.466128824550837
+        },
+        "scale": {
+          "value": 0.9765224687057159,
+          "velocity": 0.18009276996638396
+        },
+        "opacity": {
+          "value": 0.9495751296911631,
+          "velocity": -0.34956209079721395
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2890.75,
+      "tracks": {
+        "position.x": {
+          "value": -4.732041287854588,
+          "velocity": -6.042511570419837
+        },
+        "position.y": {
+          "value": 5.260745018539314,
+          "velocity": -5.722890865341511
+        },
+        "position.z": {
+          "value": 10.239103937721021,
+          "velocity": -4.76402875010653
+        },
+        "scale": {
+          "value": 0.9791892619627032,
+          "velocity": 0.1599693420382136
+        },
+        "opacity": {
+          "value": 0.9438866679476733,
+          "velocity": -0.37513813699065557
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2906.453125,
+      "tracks": {
+        "position.x": {
+          "value": -4.825562250363358,
+          "velocity": -5.869927770459753
+        },
+        "position.y": {
+          "value": 5.171342584094953,
+          "velocity": -5.664050284964559
+        },
+        "position.z": {
+          "value": 10.162057087469886,
+          "velocity": -5.046417828478978
+        },
+        "scale": {
+          "value": 0.9815589590530963,
+          "velocity": 0.1422219621883165
+        },
+        "opacity": {
+          "value": 0.9377870137309787,
+          "velocity": -0.4019433584006621
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2922.15625,
+      "tracks": {
+        "position.x": {
+          "value": -4.916433528826765,
+          "velocity": -5.704953230262905
+        },
+        "position.y": {
+          "value": 5.082847356927191,
+          "velocity": -5.607327151197967
+        },
+        "position.z": {
+          "value": 10.080690014189061,
+          "velocity": -5.314448914003152
+        },
+        "scale": {
+          "value": 0.9836671947082928,
+          "velocity": 0.12662756668363173
+        },
+        "opacity": {
+          "value": 0.9312563701946582,
+          "velocity": -0.4300408237992183
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2936.999,
+      "tracks": {
+        "position.x": {
+          "value": -4.999994444439512,
+          "velocity": -5.55556541496554
+        },
+        "position.y": {
+          "value": 5.000005555557273,
+          "velocity": -5.555558984914709
+        },
+        "position.z": {
+          "value": 10.000005555547629,
+          "velocity": -5.555539694762218
+        },
+        "scale": {
+          "value": 0.9854483286889417,
+          "velocity": 0.11363781662422358
+        },
+        "opacity": {
+          "value": 0.9246685781432987,
+          "velocity": -0.4578433789008485
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2937,
+      "tracks": {
+        "position.x": {
+          "value": -4.999999999999997,
+          "velocity": -5.555555555555561
+        },
+        "position.y": {
+          "value": 5.000000000000003,
+          "velocity": -5.555555555555557
+        },
+        "position.z": {
+          "value": 10.000000000000002,
+          "velocity": -5.555555555555548
+        },
+        "scale": {
+          "value": 0.9854484423263471,
+          "velocity": 0.11363699381807157
+        },
+        "opacity": {
+          "value": 0.9246681202989624,
+          "velocity": -0.457845293990094
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2937.001,
+      "tracks": {
+        "position.x": {
+          "value": -4.999999999997261,
+          "velocity": 0.000005478859556404428
+        },
+        "position.y": {
+          "value": 4.999999999997261,
+          "velocity": -0.000005478859556404428
+        },
+        "position.z": {
+          "value": 10.000000000002192,
+          "velocity": 0.000004383087645123543
+        },
+        "scale": {
+          "value": 0.9854485559629295,
+          "velocity": 0.11363617101865837
+        },
+        "opacity": {
+          "value": 0.9246676624527108,
+          "velocity": -0.45784720908506926
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2937.859375,
+      "tracks": {
+        "position.x": {
+          "value": -4.999997975186369,
+          "velocity": 0.0047142481031521065
+        },
+        "position.y": {
+          "value": 4.999997975186369,
+          "velocity": -0.0047142481031521065
+        },
+        "position.z": {
+          "value": 10.000001619850908,
+          "velocity": 0.003771398482521685
+        },
+        "scale": {
+          "value": 0.9855457959989058,
+          "velocity": 0.11293237935496182
+        },
+        "opacity": {
+          "value": 0.9242739517209807,
+          "velocity": -0.4594931935125439
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2953.5625,
+      "tracks": {
+        "position.x": {
+          "value": -4.99923630598676,
+          "velocity": 0.09297146691220767
+        },
+        "position.y": {
+          "value": 4.99923630598676,
+          "velocity": -0.09297146691220767
+        },
+        "position.z": {
+          "value": 10.000610955210593,
+          "velocity": 0.07437717352976614
+        },
+        "scale": {
+          "value": 0.9872226117476355,
+          "velocity": 0.10088752241791916
+        },
+        "opacity": {
+          "value": 0.9168180009799998,
+          "velocity": -0.49036129444664894
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2969.265625,
+      "tracks": {
+        "position.x": {
+          "value": -4.997056059998258,
+          "velocity": 0.18543833511152585
+        },
+        "position.y": {
+          "value": 4.997056059998258,
+          "velocity": -0.18543833511152585
+        },
+        "position.z": {
+          "value": 10.002355152001394,
+          "velocity": 0.1483506680892207
+        },
+        "scale": {
+          "value": 0.9887217377289446,
+          "velocity": 0.0902655378864643
+        },
+        "opacity": {
+          "value": 0.9088658318846712,
+          "velocity": -0.5227022296524513
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2984.96875,
+      "tracks": {
+        "position.x": {
+          "value": -4.993388719546026,
+          "velocity": 0.282427068795374
+        },
+        "position.y": {
+          "value": 4.993388719546026,
+          "velocity": -0.282427068795374
+        },
+        "position.z": {
+          "value": 10.00528902436318,
+          "velocity": 0.22594165503629915
+        },
+        "scale": {
+          "value": 0.9900639090254195,
+          "velocity": 0.08086626088989736
+        },
+        "opacity": {
+          "value": 0.900393906607582,
+          "velocity": -0.5565669104542078
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3000.671875,
+      "tracks": {
+        "position.x": {
+          "value": -4.9881606249255706,
+          "velocity": 0.38428095246170013
+        },
+        "position.y": {
+          "value": 4.9881606249255706,
+          "velocity": -0.38428095246170013
+        },
+        "position.z": {
+          "value": 10.009471500059544,
+          "velocity": 0.3074247619693601
+        },
+        "scale": {
+          "value": 0.9912669366159251,
+          "velocity": 0.07251722619007624
+        },
+        "opacity": {
+          "value": 0.8913779567176637,
+          "velocity": -0.5919968822747304
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3016.375,
+      "tracks": {
+        "position.x": {
+          "value": -4.9812924571975294,
+          "velocity": 0.49137815962669534
+        },
+        "position.y": {
+          "value": 4.9812924571975294,
+          "velocity": -0.49137815962669534
+        },
+        "position.z": {
+          "value": 10.014966034241978,
+          "velocity": 0.39310252770135634
+        },
+        "scale": {
+          "value": 0.9923461277581791,
+          "velocity": 0.0650715522933015
+        },
+        "opacity": {
+          "value": 0.8817931606348512,
+          "velocity": -0.629020301292076
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3032.078125,
+      "tracks": {
+        "position.x": {
+          "value": -4.972698656804956,
+          "velocity": 0.604136119194562
+        },
+        "position.y": {
+          "value": 4.972698656804956,
+          "velocity": -0.604136119194562
+        },
+        "position.z": {
+          "value": 10.021841074556038,
+          "velocity": 0.4833088953556496
+        },
+        "scale": {
+          "value": 0.9933146642755094,
+          "velocity": 0.05840487951833416
+        },
+        "opacity": {
+          "value": 0.8716143919111915,
+          "velocity": -0.6676469121558593
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3047.78125,
+      "tracks": {
+        "position.x": {
+          "value": -4.962286768793525,
+          "velocity": 0.7230165123126862
+        },
+        "position.y": {
+          "value": 4.962286768793525,
+          "velocity": -0.7230165123126862
+        },
+        "position.z": {
+          "value": 10.03017058496518,
+          "velocity": 0.5784132098501489
+        },
+        "scale": {
+          "value": 0.9941839308685246,
+          "velocity": 0.05241215545994798
+        },
+        "opacity": {
+          "value": 0.8608165551695633,
+          "velocity": -0.7078618836666579
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3063.484375,
+      "tracks": {
+        "position.x": {
+          "value": -4.949956703986542,
+          "velocity": 0.8485309971448078
+        },
+        "position.y": {
+          "value": 4.949956703986542,
+          "velocity": -0.8485309971448078
+        },
+        "position.z": {
+          "value": 10.040034636810766,
+          "velocity": 0.6788247977158464
+        },
+        "scale": {
+          "value": 0.9949637943256071,
+          "velocity": 0.04700463361095498
+        },
+        "opacity": {
+          "value": 0.8493750285827131,
+          "velocity": -0.7496183890261621
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3079.1875,
+      "tracks": {
+        "position.x": {
+          "value": -4.935599903829269,
+          "velocity": 0.9812477728164875
+        },
+        "position.y": {
+          "value": 4.935599903829269,
+          "velocity": -0.9812477728164875
+        },
+        "position.z": {
+          "value": 10.051520076936583,
+          "velocity": 0.7849982182531899
+        },
+        "scale": {
+          "value": 0.995662838295314,
+          "velocity": 0.04210722681536561
+        },
+        "opacity": {
+          "value": 0.8372662330975473,
+          "velocity": -0.7928288828979713
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3094.890625,
+      "tracks": {
+        "position.x": {
+          "value": -4.919098394756907,
+          "velocity": 1.121799108252746
+        },
+        "position.y": {
+          "value": 4.919098394756907,
+          "velocity": -1.121799108252746
+        },
+        "position.z": {
+          "value": 10.064721284194473,
+          "velocity": 0.8974392866021969
+        },
+        "scale": {
+          "value": 0.9962885595253139,
+          "velocity": 0.03765624546654583
+        },
+        "opacity": {
+          "value": 0.8244683485145452,
+          "velocity": -0.8373551453446862
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3110.59375,
+      "tracks": {
+        "position.x": {
+          "value": -4.900323715853864,
+          "velocity": 1.2708899757866337
+        },
+        "position.y": {
+          "value": 4.900323715853864,
+          "velocity": -1.2708899757866337
+        },
+        "position.z": {
+          "value": 10.079741027316908,
+          "velocity": 1.016711980629307
+        },
+        "scale": {
+          "value": 0.9968475314811762,
+          "velocity": 0.033597498724527323
+        },
+        "opacity": {
+          "value": 0.8109621940577014,
+          "velocity": -0.8829973509918979
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3126.296875,
+      "tracks": {
+        "position.x": {
+          "value": -4.87913570127605,
+          "velocity": 1.4293079415286383
+        },
+        "position.y": {
+          "value": 4.87913570127605,
+          "velocity": -1.4293079415286383
+        },
+        "position.z": {
+          "value": 10.09669143897916,
+          "velocity": 1.1434463532229109
+        },
+        "scale": {
+          "value": 0.9973455407282568,
+          "velocity": 0.02988471656038795
+        },
+        "opacity": {
+          "value": 0.7967322849739257,
+          "velocity": -0.9294826971093745
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3142,
+      "tracks": {
+        "position.x": {
+          "value": -4.855381096456629,
+          "velocity": 1.5979344715215915
+        },
+        "position.y": {
+          "value": 4.855381096456629,
+          "velocity": -1.5979344715215915
+        },
+        "position.z": {
+          "value": 10.115695122834696,
+          "velocity": 1.2783475772172732
+        },
+        "scale": {
+          "value": 0.9977877007447833,
+          "velocity": 0.026478245466724018
+        },
+        "opacity": {
+          "value": 0.7817680655365175,
+          "velocity": -0.9764544944109076
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3157.703125,
+      "tracks": {
+        "position.x": {
+          "value": -4.82889198462536,
+          "velocity": 1.7777578095500175
+        },
+        "position.y": {
+          "value": 4.82889198462536,
+          "velocity": -1.7777578095500175
+        },
+        "position.z": {
+          "value": 10.136886412299711,
+          "velocity": 1.4222062476400146
+        },
+        "scale": {
+          "value": 0.9981785471052049,
+          "velocity": 0.02334397289483873
+        },
+        "opacity": {
+          "value": 0.7660653011715222,
+          "velocity": -1.023463076405789
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3173.40625,
+      "tracks": {
+        "position.x": {
+          "value": -4.799483997863474,
+          "velocity": 1.9698875606543758
+        },
+        "position.y": {
+          "value": 4.799483997863474,
+          "velocity": -1.9698875606543758
+        },
+        "position.z": {
+          "value": 10.160412801709219,
+          "velocity": 1.5759100485235005
+        },
+        "scale": {
+          "value": 0.9985221173053584,
+          "velocity": 0.020452440602194335
+        },
+        "opacity": {
+          "value": 0.749627587319177,
+          "velocity": -1.0699603679243606
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3189.109375,
+      "tracks": {
+        "position.x": {
+          "value": -4.766954285182951,
+          "velocity": 2.175571060065579
+        },
+        "position.y": {
+          "value": 4.766954285182951,
+          "velocity": -2.175571060065579
+        },
+        "position.z": {
+          "value": 10.186436571853639,
+          "velocity": 1.7404568480524631
+        },
+        "scale": {
+          "value": 0.9988220179218597,
+          "velocity": 0.017778112985390344
+        },
+        "opacity": {
+          "value": 0.7324679002920781,
+          "velocity": -1.11530036927956
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3204.8125,
+      "tracks": {
+        "position.x": {
+          "value": -4.731079209633974,
+          "velocity": 2.396211497967515
+        },
+        "position.y": {
+          "value": 4.731079209633974,
+          "velocity": -2.396211497967515
+        },
+        "position.z": {
+          "value": 10.21513663229282,
+          "velocity": 1.916969198374012
+        },
+        "scale": {
+          "value": 0.9990814813105539,
+          "velocity": 0.015298772139987912
+        },
+        "opacity": {
+          "value": 0.7146100780770149,
+          "velocity": -1.1587479970762864
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3220.515625,
+      "tracks": {
+        "position.x": {
+          "value": -4.691611748332148,
+          "velocity": 2.6333875700564304
+        },
+        "position.y": {
+          "value": 4.691611748332148,
+          "velocity": -2.6333875700564304
+        },
+        "position.z": {
+          "value": 10.246710601334282,
+          "velocity": 2.106710056045145
+        },
+        "scale": {
+          "value": 0.9993034136455665,
+          "velocity": 0.012995016421720256
+        },
+        "opacity": {
+          "value": 0.6960900819824529,
+          "velocity": -1.1994984671816
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3236.21875,
+      "tracks": {
+        "position.x": {
+          "value": -4.648278575407873,
+          "velocity": 2.888874074400333
+        },
+        "position.y": {
+          "value": 4.648278575407873,
+          "velocity": -2.888874074400333
+        },
+        "position.z": {
+          "value": 10.281377139673701,
+          "velocity": 2.311099259520267
+        },
+        "scale": {
+          "value": 0.9994904357704308,
+          "velocity": 0.010849843569316151
+        },
+        "opacity": {
+          "value": 0.6769568618229621,
+          "velocity": -1.2367085068225332
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3251.921875,
+      "tracks": {
+        "position.x": {
+          "value": -4.6007768212227145,
+          "velocity": 3.164662284427174
+        },
+        "position.y": {
+          "value": 4.6007768212227145,
+          "velocity": -3.164662284427174
+        },
+        "position.z": {
+          "value": 10.319378543021829,
+          "velocity": 2.531729827541739
+        },
+        "scale": {
+          "value": 0.9996449180642031,
+          "velocity": 0.008848303009784203
+        },
+        "opacity": {
+          "value": 0.6572726390582092,
+          "velocity": -1.2695390400801299
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3267.625,
+      "tracks": {
+        "position.x": {
+          "value": -4.548770526617206,
+          "velocity": 3.46297795024311
+        },
+        "position.y": {
+          "value": 4.548770526617206,
+          "velocity": -3.46297795024311
+        },
+        "position.z": {
+          "value": 10.360983578706234,
+          "velocity": 2.7703823601944872
+        },
+        "scale": {
+          "value": 0.9997690103076559,
+          "velocity": 0.006977204881868142
+        },
+        "opacity": {
+          "value": 0.6371124450707895,
+          "velocity": -1.2972067246227161
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3283.328125,
+      "tracks": {
+        "position.x": {
+          "value": -4.4918868561876515,
+          "velocity": 3.7862931877402124
+        },
+        "position.y": {
+          "value": 4.4918868561876515,
+          "velocity": -3.7862931877402124
+        },
+        "position.z": {
+          "value": 10.40649051504988,
+          "velocity": 3.02903455019217
+        },
+        "scale": {
+          "value": 0.9998646673581281,
+          "velocity": 0.005224875678560773
+        },
+        "opacity": {
+          "value": 0.6165628124345683,
+          "velocity": -1.3190392543038363
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3299.03125,
+      "tracks": {
+        "position.x": {
+          "value": -4.429712211863178,
+          "velocity": 4.137325955288344
+        },
+        "position.y": {
+          "value": 4.429712211863178,
+          "velocity": -4.137325955288344
+        },
+        "position.z": {
+          "value": 10.456230230509458,
+          "velocity": 3.309860764230675
+        },
+        "scale": {
+          "value": 0.999933671298562,
+          "velocity": 0.003580952318990153
+        },
+        "opacity": {
+          "value": 0.5957196134430564,
+          "velocity": -1.334527383950421
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3314.734375,
+      "tracks": {
+        "position.x": {
+          "value": -4.361788516437158,
+          "velocity": 4.519016761812842
+        },
+        "position.y": {
+          "value": 4.361788516437158,
+          "velocity": -4.519016761812842
+        },
+        "position.z": {
+          "value": 10.510569186850272,
+          "velocity": 3.615213409450274
+        },
+        "scale": {
+          "value": 0.999977650610157,
+          "velocity": 0.0020362079975296712
+        },
+        "opacity": {
+          "value": 0.5746851582283089,
+          "velocity": -1.343365952514696
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3330.4375,
+      "tracks": {
+        "position.x": {
+          "value": -4.287610145361027,
+          "velocity": 4.934465932999838
+        },
+        "position.y": {
+          "value": 4.287610145361027,
+          "velocity": -4.934465932999838
+        },
+        "position.z": {
+          "value": 10.569911883711178,
+          "velocity": 3.9475727463998695
+        },
+        "scale": {
+          "value": 0.9999980968236761,
+          "velocity": 0.0005824043950263409
+        },
+        "opacity": {
+          "value": 0.553564779851113,
+          "velocity": -1.3454772888941737
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3336.999,
+      "tracks": {
+        "position.x": {
+          "value": -4.25463144095067,
+          "velocity": 5.118811239910754
+        },
+        "position.y": {
+          "value": 4.25463144095067,
+          "velocity": -5.118811239910754
+        },
+        "position.z": {
+          "value": 10.596294847239463,
+          "velocity": 4.0950489919286035
+        },
+        "scale": {
+          "value": 0.9999999999999561,
+          "velocity": 8.76617897181242e-8
+        },
+        "opacity": {
+          "value": 0.5447393565138716,
+          "velocity": -1.3443953635370187
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3337,
+      "tracks": {
+        "position.x": {
+          "value": -4.254626322125129,
+          "velocity": 5.11883983737715
+        },
+        "position.y": {
+          "value": 4.254626322125129,
+          "velocity": -5.11883983737715
+        },
+        "position.z": {
+          "value": 10.596298942299896,
+          "velocity": 4.09507186990172
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.5447380121186333,
+          "velocity": -1.3443951120164748
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3337.001,
+      "tracks": {
+        "position.x": {
+          "value": -4.254621203270992,
+          "velocity": 5.1188684349983875
+        },
+        "position.y": {
+          "value": 4.254621203270992,
+          "velocity": -5.1188684349983875
+        },
+        "position.z": {
+          "value": 10.596303037383203,
+          "velocity": 4.09509474799871
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.5447366677236471,
+          "velocity": -1.3443948604697156
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3346.140625,
+      "tracks": {
+        "position.x": {
+          "value": -4.206622317270808,
+          "velocity": 5.386805158280874
+        },
+        "position.y": {
+          "value": 4.206622317270808,
+          "velocity": -5.386805158280874
+        },
+        "position.z": {
+          "value": 10.634702146183352,
+          "velocity": 4.3094441266246974
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.5324632173017747,
+          "velocity": -1.3410132207711263
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3361.84375,
+      "tracks": {
+        "position.x": {
+          "value": -4.118222270247056,
+          "velocity": 5.878962970869298
+        },
+        "position.y": {
+          "value": 4.118222270247056,
+          "velocity": -5.878962970869298
+        },
+        "position.z": {
+          "value": 10.705422183802355,
+          "velocity": 4.703170376695439
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.5114811370914152,
+          "velocity": -1.33033576115383
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3377.546875,
+      "tracks": {
+        "position.x": {
+          "value": -4.021765329490902,
+          "velocity": 6.413264437006107
+        },
+        "position.y": {
+          "value": 4.021765329490902,
+          "velocity": -6.413264437006107
+        },
+        "position.z": {
+          "value": 10.782587736407276,
+          "velocity": 5.130611549604884
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.4907121025333512,
+          "velocity": -1.3139803071691305
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3393.25,
+      "tracks": {
+        "position.x": {
+          "value": -3.916579092868155,
+          "velocity": 6.990781575313448
+        },
+        "position.y": {
+          "value": 3.916579092868155,
+          "velocity": -6.990781575313448
+        },
+        "position.z": {
+          "value": 10.866736725705476,
+          "velocity": 5.592625260250759
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.47024021706471797,
+          "velocity": -1.2926077975326582
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3408.953125,
+      "tracks": {
+        "position.x": {
+          "value": -3.8019904548531867,
+          "velocity": 7.610328973310353
+        },
+        "position.y": {
+          "value": 3.8019904548531867,
+          "velocity": -7.610328973310353
+        },
+        "position.z": {
+          "value": 10.95840763611745,
+          "velocity": 6.0882631786482815
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.45013855737570074,
+          "velocity": -1.2669531661309412
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3424.65625,
+      "tracks": {
+        "position.x": {
+          "value": -3.6773719103196854,
+          "velocity": 8.266996758333091
+        },
+        "position.y": {
+          "value": 3.6773719103196854,
+          "velocity": -8.266996758333091
+        },
+        "position.z": {
+          "value": 11.05810247174425,
+          "velocity": 6.613597406666474
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.43046840101469264,
+          "velocity": -1.237776663675503
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3440.359375,
+      "tracks": {
+        "position.x": {
+          "value": -3.542214934686152,
+          "velocity": 8.950171326585428
+        },
+        "position.y": {
+          "value": 3.542214934686152,
+          "velocity": -8.950171326585428
+        },
+        "position.z": {
+          "value": 11.166228052251082,
+          "velocity": 7.160137061268343
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.4112791636429972,
+          "velocity": -1.205822750154247
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3456.0625,
+      "tracks": {
+        "position.x": {
+          "value": -3.396237745076273,
+          "velocity": 9.641185996945632
+        },
+        "position.y": {
+          "value": 3.396237745076273,
+          "velocity": -9.641185996945632
+        },
+        "position.z": {
+          "value": 11.283009803938981,
+          "velocity": 7.712948797556505
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.39260890486765737,
+          "velocity": -1.1717890134704925
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3471.765625,
+      "tracks": {
+        "position.x": {
+          "value": -3.2395295962817947,
+          "velocity": 10.311158527570665
+        },
+        "position.y": {
+          "value": 3.2395295962817947,
+          "velocity": -10.311158527570665
+        },
+        "position.z": {
+          "value": 11.408376322974565,
+          "velocity": 8.24892682205653
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.3744852394580366,
+          "velocity": -1.1363055522858425
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3487.46875,
+      "tracks": {
+        "position.x": {
+          "value": -3.07272014654165,
+          "velocity": 10.920221702150823
+        },
+        "position.y": {
+          "value": 3.07272014654165,
+          "velocity": -10.920221702150823
+        },
+        "position.z": {
+          "value": 11.541823882766678,
+          "velocity": 8.736177361720658
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.35692649607491495,
+          "velocity": -1.0999238159480904
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3503.171875,
+      "tracks": {
+        "position.x": {
+          "value": -2.8971383453070096,
+          "velocity": 11.41994886033451
+        },
+        "position.y": {
+          "value": 2.8971383453070096,
+          "velocity": -11.41994886033451
+        },
+        "position.z": {
+          "value": 11.682289323754391,
+          "velocity": 9.135959088267608
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.33994298851708876,
+          "velocity": -1.063113098642219
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3518.875,
+      "tracks": {
+        "position.x": {
+          "value": -2.714897184581727,
+          "velocity": 11.76052183089492
+        },
+        "position.y": {
+          "value": 2.714897184581727,
+          "velocity": -11.76052183089492
+        },
+        "position.z": {
+          "value": 11.828082252334617,
+          "velocity": 9.408417464715937
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.32353829535200596,
+          "velocity": -1.0262626376418698
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3534.578125,
+      "tracks": {
+        "position.x": {
+          "value": -2.5288297354484404,
+          "velocity": 11.902148767367281
+        },
+        "position.y": {
+          "value": 2.5288297354484404,
+          "velocity": -11.902148767367281
+        },
+        "position.z": {
+          "value": 11.976936211641249,
+          "velocity": 9.521719013893824
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.30771047537254037,
+          "velocity": -0.9896873909451984
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3550.28125,
+      "tracks": {
+        "position.x": {
+          "value": -2.342236205557124,
+          "velocity": 11.826782926608072
+        },
+        "position.y": {
+          "value": 2.342236205557124,
+          "velocity": -11.826782926608072
+        },
+        "position.z": {
+          "value": 12.1262110355543,
+          "velocity": 9.461426341286456
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.2924531741630101,
+          "velocity": -0.9536358935323683
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3565.984375,
+      "tracks": {
+        "position.x": {
+          "value": -2.15848423173381,
+          "velocity": 11.544140665049806
+        },
+        "position.y": {
+          "value": 2.15848423173381,
+          "velocity": -11.544140665049806
+        },
+        "position.z": {
+          "value": 12.273212614612952,
+          "velocity": 9.235312532039845
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.27775659915909073,
+          "velocity": -0.9182989804667084
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3581.6875,
+      "tracks": {
+        "position.x": {
+          "value": -1.9805865035869354,
+          "velocity": 11.088408516038859
+        },
+        "position.y": {
+          "value": 1.9805865035869354,
+          "velocity": -11.088408516038859
+        },
+        "position.z": {
+          "value": 12.415530797130451,
+          "velocity": 8.870726812831087
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.2636083566480868,
+          "velocity": -0.8838185352295255
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3597.390625,
+      "tracks": {
+        "position.x": {
+          "value": -1.8108935468820302,
+          "velocity": 10.5076534487256
+        },
+        "position.y": {
+          "value": 1.8108935468820302,
+          "velocity": -10.5076534487256
+        },
+        "position.z": {
+          "value": 12.551285162494377,
+          "velocity": 8.40612275898048
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.24999415484768092,
+          "velocity": -0.8502957313603131
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3613.09375,
+      "tracks": {
+        "position.x": {
+          "value": -1.650972648017087,
+          "velocity": 9.851732109675083
+        },
+        "position.y": {
+          "value": 1.650972648017087,
+          "velocity": -9.851732109675083
+        },
+        "position.z": {
+          "value": 12.679221881586331,
+          "velocity": 7.881385687740066
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.23689838360081575,
+          "velocity": -0.8177984720859883
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3628.796875,
+      "tracks": {
+        "position.x": {
+          "value": -1.5016541908918846,
+          "velocity": 9.163610774436995
+        },
+        "position.y": {
+          "value": 1.5016541908918846,
+          "velocity": -9.163610774436995
+        },
+        "position.z": {
+          "value": 12.798676647286493,
+          "velocity": 7.330888619549596
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.22430458446165796,
+          "velocity": -0.7863679003064841
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3644.5,
+      "tracks": {
+        "position.x": {
+          "value": -1.3631755808695813,
+          "velocity": 8.47558797261219
+        },
+        "position.y": {
+          "value": 1.3631755808695813,
+          "velocity": -8.47558797261219
+        },
+        "position.z": {
+          "value": 12.909459535304336,
+          "velocity": 6.780470378089753
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.2121958260184146,
+          "velocity": -0.7560239617909131
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3660.203125,
+      "tracks": {
+        "position.x": {
+          "value": -1.235352525408035,
+          "velocity": 7.809285213906281
+        },
+        "position.y": {
+          "value": 1.235352525408035,
+          "velocity": -7.809285213906281
+        },
+        "position.z": {
+          "value": 13.01171797967357,
+          "velocity": 6.247428171125026
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.20055499899427923,
+          "velocity": -0.7267700713566203
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3675.90625,
+      "tracks": {
+        "position.x": {
+          "value": -1.1177332079406832,
+          "velocity": 7.177542194010197
+        },
+        "position.y": {
+          "value": 1.1177332079406832,
+          "velocity": -7.177542194010197
+        },
+        "position.z": {
+          "value": 13.105813433647453,
+          "velocity": 5.7420337552081575
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.18936504457113557,
+          "velocity": -0.6985969676858598
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3691.609375,
+      "tracks": {
+        "position.x": {
+          "value": -1.0097175208866376,
+          "velocity": 6.586794333176518
+        },
+        "position.y": {
+          "value": 1.0097175208866376,
+          "velocity": -6.586794333176518
+        },
+        "position.z": {
+          "value": 13.19222598329069,
+          "velocity": 5.269435466541215
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.17860912789568423,
+          "velocity": -0.6714858575073361
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3707.3125,
+      "tracks": {
+        "position.x": {
+          "value": -0.910640386933935,
+          "velocity": 6.039195539909673
+        },
+        "position.y": {
+          "value": 0.910640386933935,
+          "velocity": -6.039195539909673
+        },
+        "position.z": {
+          "value": 13.271487690452851,
+          "velocity": 4.831356431927739
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.1682707671173163,
+          "velocity": -0.645410951846051
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3723.015625,
+      "tracks": {
+        "position.x": {
+          "value": -0.8198255502101809,
+          "velocity": 5.534243421975748
+        },
+        "position.y": {
+          "value": 0.8198255502101809,
+          "velocity": -5.534243421975748
+        },
+        "position.z": {
+          "value": 13.344139559831856,
+          "velocity": 4.4273947375806
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.15833392673140356,
+          "velocity": -0.6203414914079743
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3738.71875,
+      "tracks": {
+        "position.x": {
+          "value": -0.7366177811746887,
+          "velocity": 5.0699158694769615
+        },
+        "position.y": {
+          "value": 0.7366177811746887,
+          "velocity": -5.0699158694769615
+        },
+        "position.z": {
+          "value": 13.41070577506025,
+          "velocity": 4.055932695581569
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.14878308254909017,
+          "velocity": -0.5962433486168838
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3754.421875,
+      "tracks": {
+        "position.x": {
+          "value": -0.6604004403393218,
+          "velocity": 4.64341807187384
+        },
+        "position.y": {
+          "value": 0.6604004403393218,
+          "velocity": -4.64341807187384
+        },
+        "position.z": {
+          "value": 13.471679647728543,
+          "velocity": 3.714734457499072
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.13960326432654063,
+          "velocity": -0.5730802827338326
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3770.125,
+      "tracks": {
+        "position.x": {
+          "value": -0.5906036434437902,
+          "velocity": 4.251649657498576
+        },
+        "position.y": {
+          "value": 0.5906036434437902,
+          "velocity": -4.251649657498576
+        },
+        "position.z": {
+          "value": 13.527517085244968,
+          "velocity": 3.4013197259988606
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.13078008097476157,
+          "velocity": -0.5508149133018277
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3785.828125,
+      "tracks": {
+        "position.x": {
+          "value": -0.526706677158388,
+          "velocity": 3.891482939349619
+        },
+        "position.y": {
+          "value": 0.526706677158388,
+          "velocity": -3.891482939349619
+        },
+        "position.z": {
+          "value": 13.57863465827329,
+          "velocity": 3.1131863514796954
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.12229973233018351,
+          "velocity": -0.529409466672467
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3801.53125,
+      "tracks": {
+        "position.x": {
+          "value": -0.46823707706329903,
+          "velocity": 3.5599189879826927
+        },
+        "position.y": {
+          "value": 0.46823707706329903,
+          "velocity": -3.5599189879826927
+        },
+        "position.z": {
+          "value": 13.625410338349361,
+          "velocity": 2.8479351903861545
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.11414901068164035,
+          "velocity": -0.5088263409798328
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3817.234375,
+      "tracks": {
+        "position.x": {
+          "value": -0.4147679032044735,
+          "velocity": 3.254167278207508
+        },
+        "position.y": {
+          "value": 0.4147679032044735,
+          "velocity": -3.254167278207508
+        },
+        "position.z": {
+          "value": 13.66818567743642,
+          "velocity": 2.6033338225660065
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.10631529460269928,
+          "velocity": -0.4890285267679915
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3832.9375,
+      "tracks": {
+        "position.x": {
+          "value": -0.36591416002633464,
+          "velocity": 2.9716789972948563
+        },
+        "position.y": {
+          "value": 0.36591416002633464,
+          "velocity": -2.9716789972948563
+        },
+        "position.z": {
+          "value": 13.707268671978934,
+          "velocity": 2.3773431978358848
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.0987865371100668,
+          "velocity": -0.469979913541532
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3848.640625,
+      "tracks": {
+        "position.x": {
+          "value": -0.32132892581252626,
+          "velocity": 2.710153245788663
+        },
+        "position.y": {
+          "value": 0.32132892581252626,
+          "velocity": -2.710153245788663
+        },
+        "position.z": {
+          "value": 13.74293685934998,
+          "velocity": 2.16812259663093
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.09155124974043563,
+          "velocity": -0.45164550670331527
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3864.34375,
+      "tracks": {
+        "position.x": {
+          "value": -0.28069951539196064,
+          "velocity": 2.467528151792527
+        },
+        "position.y": {
+          "value": 0.28069951539196064,
+          "velocity": -2.467528151792527
+        },
+        "position.z": {
+          "value": 13.77544038768643,
+          "velocity": 1.9740225214340217
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.0845984837929139,
+          "velocity": -0.43399157454329884
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3880.046875,
+      "tracks": {
+        "position.x": {
+          "value": -0.24374385040710062,
+          "velocity": 2.2419642599793392
+        },
+        "position.y": {
+          "value": 0.24374385040710062,
+          "velocity": -2.2419642599793392
+        },
+        "position.z": {
+          "value": 13.805004919674321,
+          "velocity": 1.7935714079834717
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.07791780970729037,
+          "velocity": -0.4169857410091442
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3895.75,
+      "tracks": {
+        "position.x": {
+          "value": -0.21020712083366655,
+          "velocity": 2.0318246016947374
+        },
+        "position.y": {
+          "value": 0.21020712083366655,
+          "velocity": -2.0318246016947374
+        },
+        "position.z": {
+          "value": 13.831834303333068,
+          "velocity": 1.62545968135579
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.07149929532739929,
+          "velocity": -0.4005970367900614
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3911.453125,
+      "tracks": {
+        "position.x": {
+          "value": -0.17985876789297697,
+          "velocity": 1.8356540061507636
+        },
+        "position.y": {
+          "value": 0.17985876789297697,
+          "velocity": -1.8356540061507636
+        },
+        "position.z": {
+          "value": 13.856112985685616,
+          "velocity": 1.4685232049206112
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.06533348362307258,
+          "velocity": -0.38479591865765816
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3927.15625,
+      "tracks": {
+        "position.x": {
+          "value": -0.15248978796338614,
+          "velocity": 1.6521590744937757
+        },
+        "position.y": {
+          "value": 0.15248978796338614,
+          "velocity": -1.6521590744937757
+        },
+        "position.z": {
+          "value": 13.87800816962929,
+          "velocity": 1.3217272595950205
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.05941137030500576,
+          "velocity": -0.36955426492448834
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3942.859375,
+      "tracks": {
+        "position.x": {
+          "value": -0.12791034065605356,
+          "velocity": 1.4801895472067306
+        },
+        "position.y": {
+          "value": 0.12791034065605356,
+          "velocity": -1.4801895472067306
+        },
+        "position.z": {
+          "value": 13.897671727475158,
+          "velocity": 1.1841516377653845
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.05372438165699837,
+          "velocity": -0.3548453532102789
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3958.5625,
+      "tracks": {
+        "position.x": {
+          "value": -0.10594763626886682,
+          "velocity": 1.3187213833062723
+        },
+        "position.y": {
+          "value": 0.10594763626886682,
+          "velocity": -1.3187213833062723
+        },
+        "position.z": {
+          "value": 13.915241890984905,
+          "velocity": 1.054977106645018
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.048264352823735694,
+          "velocity": -0.34064382537036153
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3974.265625,
+      "tracks": {
+        "position.x": {
+          "value": -0.08644407488292519,
+          "velocity": 1.1668416308608869
+        },
+        "position.y": {
+          "value": 0.08644407488292519,
+          "velocity": -1.1668416308608869
+        },
+        "position.z": {
+          "value": 13.93084474009366,
+          "velocity": 0.9334733046887094
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.04302350672469693,
+          "velocity": -0.3269256433761658
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3989.96875,
+      "tracks": {
+        "position.x": {
+          "value": -0.06925560926622307,
+          "velocity": 1.0237350356141723
+        },
+        "position.y": {
+          "value": 0.06925560926622307,
+          "velocity": -1.0237350356141723
+        },
+        "position.z": {
+          "value": 13.944595512587021,
+          "velocity": 0.8189880284913379
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.03799443371218661,
+          "velocity": -0.3136680390911742
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4005.671875,
+      "tracks": {
+        "position.x": {
+          "value": -0.05425030518602394,
+          "velocity": 0.8886722661164992
+        },
+        "position.y": {
+          "value": 0.05425030518602394,
+          "velocity": -0.8886722661164992
+        },
+        "position.z": {
+          "value": 13.956599755851181,
+          "velocity": 0.7109378128931994
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.03317007205072583,
+          "velocity": -0.30084946021421505
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4021.375,
+      "tracks": {
+        "position.x": {
+          "value": -0.041307074914526114,
+          "velocity": 0.7609996037203705
+        },
+        "position.y": {
+          "value": 0.041307074914526114,
+          "velocity": -0.7609996037203705
+        },
+        "position.z": {
+          "value": 13.966954340068378,
+          "velocity": 0.6087996829762962
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.028543689263710526,
+          "velocity": -0.28844951413062303
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4037.078125,
+      "tracks": {
+        "position.x": {
+          "value": -0.030314562176528757,
+          "velocity": 0.6401299379880444
+        },
+        "position.y": {
+          "value": 0.030314562176528757,
+          "velocity": -0.6401299379880444
+        },
+        "position.z": {
+          "value": 13.975748350258778,
+          "velocity": 0.5121039503904354
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.024108864369328034,
+          "velocity": -0.27644891099229024
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4052.78125,
+      "tracks": {
+        "position.x": {
+          "value": -0.021170159267392078,
+          "velocity": 0.525534912622357
+        },
+        "position.y": {
+          "value": 0.021170159267392078,
+          "velocity": -0.525534912622357
+        },
+        "position.z": {
+          "value": 13.983063872586087,
+          "velocity": 0.42042793009788554
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.019859471009683625,
+          "velocity": -0.26482940701739116
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4068.484375,
+      "tracks": {
+        "position.x": {
+          "value": -0.013779139421468342,
+          "velocity": 0.41673807797808554
+        },
+        "position.y": {
+          "value": 0.013779139421468342,
+          "velocity": -0.41673807797808554
+        },
+        "position.z": {
+          "value": 13.988976688462824,
+          "velocity": 0.3333904623824684
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.01578966146364059,
+          "velocity": -0.2535737487412989
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4084.1875,
+      "tracks": {
+        "position.x": {
+          "value": -0.0080538896655379,
+          "velocity": 0.31330891997200655
+        },
+        "position.y": {
+          "value": 0.0080538896655379,
+          "velocity": -0.31330891997200655
+        },
+        "position.z": {
+          "value": 13.99355688826757,
+          "velocity": 0.25064713597760524
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.011893851524056075,
+          "velocity": -0.24266561874742468
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4099.890625,
+      "tracks": {
+        "position.x": {
+          "value": -0.003913231322215061,
+          "velocity": 0.21485764971136734
+        },
+        "position.y": {
+          "value": 0.003913231322215061,
+          "velocity": -0.21485764971136734
+        },
+        "position.z": {
+          "value": 13.996869414942227,
+          "velocity": 0.1718861197690939
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.008166706213079406,
+          "velocity": -0.23208958324870715
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4115.59375,
+      "tracks": {
+        "position.x": {
+          "value": -0.00128181703319855,
+          "velocity": 0.12103065224900167
+        },
+        "position.y": {
+          "value": 0.00128181703319855,
+          "velocity": -0.12103065224900167
+        },
+        "position.z": {
+          "value": 13.998974546373441,
+          "velocity": 0.09682452179920134
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.004603126304360819,
+          "velocity": -0.22183104176798038
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4131.296875,
+      "tracks": {
+        "position.x": {
+          "value": -0.00008959466330052839,
+          "velocity": 0.031506505951639674
+        },
+        "position.y": {
+          "value": 0.00008959466330052839,
+          "velocity": -0.031506505951639674
+        },
+        "position.z": {
+          "value": 13.99992832426936,
+          "velocity": 0.025205204761311738
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0.0011982356178996138,
+          "velocity": -0.2118761790710829
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4136.999,
+      "tracks": {
+        "position.x": {
+          "value": -2.7394284622840514e-12,
+          "velocity": 0.000005478859561777146
+        },
+        "position.y": {
+          "value": 2.7394284622840514e-12,
+          "velocity": -0.000005478859561777146
+        },
+        "position.z": {
+          "value": 13.999999999997808,
+          "velocity": 0.000004383087649421717
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 2.0833364232514658e-7,
+          "velocity": -0.20833395122068035
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4137,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 14,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4137.001,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 14,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4147,
+      "tracks": {
+        "position.x": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "position.z": {
+          "value": 14,
+          "velocity": 0
+        },
+        "scale": {
+          "value": 1,
+          "velocity": 0
+        },
+        "opacity": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    }
+  ]
+}

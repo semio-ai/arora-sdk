@@ -1,0 +1,7318 @@
+{
+  "animation": {
+    "id": "namespace-a-animation",
+    "name": "Namespace A Animation",
+    "duration": 1500,
+    "tracks": [
+      {
+        "id": "rotation.r",
+        "name": "r",
+        "animatableId": "rotation.r",
+        "points": [
+          {
+            "id": "rx0.r",
+            "stamp": 150,
+            "value": 0
+          },
+          {
+            "id": "rx1.r",
+            "stamp": 750,
+            "value": -0.7853981633974483,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": 0.23561944901923448
+              },
+              "out": {
+                "x": 450,
+                "y": -0.3141592653589793
+              }
+            }
+          },
+          {
+            "id": "rx2.r",
+            "stamp": 1500,
+            "value": -1.5707963267948966,
+            "transitions": {
+              "in": {
+                "x": -487.5,
+                "y": 0.07853981633974483
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#E17055"
+        },
+        "groupName": "Rotation"
+      },
+      {
+        "id": "rotation.p",
+        "name": "p",
+        "animatableId": "rotation.p",
+        "points": [
+          {
+            "id": "rx0.p",
+            "stamp": 150,
+            "value": 1.5707963267948966
+          },
+          {
+            "id": "rx1.p",
+            "stamp": 750,
+            "value": 0.7853981633974483,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": 0.23561944901923448
+              },
+              "out": {
+                "x": 450,
+                "y": -0.3141592653589793
+              }
+            }
+          },
+          {
+            "id": "rx2.p",
+            "stamp": 1500,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -487.5,
+                "y": 0.07853981633974483
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#E17055"
+        },
+        "groupName": "Rotation"
+      },
+      {
+        "id": "rotation.y",
+        "name": "y",
+        "animatableId": "rotation.y",
+        "points": [
+          {
+            "id": "rx0.y",
+            "stamp": 150,
+            "value": 0
+          },
+          {
+            "id": "rx1.y",
+            "stamp": 750,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": 0.23561944901923448
+              },
+              "out": {
+                "x": 450,
+                "y": -0.3141592653589793
+              }
+            }
+          },
+          {
+            "id": "rx2.y",
+            "stamp": 1500,
+            "value": 0.7853981633974483,
+            "transitions": {
+              "in": {
+                "x": -487.5,
+                "y": 0.07853981633974483
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#E17055"
+        },
+        "groupName": "Rotation"
+      },
+      {
+        "id": "width",
+        "name": "Width",
+        "animatableId": "width",
+        "points": [
+          {
+            "id": "w0",
+            "stamp": 0,
+            "value": 100,
+            "transitions": {
+              "out": {
+                "x": 202.5,
+                "y": 7.5
+              }
+            }
+          },
+          {
+            "id": "w1",
+            "stamp": 450,
+            "value": 150,
+            "transitions": {
+              "in": {
+                "x": -292.5,
+                "y": -7.5
+              },
+              "out": {
+                "x": 472.5,
+                "y": 10
+              }
+            }
+          },
+          {
+            "id": "w2",
+            "stamp": 1125,
+            "value": 200
+          },
+          {
+            "id": "w3",
+            "stamp": 1350,
+            "value": 100
+          }
+        ],
+        "settings": {
+          "color": "#FD79A8"
+        }
+      },
+      {
+        "id": "height",
+        "name": "Height",
+        "animatableId": "height",
+        "points": [
+          {
+            "id": "h0",
+            "stamp": 300,
+            "value": 50,
+            "transitions": {
+              "out": {
+                "x": 247.5,
+                "y": 10
+              }
+            }
+          },
+          {
+            "id": "h1",
+            "stamp": 750,
+            "value": 100,
+            "transitions": {
+              "in": {
+                "x": -337.5,
+                "y": -5
+              },
+              "out": {
+                "x": 97.5,
+                "y": -8.75
+              }
+            }
+          },
+          {
+            "id": "h2",
+            "stamp": 900,
+            "value": 75
+          },
+          {
+            "id": "h3",
+            "stamp": 1500,
+            "value": 50,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 5
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#FDCB6E"
+        }
+      }
+    ],
+    "groups": [],
+    "formatVersion": 2,
+    "defaultViewportExtent": 1500
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 1,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 132.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100.00003703733508,
+          "velocity": 37.037633154699996
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 138.875,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100.07049798451372,
+          "velocity": 38.16385928977123
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 144.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100.30796181035258,
+          "velocity": 41.85587767231243
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 150.75,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100.56792849819114,
+          "velocity": 45.74596921801413
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 156.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100.85161406453194,
+          "velocity": 49.84772629492063
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 162.625,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 101.16031756413747,
+          "velocity": 54.175519675966626
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 168.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 101.49542553418812,
+          "velocity": 58.744431218316365
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.5,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 101.85841588912616,
+          "velocity": 63.57013326762666
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 180.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 102.2508608933735,
+          "velocity": 68.66869485517006
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 186.375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 102.67442870337787,
+          "velocity": 74.05628867626785
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 192.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 103.13088279452488,
+          "velocity": 79.74876536659919
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 198.25,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 103.62207836396092,
+          "velocity": 85.76105271858663
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 204.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 104.149954519593,
+          "velocity": 92.10632747460468
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 210.125,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 104.71652072378038,
+          "velocity": 98.79489699584492
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 216.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 105.32383556003444,
+          "velocity": 105.83271914272294
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 222,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 105.97397544907554,
+          "velocity": 113.21948428131823
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 227.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 106.66899049841015,
+          "velocity": 120.94618879060795
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 233.875,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 107.41084430881843,
+          "velocity": 128.99215307003058
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 239.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 108.20133442271376,
+          "velocity": 137.32149055169364
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 245.75,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 109.04199040304847,
+          "velocity": 145.8791322311247
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 251.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 109.93394758639757,
+          "velocity": 154.58666843588375
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 257.625,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 110.8777967405729,
+          "velocity": 163.3384937067544
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 263.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 111.87341355137839,
+          "velocity": 171.99901975355795
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 269.5,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 112.91977726642659,
+          "velocity": 180.4020055344083
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 275.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 114.014794684293,
+          "velocity": 188.35323768198586
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 281.375,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 115.15515294867156,
+          "velocity": 195.63771886456806
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 286.999,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 116.27294197499803,
+          "velocity": 201.72022583231322
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 287,
+      "tracks": {
+        "rotation.r": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "width": {
+          "value": 116.27314369572359,
+          "velocity": 201.7212252423842
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 287.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2048650318041981e-12,
+          "velocity": -0.000002409732692957912
+        },
+        "rotation.p": {
+          "value": 1.5707963267936915,
+          "velocity": -0.000002409732692957912
+        },
+        "rotation.y": {
+          "value": 5.163705177526181e-13,
+          "velocity": 0.0000010327419522050184
+        },
+        "width": {
+          "value": 116.2733454174485,
+          "velocity": 201.7222246213526
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 287.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.1774264192854328e-7,
+          "velocity": -0.0007538100584326333
+        },
+        "rotation.p": {
+          "value": 1.5707962090522547,
+          "velocity": -0.0007538100584326333
+        },
+        "rotation.y": {
+          "value": 5.0454710685679726e-8,
+          "velocity": 0.000322999781194012
+        },
+        "width": {
+          "value": 116.3362302185843,
+          "velocity": 202.0320123299761
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 293.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.00004771681343222729,
+          "velocity": -0.015375304070145911
+        },
+        "rotation.p": {
+          "value": 1.5707486099814645,
+          "velocity": -0.015375304070145911
+        },
+        "rotation.y": {
+          "value": 0.000020397461527544902,
+          "velocity": 0.006563956203353952
+        },
+        "width": {
+          "value": 117.55209432204857,
+          "velocity": 207.32135833580173
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 299.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.00018387061655952936,
+          "velocity": -0.030588622225622968
+        },
+        "rotation.p": {
+          "value": 1.5706124561783368,
+          "velocity": -0.030588622225622968
+        },
+        "rotation.y": {
+          "value": 0.00007840217071368329,
+          "velocity": 0.013009434306771879
+        },
+        "width": {
+          "value": 118.7956130974048,
+          "velocity": 211.31975040555884
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 305.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.00041220009377122233,
+          "velocity": -0.04643028069455056
+        },
+        "rotation.p": {
+          "value": 1.5703841267011251,
+          "velocity": -0.04643028069455056
+        },
+        "rotation.y": {
+          "value": 0.000175310544179402,
+          "velocity": 0.01967020536913998
+        },
+        "width": {
+          "value": 120.05868505723845,
+          "velocity": 213.88976253996026
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 311.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.000736551814003585,
+          "velocity": -0.06293981290509851
+        },
+        "rotation.p": {
+          "value": 1.5700597749808927,
+          "velocity": -0.06293981290509851
+        },
+        "rotation.y": {
+          "value": 0.0003124347365693829,
+          "velocity": 0.026557805159453857
+        },
+        "width": {
+          "value": 121.33257729088847,
+          "velocity": 214.958184112604
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 317,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.0011610167929411437,
+          "velocity": -0.08016008016953959
+        },
+        "rotation.p": {
+          "value": 1.5696353100019556,
+          "velocity": -0.08016008016953959
+        },
+        "rotation.y": {
+          "value": 0.0004911578282877365,
+          "velocity": 0.033684600266781425
+        },
+        "width": {
+          "value": 122.60833480279078,
+          "velocity": 214.52397474846458
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 322.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.0016899512671455913,
+          "velocity": -0.0981376202604049
+        },
+        "rotation.p": {
+          "value": 1.5691063755277508,
+          "velocity": -0.0981376202604049
+        },
+        "rotation.y": {
+          "value": 0.0007129389712774839,
+          "velocity": 0.041063860906034574
+        },
+        "width": {
+          "value": 123.8772092833777,
+          "velocity": 212.65674613043583
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 328.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.0023279996634199968,
+          "velocity": -0.11692303922746099
+        },
+        "rotation.p": {
+          "value": 1.5684683271314768,
+          "velocity": -0.11692303922746099
+        },
+        "rotation.y": {
+          "value": 0.0009793189878614715,
+          "velocity": 0.04870984083083531
+        },
+        "width": {
+          "value": 125.13105155904923,
+          "velocity": 209.4863371898733
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 334.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.003080120037826732,
+          "velocity": -0.1365714525544515
+        },
+        "rotation.p": {
+          "value": 1.5677162067570698,
+          "velocity": -0.1365714525544515
+        },
+        "rotation.y": {
+          "value": 0.0012919264668123283,
+          "velocity": 0.056637865022758235
+        },
+        "width": {
+          "value": 126.36262190520878,
+          "velocity": 205.18614223256154
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 340.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.003951612297703482,
+          "velocity": -0.1571429826914999
+        },
+        "rotation.p": {
+          "value": 1.566844714497193,
+          "velocity": -0.1571429826914999
+        },
+        "rotation.y": {
+          "value": 0.0016524844048890978,
+          "velocity": 0.06486442585674533
+        },
+        "width": {
+          "value": 127.56579196711317,
+          "velocity": 199.95391207332978
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 346.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.004948149564938192,
+          "velocity": -0.17870332108311957
+        },
+        "rotation.p": {
+          "value": 1.5658481772299584,
+          "velocity": -0.17870332108311957
+        },
+        "rotation.y": {
+          "value": 0.002062817446289003,
+          "velocity": 0.07340728845811799
+        },
+        "width": {
+          "value": 128.73563415094162,
+          "velocity": 193.993566885349
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 352.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.006075813090602493,
+          "velocity": -0.20132436406308066
+        },
+        "rotation.p": {
+          "value": 1.5647205137042943,
+          "velocity": -0.20132436406308066
+        },
+        "rotation.y": {
+          "value": 0.002524859776700562,
+          "velocity": 0.08228560595835467
+        },
+        "width": {
+          "value": 129.86841246825074,
+          "velocity": 187.50048518464249
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 358.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.0073411311908606214,
+          "velocity": -0.22508493342682256
+        },
+        "rotation.p": {
+          "value": 1.5634551956040357,
+          "velocity": -0.22508493342682256
+        },
+        "rotation.y": {
+          "value": 0.0030406637327318035,
+          "velocity": 0.09152004531178211
+        },
+        "width": {
+          "value": 130.96149938341048,
+          "velocity": 180.65136315267887
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 364.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.00875112274304228,
+          "velocity": -0.2500715941396478
+        },
+        "rotation.p": {
+          "value": 1.5620452040518544,
+          "velocity": -0.2500715941396478
+        },
+        "rotation.y": {
+          "value": 0.003612409191154042,
+          "velocity": 0.10113292423511303
+        },
+        "width": {
+          "value": 132.01324606822195,
+          "velocity": 173.5985746165182
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 370.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.010313345860183622,
+          "velocity": -0.2763795835113846
+        },
+        "rotation.p": {
+          "value": 1.5604829809347132,
+          "velocity": -0.2763795835113846
+        },
+        "rotation.y": {
+          "value": 0.004242413805247571,
+          "velocity": 0.11114835965018151
+        },
+        "width": {
+          "value": 133.0228306840031,
+          "velocity": 166.46824353908806
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 376.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.012035952453565915,
+          "velocity": -0.304113868274727
+        },
+        "rotation.p": {
+          "value": 1.558760374341331,
+          "velocity": -0.304113868274727
+        },
+        "rotation.y": {
+          "value": 0.004933144156972781,
+          "velocity": 0.12159242771006899
+        },
+        "width": {
+          "value": 133.99010362206505,
+          "velocity": 159.3609658487786
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 382.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.013927749497202841,
+          "velocity": -0.3333903483400461
+        },
+        "rotation.p": {
+          "value": 1.5568685772976938,
+          "velocity": -0.3333903483400461
+        },
+        "rotation.y": {
+          "value": 0.005687227892867697,
+          "velocity": 0.13249333501735303
+        },
+        "width": {
+          "value": 134.91544231868477,
+          "velocity": 152.35415564792777
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 388.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.01599826792712903,
+          "velocity": -0.3643372285337912
+        },
+        "rotation.p": {
+          "value": 1.5547980588677677,
+          "velocity": -0.3643372285337912
+        },
+        "rotation.y": {
+          "value": 0.006507466907264156,
+          "velocity": 0.14388159992566757
+        },
+        "width": {
+          "value": 135.79962271958942,
+          "velocity": 145.50518982785772
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 394.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.01825784024271697,
+          "velocity": -0.3970965822880746
+        },
+        "rotation.p": {
+          "value": 1.5525384865521796,
+          "velocity": -0.3970965822880746
+        },
+        "rotation.y": {
+          "value": 0.007396851626862577,
+          "velocity": 0.15579024174614237
+        },
+        "width": {
+          "value": 136.643710285109,
+          "velocity": 138.8547680246413
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 400.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.020717688027465778,
+          "velocity": -0.43182613389362223
+        },
+        "rotation.p": {
+          "value": 1.5500786387674308,
+          "velocity": -0.43182613389362223
+        },
+        "rotation.y": {
+          "value": 0.008358576433398211,
+          "velocity": 0.1682549741081768
+        },
+        "width": {
+          "value": 137.44897063822413,
+          "velocity": 132.43012441598043
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 406.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.02339002077198721,
+          "velocity": -0.46870128830380303
+        },
+        "rotation.p": {
+          "value": 1.547406306022909,
+          "velocity": -0.46870128830380303
+        },
+        "rotation.y": {
+          "value": 0.009396056232489859,
+          "velocity": 0.1813143964359222
+        },
+        "width": {
+          "value": 138.21679832870117,
+          "velocity": 126.2478969909521
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 412,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.026288147559497075,
+          "velocity": -0.5079174391543216
+        },
+        "rotation.p": {
+          "value": 1.5445081792353998,
+          "velocity": -0.5079174391543216
+        },
+        "rotation.y": {
+          "value": 0.010512944131686202,
+          "velocity": 0.19501017419438366
+        },
+        "width": {
+          "value": 138.94866140174867,
+          "velocity": 120.31657602261119
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 417.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.02942660335792629,
+          "velocity": -0.549692585935002
+        },
+        "rotation.p": {
+          "value": 1.5413697234369699,
+          "velocity": -0.549692585935002
+        },
+        "rotation.y": {
+          "value": 0.011713150121956539,
+          "velocity": 0.20938719380087165
+        },
+        "width": {
+          "value": 139.64605922714156,
+          "velocity": 114.63852530147248
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 423.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.03282129184133904,
+          "velocity": -0.5942702889786957
+        },
+        "rotation.p": {
+          "value": 1.537975034953557,
+          "velocity": -0.5942702889786957
+        },
+        "rotation.y": {
+          "value": 0.013000860554083967,
+          "velocity": 0.22449367127509334
+        },
+        "width": {
+          "value": 140.31049113670215,
+          "velocity": 109.21160911175684
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 429.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.03648964681662482,
+          "velocity": -0.6419229843095011
+        },
+        "rotation.p": {
+          "value": 1.5343066799782723,
+          "velocity": -0.6419229843095011
+        },
+        "rotation.y": {
+          "value": 0.014380558049915313,
+          "velocity": 0.24038118394217559
+        },
+        "width": {
+          "value": 140.94343367528916,
+          "velocity": 104.03047581866733
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 435.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.040450814425766285,
+          "velocity": -0.6929556665751644
+        },
+        "rotation.p": {
+          "value": 1.5303455123691299,
+          "velocity": -0.6929556665751644
+        },
+        "rotation.y": {
+          "value": 0.01585704126730335,
+          "velocity": 0.25710458056883617
+        },
+        "width": {
+          "value": 141.54632459144216,
+          "velocity": 99.08755369749387
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 436.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.041323291107321476,
+          "velocity": -0.7041523919375106
+        },
+        "rotation.p": {
+          "value": 1.5294730356875754,
+          "velocity": -0.7041523919375106
+        },
+        "rotation.y": {
+          "value": 0.01618042748291856,
+          "velocity": 0.2607342660411175
+        },
+        "width": {
+          "value": 141.66945297193004,
+          "velocity": 98.07726886551
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 437,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.04132399526422902,
+          "velocity": -0.7041614233128675
+        },
+        "rotation.p": {
+          "value": 1.5294723315306675,
+          "velocity": -0.7041614233128675
+        },
+        "rotation.y": {
+          "value": 0.016180688218645607,
+          "velocity": 0.26073718810299945
+        },
+        "width": {
+          "value": 141.66955104879648,
+          "velocity": 98.07646403082727
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 437.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.04132469943016814,
+          "velocity": -0.7041704547958756
+        },
+        "rotation.p": {
+          "value": 1.5294716273647284,
+          "velocity": -0.7041704547958756
+        },
+        "rotation.y": {
+          "value": 0.016180948957294772,
+          "velocity": 0.2607401101905825
+        },
+        "width": {
+          "value": 141.6696491248581,
+          "velocity": 98.07565920258948
+        },
+        "height": {
+          "value": 50.000040404260545,
+          "velocity": 40.40448068279032
+        }
+      }
+    },
+    {
+      "worldTimeMs": 441.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.04472585827446205,
+          "velocity": -0.7477099228427043
+        },
+        "rotation.p": {
+          "value": 1.5260704685204345,
+          "velocity": -0.7477099228427043
+        },
+        "rotation.y": {
+          "value": 0.017435443617149125,
+          "velocity": 0.2747217054505803
+        },
+        "width": {
+          "value": 142.12055201923346,
+          "velocity": 94.37381214577763
+        },
+        "height": {
+          "value": 50.19430403854958,
+          "velocity": 42.51487025295778
+        }
+      }
+    },
+    {
+      "worldTimeMs": 447.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.04933798941654184,
+          "velocity": -0.8065682560951539
+        },
+        "rotation.p": {
+          "value": 1.521458337378355,
+          "velocity": -0.8065682560951539
+        },
+        "rotation.y": {
+          "value": 0.01912124956910051,
+          "velocity": 0.2932928437087449
+        },
+        "width": {
+          "value": 142.6674476017662,
+          "velocity": 89.87933546397294
+        },
+        "height": {
+          "value": 50.45501421774291,
+          "velocity": 45.33077780038649
+        }
+      }
+    },
+    {
+      "worldTimeMs": 453.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.054312822561506234,
+          "velocity": -0.8699585642699886
+        },
+        "rotation.p": {
+          "value": 1.5164835042333902,
+          "velocity": -0.8699585642699886
+        },
+        "rotation.y": {
+          "value": 0.020920306519662223,
+          "velocity": 0.31287975495574244
+        },
+        "width": {
+          "value": 143.1882825658951,
+          "velocity": 85.59374923781247
+        },
+        "height": {
+          "value": 50.73294811913481,
+          "velocity": 48.319085319201285
+        }
+      }
+    },
+    {
+      "worldTimeMs": 459.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.0596786587526215,
+          "velocity": -0.938358522513811
+        },
+        "rotation.p": {
+          "value": 1.5111176680422749,
+          "velocity": -0.938358522513811
+        },
+        "rotation.y": {
+          "value": 0.02283882924907277,
+          "velocity": 0.3335441058068556
+        },
+        "width": {
+          "value": 143.68426597415834,
+          "velocity": 81.50653226077061
+        },
+        "height": {
+          "value": 51.02917639772613,
+          "velocity": 51.49594303752539
+        }
+      }
+    },
+    {
+      "worldTimeMs": 465.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.06546679274976158,
+          "velocity": -1.0122994286609888
+        },
+        "rotation.p": {
+          "value": 1.505329534045135,
+          "velocity": -1.0122994286609888
+        },
+        "rotation.y": {
+          "value": 0.024883392644844623,
+          "velocity": 0.355345032089865
+        },
+        "width": {
+          "value": 144.1565445559972,
+          "velocity": 77.6072405133286
+        },
+        "height": {
+          "value": 51.344871352220586,
+          "velocity": 54.87948313986871
+        }
+      }
+    },
+    {
+      "worldTimeMs": 471.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.07171183993136304,
+          "velocity": -1.0923687785548295
+        },
+        "rotation.p": {
+          "value": 1.4990844868635333,
+          "velocity": -1.0923687785548295
+        },
+        "rotation.y": {
+          "value": 0.027060906460588594,
+          "velocity": 0.37833545079542913
+        },
+        "width": {
+          "value": 144.60620366095435,
+          "velocity": 73.88566420586697
+        },
+        "height": {
+          "value": 51.68131952571141,
+          "velocity": 58.49010712972388
+        }
+      }
+    },
+    {
+      "worldTimeMs": 477.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.07845207192850556,
+          "velocity": -1.17921038593262
+        },
+        "rotation.p": {
+          "value": 1.492344254866391,
+          "velocity": -1.17921038593262
+        },
+        "rotation.y": {
+          "value": 0.029378563194679908,
+          "velocity": 0.4025565898740744
+        },
+        "width": {
+          "value": 145.03426898725738,
+          "velocity": 70.33193432491284
+        },
+        "height": {
+          "value": 52.03993613934352,
+          "velocity": 62.35081673274387
+        }
+      }
+    },
+    {
+      "worldTimeMs": 483.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.08572974127098326,
+          "velocity": -1.2735201767663447
+        },
+        "rotation.p": {
+          "value": 1.4850665855239136,
+          "velocity": -1.2735201767663447
+        },
+        "rotation.y": {
+          "value": 0.031843746438863785,
+          "velocity": 0.4280300004537184
+        },
+        "width": {
+          "value": 145.44170882542406,
+          "velocity": 66.93659142552181
+        },
+        "height": {
+          "value": 52.42228163210887,
+          "velocity": 66.48759318301569
+        }
+      }
+    },
+    {
+      "worldTimeMs": 489.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.09359136139474032,
+          "velocity": -1.3760347708581875
+        },
+        "rotation.p": {
+          "value": 1.4772049654001562,
+          "velocity": -1.3760347708581875
+        },
+        "rotation.y": {
+          "value": 0.034463881930722556,
+          "velocity": 0.4547460535294316
+        },
+        "width": {
+          "value": 145.82943662311033,
+          "velocity": 63.690626470261805
+        },
+        "height": {
+          "value": 52.830080606235924,
+          "velocity": 70.92982874007683
+        }
+      }
+    },
+    {
+      "worldTimeMs": 495.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.10208788711026119,
+          "velocity": -1.4875084942933687
+        },
+        "rotation.p": {
+          "value": 1.4687084396846353,
+          "velocity": -1.4875084942933687
+        },
+        "rotation.y": {
+          "value": 0.03724620669936618,
+          "velocity": 0.48264760596135264
+        },
+        "width": {
+          "value": 146.19831372846474,
+          "velocity": 60.5855012025651
+        },
+        "height": {
+          "value": 53.2652434943226,
+          "velocity": 75.71081191244066
+        }
+      }
+    },
+    {
+      "worldTimeMs": 501.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.11127470902271665,
+          "velocity": -1.6086724303445732
+        },
+        "rotation.p": {
+          "value": 1.45952161777218,
+          "velocity": -1.6086724303445732
+        },
+        "rotation.y": {
+          "value": 0.040197422876446315,
+          "velocity": 0.5116071831393754
+        },
+        "width": {
+          "value": 146.54915220813854,
+          "velocity": 57.61315374141719
+        },
+        "height": {
+          "value": 53.72989126052734,
+          "velocity": 80.86826311042036
+        }
+      }
+    },
+    {
+      "worldTimeMs": 507,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.12121132988817887,
+          "velocity": -1.7401664792098919
+        },
+        "rotation.p": {
+          "value": 1.4495849969067176,
+          "velocity": -1.7401664792098919
+        },
+        "rotation.y": {
+          "value": 0.043323192087542386,
+          "velocity": 0.541395768586537
+        },
+        "width": {
+          "value": 146.88271766555607,
+          "velocity": 54.765993692286955
+        },
+        "height": {
+          "value": 54.22638340512467,
+          "velocity": 86.44490865875103
+        }
+      }
+    },
+    {
+      "worldTimeMs": 512.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.13196052838342,
+          "velocity": -1.882432381860183
+        },
+        "rotation.p": {
+          "value": 1.4388357984114768,
+          "velocity": -1.882432381860183
+        },
+        "rotation.y": {
+          "value": 0.04662741491948595,
+          "velocity": 0.5716413451509091
+        },
+        "width": {
+          "value": 147.19973200723368,
+          "velocity": 52.0368899992749
+        },
+        "height": {
+          "value": 54.757349428145005,
+          "velocity": 92.48906554671076
+        }
+      }
+    },
+    {
+      "worldTimeMs": 518.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.14358673608319078,
+          "velocity": -2.0355531135699616
+        },
+        "rotation.p": {
+          "value": 1.4272095907117057,
+          "velocity": -2.0355531135699616
+        },
+        "rotation.y": {
+          "value": 0.05011123085235863,
+          "velocity": 0.6017761595576143
+        },
+        "width": {
+          "value": 147.50087612154437,
+          "velocity": 49.41915394500503
+        },
+        "height": {
+          "value": 55.3257236714098,
+          "velocity": 99.05518254644375
+        }
+      }
+    },
+    {
+      "worldTimeMs": 524.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.15615326474691987,
+          "velocity": -2.1990240670203454
+        },
+        "rotation.p": {
+          "value": 1.4146430620479764,
+          "velocity": -2.1990240670203454
+        },
+        "rotation.y": {
+          "value": 0.05377167404672932,
+          "velocity": 0.6309740924742133
+        },
+        "width": {
+          "value": 147.7867924466795,
+          "velocity": 46.906519081226485
+        },
+        "height": {
+          "value": 55.93478301300702,
+          "velocity": 106.20423823516757
+        }
+      }
+    },
+    {
+      "worldTimeMs": 530.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.16971794982296662,
+          "velocity": -2.3714482531265513
+        },
+        "rotation.p": {
+          "value": 1.40107837697193,
+          "velocity": -2.3714482531265513
+        },
+        "rotation.y": {
+          "value": 0.05759994229205462,
+          "velocity": 0.6580847141057505
+        },
+        "width": {
+          "value": 148.05808741367372,
+          "velocity": 44.49311939976992
+        },
+        "height": {
+          "value": 56.58818609396736,
+          "velocity": 114.00382164112384
+        }
+      }
+    },
+    {
+      "worldTimeMs": 536.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.1843267820782042,
+          "velocity": -2.5501683133042796
+        },
+        "rotation.p": {
+          "value": 1.3864695447166924,
+          "velocity": -2.5501683133042796
+        },
+        "rotation.y": {
+          "value": 0.06157930078663182,
+          "velocity": 0.6815798869586714
+        },
+        "width": {
+          "value": 148.3153337570243,
+          "velocity": 42.173466695490234
+        },
+        "height": {
+          "value": 57.29001138842951,
+          "velocity": 122.52759904677953
+        }
+      }
+    },
+    {
+      "worldTimeMs": 542.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.2000052891913482,
+          "velocity": -2.7308907966347835
+        },
+        "rotation.p": {
+          "value": 1.3707910376035484,
+          "velocity": -2.7308907966347835
+        },
+        "rotation.y": {
+          "value": 0.06568277512676206,
+          "velocity": 0.699542342615501
+        },
+        "width": {
+          "value": 148.55907269024638,
+          "velocity": 39.94242780303482
+        },
+        "height": {
+          "value": 58.04478913142475,
+          "velocity": 131.85367463673091
+        }
+      }
+    },
+    {
+      "worldTimeMs": 548.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.21674794868895758,
+          "velocity": -2.9074259042219275
+        },
+        "rotation.p": {
+          "value": 1.354048378105939,
+          "velocity": -2.9074259042219275
+        },
+        "rotation.y": {
+          "value": 0.06987100653772559,
+          "velocity": 0.7097399387328315
+        },
+        "width": {
+          "value": 148.78981594712414,
+          "velocity": 37.79520218677887
+        },
+        "height": {
+          "value": 58.857518352230684,
+          "velocity": 142.0610468584061
+        }
+      }
+    },
+    {
+      "worldTimeMs": 554.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.23450687464215783,
+          "velocity": -3.0717411473060823
+        },
+        "rotation.p": {
+          "value": 1.3362894521527389,
+          "velocity": -3.0717411473060823
+        },
+        "rotation.y": {
+          "value": 0.07409092308644485,
+          "velocity": 0.7098333489210502
+        },
+        "width": {
+          "value": 149.00804769179314,
+          "velocity": 35.7273002119922
+        },
+        "height": {
+          "value": 59.73365424685625,
+          "velocity": 153.22290385843104
+        }
+      }
+    },
+    {
+      "worldTimeMs": 560.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.25318232215685127,
+          "velocity": -3.2145538176834605
+        },
+        "rotation.p": {
+          "value": 1.3176140046380451,
+          "velocity": -3.2145538176834605
+        },
+        "rotation.y": {
+          "value": 0.07827610973699675,
+          "velocity": 0.6977401222176212
+        },
+        "width": {
+          "value": 149.21422630238666,
+          "velocity": 33.73452231292022
+        },
+        "height": {
+          "value": 60.679041849562964,
+          "velocity": 165.39486025292294
+        }
+      }
+    },
+    {
+      "worldTimeMs": 566.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.2726186500002076,
+          "velocity": -3.3265769087957904
+        },
+        "rotation.p": {
+          "value": 1.2981776767946889,
+          "velocity": -3.3265769087957904
+        },
+        "rotation.y": {
+          "value": 0.08234971532775191,
+          "velocity": 0.6721098001733052
+        },
+        "width": {
+          "value": 149.40878603400049,
+          "velocity": 31.81293919055839
+        },
+        "height": {
+          "value": 61.69975840944733,
+          "velocity": 178.5954555287578
+        }
+      }
+    },
+    {
+      "worldTimeMs": 572.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.292609273261842,
+          "velocity": -3.400239953388817
+        },
+        "rotation.p": {
+          "value": 1.2781870535330546,
+          "velocity": -3.400239953388817
+        },
+        "rotation.y": {
+          "value": 0.08623018428866665,
+          "velocity": 0.6327696425990631
+        },
+        "width": {
+          "value": 149.59213856732924,
+          "velocity": 29.958873112273068
+        },
+        "height": {
+          "value": 62.801808810569874,
+          "velocity": 192.7755697314305
+        }
+      }
+    },
+    {
+      "worldTimeMs": 578.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.31291197841642615,
+          "velocity": -3.4313452970289777
+        },
+        "rotation.p": {
+          "value": 1.2578843483784703,
+          "velocity": -3.4313452970289777
+        },
+        "rotation.y": {
+          "value": 0.08983905882830821,
+          "velocity": 0.5809441585026432
+        },
+        "width": {
+          "value": 149.7646744496196,
+          "velocity": 28.168880341603256
+        },
+        "height": {
+          "value": 63.99059841714042,
+          "velocity": 207.7736331525394
+        }
+      }
+    },
+    {
+      "worldTimeMs": 584.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.33327216076678645,
+          "velocity": -3.419976810608578
+        },
+        "rotation.p": {
+          "value": 1.2375241660281102,
+          "velocity": -3.419976810608578
+        },
+        "rotation.y": {
+          "value": 0.0931090353063764,
+          "velocity": 0.5191100581359702
+        },
+        "width": {
+          "value": 149.9267644346542,
+          "velocity": 26.4397346953908
+        },
+        "height": {
+          "value": 65.27009566481163,
+          "velocity": 223.2563348733366
+        }
+      }
+    },
+    {
+      "worldTimeMs": 586.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.34286246964062306,
+          "velocity": -3.400838077305365
+        },
+        "rotation.p": {
+          "value": 1.2279338571542735,
+          "velocity": -3.400838077305365
+        },
+        "rotation.y": {
+          "value": 0.09452405349671142,
+          "velocity": 0.48726088578686344
+        },
+        "width": {
+          "value": 149.9999743588335,
+          "velocity": 25.641307357821205
+        },
+        "height": {
+          "value": 65.90812106379987,
+          "velocity": 230.60306157668572
+        }
+      }
+    },
+    {
+      "worldTimeMs": 587,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.3428658704745674,
+          "velocity": -3.4008298116186046
+        },
+        "rotation.p": {
+          "value": 1.227930456320329,
+          "velocity": -3.4008298116186046
+        },
+        "rotation.y": {
+          "value": 0.09452454075182005,
+          "velocity": 0.48724933152148125
+        },
+        "width": {
+          "value": 150,
+          "velocity": 25.64102564102564
+        },
+        "height": {
+          "value": 65.90835166816197,
+          "velocity": 230.60566265096645
+        }
+      }
+    },
+    {
+      "worldTimeMs": 587.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.34286927130024575,
+          "velocity": -3.400821544925458
+        },
+        "rotation.p": {
+          "value": 1.2279270554946506,
+          "velocity": -3.400821544925458
+        },
+        "rotation.y": {
+          "value": 0.09452502799537436,
+          "velocity": 0.48723777711095356
+        },
+        "width": {
+          "value": 150.00002116408834,
+          "velocity": 21.164155539080717
+        },
+        "height": {
+          "value": 65.90858227512514,
+          "velocity": 230.60826371305504
+        }
+      }
+    },
+    {
+      "worldTimeMs": 590.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.35344812155045985,
+          "velocity": -3.3702629148243046
+        },
+        "rotation.p": {
+          "value": 1.2173482052444367,
+          "velocity": -3.3702629148243046
+        },
+        "rotation.y": {
+          "value": 0.09599010459925204,
+          "velocity": 0.45051711691785895
+        },
+        "width": {
+          "value": 150.0667969876443,
+          "velocity": 21.587111470596486
+        },
+        "height": {
+          "value": 66.64161615928663,
+          "velocity": 238.65287424560734
+        }
+      }
+    },
+    {
+      "worldTimeMs": 596.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.37323182669511146,
+          "velocity": -3.2891578095804994
+        },
+        "rotation.p": {
+          "value": 1.1975645000997852,
+          "velocity": -3.2891578095804994
+        },
+        "rotation.y": {
+          "value": 0.09845231209571256,
+          "velocity": 0.37856887840265757
+        },
+        "width": {
+          "value": 150.19739823205003,
+          "velocity": 22.408848362107616
+        },
+        "height": {
+          "value": 68.10225279152769,
+          "velocity": 253.10739612071214
+        }
+      }
+    },
+    {
+      "worldTimeMs": 602,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.39246091570680874,
+          "velocity": -3.184824202512383
+        },
+        "rotation.p": {
+          "value": 1.1783354110880877,
+          "velocity": -3.184824202512383
+        },
+        "rotation.y": {
+          "value": 0.10048500904204215,
+          "velocity": 0.306293361829959
+        },
+        "width": {
+          "value": 150.33295018515008,
+          "velocity": 23.25490236143901
+        },
+        "height": {
+          "value": 69.64318794640809,
+          "velocity": 265.49623208815103
+        }
+      }
+    },
+    {
+      "worldTimeMs": 607.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.4110214606016597,
+          "velocity": -3.06521599471285
+        },
+        "rotation.p": {
+          "value": 1.1597748661932368,
+          "velocity": -3.06521599471285
+        },
+        "rotation.y": {
+          "value": 0.1020935966024958,
+          "velocity": 0.2360388333111672
+        },
+        "width": {
+          "value": 150.4736005704214,
+          "velocity": 24.126410294467828
+        },
+        "height": {
+          "value": 71.24844204493927,
+          "velocity": 274.5657806909046
+        }
+      }
+    },
+    {
+      "worldTimeMs": 613.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.42884377361049625,
+          "velocity": -2.93717875188861
+        },
+        "rotation.p": {
+          "value": 1.1419525531844001,
+          "velocity": -2.93717875188861
+        },
+        "rotation.y": {
+          "value": 0.10329517061081492,
+          "velocity": 0.1693997667962668
+        },
+        "width": {
+          "value": 150.61950407236637,
+          "velocity": 25.024581011640905
+        },
+        "height": {
+          "value": 72.89486397167424,
+          "velocity": 279.2092978646858
+        }
+      }
+    },
+    {
+      "worldTimeMs": 619.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.44589449913162627,
+          "velocity": -2.8060808714876257
+        },
+        "rotation.p": {
+          "value": 1.1249018276632703,
+          "velocity": -2.8060808714876257
+        },
+        "rotation.y": {
+          "value": 0.10411423509969711,
+          "velocity": 0.10729893675809922
+        },
+        "width": {
+          "value": 150.770822780861,
+          "velocity": 25.950701099265185
+        },
+        "height": {
+          "value": 74.55400877135614,
+          "velocity": 278.8027500163196
+        }
+      }
+    },
+    {
+      "worldTimeMs": 625.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.4621677289385995,
+          "velocity": -2.6758224207295047
+        },
+        "rotation.p": {
+          "value": 1.108628597856297,
+          "velocity": -2.6758224207295047
+        },
+        "rotation.y": {
+          "value": 0.10457914763174544,
+          "velocity": 0.05013881681339712
+        },
+        "width": {
+          "value": 150.92772667098487,
+          "velocity": 26.906141128863005
+        },
+        "height": {
+          "value": 76.1957658622705,
+          "velocity": 273.4272610724191
+        }
+      }
+    },
+    {
+      "worldTimeMs": 631.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.47767684054304566,
+          "velocity": -2.5490427709701895
+        },
+        "rotation.p": {
+          "value": 1.093119486251851,
+          "velocity": -2.5490427709701895
+        },
+        "rotation.y": {
+          "value": 0.10471950703249189,
+          "velocity": -0.0020400597439343537
+        },
+        "width": {
+          "value": 151.0903941216944,
+          "velocity": 27.89236250237136
+        },
+        "height": {
+          "value": 77.79258747796628,
+          "velocity": 263.8365543673244
+        }
+      }
+    },
+    {
+      "worldTimeMs": 637.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.49244781294672335,
+          "velocity": -2.4273933442777813
+        },
+        "rotation.p": {
+          "value": 1.0783485138481732,
+          "velocity": -2.4273933442777813
+        },
+        "rotation.y": {
+          "value": 0.10456441752317955,
+          "velocity": -0.049425305051345514
+        },
+        "width": {
+          "value": 151.25901247706713,
+          "velocity": 28.910924957746957
+        },
+        "height": {
+          "value": 79.32277668642654,
+          "velocity": 251.1919196722373
+        }
+      }
+    },
+    {
+      "worldTimeMs": 643.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5065141543996277,
+          "velocity": -2.3117993961497003
+        },
+        "rotation.p": {
+          "value": 1.0642821723952687,
+          "velocity": -2.3117993961497003
+        },
+        "rotation.y": {
+          "value": 0.10414144765062715,
+          "velocity": -0.09233271895499501
+        },
+        "width": {
+          "value": 151.43377865424728,
+          "velocity": 29.963494807141554
+        },
+        "height": {
+          "value": 80.77190445871273,
+          "velocity": 236.7285349367816
+        }
+      }
+    },
+    {
+      "worldTimeMs": 649.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5199132638483475,
+          "velocity": -2.2026783819163436
+        },
+        "rotation.p": {
+          "value": 1.050883062946549,
+          "velocity": -2.2026783819163436
+        },
+        "rotation.y": {
+          "value": 0.10347608669111003,
+          "velocity": -0.13113775125461666
+        },
+        "width": {
+          "value": 151.61489980267748,
+          "velocity": 31.051853988325735
+        },
+        "height": {
+          "value": 82.13245224592782,
+          "velocity": 221.5098157572664
+        }
+      }
+    },
+    {
+      "worldTimeMs": 655.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5326839389219645,
+          "velocity": -2.100107949299338
+        },
+        "rotation.p": {
+          "value": 1.0381123878729321,
+          "velocity": -2.100107949299338
+        },
+        "rotation.y": {
+          "value": 0.10259153092545015,
+          "velocity": -0.16623170828671013
+        },
+        "width": {
+          "value": 151.8025940197086,
+          "velocity": 32.17791001955749
+        },
+        "height": {
+          "value": 83.40241350963333,
+          "velocity": 206.32216352386834
+        }
+      }
+    },
+    {
+      "worldTimeMs": 661.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5448647426437722,
+          "velocity": -2.003948529729907
+        },
+        "rotation.p": {
+          "value": 1.0259315841511245,
+          "velocity": -2.003948529729907
+        },
+        "rotation.y": {
+          "value": 0.10150867408375713,
+          "velocity": -0.19799568003434578
+        },
+        "width": {
+          "value": 151.99709112824524,
+          "velocity": 33.343706958708275
+        },
+        "height": {
+          "value": 84.58361682119603,
+          "velocity": 191.6773014696413
+        }
+      }
+    },
+    {
+      "worldTimeMs": 667.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5564929851417164,
+          "velocity": -1.9139294771579989
+        },
+        "rotation.p": {
+          "value": 1.0143033416531801,
+          "velocity": -1.9139294771579989
+        },
+        "rotation.y": {
+          "value": 0.10024621478221844,
+          "velocity": -0.22678636177341946
+        },
+        "width": {
+          "value": 152.19863352271753,
+          "velocity": 34.55143747927071
+        },
+        "height": {
+          "value": 85.68024204509118,
+          "velocity": 177.8663147426916
+        }
+      }
+    },
+    {
+      "worldTimeMs": 673.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5676041312600014,
+          "velocity": -1.8297078044362844
+        },
+        "rotation.p": {
+          "value": 1.0031921955348952,
+          "velocity": -1.8297078044362844
+        },
+        "rotation.y": {
+          "value": 0.09882082384879758,
+          "velocity": -0.25292946147441886
+        },
+        "width": {
+          "value": 152.40747709037822,
+          "velocity": 35.803456188953604
+        },
+        "height": {
+          "value": 86.69770356092683,
+          "velocity": 165.02429214444297
+        }
+      }
+    },
+    {
+      "worldTimeMs": 679.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5782314949170051,
+          "velocity": -1.7509071651640051
+        },
+        "rotation.p": {
+          "value": 0.9925648318778915,
+          "velocity": -1.7509071651640051
+        },
+        "rotation.y": {
+          "value": 0.09724733591275055,
+          "velocity": -0.27671771812994667
+        },
+        "width": {
+          "value": 152.6238922157102,
+          "velocity": 37.102294330993296
+        },
+        "height": {
+          "value": 87.64189547093862,
+          "velocity": 153.18578587553247
+        }
+      }
+    },
+    {
+      "worldTimeMs": 685.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5884061213256905,
+          "velocity": -1.6771429989850652
+        },
+        "rotation.p": {
+          "value": 0.982390205469206,
+          "velocity": -1.6771429989850652
+        },
+        "rotation.y": {
+          "value": 0.09553894411985461,
+          "velocity": -0.29841157197389734
+        },
+        "width": {
+          "value": 152.8481648766098,
+          "velocity": 38.45067602409515
+        },
+        "height": {
+          "value": 88.51872320265352,
+          "velocity": 142.32566612992946
+        }
+      }
+    },
+    {
+      "worldTimeMs": 691.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.5981567885428158,
+          "velocity": -1.6080381919611886
+        },
+        "rotation.p": {
+          "value": 0.9726395382520807,
+          "velocity": -1.6080381919611886
+        },
+        "rotation.y": {
+          "value": 0.09370738620811257,
+          "velocity": -0.318241243369267
+        },
+        "width": {
+          "value": 153.080597841986,
+          "velocity": 39.851536214040486
+        },
+        "height": {
+          "value": 89.33383662578282,
+          "velocity": 132.38661352240797
+        }
+      }
+    },
+    {
+      "worldTimeMs": 697,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6075100817670559,
+          "velocity": -1.5432323501985874
+        },
+        "rotation.p": {
+          "value": 0.9632862450278405,
+          "velocity": -1.5432323501985874
+        },
+        "rotation.y": {
+          "value": 0.09176311603471055,
+          "velocity": -0.3364094576492333
+        },
+        "width": {
+          "value": 153.3215119814981,
+          "velocity": 41.30804052833013
+        },
+        "height": {
+          "value": 90.09249465888311,
+          "velocity": 123.2964856319172
+        }
+      }
+    },
+    {
+      "worldTimeMs": 702.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6164905092668018,
+          "velocity": -1.4823868450040112
+        },
+        "rotation.p": {
+          "value": 0.9543058175280947,
+          "velocity": -1.4823868450040112
+        },
+        "rotation.y": {
+          "value": 0.08971545817925689,
+          "velocity": -0.35309436497542795
+        },
+        "width": {
+          "value": 153.57124769934555,
+          "velocity": 42.82360724453409
+        },
+        "height": {
+          "value": 90.79951090572135,
+          "velocity": 114.97871870608348
+        }
+      }
+    },
+    {
+      "worldTimeMs": 708.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6251206395058068,
+          "velocity": -1.4251871097227948
+        },
+        "rotation.p": {
+          "value": 0.9456756872890898,
+          "velocity": -1.4251871097227948
+        },
+        "rotation.y": {
+          "value": 0.08757274529518846,
+          "velocity": -0.3684524012426424
+        },
+        "width": {
+          "value": 153.83016650533574,
+          "velocity": 44.40193160281481
+        },
+        "height": {
+          "value": 91.45924662978712,
+          "velocity": 107.3582143542699
+        }
+      }
+    },
+    {
+      "worldTimeMs": 714.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6334212463209199,
+          "velocity": -1.371343190987326
+        },
+        "rotation.p": {
+          "value": 0.9373750804739767,
+          "velocity": -1.371343190987326
+        },
+        "rotation.y": {
+          "value": 0.08534243899891271,
+          "velocity": -0.3826209575128487
+        },
+        "width": {
+          "value": 154.09865273788026,
+          "velocity": 46.04701271263976
+        },
+        "height": {
+          "value": 92.07562966336684,
+          "velocity": 100.36441886595867
+        }
+      }
+    },
+    {
+      "worldTimeMs": 720.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6414114539170832,
+          "velocity": -1.320589226408223
+        },
+        "rotation.p": {
+          "value": 0.9293848728778134,
+          "velocity": -1.320589226408223
+        },
+        "rotation.y": {
+          "value": 0.08303123563755056,
+          "velocity": -0.3957207984431732
+        },
+        "width": {
+          "value": 154.37711545511053,
+          "velocity": 47.76318332180354
+        },
+        "height": {
+          "value": 92.65218615688323,
+          "velocity": 93.9327166988743
+        }
+      }
+    },
+    {
+      "worldTimeMs": 726.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6491088767197556,
+          "velocity": -1.272682294265294
+        },
+        "rotation.p": {
+          "value": 0.9216874500751411,
+          "velocity": -1.272682294265294
+        },
+        "rotation.y": {
+          "value": 0.08064515849182594,
+          "velocity": -0.40785821263332456
+        },
+        "width": {
+          "value": 154.6659905119417,
+          "velocity": 49.55514273073032
+        },
+        "height": {
+          "value": 93.19207743033965,
+          "velocity": 88.00484748542837
+        }
+      }
+    },
+    {
+      "worldTimeMs": 732.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6565297512841862,
+          "velocity": -1.2274009269613586
+        },
+        "rotation.p": {
+          "value": 0.9142665755107103,
+          "velocity": -1.2274009269613586
+        },
+        "rotation.y": {
+          "value": 0.07818963799482931,
+          "velocity": -0.4191269013942046
+        },
+        "width": {
+          "value": 154.96574284262402,
+          "velocity": 51.427993143902995
+        },
+        "height": {
+          "value": 93.69813753241078,
+          "velocity": 82.52878322700049
+        }
+      }
+    },
+    {
+      "worldTimeMs": 738.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6636890588650632,
+          "velocity": -1.1845434762879368
+        },
+        "rotation.p": {
+          "value": 0.9071072679298335,
+          "velocity": -1.1845434762879368
+        },
+        "rotation.y": {
+          "value": 0.07566958146851775,
+          "velocity": -0.4296096245445842
+        },
+        "width": {
+          "value": 155.2768689700563,
+          "velocity": 53.38727974916431
+        },
+        "height": {
+          "value": 94.17290914930709,
+          "velocity": 77.45832840585012
+        }
+      }
+    },
+    {
+      "worldTimeMs": 744.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6706006381464604,
+          "velocity": -1.1439264490643268
+        },
+        "rotation.p": {
+          "value": 0.9001956886484361,
+          "velocity": -1.1439264490643268
+        },
+        "rotation.y": {
+          "value": 0.07308943375109261,
+          "velocity": -0.43937962713509865
+        },
+        "width": {
+          "value": 155.59989976482242,
+          "velocity": 55.43903479869738
+        },
+        "height": {
+          "value": 94.61867671802086,
+          "velocity": 72.75259739082567
+        }
+      }
+    },
+    {
+      "worldTimeMs": 750.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6772772881893407,
+          "velocity": -1.105382885482342
+        },
+        "rotation.p": {
+          "value": 0.893519038605556,
+          "velocity": -1.105382885482342
+        },
+        "rotation.y": {
+          "value": 0.07045322994100311,
+          "velocity": -0.4485018723686346
+        },
+        "width": {
+          "value": 155.93540347842898,
+          "velocity": 57.58982592423165
+        },
+        "height": {
+          "value": 95.03749630193616,
+          "velocity": 68.37545717710212
+        }
+      }
+    },
+    {
+      "worldTimeMs": 756.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6837308619864627,
+          "velocity": -1.0687608219948728
+        },
+        "rotation.p": {
+          "value": 0.887065464808434,
+          "velocity": -1.0687608219948728
+        },
+        "rotation.y": {
+          "value": 0.0677646413348648,
+          "velocity": -0.45703410520286186
+        },
+        "width": {
+          "value": 156.28398907639487,
+          "velocity": 59.846808841186835
+        },
+        "height": {
+          "value": 95.43122218062902,
+          "velocity": 64.29498349191327
+        }
+      }
+    },
+    {
+      "worldTimeMs": 762.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6899723511996648,
+          "velocity": -1.0339218606971385
+        },
+        "rotation.p": {
+          "value": 0.8808239755952318,
+          "velocity": -1.0339218606971385
+        },
+        "rotation.y": {
+          "value": 0.06502701549639564,
+          "velocity": -0.4650277692502745
+        },
+        "width": {
+          "value": 156.64630989740047,
+          "velocity": 62.21778446445626
+        },
+        "height": {
+          "value": 95.80153031414918,
+          "velocity": 60.482954545706846
+        }
+      }
+    },
+    {
+      "worldTimeMs": 768.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.6960119627440342,
+          "velocity": -1.0007398543795463
+        },
+        "rotation.p": {
+          "value": 0.8747843640508624,
+          "velocity": -1.0007398543795463
+        },
+        "rotation.y": {
+          "value": 0.062243411265990756,
+          "velocity": -0.4725287972620841
+        },
+        "width": {
+          "value": 157.02306766426133,
+          "velocity": 64.71126024713293
+        },
+        "height": {
+          "value": 96.14993894142259,
+          "velocity": 56.91439288355233
+        }
+      }
+    },
+    {
+      "worldTimeMs": 774.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.701859187912297,
+          "velocity": -0.9690997084183701
+        },
+        "rotation.p": {
+          "value": 0.8689371388825998,
+          "velocity": -0.9690997084183701
+        },
+        "rotation.y": {
+          "value": 0.05941662940732569,
+          "velocity": -0.4795782930536834
+        },
+        "width": {
+          "value": 157.41501687046525,
+          "velocity": 67.33651522664621
+        },
+        "height": {
+          "value": 96.47782660900441,
+          "velocity": 53.567157972104326
+        }
+      }
+    },
+    {
+      "worldTimeMs": 780.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.707522864724007,
+          "velocity": -0.938896295817774
+        },
+        "rotation.p": {
+          "value": 0.8632734620708896,
+          "velocity": -0.938896295817774
+        },
+        "rotation.y": {
+          "value": 0.05654923948835468,
+          "velocity": -0.48621312039605835
+        },
+        "width": {
+          "value": 157.82296956158694,
+          "velocity": 70.10366776909784
+        },
+        "height": {
+          "value": 96.78644792816927,
+          "velocity": 50.42158793239603
+        }
+      }
+    },
+    {
+      "worldTimeMs": 786.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7130112341531929,
+          "velocity": -0.9100334789457548
+        },
+        "rotation.p": {
+          "value": 0.8577850926417037,
+          "velocity": -0.9100334789457548
+        },
+        "rotation.y": {
+          "value": 0.05364360350835651,
+          "velocity": -0.4924664122560483
+        },
+        "width": {
+          "value": 158.24780052286192,
+          "velocity": 73.02374426888137
+        },
+        "height": {
+          "value": 97.07694734185645,
+          "velocity": 47.46018672664759
+        }
+      }
+    },
+    {
+      "worldTimeMs": 792,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.718331990845025,
+          "velocity": -0.882423230091475
+        },
+        "rotation.p": {
+          "value": 0.8524643359498716,
+          "velocity": -0.882423230091475
+        },
+        "rotation.y": {
+          "value": 0.050701896709015086,
+          "velocity": -0.49836801185755075
+        },
+        "width": {
+          "value": 158.69045287085868,
+          "velocity": 76.1087459830349
+        },
+        "height": {
+          "value": 97.35037115802659,
+          "velocity": 44.667352235150304
+        }
+      }
+    },
+    {
+      "worldTimeMs": 797.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7234923288833802,
+          "velocity": -0.8559848424245088
+        },
+        "rotation.p": {
+          "value": 0.8473039979115162,
+          "velocity": -0.8559848424245088
+        },
+        "rotation.y": {
+          "value": 0.0477261259444866,
+          "velocity": -0.5039448553618496
+        },
+        "width": {
+          "value": 159.15194402606937,
+          "velocity": 79.37170961112554
+        },
+        "height": {
+          "value": 97.60767807810652,
+          "velocity": 42.02914047894404
+        }
+      }
+    },
+    {
+      "worldTimeMs": 803.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7284989831209591,
+          "velocity": -0.8306442229319883
+        },
+        "rotation.p": {
+          "value": 0.8422973436739376,
+          "velocity": -0.8306442229319883
+        },
+        "rotation.y": {
+          "value": 0.04471814593163882,
+          "velocity": -0.5092213045167562
+        },
+        "width": {
+          "value": 159.63337201085855,
+          "velocity": 82.82675496452457
+        },
+        "height": {
+          "value": 97.84974842146552,
+          "velocity": 39.53306143399883
+        }
+      }
+    },
+    {
+      "worldTimeMs": 809.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7333582665344277,
+          "velocity": -0.8063332592308005
+        },
+        "rotation.p": {
+          "value": 0.8374380602604687,
+          "velocity": -0.8063332592308005
+        },
+        "rotation.y": {
+          "value": 0.04167967365585705,
+          "velocity": -0.514219436381316
+        },
+        "width": {
+          "value": 160.13592196859992,
+          "velocity": 86.48910981341041
+        },
+        "height": {
+          "value": 98.0773922208693,
+          "velocity": 37.16790225346987
+        }
+      }
+    },
+    {
+      "worldTimeMs": 815.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7380761040203875,
+          "velocity": -0.782989252656218
+        },
+        "rotation.p": {
+          "value": 0.8327202227745092,
+          "velocity": -0.782989252656218
+        },
+        "rotation.y": {
+          "value": 0.03861230116884589,
+          "velocity": -0.5189592961723305
+        },
+        "width": {
+          "value": 160.66087272799686,
+          "velocity": 90.37509735288705
+        },
+        "height": {
+          "value": 98.29135634031567,
+          "velocity": 34.92357415684975
+        }
+      }
+    },
+    {
+      "worldTimeMs": 821.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7426580630045798,
+          "velocity": -0.7605544106228377
+        },
+        "rotation.p": {
+          "value": 0.8281382637903167,
+          "velocity": -0.7605544106228377
+        },
+        "rotation.y": {
+          "value": 0.03551750698170917,
+          "velocity": -0.5234591183774843
+        },
+        "width": {
+          "value": 161.20960313169746,
+          "velocity": 94.5020651396619
+        },
+        "height": {
+          "value": 98.49233074579004,
+          "velocity": 32.79097969726219
+        }
+      }
+    },
+    {
+      "worldTimeMs": 827.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7471093811970166,
+          "velocity": -0.7389753918790801
+        },
+        "rotation.p": {
+          "value": 0.8236869455978799,
+          "velocity": -0.7389753918790801
+        },
+        "rotation.y": {
+          "value": 0.03239666622837224,
+          "velocity": -0.5277355205154746
+        },
+        "width": {
+          "value": 161.78359769676723,
+          "velocity": 98.88822507770819
+        },
+        "height": {
+          "value": 98.68095404124477,
+          "velocity": 30.761897548256385
+        }
+      }
+    },
+    {
+      "worldTimeMs": 833.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7514349917896871,
+          "velocity": -0.7182028988960043
+        },
+        "rotation.p": {
+          "value": 0.8193613350052096,
+          "velocity": -0.7182028988960043
+        },
+        "rotation.y": {
+          "value": 0.029251059750378172,
+          "velocity": -0.5318036732762381
+        },
+        "width": {
+          "value": 162.38445095767494,
+          "velocity": 103.55236111286844
+        },
+        "height": {
+          "value": 98.8578183663196,
+          "velocity": 28.828882343808317
+        }
+      }
+    },
+    {
+      "worldTimeMs": 839.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7556395463610794,
+          "velocity": -0.6981913122228751
+        },
+        "rotation.p": {
+          "value": 0.8151567804338171,
+          "velocity": -0.6981913122228751
+        },
+        "rotation.y": {
+          "value": 0.02608188223359602,
+          "velocity": -0.5356774502265461
+        },
+        "width": {
+          "value": 163.0138695351327,
+          "velocity": 108.51334354345941
+        },
+        "height": {
+          "value": 99.02347373873334,
+          "velocity": 26.985177454066836
+        }
+      }
+    },
+    {
+      "worldTimeMs": 845.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7597274357227293,
+          "velocity": -0.678898362193701
+        },
+        "rotation.p": {
+          "value": 0.8110688910721674,
+          "velocity": -0.678898362193701
+        },
+        "rotation.y": {
+          "value": 0.02289024950988096,
+          "velocity": -0.5393695598026421
+        },
+        "width": {
+          "value": 163.67367054374589,
+          "velocity": 113.78936492721935
+        },
+        "height": {
+          "value": 99.17843191263177,
+          "velocity": 25.2246388844436
+        }
+      }
+    },
+    {
+      "worldTimeMs": 851.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7637028089171242,
+          "velocity": -0.6602848338752207
+        },
+        "rotation.p": {
+          "value": 0.8070935178777723,
+          "velocity": -0.6602848338752207
+        },
+        "rotation.y": {
+          "value": 0.019677205121764664,
+          "velocity": -0.5428916619190843
+        },
+        "width": {
+          "value": 164.3657743575063,
+          "velocity": 119.39678123375242
+        },
+        "height": {
+          "value": 99.32316981421855,
+          "velocity": 23.541668749476294
+        }
+      }
+    },
+    {
+      "worldTimeMs": 857.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7675695905532887,
+          "velocity": -0.6423143016058636
+        },
+        "rotation.p": {
+          "value": 0.8032267362416078,
+          "velocity": -0.6423143016058636
+        },
+        "rotation.y": {
+          "value": 0.016443726235437217,
+          "velocity": -0.5462544711903672
+        },
+        "width": {
+          "value": 165.09218894867018,
+          "velocity": 125.34840266882414
+        },
+        "height": {
+          "value": 99.45813260749091,
+          "velocity": 21.931156999386907
+        }
+      }
+    },
+    {
+      "worldTimeMs": 863.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7713314966459347,
+          "velocity": -0.6249528898880738
+        },
+        "rotation.p": {
+          "value": 0.7994648301489619,
+          "velocity": -0.6249528898880738
+        },
+        "rotation.y": {
+          "value": 0.013190728976289435,
+          "velocity": -0.5494678484798123
+        },
+        "width": {
+          "value": 165.85498195888175,
+          "velocity": 131.6510330874507
+        },
+        "height": {
+          "value": 99.58373643564181,
+          "velocity": 20.38843027073674
+        }
+      }
+    },
+    {
+      "worldTimeMs": 869.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7749920491059666,
+          "velocity": -0.6081690577653431
+        },
+        "rotation.p": {
+          "value": 0.7958042776889299,
+          "velocity": -0.6081690577653431
+        },
+        "rotation.y": {
+          "value": 0.009919073251835598,
+          "velocity": -0.5525408822506376
+        },
+        "width": {
+          "value": 166.65623532965532,
+          "velocity": 138.3020114150147
+        },
+        "height": {
+          "value": 99.70037087749091,
+          "velocity": 18.909206897326836
+        }
+      }
+    },
+    {
+      "worldTimeMs": 875.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7785545890140843,
+          "velocity": -0.5919334041435824
+        },
+        "rotation.p": {
+          "value": 0.7922417377808123,
+          "velocity": -0.5919334041435824
+        },
+        "rotation.y": {
+          "value": 0.0066295671186985,
+          "velocity": -0.5554819609903725
+        },
+        "width": {
+          "value": 167.49797575271305,
+          "velocity": 145.2844785857117
+        },
+        "height": {
+          "value": 99.80840115301211,
+          "velocity": 17.489557257509073
+        }
+      }
+    },
+    {
+      "worldTimeMs": 881.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7820222887950301,
+          "velocity": -0.5762184918075989
+        },
+        "rotation.p": {
+          "value": 0.7887740379998666,
+          "velocity": -0.5762184918075989
+        },
+        "rotation.y": {
+          "value": 0.003322970743320296,
+          "velocity": -0.5582988378062363
+        },
+        "width": {
+          "value": 168.38207257658502,
+          "velocity": 152.56111126310597
+        },
+        "height": {
+          "value": 99.90817010749485,
+          "velocity": 16.125868752952385
+        }
+      }
+    },
+    {
+      "worldTimeMs": 886.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7853976023974986,
+          "velocity": -0.561001211157688
+        },
+        "rotation.p": {
+          "value": 0.785398724397398,
+          "velocity": -0.561001211157688
+        },
+        "rotation.y": {
+          "value": 5.609984655757213e-7,
+          "velocity": -0.5609982429024154
+        },
+        "width": {
+          "value": 169.30993349888018,
+          "velocity": 160.06490904620398
+        },
+        "height": {
+          "value": 99.99998518507691,
+          "velocity": 14.815031367872395
+        }
+      }
+    },
+    {
+      "worldTimeMs": 887,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7853981633974483,
+          "velocity": -0.5609986881410344
+        },
+        "rotation.p": {
+          "value": 0.7853981633974483,
+          "velocity": -0.5609986881410344
+        },
+        "rotation.y": {
+          "value": 0,
+          "velocity": -0.5609986881410344
+        },
+        "width": {
+          "value": 169.31009356442829,
+          "velocity": 160.0661870977559
+        },
+        "height": {
+          "value": 100,
+          "velocity": 14.814814814814815
+        }
+      }
+    },
+    {
+      "worldTimeMs": 887.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7853988615300109,
+          "velocity": -0.6981334245835397
+        },
+        "rotation.p": {
+          "value": 0.7853974652648854,
+          "velocity": -0.6981334245835397
+        },
+        "rotation.y": {
+          "value": -6.981299770341521e-7,
+          "velocity": -0.698128253225158
+        },
+        "width": {
+          "value": 169.31025363125437,
+          "velocity": 160.06746515296425
+        },
+        "height": {
+          "value": 99.99991025569884,
+          "velocity": -89.7450125746288
+        }
+      }
+    },
+    {
+      "worldTimeMs": 892.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7895739753720308,
+          "velocity": -0.7085035254023728
+        },
+        "rotation.p": {
+          "value": 0.7812223514228657,
+          "velocity": -0.7085035254023728
+        },
+        "rotation.y": {
+          "value": -0.004083778883519346,
+          "velocity": -0.6773534322457082
+        },
+        "width": {
+          "value": 170.28310892261004,
+          "velocity": 167.69616749309037
+        },
+        "height": {
+          "value": 99.44093549493623,
+          "velocity": -98.77357549609029
+        }
+      }
+    },
+    {
+      "worldTimeMs": 898.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7938121993214617,
+          "velocity": -0.7191565789111255
+        },
+        "rotation.p": {
+          "value": 0.7769841274734351,
+          "velocity": -0.7191565789111255
+        },
+        "rotation.y": {
+          "value": -0.00804231481231484,
+          "velocity": -0.6559398952311633
+        },
+        "width": {
+          "value": 171.30143683341134,
+          "velocity": 175.29962313956574
+        },
+        "height": {
+          "value": 98.8244139245915,
+          "velocity": -109.1450825210125
+        }
+      }
+    },
+    {
+      "worldTimeMs": 904.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.7981145394306355,
+          "velocity": -0.7301025463450014
+        },
+        "rotation.p": {
+          "value": 0.7726817873642611,
+          "velocity": -0.7301025463450014
+        },
+        "rotation.y": {
+          "value": -0.011871750439771159,
+          "velocity": -0.633862031284765
+        },
+        "width": {
+          "value": 172.3643315546017,
+          "velocity": 182.6683887296928
+        },
+        "height": {
+          "value": 98.14153613817878,
+          "velocity": -121.18842611568155
+        }
+      }
+    },
+    {
+      "worldTimeMs": 910.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8024827711111715,
+          "velocity": -0.7413537411760511
+        },
+        "rotation.p": {
+          "value": 0.7683135556837253,
+          "velocity": -0.7413537411760511
+        },
+        "rotation.y": {
+          "value": -0.01556805080561867,
+          "velocity": -0.6110890513264068
+        },
+        "width": {
+          "value": 173.4696305083755,
+          "velocity": 189.53328074049548
+        },
+        "height": {
+          "value": 97.38112557343901,
+          "velocity": -135.34689491676897
+        }
+      }
+    },
+    {
+      "worldTimeMs": 916.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8069187448480306,
+          "velocity": -0.7529231445324094
+        },
+        "rotation.p": {
+          "value": 0.7638775819468657,
+          "velocity": -0.7529231445324094
+        },
+        "rotation.y": {
+          "value": -0.019126992698693227,
+          "velocity": -0.5875883122438896
+        },
+        "width": {
+          "value": 174.61340103441097,
+          "velocity": 195.56915003679745
+        },
+        "height": {
+          "value": 96.52892668948371,
+          "velocity": -152.22354518901577
+        }
+      }
+    },
+    {
+      "worldTimeMs": 922.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8114243902862279,
+          "velocity": -0.7648244468854379
+        },
+        "rotation.p": {
+          "value": 0.7593719365086684,
+          "velocity": -0.7648244468854379
+        },
+        "rotation.y": {
+          "value": -0.022544153258135004,
+          "velocity": -0.5633251836626705
+        },
+        "width": {
+          "value": 175.7896579614599,
+          "velocity": 200.41448199438253
+        },
+        "height": {
+          "value": 95.56647381761803,
+          "velocity": -172.64569896904888
+        }
+      }
+    },
+    {
+      "worldTimeMs": 928.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8160017205726894,
+          "velocity": -0.7770720923226525
+        },
+        "rotation.p": {
+          "value": 0.7547946062222072,
+          "velocity": -0.7770720923226525
+        },
+        "rotation.y": {
+          "value": -0.025814897752481875,
+          "velocity": -0.5382629041202396
+        },
+        "width": {
+          "value": 176.9902496187207,
+          "velocity": 203.70870272009
+        },
+        "height": {
+          "value": 94.46953276440728,
+          "velocity": -197.74164305072142
+        }
+      }
+    },
+    {
+      "worldTimeMs": 934.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8206528369688835,
+          "velocity": -0.7896813254964733
+        },
+        "rotation.p": {
+          "value": 0.7501434898260132,
+          "velocity": -0.7896813254964733
+        },
+        "rotation.y": {
+          "value": -0.02893436647128954,
+          "velocity": -0.5123624258110826
+        },
+        "width": {
+          "value": 178.20501364943192,
+          "velocity": 205.14467896629762
+        },
+        "height": {
+          "value": 93.20614749157019,
+          "velocity": -228.9812329830936
+        }
+      }
+    },
+    {
+      "worldTimeMs": 940.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8253799337503346,
+          "velocity": -0.802668241318688
+        },
+        "rotation.p": {
+          "value": 0.7454163930445622,
+          "velocity": -0.802668241318688
+        },
+        "rotation.y": {
+          "value": -0.031897460658830194,
+          "velocity": -0.4855822470234088
+        },
+        "width": {
+          "value": 179.42226497560583,
+          "velocity": 204.5256041609445
+        },
+        "height": {
+          "value": 91.73500759118197,
+          "velocity": -267.9616811772957
+        }
+      }
+    },
+    {
+      "worldTimeMs": 946.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8301853034094581,
+          "velocity": -0.8160498374419115
+        },
+        "rotation.p": {
+          "value": 0.7406110233854385,
+          "velocity": -0.8160498374419115
+        },
+        "rotation.y": {
+          "value": -0.03469882741408194,
+          "velocity": -0.4578782313494992
+        },
+        "width": {
+          "value": 180.62959209991578,
+          "velocity": 201.80883097313935
+        },
+        "height": {
+          "value": 90.00758717499494,
+          "velocity": -315.1211117813633
+        }
+      }
+    },
+    {
+      "worldTimeMs": 952.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8350713421782956,
+          "velocity": -0.8298440695298724
+        },
+        "rotation.p": {
+          "value": 0.7357249846166011,
+          "velocity": -0.8298440695298724
+        },
+        "rotation.y": {
+          "value": -0.037332843475671305,
+          "velocity": -0.429203412720888
+        },
+        "width": {
+          "value": 181.81483186454864,
+          "velocity": 197.11996236837237
+        },
+        "height": {
+          "value": 87.98638049015437,
+          "velocity": -365.0610498816156
+        }
+      }
+    },
+    {
+      "worldTimeMs": 958.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8400405558875843,
+          "velocity": -0.8440699092650898
+        },
+        "rotation.p": {
+          "value": 0.7307557709073121,
+          "velocity": -0.8440699092650898
+        },
+        "rotation.y": {
+          "value": -0.039793597804741704,
+          "velocity": -0.39950778530197817
+        },
+        "width": {
+          "value": 182.96701989350746,
+          "velocity": 190.73069867249387
+        },
+        "height": {
+          "value": 85.70694624543312,
+          "velocity": -396.9670025032418
+        }
+      }
+    },
+    {
+      "worldTimeMs": 964.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8450955661780918,
+          "velocity": -0.8587474049715365
+        },
+        "rotation.p": {
+          "value": 0.7257007606168048,
+          "velocity": -0.8587474049715365
+        },
+        "rotation.y": {
+          "value": -0.04207487287297081,
+          "velocity": -0.3687380772770337
+        },
+        "width": {
+          "value": 184.07711844726805,
+          "velocity": 183.00843339815137
+        },
+        "height": {
+          "value": 83.3723310289504,
+          "velocity": -379.76540859506935
+        }
+      }
+    },
+    {
+      "worldTimeMs": 970.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8502391170791552,
+          "velocity": -0.8738977446365082
+        },
+        "rotation.p": {
+          "value": 0.7205572097157411,
+          "velocity": -0.8738977446365082
+        },
+        "rotation.y": {
+          "value": -0.0441701245573023,
+          "velocity": -0.33683750759331704
+        },
+        "width": {
+          "value": 185.13840434395874,
+          "velocity": 174.35544061715322
+        },
+        "height": {
+          "value": 81.29107289036669,
+          "velocity": -316.58534990801706
+        }
+      }
+    },
+    {
+      "worldTimeMs": 976.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8554740819677347,
+          "velocity": -0.8895433209939975
+        },
+        "rotation.p": {
+          "value": 0.7153222448271619,
+          "velocity": -0.8895433209939975
+        },
+        "rotation.y": {
+          "value": -0.04607246053755749,
+          "velocity": -0.3037455247877223
+        },
+        "width": {
+          "value": 186.14651063356973,
+          "velocity": 165.15556039126292
+        },
+        "height": {
+          "value": 79.62946700168445,
+          "velocity": -244.1691696422042
+        }
+      }
+    },
+    {
+      "worldTimeMs": 982,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8608034709188386,
+          "velocity": -0.9057077981738884
+        },
+        "rotation.p": {
+          "value": 0.7099928558760576,
+          "velocity": -0.9057077981738884
+        },
+        "rotation.y": {
+          "value": -0.04777461708822803,
+          "velocity": -0.2693975271385476
+        },
+        "width": {
+          "value": 187.099202133805,
+          "velocity": 155.73881511103332
+        },
+        "height": {
+          "value": 78.36621879985805,
+          "velocity": -183.90873648594692
+        }
+      }
+    },
+    {
+      "worldTimeMs": 987.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8662304384546575,
+          "velocity": -0.9224161792175642
+        },
+        "rotation.p": {
+          "value": 0.7045658883402391,
+          "velocity": -0.9224161792175642
+        },
+        "rotation.y": {
+          "value": -0.04926893415174266,
+          "velocity": -0.2337245635655462
+        },
+        "width": {
+          "value": 187.99599969840133,
+          "velocity": 146.36547846109116
+        },
+        "height": {
+          "value": 77.41630716697816,
+          "velocity": -138.28023968861217
+        }
+      }
+    },
+    {
+      "worldTimeMs": 993.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8717582916948381,
+          "velocity": -0.9396948734991242
+        },
+        "rotation.p": {
+          "value": 0.6990380351000582,
+          "velocity": -0.9396948734991242
+        },
+        "rotation.y": {
+          "value": -0.05054732857783389,
+          "velocity": -0.1966530149721705
+        },
+        "width": {
+          "value": 188.83775777775222,
+          "velocity": 137.22529667107483
+        },
+        "height": {
+          "value": 76.70143043117363,
+          "velocity": -104.13711984078779
+        }
+      }
+    },
+    {
+      "worldTimeMs": 999.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8773904989036894,
+          "velocity": -0.9575717627570847
+        },
+        "rotation.p": {
+          "value": 0.6934058278912071,
+          "velocity": -0.9575717627570847
+        },
+        "rotation.y": {
+          "value": -0.05160126541289903,
+          "velocity": -0.1581042561132932
+        },
+        "width": {
+          "value": 189.62626717377262,
+          "velocity": 128.44575358308379
+        },
+        "height": {
+          "value": 76.16350409167144,
+          "velocity": -78.19849930729228
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1005.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8831306984211821,
+          "velocity": -0.9760762640152707
+        },
+        "rotation.p": {
+          "value": 0.6876656283737144,
+          "velocity": -0.9760762640152707
+        },
+        "rotation.y": {
+          "value": -0.052421727125276645,
+          "velocity": -0.11799429861711913
+        },
+        "width": {
+          "value": 190.36392027376527,
+          "velocity": 120.10411573101483
+        },
+        "height": {
+          "value": 75.76140916702136,
+          "velocity": -58.052704164795635
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1011.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8889827079528706,
+          "velocity": -0.9952393871297599
+        },
+        "rotation.p": {
+          "value": 0.6818136188420261,
+          "velocity": -0.9952393871297599
+        },
+        "rotation.y": {
+          "value": -0.0529991806582043,
+          "velocity": -0.07623341654008846
+        },
+        "width": {
+          "value": 191.05344998683086,
+          "velocity": 112.23978744217207
+        },
+        "height": {
+          "value": 75.46595452243194,
+          "velocity": -42.05421903291001
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1017.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.8949505341784367,
+          "velocity": -1.0150937840113032
+        },
+        "rotation.p": {
+          "value": 0.6758457926164598,
+          "velocity": -1.0150937840113032
+        },
+        "rotation.y": {
+          "value": -0.05332354221327975,
+          "velocity": -0.032725756851222504
+        },
+        "width": {
+          "value": 191.69773816797158,
+          "velocity": 104.86517546409455
+        },
+        "height": {
+          "value": 75.25603454729321,
+          "velocity": -29.088994688952383
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1023.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9010383826185796,
+          "velocity": -1.035673785702576
+        },
+        "rotation.p": {
+          "value": 0.669757944176317,
+          "velocity": -1.035673785702576
+        },
+        "rotation.y": {
+          "value": -0.0533841396853362,
+          "velocity": 0.012631061392100235
+        },
+        "width": {
+          "value": 192.29968233088897,
+          "velocity": 97.97441875411012
+        },
+        "height": {
+          "value": 75.116047300723,
+          "velocity": -18.39249622781399
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1029.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9072506676741331,
+          "velocity": -1.0570154223902697
+        },
+        "rotation.p": {
+          "value": 0.6635456591207632,
+          "velocity": -1.0570154223902697
+        },
+        "rotation.y": {
+          "value": -0.05316967269712011,
+          "velocity": 0.059946353597580236
+        },
+        "width": {
+          "value": 192.8621077749466,
+          "velocity": 91.54999002278774
+        },
+        "height": {
+          "value": 75.0342030520441,
+          "velocity": -9.42926899098917
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1035.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9135920227181429,
+          "velocity": -1.0791564200462471
+        },
+        "rotation.p": {
+          "value": 0.6572043040767537,
+          "velocity": -1.0791564200462471
+        },
+        "rotation.y": {
+          "value": -0.052668170222090145,
+          "velocity": 0.10933677394000031
+        },
+        "width": {
+          "value": 193.38771329646005,
+          "velocity": 85.56746799869457
+        },
+        "height": {
+          "value": 75.00140948208214,
+          "velocity": -1.8160649635609893
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1036.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9152817715341989,
+          "velocity": -1.0851169212713134
+        },
+        "rotation.p": {
+          "value": 0.6555145552606977,
+          "velocity": -1.0851169212713134
+        },
+        "rotation.y": {
+          "value": -0.05248703841228543,
+          "velocity": 0.12268596285786976
+        },
+        "width": {
+          "value": 193.5201494174119,
+          "velocity": 84.06405621608232
+        },
+        "height": {
+          "value": 75.0000000005698,
+          "velocity": -0.0011396153754577997
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.915282856653038,
+          "velocity": -1.085120757176221
+        },
+        "rotation.p": {
+          "value": 0.6555134701418585,
+          "velocity": -1.085120757176221
+        },
+        "rotation.y": {
+          "value": -0.05248691572202349,
+          "velocity": 0.12269456103973483
+        },
+        "width": {
+          "value": 193.52023348099124,
+          "velocity": 84.06310247774931
+        },
+        "height": {
+          "value": 75,
+          "velocity": -7.401486830834379e-14
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9152839417757132,
+          "velocity": -1.085124593105218
+        },
+        "rotation.p": {
+          "value": 0.6555123850191832,
+          "velocity": -1.085124593105218
+        },
+        "rotation.y": {
+          "value": -0.052486793023163315,
+          "velocity": 0.12270315928493777
+        },
+        "width": {
+          "value": 193.52031754361684,
+          "velocity": 84.06214875094206
+        },
+        "height": {
+          "value": 74.99999999995616,
+          "velocity": -0.00008766187178422485
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1041.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9200673100791967,
+          "velocity": -1.1021361656484472
+        },
+        "rotation.p": {
+          "value": 0.6507290167156997,
+          "velocity": -1.1021361656484472
+        },
+        "rotation.y": {
+          "value": -0.05186694583998363,
+          "velocity": 0.1609267062765842
+        },
+        "width": {
+          "value": 193.8790407480104,
+          "velocity": 79.99886201508949
+        },
+        "height": {
+          "value": 74.99915412989579,
+          "velocity": -0.3882800798054843
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1047.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9266816307002727,
+          "velocity": -1.1259956307442265
+        },
+        "rotation.p": {
+          "value": 0.6441146960946239,
+          "velocity": -1.1259956307442265
+        },
+        "rotation.y": {
+          "value": -0.05075255074761109,
+          "velocity": 0.21484862641851474
+        },
+        "width": {
+          "value": 194.33846094618167,
+          "velocity": 74.81484997935473
+        },
+        "height": {
+          "value": 74.99524689890615,
+          "velocity": -0.930912369537625
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1053.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9334403331887491,
+          "velocity": -1.1507772403804737
+        },
+        "rotation.p": {
+          "value": 0.6373559936061474,
+          "velocity": -1.1507772403804737
+        },
+        "rotation.y": {
+          "value": -0.049310724753150695,
+          "velocity": 0.27124341514098316
+        },
+        "width": {
+          "value": 194.76817040242213,
+          "velocity": 69.98623052621933
+        },
+        "height": {
+          "value": 74.9880621136495,
+          "velocity": -1.4924597472869983
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1059.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.940349021886411,
+          "velocity": -1.1765246710091541
+        },
+        "rotation.p": {
+          "value": 0.6304473049084851,
+          "velocity": -1.1765246710091541
+        },
+        "rotation.y": {
+          "value": -0.047526345624355135,
+          "velocity": 0.33026059437572425
+        },
+        "width": {
+          "value": 195.17019493665975,
+          "velocity": 65.48482283816513
+        },
+        "height": {
+          "value": 74.97748452568422,
+          "velocity": -2.073923756856147
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1065.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9474135634788149,
+          "velocity": -1.203282556733863
+        },
+        "rotation.p": {
+          "value": 0.6233827633160817,
+          "velocity": -1.203282556733863
+        },
+        "rotation.y": {
+          "value": -0.04538337735012286,
+          "velocity": 0.39205845009188345
+        },
+        "width": {
+          "value": 195.5463974357573,
+          "velocity": 61.28398745140397
+        },
+        "height": {
+          "value": 74.96339273503293,
+          "velocity": -2.676375896015646
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1071.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9546400915258333,
+          "velocity": -1.2310960780187556
+        },
+        "rotation.p": {
+          "value": 0.6161562352690634,
+          "velocity": -1.2310960780187556
+        },
+        "rotation.y": {
+          "value": -0.04286481812418855,
+          "velocity": 0.4568039939152456
+        },
+        "width": {
+          "value": 195.8984878978882,
+          "velocity": 57.358892830453684
+        },
+        "height": {
+          "value": 74.94565875745985,
+          "velocity": -3.300963559220079
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1077,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9620350081230673,
+          "velocity": -1.2600104005415476
+        },
+        "rotation.p": {
+          "value": 0.6087613186718294,
+          "velocity": -1.2600104005415476
+        },
+        "rotation.y": {
+          "value": -0.039952649186006516,
+          "velocity": 0.5246727009367198
+        },
+        "width": {
+          "value": 196.22803452976837,
+          "velocity": 53.68661555377676
+        },
+        "height": {
+          "value": 74.92414755478032,
+          "velocity": -3.9489165565847792
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1082.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9696049816893939,
+          "velocity": -1.2900699240301121
+        },
+        "rotation.p": {
+          "value": 0.6011913451055028,
+          "velocity": -1.2900699240301121
+        },
+        "rotation.y": {
+          "value": -0.03662778607802653,
+          "velocity": 0.5958479426797454
+        },
+        "width": {
+          "value": 196.53647510044811,
+          "velocity": 50.24613485224888
+        },
+        "height": {
+          "value": 74.89871652460762,
+          "velocity": -4.621554268439559
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1088.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9773569396102479,
+          "velocity": -1.3213172914750109
+        },
+        "rotation.p": {
+          "value": 0.5934393871846486,
+          "velocity": -1.3213172914750109
+        },
+        "rotation.y": {
+          "value": -0.03287003442602363,
+          "velocity": 0.6705200109869959
+        },
+        "width": {
+          "value": 196.82512805514733,
+          "velocity": 47.01826284925164
+        },
+        "height": {
+          "value": 74.86921494557389,
+          "velocity": -5.320293500386551
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1094.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.985298054139306,
+          "velocity": -1.3537920978924873
+        },
+        "rotation.p": {
+          "value": 0.5854982726555907,
+          "velocity": -1.3537920978924873
+        },
+        "rotation.y": {
+          "value": -0.02865805305070795,
+          "velocity": 0.7488845997289661
+        },
+        "width": {
+          "value": 197.09520309523268,
+          "velocity": 43.98553821957083
+        },
+        "height": {
+          "value": 74.83548337365804,
+          "velocity": -6.0466571096101145
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1100.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -0.9934357195622115,
+          "velocity": -1.3875292247503974
+        },
+        "rotation.p": {
+          "value": 0.5773606072326848,
+          "velocity": -1.3875292247503974
+        },
+        "rotation.y": {
+          "value": -0.02396932811081933,
+          "velocity": 0.8311405758073136
+        },
+        "width": {
+          "value": 197.34781106520887,
+          "velocity": 41.132101532503334
+        },
+        "height": {
+          "value": 74.79735298481754,
+          "velocity": -6.802283479074729
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1106.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0017775181441368,
+          "velocity": -1.4225567113727464
+        },
+        "rotation.p": {
+          "value": 0.5690188086507599,
+          "velocity": -1.4225567113727464
+        },
+        "rotation.y": {
+          "value": -0.018780163101776107,
+          "velocity": 0.9174868281416125
+        },
+        "width": {
+          "value": 197.58397307558562,
+          "velocity": 38.443564064818375
+        },
+        "height": {
+          "value": 74.75464485864725,
+          "velocity": -7.588936921981301
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1112.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0103311718090848,
+          "velocity": -1.4588930585430988
+        },
+        "rotation.p": {
+          "value": 0.5604651549858116,
+          "velocity": -1.4588930585430988
+        },
+        "rotation.y": {
+          "value": -0.013065690934777168,
+          "velocity": 1.0081179328029706
+        },
+        "width": {
+          "value": 197.80462884655344,
+          "velocity": 35.90687747284622
+        },
+        "height": {
+          "value": 74.70716919728473,
+          "velocity": -8.408519104108363
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1118.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.019104475827791,
+          "velocity": -1.4965438431133893
+        },
+        "rotation.p": {
+          "value": 0.5516918509671056,
+          "velocity": -1.4965438431133893
+        },
+        "rotation.y": {
+          "value": -0.0067999160442930515,
+          "velocity": 1.1032183146257322
+        },
+        "width": {
+          "value": 198.01064429192581,
+          "velocity": 33.51020876172193
+        },
+        "height": {
+          "value": 74.6547244732468,
+          "velocity": -9.263081575958482
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1124.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0281052100258838,
+          "velocity": -1.5354975075367627
+        },
+        "rotation.p": {
+          "value": 0.5426911167690127,
+          "velocity": -1.5354975075367627
+        },
+        "rotation.y": {
+          "value": 0.00004420344429272721,
+          "velocity": 1.2029545224242402
+        },
+        "width": {
+          "value": 198.20281838294073,
+          "velocity": 31.242823032613934
+        },
+        "height": {
+          "value": 74.5970964993282,
+          "velocity": -10.154839509277132
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1130.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0373410221823365,
+          "velocity": -1.5757201780366135
+        },
+        "rotation.p": {
+          "value": 0.53345530461256,
+          "velocity": -1.5757201780366135
+        },
+        "rotation.y": {
+          "value": 0.007494620990283333,
+          "velocity": 1.3074651708314213
+        },
+        "width": {
+          "value": 198.38188934217607,
+          "velocity": 29.094975210409917
+        },
+        "height": {
+          "value": 74.53405741312955,
+          "velocity": -11.086186732528475
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1136.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0468192774118203,
+          "velocity": -1.6171493646616475
+        },
+        "rotation.p": {
+          "value": 0.5239770493830761,
+          "velocity": -1.6171493646616475
+        },
+        "rotation.y": {
+          "value": 0.015579999031447337,
+          "velocity": 1.4168480452551846
+        },
+        "width": {
+          "value": 198.54854022235838,
+          "velocity": 27.057811136346455
+        },
+        "height": {
+          "value": 74.46536456823013,
+          "velocity": -12.059712155924705
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1142.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0565468664926234,
+          "velocity": -1.6596864134589782
+        },
+        "rotation.p": {
+          "value": 0.514249460302273,
+          "velocity": -1.6596864134589782
+        },
+        "rotation.y": {
+          "value": 0.024329420063544792,
+          "velocity": 1.531143832085684
+        },
+        "width": {
+          "value": 198.70340392549525,
+          "velocity": 25.123277901952964
+        },
+        "height": {
+          "value": 74.39075932350828,
+          "velocity": -13.078217666683564
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1148.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0665299654490301,
+          "velocity": -1.7031876265486152
+        },
+        "rotation.p": {
+          "value": 0.5042663613458666,
+          "velocity": -1.7031876265486152
+        },
+        "rotation.y": {
+          "value": 0.03377198978242002,
+          "velocity": 1.65031594730342
+        },
+        "width": {
+          "value": 198.84706771604976,
+          "velocity": 23.284042999305306
+        },
+        "height": {
+          "value": 74.30996572168426,
+          "velocity": -14.144737556647542
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1154.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.07677373843604,
+          "velocity": -1.7474540551761513
+        },
+        "rotation.p": {
+          "value": 0.49402258835885654,
+          "velocity": -1.7474540551761513
+        },
+        "rotation.y": {
+          "value": 0.04393630775749216,
+          "velocity": 1.774226027758251
+        },
+        "width": {
+          "value": 198.98007727880824,
+          "velocity": 21.53342169758517
+        },
+        "height": {
+          "value": 74.2226890478747,
+          "velocity": -15.262559513527718
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1160.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.0872819764200603,
+          "velocity": -1.7922201230907213
+        },
+        "rotation.p": {
+          "value": 0.4835143503748362,
+          "velocity": -1.7922201230907213
+        },
+        "rotation.y": {
+          "value": 0.054849779092907155,
+          "velocity": 1.9026048692016968
+        },
+        "width": {
+          "value": 199.10294036832929,
+          "velocity": 19.865311979552207
+        },
+        "height": {
+          "value": 74.12861425889655,
+          "velocity": -16.43524715869519
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1166.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.098056665739976,
+          "velocity": -1.8371414747358055
+        },
+        "rotation.p": {
+          "value": 0.47273966105492055,
+          "velocity": -1.8371414747358055
+        },
+        "rotation.y": {
+          "value": 0.06653774035930325,
+          "velocity": 2.0350190063801485
+        },
+        "width": {
+          "value": 199.21613009282126,
+          "velocity": 18.274136351488426
+        },
+        "height": {
+          "value": 74.02740427436116,
+          "velocity": -17.66666404158358
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1172,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.109097483935875,
+          "velocity": -1.8817827852331535
+        },
+        "rotation.p": {
+          "value": 0.46169884285902163,
+          "velocity": -1.8817827852331535
+        },
+        "rotation.y": {
+          "value": 0.07902237609353635,
+          "velocity": 2.1708338052754286
+        },
+        "width": {
+          "value": 199.32008787125324,
+          "velocity": 16.754789854821013
+        },
+        "height": {
+          "value": 73.9186981214313,
+          "velocity": -18.960998893683257
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1177.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.1204012259126852,
+          "velocity": -1.925606727675889
+        },
+        "rotation.p": {
+          "value": 0.45039510088221124,
+          "velocity": -1.925606727675889
+        },
+        "rotation.y": {
+          "value": 0.09232141013878636,
+          "velocity": 2.30917494336834
+        },
+        "width": {
+          "value": 199.41522609860962,
+          "velocity": 15.30259364257336
+        },
+        "height": {
+          "value": 73.80210892671592,
+          "velocity": -20.322791790555122
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1183.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.1319611722288778,
+          "velocity": -1.9679658544625263
+        },
+        "rotation.p": {
+          "value": 0.4388351545660188,
+          "velocity": -1.9679658544625263
+        },
+        "rotation.y": {
+          "value": 0.10644657112566437,
+          "velocity": 2.4488915243874483
+        },
+        "width": {
+          "value": 199.50193055055118,
+          "velocity": 13.913253529560905
+        },
+        "height": {
+          "value": 73.67722175147868,
+          "velocity": -21.75696065018427
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1189.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.1437664235319025,
+          "velocity": -2.008099755441729
+        },
+        "rotation.p": {
+          "value": 0.4270299032629942,
+          "velocity": -2.008099755441729
+        },
+        "rotation.y": {
+          "value": 0.121401855554743,
+          "velocity": 2.588525761159344
+        },
+        "width": {
+          "value": 199.58056255538344,
+          "velocity": 12.582822975709425
+        },
+        "height": {
+          "value": 73.54359127060201,
+          "velocity": -23.26882718576703
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1195.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.1558012408340734,
+          "velocity": -2.0451403807902033
+        },
+        "rotation.p": {
+          "value": 0.4149950859608233,
+          "velocity": -2.0451403807902033
+        },
+        "rotation.y": {
+          "value": 0.13718164662007531,
+          "velocity": 2.7262959674300027
+        },
+        "width": {
+          "value": 199.65146095817596,
+          "velocity": 11.307670013162223
+        },
+        "height": {
+          "value": 73.40073930219901,
+          "velocity": -24.864140997503437
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1201.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.168044449374447,
+          "velocity": -2.078128650895927
+        },
+        "rotation.p": {
+          "value": 0.4027518774204494,
+          "velocity": -2.078128650895927
+        },
+        "rotation.y": {
+          "value": 0.15376879171924793,
+          "velocity": 2.8601011138042582
+        },
+        "width": {
+          "value": 199.71494389912039,
+          "velocity": 10.084447677587093
+        },
+        "height": {
+          "value": 73.24815220426626,
+          "velocity": -26.549099886561535
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1207.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.180468981699863,
+          "velocity": -2.106045134344298
+        },
+        "rotation.p": {
+          "value": 0.39032734509503386,
+          "velocity": -2.106045134344298
+        },
+        "rotation.y": {
+          "value": 0.17113279294439102,
+          "velocity": 2.9875557632294174
+        },
+        "width": {
+          "value": 199.7713104257447,
+          "velocity": 8.910067550942438
+        },
+        "height": {
+          "value": 73.08527816848122,
+          "velocity": -28.330363645762564
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1213.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.193041648997487,
+          "velocity": -2.1278563589474806
+        },
+        "rotation.p": {
+          "value": 0.3777546777974093,
+          "velocity": -2.1278563589474806
+        },
+        "rotation.y": {
+          "value": 0.18922831463188006,
+          "velocity": 3.1060629687785575
+        },
+        "width": {
+          "value": 199.82084195639982,
+          "velocity": 7.781676066211129
+        },
+        "height": {
+          "value": 72.91152446074172,
+          "velocity": -30.215057447635843
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1219.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2057232327770557,
+          "velocity": -2.142576044044185
+        },
+        "rotation.p": {
+          "value": 0.3650730940178409,
+          "velocity": -2.142576044044185
+        },
+        "rotation.y": {
+          "value": 0.20799424719314058,
+          "velocity": 3.2129289141907487
+        },
+        "width": {
+          "value": 199.86380361047927,
+          "velocity": 6.696633263982269
+        },
+        "height": {
+          "value": 72.72625468542171,
+          "velocity": -32.21075941026533
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1225.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2184689755716922,
+          "velocity": -2.149337315838956
+        },
+        "rotation.p": {
+          "value": 0.3523273512232044,
+          "velocity": -2.149337315838956
+        },
+        "rotation.y": {
+          "value": 0.22735357047685784,
+          "velocity": 3.3055164188335575
+        },
+        "width": {
+          "value": 199.90044541909666,
+          "velocity": 5.65249372624776
+        },
+        "height": {
+          "value": 72.5287861883524,
+          "velocity": -34.32546484713703
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1231.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2312295152030788,
+          "velocity": -2.1474683608010543
+        },
+        "rotation.p": {
+          "value": 0.3395668115918179,
+          "velocity": -2.1474683608010543
+        },
+        "rotation.y": {
+          "value": 0.24721421735461552,
+          "velocity": 3.381425616939027
+        },
+        "width": {
+          "value": 199.93100342841396,
+          "velocity": 4.64698944453077
+        },
+        "height": {
+          "value": 72.31838776585545,
+          "velocity": -36.56751694329737
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1237.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2439522529704814,
+          "velocity": -2.1365610238592465
+        },
+        "rotation.p": {
+          "value": 0.3268440738244151,
+          "velocity": -2.1365610238592465
+        },
+        "rotation.y": {
+          "value": 0.26747104154600004,
+          "velocity": 3.4386811362114913
+        },
+        "width": {
+          "value": 199.9557007064535,
+          "velocity": 3.6780144077171033
+        },
+        "height": {
+          "value": 72.09427791836664,
+          "velocity": -38.945489967312106
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1243.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.256583079488466,
+          "velocity": -2.116520812484019
+        },
+        "rotation.p": {
+          "value": 0.3142132473064306,
+          "velocity": -2.116520812484019
+        },
+        "rotation.y": {
+          "value": 0.28800885038507223,
+          "velocity": 3.475898907590526
+        },
+        "width": {
+          "value": 199.9747482630313,
+          "velocity": 2.743610720006924
+        },
+        "height": {
+          "value": 71.8556239830162,
+          "velocity": -41.46800644058244
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1249.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2690683171540236,
+          "velocity": -2.0875885434186268
+        },
+        "rotation.p": {
+          "value": 0.301728009640873,
+          "velocity": -2.0875885434186268
+        },
+        "rotation.y": {
+          "value": 0.30870629886963025,
+          "velocity": 3.4924052451960828
+        },
+        "width": {
+          "value": 199.98834589138895,
+          "velocity": 1.8419560815396774
+        },
+        "height": {
+          "value": 71.60154260672189,
+          "velocity": -44.14346378956721
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1255.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2813566927366962,
+          "velocity": -2.0503284876280623
+        },
+        "rotation.p": {
+          "value": 0.2894396340582005,
+          "velocity": -2.0503284876280623
+        },
+        "rotation.y": {
+          "value": 0.3294402950029376,
+          "velocity": 3.488287435904438
+        },
+        "width": {
+          "value": 199.99668293916642,
+          "velocity": 0.9713524837707624
+        },
+        "height": {
+          "value": 71.33110218727656,
+          "velocity": -46.979638864911244
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1261.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2934011414575526,
+          "velocity": -2.005584215231367
+        },
+        "rotation.p": {
+          "value": 0.27739518533734414,
+          "velocity": -2.005584215231367
+        },
+        "rotation.y": {
+          "value": 0.35009047809716654,
+          "velocity": 3.464367583558099
+        },
+        "width": {
+          "value": 199.99993901553316,
+          "velocity": 0.13021598887669789
+        },
+        "height": {
+          "value": 71.0433281214671,
+          "velocity": -49.98313055612849
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1261.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2952757902070249,
+          "velocity": -1.9979105407704087
+        },
+        "rotation.p": {
+          "value": 0.27552053658787157,
+          "velocity": -1.9979105407704087
+        },
+        "rotation.y": {
+          "value": 0.3533323219036146,
+          "velocity": 3.458875102655462
+        },
+        "width": {
+          "value": 199.99999999993074,
+          "velocity": 0.000138527407789193
+        },
+        "height": {
+          "value": 70.99629011796416,
+          "velocity": -50.472477268652405
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1262,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2952777881134268,
+          "velocity": -1.9979022627379188
+        },
+        "rotation.p": {
+          "value": 0.2755185386814699,
+          "velocity": -1.9979022627379188
+        },
+        "rotation.y": {
+          "value": 0.35333578077566363,
+          "velocity": 3.458868995815012
+        },
+        "width": {
+          "value": 200,
+          "velocity": 0
+        },
+        "height": {
+          "value": 70.99623964522449,
+          "velocity": -50.47300209026962
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1262.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.2952797860115501,
+          "velocity": -1.9978939845278683
+        },
+        "rotation.p": {
+          "value": 0.27551654078334653,
+          "velocity": -1.9978939845278683
+        },
+        "rotation.y": {
+          "value": 0.35333923964160546,
+          "velocity": 3.4588628884611246
+        },
+        "width": {
+          "value": 199.99999999844158,
+          "velocity": -0.0031168818615848505
+        },
+        "height": {
+          "value": 70.99618917195998,
+          "velocity": -50.47352691678628
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1267,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3051602699629272,
+          "velocity": -1.9544095079758692
+        },
+        "rotation.p": {
+          "value": 0.2656360568319694,
+          "velocity": -1.9544095079758692
+        },
+        "rotation.y": {
+          "value": 0.37054332661382205,
+          "velocity": 3.4221062456470097
+        },
+        "width": {
+          "value": 199.9600071098778,
+          "velocity": -16.20984881241326
+        },
+        "height": {
+          "value": 70.73721196054058,
+          "velocity": -53.158592329043216
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1272.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3165993629058494,
+          "velocity": -1.8979858099423659
+        },
+        "rotation.p": {
+          "value": 0.2541969638890473,
+          "velocity": -1.8979858099423659
+        },
+        "rotation.y": {
+          "value": 0.39069553027454507,
+          "velocity": 3.3634549215842844
+        },
+        "width": {
+          "value": 199.80235824997854,
+          "velocity": -37.235782370969055
+        },
+        "height": {
+          "value": 70.4117258812644,
+          "velocity": -56.50769960024824
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1278.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.327690890546517,
+          "velocity": -1.8375386958712536
+        },
+        "rotation.p": {
+          "value": 0.24310543624837966,
+          "velocity": -1.8375386958712536
+        },
+        "rotation.y": {
+          "value": 0.4104563977827024,
+          "velocity": 3.2906832181347707
+        },
+        "width": {
+          "value": 199.5134408417858,
+          "velocity": -60.482722492963525
+        },
+        "height": {
+          "value": 70.06584421764418,
+          "velocity": -60.02779477790573
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1284.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3384145444219526,
+          "velocity": -1.774263919187262
+        },
+        "rotation.p": {
+          "value": 0.2323817823729438,
+          "velocity": -1.774263919187262
+        },
+        "rotation.y": {
+          "value": 0.42974922792162945,
+          "velocity": 3.206206475220727
+        },
+        "width": {
+          "value": 199.07899744230176,
+          "velocity": -86.32371960617307
+        },
+        "height": {
+          "value": 69.69857411968387,
+          "velocity": -63.710161315548255
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1290.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3487568802875853,
+          "velocity": -1.7092698584912265
+        },
+        "rotation.p": {
+          "value": 0.2220394465073112,
+          "velocity": -1.7092698584912265
+        },
+        "rotation.y": {
+          "value": 0.4485117107218578,
+          "velocity": 3.112434170187722
+        },
+        "width": {
+          "value": 198.4823122990143,
+          "velocity": -115.21728941285681
+        },
+        "height": {
+          "value": 69.30899762337121,
+          "velocity": -67.53790629072951
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1296.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3587106755354141,
+          "velocity": -1.643539013641791
+        },
+        "rotation.p": {
+          "value": 0.21208565125948237,
+          "velocity": -1.643539013641791
+        },
+        "rotation.y": {
+          "value": 0.4666955224332302,
+          "velocity": 3.0116512694604634
+        },
+        "width": {
+          "value": 197.70363524160354,
+          "velocity": -147.73165321807815
+        },
+        "height": {
+          "value": 68.8963273779062,
+          "velocity": -71.4834914363108
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1302.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.368274113185951,
+          "velocity": -1.5779077283493357
+        },
+        "rotation.p": {
+          "value": 0.2025222136089456,
+          "velocity": -1.5779077283493357
+        },
+        "rotation.y": {
+          "value": 0.48426532565588043,
+          "velocity": 2.9059365922331395
+        },
+        "width": {
+          "value": 196.71943986910645,
+          "velocity": -184.57665286902582
+        },
+        "height": {
+          "value": 68.45997774716274,
+          "velocity": -75.50605990178465
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1308.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3774498923881067,
+          "velocity": -1.513061088659288
+        },
+        "rotation.p": {
+          "value": 0.1933464344067899,
+          "velocity": -1.513061088659288
+        },
+        "rotation.y": {
+          "value": 0.5011973903772611,
+          "velocity": 2.7971159977452054
+        },
+        "width": {
+          "value": 195.5014641858587,
+          "velocity": -226.6454809641831
+        },
+        "height": {
+          "value": 67.99965166599239,
+          "velocity": -79.54887176677718
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1314.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3862443438352394,
+          "velocity": -1.4495389903831768
+        },
+        "rotation.p": {
+          "value": 0.1845519829596574,
+          "velocity": -1.4495389903831768
+        },
+        "rotation.y": {
+          "value": 0.5174780263065577,
+          "velocity": 2.686744463834793
+        },
+        "width": {
+          "value": 194.01546935330953,
+          "velocity": -275.0681417664633
+        },
+        "height": {
+          "value": 67.51544114014781,
+          "velocity": -83.53738208843373
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1320.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.3946666043841494,
+          "velocity": -1.3877493869631035
+        },
+        "rotation.p": {
+          "value": 0.17612972241074726,
+          "velocity": -1.3877493869631035
+        },
+        "rotation.y": {
+          "value": 0.5331019763699854,
+          "velocity": 2.5761096717564094
+        },
+        "width": {
+          "value": 192.21964519276636,
+          "velocity": -331.27664436041545
+        },
+        "height": {
+          "value": 67.00793539252732,
+          "velocity": -87.378733991822
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1326.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.402727883063669,
+          "velocity": -1.3279853267228476
+        },
+        "rotation.p": {
+          "value": 0.16806844373122778,
+          "velocity": -1.3279853267228476
+        },
+        "rotation.y": {
+          "value": 0.5480708773067489,
+          "velocity": 2.4662498978845875
+        },
+        "width": {
+          "value": 190.06260726204982,
+          "velocity": -397.07523326469146
+        },
+        "height": {
+          "value": 66.47832551196475,
+          "velocity": -90.9636046492998
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1332.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4104408329435056,
+          "velocity": -1.2704432185148935
+        },
+        "rotation.p": {
+          "value": 0.1603554938513911,
+          "velocity": -1.2704432185148935
+        },
+        "rotation.y": {
+          "value": 0.5623918535464265,
+          "velocity": 2.3579801183158176
+        },
+        "width": {
+          "value": 187.48101811733056,
+          "velocity": -474.68953722181504
+        },
+        "height": {
+          "value": 65.9284889114943,
+          "velocity": -94.1712835422994
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1338.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4178190306241658,
+          "velocity": -1.215240591519333
+        },
+        "rotation.p": {
+          "value": 0.1529772961707307,
+          "velocity": -1.215240591519333
+        },
+        "rotation.y": {
+          "value": 0.5760762786048617,
+          "velocity": 2.251921680120649
+        },
+        "width": {
+          "value": 184.39715024338352,
+          "velocity": -566.7166981329561
+        },
+        "height": {
+          "value": 65.36103279069397,
+          "velocity": -96.87841211679007
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1344.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4248765569644637,
+          "velocity": -1.1624323130781167
+        },
+        "rotation.p": {
+          "value": 0.14591976983043298,
+          "velocity": -1.1624323130781167
+        },
+        "rotation.y": {
+          "value": 0.5891387149324199,
+          "velocity": 2.148532310201161
+        },
+        "width": {
+          "value": 180.71749903314821,
+          "velocity": -675.7693678962079
+        },
+        "height": {
+          "value": 64.77927575461133,
+          "velocity": -98.97089639488037
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1350.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4316276681607054,
+          "velocity": -1.1120247549580435
+        },
+        "rotation.p": {
+          "value": 0.1391686586341913,
+          "velocity": -1.1120247549580435
+        },
+        "rotation.y": {
+          "value": 0.6015960276611871,
+          "velocity": 2.0481344290253336
+        },
+        "width": {
+          "value": 176.33553828923294,
+          "velocity": -803.3177289354477
+        },
+        "height": {
+          "value": 64.18715320333791,
+          "velocity": -100.35728495465894
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1356.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4380865444137787,
+          "velocity": -1.0639877595877782
+        },
+        "rotation.p": {
+          "value": 0.1327097823811179,
+          "velocity": -1.0639877595877782
+        },
+        "rotation.y": {
+          "value": 0.6134666584816485,
+          "velocity": 1.9509406499467958
+        },
+        "width": {
+          "value": 171.1460390736107,
+          "velocity": -946.7457219268136
+        },
+        "height": {
+          "value": 63.589045592718115,
+          "velocity": -100.98085803148291
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1362,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4442671032653567,
+          "velocity": -1.0182644827169671
+        },
+        "rotation.p": {
+          "value": 0.12652922352953977,
+          "velocity": -1.0182644827169671
+        },
+        "rotation.y": {
+          "value": 0.62477004126631,
+          "velocity": 1.8570759877204537
+        },
+        "width": {
+          "value": 165.08511602719912,
+          "velocity": -1093.5358085228536
+        },
+        "height": {
+          "value": 62.98954630480112,
+          "velocity": -100.82741772670326
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1367.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4501828655471234,
+          "velocity": -0.9747793126056419
+        },
+        "rotation.p": {
+          "value": 0.12061346124777322,
+          "velocity": -0.9747793126056419
+        },
+        "rotation.y": {
+          "value": 0.6355261395691367,
+          "velocity": 1.7665967183578886
+        },
+        "width": {
+          "value": 158.2100441578077,
+          "velocity": -1214.6734000930007
+        },
+        "height": {
+          "value": 62.39320164019043,
+          "velocity": -99.92666978378828
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1373.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4558468632639254,
+          "velocity": -0.933444120266978
+        },
+        "rotation.p": {
+          "value": 0.11494946353097103,
+          "velocity": -0.933444120266978
+        },
+        "rotation.y": {
+          "value": 0.6457550865959371,
+          "velocity": 1.6795060814071339
+        },
+        "width": {
+          "value": 150.79354079485682,
+          "velocity": -1269.313382562459
+        },
+        "height": {
+          "value": 61.804262875133034,
+          "velocity": -98.34690008405278
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1379.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4612715802911054,
+          "velocity": -0.8941631059549175
+        },
+        "rotation.p": {
+          "value": 0.10952474650379138,
+          "velocity": -0.8941631059549175
+        },
+        "rotation.y": {
+          "value": 0.655476909808262,
+          "velocity": 1.5957671453900757
+        },
+        "width": {
+          "value": 143.32009992912472,
+          "velocity": -1233.0238269673061
+        },
+        "height": {
+          "value": 61.22648620062413,
+          "velocity": -96.18457065378122
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1385.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4664689183066035,
+          "velocity": -0.856836492566436
+        },
+        "rotation.p": {
+          "value": 0.10432740848829299,
+          "velocity": -0.856836492566436
+        },
+        "rotation.y": {
+          "value": 0.6647113244097094,
+          "velocity": 1.5153132081373735
+        },
+        "width": {
+          "value": 136.30002277571668,
+          "velocity": -1122.4756640398305
+        },
+        "height": {
+          "value": 60.663002719334216,
+          "velocity": -93.55162796478028
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1391.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4714501817901282,
+          "velocity": -0.8213632894867382
+        },
+        "rotation.p": {
+          "value": 0.09934614500476828,
+          "velocity": -0.8213632894867382
+        },
+        "rotation.y": {
+          "value": 0.6734775821964522,
+          "velocity": 1.4380561063723925
+        },
+        "width": {
+          "value": 130.05695486454317,
+          "velocity": -978.0643312697416
+        },
+        "height": {
+          "value": 60.1162634386542,
+          "velocity": -90.5633524434413
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1397.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4762260771553724,
+          "velocity": -0.7876433186106382
+        },
+        "rotation.p": {
+          "value": 0.0945702496395245,
+          "velocity": -0.7876433186106382
+        },
+        "rotation.y": {
+          "value": 0.6817943644128037,
+          "velocity": 1.3638927842452524
+        },
+        "width": {
+          "value": 124.68672085068036,
+          "velocity": -832.415160912611
+        },
+        "height": {
+          "value": 59.588049616909316,
+          "velocity": -87.32872891229307
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1403.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4808067221246204,
+          "velocity": -0.7555786625145555
+        },
+        "rotation.p": {
+          "value": 0.08998960467027607,
+          "velocity": -0.7555786625145555
+        },
+        "rotation.y": {
+          "value": 0.6896797092203931,
+          "velocity": 1.292710432583054
+        },
+        "width": {
+          "value": 120.14294636781653,
+          "velocity": -701.082337953946
+        },
+        "height": {
+          "value": 59.079530498972595,
+          "velocity": -83.9441583395302
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1409.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4852016623165423,
+          "velocity": -0.7250746655281805
+        },
+        "rotation.p": {
+          "value": 0.08559466447835429,
+          "velocity": -0.7250746655281805
+        },
+        "rotation.y": {
+          "value": 0.6971509661152497,
+          "velocity": 1.2243904681499398
+        },
+        "width": {
+          "value": 116.32458109060612,
+          "velocity": -588.1816476881579
+        },
+        "height": {
+          "value": 58.59134865449575,
+          "velocity": -80.4903646561584
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1415.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4894198927164028,
+          "velocity": -0.6960405928725907
+        },
+        "rotation.p": {
+          "value": 0.08137643407849382,
+          "velocity": -0.6960405928725907
+        },
+        "rotation.y": {
+          "value": 0.7042247711005418,
+          "velocity": 1.1588115803267636
+        },
+        "width": {
+          "value": 113.12357897893858,
+          "velocity": -492.7743608502846
+        },
+        "height": {
+          "value": 58.12371584845914,
+          "velocity": -77.0318010713396
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1421.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4934698822561523,
+          "velocity": -0.6683900313761927
+        },
+        "rotation.p": {
+          "value": 0.07732644453874415,
+          "velocity": -0.6683900313761927
+        },
+        "rotation.y": {
+          "value": 0.7109170376564371,
+          "velocity": 1.0958520340585363
+        },
+        "width": {
+          "value": 110.4432283385325,
+          "velocity": -412.35067961167965
+        },
+        "height": {
+          "value": 57.67650713364452,
+          "velocity": -73.61770310300207
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1427.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.4973596001727767,
+          "velocity": -0.6420410973802714
+        },
+        "rotation.p": {
+          "value": 0.07343672662212,
+          "velocity": -0.6420410973802714
+        },
+        "rotation.y": {
+          "value": 0.7172429595664582,
+          "velocity": 1.0353913839024973
+        },
+        "width": {
+          "value": 108.20252252073875,
+          "velocity": -344.2638550543304
+        },
+        "height": {
+          "value": 57.24934572695712,
+          "velocity": -70.28402838293361
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1433.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5010965431581593,
+          "velocity": -0.6169165029096961
+        },
+        "rotation.p": {
+          "value": 0.06969978363673741,
+          "velocity": -0.6169165029096961
+        },
+        "rotation.y": {
+          "value": 0.7232170224900996,
+          "velocity": 0.9773117248591673
+        },
+        "width": {
+          "value": 106.33528665794125,
+          "velocity": -286.2000223862516
+        },
+        "height": {
+          "value": 56.84167518016662,
+          "velocity": -67.05572066099973
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1439.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5046877625810877,
+          "velocity": -0.592943519538309
+        },
+        "rotation.p": {
+          "value": 0.06610856421380891,
+          "velocity": -0.592943519538309
+        },
+        "rotation.y": {
+          "value": 0.7288530218428309,
+          "velocity": 0.921498581195276
+        },
+        "width": {
+          "value": 104.78782732640286,
+          "velocity": -236.26868572035002
+        },
+        "height": {
+          "value": 56.45281807766048,
+          "velocity": -63.94893959267014
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1445.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5081398912676554,
+          "velocity": -0.5700538701469565
+        },
+        "rotation.p": {
+          "value": 0.06265643552724129,
+          "velocity": -0.5700538701469565
+        },
+        "rotation.y": {
+          "value": 0.7341640850834956,
+          "velocity": 0.8678415142284676
+        },
+        "width": {
+          "value": 103.5164992669319,
+          "velocity": -192.96519453039113
+        },
+        "height": {
+          "value": 56.08202210854173,
+          "velocity": -60.973062509575634
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1451.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5114591694831971,
+          "velocity": -0.5481835715177126
+        },
+        "rotation.p": {
+          "value": 0.05933715731169952,
+          "velocity": -0.5481835715177126
+        },
+        "rotation.y": {
+          "value": 0.7391626969390552,
+          "velocity": 0.8162345134964885
+        },
+        "width": {
+          "value": 102.48561530618944,
+          "velocity": -155.1017243570971
+        },
+        "height": {
+          "value": 55.72849514864141,
+          "velocity": -58.13237821260686
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1457,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5146514698776223,
+          "velocity": -0.5272727450482526
+        },
+        "rotation.p": {
+          "value": 0.05614485691727414,
+          "velocity": -0.5272727450482526
+        },
+        "rotation.y": {
+          "value": 0.7438607264379089,
+          "velocity": 0.7665762223227168
+        },
+        "width": {
+          "value": 101.66576908802418,
+          "velocity": -121.74008666890305
+        },
+        "height": {
+          "value": 55.39143123764843,
+          "velocity": -55.427462194675705
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1462.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5177223212450432,
+          "velocity": -0.5072654084828105
+        },
+        "rotation.p": {
+          "value": 0.05307400554985353,
+          "velocity": -0.5072654084828105
+        },
+        "rotation.y": {
+          "value": 0.7482694548926851,
+          "velocity": 0.7187700379955206
+        },
+        "width": {
+          "value": 101.03252537970944,
+          "velocity": -92.13567692040839
+        },
+        "height": {
+          "value": 55.07002927710573,
+          "velocity": -52.85625950388891
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1468.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5206769310146897,
+          "velocity": -0.4881092581741827
+        },
+        "rotation.p": {
+          "value": 0.0501193957802068,
+          "velocity": -0.4881092581741827
+        },
+        "rotation.y": {
+          "value": 0.7523996041855715,
+          "velocity": 0.6727241181378999
+        },
+        "width": {
+          "value": 100.56540709342391,
+          "velocity": -65.69340714112495
+        },
+        "height": {
+          "value": 54.763506064840335,
+          "velocity": -50.41491713811685
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1474.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.52352020643856,
+          "velocity": -0.4697554487986122
+        },
+        "rotation.p": {
+          "value": 0.04727612035633652,
+          "velocity": -0.4697554487986122
+        },
+        "rotation.y": {
+          "value": 0.7562613648755178,
+          "velocity": 0.6283513179574185
+        },
+        "width": {
+          "value": 100.2471124125125,
+          "velocity": -41.93390722030262
+        },
+        "height": {
+          "value": 54.47110501833349,
+          "velocity": -48.098411210850024
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1480.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5262567744762052,
+          "velocity": -0.452158375468657
+        },
+        "rotation.p": {
+          "value": 0.04453955231869114,
+          "velocity": -0.452158375468657
+        },
+        "rotation.y": {
+          "value": 0.7598644237763765,
+          "velocity": 0.5855690775983322
+        },
+        "width": {
+          "value": 100.06290748565125,
+          "velocity": -20.46783518305421
+        },
+        "height": {
+          "value": 54.192101677861515,
+          "velocity": -45.90101109143926
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1486.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5288910004017675,
+          "velocity": -0.4352754616908639
+        },
+        "rotation.p": {
+          "value": 0.041905326393129064,
+          "velocity": -0.4352754616908639
+        },
+        "rotation.y": {
+          "value": 0.7632179907558322,
+          "velocity": 0.5442992744900301
+        },
+        "width": {
+          "value": 100.00015243536207,
+          "velocity": -0.976371882511889
+        },
+        "height": {
+          "value": 53.92580684605045,
+          "velocity": -43.816616955997404
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1486.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5290264536593838,
+          "velocity": -0.4344086841401319
+        },
+        "rotation.p": {
+          "value": 0.04176987313551286,
+          "velocity": -0.4344086841401319
+        },
+        "rotation.y": {
+          "value": 0.7633872089391814,
+          "velocity": 0.5421744717253177
+        },
+        "width": {
+          "value": 100.00000000155843,
+          "velocity": -0.003116881862832862
+        },
+        "height": {
+          "value": 53.91217454175215,
+          "velocity": -43.710265325297776
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1487,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.529026888066678,
+          "velocity": -0.4344059045298148
+        },
+        "rotation.p": {
+          "value": 0.04176943872821859,
+          "velocity": -0.4344059045298148
+        },
+        "rotation.y": {
+          "value": 0.7633877511102456,
+          "velocity": 0.5421676568919859
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 53.91213083165731,
+          "velocity": -43.70992437981021
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1487.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5290273224711928,
+          "velocity": -0.434403124938563
+        },
+        "rotation.p": {
+          "value": 0.04176900432370374,
+          "velocity": -0.434403124938563
+        },
+        "rotation.y": {
+          "value": 0.7633882932744952,
+          "velocity": 0.5421608420993405
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 53.9120871219034,
+          "velocity": -43.70958343734201
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1492.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5314270051753316,
+          "velocity": -0.4190669554865669
+        },
+        "rotation.p": {
+          "value": 0.03936932161956493,
+          "velocity": -0.4190669554865669
+        },
+        "rotation.y": {
+          "value": 0.7663308245828483,
+          "velocity": 0.5044680521698881
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 53.67156802326109,
+          "velocity": -41.83900074524945
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1498.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.533868681631802,
+          "velocity": -0.4034957351505838
+        },
+        "rotation.p": {
+          "value": 0.03692764516309481,
+          "velocity": -0.4034957351505838
+        },
+        "rotation.y": {
+          "value": 0.7692112577112238,
+          "velocity": 0.46600563436967973
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 53.428769638476744,
+          "velocity": -39.96197445261547
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1504.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5362197095473102,
+          "velocity": -0.3885271254976091
+        },
+        "rotation.p": {
+          "value": 0.03457661724758623,
+          "velocity": -0.3885271254976091
+        },
+        "rotation.y": {
+          "value": 0.7718672199325051,
+          "velocity": 0.4288461310432476
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 53.196832449401214,
+          "velocity": -38.179504400892284
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1510.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5384835696467862,
+          "velocity": -0.37412872498828553
+        },
+        "rotation.p": {
+          "value": 0.03231275714811018,
+          "velocity": -0.37412872498828553
+        },
+        "rotation.y": {
+          "value": 0.7743062608660403,
+          "velocity": 0.39292734135978347
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.97521238803618,
+          "velocity": -36.485785823158984
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1516.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5406635566176021,
+          "velocity": -0.36027024379631056
+        },
+        "rotation.p": {
+          "value": 0.030132770177294405,
+          "velocity": -0.36027024379631056
+        },
+        "rotation.y": {
+          "value": 0.7765355712798053,
+          "velocity": 0.3581905573958156
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.76339905371243,
+          "velocity": -34.87528859525668
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1522.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.542762791193842,
+          "velocity": -0.3469233526438157
+        },
+        "rotation.p": {
+          "value": 0.028033535601054687,
+          "velocity": -0.3469233526438157
+        },
+        "rotation.y": {
+          "value": 0.7785620032546856,
+          "velocity": 0.3245803712540428
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.56091399952854,
+          "velocity": -33.34278225797073
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1528.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.544784231374203,
+          "velocity": -0.33406154207084765
+        },
+        "rotation.p": {
+          "value": 0.026012095420693295,
+          "velocity": -0.33406154207084765
+        },
+        "rotation.y": {
+          "value": 0.7803920892186839,
+          "velocity": 0.2920444875576971
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.36730891629264,
+          "velocity": -31.883346383910805
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1534.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5467306828342162,
+          "velocity": -0.32165999169792425
+        },
+        "rotation.p": {
+          "value": 0.02406564396068036,
+          "velocity": -0.32165999169792425
+        },
+        "rotation.y": {
+          "value": 0.7820320598872292,
+          "velocity": 0.26053354266732637
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.182163787029715,
+          "velocity": -30.492370760844633
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1540.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5486048085906308,
+          "velocity": -0.3096954489743571
+        },
+        "rotation.p": {
+          "value": 0.022191518204265778,
+          "velocity": -0.3096954489743571
+        },
+        "rotation.y": {
+          "value": 0.783487861152327,
+          "velocity": 0.23000093150471443
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 52.00508506227624,
+          "velocity": -29.16554867046665
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1546.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5504091379726952,
+          "velocity": -0.29814611686865927
+        },
+        "rotation.p": {
+          "value": 0.020387188822201533,
+          "velocity": -0.29814611686865927
+        },
+        "rotation.y": {
+          "value": 0.7847651699674497,
+          "velocity": 0.20040264251600398
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.835703889693704,
+          "velocity": -27.89886564915701
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1552,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5521460749517606,
+          "velocity": -0.28699154994280357
+        },
+        "rotation.p": {
+          "value": 0.018650251843135984,
+          "velocity": -0.28699154994280357
+        },
+        "rotation.y": {
+          "value": 0.7858694092773955,
+          "velocity": 0.171697101039324
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.67367441943123,
+          "velocity": -26.68858545333306
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1557.9375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.553817905877339,
+          "velocity": -0.2762125582531385
+        },
+        "rotation.p": {
+          "value": 0.016978420917557753,
+          "velocity": -0.2762125582531385
+        },
+        "rotation.y": {
+          "value": 0.7868057620432949,
+          "velocity": 0.1438450211424519
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.51867219797242,
+          "velocity": -25.5312344604538
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1563.875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5554268066644505,
+          "velocity": -0.2657911185328277
+        },
+        "rotation.p": {
+          "value": 0.015369520130445992,
+          "velocity": -0.2657911185328277
+        },
+        "rotation.y": {
+          "value": 0.787579184412877,
+          "velocity": 0.11680926584863961
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.37039265702287,
+          "velocity": -24.423585374491896
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1569.8125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5569748494739326,
+          "velocity": -0.2557102921301602
+        },
+        "rotation.p": {
+          "value": 0.01382147732096381,
+          "velocity": -0.2557102921301602
+        },
+        "rotation.y": {
+          "value": 0.7881944180852828,
+          "velocity": 0.09055471556190026
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.22854969966562,
+          "velocity": -23.362640838968158
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1575.75,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5584640089243136,
+          "velocity": -0.24595414920143902
+        },
+        "rotation.p": {
+          "value": 0.01233231787058309,
+          "velocity": -0.24595414920143902
+        },
+        "rotation.y": {
+          "value": 0.7886560019183575,
+          "velocity": 0.06504814442773098
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 51.09287438303761,
+          "velocity": -22.34561736669986
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1581.6875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.559896167870971,
+          "velocity": -0.23650769868441293
+        },
+        "rotation.p": {
+          "value": 0.010900158923925684,
+          "velocity": -0.23650769868441293
+        },
+        "rotation.y": {
+          "value": 0.788968282824622,
+          "velocity": 0.04025810431416359
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.96311369479058,
+          "velocity": -21.369929854686298
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1587.625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5612731227855616,
+          "velocity": -0.22735682360694334
+        },
+        "rotation.p": {
+          "value": 0.009523204009335004,
+          "velocity": -0.22735682360694334
+        },
+        "rotation.y": {
+          "value": 0.7891354260001513,
+          "velocity": 0.01615481606552122
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.83902941932457,
+          "velocity": -20.43317685116266
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1593.5625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5625965887661457,
+          "velocity": -0.21848822131479453
+        },
+        "rotation.p": {
+          "value": 0.008199738028750896,
+          "velocity": -0.21848822131479453
+        },
+        "rotation.y": {
+          "value": 0.7891614245284604,
+          "velocity": -0.0072899323370858036
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.72039708901685,
+          "velocity": -19.533126669452212
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1599.5,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5638682042060548,
+          "velocity": -0.2098893482313029
+        },
+        "rotation.p": {
+          "value": 0.006928122588841913,
+          "velocity": -0.2098893482313029
+        },
+        "rotation.y": {
+          "value": 0.7890501083992972,
+          "velocity": -0.03010288108226489
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.60700501526805,
+          "velocity": -18.66770439215573
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1605.4375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5650895351473266,
+          "velocity": -0.2015483687898117
+        },
+        "rotation.p": {
+          "value": 0.005706791647569943,
+          "velocity": -0.2015483687898117
+        },
+        "rotation.y": {
+          "value": 0.7888051529800244,
+          "velocity": -0.05230938767527513
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.49865339404123,
+          "velocity": -17.83497977373089
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1611.375,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5662620793424886,
+          "velocity": -0.19345410820666514
+        },
+        "rotation.p": {
+          "value": 0.00453424745240768,
+          "velocity": -0.19345410820666514
+        },
+        "rotation.y": {
+          "value": 0.7884300869750654,
+          "velocity": -0.07393351029289848
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.39515348059722,
+          "velocity": -17.0331560254072
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1617.3125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5673872700465665,
+          "velocity": -0.18559600878818244
+        },
+        "rotation.p": {
+          "value": 0.0034090567483300548,
+          "velocity": -0.18559600878818244
+        },
+        "rotation.y": {
+          "value": 0.78792829990674,
+          "velocity": -0.09499808570347629
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.296326828276314,
+          "velocity": -16.260559450533304
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1623.25,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.568466479559451,
+          "velocity": -0.17796408948911513
+        },
+        "rotation.p": {
+          "value": 0.0023298472354456143,
+          "velocity": -0.17796408948911513
+        },
+        "rotation.y": {
+          "value": 0.7873030491487273,
+          "velocity": -0.11552480209631216
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.20200458639687,
+          "velocity": -15.515629888556363
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1629.1875,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.569501022537151,
+          "velocity": -0.17054890846267562
+        },
+        "rotation.p": {
+          "value": 0.0012953042577454263,
+          "velocity": -0.17054890846267562
+        },
+        "rotation.y": {
+          "value": 0.7865574665414017,
+          "velocity": -0.13553426714960984
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.112026852608885,
+          "velocity": -14.796911920187993
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1635.125,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5704921590889704,
+          "velocity": -0.1633415283632412
+        },
+        "rotation.p": {
+          "value": 0.0003041677059260962,
+          "velocity": -0.1633415283632412
+        },
+        "rotation.y": {
+          "value": 0.7856945646163702,
+          "velocity": -0.15504607164997805
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.026242075330465,
+          "velocity": -14.103046783669043
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1636.999,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5707961656869878,
+          "velocity": -0.1611085018975555
+        },
+        "rotation.p": {
+          "value": 1.61107908733037e-7,
+          "velocity": -0.1611085018975555
+        },
+        "rotation.y": {
+          "value": 0.7853983245031538,
+          "velocity": -0.1611040955341232
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50.00001388894569,
+          "velocity": -13.889002486611528
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1637,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0.7853981633974483,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1637.001,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0.7853981633974483,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1641.0625,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0.7853981633974483,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1647,
+      "tracks": {
+        "rotation.r": {
+          "value": -1.5707963267948966,
+          "velocity": 0
+        },
+        "rotation.p": {
+          "value": 0,
+          "velocity": 0
+        },
+        "rotation.y": {
+          "value": 0.7853981633974483,
+          "velocity": 0
+        },
+        "width": {
+          "value": 100,
+          "velocity": 0
+        },
+        "height": {
+          "value": 50,
+          "velocity": 0
+        }
+      }
+    }
+  ]
+}

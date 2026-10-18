@@ -1,0 +1,2424 @@
+{
+  "animation": {
+    "id": "boolean-last-keypoint",
+    "name": "boolean-last-keypoint",
+    "formatVersion": 2,
+    "groups": [],
+    "tracks": [
+      {
+        "id": "track",
+        "name": "track",
+        "animatableId": "target",
+        "points": [
+          {
+            "id": "key-0",
+            "stamp": 0,
+            "value": false
+          },
+          {
+            "id": "key-1000",
+            "stamp": 1000,
+            "value": true
+          },
+          {
+            "id": "key-2000",
+            "stamp": 2000,
+            "value": false
+          }
+        ]
+      }
+    ]
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 0.5,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 142.703125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 158.40625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.109375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 189.8125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 205.515625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 221.21875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 236.921875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 252.625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 268.328125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 284.03125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 299.734375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 315.4375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 331.140625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 346.84375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 362.546875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 378.25,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 393.953125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 409.65625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 425.359375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 441.0625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 456.765625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 472.46875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 488.171875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 503.875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 519.578125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 535.28125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 550.984375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 566.6875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 582.390625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 598.09375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 613.796875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 629.5,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 645.203125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 660.90625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 676.609375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 692.3125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 708.015625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 723.71875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 739.421875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 755.125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 770.828125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 786.53125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 802.234375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 817.9375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 833.640625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 849.34375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 865.046875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 880.75,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 896.453125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 912.15625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 927.859375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 943.5625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 959.265625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 974.96875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 990.671875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1006.375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1022.078125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037.78125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1053.484375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1069.1875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1084.890625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1100.59375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1116.296875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1132,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1147.703125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1163.40625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1179.109375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1194.8125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1210.515625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1226.21875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1241.921875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1257.625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1273.328125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1289.03125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1304.734375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1320.4375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1336.140625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1351.84375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1367.546875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1383.25,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1398.953125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1414.65625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1430.359375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1446.0625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1461.765625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1477.46875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1493.171875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1508.875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1524.578125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1540.28125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1555.984375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1571.6875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1587.390625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1603.09375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1618.796875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1634.5,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1650.203125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1665.90625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1681.609375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1697.3125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1713.015625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1728.71875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1744.421875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1760.125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1775.828125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1791.53125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1807.234375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1822.9375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1838.640625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1854.34375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1870.046875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1885.75,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1901.453125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1917.15625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1932.859375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1948.5625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1964.265625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1979.96875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1995.671875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2011.375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2027.078125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2042.78125,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2058.484375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2074.1875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2089.890625,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2105.59375,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2121.296875,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2136.999,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137.001,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2152.703125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2168.40625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2184.109375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2199.8125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2215.515625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2231.21875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2246.921875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2262.625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2278.328125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2294.03125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2309.734375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2325.4375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2341.140625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2356.84375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2372.546875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2388.25,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2403.953125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2419.65625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2435.359375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2451.0625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2466.765625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2482.46875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2498.171875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2513.875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2529.578125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2545.28125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2560.984375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2576.6875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2592.390625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2608.09375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2623.796875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2639.5,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2655.203125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2670.90625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2686.609375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2702.3125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2718.015625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2733.71875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2749.421875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2765.125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2780.828125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2796.53125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2812.234375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2827.9375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2843.640625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2859.34375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2875.046875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2890.75,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2906.453125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2922.15625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2937.859375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2953.5625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2969.265625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2984.96875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3000.671875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3016.375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3032.078125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3047.78125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3063.484375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3079.1875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3094.890625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3110.59375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3126.296875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3142,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3157.703125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3173.40625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3189.109375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3204.8125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3220.515625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3236.21875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3251.921875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3267.625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3283.328125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3299.03125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3314.734375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3330.4375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3346.140625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3361.84375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3377.546875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3393.25,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3408.953125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3424.65625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3440.359375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3456.0625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3471.765625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3487.46875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3503.171875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3518.875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3534.578125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3550.28125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3565.984375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3581.6875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3597.390625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3613.09375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3628.796875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3644.5,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3660.203125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3675.90625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3691.609375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3707.3125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3723.015625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3738.71875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3754.421875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3770.125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3785.828125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3801.53125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3817.234375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3832.9375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3848.640625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3864.34375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3880.046875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3895.75,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3911.453125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3927.15625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3942.859375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3958.5625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3974.265625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3989.96875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4005.671875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4021.375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4037.078125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4052.78125,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4068.484375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4084.1875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4099.890625,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4115.59375,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4131.296875,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4136.999,
+      "tracks": {
+        "track": {
+          "value": true,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4137,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4137.001,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 4147,
+      "tracks": {
+        "track": {
+          "value": false,
+          "velocity": null
+        }
+      }
+    }
+  ]
+}
