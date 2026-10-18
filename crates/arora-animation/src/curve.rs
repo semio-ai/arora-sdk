@@ -185,17 +185,21 @@ impl Curve {
     /// the one [`Curve::sample`] gives at that point's time, to rounding.
     /// Returns `false`, appending nothing, for a track that is not a number
     /// track.
+    ///
+    /// A range counts as within a segment when its ends are within half a
+    /// nanosecond of the segment's: an editor holds a keypoint's time in
+    /// fractional milliseconds, which the clip rounds to whole nanoseconds.
     pub fn polyline(&self, start: f64, end: f64, count: usize, out: &mut Vec<(f64, f64)>) -> bool {
         if self.kind != Some(Kind::Number) {
             return false;
         }
         out.reserve(count);
         let last = count.saturating_sub(1).max(1) as f64;
-        let index = self.segments.partition_point(|s| (s.end as f64) < end);
+        let index = self.segments.partition_point(|s| s.end as f64 + 0.5 < end);
         let within = self
             .segments
             .get(index)
-            .filter(|s| start < end && s.start as f64 <= start);
+            .filter(|s| start < end && s.start as f64 - 0.5 <= start);
         if let Some(segment) = within {
             let bezier = segment
                 .bezier
@@ -628,6 +632,13 @@ mod tests {
         out.clear();
         curve.polyline(0.5e9, 1.5e9, 3, &mut out);
         assert_eq!(out[1].0, 1e9);
+        // A segment's ends as an editor holds them, off by the rounding to
+        // whole nanoseconds, still draw it by its parameter.
+        for (start, end) in [(-1e9 - 0.4, 1e9 + 0.4), (-1e9 + 0.4, 1e9 - 0.4)] {
+            out.clear();
+            curve.polyline(start, end, 3, &mut out);
+            assert!((out[1].0 - middle).abs() <= 1.0, "{} vs {middle}", out[1].0);
+        }
     }
 
     #[test]
