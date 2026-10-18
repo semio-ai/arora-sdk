@@ -1,0 +1,7578 @@
+{
+  "animation": {
+    "id": "namespace-b-animation",
+    "name": "Namespace B Animation",
+    "duration": 3000,
+    "tracks": [
+      {
+        "id": "translation.x",
+        "name": "x",
+        "animatableId": "translation.x",
+        "points": [
+          {
+            "id": "tx0.x",
+            "stamp": 900,
+            "value": -20,
+            "transitions": {
+              "out": {
+                "x": 360,
+                "y": 5
+              }
+            }
+          },
+          {
+            "id": "tx1.x",
+            "stamp": 1500,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": -6
+              },
+              "out": {
+                "x": 412.50000000000006,
+                "y": 9
+              }
+            }
+          },
+          {
+            "id": "tx2.x",
+            "stamp": 2250,
+            "value": 30,
+            "transitions": {
+              "in": {
+                "x": -450,
+                "y": -4.5
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#00B894"
+        },
+        "groupName": "Translation"
+      },
+      {
+        "id": "translation.y",
+        "name": "y",
+        "animatableId": "translation.y",
+        "points": [
+          {
+            "id": "tx0.y",
+            "stamp": 900,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 360,
+                "y": 5
+              }
+            }
+          },
+          {
+            "id": "tx1.y",
+            "stamp": 1500,
+            "value": -40,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": -6
+              },
+              "out": {
+                "x": 412.50000000000006,
+                "y": 9
+              }
+            }
+          },
+          {
+            "id": "tx2.y",
+            "stamp": 2250,
+            "value": 30,
+            "transitions": {
+              "in": {
+                "x": -450,
+                "y": -4.5
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#00B894"
+        },
+        "groupName": "Translation"
+      },
+      {
+        "id": "translation.z",
+        "name": "z",
+        "animatableId": "translation.z",
+        "points": [
+          {
+            "id": "tx0.z",
+            "stamp": 900,
+            "value": 10,
+            "transitions": {
+              "out": {
+                "x": 360,
+                "y": 5
+              }
+            }
+          },
+          {
+            "id": "tx1.z",
+            "stamp": 1500,
+            "value": -50,
+            "transitions": {
+              "in": {
+                "x": -420.00000000000006,
+                "y": -6
+              },
+              "out": {
+                "x": 412.50000000000006,
+                "y": 9
+              }
+            }
+          },
+          {
+            "id": "tx2.z",
+            "stamp": 2250,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -450,
+                "y": -4.5
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#00B894"
+        },
+        "groupName": "Translation"
+      },
+      {
+        "id": "intensity",
+        "name": "Intensity",
+        "animatableId": "intensity",
+        "points": [
+          {
+            "id": "i0",
+            "stamp": 0,
+            "value": 0
+          },
+          {
+            "id": "i1",
+            "stamp": 600,
+            "value": 0.5,
+            "transitions": {
+              "in": {
+                "x": -450,
+                "y": -0.05
+              },
+              "out": {
+                "x": 360,
+                "y": 0.15
+              }
+            }
+          },
+          {
+            "id": "i2",
+            "stamp": 1200,
+            "value": 1,
+            "transitions": {
+              "out": {
+                "x": 450,
+                "y": 0.2
+              }
+            }
+          },
+          {
+            "id": "i3",
+            "stamp": 1800,
+            "value": 0.7,
+            "transitions": {
+              "in": {
+                "x": -330,
+                "y": 0.12
+              }
+            }
+          },
+          {
+            "id": "i4",
+            "stamp": 3000,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -780,
+                "y": 0.14
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#FF7675"
+        }
+      },
+      {
+        "id": "blur",
+        "name": "Blur",
+        "animatableId": "blur",
+        "points": [
+          {
+            "id": "b0",
+            "stamp": 2100,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 165,
+                "y": 2
+              }
+            }
+          },
+          {
+            "id": "b1",
+            "stamp": 2400,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -240,
+                "y": -0.5
+              },
+              "out": {
+                "x": 117,
+                "y": -2
+              }
+            }
+          },
+          {
+            "id": "b2",
+            "stamp": 2580,
+            "value": 5
+          },
+          {
+            "id": "b3",
+            "stamp": 2850,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -189,
+                "y": 1.25
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#FDCB6E"
+        }
+      }
+    ],
+    "groups": [],
+    "formatVersion": 2,
+    "defaultViewportExtent": 3000
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 1,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 9.86195486401859e-13,
+          "velocity": 0.0000019723931653066344
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 138.796875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0000031969598254261866,
+          "velocity": 0.003565499517048142
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 150.59375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0001879439132619672,
+          "velocity": 0.028086310241802324
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 162.390625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0006741604337861176,
+          "velocity": 0.054719858012956556
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.1875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.001488430401104392,
+          "velocity": 0.08375582117032776
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 185.984375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.002661067715273639,
+          "velocity": 0.11553885293024868
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 197.78125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.00422684041913326,
+          "velocity": 0.15048196543346398
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 209.578125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.006225874967489432,
+          "velocity": 0.18908388001218226
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 221.375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.008704795058050331,
+          "velocity": 0.2319517091232129
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 233.171875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.011718168422537466,
+          "velocity": 0.27983085050533185
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 244.96875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.015330361106569487,
+          "velocity": 0.33364467834811423
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 256.765625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.01961793452145911,
+          "velocity": 0.3945475478333392
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 268.5625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.024672768612992543,
+          "velocity": 0.4639957721587292
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 280.359375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.030606156432747004,
+          "velocity": 0.543842376433035
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 292.15625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.03755418751923832,
+          "velocity": 0.636461796680012
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 303.953125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.04568479892882108,
+          "velocity": 0.7449078800443791
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 315.75,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.05520685279265008,
+          "velocity": 0.8730957931724079
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 327.546875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.06638129010874853,
+          "velocity": 1.0259574648457095
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 339.34375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.07953324190307123,
+          "velocity": 1.2094035448635896
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 351.140625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.09506047958159125,
+          "velocity": 1.429619365462333
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 362.9375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.11342435251073543,
+          "velocity": 1.6905133035490056
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 374.734375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.13508856560847865,
+          "velocity": 1.9869222110289781
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 386.53125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.16033906820272867,
+          "velocity": 2.291104291465666
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 398.328125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.18892629338915357,
+          "velocity": 2.5388821973863
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 410.125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.21968050676022785,
+          "velocity": 2.6457753483843476
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 421.921875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.25062909022498514,
+          "velocity": 2.5726507928008875
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 433.71875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.27984466604493885,
+          "velocity": 2.364772998219986
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 445.515625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3062110747127097,
+          "velocity": 2.101994994292928
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 457.3125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3294512080441578,
+          "velocity": 1.8412789352089918
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 469.109375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3497620767170889,
+          "velocity": 1.6074942544686845
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 480.90625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.36750748333007255,
+          "velocity": 1.406391582280434
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 492.703125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.38306436563925783,
+          "velocity": 1.2358018269817261
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 504.5,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.39676706144519797,
+          "velocity": 1.091249794586489
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 516.296875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4088953819608997,
+          "velocity": 0.9681684311352605
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 528.09375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4196785458771849,
+          "velocity": 0.862598017265408
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 539.890625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.42930336027778815,
+          "velocity": 0.771304883581387
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 551.6875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.43792244468942343,
+          "velocity": 0.6917082815454824
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 563.484375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4456612469186847,
+          "velocity": 0.6217623876959747
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 575.28125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4526236733497746,
+          "velocity": 0.5598436409430709
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 587.078125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.45889649772492147,
+          "velocity": 0.5046571143583196
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 598.875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.46455278488057516,
+          "velocity": 0.45516281922195534
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 610.671875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4696545488235094,
+          "velocity": 0.4105189996904345
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 622.46875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.47425482444667905,
+          "velocity": 0.3700388545429052
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 634.265625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4783992920758146,
+          "velocity": 0.33315752994591463
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 646.0625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.48212756051750527,
+          "velocity": 0.29940686273312045
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 657.859375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4854741881475479,
+          "velocity": 0.268395948345363
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 669.65625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4884695018259878,
+          "velocity": 0.23979609078223368
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 681.453125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4911402586942947,
+          "velocity": 0.21332906230743914
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 693.25,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.49351018497270305,
+          "velocity": 0.18875787704012628
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 705.046875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4956004177506299,
+          "velocity": 0.1658794863579099
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 716.84375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4974298697066253,
+          "velocity": 0.14451895369754103
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 728.640625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.49901553215692424,
+          "velocity": 0.12452477629704731
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 736.999,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.49999988888810426,
+          "velocity": 0.11111268038821964
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 737,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5,
+          "velocity": 0.11111111111111109
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 737.001,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5000004166677277,
+          "velocity": 0.4166687885862452
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 740.4375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5014449101805094,
+          "velocity": 0.4240323251425874
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 752.234375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5066011973596549,
+          "velocity": 0.45044792780074644
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 764.03125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5120801683687805,
+          "velocity": 0.4787723149126356
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 775.828125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5179055755021771,
+          "velocity": 0.5092196191569646
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 787.625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5241038770437616,
+          "velocity": 0.5420352777231718
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 799.421875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.530704636567618,
+          "velocity": 0.5775012460833857
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 811.21875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.537740988286356,
+          "velocity": 0.6159419838704842
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 823.015625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5452501774482752,
+          "velocity": 0.6577311764968622
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 834.8125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5532741835245376,
+          "velocity": 0.7032989971402827
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 846.609375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5618604299940521,
+          "velocity": 0.7531394045670385
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 858.40625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.571062575507509,
+          "velocity": 0.807816391546979
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 870.203125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5809413627409828,
+          "velocity": 0.8679670314989942
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 882,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5915654655853687,
+          "velocity": 0.9342972426390725
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 893.796875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6030122088625482,
+          "velocity": 1.0075627622837708
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 905.59375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6153679142179399,
+          "velocity": 1.088521870722909
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 917.390625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6287274130368966,
+          "velocity": 1.1778364344378784
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 929.1875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6431919049120082,
+          "velocity": 1.2758822348194312
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 940.984375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6588637587608249,
+          "velocity": 1.3824083671707412
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 952.78125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6758360199530055,
+          "velocity": 1.4959664174476026
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 964.578125,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.6941734706266205,
+          "velocity": 1.6130434134349447
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 976.375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.713881875721278,
+          "velocity": 1.726956533772251
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 988.171875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.7348645847557145,
+          "velocity": 1.8269326662902416
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 999.96875,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.7568742509510568,
+          "velocity": 1.8984340293724158
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1011.765625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.7794829616275417,
+          "velocity": 1.9261596094088538
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1023.5625,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.8021057047498691,
+          "velocity": 1.8998716555039634
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1035.359375,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.8240954654885055,
+          "velocity": 1.8199172407583062
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1036.999,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.8270674088196952,
+          "velocity": 1.8050989345980823
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037,
+      "tracks": {
+        "translation.x": {
+          "value": -20,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 0,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.8270692139139895,
+          "velocity": 1.8050896541451695
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1037.001,
+      "tracks": {
+        "translation.x": {
+          "value": -19.999986111081537,
+          "velocity": 13.888948045459587
+        },
+        "translation.y": {
+          "value": 0.000013888764143899928,
+          "velocity": 13.88863940248409
+        },
+        "translation.z": {
+          "value": 10.000013888712706,
+          "velocity": 13.88853652149226
+        },
+        "intensity": {
+          "value": 0.8270710189990034,
+          "velocity": 1.8050803734018195
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1047.15625,
+      "tracks": {
+        "translation.x": {
+          "value": -19.855821208366454,
+          "velocity": 14.510188120830177
+        },
+        "translation.y": {
+          "value": 0.12790251770806513,
+          "velocity": 11.268853132432252
+        },
+        "translation.z": {
+          "value": 10.122477093066239,
+          "velocity": 10.18840813629961
+        },
+        "intensity": {
+          "value": 0.8448775514760316,
+          "velocity": 1.6977374988723049
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1058.953125,
+      "tracks": {
+        "translation.x": {
+          "value": -19.680124643550847,
+          "velocity": 15.287247255928667
+        },
+        "translation.y": {
+          "value": 0.24177463960648263,
+          "velocity": 7.992597085788903
+        },
+        "translation.z": {
+          "value": 10.215741067325594,
+          "velocity": 5.561047029075647
+        },
+        "intensity": {
+          "value": 0.8640534949502716,
+          "velocity": 1.5506039704992194
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1070.75,
+      "tracks": {
+        "translation.x": {
+          "value": -19.49487508066394,
+          "velocity": 16.13114001316887
+        },
+        "translation.y": {
+          "value": 0.31537349861787956,
+          "velocity": 4.435315298718706
+        },
+        "translation.z": {
+          "value": 10.252123025045151,
+          "velocity": 0.5367070605686498
+        },
+        "intensity": {
+          "value": 0.8814294164235907,
+          "velocity": 1.3949875569027679
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1082.546875,
+      "tracks": {
+        "translation.x": {
+          "value": -19.29923285070083,
+          "velocity": 17.050794192624696
+        },
+        "translation.y": {
+          "value": 0.3451688410478067,
+          "velocity": 0.559545130077133
+        },
+        "translation.z": {
+          "value": 10.226636071630686,
+          "velocity": -4.937537890772055
+        },
+        "intensity": {
+          "value": 0.8969804981997711,
+          "velocity": 1.2427599135762237
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1094.34375,
+      "tracks": {
+        "translation.x": {
+          "value": -19.092243869075403,
+          "velocity": 18.05673111269063
+        },
+        "translation.y": {
+          "value": 0.32715038333135593,
+          "velocity": -3.678848503742081
+        },
+        "translation.z": {
+          "value": 10.133615134133608,
+          "velocity": -10.924041709219653
+        },
+        "intensity": {
+          "value": 0.9107913492305248,
+          "velocity": 1.1007195086044488
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1106.140625,
+      "tracks": {
+        "translation.x": {
+          "value": -18.872818875796565,
+          "velocity": 19.161410348770737
+        },
+        "translation.y": {
+          "value": 0.2567409072492624,
+          "velocity": -8.332112640354094
+        },
+        "translation.z": {
+          "value": 9.966594168264539,
+          "velocity": -17.496620303395698
+        },
+        "intensity": {
+          "value": 0.9230025397360029,
+          "velocity": 0.9718101941174312
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1117.9375,
+      "tracks": {
+        "translation.x": {
+          "value": -18.6397081452725,
+          "velocity": 20.379655709101915
+        },
+        "translation.y": {
+          "value": 0.12869044642786004,
+          "velocity": -13.462383385840232
+        },
+        "translation.z": {
+          "value": 9.718156643661313,
+          "velocity": -24.743063084154283
+        },
+        "intensity": {
+          "value": 0.9337740052217555,
+          "velocity": 0.8565956873437519
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1129.734375,
+      "tracks": {
+        "translation.x": {
+          "value": -18.391470612105365,
+          "velocity": 21.729178638184823
+        },
+        "translation.y": {
+          "value": -0.06305280953104772,
+          "velocity": -19.143866952093834
+        },
+        "translation.z": {
+          "value": 9.379753124660391,
+          "velocity": -32.76821548218671
+        },
+        "intensity": {
+          "value": 0.9432640548715818,
+          "velocity": 0.7543873422512012
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1141.53125,
+      "tracks": {
+        "translation.x": {
+          "value": -18.126436174186395,
+          "velocity": 23.23121349123958
+        },
+        "translation.y": {
+          "value": -0.3255000196672898,
+          "velocity": -25.465482746218015
+        },
+        "translation.z": {
+          "value": 8.941478698505744,
+          "velocity": -41.697714825370554
+        },
+        "intensity": {
+          "value": 0.9516191392151535,
+          "velocity": 0.663950852330098
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1153.328125,
+      "tracks": {
+        "translation.x": {
+          "value": -17.842659806038416,
+          "velocity": 24.91127027207103
+        },
+        "translation.y": {
+          "value": -0.6668132334806175,
+          "velocity": -32.53398815951941
+        },
+        "translation.z": {
+          "value": 8.391802290705318,
+          "velocity": -51.682407636716235
+        },
+        "intensity": {
+          "value": 0.9589699678613,
+          "velocity": 0.5838974930574969
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1165.125,
+      "tracks": {
+        "translation.x": {
+          "value": -17.53786617336766,
+          "velocity": 26.799985611757485
+        },
+        "translation.y": {
+          "value": -1.0965362984965452,
+          "velocity": -40.477498488858394
+        },
+        "translation.z": {
+          "value": 7.717240326460493,
+          "velocity": -62.90332652239701
+        },
+        "intensity": {
+          "value": 0.9654309808076156,
+          "velocity": 0.51287889150485
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1176.921875,
+      "tracks": {
+        "translation.x": {
+          "value": -17.20938396797039,
+          "velocity": 28.933993609550058
+        },
+        "translation.y": {
+          "value": -1.6258681585060615,
+          "velocity": -49.449063986652135
+        },
+        "translation.z": {
+          "value": 6.901970444648715,
+          "velocity": -75.57674985205286
+        },
+        "intensity": {
+          "value": 0.9711013993149583,
+          "velocity": 0.4496713451845552
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1188.71875,
+      "tracks": {
+        "translation.x": {
+          "value": -16.854070780900006,
+          "velocity": 31.35660719852293
+        },
+        "translation.y": {
+          "value": -2.26797472479147,
+          "velocity": -59.62941173195945
+        },
+        "translation.z": {
+          "value": 5.927390627244709,
+          "velocity": -89.95808470878691
+        },
+        "intensity": {
+          "value": 0.9760668927524574,
+          "velocity": 0.39320248735535696
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1200.515625,
+      "tracks": {
+        "translation.x": {
+          "value": -16.46823323872556,
+          "velocity": 34.11782345696936
+        },
+        "translation.y": {
+          "value": -3.0383189073450385,
+          "velocity": -71.2267900425821
+        },
+        "translation.z": {
+          "value": 4.771652536448466,
+          "velocity": -106.34166120909924
+        },
+        "intensity": {
+          "value": 0.9804013743556255,
+          "velocity": 0.3425500437719281
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1212.3125,
+      "tracks": {
+        "translation.x": {
+          "value": -16.047555818370068,
+          "velocity": 37.27260137353538
+        },
+        "translation.y": {
+          "value": -3.954951638492142,
+          "velocity": -84.46947506678731
+        },
+        "translation.z": {
+          "value": 3.409249754800499,
+          "velocity": -125.05016721356158
+        },
+        "intensity": {
+          "value": 0.9841687002550246,
+          "velocity": 0.2969285246804227
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1224.109375,
+      "tracks": {
+        "translation.x": {
+          "value": -15.587069947501695,
+          "velocity": 40.87526473081313
+        },
+        "translation.y": {
+          "value": -5.038630024206624,
+          "velocity": -99.58189710641767
+        },
+        "translation.z": {
+          "value": 1.810849950225067,
+          "velocity": -146.40095105216128
+        },
+        "intensity": {
+          "value": 0.9874241824012917,
+          "velocity": 0.2556718909300743
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1235.90625,
+      "tracks": {
+        "translation.x": {
+          "value": -15.081230847948305,
+          "velocity": 44.965932705278185
+        },
+        "translation.y": {
+          "value": -6.312478011141778,
+          "velocity": -116.72717809624031
+        },
+        "translation.z": {
+          "value": -0.05622706553960333,
+          "velocity": -170.62488169674646
+        },
+        "intensity": {
+          "value": 0.9902158934873829,
+          "velocity": 0.2182160390029059
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1247.703125,
+      "tracks": {
+        "translation.x": {
+          "value": -14.524234188038282,
+          "velocity": 49.54201472056572
+        },
+        "translation.y": {
+          "value": -7.800634054896143,
+          "velocity": -135.8869275744058
+        },
+        "translation.z": {
+          "value": -2.226100677182097,
+          "velocity": -197.69657500606297
+        },
+        "intensity": {
+          "value": 0.9925857730463348,
+          "velocity": 0.18408277135950632
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1259.5,
+      "tracks": {
+        "translation.x": {
+          "value": -13.910802088591298,
+          "velocity": 54.50567695771863
+        },
+        "translation.y": {
+          "value": -9.524923253187056,
+          "velocity": -156.64045609009622
+        },
+        "translation.z": {
+          "value": -4.729630308052308,
+          "velocity": -227.02250043936786
+        },
+        "intensity": {
+          "value": 0.99457055636229,
+          "velocity": 0.15286582678289348
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1271.296875,
+      "tracks": {
+        "translation.x": {
+          "value": -13.237755089045963,
+          "velocity": 59.58407126018372
+        },
+        "translation.y": {
+          "value": -11.498232606129967,
+          "velocity": -177.83078554559285
+        },
+        "translation.z": {
+          "value": -7.585058445157971,
+          "velocity": -256.96907114751843
+        },
+        "intensity": {
+          "value": 0.9962025511494514,
+          "velocity": 0.12421902522627554
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1283.09375,
+      "tracks": {
+        "translation.x": {
+          "value": -12.506576452534015,
+          "velocity": 64.25021896878303
+        },
+        "translation.y": {
+          "value": -13.713744711637975,
+          "velocity": -197.2360112362555
+        },
+        "translation.z": {
+          "value": -10.782800798005958,
+          "velocity": -284.3980879712683
+        },
+        "intensity": {
+          "value": 0.9975102860611942,
+          "velocity": 0.09784635519381797
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1294.890625,
+      "tracks": {
+        "translation.x": {
+          "value": -11.726475884263943,
+          "velocity": 67.73944623562033
+        },
+        "translation.y": {
+          "value": -16.13213692883634,
+          "velocity": -211.64525291302422
+        },
+        "translation.z": {
+          "value": -14.267357277027134,
+          "velocity": -304.77348596257247
+        },
+        "intensity": {
+          "value": 0.9985190524941002,
+          "velocity": 0.07349375177760321
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1306.6875,
+      "tracks": {
+        "translation.x": {
+          "value": -10.916035884097122,
+          "velocity": 69.28835212892153
+        },
+        "translation.y": {
+          "value": -18.674820564313116,
+          "velocity": -217.86906988970762
+        },
+        "translation.z": {
+          "value": -17.927748791051787,
+          "velocity": -313.588210562584
+        },
+        "intensity": {
+          "value": 0.9992513580764548,
+          "velocity": 0.05094230342878377
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1318.484375,
+      "tracks": {
+        "translation.x": {
+          "value": -10.10080769415507,
+          "velocity": 68.5455446484241
+        },
+        "translation.y": {
+          "value": -21.234229786125844,
+          "velocity": -214.46283135418454
+        },
+        "translation.z": {
+          "value": -21.612037150116098,
+          "velocity": -308.7989566883874
+        },
+        "intensity": {
+          "value": 0.9997273072440253,
+          "velocity": 0.030002646070103094
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1330.28125,
+      "tracks": {
+        "translation.x": {
+          "value": -9.306732591150617,
+          "velocity": 65.79790547740677
+        },
+        "translation.y": {
+          "value": -23.701551652859514,
+          "velocity": -202.66376597770665
+        },
+        "translation.z": {
+          "value": -25.166491340095817,
+          "velocity": -292.1509897960778
+        },
+        "intensity": {
+          "value": 0.999964921639154,
+          "velocity": 0.010510334656644565
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1336.999,
+      "tracks": {
+        "translation.x": {
+          "value": -8.871887829663414,
+          "velocity": 63.60646645285284
+        },
+        "translation.y": {
+          "value": -25.032450021291517,
+          "velocity": -193.33270264955425
+        },
+        "translation.z": {
+          "value": -27.085970751834218,
+          "velocity": -278.97909235035655
+        },
+        "intensity": {
+          "value": 0.999999999999233,
+          "velocity": 0.00000153408287376573
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1337,
+      "tracks": {
+        "translation.x": {
+          "value": -8.871824223371904,
+          "velocity": 63.60611658106539
+        },
+        "translation.y": {
+          "value": -25.032643353250574,
+          "velocity": -193.3312155164154
+        },
+        "translation.z": {
+          "value": -27.086249729876798,
+          "velocity": -278.9769928822423
+        },
+        "intensity": {
+          "value": 1,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1337.001,
+      "tracks": {
+        "translation.x": {
+          "value": -8.871760617430258,
+          "velocity": 63.60576670330921
+        },
+        "translation.y": {
+          "value": -25.03283668372253,
+          "velocity": -193.32972835858143
+        },
+        "translation.z": {
+          "value": -27.086528705819948,
+          "velocity": -278.97489337921166
+        },
+        "intensity": {
+          "value": 1.0000004444439508,
+          "velocity": 0.4444434567874572
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1342.078125,
+      "tracks": {
+        "translation.x": {
+          "value": -8.55345325057955,
+          "velocity": 61.76231576688718
+        },
+        "translation.y": {
+          "value": -25.994742627358548,
+          "velocity": -185.5023368736709
+        },
+        "translation.z": {
+          "value": -28.47517241961821,
+          "velocity": -267.92388775385695
+        },
+        "intensity": {
+          "value": 1.0022440923713847,
+          "velocity": 0.4393593135117704
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1353.875,
+      "tracks": {
+        "translation.x": {
+          "value": -7.851627530597071,
+          "velocity": 57.184733892007806
+        },
+        "translation.y": {
+          "value": -28.069630360691455,
+          "velocity": -166.11536714400802
+        },
+        "translation.z": {
+          "value": -31.475631304056247,
+          "velocity": -240.5487341560132
+        },
+        "intensity": {
+          "value": 1.0073549548117444,
+          "velocity": 0.4269827891569655
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1365.671875,
+      "tracks": {
+        "translation.x": {
+          "value": -7.204254454143664,
+          "velocity": 52.59789015960552
+        },
+        "translation.y": {
+          "value": -29.91418819881677,
+          "velocity": -146.73413371899395
+        },
+        "translation.z": {
+          "value": -34.15083278037447,
+          "velocity": -213.17814167852714
+        },
+        "intensity": {
+          "value": 1.0123148658485797,
+          "velocity": 0.41375354804769787
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1377.46875,
+      "tracks": {
+        "translation.x": {
+          "value": -6.609511836618868,
+          "velocity": 48.293785752494436
+        },
+        "translation.y": {
+          "value": -31.536540476334885,
+          "velocity": -128.57550262423996
+        },
+        "translation.z": {
+          "value": -36.51221668957356,
+          "velocity": -187.53193208315142
+        },
+        "intensity": {
+          "value": 1.017113247988522,
+          "velocity": 0.3995817842025983
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1389.265625,
+      "tracks": {
+        "translation.x": {
+          "value": -6.063225490911725,
+          "velocity": 44.392785960865154
+        },
+        "translation.y": {
+          "value": -32.954577855575,
+          "velocity": -112.13593408076149
+        },
+        "translation.z": {
+          "value": -38.58502864379609,
+          "velocity": -164.31217409463702
+        },
+        "intensity": {
+          "value": 1.021738390637667,
+          "velocity": 0.38436485059015557
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1401.0625,
+      "tracks": {
+        "translation.x": {
+          "value": -5.560438201355968,
+          "velocity": 40.917893040825874
+        },
+        "translation.y": {
+          "value": -34.189382743342875,
+          "velocity": -97.50475368368517
+        },
+        "translation.z": {
+          "value": -40.39903092400519,
+          "velocity": -143.64563592518883
+        },
+        "intensity": {
+          "value": 1.026177285332286,
+          "velocity": 0.3679849309061967
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1412.859375,
+      "tracks": {
+        "translation.x": {
+          "value": -5.096234338809678,
+          "velocity": 37.845424096533165
+        },
+        "translation.y": {
+          "value": -35.261788207133925,
+          "velocity": -84.57707819380124
+        },
+        "translation.z": {
+          "value": -41.983639496575336,
+          "velocity": -125.38457895724606
+        },
+        "intensity": {
+          "value": 1.0304154306013467,
+          "velocity": 0.3503062000698613
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1424.65625,
+      "tracks": {
+        "translation.x": {
+          "value": -4.666104451215555,
+          "velocity": 35.133528076656454
+        },
+        "translation.y": {
+          "value": -36.19086690346512,
+          "velocity": -73.1732469190643
+        },
+        "translation.z": {
+          "value": -43.36578772088164,
+          "velocity": -109.27550525097122
+        },
+        "intensity": {
+          "value": 1.034436599687967,
+          "velocity": 0.33117134224712286
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1436.453125,
+      "tracks": {
+        "translation.x": {
+          "value": -4.266065150521224,
+          "velocity": 32.73643304747565
+        },
+        "translation.y": {
+          "value": -36.993443239687444,
+          "velocity": -63.09826799333111
+        },
+        "translation.z": {
+          "value": -44.56923593607618,
+          "velocity": -95.04316834026669
+        },
+        "intensity": {
+          "value": 1.038222562595228,
+          "velocity": 0.31039725719387945
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1448.25,
+      "tracks": {
+        "translation.x": {
+          "value": -3.8926623605420394,
+          "velocity": 30.610816963088237
+        },
+        "translation.y": {
+          "value": -37.68409113175795,
+          "velocity": -54.16824915732425
+        },
+        "translation.z": {
+          "value": -45.614567388829926,
+          "velocity": -82.42793786412841
+        },
+        "intensity": {
+          "value": 1.0417527516444163,
+          "velocity": 0.28776973576238346
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1460.046875,
+      "tracks": {
+        "translation.x": {
+          "value": -3.542925701305234,
+          "velocity": 28.7181943845003
+        },
+        "translation.y": {
+          "value": -38.275333637345824,
+          "velocity": -46.220179423424504
+        },
+        "translation.z": {
+          "value": -46.519469616026015,
+          "velocity": -71.19963735939945
+        },
+        "intensity": {
+          "value": 1.0450038567788047,
+          "velocity": 0.26303681976937177
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1471.84375,
+      "tracks": {
+        "translation.x": {
+          "value": -3.214307249321413,
+          "velocity": 27.02542397745631
+        },
+        "translation.y": {
+          "value": -38.77790578437519,
+          "velocity": -39.113888863932
+        },
+        "translation.z": {
+          "value": -47.29910529605978,
+          "velocity": -61.160326477728105
+        },
+        "intensity": {
+          "value": 1.0479493330013379,
+          "velocity": 0.2359004753615276
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1483.640625,
+      "tracks": {
+        "translation.x": {
+          "value": -2.9046198141093247,
+          "velocity": 25.504403988106795
+        },
+        "translation.y": {
+          "value": -39.2010177332146,
+          "velocity": -32.730650504620826
+        },
+        "translation.z": {
+          "value": -47.96648370624968,
+          "velocity": -52.14233533553003
+        },
+        "intensity": {
+          "value": 1.05055879732711,
+          "velocity": 0.20600609696640435
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1495.4375,
+      "tracks": {
+        "translation.x": {
+          "value": -2.6119808870753443,
+          "velocity": 24.131472059425246
+        },
+        "translation.y": {
+          "value": -39.55259294149538,
+          "velocity": -26.97057744962693
+        },
+        "translation.z": {
+          "value": -48.532796959635384,
+          "velocity": -44.004593952644335
+        },
+        "intensity": {
+          "value": 1.0527972861203183,
+          "velocity": 0.17292921513568824
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1507.234375,
+      "tracks": {
+        "translation.x": {
+          "value": -2.334764162659847,
+          "velocity": 22.886746827164412
+        },
+        "translation.y": {
+          "value": -39.83947371636202,
+          "velocity": -21.749800914977488
+        },
+        "translation.z": {
+          "value": -49.00771023426274,
+          "velocity": -36.62865016235812
+        },
+        "intensity": {
+          "value": 1.0546243352695757,
+          "velocity": 0.13615860216772172
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1519.03125,
+      "tracks": {
+        "translation.x": {
+          "value": -2.071558634583342,
+          "velocity": 21.75351193824481
+        },
+        "translation.y": {
+          "value": -40.06759439161917,
+          "velocity": -16.997843781556682
+        },
+        "translation.z": {
+          "value": -49.39960631063111,
+          "velocity": -29.914962354823846
+        },
+        "intensity": {
+          "value": 1.0559928349218106,
+          "velocity": 0.09507475744266217
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1530.828125,
+      "tracks": {
+        "translation.x": {
+          "value": -1.821134514579402,
+          "velocity": 20.717678123676553
+        },
+        "translation.y": {
+          "value": -40.24212546072505,
+          "velocity": -12.655333806459819
+        },
+        "translation.z": {
+          "value": -49.715789109440266,
+          "velocity": -23.779671116505277
+        },
+        "intensity": {
+          "value": 1.0568475971628892,
+          "velocity": 0.04892253226969304
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1542.625,
+      "tracks": {
+        "translation.x": {
+          "value": -1.5824149984938498,
+          "velocity": 19.767329425063323
+        },
+        "translation.y": {
+          "value": -40.36759287727363,
+          "velocity": -8.672078383425658
+        },
+        "translation.z": {
+          "value": -49.96265217020023,
+          "velocity": -18.15188098625532
+        },
+        "intensity": {
+          "value": 1.0571235593243242,
+          "velocity": -0.0032235087327830915
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1554.421875,
+      "tracks": {
+        "translation.x": {
+          "value": -1.3544529167802575,
+          "velocity": 18.892347332043876
+        },
+        "translation.y": {
+          "value": -40.4479766472505,
+          "velocity": -5.005472120010784
+        },
+        "translation.z": {
+          "value": -50.14581789074058,
+          "velocity": -12.971411937362333
+        },
+        "intensity": {
+          "value": 1.0567435291105143,
+          "velocity": -0.06250231695891316
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1566.21875,
+      "tracks": {
+        "translation.x": {
+          "value": -1.1364114102302008,
+          "velocity": 18.084102359028662
+        },
+        "translation.y": {
+          "value": -40.48679237681211,
+          "velocity": -1.6191915489379778
+        },
+        "translation.z": {
+          "value": -50.27025269900609,
+          "velocity": -8.18695618492686
+        },
+        "intensity": {
+          "value": 1.0556153654593767,
+          "velocity": -0.13031876641596626
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1578.015625,
+      "tracks": {
+        "translation.x": {
+          "value": -0.9275479009295344,
+          "velocity": 17.335202019788042
+        },
+        "translation.y": {
+          "value": -40.48715888023371,
+          "velocity": 1.5178705599196107
+        },
+        "translation.z": {
+          "value": -50.34036254000176,
+          "velocity": -3.754573260036534
+        },
+        "intensity": {
+          "value": 1.053628493783666,
+          "velocity": -0.2084034465615184
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1589.8125,
+      "tracks": {
+        "translation.x": {
+          "value": -0.7272007539978624,
+          "velocity": 16.639285096953138
+        },
+        "translation.y": {
+          "value": -40.45185441390049,
+          "velocity": 4.432474515496684
+        },
+        "translation.z": {
+          "value": -50.36007230053471,
+          "velocity": 0.3635376550111999
+        },
+        "intensity": {
+          "value": 1.0506497063450886,
+          "velocity": -0.29887188722487024
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1601.609375,
+      "tracks": {
+        "translation.x": {
+          "value": -0.5347781365867098,
+          "velocity": 15.990853538132246
+        },
+        "translation.y": {
+          "value": -40.3833636285043,
+          "velocity": 7.1477436077958325
+        },
+        "translation.z": {
+          "value": -50.332892125810154,
+          "velocity": 4.200040297683693
+        },
+        "intensity": {
+          "value": 1.0465183664166533,
+          "velocity": -0.4042607217595641
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1613.40625,
+      "tracks": {
+        "translation.x": {
+          "value": -0.34974867407819893,
+          "velocity": 15.385134787257188
+        },
+        "translation.y": {
+          "value": -40.283916933585,
+          "velocity": 9.683745185699964
+        },
+        "translation.z": {
+          "value": -50.26197302008726,
+          "velocity": 7.783281985180891
+        },
+        "intensity": {
+          "value": 1.0410415661501202,
+          "velocity": -0.52748608761346
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1625.203125,
+      "tracks": {
+        "translation.x": {
+          "value": -0.1716335802051468,
+          "velocity": 14.817968694756772
+        },
+        "translation.y": {
+          "value": -40.15552364224919,
+          "velocity": 12.057967779023892
+        },
+        "translation.z": {
+          "value": -50.15015366293055,
+          "velocity": 11.137967473779597
+        },
+        "intensity": {
+          "value": 1.033990781897275,
+          "velocity": -0.6716028800889832
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1636.999,
+      "tracks": {
+        "translation.x": {
+          "value": -0.00001428573615150969,
+          "velocity": 14.285758017606536
+        },
+        "translation.y": {
+          "value": -40.00001428562277,
+          "velocity": 14.285531259645602
+        },
+        "translation.z": {
+          "value": -50.00001428558498,
+          "velocity": 14.285455673658628
+        },
+        "intensity": {
+          "value": 1.0251045058388641,
+          "velocity": -0.8391045781067106
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1637,
+      "tracks": {
+        "translation.x": {
+          "value": -3.996802888650564e-15,
+          "velocity": 14.285714285714295
+        },
+        "translation.y": {
+          "value": -40,
+          "velocity": 14.285714285714235
+        },
+        "translation.z": {
+          "value": -50,
+          "velocity": 14.285714285714214
+        },
+        "intensity": {
+          "value": 1.0251036667266717,
+          "velocity": -0.8391198064658004
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1637.001,
+      "tracks": {
+        "translation.x": {
+          "value": 0.000021818218948878505,
+          "velocity": 21.81825608163662
+        },
+        "translation.y": {
+          "value": -39.99997818170269,
+          "velocity": 21.818412800695686
+        },
+        "translation.z": {
+          "value": -49.99997818172228,
+          "velocity": 21.81837362093092
+        },
+        "intensity": {
+          "value": 1.025102827599251,
+          "velocity": -0.8391350349988582
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1648.796875,
+      "tracks": {
+        "translation.x": {
+          "value": 0.2626434230952422,
+          "velocity": 22.717180843805576
+        },
+        "translation.y": {
+          "value": -39.72625245539373,
+          "velocity": 24.616946125566034
+        },
+        "translation.z": {
+          "value": -49.72902848577149,
+          "velocity": 24.14200480512592
+        },
+        "intensity": {
+          "value": 1.0140985391546258,
+          "velocity": -1.030446313798773
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1660.59375,
+      "tracks": {
+        "translation.x": {
+          "value": 0.5361729402864832,
+          "velocity": 23.66436962428676
+        },
+        "translation.y": {
+          "value": -39.41858214010566,
+          "velocity": 27.571327752124272
+        },
+        "translation.z": {
+          "value": -49.42989337000762,
+          "velocity": 26.594588220164894
+        },
+        "intensity": {
+          "value": 1.0007148833809274,
+          "velocity": -1.2409665246890096
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1672.390625,
+      "tracks": {
+        "translation.x": {
+          "value": 0.8211788528890164,
+          "velocity": 24.66350111822429
+        },
+        "translation.y": {
+          "value": -39.07508020602561,
+          "velocity": 30.693905093593813
+        },
+        "translation.z": {
+          "value": -49.10101544129695,
+          "velocity": 29.186304099751435
+        },
+        "intensity": {
+          "value": 0.9847966636450407,
+          "velocity": -1.4568576911263846
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1684.1875,
+      "tracks": {
+        "translation.x": {
+          "value": 1.118297730703914,
+          "velocity": 25.71867100163316
+        },
+        "translation.y": {
+          "value": -38.69368235073043,
+          "velocity": 33.99847296502189
+        },
+        "translation.z": {
+          "value": -48.740687330371834,
+          "velocity": 31.9285224741747
+        },
+        "intensity": {
+          "value": 0.966421755818928,
+          "velocity": -1.6521948530804447
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1695.984375,
+      "tracks": {
+        "translation.x": {
+          "value": 1.428216610492636,
+          "velocity": 26.83434383118579
+        },
+        "translation.y": {
+          "value": -38.27215382464502,
+          "velocity": 37.50015183051437
+        },
+        "translation.z": {
+          "value": -48.3470612158606,
+          "velocity": 34.833699830682214
+        },
+        "intensity": {
+          "value": 0.9460290425700769,
+          "velocity": -1.793392570591917
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1707.78125,
+      "tracks": {
+        "translation.x": {
+          "value": 1.7516774925592,
+          "velocity": 28.015377088552125
+        },
+        "translation.y": {
+          "value": -37.80807315046806,
+          "velocity": 41.21549603081487
+        },
+        "translation.z": {
+          "value": -47.91813548971125,
+          "velocity": 37.91546629524918
+        },
+        "intensity": {
+          "value": 0.9244274232891878,
+          "velocity": -1.8544384931351863
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1719.578125,
+      "tracks": {
+        "translation.x": {
+          "value": 2.08948209680646,
+          "velocity": 29.267040622863913
+        },
+        "translation.y": {
+          "value": -37.29881460259962,
+          "velocity": 45.16259441905138
+        },
+        "translation.z": {
+          "value": -47.4517404277481,
+          "velocity": 41.18870597000451
+        },
+        "intensity": {
+          "value": 0.9026057926848392,
+          "velocity": -1.8324024393776754
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1731.375,
+      "tracks": {
+        "translation.x": {
+          "value": 2.442496803466238,
+          "velocity": 30.595027767684666
+        },
+        "translation.y": {
+          "value": -36.74152959231209,
+          "velocity": 49.36115314682363
+        },
+        "translation.z": {
+          "value": -46.94552299336751,
+          "velocity": 44.66962180203889
+        },
+        "intensity": {
+          "value": 0.8814450038443605,
+          "velocity": -1.7468278063518508
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1743.171875,
+      "tracks": {
+        "translation.x": {
+          "value": 2.8116576499070023,
+          "velocity": 32.005452630042
+        },
+        "translation.y": {
+          "value": -36.13312725499185,
+          "velocity": 53.83254499747868
+        },
+        "translation.z": {
+          "value": -46.396931028767135,
+          "velocity": 48.37577190561951
+        },
+        "intensity": {
+          "value": 0.8615325604987251,
+          "velocity": -1.6252019018682868
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1754.96875,
+      "tracks": {
+        "translation.x": {
+          "value": 3.197975175939686,
+          "velocity": 33.50482551599115
+        },
+        "translation.y": {
+          "value": -35.47025476266049,
+          "velocity": 58.59980193642435
+        },
+        "translation.z": {
+          "value": -45.803197278010444,
+          "velocity": 52.32605783131605
+        },
+        "intensity": {
+          "value": 0.8431512773537716,
+          "velocity": -1.490330945915296
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1766.765625,
+      "tracks": {
+        "translation.x": {
+          "value": 3.6025387953390857,
+          "velocity": 35.09999487903629
+        },
+        "translation.y": {
+          "value": -34.749278221664895,
+          "velocity": 63.687516475199146
+        },
+        "translation.z": {
+          "value": -45.16132396741391,
+          "velocity": 56.54063607615843
+        },
+        "intensity": {
+          "value": 0.8263651658812079,
+          "velocity": -1.3564681200047937
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1778.5625,
+      "tracks": {
+        "translation.x": {
+          "value": 4.026520206403908,
+          "velocity": 36.798039175564334
+        },
+        "translation.y": {
+          "value": -33.96626550860923,
+          "velocity": 69.12160174224283
+        },
+        "translation.z": {
+          "value": -44.468069079855944,
+          "velocity": 61.0407111005732
+        },
+        "intensity": {
+          "value": 0.811114254520876,
+          "velocity": -1.230816725091264
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1790.359375,
+      "tracks": {
+        "translation.x": {
+          "value": 4.471175119808937,
+          "velocity": 38.6060851165885
+        },
+        "translation.y": {
+          "value": -33.11697311123685,
+          "velocity": 74.92883818137925
+        },
+        "translation.z": {
+          "value": -43.7199360534754,
+          "velocity": 65.84814991518155
+        },
+        "intensity": {
+          "value": 0.7972819599271477,
+          "velocity": -1.1161844842815538
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1802.15625,
+      "tracks": {
+        "translation.x": {
+          "value": 4.937842252348441,
+          "velocity": 40.531019490762425
+        },
+        "translation.y": {
+          "value": -32.19684006019647,
+          "velocity": 81.1361046240052
+        },
+        "translation.z": {
+          "value": -42.91316948206025,
+          "velocity": 70.9848333406945
+        },
+        "intensity": {
+          "value": 0.7847339721870202,
+          "velocity": -1.0130392077367916
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1813.953125,
+      "tracks": {
+        "translation.x": {
+          "value": 5.427938078927867,
+          "velocity": 42.579049521557415
+        },
+        "translation.y": {
+          "value": -31.20099347100223,
+          "velocity": 87.76915114203516
+        },
+        "translation.z": {
+          "value": -42.043760583519706,
+          "velocity": 76.47162573691571
+        },
+        "intensity": {
+          "value": 0.7733378096048344,
+          "velocity": -0.920754168472667
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1825.75,
+      "tracks": {
+        "translation.x": {
+          "value": 5.942945216646533,
+          "velocity": 44.75505144354478
+        },
+        "translation.y": {
+          "value": -30.12427219159635,
+          "velocity": 94.85071933477829
+        },
+        "translation.z": {
+          "value": -41.10746783953564,
+          "velocity": 82.32680236196991
+        },
+        "intensity": {
+          "value": 0.7629713556259801,
+          "velocity": -0.838275830747808
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1837.546875,
+      "tracks": {
+        "translation.x": {
+          "value": 6.4843915007175275,
+          "velocity": 47.06162933679256
+        },
+        "translation.y": {
+          "value": -28.961277701429026,
+          "velocity": 102.39775364043696
+        },
+        "translation.z": {
+          "value": -40.09986040089238,
+          "velocity": 88.56372256452586
+        },
+        "intensity": {
+          "value": 0.7535257094854844,
+          "velocity": -0.7644534880722612
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1849.34375,
+      "tracks": {
+        "translation.x": {
+          "value": 7.05381578724462,
+          "velocity": 49.49778888018142
+        },
+        "translation.y": {
+          "value": -27.70646482254962,
+          "velocity": 110.4173816494603
+        },
+        "translation.z": {
+          "value": -39.016394670101064,
+          "velocity": 95.18748345714059
+        },
+        "intensity": {
+          "value": 0.7449053281355295,
+          "velocity": -0.6981886055761023
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1861.140625,
+      "tracks": {
+        "translation.x": {
+          "value": 7.652715318762984,
+          "velocity": 52.057120030006416
+        },
+        "translation.y": {
+          "value": -26.354288930747607,
+          "velocity": 118.9012906170261
+        },
+        "translation.z": {
+          "value": -37.85253786836996,
+          "velocity": 102.19024797027117
+        },
+        "intensity": {
+          "value": 0.7370270053220939,
+          "velocity": -0.6384932977474425
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1872.9375,
+      "tracks": {
+        "translation.x": {
+          "value": 8.28246826379633,
+          "velocity": 54.725391914710016
+        },
+        "translation.y": {
+          "value": -24.899430813184438,
+          "velocity": 127.81813110790836
+        },
+        "translation.z": {
+          "value": -36.60395604393924,
+          "velocity": 109.54494630960876
+        },
+        "intensity": {
+          "value": 0.7298184503620629,
+          "velocity": -0.5845052162194075
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1884.734375,
+      "tracks": {
+        "translation.x": {
+          "value": 8.944224154529142,
+          "velocity": 57.47751619950887
+        },
+        "translation.y": {
+          "value": -23.337124068784156,
+          "velocity": 137.10371104642428
+        },
+        "translation.z": {
+          "value": -35.26678701295583,
+          "velocity": 117.19716233469543
+        },
+        "intensity": {
+          "value": 0.7232168228871404,
+          "velocity": -0.5354828733519921
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1896.53125,
+      "tracks": {
+        "translation.x": {
+          "value": 9.638755117766465,
+          "velocity": 60.27396890964474
+        },
+        "translation.y": {
+          "value": -21.66361081079995,
+          "velocity": 146.64912459112782
+        },
+        "translation.z": {
+          "value": -33.83801932865834,
+          "velocity": 125.05533567075705
+        },
+        "intensity": {
+          "value": 0.7171673761209074,
+          "velocity": -0.4907932476377155
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1908.328125,
+      "tracks": {
+        "translation.x": {
+          "value": 10.366263250070006,
+          "velocity": 63.05702228866325
+        },
+        "translation.y": {
+          "value": -19.876745549273824,
+          "velocity": 156.28775096692007
+        },
+        "translation.z": {
+          "value": -32.31599334943786,
+          "velocity": 132.98006879735587
+        },
+        "intensity": {
+          "value": 0.7116222622783439,
+          "velocity": -0.44989730779618275
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1920.125,
+      "tracks": {
+        "translation.x": {
+          "value": 11.126145981240484,
+          "velocity": 65.74756422423759
+        },
+        "translation.y": {
+          "value": -17.976748753917743,
+          "velocity": 165.7834020479844
+        },
+        "translation.z": {
+          "value": -30.701025070128193,
+          "velocity": 140.7744425920477
+        },
+        "intensity": {
+          "value": 0.7065395076309157,
+          "velocity": -0.41233598575648733
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1931.921875,
+      "tracks": {
+        "translation.x": {
+          "value": 11.916733681770214,
+          "velocity": 68.24384600187639
+        },
+        "translation.y": {
+          "value": -15.967074119295656,
+          "velocity": 174.8237571951987
+        },
+        "translation.z": {
+          "value": -28.996122169029185,
+          "velocity": 148.17877939686812
+        },
+        "intensity": {
+          "value": 0.701882144998263,
+          "velocity": -0.377717604766076
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1936.999,
+      "tracks": {
+        "translation.x": {
+          "value": 12.265742921384685,
+          "velocity": 69.22857036755732
+        },
+        "translation.y": {
+          "value": -15.070115801517584,
+          "velocity": 178.48082914784428
+        },
+        "translation.z": {
+          "value": -28.236151120792016,
+          "velocity": 151.16776445277253
+        },
+        "intensity": {
+          "value": 0.7000003636377271,
+          "velocity": -0.36363909063971883
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1937,
+      "tracks": {
+        "translation.x": {
+          "value": 12.26581215004881,
+          "velocity": 69.22875787890516
+        },
+        "translation.y": {
+          "value": -15.06993732033701,
+          "velocity": 178.4815320013694
+        },
+        "translation.z": {
+          "value": -28.235999952740556,
+          "velocity": 151.16833847075333
+        },
+        "intensity": {
+          "value": 0.7,
+          "velocity": -0.3636363636363636
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1937.001,
+      "tracks": {
+        "translation.x": {
+          "value": 12.26588137890045,
+          "velocity": 69.22894538757753
+        },
+        "translation.y": {
+          "value": -15.069758838453565,
+          "velocity": 178.482234847577
+        },
+        "translation.z": {
+          "value": -28.23584878411506,
+          "velocity": 151.16891248257713
+        },
+        "intensity": {
+          "value": 0.6999999999996932,
+          "velocity": -6.136323030990894e-7
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1943.71875,
+      "tracks": {
+        "translation.x": {
+          "value": 12.735032853328896,
+          "velocity": 70.42401871922178
+        },
+        "translation.y": {
+          "value": -13.855293265238211,
+          "velocity": 183.02508793939148
+        },
+        "translation.z": {
+          "value": -27.207711735596433,
+          "velocity": 154.87482063434902
+        },
+        "intensity": {
+          "value": 0.6999860560921688,
+          "velocity": -0.0041648056742884425
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1955.515625,
+      "tracks": {
+        "translation.x": {
+          "value": 13.576531268398087,
+          "velocity": 72.15437813935029
+        },
+        "translation.y": {
+          "value": -11.65382521198787,
+          "velocity": 189.9548566799316
+        },
+        "translation.z": {
+          "value": -25.346236091891384,
+          "velocity": 160.50473704478625
+        },
+        "intensity": {
+          "value": 0.6998928259498033,
+          "velocity": -0.011686320734164656
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1967.3125,
+      "tracks": {
+        "translation.x": {
+          "value": 14.435139564872738,
+          "velocity": 73.3042538928202
+        },
+        "translation.y": {
+          "value": -9.38027168980664,
+          "velocity": 195.17614630647645
+        },
+        "translation.z": {
+          "value": -23.426418876136797,
+          "velocity": 164.7081732030624
+        },
+        "intensity": {
+          "value": 0.6997092354884025,
+          "velocity": -0.01948671054888054
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1979.109375,
+      "tracks": {
+        "translation.x": {
+          "value": 15.303342167677261,
+          "velocity": 73.7661093715935
+        },
+        "translation.y": {
+          "value": -7.057110570108529,
+          "velocity": 198.31069196814408
+        },
+        "translation.z": {
+          "value": -21.466997385662083,
+          "velocity": 167.17454631900642
+        },
+        "intensity": {
+          "value": 0.699431902780269,
+          "velocity": -0.027581775489918293
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1990.90625,
+      "tracks": {
+        "translation.x": {
+          "value": 16.17259489949616,
+          "velocity": 73.47625254270443
+        },
+        "translation.y": {
+          "value": -4.710597378927687,
+          "velocity": 199.10702071859765
+        },
+        "translation.z": {
+          "value": -19.489799309321725,
+          "velocity": 167.69932867462433
+        },
+        "intensity": {
+          "value": 0.6990572525775753,
+          "velocity": -0.035988507515365725
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2002.703125,
+      "tracks": {
+        "translation.x": {
+          "value": 17.033937637564577,
+          "velocity": 72.4294256016254
+        },
+        "translation.y": {
+          "value": -2.3689359285281664,
+          "velocity": 197.49245279431472
+        },
+        "translation.z": {
+          "value": -17.51821753700498,
+          "velocity": 166.22669599614238
+        },
+        "intensity": {
+          "value": 0.698581501613332,
+          "velocity": -0.04472520090650443
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2014.5,
+      "tracks": {
+        "translation.x": {
+          "value": 17.878713018343532,
+          "velocity": 70.68151725372338
+        },
+        "translation.y": {
+          "value": -0.060031490258509734,
+          "velocity": 193.58939982161118
+        },
+        "translation.z": {
+          "value": -15.575345363108,
+          "velocity": 162.86242917963926
+        },
+        "intensity": {
+          "value": 0.6980006425265686,
+          "velocity": -0.05381157500338322
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2026.296875,
+      "tracks": {
+        "translation.x": {
+          "value": 18.699237490736074,
+          "velocity": 68.3390111847048
+        },
+        "translation.y": {
+          "value": 2.190696187794739,
+          "velocity": 187.68927209745405
+        },
+        "translation.z": {
+          "value": -13.68216848646993,
+          "velocity": 157.8517068692668
+        },
+        "intensity": {
+          "value": 0.6973104262618537,
+          "velocity": -0.06326891037840167
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2038.09375,
+      "tracks": {
+        "translation.x": {
+          "value": 19.489286963388476,
+          "velocity": 65.53912454786317
+        },
+        "translation.y": {
+          "value": 4.361985953825405,
+          "velocity": 180.19440205240994
+        },
+        "translation.z": {
+          "value": -11.856188793783826,
+          "velocity": 151.53058267627327
+        },
+        "intensity": {
+          "value": 0.696506342775275,
+          "velocity": -0.07312020006476563
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2049.890625,
+      "tracks": {
+        "translation.x": {
+          "value": 20.244327094582612,
+          "velocity": 62.42758091719838
+        },
+        "translation.y": {
+          "value": 6.437636545231029,
+          "velocity": 171.54905974327212
+        },
+        "translation.z": {
+          "value": -10.110690817431074,
+          "velocity": 144.26869003675367
+        },
+        "intensity": {
+          "value": 0.6955835998587829,
+          "velocity": -0.08339031765360208
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2061.6875,
+      "tracks": {
+        "translation.x": {
+          "value": 20.961499304247294,
+          "velocity": 59.14023744066403
+        },
+        "translation.y": {
+          "value": 8.406632457272686,
+          "velocity": 162.17972096997613
+        },
+        "translation.z": {
+          "value": -8.454650830983663,
+          "velocity": 136.4198500876481
+        },
+        "intensity": {
+          "value": 0.6945370998721484,
+          "velocity": -0.09410620428986728
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2073.484375,
+      "tracks": {
+        "translation.x": {
+          "value": 21.639429837029887,
+          "velocity": 55.791686102134086
+        },
+        "translation.y": {
+          "value": 10.262679802570094,
+          "velocity": 152.45572455595172
+        },
+        "translation.z": {
+          "value": -6.8931326888149576,
+          "velocity": 128.2897149424973
+        },
+        "intensity": {
+          "value": 0.6933614141464675,
+          "velocity": -0.10529707683220503
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2085.28125,
+      "tracks": {
+        "translation.x": {
+          "value": 22.27794647622936,
+          "velocity": 52.47078855537058
+        },
+        "translation.y": {
+          "value": 12.003407923736548,
+          "velocity": 142.67147800452375
+        },
+        "translation.z": {
+          "value": -5.427957438140249,
+          "velocity": 120.12130564223546
+        },
+        "intensity": {
+          "value": 0.6920507547949526,
+          "velocity": -0.1169946596934201
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2097.078125,
+      "tracks": {
+        "translation.x": {
+          "value": 22.877774762267507,
+          "velocity": 49.24128883729888
+        },
+        "translation.y": {
+          "value": 13.629465085003797,
+          "velocity": 133.04519833825535
+        },
+        "translation.z": {
+          "value": -4.058457495680274,
+          "velocity": 112.09422096301623
+        },
+        "intensity": {
+          "value": 0.6905989436355199,
+          "velocity": -0.12923344314150106
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2108.875,
+      "tracks": {
+        "translation.x": {
+          "value": 23.44026023527315,
+          "velocity": 46.145261075566495
+        },
+        "translation.y": {
+          "value": 15.143663528690706,
+          "velocity": 123.72745300259662
+        },
+        "translation.z": {
+          "value": -2.7821872946636836,
+          "velocity": 104.33190502083912
+        },
+        "intensity": {
+          "value": 0.6889993778953081,
+          "velocity": -0.14205097110795575
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2120.671875,
+      "tracks": {
+        "translation.x": {
+          "value": 23.967138901479053,
+          "velocity": 43.20759406587343
+        },
+        "translation.y": {
+          "value": 16.550254240775054,
+          "velocity": 114.81382175687082
+        },
+        "translation.z": {
+          "value": -1.5955245940489498,
+          "velocity": 96.91226483412146
+        },
+        "intensity": {
+          "value": 0.6872449923297956,
+          "velocity": -0.1554881618068699
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2132.46875,
+      "tracks": {
+        "translation.x": {
+          "value": 24.460360895250247,
+          "velocity": 40.44039236764785
+        },
+        "translation.y": {
+          "value": 17.854356216701923,
+          "velocity": 106.35797460252546
+        },
+        "translation.z": {
+          "value": -0.4941426136609932,
+          "velocity": 89.87857904380604
+        },
+        "intensity": {
+          "value": 0.6853282173488293,
+          "velocity": -0.16958966469301726
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2144.265625,
+      "tracks": {
+        "translation.x": {
+          "value": 24.92196267579459,
+          "velocity": 37.84675074813138
+        },
+        "translation.y": {
+          "value": 19.06153231422549,
+          "velocity": 98.3832457372399
+        },
+        "translation.z": {
+          "value": 0.526639904617765,
+          "velocity": 83.24912198996277
+        },
+        "intensity": {
+          "value": 0.6832409326992431,
+          "velocity": -0.18440425744728173
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2156.0625,
+      "tracks": {
+        "translation.x": {
+          "value": 25.353979117390978,
+          "velocity": 35.423737038430154
+        },
+        "translation.y": {
+          "value": 20.17748891528757,
+          "velocity": 90.89200449861586
+        },
+        "translation.z": {
+          "value": 1.4716114658134205,
+          "velocity": 77.02493763356942
+        },
+        "intensity": {
+          "value": 0.6809744162098103,
+          "velocity": -0.19998528672248297
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2167.859375,
+      "tracks": {
+        "translation.x": {
+          "value": 25.758386244998228,
+          "velocity": 33.16462073862581
+        },
+        "translation.y": {
+          "value": 21.207872869664808,
+          "velocity": 83.87280961812527
+        },
+        "translation.z": {
+          "value": 2.3455012134981623,
+          "velocity": 71.19576239825041
+        },
+        "intensity": {
+          "value": 0.6785192870608635,
+          "velocity": -0.2163911562378492
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2179.65625,
+      "tracks": {
+        "translation.x": {
+          "value": 26.13706639186301,
+          "velocity": 31.060468893702012
+        },
+        "translation.y": {
+          "value": 22.158141146271156,
+          "velocity": 77.30564327612207
+        },
+        "translation.z": {
+          "value": 3.152872457669118,
+          "velocity": 65.74434968051703
+        },
+        "intensity": {
+          "value": 0.6758654430008487,
+          "velocity": -0.23368586536584007
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2191.453125,
+      "tracks": {
+        "translation.x": {
+          "value": 26.491789140776387,
+          "velocity": 29.10124889073377
+        },
+        "translation.y": {
+          "value": 23.033482806848035,
+          "velocity": 71.16561292759744
+        },
+        "translation.z": {
+          "value": 3.898059390330125,
+          "velocity": 60.649521918381524
+        },
+        "intensity": {
+          "value": 0.6730019908997706,
+          "velocity": -0.2519396004499606
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2203.25,
+      "tracks": {
+        "translation.x": {
+          "value": 26.824203001161827,
+          "velocity": 27.27656510293434
+        },
+        "translation.y": {
+          "value": 23.83877746250132,
+          "velocity": 65.425492235284
+        },
+        "translation.z": {
+          "value": 4.585133847166446,
+          "velocity": 55.88826045219658
+        },
+        "intensity": {
+          "value": 0.6699171700116945,
+          "velocity": -0.2712293794925205
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2215.046875,
+      "tracks": {
+        "translation.x": {
+          "value": 27.135834137412957,
+          "velocity": 25.576132849549314
+        },
+        "translation.y": {
+          "value": 24.578578426094428,
+          "velocity": 60.05741332617149
+        },
+        "translation.z": {
+          "value": 5.217892353924059,
+          "velocity": 51.437093207015934
+        },
+        "intensity": {
+          "value": 0.6665982673252362,
+          "velocity": -0.29163974821810806
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2226.84375,
+      "tracks": {
+        "translation.x": {
+          "value": 27.42808953953054,
+          "velocity": 23.99006889560851
+        },
+        "translation.y": {
+          "value": 25.25711205602845,
+          "velocity": 55.03395489889694
+        },
+        "translation.z": {
+          "value": 5.799856426903972,
+          "velocity": 47.27298339807483
+        },
+        "intensity": {
+          "value": 0.6630315244272116,
+          "velocity": -0.3132635213632153
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2236.999,
+      "tracks": {
+        "translation.x": {
+          "value": 27.665147390317433,
+          "velocity": 22.709187803593785
+        },
+        "translation.y": {
+          "value": 25.79514449596539,
+          "velocity": 50.965439623207466
+        },
+        "translation.z": {
+          "value": 6.262645219553399,
+          "velocity": 43.90137666830405
+        },
+        "intensity": {
+          "value": 0.6597512620484076,
+          "velocity": -0.3329275950401612
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2237,
+      "tracks": {
+        "translation.x": {
+          "value": 27.665170099443998,
+          "velocity": 22.709065320888705
+        },
+        "translation.y": {
+          "value": 25.795195461210245,
+          "velocity": 50.96505007596109
+        },
+        "translation.z": {
+          "value": 6.262689120768683,
+          "velocity": 43.901053887192994
+        },
+        "intensity": {
+          "value": 0.659750929119819,
+          "velocity": -0.3329295816489183
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2237.001,
+      "tracks": {
+        "translation.x": {
+          "value": 27.665192808448083,
+          "velocity": 22.708942838884145
+        },
+        "translation.y": {
+          "value": 25.795246426065567,
+          "velocity": 50.96466053084668
+        },
+        "translation.z": {
+          "value": 6.262733021661198,
+          "velocity": 43.900731107856046
+        },
+        "intensity": {
+          "value": 0.6597505961892443,
+          "velocity": -0.3329315682678059
+        },
+        "blur": {
+          "value": 0.000012121319533048226,
+          "velocity": 12.121426943229142
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2238.640625,
+      "tracks": {
+        "translation.x": {
+          "value": 27.702262833952023,
+          "velocity": 22.50905675369314
+        },
+        "translation.y": {
+          "value": 25.878287300176325,
+          "velocity": 50.32880942403095
+        },
+        "translation.z": {
+          "value": 6.334281183620249,
+          "velocity": 43.37387125644649
+        },
+        "intensity": {
+          "value": 0.6592020354121753,
+          "velocity": -0.3362025566632942
+        },
+        "blur": {
+          "value": 0.02017790683646925,
+          "velocity": 12.478114026178682
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2250.4375,
+      "tracks": {
+        "translation.x": {
+          "value": 27.959541517560663,
+          "velocity": 21.124428450157673
+        },
+        "translation.y": {
+          "value": 26.445711304035292,
+          "velocity": 45.91716273289291
+        },
+        "translation.z": {
+          "value": 6.82416885741663,
+          "velocity": 39.71897916220911
+        },
+        "intensity": {
+          "value": 0.6550936355712501,
+          "velocity": -0.3605685394023135
+        },
+        "blur": {
+          "value": 0.18370907642641665,
+          "velocity": 15.337421765823242
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2262.234375,
+      "tracks": {
+        "translation.x": {
+          "value": 28.201014811968502,
+          "velocity": 19.828191931618083
+        },
+        "translation.y": {
+          "value": 26.962708282518747,
+          "velocity": 41.77588091260219
+        },
+        "translation.z": {
+          "value": 7.272284914881187,
+          "velocity": 36.28895866735616
+        },
+        "intensity": {
+          "value": 0.6506887809334565,
+          "velocity": -0.38648374113003897
+        },
+        "blur": {
+          "value": 0.3845412978116335,
+          "velocity": 18.833982203945787
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2274.03125,
+      "tracks": {
+        "translation.x": {
+          "value": 28.427681622799213,
+          "velocity": 18.61302420017681
+        },
+        "translation.y": {
+          "value": 27.432339798099523,
+          "velocity": 37.88357099922772
+        },
+        "translation.z": {
+          "value": 7.6811752542744465,
+          "velocity": 33.06593429946499
+        },
+        "intensity": {
+          "value": 0.6459684192777386,
+          "velocity": -0.41408169522401667
+        },
+        "blur": {
+          "value": 0.6314941860704312,
+          "velocity": 23.20446377191369
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2285.828125,
+      "tracks": {
+        "translation.x": {
+          "value": 28.640458285323337,
+          "velocity": 17.472243800510217
+        },
+        "translation.y": {
+          "value": 27.857425244480908,
+          "velocity": 34.220561415316396
+        },
+        "translation.z": {
+          "value": 8.053183504691514,
+          "velocity": 30.033482011614854
+        },
+        "intensity": {
+          "value": 0.640911854078536,
+          "velocity": -0.44350770155712294
+        },
+        "blur": {
+          "value": 0.9368468787312668,
+          "velocity": 28.80845683534278
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2297.625,
+      "tracks": {
+        "translation.x": {
+          "value": 28.84018591020421,
+          "velocity": 16.399771757093905
+        },
+        "translation.y": {
+          "value": 28.24056178589671,
+          "velocity": 30.768833501015898
+        },
+        "translation.z": {
+          "value": 8.390467816973583,
+          "velocity": 27.176568065035397
+        },
+        "intensity": {
+          "value": 0.6354966041256322,
+          "velocity": -0.47491902873393843
+        },
+        "blur": {
+          "value": 1.3181917318039278,
+          "velocity": 36.20186456006941
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2309.421875,
+      "tracks": {
+        "translation.x": {
+          "value": 29.027637230850228,
+          "velocity": 15.390086933223165
+        },
+        "translation.y": {
+          "value": 28.584143307947873,
+          "velocity": 27.511925248167493
+        },
+        "translation.z": {
+          "value": 8.69501678867346,
+          "velocity": 24.481465669431408
+        },
+        "intensity": {
+          "value": 0.6296982634577222,
+          "velocity": -0.5084846199022192
+        },
+        "blur": {
+          "value": 1.8012906277227863,
+          "velocity": 46.22664690183719
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2321.21875,
+      "tracks": {
+        "translation.x": {
+          "value": 29.203522910901256,
+          "velocity": 14.438179646197288
+        },
+        "translation.y": {
+          "value": 28.890378140386453,
+          "velocity": 24.434821235354267
+        },
+        "translation.z": {
+          "value": 8.968664333015157,
+          "velocity": 21.93566083806502
+        },
+        "intensity": {
+          "value": 0.6234903690279506,
+          "velocity": -0.5443840200757589
+        },
+        "blur": {
+          "value": 2.4234641137656916,
+          "velocity": 59.951040320683184
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2333.015625,
+      "tracks": {
+        "translation.x": {
+          "value": 29.368497306518105,
+          "velocity": 13.539505926738963
+        },
+        "translation.y": {
+          "value": 29.161305446698194,
+          "velocity": 21.52383786586426
+        },
+        "translation.z": {
+          "value": 9.213103411653172,
+          "velocity": 19.527754881082934
+        },
+        "intensity": {
+          "value": 0.6168442875307678,
+          "velocity": -0.5828051204572322
+        },
+        "blur": {
+          "value": 3.2314287230801133,
+          "velocity": 77.48009597109527
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2344.8125,
+      "tracks": {
+        "translation.x": {
+          "value": 29.523163700217516,
+          "velocity": 12.689943842369466
+        },
+        "translation.y": {
+          "value": 29.39881026172694,
+          "velocity": 18.7665096677601
+        },
+        "translation.z": {
+          "value": 9.429898621349585,
+          "velocity": 17.247368211412443
+        },
+        "intensity": {
+          "value": 0.6097291385277022,
+          "velocity": -0.623940148187512
+        },
+        "blur": {
+          "value": 4.244874530111053,
+          "velocity": 92.86932208574302
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2356.609375,
+      "tracks": {
+        "translation.x": {
+          "value": 29.668079035702252,
+          "velocity": 11.885752664120373
+        },
+        "translation.y": {
+          "value": 29.60463721230547,
+          "velocity": 16.151480153354814
+        },
+        "translation.z": {
+          "value": 9.620497668154666,
+          "velocity": 15.085048281046207
+        },
+        "intensity": {
+          "value": 0.6021117790031909,
+          "velocity": -0.6679791080047934
+        },
+        "blur": {
+          "value": 5.356405569727581,
+          "velocity": 92.09697552536485
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2368.40625,
+      "tracks": {
+        "translation.x": {
+          "value": 29.803758189692065,
+          "velocity": 11.123535239180722
+        },
+        "translation.y": {
+          "value": 29.78040298757702,
+          "velocity": 13.66839922107493
+        },
+        "translation.z": {
+          "value": 9.786241788105784,
+          "velocity": 13.032183225601381
+        },
+        "intensity": {
+          "value": 0.5939568854531068,
+          "velocity": -0.7150995989186462
+        },
+        "blur": {
+          "value": 6.3558594118127045,
+          "velocity": 76.1057365646601
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2380.203125,
+      "tracks": {
+        "translation.x": {
+          "value": 29.9306778193523,
+          "velocity": 10.400203666627789
+        },
+        "translation.y": {
+          "value": 29.927607642770937,
+          "velocity": 11.307828082598558
+        },
+        "translation.z": {
+          "value": 9.928375186916279,
+          "velocity": 11.080921978605865
+        },
+        "intensity": {
+          "value": 0.5852271842693615,
+          "velocity": -0.7654515894741938
+        },
+        "blur": {
+          "value": 7.148729783844486,
+          "velocity": 58.82336229492225
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2386.999,
+      "tracks": {
+        "translation.x": {
+          "value": 29.999989999970982,
+          "velocity": 10.000058024815536
+        },
+        "translation.y": {
+          "value": 29.99998999990514,
+          "velocity": 10.000189712326673
+        },
+        "translation.z": {
+          "value": 9.999989999921599,
+          "velocity": 10.000156790448889
+        },
+        "intensity": {
+          "value": 0.5799222116669384,
+          "velocity": -0.7959670576678777
+        },
+        "blur": {
+          "value": 7.519784780286901,
+          "velocity": 50.61260909894041
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2387,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5799214156975941,
+          "velocity": -0.7959716299597687
+        },
+        "blur": {
+          "value": 7.519835392343394,
+          "velocity": 50.61150387498676
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2387.001,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5799206197236783,
+          "velocity": -0.7959762022758287
+        },
+        "blur": {
+          "value": 7.519886003294683,
+          "velocity": 50.610398680406306
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2392,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5758839000402582,
+          "velocity": -0.8191353724527339
+        },
+        "blur": {
+          "value": 7.759674152429411,
+          "velocity": 45.43994830055935
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2403.796875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5658875142622939,
+          "velocity": -0.876170622592716
+        },
+        "blur": {
+          "value": 8.23507166454265,
+          "velocity": 35.66691514451198
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2415.59375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5551989520944205,
+          "velocity": -0.9364544379647683
+        },
+        "blur": {
+          "value": 8.611170749027785,
+          "velocity": 28.44269093761398
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2427.390625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5437813373127984,
+          "velocity": -0.9997068054800715
+        },
+        "blur": {
+          "value": 8.912922824345136,
+          "velocity": 22.952494514880982
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2439.1875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5316024653398299,
+          "velocity": -1.0654036558690239
+        },
+        "blur": {
+          "value": 9.157393177616955,
+          "velocity": 18.660400136471704
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2450.984375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5186381230370866,
+          "velocity": -1.1327013235448584
+        },
+        "blur": {
+          "value": 9.356523183589799,
+          "velocity": 15.219361029071818
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2462.78125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.5048763045856679,
+          "velocity": -1.2003625347402551
+        },
+        "blur": {
+          "value": 9.518911892241835,
+          "velocity": 12.40043129952787
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2474.578125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4903222023764386,
+          "velocity": -1.2667030706088458
+        },
+        "blur": {
+          "value": 9.65092590336114,
+          "velocity": 10.04841753408488
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2486.375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.47500356654671355,
+          "velocity": -1.3295881648454113
+        },
+        "blur": {
+          "value": 9.757398468667049,
+          "velocity": 8.05514302935678
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2498.171875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.45897564252618944,
+          "velocity": -1.3865133960433729
+        },
+        "blur": {
+          "value": 9.842080582232274,
+          "velocity": 6.343207217313751
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2509.96875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4423245097900507,
+          "velocity": -1.4347978945600406
+        },
+        "blur": {
+          "value": 9.907939995446094,
+          "velocity": 4.855903495475812
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2521.765625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.42516745676621176,
+          "velocity": -1.471890207410004
+        },
+        "blur": {
+          "value": 9.95736471062092,
+          "velocity": 3.550797623895053
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2533.5625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4076492847526883,
+          "velocity": -1.4957405475713563
+        },
+        "blur": {
+          "value": 9.99230489914977,
+          "velocity": 2.3955308734809035
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2536.999,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4025014999994715,
+          "velocity": -1.499998941746151
+        },
+        "blur": {
+          "value": 9.999997916621997,
+          "velocity": 2.083422671141953
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2537,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.4025000000000002,
+          "velocity": -1.4999999999999998
+        },
+        "blur": {
+          "value": 10,
+          "velocity": 2.0833333333333477
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2537.001,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.40249849999947107,
+          "velocity": -1.5000010581482677
+        },
+        "blur": {
+          "value": 9.999982905887377,
+          "velocity": -17.094208153110973
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2545.359375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.38993427085539956,
+          "velocity": -1.5051462140757392
+        },
+        "blur": {
+          "value": 9.850077105000745,
+          "velocity": -18.820111705334966
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2557.15625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3721947579544344,
+          "velocity": -1.49996126130456
+        },
+        "blur": {
+          "value": 9.611227645166482,
+          "velocity": -21.794477645291295
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2568.953125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3545984602724498,
+          "velocity": -1.4810982490888238
+        },
+        "blur": {
+          "value": 9.332393197205848,
+          "velocity": -25.657161070631744
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2580.75,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3372969958034499,
+          "velocity": -1.4503260576227075
+        },
+        "blur": {
+          "value": 9.000630633386107,
+          "velocity": -30.864358021267673
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2592.546875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.3204176559000055,
+          "velocity": -1.4099400593979483
+        },
+        "blur": {
+          "value": 8.596009036642076,
+          "velocity": -38.16336069747907
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2604.34375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.30405929809772897,
+          "velocity": -1.3624100598283642
+        },
+        "blur": {
+          "value": 8.088044524004788,
+          "velocity": -48.526566239390185
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2616.140625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.2882920831676744,
+          "velocity": -1.3100913468680233
+        },
+        "blur": {
+          "value": 7.4415349149588526,
+          "velocity": -60.926271074616054
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2627.9375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.2731600285699434,
+          "velocity": -1.2550389107174225
+        },
+        "blur": {
+          "value": 6.690796317495909,
+          "velocity": -62.7828784066292
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2639.734375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.258685137905326,
+          "velocity": -1.198923185724893
+        },
+        "blur": {
+          "value": 6.043112893437927,
+          "velocity": -45.37098292502416
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2651.53125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.24487204310653116,
+          "velocity": -1.1430223110492606
+        },
+        "blur": {
+          "value": 5.614964620697565,
+          "velocity": -28.320002272120043
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2663.328125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.231712437525608,
+          "velocity": -1.0882604762123762
+        },
+        "blur": {
+          "value": 5.34951093532195,
+          "velocity": -17.564942860067475
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2675.125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.21918891349116124,
+          "velocity": -1.035266998365446
+        },
+        "blur": {
+          "value": 5.1847660456986056,
+          "velocity": -10.85926830303725
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2686.921875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.20727806792403894,
+          "velocity": -0.9844392122172299
+        },
+        "blur": {
+          "value": 5.084489514999893,
+          "velocity": -6.422100448907584
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2698.71875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.19595289226535023,
+          "velocity": -0.9359998913784822
+        },
+        "blur": {
+          "value": 5.028093730208206,
+          "velocity": -3.3087296025467476
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2710.515625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.1851845382968859,
+          "velocity": -0.8900453144375319
+        },
+        "blur": {
+          "value": 5.003219755463901,
+          "velocity": -1.0171517408917725
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2716.999,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.17949287060681712,
+          "velocity": -0.8658529854352531
+        },
+        "blur": {
+          "value": 5.000000000073052,
+          "velocity": -0.00014610425785347074
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2717,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.17949200475566826,
+          "velocity": -0.8658493118412058
+        },
+        "blur": {
+          "value": 5,
+          "velocity": -1.1386902816668274e-14
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2717.001,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.17949113890819304,
+          "velocity": -0.8658456382649347
+        },
+        "blur": {
+          "value": 4.999999999959416,
+          "velocity": -0.00008116875541193445
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2722.3125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.1749435764790772,
+          "velocity": -0.8465832945763486
+        },
+        "blur": {
+          "value": 4.998824607282372,
+          "velocity": -0.4483155414670182
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2734.109375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.16520086076062185,
+          "velocity": -0.8055620938452234
+        },
+        "blur": {
+          "value": 4.987046726969416,
+          "velocity": -1.5833467626068152
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2745.90625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.1559280986350874,
+          "velocity": -0.7668917524225214
+        },
+        "blur": {
+          "value": 4.960517139519199,
+          "velocity": -2.960943492768121
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2757.703125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.1470982063762248,
+          "velocity": -0.730459436732273
+        },
+        "blur": {
+          "value": 4.915900849650205,
+          "velocity": -4.6670207014929925
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2769.5,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.1386855113347167,
+          "velocity": -0.6961402383129365
+        },
+        "blur": {
+          "value": 4.848611861410491,
+          "velocity": -6.831355031640782
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2781.296875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.13066584775865017,
+          "velocity": -0.6638046007521754
+        },
+        "blur": {
+          "value": 4.752139808787988,
+          "velocity": -9.656743865114274
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2793.09375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.12301658024285347,
+          "velocity": -0.6333232959872415
+        },
+        "blur": {
+          "value": 4.616916315650865,
+          "velocity": -13.469607038316031
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2804.890625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.11571657940070565,
+          "velocity": -0.604570647985769
+        },
+        "blur": {
+          "value": 4.4284186320674435,
+          "velocity": -18.79806678567639
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2816.6875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.10874616722664351,
+          "velocity": -0.5774265209360998
+        },
+        "blur": {
+          "value": 4.164396000962077,
+          "velocity": -26.416298499393488
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2828.484375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.10208704438148064,
+          "velocity": -0.5517774488699142
+        },
+        "blur": {
+          "value": 3.79380279807092,
+          "velocity": -36.8330138216406
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2840.28125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.09572220783961508,
+          "velocity": -0.5275171780271656
+        },
+        "blur": {
+          "value": 3.294075425624787,
+          "velocity": -47.27604866466962
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2852.078125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.08963586462061479,
+          "velocity": -0.5045468152517995
+        },
+        "blur": {
+          "value": 2.713106909722173,
+          "velocity": -49.23550976811478
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2863.875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.08381334540076193,
+          "velocity": -0.4827747188560308
+        },
+        "blur": {
+          "value": 2.169491029029172,
+          "velocity": -42.11529556656213
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2875.671875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.07824102044580684,
+          "velocity": -0.4621162273841032
+        },
+        "blur": {
+          "value": 1.723816258912418,
+          "velocity": -33.63416050579611
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2887.46875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.07290621936323556,
+          "velocity": -0.4424932923583228
+        },
+        "blur": {
+          "value": 1.3688340143150537,
+          "velocity": -26.87060694836964
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2899.265625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.06779715552291926,
+          "velocity": -0.4238340602214715
+        },
+        "blur": {
+          "value": 1.08299992356146,
+          "velocity": -21.837296149402974
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2911.0625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.06290285555371151,
+          "velocity": -0.40607243393686887
+        },
+        "blur": {
+          "value": 0.8486907550360474,
+          "velocity": -18.059404619563487
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2922.859375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.05821309402899155,
+          "velocity": -0.3891476343386258
+        },
+        "blur": {
+          "value": 0.653510148617826,
+          "velocity": -15.150660077064147
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2934.65625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.05371833326240579,
+          "velocity": -0.373003774083811
+        },
+        "blur": {
+          "value": 0.48884740916057556,
+          "velocity": -12.850708271950259
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2946.453125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.04940966801487352,
+          "velocity": -0.35758945204039966
+        },
+        "blur": {
+          "value": 0.3486008529094566,
+          "velocity": -10.988202429884224
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2958.25,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.045278774843119325,
+          "velocity": -0.3428573725013004
+        },
+        "blur": {
+          "value": 0.2283290898331796,
+          "velocity": -9.448668860883185
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2970.046875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.04131786578285765,
+          "velocity": -0.3287639912819004
+        },
+        "blur": {
+          "value": 0.12471265123136088,
+          "velocity": -8.15368612405106
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2981.84375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.03751964604529355,
+          "velocity": -0.3152691892064721
+        },
+        "blur": {
+          "value": 0.035210313221112746,
+          "velocity": -7.0480880698363695
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2986.999,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.035909141011902554,
+          "velocity": -0.30955034717733826
+        },
+        "blur": {
+          "value": 0.000006613797444075165,
+          "velocity": -6.613838265557811
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2987,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.03590883146210501,
+          "velocity": -0.30954924806355544
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2987.001,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0359085219134063,
+          "velocity": -0.30954814895369576
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2993.640625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.03387727540600753,
+          "velocity": -0.3023359724824667
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3005.4375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.03038433297521875,
+          "velocity": -0.2899301988348668
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3017.234375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.027034785054083025,
+          "velocity": -0.27802032790727693
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3029.03125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.023822955800552822,
+          "velocity": -0.26657719424914633
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3040.828125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.020743500448644682,
+          "velocity": -0.25557380114072126
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3052.625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.01779138084558196,
+          "velocity": -0.2449851335178931
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3064.421875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.01496184309146557,
+          "velocity": -0.2347879883194047
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3076.21875,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.012250397085407858,
+          "velocity": -0.22496082066900416
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3088.015625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.009652797800167853,
+          "velocity": -0.21548360441145867
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3099.8125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.007165028124141008,
+          "velocity": -0.206337705634743
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3111.609375,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.004783283125009568,
+          "velocity": -0.197505767924995
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3123.40625,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0025039556034884714,
+          "velocity": -0.18897160821215178
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3135.203125,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0.0003236228184407447,
+          "velocity": -0.18072012217006655
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3136.999,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 1.7948752175472338e-7,
+          "velocity": -0.1794878639231408
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3137,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3137.001,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    },
+    {
+      "worldTimeMs": 3147,
+      "tracks": {
+        "translation.x": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.y": {
+          "value": 30,
+          "velocity": 0
+        },
+        "translation.z": {
+          "value": 10,
+          "velocity": 0
+        },
+        "intensity": {
+          "value": 0,
+          "velocity": 0
+        },
+        "blur": {
+          "value": 0,
+          "velocity": 0
+        }
+      }
+    }
+  ]
+}

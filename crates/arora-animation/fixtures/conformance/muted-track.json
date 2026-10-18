@@ -1,0 +1,7453 @@
+{
+  "animation": {
+    "id": "shared-animation",
+    "name": "Shared Animation",
+    "duration": 2000,
+    "tracks": [
+      {
+        "id": "position.x",
+        "name": "x",
+        "animatableId": "position.x",
+        "points": [
+          {
+            "id": "px0.x",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.x",
+            "stamp": 200,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.x",
+            "stamp": 800,
+            "value": 5
+          },
+          {
+            "id": "px3.x",
+            "stamp": 1400,
+            "value": -5,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.x",
+            "stamp": 2000,
+            "value": 0
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF",
+          "muted": true
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "position.y",
+        "name": "y",
+        "animatableId": "position.y",
+        "points": [
+          {
+            "id": "px0.y",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.y",
+            "stamp": 200,
+            "value": 20,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.y",
+            "stamp": 800,
+            "value": 10
+          },
+          {
+            "id": "px3.y",
+            "stamp": 1400,
+            "value": 5,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.y",
+            "stamp": 2000,
+            "value": 0
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF",
+          "muted": true
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "position.z",
+        "name": "z",
+        "animatableId": "position.z",
+        "points": [
+          {
+            "id": "px0.z",
+            "stamp": 0,
+            "value": 0,
+            "transitions": {
+              "out": {
+                "x": 100,
+                "y": 1
+              }
+            }
+          },
+          {
+            "id": "px1.z",
+            "stamp": 200,
+            "value": -15,
+            "transitions": {
+              "in": {
+                "x": -160,
+                "y": -1
+              },
+              "out": {
+                "x": 420,
+                "y": -1
+              }
+            }
+          },
+          {
+            "id": "px2.z",
+            "stamp": 800,
+            "value": 0
+          },
+          {
+            "id": "px3.z",
+            "stamp": 1400,
+            "value": 10,
+            "transitions": {
+              "in": {
+                "x": -360,
+                "y": 4
+              }
+            }
+          },
+          {
+            "id": "px4.z",
+            "stamp": 2000,
+            "value": 14
+          }
+        ],
+        "settings": {
+          "color": "#00FFFF",
+          "muted": true
+        },
+        "groupName": "Position"
+      },
+      {
+        "id": "scale",
+        "name": "Scale",
+        "animatableId": "scale",
+        "points": [
+          {
+            "id": "s0",
+            "stamp": 400,
+            "value": 1,
+            "transitions": {
+              "out": {
+                "x": 240,
+                "y": 0.05
+              }
+            }
+          },
+          {
+            "id": "s1",
+            "stamp": 800,
+            "value": 1.5,
+            "transitions": {
+              "in": {
+                "x": -300,
+                "y": -0.075
+              },
+              "out": {
+                "x": 110,
+                "y": -0.21
+              }
+            }
+          },
+          {
+            "id": "s2",
+            "stamp": 1000,
+            "value": 0.8,
+            "transitions": {
+              "out": {
+                "x": 420,
+                "y": 0.12
+              }
+            }
+          },
+          {
+            "id": "s3",
+            "stamp": 1600,
+            "value": 1
+          }
+        ],
+        "settings": {
+          "color": "#96CEB4",
+          "muted": true
+        }
+      },
+      {
+        "id": "opacity",
+        "name": "Opacity",
+        "animatableId": "opacity",
+        "points": [
+          {
+            "id": "o0",
+            "stamp": 0,
+            "value": 0
+          },
+          {
+            "id": "o1",
+            "stamp": 300,
+            "value": 1,
+            "transitions": {
+              "in": {
+                "x": -240,
+                "y": 0
+              },
+              "out": {
+                "x": 240,
+                "y": 0
+              },
+              "pairing": "paired"
+            }
+          },
+          {
+            "id": "o2",
+            "stamp": 1200,
+            "value": 1,
+            "transitions": {
+              "out": {
+                "x": 450,
+                "y": 0
+              }
+            }
+          },
+          {
+            "id": "o3",
+            "stamp": 2000,
+            "value": 0,
+            "transitions": {
+              "in": {
+                "x": -480,
+                "y": 0.2
+              }
+            }
+          }
+        ],
+        "settings": {
+          "color": "#FFEAA7",
+          "muted": true
+        }
+      }
+    ],
+    "groups": [],
+    "formatVersion": 2,
+    "defaultViewportExtent": 2000
+  },
+  "instance": {
+    "offset": 137,
+    "timescale": 1,
+    "active": true
+  },
+  "samples": [
+    {
+      "worldTimeMs": 127,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 134.890625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 136.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 137.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 142.78125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 150.671875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 158.5625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 166.453125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 174.34375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 182.234375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 190.125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 198.015625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 205.90625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 213.796875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 221.6875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 229.578125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 237.46875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 245.359375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 253.25,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 261.140625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 269.03125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 276.921875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 284.8125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 292.703125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 300.59375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 308.484375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 316.375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 324.265625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 332.15625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 336.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 337,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 337.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 340.046875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 347.9375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 355.828125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 363.71875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 371.609375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 379.5,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 387.390625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 395.28125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 403.171875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 411.0625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 418.953125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 426.84375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 434.734375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 436.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 437,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 437.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 442.625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 450.515625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 458.40625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 466.296875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 474.1875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 482.078125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 489.96875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 497.859375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 505.75,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 513.640625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 521.53125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 529.421875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 536.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 537.3125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 545.203125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 553.09375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 560.984375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 568.875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 576.765625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 584.65625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 592.546875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 600.4375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 608.328125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 616.21875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 624.109375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 632,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 639.890625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 647.78125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 655.671875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 663.5625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 671.453125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 679.34375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 687.234375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 695.125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 703.015625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 710.90625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 718.796875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 726.6875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 734.578125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 742.46875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 750.359375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 758.25,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 766.140625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 774.03125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 781.921875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 789.8125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 797.703125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 805.59375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 813.484375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 821.375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 829.265625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 837.15625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 845.046875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 852.9375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 860.828125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 868.71875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 876.609375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 884.5,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 892.390625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 900.28125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 908.171875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 916.0625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 923.953125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 931.84375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 936.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 937,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 937.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 939.734375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 947.625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 955.515625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 963.40625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 971.296875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 979.1875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 987.078125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 994.96875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1002.859375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1010.75,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1018.640625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1026.53125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1034.421875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1042.3125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1050.203125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1058.09375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1065.984375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1073.875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1081.765625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1089.65625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1097.546875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1105.4375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1113.328125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1121.21875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1129.109375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1136.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1137,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1137.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1144.890625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1152.78125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1160.671875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1168.5625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1176.453125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1184.34375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1192.234375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1200.125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1208.015625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1215.90625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1223.796875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1231.6875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1239.578125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1247.46875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1255.359375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1263.25,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1271.140625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1279.03125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1286.921875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1294.8125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1302.703125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1310.59375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1318.484375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1326.375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1334.265625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1336.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1337,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1337.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1342.15625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1350.046875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1357.9375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1365.828125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1373.71875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1381.609375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1389.5,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1397.390625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1405.28125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1413.171875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1421.0625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1428.953125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1436.84375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1444.734375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1452.625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1460.515625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1468.40625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1476.296875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1484.1875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1492.078125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1499.96875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1507.859375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1515.75,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1523.640625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1531.53125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1536.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1537,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1537.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1539.421875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1547.3125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1555.203125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1563.09375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1570.984375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1578.875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1586.765625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1594.65625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1602.546875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1610.4375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1618.328125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1626.21875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1634.109375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1642,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1649.890625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1657.78125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1665.671875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1673.5625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1681.453125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1689.34375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1697.234375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1705.125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1713.015625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1720.90625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1728.796875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1736.6875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1736.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1737,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1737.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1744.578125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1752.46875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1760.359375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1768.25,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1776.140625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1784.03125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1791.921875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1799.8125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1807.703125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1815.59375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1823.484375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1831.375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1839.265625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1847.15625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1855.046875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1862.9375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1870.828125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1878.71875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1886.609375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1894.5,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1902.390625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1910.28125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1918.171875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1926.0625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1933.953125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1941.84375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1949.734375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1957.625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1965.515625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1973.40625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1981.296875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1989.1875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 1997.078125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2004.96875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2012.859375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2020.75,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2028.640625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2036.53125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2044.421875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2052.3125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2060.203125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2068.09375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2075.984375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2083.875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2091.765625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2099.65625,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2107.546875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2115.4375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2123.328125,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2131.21875,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2136.999,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2137.001,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2139.109375,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    },
+    {
+      "worldTimeMs": 2147,
+      "tracks": {
+        "position.x": {
+          "value": null,
+          "velocity": null
+        },
+        "position.y": {
+          "value": null,
+          "velocity": null
+        },
+        "position.z": {
+          "value": null,
+          "velocity": null
+        },
+        "scale": {
+          "value": null,
+          "velocity": null
+        },
+        "opacity": {
+          "value": null,
+          "velocity": null
+        }
+      }
+    }
+  ]
+}

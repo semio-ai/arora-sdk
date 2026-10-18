@@ -206,6 +206,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-animation"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arora-behavior"
 version = "9.4.0"
 dependencies = [
