@@ -180,7 +180,6 @@ struct OracleSegment {
     start: f64,
     end: f64,
     from: usize,
-    to: usize,
     /// Milliseconds and values.
     bezier: Option<([f64; 4], [f64; 4])>,
 }
@@ -225,7 +224,6 @@ impl Oracle {
                 start: ms(a),
                 end: ms(b),
                 from: i,
-                to: i + 1,
                 bezier,
             });
         }
@@ -240,18 +238,24 @@ impl Oracle {
         }
     }
 
-    /// The track at `t` nanoseconds.
+    /// The track at `t` nanoseconds: the first value before the first
+    /// keypoint, and of keypoints sharing a time the last one, at the start
+    /// and from the end on.
     fn at(&self, t: f64) -> Value {
         let t = t / 1e6;
-        let Some(first) = self.segments.first() else {
+        let final_value = self.points[self.points.len() - 1].1.clone();
+        if t < self.points[0].0 {
             return self.points[0].1.clone();
+        }
+        let Some(first) = self.segments.first() else {
+            return final_value;
         };
         if t <= first.start {
             return self.points[first.from].1.clone();
         }
         let last = self.segments.last().unwrap();
         if t >= last.end {
-            return self.points[last.to].1.clone();
+            return final_value;
         }
         let segment = self.segments.iter().find(|s| t <= s.end).unwrap();
         let Some((xs, ys)) = segment.bezier else {

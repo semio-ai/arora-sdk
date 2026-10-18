@@ -254,6 +254,12 @@ impl<'de> Deserialize<'de> for Transition {
                 let (mut dt, mut dv) = (None, None);
                 while let Some(key) = map.next_key::<HandleField>()? {
                     match key {
+                        HandleField::Dt if dt.is_some() => {
+                            return Err(de::Error::duplicate_field("dtNs"))
+                        }
+                        HandleField::Dv if dv.is_some() => {
+                            return Err(de::Error::duplicate_field("dv"))
+                        }
                         HandleField::Dt => dt = Some(map.next_value::<f64>()?),
                         HandleField::Dv => dv = Some(map.next_value::<f64>()?),
                         HandleField::Other => {
@@ -447,6 +453,10 @@ mod tests {
         let half_handle = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":1,"transitions":{"out":{"dtNs":5}}}]}]}"#;
         assert!(
             matches!(Clip::from_json(half_handle), Err(ClipError::Document(e)) if e.contains("dv"))
+        );
+        let twice = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":1,"transitions":{"out":{"dtNs":1,"dtNs":2,"dv":3}}}]}]}"#;
+        assert!(
+            matches!(Clip::from_json(twice), Err(ClipError::Document(e)) if e.contains("duplicate field"))
         );
         let no_value = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":null}]}]}"#;
         assert!(matches!(

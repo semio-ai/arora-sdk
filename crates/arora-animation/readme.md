@@ -59,7 +59,8 @@ ends.
 
 - **Exact.** A number segment is a cubic Bézier in (time, value); its time is
   solved for the curve's parameter to double precision, its value and
-  velocity taken from the curve.
+  velocity taken from the curve. Where the tangent is vertical in time the
+  velocity is infinite.
 - **The control points are Studio's.** `resolve` places them by the rules
   Semio Studio's editor draws a curve with, so a clip plays the curve its
   author saw. Resolution works in milliseconds, as the editor does: the
@@ -70,7 +71,8 @@ ends.
   still holds, just after it the keypoint plays. The last keypoint plays at
   its instant.
 - **Holds.** Before the first keypoint the first value holds, after the last
-  the last, with no velocity.
+  the last, with no velocity; of keypoints sharing the first or the last
+  time, the last of them plays from that time on.
 
 ## Playback
 

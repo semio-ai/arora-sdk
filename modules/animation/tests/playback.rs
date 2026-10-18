@@ -345,6 +345,21 @@ fn transport_is_immediate_and_reports_windows_heading_end_and_instance_timing() 
     assert_eq!(state.time_ns, 250_000_000);
     assert!(state.ended);
     assert!(state.reversed);
+    // Given the heading of a player that turned, a bounce turns no more.
+    let mut b = AnimationModule::new();
+    b.step(0, Some(0));
+    let q = b.create_player(Some("q".into()));
+    b.set_length(q, Some(SECOND));
+    b.set_loop(q, "bounce".into());
+    b.seek(q, 600_000_000);
+    b.play(q);
+    assert_eq!(b.set_reversed(q, true), q);
+    assert!(b.player_states()[0].reversed);
+    b.step(SECOND, None);
+    let late = &b.player_states()[0];
+    assert_eq!(late.time_ns, 0);
+    assert!(late.ended);
+    assert_eq!(b.set_reversed(q + 1, true), u32::MAX);
     a.pause(p);
     assert_eq!(a.player_states()[0].state, "paused");
     a.stop(p);

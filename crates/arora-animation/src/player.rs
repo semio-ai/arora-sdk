@@ -2,14 +2,16 @@
 //!
 //! **The clock.** A player measures how far it has travelled from the
 //! device time it last started or changed speed at, as
-//! `round((now − anchor) × |speed|)` whole nanoseconds. Nothing is summed
-//! step by step, so a player stepped at 60 Hz and one stepped at 1 kHz stand
-//! at the same place at the same device time, however long they run.
+//! `round((now − anchor) × |speed|)` whole nanoseconds, computed exactly in
+//! integers. Nothing is summed step by step, so a player stepped at 60 Hz and
+//! one stepped at 1 kHz stand at the same place at the same device time,
+//! however long they run.
 //!
 //! **The bounds.** A player plays within its window (by default its whole
-//! length). One that starts outside the window plays over its whole length,
-//! `[0, length]`, until it enters the window; from then on the window holds
-//! it. Reaching a bound, the loop mode decides:
+//! length). One that starts outside the window, or whose window is changed
+//! to one it is outside, plays over its whole length, `[0, length]`, until
+//! it enters the window; from then on the window holds it. Reaching a bound,
+//! the loop mode decides:
 //!
 //! | Mode | At a bound |
 //! |---|---|
@@ -26,7 +28,9 @@
 //! **Direction.** The speed is signed: a negative speed plays backwards. A
 //! turn at a bound reverses the heading without changing the speed; a new
 //! speed of the other sign, `play` and `seek` start the rules afresh — no
-//! turn taken, the window not yet entered, not ended.
+//! turn taken, the window not yet entered, not ended. `set_reversed` gives a
+//! player the heading another has after a turn, so a player started late
+//! plays alongside it.
 
 use crate::time::Nanos;
 
@@ -87,7 +91,7 @@ enum Clock {
     Idle,
     /// Playing, and travelling from the device time `from`: `travelled`
     /// nanoseconds of timeline so far.
-    From { from: Nanos, travelled: Nanos },
+    From { from: Nanos, travelled: i128 },
     /// Playing from the device time `at`, which is still to come.
     Waiting { at: Nanos },
 }
@@ -262,11 +266,22 @@ impl Player {
     }
 
     /// Sets the window: from `start` to `end`, or to the player's length.
-    /// The playhead stays where it is; outside the window, it plays toward
-    /// it.
+    /// The playhead stays where it is; outside the new window, it plays over
+    /// the whole length until it enters it, as from a start outside.
     pub fn set_window(&mut self, at: Nanos, start: Nanos, end: Option<Nanos>, length: Nanos) {
         self.advance(at, length);
         self.window = (start, end);
+        self.entered = false;
+    }
+
+    /// Heads the player against its speed's sign, as after a turn at a
+    /// bound, or with it: the heading of another player that turned, for one
+    /// that is to play alongside it. Reversed, it counts as having turned, so
+    /// a bounce stops at the next bound.
+    pub fn set_reversed(&mut self, at: Nanos, reversed: bool, length: Nanos) {
+        self.advance(at, length);
+        self.reversed = reversed;
+        self.turned = self.turned || reversed;
     }
 
     /// The window as it bounds a player of `length`, its ends in order.
@@ -334,71 +349,76 @@ impl Player {
     }
 
     /// Moves the playhead `distance` nanoseconds of timeline along its
-    /// heading, applying the loop mode at every bound it reaches.
-    fn travel(&mut self, mut distance: Nanos, length: Nanos) {
-        let length = length.max(0);
+    /// heading, applying the loop mode at every bound it reaches. The
+    /// arithmetic is in `i128`, so no position, bound or distance a player
+    /// can hold overflows it.
+    fn travel(&mut self, mut distance: i128, length: Nanos) {
+        let length = i128::from(length.max(0));
+        let mut position = i128::from(self.position);
         while distance > 0 && !self.ended {
-            let window = self.bounds_of_window(length);
-            if !self.entered && window.0 <= self.position && self.position <= window.1 {
+            let window = self.bounds_of_window(length as Nanos);
+            let window = (i128::from(window.0), i128::from(window.1));
+            if !self.entered && window.0 <= position && position <= window.1 {
                 self.entered = true;
             }
             let (lo, hi) = if self.entered {
                 window
             } else {
-                (0.min(window.0), length.max(window.1))
+                (window.0.min(0), window.1.max(length))
             };
-            let heading = self.heading();
-            if self.position < lo || self.position > hi {
-                let toward = (self.position < lo) == (heading > 0);
+            let heading = i128::from(self.heading());
+            if position < lo || position > hi {
+                let toward = (position < lo) == (heading > 0);
                 if toward {
-                    let gap = if self.position < lo {
-                        lo - self.position
+                    let gap = if position < lo {
+                        lo - position
                     } else {
-                        self.position - hi
+                        position - hi
                     };
                     let step = distance.min(gap);
-                    self.position += heading * step;
+                    position += heading * step;
                     distance -= step;
                 } else {
                     // Heading away from the bounds: the bound it left is
                     // where the rules take it from.
-                    self.position = if heading > 0 { hi } else { lo };
-                    distance = self.at_bound(heading, lo, hi, distance);
+                    position = if heading > 0 { hi } else { lo };
+                    distance = self.at_bound(heading, lo, hi, distance, &mut position);
                 }
                 continue;
             }
             if !self.entered {
                 // The window ahead is entered on the way, at its near end.
-                let gap = if heading > 0 && self.position < window.0 {
-                    Some(window.0 - self.position)
-                } else if heading < 0 && self.position > window.1 {
-                    Some(self.position - window.1)
+                let gap = if heading > 0 && position < window.0 {
+                    Some(window.0 - position)
+                } else if heading < 0 && position > window.1 {
+                    Some(position - window.1)
                 } else {
                     None
                 };
                 if let Some(gap) = gap.filter(|gap| distance >= *gap) {
-                    self.position += heading * gap;
+                    position += heading * gap;
                     distance -= gap;
                     self.entered = true;
                     continue;
                 }
             }
             let room = if heading > 0 {
-                hi - self.position
+                hi - position
             } else {
-                self.position - lo
+                position - lo
             };
             if distance <= room {
-                self.position += heading * distance;
+                position += heading * distance;
                 distance = 0;
-                if self.position == if heading > 0 { hi } else { lo } && self.stops_at_bound() {
+                if position == if heading > 0 { hi } else { lo } && self.stops_at_bound() {
                     self.ended = true;
                 }
             } else {
-                self.position += heading * room;
-                distance = self.at_bound(heading, lo, hi, distance - room);
+                position += heading * room;
+                distance = self.at_bound(heading, lo, hi, distance - room, &mut position);
             }
         }
+        self.position = position as Nanos;
     }
 
     /// Whether the loop mode stops the player at the next bound it reaches.
@@ -410,10 +430,17 @@ impl Player {
         }
     }
 
-    /// The loop mode's rule at the bound the playhead reached heading
+    /// The loop mode's rule at the bound `position` reached heading
     /// `heading`, with `remaining` nanoseconds still to travel; returns what
     /// is left to travel.
-    fn at_bound(&mut self, heading: i64, lo: Nanos, hi: Nanos, remaining: Nanos) -> Nanos {
+    fn at_bound(
+        &mut self,
+        heading: i128,
+        lo: i128,
+        hi: i128,
+        remaining: i128,
+        position: &mut i128,
+    ) -> i128 {
         let span = hi - lo;
         if self.stops_at_bound() {
             self.ended = true;
@@ -423,21 +450,31 @@ impl Player {
             // A window of no length holds the playhead.
             return 0;
         }
+        // Whole periods travel to where they started, so only the part of
+        // the travel past them is left; a travel landing on a bound stays on
+        // it. Before the window is entered they would not: the playhead
+        // enters it on the way, within one period.
+        let periods = |period: i128| {
+            if self.entered {
+                (remaining - 1) % period + 1
+            } else {
+                remaining
+            }
+        };
         match self.mode {
             LoopMode::Loop => {
-                self.position = if heading > 0 { lo } else { hi };
-                // Whole periods travel to where they started; a travel
-                // landing on a bound stays on it.
-                (remaining - 1) % span + 1
+                *position = if heading > 0 { lo } else { hi };
+                periods(span)
             }
             LoopMode::Bounce | LoopMode::PingPong => {
-                self.reversed = !self.reversed;
-                self.turned = true;
-                if self.mode == LoopMode::PingPong {
-                    (remaining - 1) % (2 * span) + 1
+                let left = if self.mode == LoopMode::PingPong {
+                    periods(2 * span)
                 } else {
                     remaining
-                }
+                };
+                self.reversed = !self.reversed;
+                self.turned = true;
+                left
             }
             LoopMode::Once => unreachable!("stops at its bound"),
         }
@@ -445,17 +482,39 @@ impl Player {
 }
 
 /// How far a player travels in `elapsed` nanoseconds of device time at
-/// `speed`: whole nanoseconds of timeline, rounded once from the start.
-fn travel(elapsed: Nanos, speed: f64) -> Nanos {
-    if elapsed <= 0 {
+/// `speed`: whole nanoseconds of timeline, the exact product rounded once
+/// (half away from zero). It is computed in integers, so it neither loses a
+/// nanosecond nor saturates however long the player runs; only a speed of
+/// 2^63 or more saturates it, at a distance no window can tell from its
+/// periods.
+fn travel(elapsed: Nanos, speed: f64) -> i128 {
+    if elapsed <= 0 || speed == 0.0 || !speed.is_finite() {
         return 0;
     }
-    let distance = (elapsed as f64 * speed.abs()).round();
-    if distance >= i64::MAX as f64 {
-        i64::MAX
+    // |speed| = mantissa × 2^exponent, the mantissa an integer below 2^53.
+    let bits = speed.abs().to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    let (mantissa, exponent) = if biased == 0 {
+        (fraction, -1074)
     } else {
-        distance as i64
+        (fraction | (1 << 52), biased - 1075)
+    };
+    // Below 2^63 × 2^53.
+    let product = i128::from(elapsed) * i128::from(mantissa);
+    if exponent >= 0 {
+        return if exponent <= 10 {
+            product << exponent
+        } else {
+            i128::MAX / 4
+        };
     }
+    let shift = -exponent;
+    if shift > 117 {
+        // The product is below 2^116: less than half a nanosecond.
+        return 0;
+    }
+    (product + (1 << (shift - 1))) >> shift
 }
 
 #[cfg(test)]
@@ -548,6 +607,107 @@ mod tests {
         assert!(p.waiting());
         p.advance(1_010 * MS, 5_000 * MS);
         assert_eq!(p.position(), 10 * MS - 3);
+    }
+
+    #[test]
+    fn a_window_changed_while_playing_is_entered_on_the_way() {
+        let mut p = playing(LoopMode::Loop);
+        assert_eq!(at(&mut p, 4_000), 4_000);
+        p.set_window(4_000 * MS, 1_000 * MS, Some(2_000 * MS), 5_000 * MS);
+        // Outside the new window: on over the whole length, then into it.
+        assert_eq!(at(&mut p, 4_100), 4_100);
+        assert_eq!(at(&mut p, 6_500), 1_500);
+        assert_eq!(at(&mut p, 7_200), 1_200);
+        // Inside the new window, the window holds it at once.
+        p.set_window(7_200 * MS, 0, Some(3_000 * MS), 5_000 * MS);
+        assert_eq!(at(&mut p, 9_000), 3_000);
+        assert_eq!(at(&mut p, 9_500), 500);
+    }
+
+    #[test]
+    fn whole_periods_before_the_window_is_entered_do_not_skip_it() {
+        let start = |p: &mut Player| {
+            p.set_mode(LoopMode::Loop);
+            p.set_window(0, 1_000 * MS, Some(3_000 * MS), 5_000 * MS);
+            p.seek(0, 4_000 * MS, 5_000 * MS);
+            p.play(0, 5_000 * MS);
+        };
+        let (mut once, mut twice) = (Player::new(), Player::new());
+        start(&mut once);
+        start(&mut twice);
+        // 1 s to the end, a wrap, 1 s into the window, then 5 s in it.
+        assert_eq!(at(&mut once, 7_000), 2_000);
+        at(&mut twice, 2_000);
+        assert_eq!(at(&mut twice, 7_000), 2_000);
+    }
+
+    #[test]
+    fn the_clock_is_exact_however_long_and_fast_a_player_runs() {
+        let period: i128 = 1_000_000_000;
+        // The position a looping player over [0, 1 s] has after travelling
+        // `travel` nanoseconds from 0: a travel landing on the end stays.
+        let expected = |travel: i128| -> Nanos {
+            if travel > 0 && travel % period == 0 {
+                period as Nanos
+            } else {
+                (travel % period) as Nanos
+            }
+        };
+        // Past 2^53 nanoseconds (104 days), at speed 1.
+        let mut p = Player::new();
+        p.set_mode(LoopMode::Loop);
+        p.play(0, period as Nanos);
+        let late = 9_007_199_254_740_993;
+        p.advance(late, period as Nanos);
+        assert_eq!(p.position(), expected(i128::from(late)));
+        // Fast enough that a second of travel overflows i64.
+        let speed = 3e9 + 0.25;
+        let mut p = Player::new();
+        p.set_mode(LoopMode::Loop);
+        p.set_speed(0, speed, period as Nanos);
+        p.play(0, period as Nanos);
+        for elapsed in [1_000_000_000_i64, 1_000_000_001, 5_000_000_003] {
+            p.advance(elapsed, period as Nanos);
+            // The exact product, rounded half away from zero.
+            let travel = (i128::from(elapsed) * 12_000_000_001 + 2) / 4;
+            assert_eq!(p.position(), expected(travel), "at {elapsed}");
+        }
+    }
+
+    #[test]
+    fn a_turn_near_the_largest_length_does_not_overflow() {
+        let length = 1 << 62;
+        let mut p = Player::new();
+        p.set_mode(LoopMode::PingPong);
+        p.seek(0, length, length);
+        p.play(0, length);
+        p.advance(1, length);
+        assert_eq!(p.position(), length - 1);
+        assert!(p.reversed());
+    }
+
+    #[test]
+    fn a_player_given_another_ones_heading_plays_alongside_it() {
+        let mut leader = playing(LoopMode::PingPong);
+        assert_eq!(at(&mut leader, 6_000), 4_000);
+        assert!(leader.reversed());
+        let mut late = Player::new();
+        late.set_mode(LoopMode::PingPong);
+        late.seek(6_000 * MS, 4_000 * MS, 5_000 * MS);
+        late.play(6_000 * MS, 5_000 * MS);
+        late.set_reversed(6_000 * MS, leader.reversed(), 5_000 * MS);
+        for ms in [6_500, 10_000, 11_250, 17_000] {
+            assert_eq!(at(&mut late, ms), at(&mut leader, ms), "at {ms} ms");
+            assert_eq!(late.reversed(), leader.reversed());
+        }
+        // A bounce given a turn's heading stops at the next bound.
+        let mut bounce = Player::new();
+        bounce.set_mode(LoopMode::Bounce);
+        bounce.seek(0, 4_000 * MS, 5_000 * MS);
+        bounce.play(0, 5_000 * MS);
+        bounce.set_reversed(0, true, 5_000 * MS);
+        assert_eq!(at(&mut bounce, 5_000), 0);
+        assert!(bounce.ended());
     }
 
     #[test]

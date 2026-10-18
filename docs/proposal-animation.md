@@ -166,15 +166,17 @@ moves into arora-sdk as `arora-shape`.
   baked into a polyline.
 - **Velocities.** A number sample carries its velocity: the curve's slope,
   in value units per second. At a collapsed handle, where the time
-  derivative vanishes, it is the limit of the slope. Held values have no
-  velocity.
+  derivative vanishes, it is the limit of the slope; where the curve's
+  tangent is vertical in time it is infinite, so a client checking a
+  velocity limit sees it exceeded. Held values have no velocity.
 - **The step rule.** A boolean or a string holds the value of the keypoint
   that starts its segment. At an interior keypoint's own instant the segment
   ending there still holds; just after it, the keypoint plays.
 - **The last keypoint plays at its instant**, of every kind. A clip that
   plays once to its end rests on its last keypoint.
 - **Holds.** Before the first keypoint the first value holds, after the
-  last the last.
+  last the last; of keypoints sharing the first or the last time, the last
+  of them plays from that time on.
 - **Order.** Keypoints play in time order; keypoints sharing a time, in the
   order the track gives them. A segment of no duration plays nothing of its
   own: the later keypoint takes over.
@@ -203,10 +205,11 @@ An instance puts a clip on a player at a weight and a timing:
 
 **The clock.** A player measures how far it has travelled from the device
 time it last started or changed speed at: `round((now − anchor) ×
-|speed|)` whole nanoseconds. Nothing is summed step by step. So a player
-stepped at 60 Hz and one stepped at 1 kHz stand at the same place at the
-same device time, and a player looping an idle animation for a month is
-where its period puts it.
+|speed|)` whole nanoseconds, the product computed exactly in integers.
+Nothing is summed step by step. So a player stepped at 60 Hz and one
+stepped at 1 kHz stand at the same place at the same device time, and a
+player looping an idle animation for months, or at any speed, is where its
+period puts it.
 
 **Starting in step.** `play_at(t)` starts a player at device time `t`:
 until then it holds, and from then on it stands where it would had it
@@ -216,8 +219,9 @@ and given one `play_at` play in lockstep.
 **The bounds.** A player plays within its window, by default its whole
 length (the latest end of its instances). A player outside its window plays
 over its whole length, `[0, length]`, until it enters the window; from then
-on the window holds it. Setting a window leaves the playhead where it is. At
-a bound, the loop mode decides:
+on the window holds it. Setting a window leaves the playhead where it is,
+and a playhead outside the new window plays toward it as from a start
+outside. At a bound, the loop mode decides:
 
 | Mode | At a bound |
 |---|---|
@@ -234,7 +238,9 @@ the device steps.
 **Direction.** The speed is signed; a negative speed plays backwards. A turn
 reverses the heading without changing the speed. A speed of the other sign,
 a `play` or a `seek` starts the rules afresh: no turn taken, the window not
-yet entered, not ended.
+yet entered, not ended. `set_reversed` gives a player the heading another
+has after a turn, so one started late (an instance delivered mid-bounce)
+plays alongside the others.
 
 **Commands** take effect at the device time of the last step, so a client
 reading the players after a command sees it. Before the first step they wait
@@ -272,9 +278,10 @@ them on its own:
   `create_player(name)`, `add_instance(player, anim)`; and
   `remove_instance`, `remove_player`, `unload_animation`.
 - **Transport.** `play`, `play_at`, `pause`, `stop`, `seek`, `set_speed`,
-  `set_loop` (`once`, `loop`, `bounce`, `ping_pong`), `set_window`; per
-  instance `set_weight`, `set_start_offset`, `set_rate` (and
-  `set_time_scale`).
+  `set_loop` (`once`, `loop`, `bounce`, `ping_pong`), `set_window`,
+  `set_length`, and `set_reversed` (the heading another player has after a
+  turn, for a player started alongside it); per instance `set_weight`,
+  `set_start_offset`, `set_rate` (and `set_time_scale`).
 - **The step.** A behavior ticks the module with `arora/dt` and
   `arora/time`, `step_values(dt_ns, time_ns)` returning the values by
   position in the table `output_keys()` returns (`step_with_velocities`
@@ -378,7 +385,7 @@ and a cubic Bézier is unchanged by that affine map.
 | Crate or surface | Version | Change |
 |---|---|---|
 | `arora-animation` | 1.0.0 | New. |
-| `arora-animation-module` | 1.0.0 (module 3.0.0) | New crate; the module's interface continues vizij's 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed`, `InstanceState` 1.2.0 adds `rate`; `set_loop` takes `bounce`. Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
+| `arora-animation-module` | 1.0.0 (module 3.0.0) | New crate; the module's interface continues vizij's 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; `set_loop` takes `bounce`. Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
 | `vizij-animation-core`, `vizij-animation-module` | — | No further release once vizij-rs depends on the arora crates. |
 | `@vizij/animation-module` (npm) | — | Deprecated, or a wrapper over the new guest. |
 | Semio Studio's stored animation | format 3 | Clip 2.0 plus the editor's fields. Studio reads 1, 2 and 3, writes 3, and writes 3 only once every client refuses a format newer than it reads. Published releases keep format 2. |

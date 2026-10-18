@@ -124,7 +124,7 @@ impl ClipV1 {
                 ) else {
                     continue;
                 };
-                let dt = (keypoints[i + 1].time - keypoints[i].time) as f64;
+                let dt = keypoints[i + 1].time as f64 - keypoints[i].time as f64;
                 if dt == 0.0 {
                     continue;
                 }

@@ -198,6 +198,7 @@ enum Command {
     Seek(Nanos),
     Speed(f64),
     Window(Nanos, Option<Nanos>),
+    Reversed(bool),
 }
 
 /// Clips, players and instances, stepped together.
@@ -393,6 +394,13 @@ impl Engine {
         self.command(player, Command::Window(start, end))
     }
 
+    /// Heads `player` against its speed's sign, as after a turn at a bound,
+    /// or with it ([`Player::set_reversed`]): how a player started late takes
+    /// the heading of one it is to play alongside.
+    pub fn set_reversed(&mut self, player: PlayerId, reversed: bool) -> bool {
+        self.command(player, Command::Reversed(reversed))
+    }
+
     /// Sets the length of `player`'s timeline, the bounds it plays within
     /// until it enters its window and the end of a window that states none;
     /// `None` returns it to the latest end of its instances. A host whose
@@ -578,6 +586,7 @@ impl Engine {
             Command::Seek(position) => p.seek(at, position, length),
             Command::Speed(speed) => p.set_speed(at, speed, length),
             Command::Window(start, end) => p.set_window(at, start, end, length),
+            Command::Reversed(reversed) => p.set_reversed(at, reversed, length),
         }
     }
 

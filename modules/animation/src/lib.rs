@@ -185,6 +185,12 @@ pub trait AnimationContract {
         #[param(id = "76697a69-6a00-0000-0f1e-000000000001")] player: u32,
         #[param(id = "76697a69-6a00-0000-0f1e-000000000002")] length_ns: Option<u64>,
     ) -> u32;
+    #[export(id = "76697a69-6a00-0000-0f00-00000000001f")]
+    fn set_reversed(
+        &mut self,
+        #[param(id = "76697a69-6a00-0000-0f1f-000000000001")] player: u32,
+        #[param(id = "76697a69-6a00-0000-0f1f-000000000002")] reversed: bool,
+    ) -> u32;
 }
 
 /// Every function, acting on `state` alone: one registration's.
@@ -414,5 +420,12 @@ pub mod animation {
         #[param(id = "76697a69-6a00-0000-0f1e-000000000002")] length_ns: Option<u64>,
     ) -> u32 {
         guest(|a| AnimationContract::set_length(a, player, length_ns))
+    }
+    #[export(id = "76697a69-6a00-0000-0f00-00000000001f")]
+    pub fn set_reversed(
+        #[param(id = "76697a69-6a00-0000-0f1f-000000000001")] player: u32,
+        #[param(id = "76697a69-6a00-0000-0f1f-000000000002")] reversed: bool,
+    ) -> u32 {
+        guest(|a| AnimationContract::set_reversed(a, player, reversed))
     }
 }

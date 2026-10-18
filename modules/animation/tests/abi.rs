@@ -11,7 +11,7 @@ use arora_types::{
 #[test]
 fn declarations_match_and_all_kept_function_and_parameter_ids_are_pinned() {
     let descriptions = animation_contract::descriptions();
-    assert_eq!(descriptions.len(), 30);
+    assert_eq!(descriptions.len(), 31);
     assert_eq!(animation::record(Uuid::nil()).exports, descriptions);
     assert_eq!(
         animation::ids::MODULE.to_string(),
@@ -60,7 +60,7 @@ fn host_dispatch_matches_arguments_by_id_and_registrations_own_their_state() {
         let mut engine = EngineBuilder::new().build();
         let module =
             HostModule::from_exports(animation::ids::MODULE, exports(AnimationModule::new()));
-        assert_eq!(module.descriptions().len(), 30);
+        assert_eq!(module.descriptions().len(), 31);
         engine.register_module(module.id(), Box::new(module));
         engine
     };

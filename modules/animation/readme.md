@@ -81,7 +81,9 @@ numbers and handles.
 - Transport: `play`, `play_at`, `pause`, `stop`, `seek`, `set_speed`,
   `set_loop`, `set_window`, `set_length` (the timeline a player plays over
   until it enters its window, and the end of a window that states none;
-  absent, the latest end of its instances); instance controls:
+  absent, the latest end of its instances), `set_reversed` (the heading
+  another player has after a turn at a bound, for a player started
+  alongside it); instance controls:
   `set_weight`, `set_start_offset`, `set_time_scale`, `set_rate`.
 - Feedback: `player_states` reports each player's transport and instances.
 - Baking: `bake` and `bake_with_derivatives` sample a loaded clip over a

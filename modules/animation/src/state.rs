@@ -286,6 +286,9 @@ impl AnimationContract for AnimationModule {
             self.engine.set_length(PlayerId(player), length_ns.map(ns)),
         )
     }
+    fn set_reversed(&mut self, player: u32, reversed: bool) -> u32 {
+        result(player, self.engine.set_reversed(PlayerId(player), reversed))
+    }
     fn output_keys(&mut self) -> OutputKeys {
         let (revision, keys) = self.engine.output_keys();
         OutputKeys {

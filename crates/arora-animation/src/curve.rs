@@ -14,7 +14,8 @@
 //!
 //! Before the first keypoint the track holds its first value, after the last
 //! its last, with no velocity. A segment of no duration (keypoints sharing a
-//! time) plays nothing of its own: the later keypoint takes over from it.
+//! time) plays nothing of its own: the later keypoint takes over from it, at
+//! the first and last times as anywhere.
 
 use crate::clip::{Keypoint, Track};
 use crate::resolve::{self, Point, SegmentInput};
@@ -27,6 +28,8 @@ pub struct Curve {
     kind: Option<Kind>,
     /// The keypoints' values, in time order.
     values: Vec<Value>,
+    /// The earliest keypoint's time; before it the first value holds.
+    start: Nanos,
     segments: Vec<Segment>,
 }
 
@@ -104,6 +107,7 @@ impl Curve {
         Curve {
             kind,
             values: order.iter().map(|k| k.value.clone()).collect(),
+            start: order.first().map_or(0, |k| k.time),
             segments,
         }
     }
@@ -271,18 +275,25 @@ impl Curve {
         }
     }
 
-    /// Where `t` falls: on a value held before the first segment, after the
-    /// last or with no segment at all, or in a segment.
+    /// Where `t` falls: on a value held before the first keypoint (the
+    /// first), at the time keypoints share at the start (the last of them),
+    /// at or after the last keypoint's time (the last keypoint's, whichever
+    /// keypoints share that time), or in a segment.
     fn locate<'s>(&'s self, t: f64, cursor: &mut Cursor) -> Located<'s> {
-        let Some(first) = self.segments.first() else {
+        let last_value = self.values.len().saturating_sub(1);
+        if t < self.start as f64 {
             return Located::Hold(0);
+        }
+        let Some(first) = self.segments.first() else {
+            // Every keypoint shares one time, and the last of them plays.
+            return Located::Hold(last_value);
         };
         if t <= first.start as f64 {
             return Located::Hold(first.from);
         }
         let last = self.segments.last().expect("a first segment");
         if t >= last.end as f64 {
-            return Located::Hold(last.to);
+            return Located::Hold(last_value);
         }
         // The first segment ending at or after `t`: the one an interior
         // keypoint's instant belongs to is the one that ends there.
@@ -320,7 +331,7 @@ fn bezier_of(start: &Keypoint, end: &Keypoint, cp: [Point; 2]) -> Bezier {
             0.0,
             (cp[0].t - t0) * ms,
             (cp[1].t - t0) * ms,
-            (end.time - start.time) as f64,
+            end.time as f64 - start.time as f64,
         ],
         y: [v0, cp[0].v, cp[1].v, v3],
     }
@@ -345,19 +356,47 @@ fn third_derivative(p: &[f64; 4]) -> f64 {
     6.0 * (p[3] - 3.0 * p[2] + 3.0 * p[1] - p[0])
 }
 
-/// dy/dx at `u`, in value units per nanosecond. Where a collapsed handle
-/// makes dx/du vanish, the first parametric derivative that does not gives
-/// the tangent's limit.
+/// dy/dx at `u`, in value units per nanosecond. Where dx/du vanishes (a
+/// collapsed handle, or a tangent vertical in time) the lowest orders of
+/// parametric derivative of time and of value that do not vanish decide it:
+/// of one order, their ratio is the tangent's limit; the value's of a higher
+/// order, the slope is 0; the value's of a lower order, the slope is
+/// unbounded, and this is its limit from earlier times (from later ones at
+/// a segment's start), an infinity.
 fn slope(b: &Bezier, u: f64) -> f64 {
     let dx = first_derivative(&b.x, u);
     if dx != 0.0 {
         return first_derivative(&b.y, u) / dx;
     }
-    let ddx = second_derivative(&b.x, u);
-    if ddx != 0.0 {
-        return second_derivative(&b.y, u) / ddx;
+    let dx = [dx, second_derivative(&b.x, u), third_derivative(&b.x)];
+    let dy = [
+        first_derivative(&b.y, u),
+        second_derivative(&b.y, u),
+        third_derivative(&b.y),
+    ];
+    let (Some(kx), Some(ky)) = (
+        dx.iter().position(|d| *d != 0.0),
+        dy.iter().position(|d| *d != 0.0),
+    ) else {
+        // The value does not move, or time does not (a segment of no
+        // duration is never evaluated).
+        return 0.0;
+    };
+    let ratio = dy[ky] / dx[kx];
+    if ky == kx {
+        ratio
+    } else if ky > kx {
+        0.0
+    } else {
+        // Near `u` the slope goes as the ratio times the parameter's gap to
+        // the power ky − kx, which from earlier times is negative.
+        let from_earlier = if u > 0.0 && (kx - ky) % 2 == 1 {
+            -1.0
+        } else {
+            1.0
+        };
+        f64::INFINITY.copysign(ratio * from_earlier)
     }
-    third_derivative(&b.y) / third_derivative(&b.x)
 }
 
 /// The parameter `u` in `[0, 1]` at which the time curve `x` reaches
@@ -494,6 +533,68 @@ mod tests {
         let single = Curve::new(&track(vec![keypoint(5, Value::Number(2.0))]));
         assert_eq!(single.sample(-1e12).unwrap().value, Value::Number(2.0));
         assert_eq!(Curve::new(&track(vec![])).sample(0.0), None);
+    }
+
+    #[test]
+    fn keypoints_sharing_the_first_or_last_time_hold_the_first_before_and_the_last_after() {
+        let text = |s: &str| Value::Text(s.into());
+        let ends = Curve::new(&track(vec![
+            keypoint(0, text("a")),
+            keypoint(0, text("b")),
+            keypoint(S, text("c")),
+            keypoint(S, text("d")),
+        ]));
+        let at = |t: f64| ends.sample(t).unwrap().value;
+        assert_eq!(at(-1.0), text("a"));
+        assert_eq!(at(0.0), text("b"));
+        assert_eq!(at(0.5e9), text("b"));
+        assert_eq!(at(1e9), text("d"));
+        assert_eq!(at(5e9), text("d"));
+        // Every keypoint at one time: the first before it, the last from it on.
+        let one_time = Curve::new(&track(vec![
+            keypoint(-1_000_000, Value::Number(1.0)),
+            keypoint(-1_000_000, Value::Number(2.0)),
+        ]));
+        let values: Vec<Value> = [-2e6, -1e6, 0.0]
+            .iter()
+            .map(|t| one_time.sample(*t).unwrap().value)
+            .collect();
+        assert_eq!(values, [1.0, 2.0, 2.0].map(Value::Number).to_vec());
+        let numbers = Curve::new(&track(vec![
+            keypoint(0, Value::Number(0.0)),
+            keypoint(S, Value::Number(1.0)),
+            keypoint(S, Value::Number(7.0)),
+        ]));
+        assert_eq!(numbers.sample(1e9).unwrap().value, Value::Number(7.0));
+        assert_eq!(numbers.sample(2e9).unwrap().value, Value::Number(7.0));
+    }
+
+    #[test]
+    fn a_tangent_vertical_in_time_has_an_unbounded_velocity() {
+        // Time stalls at the middle of the segment while the value rises
+        // through it.
+        let mut points = vec![
+            keypoint(0, Value::Number(0.0)),
+            keypoint(S, Value::Number(1.0)),
+        ];
+        points[0].transitions.leave = Some(Transition::Handle { dt: 1e9, dv: 0.0 });
+        points[1].transitions.arrive = Some(Transition::Handle { dt: -1e9, dv: 0.0 });
+        let curve = Curve::new(&track(points));
+        let velocity = |t: f64| curve.sample(t).unwrap().velocity.unwrap();
+        assert_eq!(velocity(0.5e9), f64::INFINITY);
+        assert!(velocity(0.5e9 - 1.0) > 1e5 && velocity(0.5e9 + 1.0) > 1e5);
+        // An interior keypoint arrived at by a handle of no duration and
+        // some height: the slope from earlier times, rising.
+        let mut points = vec![
+            keypoint(0, Value::Number(0.0)),
+            keypoint(S, Value::Number(1.0)),
+            keypoint(2 * S, Value::Number(0.0)),
+        ];
+        points[0].transitions.leave = Some(Transition::Easing(Easing::Linear));
+        points[1].transitions.arrive = Some(Transition::Handle { dt: 0.0, dv: -0.5 });
+        let curve = Curve::new(&track(points));
+        assert_eq!(curve.sample(1e9).unwrap().velocity, Some(f64::INFINITY));
+        assert!(curve.sample(1e9 - 1e3).unwrap().velocity.unwrap() > 0.0);
     }
 
     #[test]
