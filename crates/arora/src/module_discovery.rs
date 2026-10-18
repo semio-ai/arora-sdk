@@ -30,6 +30,8 @@ use std::collections::HashMap;
 use arora_types::module::low::{ExportFunction, ExportSymbol, Header, TypeRef};
 use arora_types::record::module::frozen::{self, ExportKind, Function, Parameter};
 use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
+use arora_types::record::Version;
+use arora_types::SemanticVersion;
 use uuid::Uuid;
 
 /// Freeze a [`TypeRef`] that needs no registry into a [`FrozenTy`], or `None`
@@ -154,24 +156,32 @@ pub(crate) fn check_record(header: &Header, record: &frozen::Module) -> Result<(
     Ok(())
 }
 
-/// Whether the frozen type `frozen` names what the header's `type_ref`
-/// names: the primitive its well-known id names, or a reference to its id —
-/// as a scalar, an array or an optional, as the header has it. A
-/// fixed-length array or a map has no frozen form, so nothing names it.
+/// Whether the frozen type `frozen` is the header's `type_ref` frozen, each
+/// reference at the version `frozen` pins: a primitive id as that primitive
+/// (a `Key` as the string), any other id as a reference to it — as a scalar,
+/// an array or an optional, as the header has it. One form per header type,
+/// the one the module macros and the derive produce. A fixed-length array or
+/// a map has no frozen form, so nothing names it.
 fn names(frozen: &FrozenTy, type_ref: &TypeRef) -> bool {
-    match (type_ref, frozen) {
-        (TypeRef::Scalar { id }, FrozenTy::Primitive(primitive)) => {
-            PrimitiveKind::from_id(id) == Some(primitive.kind)
-        }
-        (TypeRef::Scalar { id }, FrozenTy::FrozenScalar(scalar)) => scalar.reference.id == *id,
-        (TypeRef::Array { id }, FrozenTy::Primitive(primitive)) => {
-            PrimitiveKind::from_id(id).and_then(PrimitiveKind::array_of) == Some(primitive.kind)
-        }
-        (TypeRef::Array { id }, FrozenTy::FrozenArray(array)) => array.reference.id == *id,
-        (TypeRef::Option { id }, FrozenTy::FrozenOption(option)) => {
-            names(&option.element, &TypeRef::Scalar { id: *id })
-        }
-        _ => false,
+    // A frozen type pinning no reference is a primitive: any version freezes
+    // the header's type alike.
+    let version = pinned(frozen).cloned().unwrap_or_else(|| {
+        Version::from(SemanticVersion {
+            major: 0,
+            minor: 0,
+            patch: 0,
+        })
+    });
+    FrozenTy::from_type_ref(type_ref, &version).as_ref() == Some(frozen)
+}
+
+/// The version the record reference in `frozen` pins, if it holds one.
+fn pinned(frozen: &FrozenTy) -> Option<&Version> {
+    match frozen {
+        FrozenTy::FrozenScalar(scalar) => Some(&scalar.reference.version),
+        FrozenTy::FrozenArray(array) => Some(&array.reference.version),
+        FrozenTy::FrozenOption(option) => pinned(&option.element),
+        _ => None,
     }
 }
 
@@ -208,6 +218,54 @@ mod tests {
             freeze_type_ref(&TypeRef::Option { id: *ty::STRING_ID }),
             Some(option_of(PrimitiveKind::String))
         );
+    }
+
+    /// A record's type names the header's in one form: a primitive id as that
+    /// primitive — a `Key` parameter as the string — and any other id as a
+    /// reference to it, at whatever version the record pins.
+    #[test]
+    fn a_record_s_type_names_the_header_s_in_one_form() {
+        let version = Version::parse("1.2.0").expect("a version");
+        let reference = |id: Uuid| arora_types::record::FrozenReference {
+            id,
+            version: version.clone(),
+        };
+        let string = TypeRef::Scalar { id: *ty::STRING_ID };
+        assert!(names(&FrozenTy::from(PrimitiveKind::String), &string));
+        assert!(!names(
+            &FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar {
+                reference: reference(*ty::STRING_ID)
+            }),
+            &string
+        ));
+        assert!(names(
+            &option_of(PrimitiveKind::String),
+            &TypeRef::Option { id: *ty::STRING_ID }
+        ));
+        assert!(names(
+            &FrozenTy::from(PrimitiveKind::ArrayString),
+            &TypeRef::Array { id: *ty::STRING_ID }
+        ));
+
+        let record = Uuid::from_u128(0x276);
+        let scalar = FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar {
+            reference: reference(record),
+        });
+        assert!(names(&scalar, &TypeRef::Scalar { id: record }));
+        assert!(!names(&scalar, &TypeRef::Scalar { id: *ty::U8_ID }));
+        assert!(names(
+            &FrozenTy::FrozenArray(arora_types::record::ty::FrozenArray {
+                reference: reference(record)
+            }),
+            &TypeRef::Array { id: record }
+        ));
+        assert!(names(
+            &FrozenTy::FrozenOption(FrozenOption {
+                element: Box::new(scalar.clone())
+            }),
+            &TypeRef::Option { id: record }
+        ));
+        assert!(!names(&scalar, &TypeRef::Array { id: record }));
     }
 
     /// What needs a registry, or has no frozen form, stays undescribed.

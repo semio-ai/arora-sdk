@@ -938,8 +938,9 @@ impl AroraBuilder {
     /// build fails, naming the module, when
     /// - the record does not describe the header — each export with the same
     ///   id and name, the same parameters in the same order (ids, names and
-    ///   mutability), and each type naming the id the header's names, and no
-    ///   other export — naming the export;
+    ///   mutability), each type the header's frozen (a primitive id as that
+    ///   primitive, a `Key` as the string, any other id as a reference to it),
+    ///   and no other export — naming the export;
     /// - the registry lacks a record the module record depends on,
     ///   transitively, naming each: a device holds the whole description of
     ///   what a module it describes takes and returns.

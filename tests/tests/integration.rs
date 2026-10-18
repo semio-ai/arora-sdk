@@ -63,14 +63,22 @@ fn call_test_rust_wasm_from_engine() {
     ]);
 }
 
-/// Write the records of the types module `M`'s functions name into `dir`, in
-/// the record-directory layout `--include` reads.
+/// Write the records of the types module `M`'s functions name, with the
+/// folders they declare, into `dir`, in the record-directory layout
+/// `--include` reads.
 fn write_type_records<M: arora_types::module::declared::AroraModule>(dir: &std::path::Path) {
     use arora_registry::local::{LocalRegistry, ROOT_ID};
     use arora_registry::{EditableRegistry, TypeDefinitionFrozen};
     let mut registry = LocalRegistry::new();
     futures::executor::block_on(async {
-        for (reference, record) in M::type_records(ROOT_ID) {
+        let records = M::type_records(ROOT_ID);
+        for (id, folder) in records.folders {
+            registry
+                .add_folder(id, folder)
+                .await
+                .expect("a folder the types declare is added");
+        }
+        for (reference, record) in records.types {
             let (id, version) = (reference.id, reference.version.0);
             match record {
                 TypeDefinitionFrozen::Structure(s) => registry.add_structure(id, version, s).await,
