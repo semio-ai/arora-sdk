@@ -22,6 +22,7 @@ pub mod folder;
 pub mod freeze;
 pub mod module;
 pub mod reference;
+pub mod scope;
 pub mod selector;
 pub mod structure;
 pub mod ty;

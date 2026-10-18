@@ -349,18 +349,19 @@ fn add_frozen_index_entries(
     path_to_ids: &mut HashMap<String, Uuid>,
     mappings: HashMap<String, Uuid>,
 ) -> Result<(), RegistryError> {
-    // Check that transaction is valid.
-    for (selector, version_index) in &entries {
-        for version in version_index.keys() {
-            check_frozen_index_entry_vacant(index, selector, version)?;
-        }
-    }
-    // A path names one record: another version of the same record keeps it.
+    // A path names one record — a name is unique within its folder —
+    // whatever its version: another version of the same record keeps it.
     for (path, id) in &mappings {
         if path_to_ids.get(path).is_some_and(|held| held != id) {
             Err(RegistryError::DuplicateSelector {
                 selector: Selector::Path(path.to_owned()),
             })?
+        }
+    }
+    // Check that transaction is valid.
+    for (selector, version_index) in &entries {
+        for version in version_index.keys() {
+            check_frozen_index_entry_vacant(index, selector, version)?;
         }
     }
     // Apply the transaction.

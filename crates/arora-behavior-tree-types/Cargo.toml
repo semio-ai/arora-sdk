@@ -8,10 +8,10 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# 3.8: `TickId` declares the folder of its record.
+# 3.8: `TickId` states the scope of its record (`ARORA`).
 arora-types = { path = "../arora-types", version = "3.8" }
 # Status moved here (ARORA-82); re-exported for existing consumers.
-# 9.5: `BEHAVIOR_TREE_FOLDER`.
+# 9.5: `Status`'s record, in the `arora` scope.
 arora-behavior = { path = "../arora-behavior", version = "9.5" }
 lazy_static = "1"
 semver = "1"

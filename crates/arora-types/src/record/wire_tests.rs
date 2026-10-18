@@ -1,7 +1,6 @@
 //! Golden wire-format tests: the frozen record serde must stay byte-compatible
 //! with semio-record's, because these YAML documents are what the Semio store
-//! consumes. Fixtures are copied verbatim from committed, store-accepted
-//! records under `modules/test-behavior-tree-nodes/records/`.
+//! consumes. Fixtures are records the store accepted, verbatim.
 
 use super::enumeration::frozen::Enumeration;
 use super::folder::public::Public as Folder;

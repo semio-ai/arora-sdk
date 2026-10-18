@@ -3,7 +3,7 @@
 
 use uuid::Uuid;
 
-use crate::record::folder::DeclaredFolder;
+use crate::record::scope::Scope;
 use crate::record::{TypeDefinitionFrozen, TypeRecords};
 use crate::ty::{low, TypeRegistry};
 
@@ -56,11 +56,11 @@ pub trait AroraType {
     (Self::arora_type(), registry)
   }
 
-  /// The folder this type declares as its record's home
-  /// (`#[arora(parent = …)]`), or `None` when it declares none. A type with a
-  /// home has its record there whatever names it, so modules sharing the
-  /// type ship one record.
-  fn parent() -> Option<&'static DeclaredFolder> {
+  /// The scope this type states its record lives in
+  /// (`#[arora(scope = …)]`), or `None` when it states none. A type stating
+  /// its scope has its record there whatever names it, so modules of
+  /// different scopes sharing the type ship one record.
+  fn scope() -> Option<Scope> {
     None
   }
 
@@ -69,28 +69,29 @@ pub trait AroraType {
   /// [`arora_type_version`](AroraType::arora_type_version). Each type it names
   /// is pinned at that type's own version.
   ///
-  /// The record lives in the folder the type declares
-  /// ([`parent`](AroraType::parent)); a type declaring none lives in
-  /// `default_parent`, the folder of what names it: the module whose function
-  /// names it, or the type whose field names it.
+  /// The record lives in the scope the type states
+  /// ([`scope`](AroraType::scope)); a type stating none lives in
+  /// `default_scope`, the scope of what names it: the module whose function
+  /// names it, or the type whose field names it. With neither, it lives at
+  /// the root.
   ///
   /// `None` for a type with no record of its own — one that travels as a
   /// well-known type, as a [`Key`](crate::data::Key) travels as a string —
   /// and for one whose shape a record cannot express: a fixed-length array.
-  fn record(_default_parent: Uuid) -> Option<TypeDefinitionFrozen> {
+  fn record(_default_scope: Option<Scope>) -> Option<TypeDefinitionFrozen> {
     None
   }
 
   /// Insert this type's [`record`](AroraType::record), and the record of
   /// every type it names, into `records`, each under the reference that pins
-  /// it, with the folders they declare. This type, when it declares no
-  /// folder, lives in `default_parent`; a type it names that declares none
-  /// lives where this one does. A type reached first through one path keeps
-  /// the folder that path gives it. Idempotent, and safe for a type reachable
-  /// from itself. A type without a record inserts nothing, so a record naming
-  /// one names a record `records` does not hold: a registry's
+  /// it, with the scopes they live in. This type, when it states no scope,
+  /// lives in `default_scope`; a type it names that states none lives where
+  /// this one does. A type reached first through one path keeps the scope
+  /// that path gives it. Idempotent, and safe for a type reachable from
+  /// itself. A type without a record inserts nothing, so a record naming one
+  /// names a record `records` does not hold: a registry's
   /// `missing_dependencies` reports it.
-  fn register_records(_default_parent: Uuid, _records: &mut TypeRecords) {}
+  fn register_records(_default_scope: Option<Scope>, _records: &mut TypeRecords) {}
 }
 
 #[cfg(all(test, feature = "derive"))]
@@ -605,7 +606,7 @@ mod tests {
 
   // ---- the records the derive emits -----------------------------------------
 
-  /// A struct's record is a structure under the folder given, its fields in
+  /// A struct's record is a structure in the scope given, its fields in
   /// declared order, each typed as a record names it: a primitive by kind, a
   /// nested type by a reference pinned at that type's version, a well-known
   /// type (a uuid, a dynamic value) by a reference at 1.0.0.
@@ -643,11 +644,14 @@ mod tests {
       key: crate::data::Key,
     }
 
-    let folder = crate::Uuid::from_u128(0xf01d);
-    let Some(TypeDefinitionFrozen::Structure(record)) = Shape::record(folder) else {
+    let scope = crate::record::scope::Scope {
+      id: crate::Uuid::from_u128(0xf01d),
+      handle: "shapes",
+    };
+    let Some(TypeDefinitionFrozen::Structure(record)) = Shape::record(Some(scope)) else {
       panic!("a struct's record is a structure");
     };
-    assert_eq!(record.parent, folder);
+    assert_eq!(record.parent, scope.id);
     assert_eq!(record.name, "Shape");
     let names: Vec<&str> = record.fields.values().map(|f| f.name.as_str()).collect();
     assert_eq!(
@@ -707,10 +711,12 @@ mod tests {
       #[arora(id = "13131313-1313-4131-8131-000000000012", name = "RUN")]
       Run,
     }
-    let Some(TypeDefinitionFrozen::Enumeration(record)) = Mode::record(crate::Uuid::nil()) else {
+    let Some(TypeDefinitionFrozen::Enumeration(record)) = Mode::record(None) else {
       panic!("an enum's record is an enumeration");
     };
     assert_eq!(record.name, "Mode");
+    // Without a scope, it lives at the root.
+    assert_eq!(record.parent, crate::record::folder::ROOT_ID);
     let variants: Vec<(String, String, FrozenTy)> = record
       .variants
       .iter()
@@ -736,8 +742,8 @@ mod tests {
 
   /// `register_records` holds a type's record and those of every type it
   /// names, transitively, each once — a type reachable from itself included —
-  /// under the references that pin them. Types declaring no folder all live
-  /// in the folder given, and no folder record is added.
+  /// under the references that pin them. Types stating no scope all live in
+  /// the scope given, which is the one scope the records name.
   #[test]
   fn register_records_collects_every_record_a_type_reaches_once() {
     use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
@@ -765,10 +771,13 @@ mod tests {
       root: Option<Box<Node>>,
     }
 
-    let folder = crate::Uuid::from_u128(0xf01d);
+    let scope = crate::record::scope::Scope {
+      id: crate::Uuid::from_u128(0xf01d),
+      handle: "forest",
+    };
     let mut records = TypeRecords::default();
-    Tree::register_records(folder, &mut records);
-    Tree::register_records(folder, &mut records);
+    Tree::register_records(Some(scope), &mut records);
+    Tree::register_records(Some(scope), &mut records);
     let reference = |id: crate::Uuid, version: &str| FrozenReference {
       id,
       version: crate::record::Version::parse(version).unwrap(),
@@ -791,31 +800,24 @@ mod tests {
         TypeDefinitionFrozen::Enumeration(e) => e.parent,
         TypeDefinitionFrozen::Primitive(_) => panic!("a primitive has no record"),
       };
-      assert_eq!(parent, folder);
+      assert_eq!(parent, scope.id);
     }
-    assert!(records.folders.is_empty());
+    assert_eq!(records.scopes, std::collections::BTreeSet::from([scope]));
   }
 
-  /// A type declaring its folder (`#[arora(parent = …)]`) has its record
-  /// there whatever names it, and brings the folder's record and those of
-  /// the folders holding it. A type it names that declares no folder lives
-  /// there too; a type declaring none that the caller names directly lives
-  /// in the folder the caller gives.
+  /// A type stating its scope (`#[arora(scope = …)]`) has its record there
+  /// whatever names it, and a type it names that states none lives there
+  /// too; a type stating none that the caller names directly lives in the
+  /// scope the caller gives. The records name both scopes.
   #[test]
-  fn a_type_declaring_its_folder_keeps_it_whatever_names_it() {
-    use crate::record::folder::DeclaredFolder;
+  fn a_type_stating_its_scope_keeps_it_whatever_names_it() {
+    use crate::record::scope::Scope;
     use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
     use crate::Uuid;
 
-    const SHAPES: DeclaredFolder = DeclaredFolder {
+    const SHAPES: Scope = Scope {
       id: Uuid::from_u128(0x5a9e),
-      name: "shapes",
-      parent: None,
-    };
-    const POLYGONS: DeclaredFolder = DeclaredFolder {
-      id: Uuid::from_u128(0x9019),
-      name: "polygons",
-      parent: Some(&SHAPES),
+      handle: "shapes",
     };
 
     #[derive(AroraType)]
@@ -825,7 +827,7 @@ mod tests {
       Clockwise,
     }
     #[derive(AroraType)]
-    #[arora(id = "16161616-1616-4161-8161-000000000002", parent = POLYGONS)]
+    #[arora(id = "16161616-1616-4161-8161-000000000002", scope = SHAPES)]
     struct Polygon {
       #[arora(id = "16161616-1616-4161-8161-000000000021")]
       winding: Winding,
@@ -837,8 +839,8 @@ mod tests {
       outline: Polygon,
     }
 
-    assert_eq!(Polygon::parent(), Some(&POLYGONS));
-    assert_eq!(Drawing::parent(), None);
+    assert_eq!(Polygon::scope(), Some(SHAPES));
+    assert_eq!(Drawing::scope(), None);
 
     let parent_of = |records: &TypeRecords, id: Uuid| {
       let reference = FrozenReference {
@@ -851,28 +853,40 @@ mod tests {
         other => panic!("{id} has no record: {other:?}"),
       }
     };
-    let module_folder = Uuid::from_u128(0x6d0d);
+    let module_scope = Scope {
+      id: Uuid::from_u128(0x6d0d),
+      handle: "studio",
+    };
     let mut records = TypeRecords::default();
-    Drawing::register_records(module_folder, &mut records);
-    assert_eq!(parent_of(&records, Drawing::arora_type_id()), module_folder);
-    assert_eq!(parent_of(&records, Polygon::arora_type_id()), POLYGONS.id);
-    assert_eq!(parent_of(&records, Winding::arora_type_id()), POLYGONS.id);
+    Drawing::register_records(Some(module_scope), &mut records);
     assert_eq!(
-      records.folders,
-      POLYGONS
-        .records()
-        .collect::<std::collections::BTreeMap<_, _>>()
+      parent_of(&records, Drawing::arora_type_id()),
+      module_scope.id
+    );
+    assert_eq!(parent_of(&records, Polygon::arora_type_id()), SHAPES.id);
+    assert_eq!(parent_of(&records, Winding::arora_type_id()), SHAPES.id);
+    assert_eq!(
+      records.scopes,
+      std::collections::BTreeSet::from([module_scope, SHAPES])
     );
 
-    // Named from another folder, the shared type and the type it names are
-    // the same records.
-    let mut elsewhere = TypeRecords::default();
-    Polygon::register_records(Uuid::from_u128(0xe15e), &mut elsewhere);
-    assert_eq!(elsewhere.types.len(), 2);
-    for (reference, record) in &elsewhere.types {
-      assert_eq!(records.types.get(reference), Some(record));
+    // Named from another scope, or from none, the shared type and the type
+    // it names are the same records.
+    for elsewhere_scope in [
+      Some(Scope {
+        id: Uuid::from_u128(0xe15e),
+        handle: "elsewhere",
+      }),
+      None,
+    ] {
+      let mut elsewhere = TypeRecords::default();
+      Polygon::register_records(elsewhere_scope, &mut elsewhere);
+      assert_eq!(elsewhere.types.len(), 2);
+      for (reference, record) in &elsewhere.types {
+        assert_eq!(records.types.get(reference), Some(record));
+      }
+      assert_eq!(elsewhere.scopes, std::collections::BTreeSet::from([SHAPES]));
     }
-    assert_eq!(elsewhere.folders, records.folders);
   }
 
   /// A fixed-length array has no record form, so neither has a type holding
@@ -885,9 +899,9 @@ mod tests {
       #[arora(id = "15151515-1515-4151-8151-000000000011")]
       covariance: [f64; 4],
     }
-    assert!(Pose::record(crate::Uuid::nil()).is_none());
+    assert!(Pose::record(None).is_none());
     let mut records = crate::record::TypeRecords::default();
-    Pose::register_records(crate::Uuid::nil(), &mut records);
+    Pose::register_records(None, &mut records);
     assert_eq!(records, crate::record::TypeRecords::default());
   }
 }

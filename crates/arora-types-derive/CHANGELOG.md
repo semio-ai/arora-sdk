@@ -7,23 +7,23 @@ All notable changes.
 ### Changed
 
 - **Breaking:** the derived impl implements `AroraType::record`,
-  `AroraType::register_records` and `AroraType::parent`, which arora-types
+  `AroraType::register_records` and `AroraType::scope`, which arora-types
   declares from 3.8: the derive builds only against arora-types 3.8 or later,
   which re-exports it.
 
 ### Added
 
-- The derived type's record: `record(default_parent)` is a structure (each
+- The derived type's record: `record(default_scope)` is a structure (each
   field typed as a record names it: a primitive by kind — a `Key` as a string
   — a derived type by a reference at that type's `arora_type_version`, a uuid
   or a `keyvalue` field by a reference at `1.0.0`) or an enumeration of unit
   variants; `register_records` adds the records of every type it names. A
   struct with a fixed-length array field has no record.
-- `#[arora(parent = FOLDER)]` on a type: the `DeclaredFolder` its record
-  lives in whatever names it; `register_records` adds the folder's records
-  with it. A type without it lives in the folder of what names it, and the
-  types it names that declare no folder live where it does. On a field or a
-  variant, `parent` is an error.
+- `#[arora(scope = SCOPE)]` on a type: the `Scope` its record lives in
+  whatever names it. A type without it lives in the scope of what names it
+  (at the root when that has none), and the types it names that state no
+  scope live where it does. `register_records` collects the scopes with the
+  records. On a field or a variant, `scope` is an error.
 
 ## [1.4.0] - 2026-10-16
 

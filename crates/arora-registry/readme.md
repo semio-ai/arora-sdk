@@ -32,11 +32,21 @@ and `LocalRegistry::type_at` look a record up by its exact id and version,
 from memory, and `LocalRegistry::missing_dependencies` lists the records a
 record depends on, transitively, that the registry does not hold.
 
+A name is unique within its folder: another record under a path a record
+holds is refused, whatever its version.
+
+The top folders are **scopes**: the `@handle` of the account — a person or
+an organization — that publishes the records in them, so `@vizij/animation`
+is the module record at `vizij.animation`. A record published to the store
+states its scope; a local registry also holds records with none, at the
+root.
+
 `LocalRegistry::add_declared_module` adds the records of a module declared in
-Rust: its module record, in the folder given, and the records of the types
-its functions name, which `#[derive(AroraType)]` produces, each in the folder
-its type declares (added with them) or, for a type declaring none, in the
-module's. Modules sharing a type that declares its folder add together.
+Rust: its module record, in the scope its declaration states, and the records
+of the types its functions name, which `#[derive(AroraType)]` produces, each
+in the scope its type states or, for a type stating none, in the module's.
+Each scope's folder is added with them. Modules of different scopes sharing a
+type that states its scope add together.
 
 ## YAML Records Layout
 

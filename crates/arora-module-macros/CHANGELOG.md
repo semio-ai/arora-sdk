@@ -8,11 +8,11 @@ All notable changes to `arora-module-macros`. The format follows
 
 ### Changed
 
-- **Breaking:** a module's `Module` implements `AroraModule::type_records`,
-  and the generated code names `TypeRecords`, `FrozenTy::from_type_ref` and
-  `AroraType::register_records`, which arora-types declares from 3.8: a
-  declaration builds only against arora-types 3.8 or later, through
-  arora-module 2.2.
+- **Breaking:** a module's `Module` implements `AroraModule::scope` and
+  `AroraModule::type_records`, and the generated code names `Scope`,
+  `TypeRecords`, `FrozenTy::from_type_ref` and `AroraType::register_records`,
+  which arora-types declares from 3.8: a declaration builds only against
+  arora-types 3.8 or later, through arora-module 2.2.
 - A `Key` parameter or return is frozen in the module record as the string
   primitive, as a derived type's `Key` field is, and is not among the
   record's dependencies; it was a reference to the string id at `1.0.0`. Any
@@ -20,12 +20,15 @@ All notable changes to `arora-module-macros`. The format follows
 
 ### Added
 
-- A module declaration's and a contract's `type_records(parent)`: the records
-  of the types their functions name, and of the types those name, with the
-  folders those types declare; a type declaring none lives in `parent`, the
-  module's folder, when a function names it. A module's `Module` implements
-  `AroraModule::type_records` with it. Each export's declaration carries
-  `register_records(parent, records)`.
+- `scope = SCOPE` in a module declaration: the `Scope` its records live in,
+  a path as the module's items see it. The module's `Module` implements
+  `AroraModule::scope` with it, `None` without one.
+- A module declaration's `type_records()`: the records of the types its
+  functions name, and of the types those name, with the scopes they live in;
+  a type stating none lives in the module's scope when a function names it.
+  A contract's `type_records(scope)` takes the implementing module's scope.
+  A module's `Module` implements `AroraModule::type_records` with it. Each
+  export's declaration carries `register_records(scope, records)`.
 
 ## [2.1.0] - 2026-09-28
 

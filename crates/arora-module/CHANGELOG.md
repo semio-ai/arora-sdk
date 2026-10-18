@@ -8,9 +8,10 @@ All notable changes to `arora-module`. The format follows
 
 ### Added
 
-- A declaration's `type_records(parent)`, the records of the types its
-  functions name, each in the folder its type declares or in the module's
-  folder `parent`; see arora-module-macros 3.0.0. Requires arora-types 3.8.
+- `scope = SCOPE` in a declaration, the scope its records live in, and its
+  `type_records()`, the records of the types its functions name, each in the
+  scope its type states or in the module's; see arora-module-macros 3.0.0.
+  Requires arora-types 3.8.
 
 ### Changed
 

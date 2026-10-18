@@ -6,16 +6,12 @@ All notable changes to `arora-behavior`. The format follows
 
 ## [9.5.0] - 2026-10-18
 
-### Added
-
-- `BEHAVIOR_TREE_FOLDER`: the `behavior_tree` folder, declared, where
-  `Status`'s record lives.
-
 ### Changed
 
-- `Status`'s record (`AroraType::record`, arora-types 3.8) lives in
-  `BEHAVIOR_TREE_FOLDER` whatever names it, so modules sharing `Status`
-  ship one record. Requires arora-types 3.8.
+- `Status`'s record (`AroraType::record`, arora-types 3.8) lives in the
+  `arora` scope (`arora_types::record::scope::ARORA`, path `arora.Status`)
+  whatever names it, so modules of any scope sharing `Status` ship one
+  record. Requires arora-types 3.8.
 
 ## [9.4.0] - 2026-10-16
 

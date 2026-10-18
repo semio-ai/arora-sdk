@@ -191,27 +191,36 @@ impl LocalRegistry {
     }
 
     /// Add the records of a module declared in Rust: its module record at
-    /// `version` — the version its header carries — in the folder `parent`
-    /// (the root, [`ROOT_ID`], or a folder the registry holds), and the
-    /// records of the types its functions name, transitively
-    /// ([`AroraModule::type_records`]): each in the folder its type declares,
-    /// added with that folder's records, or in `parent` for a type declaring
-    /// none. A record the registry already holds identically is kept, so
-    /// modules sharing a type that declares its folder add together.
+    /// `version` — the version its header carries — in the scope its
+    /// declaration states ([`AroraModule::scope`]), and the records of the
+    /// types its functions name, transitively ([`AroraModule::type_records`]):
+    /// each in the scope its type states, or in the module's for a type
+    /// stating none. Each scope's folder is added with them. A module
+    /// declared without a scope, and the types it names that state none,
+    /// live at the root. A record the registry already holds identically is
+    /// kept, so modules sharing a type that states its scope add together.
     ///
     /// Fails without adding the module record when it names a type that has
     /// no record of its own — one implementing `AroraType` without a record,
-    /// or holding a fixed-length array, or naming such a type — naming each,
-    /// and when a type record differs from the one the registry holds at its
-    /// id and version: a type two modules share in different folders without
-    /// declaring its own. The records it added before failing stay.
+    /// or holding a fixed-length array, or naming such a type — naming each;
+    /// when a type record differs from the one the registry holds at its id
+    /// and version — a type modules of different scopes share without
+    /// stating its own — naming the type; and when another record holds the
+    /// type's name in its scope, naming both. The records it added before
+    /// failing stay.
     pub async fn add_declared_module<M: AroraModule>(
         &mut self,
         version: Version,
-        parent: Uuid,
     ) -> Result<(), RegistryError> {
-        let records = M::type_records(parent);
-        crate::local_yaml::add_folders(records.folders.into_iter().collect(), self).await?;
+        let scope = M::scope();
+        let module = M::record(scope.map_or(ROOT_ID, |scope| scope.id));
+        let records = M::type_records();
+        let scopes = scope.into_iter().chain(records.scopes.iter().copied());
+        crate::local_yaml::add_folders(
+            scopes.map(|scope| (scope.id, scope.record())).collect(),
+            self,
+        )
+        .await?;
         for (reference, record) in records.types {
             let name = record.name();
             let (id, tag) = (reference.id, reference.version.0.clone());
@@ -225,17 +234,22 @@ impl LocalRegistry {
                 TypeDefinitionFrozen::Primitive(_) => Ok(()),
             }
             .map_err(|error| match error {
-                RegistryError::DuplicateVersion { .. }
-                | RegistryError::DuplicateSelector { .. } => RegistryError::generic(&format!(
-                    "module '{}' names type '{name}' ({reference}), whose record conflicts \
-                         with one the registry holds ({error}): a type modules in different \
-                         folders share declares its own folder",
-                    M::record(parent).name,
+                RegistryError::DuplicateSelector {
+                    selector: Selector::Path(path),
+                } => RegistryError::generic(&format!(
+                    "module '{}' names type '{name}' ({reference}), whose path '{path}' \
+                     another record holds: a name is unique within its scope",
+                    module.name,
+                )),
+                RegistryError::DuplicateVersion { .. } => RegistryError::generic(&format!(
+                    "module '{}' names type '{name}' ({reference}), whose record differs from \
+                     the one the registry holds at that id and version ({error}): a type \
+                     modules of different scopes share states its own scope",
+                    module.name,
                 )),
                 error => error,
             })?;
         }
-        let module = M::record(parent);
         let mut references = HashSet::new();
         module.dependencies(&mut references);
         let missing = self.missing_among(references.into_iter().cloned().collect());

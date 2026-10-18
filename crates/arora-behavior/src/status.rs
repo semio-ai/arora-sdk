@@ -14,29 +14,18 @@
 //! `TryFrom<Value> for Status`): the `Value::Enumeration { id, variant_id,
 //! Unit }` form the plane speaks, from the same pinned ids.
 
-use arora_types::record::folder::DeclaredFolder;
+use arora_types::record::scope::ARORA;
 use arora_types::AroraType;
 use arora_types::Uuid;
-
-/// The `behavior_tree` folder, at the root: the home of the `Status` record
-/// and of the behavior tree's own types. A module naming `Status` ships its
-/// record in this folder, so every module sharing it ships the same record.
-pub const BEHAVIOR_TREE_FOLDER: DeclaredFolder = DeclaredFolder {
-    id: Uuid::from_bytes([
-        0x12, 0x32, 0xd7, 0xc4, 0xd5, 0xaf, 0x4f, 0x91, 0x9a, 0x34, 0x8c, 0x70, 0x7b, 0x0c, 0x96,
-        0x93,
-    ]),
-    name: "behavior_tree",
-    parent: None,
-};
 
 /// A run's lifecycle status: still running, or a terminal outcome.
 ///
 /// The one status vocabulary a behavior speaks on the value plane — the value
 /// an interpreter writes to a run's status key, and the value the ROS 2 action
-/// plane maps to `GoalStatus`. Its record lives in [`BEHAVIOR_TREE_FOLDER`].
+/// plane maps to `GoalStatus`. Its record lives in the [`ARORA`] scope
+/// (`arora.Status`), whatever names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AroraType)]
-#[arora(id = "325a5767-e344-4532-860e-0749bcf2e428", parent = BEHAVIOR_TREE_FOLDER)]
+#[arora(id = "325a5767-e344-4532-860e-0749bcf2e428", scope = ARORA)]
 pub enum Status {
     /// The behavior finished cleanly.
     #[arora(id = "766e9e9a-446d-4e46-83e6-14b7ca101169")]
