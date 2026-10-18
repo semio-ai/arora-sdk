@@ -88,9 +88,11 @@ pub struct OutputKeys {
 /// playhead and length in nanoseconds of its timeline, its speed as set
 /// (negative backwards), its name, its instances, its loop mode, whether the
 /// loop mode stopped it at a bound (`ended`), its window, and whether it
-/// heads against its speed's sign after a turn (`reversed`).
+/// heads against its speed's sign after a turn (`reversed`), and whether it
+/// waits for the device time `play_at` gave it (`waiting`; its state says
+/// `playing` meanwhile).
 ///
-/// Record 1.3.0 adds `reversed` to 1.2.0.
+/// Record 1.3.0 adds `reversed` and `waiting` to 1.2.0.
 #[derive(Debug, Clone, PartialEq, AroraType)]
 #[arora(id = "76697a69-6a00-0000-0000-000000000111", version = "1.3.0")]
 pub struct PlayerState {
@@ -119,6 +121,8 @@ pub struct PlayerState {
     /// Heading against the speed's sign after a turn at a bound.
     #[arora(id = "76697a69-6a00-0000-0111-00000000000c")]
     pub reversed: bool,
+    #[arora(id = "76697a69-6a00-0000-0111-00000000000d")]
+    pub waiting: bool,
 }
 /// One instance on a player: the clip it plays, its weight, and its timing,
 /// clip-local time = (playhead − `start_offset_ns`) × `rate`; `time_scale` is

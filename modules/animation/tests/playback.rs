@@ -363,8 +363,11 @@ fn transport_is_immediate_and_reports_windows_heading_end_and_instance_timing() 
     a.play_at(p, now + 200_000_000);
     a.step(100_000_000, None);
     assert_eq!(a.player_states()[0].time_ns, 300_000_000);
+    assert_eq!(a.player_states()[0].state, "playing");
+    assert!(a.player_states()[0].waiting, "held until its start");
     a.step(200_000_000, None);
     assert_eq!(a.player_states()[0].time_ns, 400_000_000);
+    assert!(!a.player_states()[0].waiting);
     a.set_rate(p, i, 0.5);
     assert_eq!(a.player_states()[0].duration_ns, 2 * SECOND);
     assert_eq!(a.player_states()[0].instances[0].rate, 0.5);

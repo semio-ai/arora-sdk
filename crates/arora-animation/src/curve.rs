@@ -473,6 +473,51 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_at_the_keypoints_own_instants_keeps_the_step_rule() {
+        let curve = Curve::new(&track(vec![
+            keypoint(0, Value::Bool(false)),
+            keypoint(S, Value::Bool(true)),
+            keypoint(2 * S, Value::Bool(false)),
+            keypoint(3 * S, Value::Bool(true)),
+        ]));
+        let times: Vec<f64> = (0..=12).map(|i| i as f64 * 0.25e9).collect();
+        let mut batch = Vec::new();
+        curve.sample_many(&times, &mut batch);
+        for (t, sample) in times.iter().zip(&batch) {
+            assert_eq!(*sample, curve.sample(*t).unwrap(), "at {t}");
+        }
+        assert_eq!(
+            batch[4].value,
+            Value::Bool(false),
+            "an interior keypoint's instant holds"
+        );
+        assert_eq!(batch[8].value, Value::Bool(true));
+    }
+
+    #[test]
+    fn a_collapsed_handle_gives_the_limit_of_the_slope() {
+        // The segment arrives at its end with its handle on the keypoint, so
+        // the time curve stalls there: the velocity at the instant is the
+        // slope's limit, which a finite difference approaches.
+        let mut points = vec![
+            keypoint(0, Value::Number(0.0)),
+            keypoint(S, Value::Number(10.0)),
+            keypoint(2 * S, Value::Number(0.0)),
+        ];
+        points[0].transitions.leave = Some(Transition::Handle { dt: 4e8, dv: 0.0 });
+        points[1].transitions.arrive = Some(Transition::Handle { dt: 0.0, dv: 0.0 });
+        let curve = Curve::new(&track(points));
+        let at = curve.sample(1e9).unwrap().velocity.unwrap();
+        let near = |t: f64| curve.sample(t).unwrap().value.as_number().unwrap();
+        let difference = (near(1e9) - near(1e9 - 1e3)) / 1e-6;
+        assert!(at.is_finite() && at != 0.0, "{at}");
+        assert!(
+            (at - difference).abs() < 1e-3 * at.abs(),
+            "{at} vs {difference}"
+        );
+    }
+
+    #[test]
     fn the_solver_finds_the_parameter_to_double_precision() {
         // A curve whose time stalls at its start (a collapsed handle), one
         // that stalls in its middle (a vertical tangent), and one nearly

@@ -164,6 +164,8 @@ pub struct PlayerInfo {
     pub reversed: bool,
     pub mode: LoopMode,
     pub ended: bool,
+    /// Whether it waits for the device time `play_at` gave it.
+    pub waiting: bool,
     pub window: (Nanos, Option<Nanos>),
     pub instances: Vec<Instance>,
 }
@@ -426,6 +428,7 @@ impl Engine {
                 reversed: slot.player.reversed(),
                 mode: slot.player.mode(),
                 ended: slot.player.ended(),
+                waiting: slot.player.waiting(),
                 window: slot.player.window(),
                 instances: slot.instances.clone(),
             })
@@ -848,9 +851,41 @@ mod tests {
             .unwrap();
         let out = engine.step(0, 0);
         assert_eq!(out[0].sample.as_ref().unwrap().value, Value::Number(75.0));
+        // A second instance of the ramp at twice the rate: velocities blend
+        // per second of the player's timeline, each scaled by its rate.
+        let fast = engine
+            .add_instance(
+                player,
+                anim,
+                1.0,
+                Timing {
+                    offset: 0,
+                    rate: 2.0,
+                },
+            )
+            .unwrap();
+        engine.play(player);
+        let out = engine.step(100_000_000, 100_000_000);
+        let velocity = out[0].sample.as_ref().unwrap().velocity.unwrap();
+        let slow = engine.curves(anim).unwrap()[0]
+            .sample(1e8)
+            .unwrap()
+            .velocity
+            .unwrap();
+        let quick = engine.curves(anim).unwrap()[0]
+            .sample(2e8)
+            .unwrap()
+            .velocity
+            .unwrap();
+        assert!(
+            (velocity - (slow + 2.0 * quick) / 5.0).abs() < 1e-9,
+            "{velocity}"
+        );
+        assert!(engine.remove_instance(player, fast));
         engine.set_weight(player, held, 0.0);
-        let out = engine.step(0, 0);
-        assert_eq!(out[0].sample.as_ref().unwrap().value, Value::Number(0.0));
+        let out = engine.outputs();
+        let x = out[0].sample.as_ref().unwrap().value.as_number().unwrap();
+        assert!((x - 1.0).abs() < 1e-12, "the ramp alone, at 100 ms: {x}");
         assert!(!engine.set_weight(player, held, f64::NAN));
     }
 

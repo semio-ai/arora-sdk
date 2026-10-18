@@ -35,11 +35,14 @@ fn playing(clip: Clip, mode: LoopMode, speed: f64) -> (Engine, PlayerId) {
 
 #[test]
 fn a_player_stepped_at_100_hz_for_an_hour_stays_on_its_timeline() {
-    let (mut engine, _) = playing(ramp(7_200_000), LoopMode::Once, 1.75);
+    // A third: each step's travel is a fraction of a nanosecond off a whole
+    // one, so a clock summing its steps would drift.
+    let speed = 1.0 / 3.0;
+    let (mut engine, _) = playing(ramp(7_200_000), LoopMode::Once, speed);
     let dt = 10 * MS;
     for n in 0..=360_000 {
         engine.step(n * dt, if n == 0 { 0 } else { dt });
-        let expected = (1.75 * (n * dt) as f64).round() as Nanos;
+        let expected = (speed * (n * dt) as f64).round() as Nanos;
         assert_eq!(engine.players()[0].position, expected, "step {n}");
     }
 }

@@ -489,6 +489,98 @@ mod tests {
         assert!(is_monotonic(cp1.t / 1000.0, cp2.t / 1000.0));
     }
 
+    /// Control points Studio's editor resolves (`resolveSegmentControlPoints`
+    /// in `@semio/animation`) for clamps the reference set does not reach: an
+    /// inferred clamped tangent past its segment's value range, on either
+    /// side; explicit handles near a knot and pointing back in time; an
+    /// unclamped tangent between steep neighbours.
+    #[test]
+    fn the_clamps_place_the_points_studios_editor_does() {
+        let p = Point::new;
+        let ms = |x: f64, y: f64| Transition::Handle { dt: x * 1e6, dv: y };
+        let cases = [
+            (
+                SegmentInput {
+                    start: p(10.0, 100.0),
+                    end: p(1000.0, 101.0),
+                    leave: Some(Transition::AutoClamped),
+                    arrive: Some(Transition::Easing(Easing::Cubic)),
+                    before: Some(p(0.0, 0.0)),
+                    after: Some(p(2000.0, 150.0)),
+                },
+                [p(11.103866472134445, 101.0), p(356.5, 101.0)],
+            ),
+            (
+                SegmentInput {
+                    start: p(0.0, 0.0),
+                    end: p(990.0, 1.0),
+                    leave: Some(Transition::Easing(Easing::Linear)),
+                    arrive: Some(Transition::AutoClamped),
+                    before: Some(p(-500.0, -3.0)),
+                    after: Some(p(1000.0, 101.0)),
+                },
+                [p(326.7, 0.33), p(988.8961335278656, 0.0)],
+            ),
+            (
+                SegmentInput {
+                    start: p(0.0, 0.0),
+                    end: p(1000.0, 10.0),
+                    leave: Some(ms(900.0, 30.0)),
+                    arrive: Some(ms(-950.0, -20.0)),
+                    before: None,
+                    after: None,
+                },
+                [p(900.0, 30.0), p(50.0, -10.0)],
+            ),
+            (
+                SegmentInput {
+                    start: p(0.0, 0.0),
+                    end: p(1000.0, 10.0),
+                    leave: Some(ms(-300.0, 6.0)),
+                    arrive: Some(Transition::Easing(Easing::Quint)),
+                    before: None,
+                    after: None,
+                },
+                [p(0.0, 0.0), p(170.0, 10.0)],
+            ),
+            (
+                SegmentInput {
+                    start: p(10.0, 100.0),
+                    end: p(1000.0, 101.0),
+                    leave: Some(Transition::Auto),
+                    arrive: Some(Transition::Auto),
+                    before: Some(p(0.0, 0.0)),
+                    after: Some(p(1010.0, 300.0)),
+                },
+                [
+                    p(155.39117228714107, 231.71083274774304),
+                    p(720.0581530804511, -165.49703302973631),
+                ],
+            ),
+        ];
+        // The raw points too, which the editor draws its markers at: they
+        // differ from the effective ones only where a clamp shortened a
+        // handle along its ray.
+        let raw = [
+            [p(11.103866472134445, 101.0), p(356.5, 101.0)],
+            [p(326.7, 0.33), p(988.8961335278656, 0.0)],
+            [p(900.0, 30.0), p(50.0, -10.0)],
+            [p(-300.0, 6.0), p(170.0, 10.0)],
+            cases[4].1,
+        ];
+        for (i, (input, expected)) in cases.iter().enumerate() {
+            let resolved = resolve_segment(input);
+            for (got, expected) in [(resolved.effective, expected), (resolved.raw, &raw[i])] {
+                for (g, e) in got.iter().zip(expected) {
+                    assert!(
+                        (g.t - e.t).abs() < 1e-9 && (g.v - e.v).abs() < 1e-9,
+                        "case {i}: {got:?}, Studio resolves {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn an_inferred_tangent_reads_the_neighbours() {
         let mut input = segment(Some(Transition::Auto), Some(Transition::AutoClamped));

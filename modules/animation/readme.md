@@ -48,7 +48,7 @@ carry Arora `Value`s on the self-describing value wire.
 | `StepValues` | 1.0.0 | Output revision and values by position |
 | `StepSamples` | 1.0.0 | Output revision, values and velocities by position |
 | `OutputKeys` | 1.0.0 | Output revision and keys by position |
-| `PlayerState` | 1.3.0 | Player id, state, position, length, speed, name, instances, loop mode, ended, window, reversed |
+| `PlayerState` | 1.3.0 | Player id, state, position, length, speed, name, instances, loop mode, ended, window, reversed, waiting |
 | `InstanceState` | 1.2.0 | Instance id, animation id, weight, signed start offset, time scale, rate |
 | `BakedAnimation` | 1.0.0 | Frame rate, window in nanoseconds, tracks |
 | `BakedTrack` | 1.0.0 | Target key, sample values and optional derivatives |

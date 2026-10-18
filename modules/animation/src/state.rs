@@ -305,6 +305,7 @@ impl AnimationContract for AnimationModule {
                 duration_ns: p.length.max(0) as u64,
                 speed: p.speed as f32,
                 reversed: p.reversed,
+                waiting: p.waiting,
                 loop_mode: p.mode.name().into(),
                 ended: p.ended,
                 window_start_ns: p.window.0.max(0) as u64,

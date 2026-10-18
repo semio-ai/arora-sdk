@@ -131,6 +131,15 @@ fn a_player_after_its_bounds_plays_back_toward_them() {
 }
 
 #[test]
+fn a_step_that_crosses_into_the_window_keeps_to_it_from_where_it_entered() {
+    // One step carries the player from after its bounds, into them, and on
+    // past their start: it wraps at the bound it entered within.
+    let mut p = player(LoopMode::Loop, 4_500, -1.0);
+    p.set_window(0, 1_500 * MS, Some(3_500 * MS), LENGTH);
+    assert_eq!(at(&mut p, 3_500), 3_000);
+}
+
+#[test]
 fn a_player_heading_away_from_its_bounds_plays_over_the_whole_timeline() {
     // Studio's full range: [0, length] bounds a player that has not entered
     // its bounds, so it wraps there and comes round to them.
