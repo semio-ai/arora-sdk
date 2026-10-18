@@ -11,7 +11,9 @@
 //! the first track on a target is the one that plays it; a later track on
 //! the same target is not played, and a track with no keypoint claims its
 //! target and writes nothing. Within a player, the instances writing one key
-//! blend: numbers by weight, their velocities likewise; a boolean or string
+//! blend: numbers by weight, their velocities likewise (an unbounded
+//! velocity, at a tangent vertical in time, outweighs finite ones, and
+//! opposite unbounded ones of equal weight cancel); a boolean or string
 //! replaces what was written before it in the step. The output table —
 //! per player in creation order, each key in the order its instances first
 //! write it — changes only with a structural edit, which gives it a new
@@ -23,7 +25,7 @@
 
 use crate::clip::Clip;
 use crate::curve::Curve;
-use crate::player::{LoopMode, Player, State};
+use crate::player::{LoopMode, Player, State, MAX_SPEED};
 use crate::time::{Nanos, NANOS_PER_SECOND};
 use crate::value::{Kind, Sample, Value};
 
@@ -385,9 +387,9 @@ impl Engine {
     }
 
     /// Sets a player's speed; `false` when it does not exist or the speed is
-    /// not finite.
+    /// not finite or faster than [`MAX_SPEED`] either way.
     pub fn set_speed(&mut self, player: PlayerId, speed: f64) -> bool {
-        speed.is_finite() && self.command(player, Command::Speed(speed))
+        speed.is_finite() && speed.abs() <= MAX_SPEED && self.command(player, Command::Speed(speed))
     }
 
     pub fn set_window(&mut self, player: PlayerId, start: Nanos, end: Option<Nanos>) -> bool {
@@ -695,7 +697,11 @@ enum Accumulator {
     Empty,
     Numbers {
         sum: f64,
+        /// The weighted sum of the finite velocities.
         velocity: f64,
+        /// The weight of the contributions whose velocity is unbounded
+        /// upward, and downward: a tangent vertical in time.
+        unbounded: (f64, f64),
         weight: f64,
         narrow: bool,
     },
@@ -715,22 +721,32 @@ impl Accumulator {
                 Accumulator::Numbers {
                     sum,
                     velocity,
+                    unbounded,
                     weight: total,
                     narrow: all_narrow,
                 },
             ) => {
                 *sum += weight * sample.value.as_number().unwrap_or(0.0);
-                *velocity += weight * sample.velocity.unwrap_or(0.0) * rate;
+                let v = sample.velocity.unwrap_or(0.0) * rate;
+                if v == f64::INFINITY {
+                    unbounded.0 += weight;
+                } else if v == f64::NEG_INFINITY {
+                    unbounded.1 += weight;
+                } else {
+                    *velocity += weight * v;
+                }
                 *total += weight;
                 *all_narrow &= narrow;
             }
             (Kind::Number, _) => {
                 *self = Accumulator::Numbers {
-                    sum: weight * sample.value.as_number().unwrap_or(0.0),
-                    velocity: weight * sample.velocity.unwrap_or(0.0) * rate,
-                    weight,
-                    narrow,
+                    sum: 0.0,
+                    velocity: 0.0,
+                    unbounded: (0.0, 0.0),
+                    weight: 0.0,
+                    narrow: true,
                 };
+                self.add(sample, weight, rate, narrow);
             }
             _ => {
                 *self = Accumulator::Step {
@@ -750,12 +766,21 @@ impl Accumulator {
             Accumulator::Numbers {
                 sum,
                 velocity,
+                unbounded: (up, down),
                 weight,
                 narrow,
             } => Output {
                 sample: Some(Sample {
                     value: Value::Number(sum / weight),
-                    velocity: Some(velocity / weight),
+                    // Unbounded velocities outweigh finite ones; opposite
+                    // ones of equal weight cancel.
+                    velocity: Some(if up > down {
+                        f64::INFINITY
+                    } else if down > up {
+                        f64::NEG_INFINITY
+                    } else {
+                        velocity / weight
+                    }),
                 }),
                 narrow,
             },
@@ -841,6 +866,67 @@ mod tests {
         engine.set_length(player, None);
         assert_eq!(engine.players()[0].length, 1_000_000_000);
         assert!(!engine.set_length(PlayerId(99), None));
+    }
+
+    #[test]
+    fn opposite_unbounded_velocities_of_equal_weight_cancel_in_a_blend() {
+        let vertical = |rising: bool| {
+            let (from, to) = if rising { (0.0, 1.0) } else { (1.0, 0.0) };
+            let mut points = vec![
+                crate::Keypoint {
+                    id: "a".into(),
+                    time: 0,
+                    value: Value::Number(from),
+                    transitions: Default::default(),
+                },
+                crate::Keypoint {
+                    id: "b".into(),
+                    time: 1_000_000_000,
+                    value: Value::Number(to),
+                    transitions: Default::default(),
+                },
+            ];
+            points[0].transitions.leave = Some(crate::Transition::Handle { dt: 1e9, dv: 0.0 });
+            points[1].transitions.arrive = Some(crate::Transition::Handle { dt: -1e9, dv: 0.0 });
+            Clip {
+                tracks: vec![crate::Track {
+                    id: "t".into(),
+                    target: "x".into(),
+                    keypoints: points,
+                    ..crate::Track::default()
+                }],
+                ..Clip::default()
+            }
+        };
+        let blend = |weights: [f64; 2]| {
+            let mut engine = Engine::new();
+            let player = engine.create_player("p");
+            for (rising, weight) in [(true, weights[0]), (false, weights[1])] {
+                let anim = engine.load(vertical(rising), vec![]);
+                engine.add_instance(
+                    player,
+                    anim,
+                    weight,
+                    Timing {
+                        offset: 0,
+                        rate: 1.0,
+                    },
+                );
+            }
+            engine.step(0, 0);
+            engine.seek(player, 500_000_000);
+            engine.step(0, 0);
+            let sample = engine.outputs()[0].sample.clone().unwrap();
+            sample.velocity.unwrap()
+        };
+        assert_eq!(blend([1.0, 1.0]), 0.0);
+        assert_eq!(blend([2.0, 1.0]), f64::INFINITY);
+        assert_eq!(blend([1.0, 3.0]), f64::NEG_INFINITY);
+        assert!(!Engine::new().set_speed(PlayerId(0), MAX_SPEED * 2.0));
+        let mut engine = Engine::new();
+        let player = engine.create_player("p");
+        assert!(engine.set_speed(player, -MAX_SPEED));
+        assert!(!engine.set_speed(player, MAX_SPEED * 1.5));
     }
 
     #[test]

@@ -168,7 +168,9 @@ moves into arora-sdk as `arora-shape`.
   in value units per second. At a collapsed handle, where the time
   derivative vanishes, it is the limit of the slope; where the curve's
   tangent is vertical in time it is infinite, so a client checking a
-  velocity limit sees it exceeded. Held values have no velocity.
+  velocity limit sees it exceeded; in a blend, it outweighs finite
+  velocities, and opposite infinities of equal weight cancel. Held values
+  have no velocity.
 - **The step rule.** A boolean or a string holds the value of the keypoint
   that starts its segment. At an interior keypoint's own instant the segment
   ending there still holds; just after it, the keypoint plays.
@@ -242,7 +244,8 @@ reverses the heading without changing the speed. A speed of the other sign,
 a `play` or a `seek` starts the rules afresh: no turn taken, the window not
 yet entered, not ended. `set_reversed` gives a player the heading another
 has after a turn, so one started late (an instance delivered mid-bounce)
-plays alongside the others.
+plays alongside the others, to within a nanosecond at a speed that rounds.
+A speed is at most 2^20 either way, which keeps every travel exact.
 
 **Commands** take effect at the device time of the last step, so a client
 reading the players after a command sees it. Before the first step they wait
@@ -414,7 +417,9 @@ asset of arora-sdk is the simplest.
    *Recommended*: Studio's World host-links the module, which removes the
    page's fetch of the npm guest and the record-typed exports a
    header-loaded guest has to describe; the guest build stays for devices
-   that load modules from a directory, released as in §6.
+   that load modules from a directory, released as in §6. This changes the
+   Studio-on-Arora plan's D11, which made the published guest the module's
+   home in the browser, compiled once per World.
 4. **The engine owns looping and bouncing.** This reverses the
    Studio-on-Arora plan's D7, which kept them in Studio's transport because
    vizij's player wraps each clip within its window. A robot playing on its

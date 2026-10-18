@@ -600,6 +600,18 @@ mod tests {
         let curve = Curve::new(&track(points));
         assert_eq!(curve.sample(1e9).unwrap().velocity, Some(f64::INFINITY));
         assert!(curve.sample(1e9 - 1e3).unwrap().velocity.unwrap() > 0.0);
+        // Falling through a vertical tangent: unbounded downward.
+        let mut points = vec![
+            keypoint(0, Value::Number(1.0)),
+            keypoint(S, Value::Number(0.0)),
+        ];
+        points[0].transitions.leave = Some(Transition::Handle { dt: 1e9, dv: 0.0 });
+        points[1].transitions.arrive = Some(Transition::Handle { dt: -1e9, dv: 0.0 });
+        let falling = Curve::new(&track(points));
+        assert_eq!(
+            falling.sample(0.5e9).unwrap().velocity,
+            Some(f64::NEG_INFINITY)
+        );
     }
 
     #[test]

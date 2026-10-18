@@ -456,7 +456,11 @@ mod tests {
         );
         let twice = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":1,"transitions":{"out":{"dtNs":1,"dtNs":2,"dv":3}}}]}]}"#;
         assert!(
-            matches!(Clip::from_json(twice), Err(ClipError::Document(e)) if e.contains("duplicate field"))
+            matches!(Clip::from_json(twice), Err(ClipError::Document(e)) if e.contains("duplicate field `dtNs`"))
+        );
+        let twice_dv = twice.replace(r#""dtNs":1,"dtNs":2,"dv":3"#, r#""dtNs":1,"dv":2,"dv":3"#);
+        assert!(
+            matches!(Clip::from_json(&twice_dv), Err(ClipError::Document(e)) if e.contains("duplicate field `dv`"))
         );
         let no_value = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":null}]}]}"#;
         assert!(matches!(

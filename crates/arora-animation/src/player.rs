@@ -30,9 +30,15 @@
 //! speed of the other sign, `play` and `seek` start the rules afresh — no
 //! turn taken, the window not yet entered, not ended. `set_reversed` gives a
 //! player the heading another has after a turn, so a player started late
-//! plays alongside it.
+//! plays alongside it — to within a nanosecond at a speed that rounds, as
+//! each player's travel is rounded from its own start.
 
 use crate::time::Nanos;
+
+/// The fastest a player plays, either way: 2^20 times device time. The
+/// engine refuses a faster speed; at or below it a player's travel is exact
+/// for any elapsed time.
+pub const MAX_SPEED: f64 = 1_048_576.0;
 
 /// What a player does at the bounds of its window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -313,7 +319,7 @@ impl Player {
         let Clock::From { from, travelled } = self.clock else {
             return;
         };
-        let total = travel(now.saturating_sub(from), self.speed);
+        let total = travel(i128::from(now) - i128::from(from), self.speed);
         self.clock = Clock::From {
             from,
             travelled: total,
@@ -484,10 +490,9 @@ impl Player {
 /// How far a player travels in `elapsed` nanoseconds of device time at
 /// `speed`: whole nanoseconds of timeline, the exact product rounded once
 /// (half away from zero). It is computed in integers, so it neither loses a
-/// nanosecond nor saturates however long the player runs; only a speed of
-/// 2^63 or more saturates it, at a distance no window can tell from its
-/// periods.
-fn travel(elapsed: Nanos, speed: f64) -> i128 {
+/// nanosecond nor saturates however long the player runs, at any speed up
+/// to [`MAX_SPEED`] (and up to 2^10 times faster still).
+fn travel(elapsed: i128, speed: f64) -> i128 {
     if elapsed <= 0 || speed == 0.0 || !speed.is_finite() {
         return 0;
     }
@@ -500,18 +505,19 @@ fn travel(elapsed: Nanos, speed: f64) -> i128 {
     } else {
         (fraction | (1 << 52), biased - 1075)
     };
-    // Below 2^63 × 2^53.
-    let product = i128::from(elapsed) * i128::from(mantissa);
+    // Below 2^64 × 2^53.
+    let product = elapsed * i128::from(mantissa);
     if exponent >= 0 {
-        return if exponent <= 10 {
+        // A speed of 2^52 or more, far past what the engine accepts.
+        return if exponent <= 9 {
             product << exponent
         } else {
             i128::MAX / 4
         };
     }
     let shift = -exponent;
-    if shift > 117 {
-        // The product is below 2^116: less than half a nanosecond.
+    if shift > 118 {
+        // The product is below 2^117: less than half a nanosecond.
         return 0;
     }
     (product + (1 << (shift - 1))) >> shift
@@ -672,6 +678,16 @@ mod tests {
             let travel = (i128::from(elapsed) * 12_000_000_001 + 2) / 4;
             assert_eq!(p.position(), expected(travel), "at {elapsed}");
         }
+        // The fastest speed, over the longest elapsed time a clock can give.
+        let mut p = Player::new();
+        p.set_mode(LoopMode::Loop);
+        p.set_speed(i64::MIN, MAX_SPEED, period as Nanos);
+        p.play(i64::MIN, period as Nanos);
+        for now in [-1, 0, 1, i64::MAX] {
+            p.advance(now, period as Nanos);
+            let elapsed = i128::from(now) - i128::from(i64::MIN);
+            assert_eq!(p.position(), expected(elapsed << 20), "at {now}");
+        }
     }
 
     #[test]
@@ -684,6 +700,11 @@ mod tests {
         p.advance(1, length);
         assert_eq!(p.position(), length - 1);
         assert!(p.reversed());
+        // Back to the start and 3 ns on: a period of twice the length is
+        // past i64.
+        p.advance(length + 3, length);
+        assert_eq!(p.position(), 3);
+        assert!(!p.reversed());
     }
 
     #[test]
@@ -696,10 +717,17 @@ mod tests {
         late.seek(6_000 * MS, 4_000 * MS, 5_000 * MS);
         late.play(6_000 * MS, 5_000 * MS);
         late.set_reversed(6_000 * MS, leader.reversed(), 5_000 * MS);
-        for ms in [6_500, 10_000, 11_250, 17_000] {
-            assert_eq!(at(&mut late, ms), at(&mut leader, ms), "at {ms} ms");
+        for ns in [6_500 * MS + 3, 10_000 * MS, 11_250 * MS - 7, 17_000 * MS] {
+            late.advance(ns, 5_000 * MS);
+            leader.advance(ns, 5_000 * MS);
+            assert_eq!(late.position(), leader.position(), "at {ns} ns");
             assert_eq!(late.reversed(), leader.reversed());
         }
+        // And back to heading with its speed.
+        late.set_reversed(17_000 * MS, false, 5_000 * MS);
+        assert!(!late.reversed());
+        assert_eq!(late.position(), 3_000 * MS);
+        assert_eq!(at(&mut late, 17_500), 3_500);
         // A bounce given a turn's heading stops at the next bound.
         let mut bounce = Player::new();
         bounce.set_mode(LoopMode::Bounce);

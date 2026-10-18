@@ -90,7 +90,7 @@ numbers and handles.
   window at a frame rate (default 60), returning `Option<BakedAnimation>`.
 
 Id-returning operations return `u32::MAX` for an unknown target or rejected
-value. Removal returns a boolean, except `remove_instance` returns 1 or 0.
+value, such as a speed that is not finite or is faster than 2^20 either way. Removal returns a boolean, except `remove_instance` returns 1 or 0.
 Reload returns false for invalid clips or unknown animation ids. A bake
 returns none when the engine cannot bake, including invalid rates or too
 many samples.
