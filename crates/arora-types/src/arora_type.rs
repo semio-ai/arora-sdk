@@ -1,7 +1,10 @@
-//! A Rust type that describes itself as an arora [`low::Type`].
+//! A Rust type that describes itself as an arora [`low::Type`] and as a type
+//! record.
 
 use uuid::Uuid;
 
+use crate::record::scope::Scope;
+use crate::record::{TypeDefinitionFrozen, TypeRecords};
 use crate::ty::{low, TypeRegistry};
 
 /// A Rust type that can produce its own arora [`low::Type`] and the
@@ -52,6 +55,43 @@ pub trait AroraType {
     Self::register_types(&mut registry);
     (Self::arora_type(), registry)
   }
+
+  /// The scope this type states its record lives in
+  /// (`#[arora(scope = …)]`), or `None` when it states none. A type stating
+  /// its scope has its record there whatever names it, so modules of
+  /// different scopes sharing the type ship one record.
+  fn scope() -> Option<Scope> {
+    None
+  }
+
+  /// This type's record: the structure or enumeration a registry holds under
+  /// [`arora_type_id`](AroraType::arora_type_id) at
+  /// [`arora_type_version`](AroraType::arora_type_version). Each type it names
+  /// is pinned at that type's own version.
+  ///
+  /// The record lives in the scope the type states
+  /// ([`scope`](AroraType::scope)); a type stating none lives in
+  /// `default_scope`, the scope of what names it: the module whose function
+  /// names it, or the type whose field names it. With neither, it lives at
+  /// the root.
+  ///
+  /// `None` for a type with no record of its own — one that travels as a
+  /// well-known type, as a [`Key`](crate::data::Key) travels as a string —
+  /// and for one whose shape a record cannot express: a fixed-length array.
+  fn record(_default_scope: Option<Scope>) -> Option<TypeDefinitionFrozen> {
+    None
+  }
+
+  /// Insert this type's [`record`](AroraType::record), and the record of
+  /// every type it names, into `records`, each under the reference that pins
+  /// it, with the scopes they live in. This type, when it states no scope,
+  /// lives in `default_scope`; a type it names that states none lives where
+  /// this one does. A type reached first through one path keeps the scope
+  /// that path gives it. Idempotent, and safe for a type reachable from
+  /// itself. A type without a record inserts nothing, so a record naming one
+  /// names a record `records` does not hold: a registry's
+  /// `missing_dependencies` reports it.
+  fn register_records(_default_scope: Option<Scope>, _records: &mut TypeRecords) {}
 }
 
 #[cfg(all(test, feature = "derive"))]
@@ -562,5 +602,306 @@ mod tests {
       panic!("expected an enumeration type");
     };
     assert_eq!(enumeration.values.values().next().unwrap().name, "ON");
+  }
+
+  // ---- the records the derive emits -----------------------------------------
+
+  /// A struct's record is a structure in the scope given, its fields in
+  /// declared order, each typed as a record names it: a primitive by kind, a
+  /// nested type by a reference pinned at that type's version, a well-known
+  /// type (a uuid, a dynamic value) by a reference at 1.0.0.
+  #[test]
+  fn a_struct_s_record_pins_each_type_it_names_at_that_type_s_version() {
+    use crate::record::ty::{FrozenArray, FrozenOption, FrozenScalar, FrozenTy, PrimitiveKind};
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, Version};
+
+    #[derive(AroraType)]
+    #[arora(id = "12121212-1212-4121-8121-000000000001", version = "1.2.0")]
+    struct Leaf {
+      #[arora(id = "12121212-1212-4121-8121-000000000011")]
+      x: f32,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "12121212-1212-4121-8121-000000000002", version = "2.0.1")]
+    struct Shape {
+      #[arora(id = "12121212-1212-4121-8121-000000000021")]
+      count: u32,
+      #[arora(id = "12121212-1212-4121-8121-000000000022")]
+      leaf: Leaf,
+      #[arora(id = "12121212-1212-4121-8121-000000000023")]
+      leaves: Vec<Leaf>,
+      #[arora(id = "12121212-1212-4121-8121-000000000024")]
+      maybe: Option<Box<Leaf>>,
+      #[arora(id = "12121212-1212-4121-8121-000000000025")]
+      samples: Vec<f64>,
+      #[arora(id = "12121212-1212-4121-8121-000000000026")]
+      limit: Option<u64>,
+      #[arora(id = "12121212-1212-4121-8121-000000000027")]
+      source: crate::Uuid,
+      #[arora(id = "12121212-1212-4121-8121-000000000028", keyvalue)]
+      payload: Value,
+      #[arora(id = "12121212-1212-4121-8121-000000000029")]
+      key: crate::data::Key,
+    }
+
+    let scope = crate::record::scope::Scope {
+      id: crate::Uuid::from_u128(0xf01d),
+      handle: "shapes",
+    };
+    let Some(TypeDefinitionFrozen::Structure(record)) = Shape::record(Some(scope)) else {
+      panic!("a struct's record is a structure");
+    };
+    assert_eq!(record.parent, scope.id);
+    assert_eq!(record.name, "Shape");
+    let names: Vec<&str> = record.fields.values().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+      names,
+      ["count", "leaf", "leaves", "maybe", "samples", "limit", "source", "payload", "key"]
+    );
+    let leaf = FrozenReference {
+      id: Leaf::arora_type_id(),
+      version: Version::parse("1.2.0").unwrap(),
+    };
+    let well_known = |id: crate::Uuid| FrozenReference {
+      id,
+      version: Version::parse("1.0.0").unwrap(),
+    };
+    let types: Vec<FrozenTy> = record.fields.values().map(|f| f.ty.clone()).collect();
+    assert_eq!(
+      types,
+      vec![
+        FrozenTy::from(PrimitiveKind::U32),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: leaf.clone()
+        }),
+        FrozenTy::FrozenArray(FrozenArray {
+          reference: leaf.clone()
+        }),
+        FrozenTy::FrozenOption(FrozenOption {
+          element: Box::new(FrozenTy::FrozenScalar(FrozenScalar { reference: leaf })),
+        }),
+        FrozenTy::from(PrimitiveKind::ArrayF64),
+        FrozenTy::FrozenOption(FrozenOption {
+          element: Box::new(FrozenTy::from(PrimitiveKind::U64)),
+        }),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: well_known(*ty::UUID_ID)
+        }),
+        FrozenTy::FrozenScalar(FrozenScalar {
+          reference: well_known(*ty::KEY_VALUE_ID)
+        }),
+        // A key travels as a string.
+        FrozenTy::from(PrimitiveKind::String),
+      ]
+    );
+  }
+
+  /// An enum's record is an enumeration whose variants carry unit, as the
+  /// value plane's enumerations do.
+  #[test]
+  fn an_enum_s_record_is_an_enumeration_of_unit_variants() {
+    use crate::record::ty::{FrozenTy, PrimitiveKind};
+    use crate::record::TypeDefinitionFrozen;
+
+    #[derive(AroraType)]
+    #[arora(id = "13131313-1313-4131-8131-000000000001")]
+    enum Mode {
+      #[arora(id = "13131313-1313-4131-8131-000000000011")]
+      Idle,
+      #[arora(id = "13131313-1313-4131-8131-000000000012", name = "RUN")]
+      Run,
+    }
+    let Some(TypeDefinitionFrozen::Enumeration(record)) = Mode::record(None) else {
+      panic!("an enum's record is an enumeration");
+    };
+    assert_eq!(record.name, "Mode");
+    // Without a scope, it lives at the root.
+    assert_eq!(record.parent, crate::record::folder::ROOT_ID);
+    let variants: Vec<(String, String, FrozenTy)> = record
+      .variants
+      .iter()
+      .map(|(id, variant)| (id.to_string(), variant.name.clone(), variant.ty.clone()))
+      .collect();
+    let unit = FrozenTy::from(PrimitiveKind::Unit);
+    assert_eq!(
+      variants,
+      vec![
+        (
+          "13131313-1313-4131-8131-000000000011".to_string(),
+          "Idle".to_string(),
+          unit.clone()
+        ),
+        (
+          "13131313-1313-4131-8131-000000000012".to_string(),
+          "RUN".to_string(),
+          unit
+        ),
+      ]
+    );
+  }
+
+  /// `register_records` holds a type's record and those of every type it
+  /// names, transitively, each once — a type reachable from itself included —
+  /// under the references that pin them. Types stating no scope all live in
+  /// the scope given, which is the one scope the records name.
+  #[test]
+  fn register_records_collects_every_record_a_type_reaches_once() {
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
+
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000001")]
+    enum Kind {
+      #[arora(id = "14141414-1414-4141-8141-000000000011")]
+      Leaf,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000002", version = "3.0.0")]
+    struct Node {
+      #[arora(id = "14141414-1414-4141-8141-000000000021")]
+      kind: Kind,
+      #[arora(id = "14141414-1414-4141-8141-000000000022")]
+      children: Vec<Node>,
+      #[arora(id = "14141414-1414-4141-8141-000000000023")]
+      key: crate::data::Key,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "14141414-1414-4141-8141-000000000003")]
+    struct Tree {
+      #[arora(id = "14141414-1414-4141-8141-000000000031")]
+      root: Option<Box<Node>>,
+    }
+
+    let scope = crate::record::scope::Scope {
+      id: crate::Uuid::from_u128(0xf01d),
+      handle: "forest",
+    };
+    let mut records = TypeRecords::default();
+    Tree::register_records(Some(scope), &mut records);
+    Tree::register_records(Some(scope), &mut records);
+    let reference = |id: crate::Uuid, version: &str| FrozenReference {
+      id,
+      version: crate::record::Version::parse(version).unwrap(),
+    };
+    assert_eq!(
+      records
+        .types
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>(),
+      std::collections::BTreeSet::from([
+        reference(Tree::arora_type_id(), "1.0.0"),
+        reference(Node::arora_type_id(), "3.0.0"),
+        reference(Kind::arora_type_id(), "1.0.0"),
+      ])
+    );
+    for record in records.types.values() {
+      let parent = match record {
+        TypeDefinitionFrozen::Structure(s) => s.parent,
+        TypeDefinitionFrozen::Enumeration(e) => e.parent,
+        TypeDefinitionFrozen::Primitive(_) => panic!("a primitive has no record"),
+      };
+      assert_eq!(parent, scope.id);
+    }
+    assert_eq!(records.scopes, std::collections::BTreeSet::from([scope]));
+  }
+
+  /// A type stating its scope (`#[arora(scope = …)]`) has its record there
+  /// whatever names it, and a type it names that states none lives there
+  /// too; a type stating none that the caller names directly lives in the
+  /// scope the caller gives. The records name both scopes.
+  #[test]
+  fn a_type_stating_its_scope_keeps_it_whatever_names_it() {
+    use crate::record::scope::Scope;
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
+    use crate::Uuid;
+
+    const SHAPES: Scope = Scope {
+      id: Uuid::from_u128(0x5a9e),
+      handle: "shapes",
+    };
+
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000001")]
+    enum Winding {
+      #[arora(id = "16161616-1616-4161-8161-000000000011")]
+      Clockwise,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000002", scope = SHAPES)]
+    struct Polygon {
+      #[arora(id = "16161616-1616-4161-8161-000000000021")]
+      winding: Winding,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000003")]
+    struct Drawing {
+      #[arora(id = "16161616-1616-4161-8161-000000000031")]
+      outline: Polygon,
+    }
+
+    assert_eq!(Polygon::scope(), Some(SHAPES));
+    assert_eq!(Drawing::scope(), None);
+
+    let parent_of = |records: &TypeRecords, id: Uuid| {
+      let reference = FrozenReference {
+        id,
+        version: crate::record::Version::parse("1.0.0").unwrap(),
+      };
+      match records.types.get(&reference) {
+        Some(TypeDefinitionFrozen::Structure(s)) => s.parent,
+        Some(TypeDefinitionFrozen::Enumeration(e)) => e.parent,
+        other => panic!("{id} has no record: {other:?}"),
+      }
+    };
+    let module_scope = Scope {
+      id: Uuid::from_u128(0x6d0d),
+      handle: "studio",
+    };
+    let mut records = TypeRecords::default();
+    Drawing::register_records(Some(module_scope), &mut records);
+    assert_eq!(
+      parent_of(&records, Drawing::arora_type_id()),
+      module_scope.id
+    );
+    assert_eq!(parent_of(&records, Polygon::arora_type_id()), SHAPES.id);
+    assert_eq!(parent_of(&records, Winding::arora_type_id()), SHAPES.id);
+    assert_eq!(
+      records.scopes,
+      std::collections::BTreeSet::from([module_scope, SHAPES])
+    );
+
+    // Named from another scope, or from none, the shared type and the type
+    // it names are the same records.
+    for elsewhere_scope in [
+      Some(Scope {
+        id: Uuid::from_u128(0xe15e),
+        handle: "elsewhere",
+      }),
+      None,
+    ] {
+      let mut elsewhere = TypeRecords::default();
+      Polygon::register_records(elsewhere_scope, &mut elsewhere);
+      assert_eq!(elsewhere.types.len(), 2);
+      for (reference, record) in &elsewhere.types {
+        assert_eq!(records.types.get(reference), Some(record));
+      }
+      assert_eq!(elsewhere.scopes, std::collections::BTreeSet::from([SHAPES]));
+    }
+  }
+
+  /// A fixed-length array has no record form, so neither has a type holding
+  /// one; it registers no record.
+  #[test]
+  fn a_type_with_a_fixed_length_array_has_no_record() {
+    #[derive(AroraType)]
+    #[arora(id = "15151515-1515-4151-8151-000000000001")]
+    struct Pose {
+      #[arora(id = "15151515-1515-4151-8151-000000000011")]
+      covariance: [f64; 4],
+    }
+    assert!(Pose::record(None).is_none());
+    let mut records = crate::record::TypeRecords::default();
+    Pose::register_records(None, &mut records);
+    assert_eq!(records, crate::record::TypeRecords::default());
   }
 }

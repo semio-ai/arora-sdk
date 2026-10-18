@@ -668,15 +668,16 @@ impl AroraWeb {
 }
 
 /// Assemble a browser device from what the JS world can supply — guest wasm
-/// modules over the demo defaults; exported to JavaScript as
-/// `AroraRuntimeBuilder`. A device that needs a real HAL, bridge, store, or
-/// behavior interpreter is composed in Rust with [`arora::AroraBuilder`] and
-/// wrapped with `AroraWeb::from` instead: those seams are trait objects that
-/// cannot cross the JS boundary.
+/// modules and the records they are described by, over the demo defaults;
+/// exported to JavaScript as `AroraRuntimeBuilder`. A device that needs a
+/// real HAL, bridge, store, or behavior interpreter is composed in Rust with
+/// [`arora::AroraBuilder`] and wrapped with `AroraWeb::from` instead: those
+/// seams are trait objects that cannot cross the JS boundary.
 #[wasm_bindgen(js_name = AroraRuntimeBuilder)]
 #[derive(Default)]
 pub struct AroraWebBuilder {
     inner: AroraBuilder,
+    records: arora::LocalRegistry,
 }
 
 #[wasm_bindgen(js_class = "AroraRuntimeBuilder")]
@@ -710,10 +711,61 @@ impl AroraWebBuilder {
         self.inner = inner.with_compiled_module(&module.inner);
     }
 
+    /// Add the records guest modules are described by: a module's
+    /// `records/` directory as its package ships it — an object mapping each
+    /// record file's path under `records/` (`module/<id>@<version>.yaml`,
+    /// `structure/…`, `enumeration/…`, `folder/<id>.yaml`) to its YAML.
+    /// Repeatable: the records of several modules fill one registry, a
+    /// record they share held once.
+    ///
+    /// A guest module whose record the device holds has every export
+    /// described — one taking or returning a structure included — and the
+    /// build fails when that record does not match the module's header or
+    /// lacks a record it depends on (`AroraBuilder::with_registry`). Fails
+    /// here on a path outside that layout, a record that does not read, or a
+    /// record another call gave differently under the same id and version;
+    /// the records read before a failure stay, so a page builds a new
+    /// builder rather than retrying on this one.
+    #[wasm_bindgen(js_name = withRecords)]
+    pub fn with_records(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] records: JsValue,
+    ) -> Result<(), JsValue> {
+        use arora_registry::local_yaml::{load_records, RecordKind};
+        use futures::FutureExt;
+
+        let files: std::collections::BTreeMap<String, String> =
+            serde_wasm_bindgen::from_value(records).map_err(|e| {
+                JsValue::from_str(&format!(
+                    "records must map each record file's path to its YAML: {e}"
+                ))
+            })?;
+        let mut entries = Vec::with_capacity(files.len());
+        for (path, yaml) in &files {
+            let record = path.split_once('/').and_then(|(directory, file)| {
+                Some((
+                    RecordKind::from_directory(directory)?,
+                    file.strip_suffix(".yaml")?,
+                ))
+            });
+            let Some((kind, stem)) = record else {
+                return Err(JsValue::from_str(&format!(
+                    "'{path}' is not a record file's path: <folder|enumeration|structure|module>/<id>[@<version>].yaml"
+                )));
+            };
+            entries.push((kind, stem, yaml.clone()));
+        }
+        load_records(entries, &mut self.records)
+            .now_or_never()
+            .ok_or_else(|| JsValue::from_str("the records did not load synchronously"))?
+            .map_err(|e| JsValue::from_str(&format!("the records do not load: {e}")))
+    }
+
     /// Build the device. The builder resets to its defaults, ready to
     /// assemble another.
     pub fn build(&mut self) -> Result<AroraWeb, JsValue> {
         let arora = std::mem::take(&mut self.inner)
+            .with_registry(std::mem::take(&mut self.records))
             .build()
             .map_err(|e| JsValue::from_str(&format!("arora build failed: {e:?}")))?;
         Ok(AroraWeb::from(arora))
@@ -1390,7 +1442,7 @@ impl Registry {
         Ok(())
     }
 
-    /// Resolve a UUID string to a dot-separated name path (e.g. `"behavior_tree.Status"`).
+    /// Resolve a UUID string to a dot-separated name path (e.g. `"arora.Status"`).
     /// Returns `None` if the UUID is not known.
     #[wasm_bindgen(js_name = resolveId)]
     pub fn resolve_id(&self, id: &str) -> Option<String> {

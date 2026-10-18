@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-macros"
-version = "2.1.0"
+version = "3.0.0"
 edition = "2021"
 description = "Declare an Arora module on a Rust module: #[module], #[export], #[param], declare_module!, #[contract], module_from_header!."
 license = "MIT"

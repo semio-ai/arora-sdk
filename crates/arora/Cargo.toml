@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "13.0.0"
+version = "13.1.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "MIT"
@@ -64,7 +64,12 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 arora-engine = { path = "../arora-engine", version = "5.3", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "9" }
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
-arora-types = { path = "../arora-types", version = "3.5" }
+# 3.8: `PrimitiveKind::from_id`, to check a module record against its header.
+arora-types = { path = "../arora-types", version = "3.8" }
+# 2.1: a device's records, looked up by exact id and version
+# (`LocalRegistry::module_at`, `missing_dependencies`), and the module
+# directories' `records/` loaded into them.
+arora-registry = { path = "../arora-registry", version = "2.1" }
 arora-bridge-ws = { path = "../arora-bridge-ws", version = "7", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }

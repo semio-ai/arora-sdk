@@ -1,21 +1,31 @@
 mod editable;
 mod readable;
 mod reg_ref;
-use self::reg_ref::{FrozenRegistryReference, LocalRegistryReference};
-use crate::{EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen};
+pub(crate) use self::reg_ref::FrozenRegistryReference;
+use self::reg_ref::LocalRegistryReference;
+use crate::{
+    EditableRegistry, EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError,
+    StructureFrozen, TypeDefinitionFrozen,
+};
+use arora_types::module::declared::AroraModule;
 use arora_types::record::Selector;
 use arora_types::record::{FrozenReference, Resolver, UnfrozenReference};
 use async_trait::async_trait;
 use semver::Version;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::Rc,
 };
 use uuid::Uuid;
 
 /// A [`LocalRegistry`] supports the addition of [`StructureFrozen`], [`EnumerationFrozen`] and [`ModuleFrozen`]
 /// on the fly. It provides a local index to look them up fast
-/// by [`Uuid'] or by path ([`String`]).
+/// by [`Uuid`] or by path ([`String`]).
+/// It holds one record per identifier and version, and several versions of
+/// a record side by side: adding the record it already holds under an
+/// identifier and version keeps it — a structure's fields and an
+/// enumeration's variants in the same order — and a different record there
+/// is refused.
 /// It can be used as a local cache of a remote registry accessed using the `remote` feature (semio-client).
 /// It provides an absolute root available for any record,
 /// with the identifier [`ROOT_ID`].
@@ -102,6 +112,190 @@ impl LocalRegistry {
         let parent = reg_ref.parent().cloned();
         Some((name, parent))
     }
+
+    /// The module record held at exactly `id` and `version`. Answered from
+    /// memory: no version requirement is matched and no path resolved.
+    pub fn module_at(&self, id: &Uuid, version: &Version) -> Option<&ModuleFrozen> {
+        match self.held_at(id, version)? {
+            FrozenRegistryReference::Module { record, .. } => Some(record),
+            _ => None,
+        }
+    }
+
+    /// The structure or enumeration record held at exactly `id` and
+    /// `version`. Answered from memory, like [`module_at`](Self::module_at).
+    /// A primitive has no record.
+    pub fn type_at(&self, id: &Uuid, version: &Version) -> Option<TypeDefinitionFrozen> {
+        match self.held_at(id, version)? {
+            FrozenRegistryReference::Enumeration { record, .. } => {
+                Some(TypeDefinitionFrozen::Enumeration(record.as_ref().clone()))
+            }
+            FrozenRegistryReference::Structure { record, .. } => {
+                Some(TypeDefinitionFrozen::Structure(record.as_ref().clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// The records reachable from `reference` that the registry does not
+    /// hold at exactly their version: the record itself when it is missing,
+    /// else those it depends on, transitively — a module record's exports'
+    /// types and declared dependencies, a structure's fields' and an
+    /// enumeration's variants' types. A well-known type (a primitive, a uuid,
+    /// a dynamic value) is not a record, so never missing. Empty when the
+    /// registry holds the record and everything it depends on.
+    pub fn missing_dependencies(&self, reference: &FrozenReference) -> Vec<FrozenReference> {
+        self.missing_among(vec![reference.clone()])
+    }
+
+    /// The records reachable from `pending` the registry does not hold, in
+    /// the order found.
+    fn missing_among(&self, mut pending: Vec<FrozenReference>) -> Vec<FrozenReference> {
+        let mut seen = HashSet::new();
+        let mut missing = Vec::new();
+        while let Some(reference) = pending.pop() {
+            if arora_types::ty::WELL_KNOWN_IDS.contains(&reference.id)
+                || !seen.insert(reference.clone())
+            {
+                continue;
+            }
+            let found: BTreeSet<FrozenReference> =
+                match self.held_at(&reference.id, &reference.version.0) {
+                    Some(FrozenRegistryReference::Module { record, .. }) => {
+                        let mut references = HashSet::new();
+                        record.dependencies(&mut references);
+                        references.into_iter().cloned().collect()
+                    }
+                    Some(FrozenRegistryReference::Structure { record, .. }) => {
+                        TypeDefinitionFrozen::Structure(record.as_ref().clone())
+                            .references()
+                            .into_iter()
+                            .collect()
+                    }
+                    Some(FrozenRegistryReference::Enumeration { record, .. }) => {
+                        TypeDefinitionFrozen::Enumeration(record.as_ref().clone())
+                            .references()
+                            .into_iter()
+                            .collect()
+                    }
+                    Some(_) => BTreeSet::new(),
+                    None => {
+                        missing.push(reference);
+                        continue;
+                    }
+                };
+            // Reversed onto the stack, so dependencies are visited in order.
+            pending.extend(found.into_iter().rev());
+        }
+        missing
+    }
+
+    /// Add the records of a module declared in Rust: its module record at
+    /// `version` — the version its header carries — in the scope its
+    /// declaration states ([`AroraModule::scope`]), and the records of the
+    /// types its functions name, transitively ([`AroraModule::type_records`]):
+    /// each in the scope its type states, or in the module's for a type
+    /// stating none. Each scope's folder is added with them. A module
+    /// declared without a scope, and the types it names that state none,
+    /// live at the root. A record the registry already holds identically is
+    /// kept, so modules sharing a type that states its scope add together.
+    ///
+    /// Fails without adding the module record when it names a type that has
+    /// no record of its own — one implementing `AroraType` without a record,
+    /// or holding a fixed-length array, or naming such a type — naming each;
+    /// when a type record differs from the one the registry holds at its id
+    /// and version — a type modules of different scopes share without
+    /// stating its own — naming the type; and when another record holds the
+    /// type's name in its scope, naming both. The records it added before
+    /// failing stay.
+    pub async fn add_declared_module<M: AroraModule>(
+        &mut self,
+        version: Version,
+    ) -> Result<(), RegistryError> {
+        let scope = M::scope();
+        let module = M::record(scope.map_or(ROOT_ID, |scope| scope.id));
+        let records = M::type_records();
+        let scopes = scope.into_iter().chain(records.scopes.iter().copied());
+        crate::local_yaml::add_folders(
+            scopes.map(|scope| (scope.id, scope.record())).collect(),
+            self,
+        )
+        .await?;
+        for (reference, record) in records.types {
+            let name = record.name();
+            let (id, tag) = (reference.id, reference.version.0.clone());
+            match record {
+                TypeDefinitionFrozen::Structure(structure) => {
+                    self.add_structure(id, tag, structure).await
+                }
+                TypeDefinitionFrozen::Enumeration(enumeration) => {
+                    self.add_enumeration(id, tag, enumeration).await
+                }
+                TypeDefinitionFrozen::Primitive(_) => Ok(()),
+            }
+            .map_err(|error| match error {
+                RegistryError::DuplicateSelector {
+                    selector: Selector::Path(path),
+                } => RegistryError::generic(&format!(
+                    "module '{}' names type '{name}' ({reference}), whose path '{path}' \
+                     another record holds: a name is unique within its scope",
+                    module.name,
+                )),
+                RegistryError::DuplicateVersion { .. } => RegistryError::generic(&format!(
+                    "module '{}' names type '{name}' ({reference}), whose record differs from \
+                     the one the registry holds at that id and version ({error}): a type \
+                     modules of different scopes share states its own scope",
+                    module.name,
+                )),
+                error => error,
+            })?;
+        }
+        let mut references = HashSet::new();
+        module.dependencies(&mut references);
+        let missing = self.missing_among(references.into_iter().cloned().collect());
+        if !missing.is_empty() {
+            let missing: Vec<String> = missing.iter().map(ToString::to_string).collect();
+            return Err(RegistryError::generic(&format!(
+                "module '{}' ({}@{version}) names types without a record of their own: {} — a \
+                 type implementing AroraType without a record, or holding a fixed-length array",
+                module.name,
+                M::id(),
+                missing.join(", ")
+            )));
+        }
+        self.add_module(M::id(), version, module).await
+    }
+
+    /// The record held at exactly `id` and `version`, if any.
+    pub(crate) fn held_at(&self, id: &Uuid, version: &Version) -> Option<&FrozenRegistryReference> {
+        self.indexed.get(&Selector::Id(*id))?.get(version)
+    }
+
+    /// Every record the registry holds — folders, enumerations, structures
+    /// and modules, not the fields, variants and functions indexed under
+    /// them — with its id and version.
+    pub(crate) fn held(&self) -> impl Iterator<Item = (Uuid, &Version, &FrozenRegistryReference)> {
+        self.indexed.iter().flat_map(|(selector, versions)| {
+            let id = match selector {
+                Selector::Id(id) => Some(*id),
+                Selector::Path(_) => None,
+            };
+            versions.iter().filter_map(move |(version, reg_ref)| {
+                let id = id?;
+                match reg_ref {
+                    FrozenRegistryReference::Folder { id: own, .. }
+                    | FrozenRegistryReference::Enumeration { id: own, .. }
+                    | FrozenRegistryReference::Structure { id: own, .. }
+                    | FrozenRegistryReference::Module { id: own, .. }
+                        if *own == id =>
+                    {
+                        Some((id, version, reg_ref))
+                    }
+                    _ => None,
+                }
+            })
+        })
+    }
 }
 
 #[async_trait]
@@ -150,9 +344,7 @@ pub fn get_latest_frozen(
     version_index.iter().last().map(|(_, r)| r)
 }
 
-pub const ROOT_ID: Uuid = Uuid::from_bytes([
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-]);
+pub use arora_types::record::folder::ROOT_ID;
 
 #[cfg(test)]
 mod tests {

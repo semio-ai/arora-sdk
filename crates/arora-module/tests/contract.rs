@@ -234,6 +234,26 @@ fn the_record_describes_the_contract_s_functions_in_declaration_order() {
     assert_eq!(reset.name, "reset");
 }
 
+/// A contract's types that state no scope live in the implementing module's.
+#[test]
+fn a_contract_carries_the_records_of_the_types_it_names() {
+    let scope = arora_types::record::scope::Scope {
+        id: Uuid::from_u128(0xf01de5),
+        handle: "tallies",
+    };
+    let records = tally::type_records(Some(scope));
+    assert_eq!(
+        records.types.keys().cloned().collect::<Vec<_>>(),
+        tally::record(scope.id).dependencies
+    );
+    let receipt = records.types.values().next().expect("Receipt's record");
+    assert_eq!(receipt.name(), "Receipt");
+    assert!(
+        matches!(receipt, arora_types::record::TypeDefinitionFrozen::Structure(s) if s.parent == scope.id)
+    );
+    assert_eq!(records.scopes, std::collections::BTreeSet::from([scope]));
+}
+
 #[test]
 fn the_descriptions_are_the_record_s_exports() {
     assert_eq!(tally::descriptions(), tally::record(Uuid::nil()).exports);

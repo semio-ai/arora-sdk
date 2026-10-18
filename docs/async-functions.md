@@ -12,7 +12,7 @@ This page is the normative "how it works today and stays working."
 
 ## The contract: return `Running`, be re-ticked
 
-A long-running function returns `behavior_tree.Status::Running` and is
+A long-running function returns `arora.Status::Running` and is
 **invoked again next step**. It keeps returning `Running` until it reaches a
 terminal `Status` (`Success`/`Failure`). The interpreter that hosts it — a
 behavior tree, a node graph — re-ticks it every step for as long as it is

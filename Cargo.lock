@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "13.0.0"
+version = "13.1.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -179,6 +179,7 @@ dependencies = [
  "arora-buffers",
  "arora-engine",
  "arora-hal",
+ "arora-registry",
  "arora-simple-data-store",
  "arora-studio-bridge-client",
  "arora-types",
@@ -226,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.4.0"
+version = "9.5.0"
 dependencies = [
  "arora-types",
  "semver",
@@ -257,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree-types"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -270,10 +271,11 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree-types-yaml"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "arora-behavior-tree-types",
  "arora-registry",
+ "arora-types",
  "serde",
  "serde_yaml 0.9.34+deprecated",
  "tokio",
@@ -489,7 +491,9 @@ dependencies = [
  "arora-buffers",
  "arora-cli",
  "arora-engine",
+ "arora-registry",
  "arora-types",
+ "futures",
  "serde_yaml 0.9.34+deprecated",
  "test-behavior-tree-nodes",
  "test-cpp",
@@ -501,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "arora-behavior",
  "arora-buffers",
@@ -574,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-macros"
-version = "2.1.0"
+version = "3.0.0"
 dependencies = [
  "arora-types",
  "proc-macro2",
@@ -628,17 +632,15 @@ dependencies = [
 
 [[package]]
 name = "arora-registry"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
- "anyhow",
+ "arora-module",
  "arora-types",
  "async-trait",
  "derive_more 2.1.1",
  "semver",
- "serde",
  "serde_yaml 0.9.34+deprecated",
  "tokio",
- "url",
  "uuid",
 ]
 
@@ -705,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types"
-version = "3.7.0"
+version = "3.8.0"
 dependencies = [
  "arora-types-derive",
  "async-trait",
@@ -728,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "arora-types-derive"
-version = "1.4.0"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -756,12 +758,13 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "10.0.0"
+version = "10.1.0"
 dependencies = [
  "arora",
  "arora-behavior",
  "arora-bridge",
  "arora-engine",
+ "arora-registry",
  "arora-types",
  "console_error_panic_hook",
  "futures",
@@ -1625,7 +1628,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1654,7 +1657,7 @@ dependencies = [
  "maybe-owned",
  "rustix 1.1.4",
  "rustix-linux-procfs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "winx",
 ]
 
@@ -2705,7 +2708,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2836,7 +2839,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3007,7 +3010,7 @@ checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
 dependencies = [
  "io-lifetimes",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3909,7 +3912,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
  "io-lifetimes",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4672,7 +4675,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5531,7 +5534,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6083,7 +6086,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6096,7 +6099,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6198,7 +6201,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7226,7 +7229,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7307,6 +7310,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arora-module",
+ "arora-types",
 ]
 
 [[package]]
@@ -8839,7 +8843,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -9245,7 +9249,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f3fd376f71958b862e7afb20cfe5a22830e1963462f3a17f49d82a6c1d1f42d"
 dependencies = [
  "bitflags 2.13.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

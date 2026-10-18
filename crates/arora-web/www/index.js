@@ -20,7 +20,7 @@ const noModules  = document.getElementById("no-modules");
 
 // ── type-reference rendering ─────────────────────────────────────────────────
 // Renders a YAML-derived type ref like { kind: "scalar", id: "f32" }
-// or { kind: "array", id: "behavior_tree.Status" }.
+// or { kind: "array", id: "arora.Status" }.
 function renderTypeRef(typeRef) {
   if (!typeRef) return "unit";
   const id = typeof typeRef === "string" ? typeRef : (typeRef.id ?? "?");

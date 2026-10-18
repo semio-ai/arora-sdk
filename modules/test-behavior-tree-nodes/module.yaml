@@ -16,7 +16,7 @@ exports:
     name: succeed
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 3abbbfb6-d00d-41eb-88bb-97874267eaf6
@@ -24,7 +24,7 @@ exports:
     parameters: []
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 41ae5ed0-1d12-4b71-aab8-02e7efedf177
@@ -32,7 +32,7 @@ exports:
     parameters: []
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee
@@ -42,10 +42,10 @@ exports:
         name: value
         type:
           kind: scalar
-          id: behavior_tree.Status
+          id: arora.Status
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: c803889f-4757-4b56-908f-4b2b47041eff
@@ -65,7 +65,7 @@ exports:
           id: str
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 7dce01ed-9818-4b7d-b45a-2e7fdece3633
@@ -79,7 +79,7 @@ exports:
         mutable: true
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 20ba3f0f-309e-4cd2-adfc-aca6cc432526
@@ -92,7 +92,7 @@ exports:
           id: str
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 3180977c-25a1-458e-ab82-11f36c654518
@@ -105,7 +105,7 @@ exports:
           id: str
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 8e3dbcc1-1a81-4cf6-a457-6e0c075456fd
@@ -131,7 +131,7 @@ exports:
         mutable: true
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: b8349b96-abc7-4a31-906c-da1ce6fa356e
@@ -151,7 +151,7 @@ exports:
           id: f32
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 7f6fc4a9-567c-4f15-87cc-7ca34ae1456f
@@ -171,7 +171,7 @@ exports:
           id: f32
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 32246df6-ab5d-4f18-9221-23e28731de93
@@ -181,10 +181,10 @@ exports:
         name: children
         type:
           kind: array
-          id: behavior_tree.TickId
+          id: arora.TickId
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: c2d5ed72-798c-4174-94f7-13378bd9bf1f
@@ -194,7 +194,7 @@ exports:
         name: children
         type:
           kind: array
-          id: behavior_tree.TickId
+          id: arora.TickId
 
       - id: 4de502df-3f48-4541-94d8-dd68fe92bc8e
         name: current_index
@@ -204,7 +204,7 @@ exports:
         mutable: true
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: bfa89a4e-c369-430e-be78-0dc07311391c
@@ -214,11 +214,11 @@ exports:
         name: children
         type:
           kind: array
-          id: behavior_tree.TickId
+          id: arora.TickId
         mutable: false
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: a9340289-1f30-411f-9faa-0f07d54613e8
@@ -228,11 +228,11 @@ exports:
         name: children
         type:
           kind: array
-          id: behavior_tree.TickId
+          id: arora.TickId
         mutable: false
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 104b9710-5d43-4a93-944c-d64bddb30ef8
@@ -252,7 +252,7 @@ exports:
         mutable: true
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
   - type: function
     id: 65be1fe9-ac2a-4b6e-8870-68ac7bde6f0a
@@ -278,7 +278,7 @@ exports:
         mutable: true
     ret:
       kind: scalar
-      id: behavior_tree.Status
+      id: arora.Status
 
 imports: []
 dependencies: []

@@ -4,6 +4,21 @@ All notable changes to `arora-behavior-tree-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-10-18
+
+### Changed
+
+- `TickId`'s record (`AroraType::record`, arora-types 3.8) lives in the
+  `arora` scope (`arora_types::record::scope::ARORA`, path `arora.TickId`)
+  whatever names it, as `Status`'s does (arora-behavior 9.5). Requires
+  arora-types 3.8 and arora-behavior 9.5.
+
+### Deprecated
+
+- `BEHAVIOR_TREE_FOLDER_ID` and `declare_behavior_tree_folder`: no record
+  lives in the `behavior_tree` folder; declare `Status` and `TickId` in the
+  `arora` scope.
+
 ## [2.1.0] - 2026-10-16
 
 ### Added

@@ -497,7 +497,7 @@ const IS_STR_SET_GROOT_ID: &str = "IsStringSet";
 const WAIT_STR_SET_GROOT_ID: &str = "WaitStringSet";
 const REGEX_MATCH_GROOT_ID: &str = "RegexMatch";
 
-/// UUID for behavior_tree.Status type
+/// UUID for the arora.Status type
 const STATUS_TYPE_ID: Uuid = Uuid::from_bytes([
     0x32, 0x5a, 0x57, 0x67, 0xe3, 0x44, 0x45, 0x32, 0x86, 0x0e, 0x07, 0x49, 0xbc, 0xf2, 0xe4, 0x28,
 ]);

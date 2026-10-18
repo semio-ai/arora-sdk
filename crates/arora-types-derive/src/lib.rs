@@ -4,9 +4,12 @@
 //!
 //! The generated impls produce the type's own `ty::low::Type`, the id it is
 //! referenced by, the record version it is pinned at, a `TypeRegistry`
-//! carrying it and its transitive dependencies, and the value-plane
-//! conversions `From<T> for Value` and `TryFrom<Value> for T` — a structure
-//! under the type's id with each field under its id, in declared order; a
+//! carrying it and its transitive dependencies, its record — a structure or
+//! enumeration record, each type it names pinned at that type's version — with
+//! the records of the types it names, and the
+//! value-plane conversions `From<T> for Value` and `TryFrom<Value> for T` — a
+//! structure under the type's id with each field under its id, in declared
+//! order; a
 //! unit-variant enum as an enumeration under its variant's id. Type and field
 //! ids must be pinned with `#[arora(id = "…")]`: a name-hash id silently changes when
 //! a type or field is renamed, so it is not a reliable identity. A ROS type
@@ -14,6 +17,13 @@
 //! name-hashing its qualified name (a ROS name is the stable spec identity) —
 //! that also name-hashes the struct's fields. `#[arora(version = "…")]` pins
 //! the record version (`1.0.0` by default).
+//!
+//! `#[arora(scope = SCOPE)]` on a type names the
+//! `arora_types::record::scope::Scope` its record lives in, whatever names
+//! the type: a type modules of different scopes share states its scope, so
+//! they ship one record. A type stating none lives in the scope of what names
+//! it — the module whose function names it (the scope its declaration
+//! states), or the type whose field names it.
 //!
 //! A `#[arora(keyvalue)]` field crosses the value plane as-is when its Rust
 //! type is `Value`, and through `value_serde` (name-hashed, unseeded)
@@ -32,7 +42,8 @@
 //! carrying dynamically-typed values; and enums with **unit variants** (a
 //! `ty::low` enumeration, each variant id pinned like a field). Maps and
 //! payload-carrying enum variants are rejected pending a `ty::low` model
-//! extension.
+//! extension. A struct with a fixed-length array field (`[T; N]`) has a
+//! `ty::low` type but no record: a record has no fixed-length form.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -88,7 +99,9 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
   )?;
 
   let mut field_entries = Vec::new();
+  let mut record_fields = Vec::new();
   let mut register_calls = Vec::new();
+  let mut register_record_calls = Vec::new();
   let mut field_idents = Vec::new();
   let mut field_temps = Vec::new();
   let mut encode_fields = Vec::new();
@@ -98,7 +111,7 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     // A raw identifier (`r#type`, for a field whose ROS name is a Rust keyword)
     // names the plain word in arora, so its name and id match the ROS field.
     let fname_raw = fname.to_string();
-    let field_meta = parse_arora_meta(&field.attrs)?;
+    let field_meta = member_meta(&field.attrs)?;
     // The arora field name: an `#[arora(name = "…")]` override (a record field
     // whose name is not its Rust identifier), else the identifier.
     let fname_str = field_meta.name.clone().unwrap_or_else(|| {
@@ -128,9 +141,27 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         },
       )
     });
+    // In the record, a nested type is pinned at its own version; any other
+    // id the field names is a well-known type's, which no record versions.
+    let version = match nested {
+      Some(ty) => quote! { <#ty as arora_types::AroraType>::arora_type_version() },
+      None => well_known_version(),
+    };
+    record_fields.push(quote! {
+      (
+        #field_id_expr,
+        arora_types::record::structure::frozen::StructureField {
+          name: #fname_str.to_string(),
+          ty: arora_types::record::ty::FrozenTy::from_type_ref(&#type_ref_expr, &#version)?,
+        },
+      )
+    });
     if let Some(ty) = nested {
       register_calls.push(quote! {
         <#ty as arora_types::AroraType>::register_types(registry);
+      });
+      register_record_calls.push(quote! {
+        <#ty as arora_types::AroraType>::register_records(scope, records);
       });
     }
 
@@ -172,6 +203,17 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     field_idents.push(fname.clone());
   }
   let version_fn = version_fn(&meta);
+  let scope_fn = scope_fn(&meta);
+  let register_self = register_self_record();
+  // The types a field names that state no scope live where this one does.
+  let register_named = if register_record_calls.is_empty() {
+    quote! {}
+  } else {
+    quote! {
+      let scope = <Self as arora_types::AroraType>::scope().or(default_scope);
+      #(#register_record_calls)*
+    }
+  };
   let mismatch = format!("expected a `{}` structure", name_str);
 
   Ok(quote! {
@@ -206,6 +248,30 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         #(#register_calls)*
       }
 
+      fn record(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+      ) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        let parent = <Self as arora_types::AroraType>::scope()
+          .or(default_scope)
+          .map_or(arora_types::record::folder::ROOT_ID, |scope| scope.id);
+        ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Structure(
+          arora_types::record::structure::frozen::Structure {
+            parent,
+            name: #type_name.to_string(),
+            fields: [ #(#record_fields),* ].into_iter().collect(),
+          },
+        ))
+      }
+
+      fn register_records(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+        records: &mut arora_types::record::TypeRecords,
+      ) {
+        #register_self
+        #register_named
+      }
+
+      #scope_fn
       #version_fn
     }
 
@@ -259,9 +325,12 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
     Span::call_site(),
   )?;
   let version_fn = version_fn(&meta);
+  let scope_fn = scope_fn(&meta);
+  let register_self = register_self_record();
   let mismatch = format!("expected a `{}` enumeration", name_str);
 
   let mut value_entries = Vec::new();
+  let mut record_variants = Vec::new();
   let mut encode_arms = Vec::new();
   let mut decode_arms = Vec::new();
   for variant in &data.variants {
@@ -273,7 +342,7 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
       ));
     }
     let vident = &variant.ident;
-    let variant_meta = parse_arora_meta(&variant.attrs)?;
+    let variant_meta = member_meta(&variant.attrs)?;
     // The arora variant name: an `#[arora(name = "…")]` override, else the
     // Rust identifier.
     let vname = variant_meta
@@ -283,6 +352,15 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
     let variant_id_expr = id_expr(variant_meta.id, &vname, name_hash_mode, variant.span())?;
     encode_arms.push(quote! { #name::#vident => #variant_id_expr });
     decode_arms.push(quote! { x if x == #variant_id_expr => #name::#vident });
+    record_variants.push(quote! {
+      (
+        #variant_id_expr,
+        arora_types::record::enumeration::frozen::EnumerationVariant {
+          name: #vname.to_string(),
+          ty: arora_types::record::ty::FrozenTy::from(arora_types::record::ty::PrimitiveKind::Unit),
+        },
+      )
+    });
     value_entries.push(quote! {
       (
         #variant_id_expr,
@@ -323,6 +401,29 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
       }
 
+      fn record(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+      ) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        let parent = <Self as arora_types::AroraType>::scope()
+          .or(default_scope)
+          .map_or(arora_types::record::folder::ROOT_ID, |scope| scope.id);
+        ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Enumeration(
+          arora_types::record::enumeration::frozen::Enumeration {
+            parent,
+            name: #type_name.to_string(),
+            variants: [ #(#record_variants),* ].into_iter().collect(),
+          },
+        ))
+      }
+
+      fn register_records(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+        records: &mut arora_types::record::TypeRecords,
+      ) {
+        #register_self
+      }
+
+      #scope_fn
       #version_fn
     }
 
@@ -356,6 +457,53 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
       }
     }
   })
+}
+
+/// The start of `register_records`: the type's own record under the
+/// reference that pins it, with the scope it lives in. Returns when the
+/// record is already there (a type reachable from itself is visited once,
+/// and a type keeps the scope it was first reached with) or the type has no
+/// record (its shape has no record form, so the types it names are not
+/// reached through it).
+fn register_self_record() -> TokenStream2 {
+  quote! {
+    let reference = arora_types::record::FrozenReference {
+      id: <Self as arora_types::AroraType>::arora_type_id(),
+      version: <Self as arora_types::AroraType>::arora_type_version(),
+    };
+    if records.types.contains_key(&reference) {
+      return;
+    }
+    let ::std::option::Option::Some(record) = <Self as arora_types::AroraType>::record(default_scope) else {
+      return;
+    };
+    if let ::std::option::Option::Some(scope) = <Self as arora_types::AroraType>::scope().or(default_scope) {
+      records.scopes.insert(scope);
+    }
+    records.types.insert(reference, record);
+  }
+}
+
+/// The `scope` override, when `#[arora(scope = SCOPE)]` is set: the `Scope`
+/// the type's record lives in.
+fn scope_fn(meta: &AroraMeta) -> TokenStream2 {
+  match &meta.scope {
+    Some(scope) => quote! {
+      fn scope() -> ::std::option::Option<arora_types::record::scope::Scope> {
+        ::std::option::Option::Some(#scope)
+      }
+    },
+    None => quote! {},
+  }
+}
+
+/// The version a record names a well-known type (a uuid, a dynamic value) at:
+/// `1.0.0`, as a declared module's record names a dynamic value. A well-known
+/// type has no record of its own to version.
+fn well_known_version() -> TokenStream2 {
+  quote! {
+    arora_types::record::Version::from(arora_types::SemanticVersion { major: 1, minor: 0, patch: 0 })
+  }
 }
 
 /// The `arora_type_version` override, when `#[arora(version = "…")]` is set.
@@ -412,6 +560,9 @@ struct AroraMeta {
   /// its contents dynamically typed. Used for a field that carries arbitrary
   /// arora values whose types are not known statically (e.g. a call's args).
   keyvalue: bool,
+  /// `#[arora(scope = PATH)]` on a type: the `Scope` its record lives in,
+  /// whatever names it.
+  scope: Option<syn::Path>,
 }
 
 /// Parse `#[arora(id = "…", name = "…")]` from an attribute list. `id` pins the
@@ -437,6 +588,9 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
       } else if meta.path.is_ident("keyvalue") {
         parsed.keyvalue = true;
         Ok(())
+      } else if meta.path.is_ident("scope") {
+        parsed.scope = Some(meta.value()?.parse()?);
+        Ok(())
       } else if meta.path.is_ident("version") {
         let lit: syn::LitStr = meta.value()?.parse()?;
         let parts: Vec<u32> = lit
@@ -452,12 +606,24 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
         Ok(())
       } else {
         Err(meta.error(
-          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, `version = \"…\"`, or `keyvalue`)",
+          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, `version = \"…\"`, `scope = SCOPE`, or `keyvalue`)",
         ))
       }
     })?;
   }
   Ok(parsed)
+}
+
+/// The `#[arora(…)]` of a field or a variant, which has no scope of its own.
+fn member_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
+  let meta = parse_arora_meta(attrs)?;
+  if let Some(scope) = &meta.scope {
+    return Err(syn::Error::new_spanned(
+      scope,
+      "`scope` names the scope of a type's record; a field or a variant has none",
+    ));
+  }
+  Ok(meta)
 }
 
 /// Validate a UUID literal at macro time and emit it as a `Uuid::from_bytes`.

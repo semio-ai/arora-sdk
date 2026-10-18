@@ -4,6 +4,15 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.0] - 2026-10-18
+
+### Changed
+
+- `Status`'s record (`AroraType::record`, arora-types 3.8) lives in the
+  `arora` scope (`arora_types::record::scope::ARORA`, path `arora.Status`)
+  whatever names it, so modules of any scope sharing `Status` ship one
+  record. Requires arora-types 3.8.
+
 ## [9.4.0] - 2026-10-16
 
 ### Added

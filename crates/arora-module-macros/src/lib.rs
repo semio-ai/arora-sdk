@@ -8,18 +8,23 @@
 //!   an executor looks up when the module is built as an artifact.
 //! - `declare_module! { id = "…", name = "…", …, exports = [a, b] }`
 //!   aggregates those into `ids`, `header(executor)`, `record(parent)`,
-//!   `exports()`, `client`, and a marker type `Module` implementing
+//!   `type_records()`, `exports()`, `client`, and a marker type `Module`
+//!   implementing
 //!   [`AroraModule`](arora_types::module::declared::AroraModule). A
 //!   declaration names no executor: only the step that builds the artifact
 //!   knows whether it is native or wasm, so `header` takes it there.
+//!   `scope = SCOPE` names the `arora_types::record::scope::Scope` the
+//!   module's records live in — a path as the module's own items see it —
+//!   and the types its functions name that state no scope live there too;
+//!   without it, they live at the root.
 //! - `#[module(id = "…", …)]` on an **inline** Rust module is sugar: it scans
 //!   the module for `#[export]` functions and injects `declare_module!`.
 //! - `#[contract(name = "…")]` on a trait declares functions that several
 //!   modules implement, each under its own module id: its methods carry the
 //!   same `#[export]` and `#[param]` attributes, take `&mut self` and have no
 //!   body. It emits a sibling module holding `ids`, `NAME`, `descriptions()`,
-//!   `record(parent)` and `exports(implementation)`, and no artifact entry
-//!   point.
+//!   `record(parent)`, `type_records(scope)` and `exports(implementation)`,
+//!   and no artifact entry point.
 //! - `module_from_header!("…/module.yaml", types = ["<uuid>" => Type, …])`
 //!   is the consumer side for a module that is not a Rust declaration: ids
 //!   and typed stubs from its resolved header.
@@ -192,15 +197,19 @@ impl Kind {
     }
 
     /// The `record::ty::FrozenTy` a described signature carries. A user type
-    /// is pinned at the version its declaration carries (`#[arora(version)]`,
-    /// `1.0.0` when absent).
+    /// is frozen as a derived type's field is: one whose id is a primitive's
+    /// (a `Key`, a string) is that primitive, any other a reference pinned at
+    /// the version its declaration carries (`#[arora(version)]`, `1.0.0` when
+    /// absent).
     fn frozen_ty(&self) -> TokenStream2 {
-        let reference = |ty: &Type| {
+        let user = |ty: &Type| {
+            let type_ref = self.type_ref();
             quote! {
-              arora_types::record::FrozenReference {
-                id: <#ty as arora_types::AroraType>::arora_type_id(),
-                version: <#ty as arora_types::AroraType>::arora_type_version(),
-              }
+              arora_types::record::ty::FrozenTy::from_type_ref(
+                &#type_ref,
+                &<#ty as arora_types::AroraType>::arora_type_version(),
+              )
+              .expect("a scalar, an array or an optional has a frozen form")
             }
         };
         let dynamic_reference = quote! {
@@ -220,19 +229,13 @@ impl Kind {
             Kind::Dynamic => quote! {
               arora_types::record::ty::FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar { reference: #dynamic_reference })
             },
-            Kind::User(ty) => {
-                let reference = reference(ty);
-                quote! { arora_types::record::ty::FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar { reference: #reference }) }
-            }
+            Kind::User(ty) => user(ty),
             Kind::Array(element) => match &**element {
                 Kind::Primitive { kind, .. } => {
                     let kind = format_ident!("Array{kind}");
                     quote! { arora_types::record::ty::FrozenTy::from(arora_types::record::ty::PrimitiveKind::#kind) }
                 }
-                Kind::User(ty) => {
-                    let reference = reference(ty);
-                    quote! { arora_types::record::ty::FrozenTy::FrozenArray(arora_types::record::ty::FrozenArray { reference: #reference }) }
-                }
+                Kind::User(ty) => user(ty),
                 _ => unreachable!("rejected at parse time"),
             },
             Kind::Option(element) => {
@@ -661,7 +664,7 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
         }
     });
     let ret_frozen = export.ret.frozen_ty();
-    let dependency_pushes: Vec<TokenStream2> = export
+    let user_types: Vec<&Type> = export
         .params
         .iter()
         .map(|p| &p.kind)
@@ -674,12 +677,18 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
             },
             _ => None,
         })
+        .collect();
+    let dependency_pushes: Vec<TokenStream2> = user_types
+        .iter()
         .map(|ty| {
             quote! {
-              out.push(arora_types::record::FrozenReference {
-                id: <#ty as arora_types::AroraType>::arora_type_id(),
-                version: <#ty as arora_types::AroraType>::arora_type_version(),
-              });
+              let id = <#ty as arora_types::AroraType>::arora_type_id();
+              if arora_types::record::ty::PrimitiveKind::from_id(&id).is_none() {
+                out.push(arora_types::record::FrozenReference {
+                  id,
+                  version: <#ty as arora_types::AroraType>::arora_type_version(),
+                });
+              }
             }
         })
         .collect();
@@ -755,11 +764,24 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
       pub const NAME: &str = #fn_name;
 
       /// The record references this function's signature pins (its user
-      /// types, versioned) — a module record's dependencies.
+      /// types, versioned, but for one frozen as a primitive) — a module
+      /// record's dependencies.
       pub fn dependencies() -> ::std::vec::Vec<arora_types::record::FrozenReference> {
         let mut out = ::std::vec::Vec::new();
         #(#dependency_pushes)*
         out
+      }
+
+      /// Insert the records of the types this function's signature names,
+      /// and of the types those name, into `records`, with the scopes they
+      /// live in; a type it names that states none lives in `scope`, the
+      /// module's.
+      pub fn register_records(
+        scope: ::std::option::Option<arora_types::record::scope::Scope>,
+        records: &mut arora_types::record::TypeRecords,
+      ) {
+        let _ = (&scope, &records);
+        #(<#user_types as arora_types::AroraType>::register_records(scope, records);)*
       }
 
       /// The frozen signature a described function carries.
@@ -967,6 +989,8 @@ struct ModuleArgs {
     description: Option<String>,
     executable_mime: String,
     exports: Option<Vec<Ident>>,
+    /// `scope = SCOPE`: the `Scope` the module's records live in.
+    scope: Option<Path>,
 }
 
 /// `key = "value", …, exports = [a, b]` — the attribute's and the macro's
@@ -981,10 +1005,13 @@ impl Parse for ModuleArgs {
         let mut description = None;
         let mut executable_mime = String::new();
         let mut exports = None;
+        let mut scope = None;
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
-            if key == "exports" {
+            if key == "scope" {
+                scope = Some(input.parse::<Path>()?);
+            } else if key == "exports" {
                 let content;
                 syn::bracketed!(content in input);
                 let list: Punctuated<Ident, Token![,]> =
@@ -1045,13 +1072,15 @@ impl Parse for ModuleArgs {
             description,
             executable_mime,
             exports,
+            scope,
         })
     }
 }
 
 /// `declare_module! { id = "…", name = "…", …, exports = [a, b] }`: the
 /// aggregate — `ids`, `header(executor)`, `exports()`, `record(parent)`,
-/// `client` and the `Module` marker — from the named `#[export]`s.
+/// `type_records()`, `client` and the `Module` marker — from the named
+/// `#[export]`s.
 #[proc_macro]
 pub fn declare_module(input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(input as ModuleArgs);
@@ -1169,6 +1198,10 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
         syn::Error::new(args.id.1, "`declare_module!` requires `exports = [fn, …]`")
     })?;
     let (major, minor, patch) = args.version;
+    let record_scope = match &args.scope {
+        Some(scope) => quote! { ::std::option::Option::Some(#scope) },
+        None => quote! { ::std::option::Option::None },
+    };
     let author = &args.author;
     let license = &args.license;
     let description = match &args.description {
@@ -1233,7 +1266,8 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
       /// The module as a **record** — the frozen form the store (semio-db)
       /// serves and accepts: exports keyed by id with their frozen signatures,
       /// and the versioned type references they depend on. `parent` is the
-      /// folder the record lives under; `executable` is attached at publication.
+      /// folder the record lives under — the id of the scope the declaration
+      /// states, or the root's; `executable` is attached at publication.
       pub fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module {
         let mut exports = ::std::collections::HashMap::new();
         let mut dependencies: ::std::vec::Vec<arora_types::record::FrozenReference> = ::std::vec::Vec::new();
@@ -1257,6 +1291,18 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
         }
       }
 
+      /// The records of the types the module's functions name, and of the
+      /// types those name, each under the reference that pins it, with the
+      /// scopes they live in: with [`record`], what a registry holds to
+      /// describe the module. A type stating no scope lives in the module's
+      /// when a function names it, and where the type naming it lives
+      /// otherwise.
+      pub fn type_records() -> arora_types::record::TypeRecords {
+        let mut records = arora_types::record::TypeRecords::default();
+        #(#export_mods::register_records(#record_scope, &mut records);)*
+        records
+      }
+
       /// The client stubs, one per export, bound to this module's id: the
       /// interface a consumer programs against, dispatching through any
       /// `CallBridge`.
@@ -1274,6 +1320,12 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
         fn id() -> arora_types::Uuid { ids::MODULE }
         fn header(executor: arora_types::module::low::Executor) -> arora_types::module::low::Header { header(executor) }
         fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module { record(parent) }
+        fn scope() -> ::std::option::Option<arora_types::record::scope::Scope> {
+          #record_scope
+        }
+        fn type_records() -> arora_types::record::TypeRecords {
+          type_records()
+        }
         fn exports() -> ::std::vec::Vec<arora_types::module::declared::AroraFunction> { exports() }
       }
     })
@@ -1335,7 +1387,8 @@ fn snake_case(ident: &str) -> String {
 /// `#[param]` as a module's functions do, have no body and take `&mut self`:
 /// the implementation the host module owns, a unit struct when it keeps no
 /// state. Beside the trait, a module named after it in snake case holds `ids`,
-/// `NAME`, `descriptions()`, `record(parent)` and `exports(implementation)`.
+/// `NAME`, `descriptions()`, `record(parent)`, `type_records(scope)` and
+/// `exports(implementation)`.
 #[proc_macro_attribute]
 pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as ContractArgs);
@@ -1490,6 +1543,22 @@ fn expand_contract(args: ContractArgs, contract: &mut syn::ItemTrait) -> syn::Re
             executable: ::std::option::Option::None,
             dependencies,
           }
+        }
+
+        /// The records of the types the contract's functions name, and of
+        /// the types those name, each under the reference that pins it, with
+        /// the scopes they live in: with [`record`], what a registry holds
+        /// to describe a module implementing the contract. A type stating no
+        /// scope lives in `scope`, the implementing module's, when a function
+        /// names it, and where the type naming it lives otherwise; a type
+        /// modules of different scopes implementing the contract share states
+        /// its own.
+        pub fn type_records(
+          scope: ::std::option::Option<arora_types::record::scope::Scope>,
+        ) -> arora_types::record::TypeRecords {
+          let mut records = arora_types::record::TypeRecords::default();
+          #(#fn_mods::register_records(scope, &mut records);)*
+          records
         }
 
         /// Every function of the contract, callable on `implementation`:

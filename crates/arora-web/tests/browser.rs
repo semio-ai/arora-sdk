@@ -119,6 +119,89 @@ async fn devices_share_one_compiled_module() {
     }
 }
 
+/// The records a guest's package ships, as `withRecords` takes them: each
+/// record file's path under `records/` mapped to its YAML.
+fn records() -> JsValue {
+    use futures::FutureExt;
+    let mut registry = arora::LocalRegistry::new();
+    registry
+        .add_declared_module::<test_rust_wasm::test_rust_wasm::Module>(
+            arora_types::record::Version::from(header().version).0,
+        )
+        .now_or_never()
+        .expect("a local registry adds without waiting")
+        .expect("the guest's records are added");
+    let files = js_sys::Object::new();
+    for (kind, stem, yaml) in
+        arora_registry::local_yaml::records_as_yaml(&registry).expect("the records serialize")
+    {
+        js_sys::Reflect::set(
+            &files,
+            &JsValue::from_str(&format!("{}/{stem}.yaml", kind.directory())),
+            &JsValue::from_str(&yaml),
+        )
+        .expect("an object takes a property");
+    }
+    files.into()
+}
+
+/// A guest export returning a structure is described from the module's
+/// records: without them `describeMethods` does not list `reading`; with
+/// `withRecords`, it lists it, returning the structure.
+#[wasm_bindgen_test]
+async fn with_records_describes_a_record_typed_export() {
+    for with_records in [false, true] {
+        let mut builder = AroraWebBuilder::new();
+        builder
+            .with_module(&header_json(), WASM_BYTES)
+            .map_err(jsval_to_string)
+            .expect("withModule");
+        if with_records {
+            builder
+                .with_records(records())
+                .map_err(jsval_to_string)
+                .expect("withRecords");
+        }
+        let web = builder.build().map_err(jsval_to_string).expect("build");
+        let methods = web.describe_methods(Some("reading".to_string()));
+        web.step(10.0).expect("step");
+        let methods = json(
+            JsFuture::from(methods)
+                .await
+                .expect("describeMethods resolves"),
+        );
+        let paths: Vec<&str> = methods
+            .as_array()
+            .expect("an array")
+            .iter()
+            .filter_map(|method| method["path"].as_str())
+            .collect();
+        if with_records {
+            assert_eq!(paths, vec!["reading", "readings"], "{methods}");
+            assert_eq!(methods[0]["return_type"], "struct", "{methods}");
+        } else {
+            assert!(paths.is_empty(), "{methods}");
+        }
+    }
+}
+
+/// A path outside the records layout is refused, naming it.
+#[wasm_bindgen_test]
+fn with_records_refuses_a_path_outside_the_layout() {
+    let files = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &files,
+        &JsValue::from_str("records.json"),
+        &JsValue::from_str("[]"),
+    )
+    .expect("an object takes a property");
+    let error = AroraWebBuilder::new()
+        .with_records(files.into())
+        .map_err(jsval_to_string)
+        .expect_err("records.json is not a record");
+    assert!(error.contains("'records.json'"), "{error}");
+}
+
 // =============================================================================
 // The device's client operations
 // =============================================================================

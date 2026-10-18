@@ -21,6 +21,10 @@ impl EditableRegistry for LocalRegistry {
         tag: Version,
         enumeration: EnumerationFrozen,
     ) -> Result<(), RegistryError> {
+        if matches!(self.held_at(&id, &tag), Some(FrozenRegistryReference::Enumeration { record, .. }) if same_enumeration(record, &enumeration))
+        {
+            return Ok(());
+        }
         let enumeration = Rc::new(enumeration);
         let reg_ref = FrozenRegistryReference::Enumeration {
             id: id.to_owned(),
@@ -91,6 +95,10 @@ impl EditableRegistry for LocalRegistry {
         tag: Version,
         structure: StructureFrozen,
     ) -> Result<(), RegistryError> {
+        if matches!(self.held_at(&id, &tag), Some(FrozenRegistryReference::Structure { record, .. }) if same_structure(record, &structure))
+        {
+            return Ok(());
+        }
         let structure = Rc::new(structure);
         let reg_ref = FrozenRegistryReference::Structure {
             id: id.to_owned(),
@@ -160,6 +168,10 @@ impl EditableRegistry for LocalRegistry {
         tag: Version,
         module: ModuleFrozen,
     ) -> Result<(), RegistryError> {
+        if matches!(self.held_at(&id, &tag), Some(FrozenRegistryReference::Module { record, .. }) if **record == module)
+        {
+            return Ok(());
+        }
         let module: Rc<ModuleFrozen> = Rc::new(module);
         let reg_ref = FrozenRegistryReference::Module {
             id: id.to_owned(),
@@ -228,6 +240,10 @@ impl EditableRegistry for LocalRegistry {
     }
 
     async fn add_folder(&mut self, id: Uuid, folder: FolderPublic) -> Result<(), RegistryError> {
+        if matches!(self.held_at(&id, &Version::new(0, 0, 0)), Some(FrozenRegistryReference::Folder { record, .. }) if **record == folder)
+        {
+            return Ok(());
+        }
         let folder = Rc::new(folder);
         let reg_ref = FrozenRegistryReference::Folder {
             id: id.to_owned(),
@@ -258,6 +274,19 @@ impl EditableRegistry for LocalRegistry {
         self.folders.push(folder.to_owned());
         Ok(())
     }
+}
+
+/// Whether two structure records are the same record: equal, and with their
+/// fields in the same order — a field map compares equal whatever its order,
+/// and a structure's field order is its declared one.
+fn same_structure(held: &StructureFrozen, added: &StructureFrozen) -> bool {
+    held == added && held.fields.keys().eq(added.fields.keys())
+}
+
+/// Whether two enumeration records are the same record: equal, and with
+/// their variants in the same order, as [`same_structure`] compares fields.
+fn same_enumeration(held: &EnumerationFrozen, added: &EnumerationFrozen) -> bool {
+    held == added && held.variants.keys().eq(added.variants.keys())
 }
 
 fn check_frozen_index_entry_vacant(
@@ -320,17 +349,19 @@ fn add_frozen_index_entries(
     path_to_ids: &mut HashMap<String, Uuid>,
     mappings: HashMap<String, Uuid>,
 ) -> Result<(), RegistryError> {
+    // A path names one record — a name is unique within its folder —
+    // whatever its version: another version of the same record keeps it.
+    for (path, id) in &mappings {
+        if path_to_ids.get(path).is_some_and(|held| held != id) {
+            Err(RegistryError::DuplicateSelector {
+                selector: Selector::Path(path.to_owned()),
+            })?
+        }
+    }
     // Check that transaction is valid.
     for (selector, version_index) in &entries {
         for version in version_index.keys() {
             check_frozen_index_entry_vacant(index, selector, version)?;
-        }
-    }
-    for path in mappings.keys() {
-        if path_to_ids.contains_key(path) {
-            Err(RegistryError::DuplicateSelector {
-                selector: Selector::Path(path.to_owned()),
-            })?
         }
     }
     // Apply the transaction.

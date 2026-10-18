@@ -12,7 +12,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::freeze::{Freeze, Resolver};
-use super::reference::{FrozenReference, UnfrozenReference};
+use super::reference::{FrozenReference, UnfrozenReference, Version};
+use crate::module::low::TypeRef;
+use uuid::Uuid;
 
 /// A built-in type: scalars and their array forms.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,6 +68,66 @@ impl PrimitiveKind {
 
   pub fn is_scalar(&self) -> bool {
     !self.is_array()
+  }
+
+  /// The primitive a well-known type id names — a scalar primitive, or the
+  /// array form of one — or `None` for any other id: a record's, or a
+  /// well-known type that is not a primitive (a uuid, a dynamic value).
+  pub fn from_id(id: &Uuid) -> Option<PrimitiveKind> {
+    use crate::ty;
+    use PrimitiveKind::*;
+    let table = [
+      (*ty::UNIT_ID, Unit),
+      (*ty::BOOLEAN_ID, Boolean),
+      (*ty::U8_ID, U8),
+      (*ty::U16_ID, U16),
+      (*ty::U32_ID, U32),
+      (*ty::U64_ID, U64),
+      (*ty::I8_ID, I8),
+      (*ty::I16_ID, I16),
+      (*ty::I32_ID, I32),
+      (*ty::I64_ID, I64),
+      (*ty::F32_ID, F32),
+      (*ty::F64_ID, F64),
+      (*ty::STRING_ID, String),
+      (*ty::ARRAY_BOOLEAN_ID, ArrayBoolean),
+      (*ty::ARRAY_U8_ID, ArrayU8),
+      (*ty::ARRAY_U16_ID, ArrayU16),
+      (*ty::ARRAY_U32_ID, ArrayU32),
+      (*ty::ARRAY_U64_ID, ArrayU64),
+      (*ty::ARRAY_I8_ID, ArrayI8),
+      (*ty::ARRAY_I16_ID, ArrayI16),
+      (*ty::ARRAY_I32_ID, ArrayI32),
+      (*ty::ARRAY_I64_ID, ArrayI64),
+      (*ty::ARRAY_F32_ID, ArrayF32),
+      (*ty::ARRAY_F64_ID, ArrayF64),
+      (*ty::ARRAY_STRING_ID, ArrayString),
+    ];
+    table
+      .iter()
+      .find(|(known, _)| known == id)
+      .map(|(_, kind)| *kind)
+  }
+
+  /// The array form of a scalar primitive, or `None` for one that has none:
+  /// unit, or an array already.
+  pub fn array_of(self) -> Option<PrimitiveKind> {
+    use PrimitiveKind::*;
+    Some(match self {
+      Boolean => ArrayBoolean,
+      U8 => ArrayU8,
+      U16 => ArrayU16,
+      U32 => ArrayU32,
+      U64 => ArrayU64,
+      I8 => ArrayI8,
+      I16 => ArrayI16,
+      I32 => ArrayI32,
+      I64 => ArrayI64,
+      F32 => ArrayF32,
+      F64 => ArrayF64,
+      String => ArrayString,
+      _ => return None,
+    })
   }
 }
 
@@ -339,6 +401,42 @@ impl From<PrimitiveKind> for FrozenTy {
 }
 
 impl FrozenTy {
+  /// The frozen form of a header's type reference, each record it names
+  /// pinned at `version`.
+  ///
+  /// - A scalar naming a primitive id is that primitive; naming any other id
+  ///   — a record's, or a well-known type that is not a primitive (a uuid, a
+  ///   dynamic value) — it is a reference to it.
+  /// - An array of a scalar primitive is that primitive's array form; an
+  ///   array of anything else is an array reference.
+  /// - An optional is an optional of its element read as a scalar.
+  ///
+  /// `None` for a fixed-length array or a map, which a record cannot express.
+  pub fn from_type_ref(type_ref: &TypeRef, version: &Version) -> Option<FrozenTy> {
+    let reference = |id: &Uuid| FrozenReference {
+      id: *id,
+      version: version.clone(),
+    };
+    Some(match type_ref {
+      TypeRef::Scalar { id } => match PrimitiveKind::from_id(id) {
+        Some(kind) => FrozenTy::from(kind),
+        None => FrozenTy::FrozenScalar(FrozenScalar {
+          reference: reference(id),
+        }),
+      },
+      TypeRef::Array { id } => match PrimitiveKind::from_id(id).and_then(PrimitiveKind::array_of) {
+        Some(kind) => FrozenTy::from(kind),
+        None => FrozenTy::FrozenArray(FrozenArray {
+          reference: reference(id),
+        }),
+      },
+      TypeRef::Option { id } => FrozenTy::FrozenOption(FrozenOption {
+        element: Box::new(Self::from_type_ref(&TypeRef::Scalar { id: *id }, version)?),
+      }),
+      TypeRef::FixedArray { .. } | TypeRef::Map { .. } => return None,
+    })
+  }
+
   pub fn as_primitive(&self) -> Option<&Primitive> {
     match self {
       Self::Primitive(primitive) => Some(primitive),
@@ -505,5 +603,98 @@ mod tests {
       none.is_empty(),
       "a primitive element has no record dependency"
     );
+  }
+
+  /// A header's type reference freezes as a module record declares it: a
+  /// primitive (or an array or optional of one) as that primitive, anything
+  /// else as a reference pinned at the version given.
+  #[test]
+  fn a_type_ref_freezes_as_a_record_declares_it() {
+    use crate::module::low::TypeRef;
+    use crate::ty;
+    let version = Version::parse("1.2.0").expect("a version");
+    let record = Uuid::from_u128(0x0bf1);
+    let pinned = |id: Uuid| FrozenReference {
+      id,
+      version: version.clone(),
+    };
+    let freeze = |type_ref: TypeRef| FrozenTy::from_type_ref(&type_ref, &version);
+
+    assert_eq!(
+      freeze(TypeRef::Scalar { id: *ty::F32_ID }),
+      Some(FrozenTy::from(PrimitiveKind::F32))
+    );
+    assert_eq!(
+      freeze(TypeRef::Array { id: *ty::STRING_ID }),
+      Some(FrozenTy::from(PrimitiveKind::ArrayString))
+    );
+    assert_eq!(
+      freeze(TypeRef::Option { id: *ty::U64_ID }),
+      Some(FrozenTy::FrozenOption(FrozenOption {
+        element: Box::new(FrozenTy::from(PrimitiveKind::U64)),
+      }))
+    );
+    assert_eq!(
+      freeze(TypeRef::Scalar { id: record }),
+      Some(FrozenTy::FrozenScalar(FrozenScalar {
+        reference: pinned(record)
+      }))
+    );
+    assert_eq!(
+      freeze(TypeRef::Array { id: record }),
+      Some(FrozenTy::FrozenArray(FrozenArray {
+        reference: pinned(record)
+      }))
+    );
+    assert_eq!(
+      freeze(TypeRef::Option { id: record }),
+      Some(FrozenTy::FrozenOption(FrozenOption {
+        element: Box::new(FrozenTy::FrozenScalar(FrozenScalar {
+          reference: pinned(record)
+        })),
+      }))
+    );
+    // A well-known type that is not a primitive is named by reference.
+    assert_eq!(
+      freeze(TypeRef::Scalar {
+        id: *ty::KEY_VALUE_ID
+      }),
+      Some(FrozenTy::FrozenScalar(FrozenScalar {
+        reference: pinned(*ty::KEY_VALUE_ID)
+      }))
+    );
+    // Neither a fixed-length array nor a map has a record form.
+    assert_eq!(
+      freeze(TypeRef::FixedArray {
+        id: *ty::F64_ID,
+        len: 3
+      }),
+      None
+    );
+    assert_eq!(
+      freeze(TypeRef::Map {
+        key_id: *ty::STRING_ID,
+        value_id: *ty::U8_ID
+      }),
+      None
+    );
+  }
+
+  #[test]
+  fn a_primitive_is_named_by_its_well_known_id() {
+    use crate::ty;
+    assert_eq!(
+      PrimitiveKind::from_id(&ty::BOOLEAN_ID),
+      Some(PrimitiveKind::Boolean)
+    );
+    assert_eq!(
+      PrimitiveKind::from_id(&ty::ARRAY_F64_ID),
+      Some(PrimitiveKind::ArrayF64)
+    );
+    assert_eq!(PrimitiveKind::from_id(&ty::UUID_ID), None);
+    assert_eq!(PrimitiveKind::from_id(&Uuid::from_u128(0x0bf1)), None);
+    assert_eq!(PrimitiveKind::Unit.array_of(), None);
+    assert_eq!(PrimitiveKind::ArrayU8.array_of(), None);
+    assert_eq!(PrimitiveKind::U8.array_of(), Some(PrimitiveKind::ArrayU8));
   }
 }

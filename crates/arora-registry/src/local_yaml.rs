@@ -1,3 +1,4 @@
+use crate::local::LocalRegistry;
 use crate::{
     EditableRegistry, EnumerationFrozen, FolderPublic, ModuleFrozen, RegistryError, StructureFrozen,
 };
@@ -12,7 +13,8 @@ use uuid::Uuid;
 /// Each subdirectory may contain a list of records serialized in YAML,
 /// into files named `<uuid>{@<tag>}.yaml`,
 /// where `<uuid>` is the UUID to give to the record when adding it to the registry,
-/// and `<tag>` is the version tag of the record.
+/// and `<tag>` is the version tag of the record. Folders are added each after
+/// its parent, then enumerations, structures and modules.
 pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
     path: P,
     registry: &mut dyn EditableRegistry,
@@ -46,9 +48,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
         Ok(())
     })
     .await?;
-    for (id, folder) in folders {
-        registry.add_folder(id, folder).await?;
-    }
+    add_folders(folders, registry).await?;
 
     let mut enumerations = Vec::new();
     for_each_yaml_record(
@@ -142,6 +142,36 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Add `folders`, each after its parent: a folder's path names its parent's,
+/// so a parent must be held first, whatever order the folders were read in.
+/// Fails with the error of a folder whose parent is neither the root, nor
+/// held, nor among `folders`.
+pub(crate) async fn add_folders(
+    mut folders: Vec<(Uuid, FolderPublic)>,
+    registry: &mut dyn EditableRegistry,
+) -> Result<(), RegistryError> {
+    while !folders.is_empty() {
+        let mut waiting = Vec::new();
+        let mut unknown_parent = None;
+        let count = folders.len();
+        for (id, folder) in folders {
+            match registry.add_folder(id, folder.clone()).await {
+                Ok(()) => {}
+                Err(error @ RegistryError::UnknownParent { .. }) => {
+                    unknown_parent = Some(error);
+                    waiting.push((id, folder));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if waiting.len() == count {
+            return Err(unknown_parent.expect("a folder waits on its parent"));
+        }
+        folders = waiting;
+    }
+    Ok(())
+}
+
 async fn for_each_yaml_record<F>(path: &Path, mut f: F) -> Result<(), RegistryError>
 where
     F: FnMut(Uuid, Option<Version>, String) -> Result<(), RegistryError>,
@@ -193,13 +223,136 @@ where
 }
 
 /// The kind of registry record, identifying how an entry passed to
-/// [`load_records`] should be parsed and added.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// [`load_records`] should be parsed and added. Kinds order as they load:
+/// folders, enumerations, structures, then modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordKind {
     Folder,
     Enumeration,
     Structure,
     Module,
+}
+
+impl RecordKind {
+    /// The subdirectory of a record directory holding records of this kind.
+    pub fn directory(self) -> &'static str {
+        match self {
+            RecordKind::Folder => "folder",
+            RecordKind::Enumeration => "enumeration",
+            RecordKind::Structure => "structure",
+            RecordKind::Module => "module",
+        }
+    }
+
+    /// The kind of the records a record directory's subdirectory `name`
+    /// holds, or `None` for a name that is not one.
+    pub fn from_directory(name: &str) -> Option<RecordKind> {
+        [
+            RecordKind::Folder,
+            RecordKind::Enumeration,
+            RecordKind::Structure,
+            RecordKind::Module,
+        ]
+        .into_iter()
+        .find(|kind| kind.directory() == name)
+    }
+}
+
+/// The records `registry` holds, as [`load_records`] reads them: each one's
+/// kind, its file stem (`<uuid>[@<version>]`) and its YAML, ordered by kind
+/// (folders, enumerations, structures, modules) then by stem. The same
+/// records write the same YAML each time.
+pub fn records_as_yaml(
+    registry: &LocalRegistry,
+) -> Result<Vec<(RecordKind, String, String)>, RegistryError> {
+    use crate::local::FrozenRegistryReference as Held;
+    let yaml = |what: &str, result: Result<String, serde_yaml::Error>| {
+        result.map_err(|err| RegistryError::generic(&format!("{what} does not serialize: {err}")))
+    };
+    let mut records = Vec::new();
+    for (id, version, held) in registry.held() {
+        let stem = format!("{id}@{version}");
+        records.push(match held {
+            Held::Folder { record, .. } => (
+                RecordKind::Folder,
+                id.to_string(),
+                yaml("a folder", serde_yaml::to_string(record.as_ref()))?,
+            ),
+            Held::Enumeration { record, .. } => (
+                RecordKind::Enumeration,
+                stem,
+                yaml("an enumeration", serde_yaml::to_string(record.as_ref()))?,
+            ),
+            Held::Structure { record, .. } => (
+                RecordKind::Structure,
+                stem,
+                yaml("a structure", serde_yaml::to_string(record.as_ref()))?,
+            ),
+            Held::Module { record, .. } => (
+                RecordKind::Module,
+                stem,
+                yaml(
+                    "a module",
+                    serde_yaml::to_value(record.as_ref())
+                        .map(sort_id_keyed_mappings)
+                        .and_then(|value| serde_yaml::to_string(&value)),
+                )?,
+            ),
+            _ => continue,
+        });
+    }
+    records.sort_by(|(a, a_stem, _), (b, b_stem, _)| (a, a_stem).cmp(&(b, b_stem)));
+    Ok(records)
+}
+
+/// `value` with every mapping keyed by ids ordered by id, so a module
+/// record's exports and parameters — unordered maps, a function's
+/// parameters ordered by its `parameterOrdering` — write the same YAML each
+/// time. Not for a structure's fields or an enumeration's variants, whose
+/// order is their declared one.
+fn sort_id_keyed_mappings(value: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::{Mapping, Value};
+    match value {
+        Value::Mapping(mapping) => {
+            let mut entries: Vec<(Value, Value)> = mapping
+                .into_iter()
+                .map(|(key, value)| (key, sort_id_keyed_mappings(value)))
+                .collect();
+            let id_keyed = entries
+                .iter()
+                .all(|(key, _)| key.as_str().is_some_and(|key| Uuid::from_str(key).is_ok()));
+            if id_keyed {
+                entries.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
+            }
+            Value::Mapping(entries.into_iter().collect::<Mapping>())
+        }
+        Value::Sequence(sequence) => {
+            Value::Sequence(sequence.into_iter().map(sort_id_keyed_mappings).collect())
+        }
+        other => other,
+    }
+}
+
+/// Write the records `registry` holds into the directory `path`, in the
+/// layout [`load_records_from_yaml_dir`] reads —
+/// `<path>/<kind>/<uuid>[@<version>].yaml` — creating the directories as
+/// needed.
+pub fn write_records_to_yaml_dir<P: AsRef<Path>>(
+    registry: &LocalRegistry,
+    path: P,
+) -> Result<(), RegistryError> {
+    let path = path.as_ref();
+    for (kind, stem, yaml) in records_as_yaml(registry)? {
+        let dir = path.join(kind.directory());
+        std::fs::create_dir_all(&dir).map_err(|err| {
+            RegistryError::generic(&format!("could not create {}: {err}", dir.display()))
+        })?;
+        let file = dir.join(format!("{stem}.yaml"));
+        std::fs::write(&file, yaml).map_err(|err| {
+            RegistryError::generic(&format!("could not write {}: {err}", file.display()))
+        })?;
+    }
+    Ok(())
 }
 
 /// Parse a record file stem `<uuid>[@<version>]` into its id and optional
@@ -223,7 +376,8 @@ pub fn parse_record_stem(stem: &str) -> Option<(Uuid, Option<Version>)> {
 /// file's name without extension (`<uuid>[@<version>]`). This lets a caller
 /// embed the records (e.g. via `include_dir!`) and load them on targets without
 /// a filesystem, such as `wasm32`. Records are added in dependency order
-/// (folders, enumerations, structures, then modules) regardless of input order.
+/// (folders, each after its parent, then enumerations, structures and
+/// modules) regardless of input order.
 pub async fn load_records<'a, I>(
     records: I,
     registry: &mut dyn EditableRegistry,
@@ -255,11 +409,15 @@ where
         message: "record file name was missing version information".to_string(),
     };
 
-    for (id, yaml) in folders {
-        let folder =
-            serde_yaml::from_str::<FolderPublic>(&yaml).map_err(|e| parse_err("folder", e))?;
-        registry.add_folder(id, folder).await?;
-    }
+    let folders = folders
+        .into_iter()
+        .map(|(id, yaml)| {
+            serde_yaml::from_str::<FolderPublic>(&yaml)
+                .map(|folder| (id, folder))
+                .map_err(|e| parse_err("folder", e))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    add_folders(folders, registry).await?;
     for (id, tag, yaml) in enumerations {
         let enumeration = serde_yaml::from_str::<EnumerationFrozen>(&yaml)
             .map_err(|e| parse_err("enumeration", e))?;
@@ -304,7 +462,7 @@ mod tests {
                 .resolve_id(&Uuid::from_str("325a5767-e344-4532-860e-0749bcf2e428").unwrap())
                 .await
                 .unwrap(),
-            "behavior_tree.Status"
+            "arora.Status"
         );
     }
 }

@@ -25,6 +25,29 @@ with dependencies frozen according to the existing tagged records.
 
 Use `ReadableRegistry::get_<record>` functions to retrieve tagged versions.
 
+A registry holds one record per id and version, and several versions of a
+record side by side. Adding the record it already holds under an id and
+version keeps it; a different record there is refused. `LocalRegistry::module_at`
+and `LocalRegistry::type_at` look a record up by its exact id and version,
+from memory, and `LocalRegistry::missing_dependencies` lists the records a
+record depends on, transitively, that the registry does not hold.
+
+A name is unique within its folder: another record under a path a record
+holds is refused, whatever its version.
+
+The top folders are **scopes**: the `@handle` of the account — a person or
+an organization — that publishes the records in them, so `@vizij/animation`
+is the module record at `vizij.animation`. A record published to the store
+states its scope; a local registry also holds records with none, at the
+root.
+
+`LocalRegistry::add_declared_module` adds the records of a module declared in
+Rust: its module record, in the scope its declaration states, and the records
+of the types its functions name, which `#[derive(AroraType)]` produces, each
+in the scope its type states or, for a type stating none, in the module's.
+Each scope's folder is added with them. Modules of different scopes sharing a
+type that states its scope add together.
+
 ## YAML Records Layout
 
 The records contained in a registry can be serialized into YAML
@@ -32,13 +55,18 @@ and organized in a directory, with respective sub-directories
 for each record type:
 - `enumeration`
 - `folder`
+- `module`
 - `structure`
 In each sub-directory, there is a file for each record,
-named `<record_uuid>@<version>.yaml`.
+named `<record_uuid>@<version>.yaml` (a folder, which has no version,
+`<record_uuid>.yaml`).
 
 The function [`load_records_from_yaml_dir`](src/local_yaml.rs)
 can load such a directory and
-feed an [`EditableRegistry`](src/lib.rs) with these records.
+feed an [`EditableRegistry`](src/lib.rs) with these records; `load_records`
+loads the same records from memory. `write_records_to_yaml_dir` writes the
+records a `LocalRegistry` holds in this layout, and `records_as_yaml` hands
+them over as `load_records` reads them.
 This is useful for defining types locally in an exchangeable format
 to work with CLI tools like [`arora-cli`](../arora-cli/readme.md)
 or [`arora-module-cli`](../arora-module-authoring/cli/readme.md).

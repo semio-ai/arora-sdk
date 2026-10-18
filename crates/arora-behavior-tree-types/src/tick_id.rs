@@ -9,13 +9,16 @@ use arora_types::AroraType;
 use semver::Version;
 use uuid::Uuid;
 
+use arora_types::record::scope::ARORA;
+
 /// A child a control node ticks: the callable the tree registered for it.
 ///
-/// The Rust type of the `behavior_tree.TickId` record — it derives
-/// [`AroraType`] under the record's ids, so its value-plane conversions are
-/// the record's `Value::Structure` form.
+/// The Rust type of the `arora.TickId` record — it derives [`AroraType`]
+/// under the record's ids, so its value-plane conversions are the record's
+/// `Value::Structure` form, and its record lives in the [`ARORA`] scope
+/// whatever names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AroraType)]
-#[arora(id = "6f49e650-84ca-4899-a9bd-1f3bf17fab51")]
+#[arora(id = "6f49e650-84ca-4899-a9bd-1f3bf17fab51", scope = ARORA)]
 pub struct TickId {
     /// The callable that ticks the child.
     #[arora(id = "237992d2-17d1-459f-bca1-7185fa6a69d7")]
@@ -23,7 +26,7 @@ pub struct TickId {
 }
 
 /// Declare the `TickId` structure in the record/registry form, for a registry
-/// that resolves a `module.yaml` naming `behavior_tree.TickId`. The derived
+/// that resolves a `module.yaml` naming `arora.TickId`. The derived
 /// schema ([`TickId::arora_type`]) is the same type in `ty::low` form.
 pub fn declare_tick_id_structure(parent: Uuid) -> Structure {
     Structure {

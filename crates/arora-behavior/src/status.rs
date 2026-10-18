@@ -14,6 +14,7 @@
 //! `TryFrom<Value> for Status`): the `Value::Enumeration { id, variant_id,
 //! Unit }` form the plane speaks, from the same pinned ids.
 
+use arora_types::record::scope::ARORA;
 use arora_types::AroraType;
 use arora_types::Uuid;
 
@@ -21,9 +22,10 @@ use arora_types::Uuid;
 ///
 /// The one status vocabulary a behavior speaks on the value plane — the value
 /// an interpreter writes to a run's status key, and the value the ROS 2 action
-/// plane maps to `GoalStatus`.
+/// plane maps to `GoalStatus`. Its record lives in the [`ARORA`] scope
+/// (`arora.Status`), whatever names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AroraType)]
-#[arora(id = "325a5767-e344-4532-860e-0749bcf2e428")]
+#[arora(id = "325a5767-e344-4532-860e-0749bcf2e428", scope = ARORA)]
 pub enum Status {
     /// The behavior finished cleanly.
     #[arora(id = "766e9e9a-446d-4e46-83e6-14b7ca101169")]

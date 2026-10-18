@@ -1,6 +1,79 @@
 //! Engine-local, behavior-tree-free test guest. The Status-returning version
 //! lives in arora-sdk as test-rust-wasm-with-nodes.
 
+use arora_types::record::scope::Scope;
+use arora_types::AroraType;
+
+/// The scope `Reading`'s record lives in, and `Quadrant`'s with it, whatever
+/// module names them: `test_rust_wasm` and `compass`, of other scopes, share
+/// them.
+pub const TRIGONOMETRY: Scope = Scope {
+    id: arora_types::Uuid::from_u128(0x83eb1c64_8b3b_480d_823f_882f4ffc0801),
+    handle: "trigonometry",
+};
+
+/// The scope `test_rust_wasm`'s records live in.
+pub const TESTS: Scope = Scope {
+    id: arora_types::Uuid::from_u128(0x2c3a3f6e_5d1b_4c0f_9a4e_7e57f01d0001),
+    handle: "tests",
+};
+
+/// The scope `compass`'s records live in.
+pub const NAVIGATION: Scope = Scope {
+    id: arora_types::Uuid::from_u128(0x6b0e8f42_93c1_4d7a_8f25_0a71f01d0002),
+    handle: "navigation",
+};
+
+/// What `reading` returns: an angle, its cosine and its quadrant. A record:
+/// a header names it by id alone, so a device describes the functions taking
+/// or returning it only from the module's record.
+#[derive(Debug, Clone, PartialEq, AroraType)]
+#[arora(
+    id = "8679542f-73d4-474e-a037-324f02a0cae7",
+    version = "1.1.0",
+    scope = TRIGONOMETRY
+)]
+pub struct Reading {
+    #[arora(id = "539dca7b-1122-45a5-ba3d-424da221c754")]
+    pub angle: f32,
+    #[arora(id = "184c40cc-2c53-4465-9570-edea6828c907")]
+    pub cosine: f32,
+    #[arora(id = "a9abfe94-c3be-441d-93ad-a01185b27523")]
+    pub quadrant: Quadrant,
+}
+
+/// The quadrant an angle falls in.
+#[derive(Debug, Clone, Copy, PartialEq, AroraType)]
+#[arora(id = "424f4a46-f2f8-4a04-905c-b4f2dfb06322")]
+pub enum Quadrant {
+    #[arora(id = "d0878660-95b1-4742-b4d4-01b6721c7f0f")]
+    First,
+    #[arora(id = "b2973164-8913-4cdf-8d77-f8b9d0a0202e")]
+    Second,
+    #[arora(id = "3dcbdddc-33ff-4e5c-9245-70f0966e2c6e")]
+    Third,
+    #[arora(id = "5617b081-3add-4eb6-9789-f0f70fb20f16")]
+    Fourth,
+}
+
+impl Reading {
+    /// The reading of `angle`, in radians.
+    pub fn of(angle: f32) -> Reading {
+        let turn = angle.rem_euclid(std::f32::consts::TAU);
+        let quadrant = match (turn / std::f32::consts::FRAC_PI_2) as u32 {
+            0 => Quadrant::First,
+            1 => Quadrant::Second,
+            2 => Quadrant::Third,
+            _ => Quadrant::Fourth,
+        };
+        Reading {
+            angle,
+            cosine: angle.cos(),
+            quadrant,
+        }
+    }
+}
+
 #[arora_module::module(
     id = "665d6ec9-3fc9-4cfa-9100-5c8964e95aec",
     name = "test-rust-wasm",
@@ -8,9 +81,12 @@
     author = "Semio",
     license = "MIT",
     description = "Test WASM module written in Rust",
-    executable_mime = "application/wasm"
+    executable_mime = "application/wasm",
+    scope = crate::TESTS
 )]
 pub mod test_rust_wasm {
+    use super::Reading;
+
     #[export(id = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6")]
     pub fn ping() {}
 
@@ -64,6 +140,23 @@ pub mod test_rust_wasm {
         (0..length).map(|i| seconds + f64::from(i)).collect()
     }
 
+    /// The reading of `angle`: a structure, naming an enumeration.
+    #[export(id = "df544fe1-3832-47d8-94e9-233c41867480")]
+    pub fn reading(#[param(id = "798768ab-0dc4-48c4-aef5-ba91ebe9b5ef")] angle: f32) -> Reading {
+        Reading::of(angle)
+    }
+
+    /// The readings of `count` angles a quarter turn apart, from zero: an
+    /// array of structures.
+    #[export(id = "bc460484-914b-4be5-b291-bae39b9342a8")]
+    pub fn readings(
+        #[param(id = "d565ec30-53bc-4a9b-9951-78855a06dcf2")] count: u32,
+    ) -> Vec<Reading> {
+        (0..count)
+            .map(|i| Reading::of(i as f32 * std::f32::consts::FRAC_PI_2))
+            .collect()
+    }
+
     /// A greeting, naming `name` when there is one.
     #[export(id = "c82c6987-656f-4fb1-9191-ec7a5cd6832b")]
     pub fn greet(
@@ -73,6 +166,29 @@ pub mod test_rust_wasm {
             Some(name) => format!("hello, {name}"),
             None => "hello".to_string(),
         }
+    }
+}
+
+/// A second module in the same artifact, of another scope, naming `Reading`
+/// as `test_rust_wasm` does: two modules of different scopes sharing a type
+/// on one device.
+#[arora_module::module(
+    id = "e28e1c91-2416-4ee9-8c50-71980ee47689",
+    name = "compass",
+    version = "0.1.0",
+    author = "Semio",
+    license = "MIT",
+    description = "Test WASM module sharing a type with test-rust-wasm",
+    executable_mime = "application/wasm",
+    scope = crate::NAVIGATION
+)]
+pub mod compass {
+    use super::Reading;
+
+    /// The reading of a bearing, in degrees.
+    #[export(id = "c4396a6b-600e-480e-adcd-7dd091a41a99")]
+    pub fn bearing(#[param(id = "d13d490e-2b6d-4252-b7f3-24a051905360")] degrees: f32) -> Reading {
+        Reading::of(degrees.to_radians())
     }
 }
 
@@ -95,5 +211,20 @@ mod tests {
             vec![1.5, 2.5]
         );
         assert_eq!(positioned_by, Some(7));
+        assert_eq!(reading(0.0).quadrant, super::Quadrant::First);
+        let quadrants: Vec<_> = readings(4).into_iter().map(|r| r.quadrant).collect();
+        assert_eq!(
+            quadrants,
+            vec![
+                super::Quadrant::First,
+                super::Quadrant::Second,
+                super::Quadrant::Third,
+                super::Quadrant::Fourth
+            ]
+        );
+        assert_eq!(
+            super::compass::bearing(100.0).quadrant,
+            super::Quadrant::Second
+        );
     }
 }

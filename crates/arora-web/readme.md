@@ -41,6 +41,7 @@ class AroraRuntimeBuilder {
   constructor();
   withModule(headerJson: string, executable: Uint8Array): void; // repeatable
   withCompiledModule(module: CompiledModule): void;              // repeatable
+  withRecords(records: Record<string, string>): void;            // repeatable
   build(): AroraRuntime;
 }
 
@@ -54,6 +55,15 @@ class CompiledModule {
 device alone. Several devices running one module share its compilation by
 loading one `CompiledModule` each with `withCompiledModule`: each device still
 gets its own instance, with its own memory and state.
+
+`withRecords` takes the records a module's package ships in its `records/`
+directory: each record file's path under `records/`
+(`module/<id>@<version>.yaml`, `structure/…`, `enumeration/…`,
+`folder/<id>.yaml`) mapped to its YAML. A module whose record the device holds
+has every export described by `describeMethods` and callable from a behavior
+— those taking or returning a structure included; the build fails when the
+record does not match the module's header. Without records, only the exports
+whose types are primitives are described.
 
 Values cross the JS boundary as JSON in the Arora `Value` vocabulary, e.g.
 `{"f32": 0.75}`. `drainChanges` is the poll-based counterpart to a store

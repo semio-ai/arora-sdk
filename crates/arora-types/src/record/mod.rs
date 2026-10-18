@@ -22,14 +22,17 @@ pub mod folder;
 pub mod freeze;
 pub mod module;
 pub mod reference;
+pub mod scope;
 pub mod selector;
 pub mod structure;
 pub mod ty;
+pub mod type_definition;
 pub mod versioned;
 
 pub use freeze::{Freeze, Resolver};
 pub use reference::{FrozenReference, UnfrozenReference, Version, VersionReq};
 pub use selector::{RecordType, Selector};
+pub use type_definition::{TypeDefinitionFrozen, TypeRecords};
 pub use versioned::{Compat, Versioned};
 
 use crate::module::low::Header;

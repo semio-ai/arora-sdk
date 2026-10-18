@@ -4,6 +4,20 @@ All notable changes to `arora-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-10-18
+
+### Added
+
+- `scope = SCOPE` in a declaration, the scope its records live in, and its
+  `type_records()`, the records of the types its functions name, each in the
+  scope its type states or in the module's; see arora-module-macros 3.0.0.
+  Requires arora-types 3.8.
+
+### Changed
+
+- A `Key` parameter or return is frozen in a declaration's record as the
+  string primitive (arora-module-macros 3.0.0).
+
 ## [2.1.0] - 2026-09-28
 
 ### Added
