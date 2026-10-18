@@ -28,8 +28,11 @@ In short:
   distributed; for now the only backend is Studio's, whose source lives in
   studio-bridge's client, which already owns the connection to Studio, the
   credentials and the device's cache directory.
-- **A type's record has one home folder**, the one the type declares, so
-  modules sharing a type ship one record and load together on a device.
+- **Every record lives in a scope**, the top folder named by the `@handle`
+  of the account that publishes it, as a scoped name says. A module and its
+  own types live in the module's scope; a type modules of different scopes
+  share states its own, so they ship one record and load together on a
+  device.
 - **A guest module is indexed from its module record.** The header stays as it
   is; the record, checked against it, gives every export its frozen signature
   in the method index. This unblocks behaviors calling `step_values`
@@ -144,7 +147,7 @@ STUDIO-347 on both kinds of devices.
   ├── header.json
   ├── animation.wasm
   └── records/
-      ├── folder/<folder id>.yaml
+      ├── folder/<scope id>.yaml
       ├── module/<module id>@4.0.0.yaml
       └── structure/<StepValues id>@1.0.0.yaml …
   ```
@@ -165,15 +168,31 @@ declaration.
   closure of its records. The module macros and the derive freeze a `Key` as
   the string primitive, the one form the device's check accepts. Today the
   derive produces only the header vocabulary's `Type`.
-- **Folders.** A type declares the folder its record lives in,
-  `#[arora(parent = FOLDER)]`, naming a `DeclaredFolder` (id, name, parent
-  folder); the record lives there whatever names the type, and the folder's
-  record ships alongside. A type declaring none lives in the folder of what
-  names it: the module's folder — the one the module's records are exported
-  to — when a module's function names it, the folder of the type naming it
-  otherwise. So a type several modules share has one home and the modules
-  only reference it: `Status` lives in `behavior_tree`, and vizij's types in
-  one fixed `vizij` folder.
+- **Scopes.** The top folders are scopes, `arora-index`'s term: a scope is
+  the `@handle` of the account — a person or an organization — that
+  publishes the records in it, one level deep, and a name is unique within
+  it. A scope is declared once by its owner as a `Scope`: a fixed id, and
+  the handle as its folder's name. Every record published to the store
+  states its scope, modules and types alike; a local registry also holds
+  records with none, at the root — an operator's hand-installed module, a
+  test's.
+  - A module's declaration states its scope (`scope = VIZIJ`), and its own
+    types take it: the module macros pass it to the types its functions
+    name, and those to the types they name.
+  - A type modules of different scopes share states its own,
+    `#[arora(scope = ARORA)]`, and its record lives there whatever names it.
+    A module naming it ships that record and the scope's folder, nothing
+    else: `Status` and `TickId` live in the `arora` scope (`arora.Status`),
+    vizij's types in `vizij`.
+  - A registry refuses a second record under a path another record holds,
+    so two records cannot take one name in a scope.
+  - Scope ids follow each owner's fixed-id convention, outside the ranges
+    its types, modules and functions use: `arora` is
+    `61726f72-6100-0000-f01d-000000000000` and `vizij`
+    `76697a69-6a00-0000-f01d-000000000000` (each led by the ASCII of the
+    name, `f01d` marking a folder), and `semio` would be
+    `73656d69-6f00-0000-f01d-000000000000`. An id is not derived from the
+    handle: a handle can be renamed, and records name their scope by id.
 - **An export step** writes `records/` beside the header: for a declared
   module from `AroraModule::record` and the derived types; for a `module.yaml`
   module from `arora-module-cli`'s analysis, which already produces both.
@@ -307,10 +326,23 @@ specification maps onto them:
 
 | `arora-index` | Record terms |
 |---|---|
-| scoped name | `Selector::Path`, resolved to a record id by the registry |
+| scoped name `@scope/name` | the record `name` in the scope's folder: the path `scope.name` (`Selector::Path`), resolved to a record id by the registry |
 | version range | `VersionReq`, in an unfrozen reference: authoring only |
 | asset type | `RecordType`, implied by the operation and checked by `type_of` |
 | content hash | release metadata of the record version |
+
+A module record is the asset: `@vizij/animation` is the module record
+`animation` in the `vizij` scope. The types it names are records of their
+own, in its scope (`vizij.StepValues`) or in the scope they state
+(`arora.Status`); a release carries them as records its module record
+depends on, not as parts of its scoped name. A configuration is an asset the
+same way, under the scope of whoever publishes it.
+
+Records reference each other by id, so a scope's renamed handle or an asset
+handed to another scope breaks no reference: the path follows the scope's
+current handle, a moved module's later versions name its new scope while
+earlier ones keep theirs, and resolving an old address (an alias in Studio)
+is the source's.
 
 The bridge operation takes the frozen form — id, exact version and the
 configuration record's content hash — because a device applies only what is
@@ -625,7 +657,14 @@ Each stage lands on its own.
 - **Record identity across sources.** Records are referenced by UUID and
   version; Studio identifies an asset by scoped name and release. Is the
   scoped name a `Selector::Path` over the same UUID identity in every source
-  (proposed), and how does semio-db's folder tree carry a scope?
+  (proposed)?
+- **Where a scope's id comes from.** Proposed: its owner declares it once in
+  code (2.2). Studio's accounts have Firestore document ids, not UUIDs, and
+  semio-db's top level is its user and organization records, named uniquely
+  at the root, whose ids semio-db mints: a scope there is the account
+  record. Taking the id from the store's account instead would need a UUID
+  per account and the store to hand it to whoever declares records; keeping
+  declared ids needs semio-db to accept the declared id for the account.
 - **Models, animations and faces as records.** The same registry would hold
   them as record kinds; this proposal needs only modules, types, behaviors and
   configurations.
@@ -674,14 +713,17 @@ holds would be a second, partial store whose contents depend on what the
 device happens to run, and a second surface to authorize. A client reads
 records where the device does, from the store through a source.
 
-### A type's record has one home folder
+### Records live in scopes
 
-A record's folder is part of the record. Placing a type's record in the folder
-of each module naming it gives two records under one id and version, and a
-registry holds only one, so two modules sharing the type could not load
-together. A type therefore declares its folder, and the folder's record ships
-with it; a type declaring none takes the folder of what names it, which is
-right as long as one module or one type names it.
+A record's folder is part of the record, so a type's record must be the same
+whichever module ships it. Scopes fix every record's home where its owner
+declares it: a module and its own types live in the module's scope, and a
+type modules of different scopes share states its scope. Placing a type in
+the folder of each module naming it gives two records under one id and
+version, which no registry holds together. A scope is one level deep and is
+a scoped name's `@scope`, so a published record's path and its scoped name
+agree; its id is declared rather than derived from the handle, because a
+handle can be renamed.
 
 ### One frozen form for a header type
 
@@ -749,3 +791,7 @@ make the result the same whoever sent the request, and let it restart offline.
   and leaves nothing a device can restore at start.
 - **The HAL in the configuration.** A HAL's models and components are fixed
   for its life; changing them is a restart.
+- **A type's record under the module that defines it.** A module naming
+  another module's type would have to ship that module's record for the
+  type's path to resolve, and a vocabulary no module defines (`Status`)
+  would need one invented to own it.
