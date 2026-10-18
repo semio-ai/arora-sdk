@@ -5,7 +5,8 @@
 //!
 //! The guest is `test-rust-wasm`, whose `reading` returns a `Reading`
 //! structure naming a `Quadrant` enumeration and whose `readings` returns an
-//! array of them; its header names `Reading` by id alone.
+//! array of them; its header names `Reading` by id alone. Its artifact holds a
+//! second module, `compass`, whose `bearing` returns a `Reading` too.
 
 use super::*;
 use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
@@ -22,16 +23,20 @@ use arora_types::value::{StructureField, Value};
 use arora_types::AroraType;
 use std::time::Duration;
 use test_rust_wasm::test_rust_wasm::{self as declared, Module};
-use test_rust_wasm::{Quadrant, Reading};
+use test_rust_wasm::{compass, Quadrant, Reading, TRIGONOMETRY};
 
 const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
-fn header() -> Header {
-    declared::header(low::Executor {
+fn wasm() -> low::Executor {
+    low::Executor {
         name: "wasm".to_string(),
         min_version: None,
         max_version: None,
-    })
+    }
+}
+
+fn header() -> Header {
+    declared::header(wasm())
 }
 
 /// The version the guest's records are at: its header's.
@@ -39,9 +44,12 @@ fn version() -> arora_types::record::Version {
     header().version.into()
 }
 
-/// The records the packaged guest carries, under the folder `folder`: the
-/// module record and those of the types its functions name.
-fn records(folder: Uuid) -> LocalRegistry {
+/// The records a packaged module `M` carries, exported to the folder
+/// `folder`, at the root and named `name`, or to the root itself: the module
+/// record and those of the types its functions name, with the folders those
+/// types declare.
+fn packaged<M: AroraModule>(folder: Uuid, name: &str) -> LocalRegistry {
+    let version: arora_types::record::Version = M::header(wasm()).version.into();
     let mut registry = LocalRegistry::new();
     futures::executor::block_on(async {
         if folder != ROOT_ID {
@@ -49,18 +57,21 @@ fn records(folder: Uuid) -> LocalRegistry {
                 .add_folder(
                     folder,
                     FolderPublic {
-                        name: "trigonometry".to_string(),
+                        name: name.to_string(),
                         parent: ROOT_ID,
                     },
                 )
                 .await?;
         }
-        registry
-            .add_declared_module::<Module>(version().0, folder)
-            .await
+        registry.add_declared_module::<M>(version.0, folder).await
     })
-    .expect("the guest's records are added");
+    .expect("the module's records are added");
     registry
+}
+
+/// The records the packaged guest carries, exported to the folder `folder`.
+fn records(folder: Uuid) -> LocalRegistry {
+    packaged::<Module>(folder, "test-rust-wasm")
 }
 
 /// A registry holding `module` as the guest's record, and the records of the
@@ -69,7 +80,11 @@ fn registry_with(module: frozen::Module, with_types: bool) -> LocalRegistry {
     let mut registry = LocalRegistry::new();
     futures::executor::block_on(async {
         if with_types {
-            for (reference, record) in Module::type_records(ROOT_ID) {
+            let records = Module::type_records(ROOT_ID);
+            for (id, folder) in records.folders {
+                registry.add_folder(id, folder).await?;
+            }
+            for (reference, record) in records.types {
                 let (id, tag) = (reference.id, reference.version.0);
                 match record {
                     TypeDefinitionFrozen::Structure(s) => {
@@ -393,24 +408,45 @@ fn a_record_whose_dependencies_are_missing_fails_the_build_naming_them() {
     assert!(message.contains(&reading.to_string()), "{message}");
 }
 
+/// A fresh device directory for the test `name`.
+fn device_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("arora-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// Write a module directory `modules/<name>` under `device_dir`: `header`,
+/// the guest's artifact and `records` in the records layout.
+fn write_module_dir(
+    device_dir: &std::path::Path,
+    name: &str,
+    header: &Header,
+    records: &LocalRegistry,
+) -> std::path::PathBuf {
+    let dir = device_dir.join("modules").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("header.json"),
+        serde_json::to_string(header).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.join("test_rust_wasm.wasm"), WASM).unwrap();
+    write_records_to_yaml_dir(records, dir.join("records")).expect("the records are written");
+    dir
+}
+
 /// The runner's path: a module directory carrying `records/` beside its
 /// header and artifact fills the device's registry, which describes the
 /// module; records that do not read fail, naming the module.
 #[test]
 fn a_module_directory_s_records_describe_its_module() {
-    let device_dir =
-        std::env::temp_dir().join(format!("arora-module-records-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&device_dir);
-    let dir = device_dir.join("modules").join("trigonometry");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-        dir.join("header.json"),
-        serde_json::to_string(&header()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(dir.join("test_rust_wasm.wasm"), WASM).unwrap();
-    write_records_to_yaml_dir(&records(Uuid::from_u128(0x7419_f01d)), dir.join("records"))
-        .expect("the records are written");
+    let device_dir = device_dir("module-records");
+    let dir = write_module_dir(
+        &device_dir,
+        "trigonometry",
+        &header(),
+        &records(Uuid::from_u128(0x7419_f01d)),
+    );
 
     let modules = module_dir::in_device_dir(&device_dir).expect("the module directory reads");
     let registry = futures::executor::block_on(module_dir::registry(&modules))
@@ -439,6 +475,80 @@ fn a_module_directory_s_records_describe_its_module() {
     assert!(
         message.contains("the records of module 'test-rust-wasm'"),
         "{message}"
+    );
+    std::fs::remove_dir_all(&device_dir).unwrap();
+}
+
+/// Two modules, each exported to its own folder, sharing `Reading`, which
+/// declares its folder: their module directories carry the same `Reading`
+/// and `Quadrant` records, in `trigonometry`, so they fill one registry and
+/// load together on one device, each export described.
+#[test]
+fn two_modules_sharing_a_type_load_together_on_one_device() {
+    let device_dir = device_dir("shared-type-records");
+    write_module_dir(
+        &device_dir,
+        "test-rust-wasm",
+        &header(),
+        &packaged::<Module>(Uuid::from_u128(0x7419_f01d), "test-rust-wasm"),
+    );
+    write_module_dir(
+        &device_dir,
+        "compass",
+        &compass::header(wasm()),
+        &packaged::<compass::Module>(Uuid::from_u128(0xc0b9_f01d), "compass"),
+    );
+
+    let modules = module_dir::in_device_dir(&device_dir).expect("the module directories read");
+    assert_eq!(modules.len(), 2);
+    let registry = futures::executor::block_on(module_dir::registry(&modules))
+        .expect("both module directories' records load into one registry");
+    let Some(TypeDefinitionFrozen::Structure(reading)) =
+        registry.type_at(&Reading::arora_type_id(), &Reading::arora_type_version().0)
+    else {
+        panic!("Reading's record is held");
+    };
+    assert_eq!(reading.parent, TRIGONOMETRY.id);
+
+    let mut builder = Arora::builder().with_registry(registry);
+    for module in modules {
+        builder = builder.with_module(module.header, module.executable);
+    }
+    let mut arora = builder
+        .build()
+        .expect("the device builds with both modules");
+    for (module, function) in [
+        (Module::id(), declared::ids::reading::FUNCTION),
+        (compass::Module::id(), compass::ids::bearing::FUNCTION),
+    ] {
+        let indexed = arora
+            .function_index
+            .get(&function)
+            .unwrap_or_else(|| panic!("{function} is described"));
+        assert_eq!(indexed.module_id, module);
+        assert_eq!(
+            indexed.function.return_ty,
+            FrozenTy::FrozenScalar(FrozenScalar {
+                reference: arora_types::record::FrozenReference {
+                    id: Reading::arora_type_id(),
+                    version: Reading::arora_type_version(),
+                },
+            })
+        );
+    }
+    let called = arora
+        .call(Call {
+            module_id: Some(compass::Module::id()),
+            id: compass::ids::bearing::FUNCTION,
+            args: vec![StructureField {
+                id: compass::ids::bearing::DEGREES,
+                value: Box::new(Value::F32(100.0)),
+            }],
+        })
+        .expect("bearing dispatches");
+    assert_eq!(
+        Reading::try_from(called.ret).expect("a Reading").quadrant,
+        Quadrant::Second
     );
     std::fs::remove_dir_all(&device_dir).unwrap();
 }

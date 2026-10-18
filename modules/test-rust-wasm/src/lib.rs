@@ -1,13 +1,26 @@
 //! Engine-local, behavior-tree-free test guest. The Status-returning version
 //! lives in arora-sdk as test-rust-wasm-with-nodes.
 
+use arora_types::record::folder::DeclaredFolder;
 use arora_types::AroraType;
+
+/// The folder `Reading`'s record lives in, and `Quadrant`'s with it, whatever
+/// module names them: `test_rust_wasm` and `compass` share them.
+pub const TRIGONOMETRY: DeclaredFolder = DeclaredFolder {
+    id: arora_types::Uuid::from_u128(0x83eb1c64_8b3b_480d_823f_882f4ffc0801),
+    name: "trigonometry",
+    parent: None,
+};
 
 /// What `reading` returns: an angle, its cosine and its quadrant. A record:
 /// a header names it by id alone, so a device describes the functions taking
 /// or returning it only from the module's record.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "8679542f-73d4-474e-a037-324f02a0cae7", version = "1.1.0")]
+#[arora(
+    id = "8679542f-73d4-474e-a037-324f02a0cae7",
+    version = "1.1.0",
+    parent = TRIGONOMETRY
+)]
 pub struct Reading {
     #[arora(id = "539dca7b-1122-45a5-ba3d-424da221c754")]
     pub angle: f32,
@@ -143,6 +156,27 @@ pub mod test_rust_wasm {
     }
 }
 
+/// A second module in the same artifact, naming `Reading` as
+/// `test_rust_wasm` does: two modules sharing a type on one device.
+#[arora_module::module(
+    id = "e28e1c91-2416-4ee9-8c50-71980ee47689",
+    name = "compass",
+    version = "0.1.0",
+    author = "Semio",
+    license = "MIT",
+    description = "Test WASM module sharing a type with test-rust-wasm",
+    executable_mime = "application/wasm"
+)]
+pub mod compass {
+    use super::Reading;
+
+    /// The reading of a bearing, in degrees.
+    #[export(id = "c4396a6b-600e-480e-adcd-7dd091a41a99")]
+    pub fn bearing(#[param(id = "d13d490e-2b6d-4252-b7f3-24a051905360")] degrees: f32) -> Reading {
+        Reading::of(degrees.to_radians())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::test_rust_wasm::*;
@@ -172,6 +206,10 @@ mod tests {
                 super::Quadrant::Third,
                 super::Quadrant::Fourth
             ]
+        );
+        assert_eq!(
+            super::compass::bearing(100.0).quadrant,
+            super::Quadrant::Second
         );
     }
 }

@@ -15,13 +15,18 @@ All notable changes to `arora`. The format follows
   export taking or returning a structure or an enumeration is listed by
   `DescribeMethods` and reachable from a behavior tree. The build fails,
   naming the module, when the record does not describe the header (naming the
-  export) or the registry lacks a record it depends on (naming each). A guest
+  export) or the registry lacks a record it depends on (naming each). A
+  record's type must be the header's frozen: a primitive id as that primitive
+  (a `Key` as the string, as arora-module-macros 3.0 freezes it), any other
+  id as a reference to it. A guest
   module without a record is indexed from its header, as before; a module
   loaded or reloaded on the running device is indexed from its header.
 - A module directory may carry `records/` beside `header.json`, in
   arora-registry's layout. `module_dir::registry(&modules)` loads every
   module directory's records into one registry (`ModuleFiles::records_dir`),
-  and the `arora` runner hands it to the device.
+  and the `arora` runner hands it to the device. A record two directories
+  carry identically is held once, so modules sharing a type that declares
+  its folder load together.
 - `LocalRegistry` is re-exported.
 
 ### Changed
