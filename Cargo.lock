@@ -738,13 +738,15 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "10.1.0"
+version = "10.2.0"
 dependencies = [
  "arora",
  "arora-behavior",
  "arora-bridge",
  "arora-engine",
+ "arora-hal",
  "arora-registry",
+ "arora-simple-data-store",
  "arora-types",
  "console_error_panic_hook",
  "futures",
