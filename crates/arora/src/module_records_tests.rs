@@ -6,7 +6,8 @@
 //! The guest is `test-rust-wasm`, whose `reading` returns a `Reading`
 //! structure naming a `Quadrant` enumeration and whose `readings` returns an
 //! array of them; its header names `Reading` by id alone. Its artifact holds a
-//! second module, `compass`, whose `bearing` returns a `Reading` too.
+//! second module, `compass`, of another scope, whose `bearing` returns a
+//! `Reading` too: `Reading` states its scope, `trigonometry`.
 
 use super::*;
 use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
@@ -14,7 +15,7 @@ use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
 use arora_behavior_tree::schema::_RET_PARAM_ID;
 use arora_registry::local::ROOT_ID;
 use arora_registry::local_yaml::write_records_to_yaml_dir;
-use arora_registry::{EditableRegistry, FolderPublic, TypeDefinitionFrozen};
+use arora_registry::{EditableRegistry, TypeDefinitionFrozen};
 use arora_types::call::Call;
 use arora_types::data::Key;
 use arora_types::record::module::frozen::{self, ExportKind};
@@ -23,7 +24,7 @@ use arora_types::value::{StructureField, Value};
 use arora_types::AroraType;
 use std::time::Duration;
 use test_rust_wasm::test_rust_wasm::{self as declared, Module};
-use test_rust_wasm::{compass, Quadrant, Reading, TRIGONOMETRY};
+use test_rust_wasm::{compass, Quadrant, Reading, NAVIGATION, TESTS, TRIGONOMETRY};
 
 const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
 
@@ -44,34 +45,20 @@ fn version() -> arora_types::record::Version {
     header().version.into()
 }
 
-/// The records a packaged module `M` carries, exported to the folder
-/// `folder`, at the root and named `name`, or to the root itself: the module
-/// record and those of the types its functions name, with the folders those
-/// types declare.
-fn packaged<M: AroraModule>(folder: Uuid, name: &str) -> LocalRegistry {
+/// The records a packaged module `M` carries: the module record, in the
+/// scope its declaration states, and those of the types its functions name,
+/// each in its scope, with the scopes' folders.
+fn packaged<M: AroraModule>() -> LocalRegistry {
     let version: arora_types::record::Version = M::header(wasm()).version.into();
     let mut registry = LocalRegistry::new();
-    futures::executor::block_on(async {
-        if folder != ROOT_ID {
-            registry
-                .add_folder(
-                    folder,
-                    FolderPublic {
-                        name: name.to_string(),
-                        parent: ROOT_ID,
-                    },
-                )
-                .await?;
-        }
-        registry.add_declared_module::<M>(version.0, folder).await
-    })
-    .expect("the module's records are added");
+    futures::executor::block_on(registry.add_declared_module::<M>(version.0))
+        .expect("the module's records are added");
     registry
 }
 
-/// The records the packaged guest carries, exported to the folder `folder`.
-fn records(folder: Uuid) -> LocalRegistry {
-    packaged::<Module>(folder, "test-rust-wasm")
+/// The records the packaged guest carries.
+fn records() -> LocalRegistry {
+    packaged::<Module>()
 }
 
 /// A registry holding `module` as the guest's record, and the records of the
@@ -80,9 +67,9 @@ fn registry_with(module: frozen::Module, with_types: bool) -> LocalRegistry {
     let mut registry = LocalRegistry::new();
     futures::executor::block_on(async {
         if with_types {
-            let records = Module::type_records(ROOT_ID);
-            for (id, folder) in records.folders {
-                registry.add_folder(id, folder).await?;
+            let records = Module::type_records();
+            for scope in records.scopes {
+                registry.add_folder(scope.id, scope.record()).await?;
             }
             for (reference, record) in records.types {
                 let (id, tag) = (reference.id, reference.version.0);
@@ -251,7 +238,7 @@ fn without_its_record_a_record_typed_export_dispatches_but_is_not_described() {
 /// lists the record-typed ones with their frozen types.
 #[test]
 fn a_module_record_describes_every_export_with_its_signature() {
-    let mut arora = device(Some(records(ROOT_ID))).expect("the device builds with its records");
+    let mut arora = device(Some(records())).expect("the device builds with its records");
     for declared in Module::exports() {
         let indexed = arora
             .function_index
@@ -290,7 +277,7 @@ fn a_module_record_describes_every_export_with_its_signature() {
 /// store.
 #[test]
 fn a_behavior_calling_record_typed_exports_runs() {
-    let mut arora = device(Some(records(ROOT_ID))).expect("the device builds with its records");
+    let mut arora = device(Some(records())).expect("the device builds with its records");
     let caller = arora.caller();
     let graph_type = arora_behavior_tree::behavior::graph_type();
     let run = caller_tests::settle(
@@ -441,12 +428,7 @@ fn write_module_dir(
 #[test]
 fn a_module_directory_s_records_describe_its_module() {
     let device_dir = device_dir("module-records");
-    let dir = write_module_dir(
-        &device_dir,
-        "trigonometry",
-        &header(),
-        &records(Uuid::from_u128(0x7419_f01d)),
-    );
+    let dir = write_module_dir(&device_dir, "trigonometry", &header(), &records());
 
     let modules = module_dir::in_device_dir(&device_dir).expect("the module directory reads");
     let registry = futures::executor::block_on(module_dir::registry(&modules))
@@ -479,10 +461,10 @@ fn a_module_directory_s_records_describe_its_module() {
     std::fs::remove_dir_all(&device_dir).unwrap();
 }
 
-/// Two modules, each exported to its own folder, sharing `Reading`, which
-/// declares its folder: their module directories carry the same `Reading`
-/// and `Quadrant` records, in `trigonometry`, so they fill one registry and
-/// load together on one device, each export described.
+/// Two modules of different scopes sharing `Reading`, which states its
+/// scope: their module directories carry the same `Reading` and `Quadrant`
+/// records, in `trigonometry`, so they fill one registry and load together
+/// on one device, each module in its own scope and each export described.
 #[test]
 fn two_modules_sharing_a_type_load_together_on_one_device() {
     let device_dir = device_dir("shared-type-records");
@@ -490,13 +472,13 @@ fn two_modules_sharing_a_type_load_together_on_one_device() {
         &device_dir,
         "test-rust-wasm",
         &header(),
-        &packaged::<Module>(Uuid::from_u128(0x7419_f01d), "test-rust-wasm"),
+        &packaged::<Module>(),
     );
     write_module_dir(
         &device_dir,
         "compass",
         &compass::header(wasm()),
-        &packaged::<compass::Module>(Uuid::from_u128(0xc0b9_f01d), "compass"),
+        &packaged::<compass::Module>(),
     );
 
     let modules = module_dir::in_device_dir(&device_dir).expect("the module directories read");
@@ -509,6 +491,12 @@ fn two_modules_sharing_a_type_load_together_on_one_device() {
         panic!("Reading's record is held");
     };
     assert_eq!(reading.parent, TRIGONOMETRY.id);
+    for (module, scope) in [(Module::id(), TESTS), (compass::Module::id(), NAVIGATION)] {
+        let (_, parent) = registry
+            .record_name_and_parent(&module)
+            .expect("the module's record is held");
+        assert_eq!(parent, Some(scope.id));
+    }
 
     let mut builder = Arora::builder().with_registry(registry);
     for module in modules {

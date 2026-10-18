@@ -1,15 +1,27 @@
 //! Engine-local, behavior-tree-free test guest. The Status-returning version
 //! lives in arora-sdk as test-rust-wasm-with-nodes.
 
-use arora_types::record::folder::DeclaredFolder;
+use arora_types::record::scope::Scope;
 use arora_types::AroraType;
 
-/// The folder `Reading`'s record lives in, and `Quadrant`'s with it, whatever
-/// module names them: `test_rust_wasm` and `compass` share them.
-pub const TRIGONOMETRY: DeclaredFolder = DeclaredFolder {
+/// The scope `Reading`'s record lives in, and `Quadrant`'s with it, whatever
+/// module names them: `test_rust_wasm` and `compass`, of other scopes, share
+/// them.
+pub const TRIGONOMETRY: Scope = Scope {
     id: arora_types::Uuid::from_u128(0x83eb1c64_8b3b_480d_823f_882f4ffc0801),
-    name: "trigonometry",
-    parent: None,
+    handle: "trigonometry",
+};
+
+/// The scope `test_rust_wasm`'s records live in.
+pub const TESTS: Scope = Scope {
+    id: arora_types::Uuid::from_u128(0x2c3a3f6e_5d1b_4c0f_9a4e_7e57f01d0001),
+    handle: "tests",
+};
+
+/// The scope `compass`'s records live in.
+pub const NAVIGATION: Scope = Scope {
+    id: arora_types::Uuid::from_u128(0x6b0e8f42_93c1_4d7a_8f25_0a71f01d0002),
+    handle: "navigation",
 };
 
 /// What `reading` returns: an angle, its cosine and its quadrant. A record:
@@ -19,7 +31,7 @@ pub const TRIGONOMETRY: DeclaredFolder = DeclaredFolder {
 #[arora(
     id = "8679542f-73d4-474e-a037-324f02a0cae7",
     version = "1.1.0",
-    parent = TRIGONOMETRY
+    scope = TRIGONOMETRY
 )]
 pub struct Reading {
     #[arora(id = "539dca7b-1122-45a5-ba3d-424da221c754")]
@@ -69,7 +81,8 @@ impl Reading {
     author = "Semio",
     license = "MIT",
     description = "Test WASM module written in Rust",
-    executable_mime = "application/wasm"
+    executable_mime = "application/wasm",
+    scope = crate::TESTS
 )]
 pub mod test_rust_wasm {
     use super::Reading;
@@ -156,8 +169,9 @@ pub mod test_rust_wasm {
     }
 }
 
-/// A second module in the same artifact, naming `Reading` as
-/// `test_rust_wasm` does: two modules sharing a type on one device.
+/// A second module in the same artifact, of another scope, naming `Reading`
+/// as `test_rust_wasm` does: two modules of different scopes sharing a type
+/// on one device.
 #[arora_module::module(
     id = "e28e1c91-2416-4ee9-8c50-71980ee47689",
     name = "compass",
@@ -165,7 +179,8 @@ pub mod test_rust_wasm {
     author = "Semio",
     license = "MIT",
     description = "Test WASM module sharing a type with test-rust-wasm",
-    executable_mime = "application/wasm"
+    executable_mime = "application/wasm",
+    scope = crate::NAVIGATION
 )]
 pub mod compass {
     use super::Reading;

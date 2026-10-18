@@ -127,7 +127,6 @@ fn records() -> JsValue {
     registry
         .add_declared_module::<test_rust_wasm::test_rust_wasm::Module>(
             arora_types::record::Version::from(header().version).0,
-            arora_registry::local::ROOT_ID,
         )
         .now_or_never()
         .expect("a local registry adds without waiting")
