@@ -14,8 +14,11 @@
 //!
 //! Before the first keypoint the track holds its first value, after the last
 //! its last, with no velocity. A segment of no duration (keypoints sharing a
-//! time) plays nothing of its own: the later keypoint takes over from it, at
-//! the first and last times as anywhere.
+//! time) plays nothing of its own: the later keypoint takes over from it. At
+//! the ends the segments decide, as in the reference results: before the
+//! first segment the value it starts from holds, after the last the value it
+//! ends at; with every keypoint at one time, the first value before it and
+//! the last from it on.
 
 use crate::clip::{Keypoint, Track};
 use crate::resolve::{self, Point, SegmentInput};
@@ -28,7 +31,8 @@ pub struct Curve {
     kind: Option<Kind>,
     /// The keypoints' values, in time order.
     values: Vec<Value>,
-    /// The earliest keypoint's time; before it the first value holds.
+    /// The earliest keypoint's time: with no segment, before it the first
+    /// value holds and from it on the last.
     start: Nanos,
     segments: Vec<Segment>,
 }
@@ -275,25 +279,26 @@ impl Curve {
         }
     }
 
-    /// Where `t` falls: on a value held before the first keypoint (the
-    /// first), at the time keypoints share at the start (the last of them),
-    /// at or after the last keypoint's time (the last keypoint's, whichever
-    /// keypoints share that time), or in a segment.
+    /// Where `t` falls: on the value the first segment starts from, at or
+    /// before its start; on the value the last ends at, at or after its end;
+    /// with no segment (every keypoint at one time), on the first value
+    /// before that time and the last from it on; or in a segment. These are
+    /// the reference results' rules (Studio's), keypoints sharing the first
+    /// or last time included.
     fn locate<'s>(&'s self, t: f64, cursor: &mut Cursor) -> Located<'s> {
-        let last_value = self.values.len().saturating_sub(1);
-        if t < self.start as f64 {
-            return Located::Hold(0);
-        }
         let Some(first) = self.segments.first() else {
-            // Every keypoint shares one time, and the last of them plays.
-            return Located::Hold(last_value);
+            return Located::Hold(if t < self.start as f64 {
+                0
+            } else {
+                self.values.len().saturating_sub(1)
+            });
         };
         if t <= first.start as f64 {
             return Located::Hold(first.from);
         }
         let last = self.segments.last().expect("a first segment");
         if t >= last.end as f64 {
-            return Located::Hold(last_value);
+            return Located::Hold(last.to);
         }
         // The first segment ending at or after `t`: the one an interior
         // keypoint's instant belongs to is the one that ends there.
@@ -536,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn keypoints_sharing_the_first_or_last_time_hold_the_first_before_and_the_last_after() {
+    fn keypoints_sharing_the_first_or_last_time_hold_what_the_segments_start_and_end_at() {
         let text = |s: &str| Value::Text(s.into());
         let ends = Curve::new(&track(vec![
             keypoint(0, text("a")),
@@ -545,11 +550,11 @@ mod tests {
             keypoint(S, text("d")),
         ]));
         let at = |t: f64| ends.sample(t).unwrap().value;
-        assert_eq!(at(-1.0), text("a"));
+        assert_eq!(at(-1.0), text("b"));
         assert_eq!(at(0.0), text("b"));
         assert_eq!(at(0.5e9), text("b"));
-        assert_eq!(at(1e9), text("d"));
-        assert_eq!(at(5e9), text("d"));
+        assert_eq!(at(1e9), text("c"));
+        assert_eq!(at(5e9), text("c"));
         // Every keypoint at one time: the first before it, the last from it on.
         let one_time = Curve::new(&track(vec![
             keypoint(-1_000_000, Value::Number(1.0)),
@@ -565,8 +570,8 @@ mod tests {
             keypoint(S, Value::Number(1.0)),
             keypoint(S, Value::Number(7.0)),
         ]));
-        assert_eq!(numbers.sample(1e9).unwrap().value, Value::Number(7.0));
-        assert_eq!(numbers.sample(2e9).unwrap().value, Value::Number(7.0));
+        assert_eq!(numbers.sample(1e9).unwrap().value, Value::Number(1.0));
+        assert_eq!(numbers.sample(2e9).unwrap().value, Value::Number(1.0));
     }
 
     #[test]

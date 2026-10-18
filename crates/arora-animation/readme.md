@@ -71,8 +71,11 @@ ends.
   still holds, just after it the keypoint plays. The last keypoint plays at
   its instant.
 - **Holds.** Before the first keypoint the first value holds, after the last
-  the last, with no velocity; of keypoints sharing the first or the last
-  time, the last of them plays from that time on.
+  the last, with no velocity. Where keypoints share the first or the last
+  time, the segments decide, as in the reference results: before the first
+  segment the value it starts from, after the last the value it ends at;
+  with every keypoint at one time, the first value before it and the last
+  from it on.
 
 ## Playback
 
