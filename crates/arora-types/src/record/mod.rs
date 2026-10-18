@@ -31,7 +31,7 @@ pub mod versioned;
 pub use freeze::{Freeze, Resolver};
 pub use reference::{FrozenReference, UnfrozenReference, Version, VersionReq};
 pub use selector::{RecordType, Selector};
-pub use type_definition::TypeDefinitionFrozen;
+pub use type_definition::{TypeDefinitionFrozen, TypeRecords};
 pub use versioned::{Compat, Versioned};
 
 use crate::module::low::Header;

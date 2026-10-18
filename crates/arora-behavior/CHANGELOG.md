@@ -4,6 +4,19 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.0] - 2026-10-18
+
+### Added
+
+- `BEHAVIOR_TREE_FOLDER`: the `behavior_tree` folder, declared, where
+  `Status`'s record lives.
+
+### Changed
+
+- `Status`'s record (`AroraType::record`, arora-types 3.8) lives in
+  `BEHAVIOR_TREE_FOLDER` whatever names it, so modules sharing `Status`
+  ship one record. Requires arora-types 3.8.
+
 ## [9.4.0] - 2026-10-16
 
 ### Added

@@ -68,6 +68,25 @@ pub mod geometry {
     }
 }
 
+/// A module taking and returning a `Key`.
+#[arora_module::module(
+    id = "11112222-3333-4444-8555-000000000101",
+    name = "keys",
+    version = "1.0.0",
+    author = "Semio",
+    license = "MIT",
+    executable_mime = "application/wasm"
+)]
+pub mod keys {
+    use arora_types::data::Key;
+
+    /// Takes a key, returns one.
+    #[export(id = "11112222-3333-4444-8555-000000000110")]
+    pub fn follow(#[param(id = "11112222-3333-4444-8555-000000000111")] key: Key) -> Key {
+        key
+    }
+}
+
 fn engine() -> PinnedEngine {
     let mut engine = EngineBuilder::new().build();
     let module = HostModule::of::<geometry::Module>();
@@ -182,10 +201,12 @@ fn the_declaration_is_also_the_store_record() {
     assert_eq!(read.exports.len(), record.exports.len());
 }
 
-/// The records of the types a module's signatures name come with its own:
-/// each under the reference the module record pins it at, in the folder
-/// given — so a registry holding them all holds every record the module
-/// record depends on.
+/// The records of the types a module's signatures name come with its own,
+/// each under the reference the module record pins it at, so a registry
+/// holding them all holds every record the module record depends on. A type
+/// declaring no folder (`Point`) lives in the module's folder; one declaring
+/// its folder (`Status`, in `behavior_tree`) lives there, and its folder's
+/// record comes with it.
 #[test]
 fn the_declaration_carries_the_records_of_the_types_it_names() {
     use arora_types::record::{FrozenReference, TypeDefinitionFrozen};
@@ -197,6 +218,7 @@ fn the_declaration_carries_the_records_of_the_types_it_names() {
         record.dependencies.iter().cloned().collect();
     assert_eq!(
         records
+            .types
             .keys()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>(),
@@ -207,18 +229,43 @@ fn the_declaration_carries_the_records_of_the_types_it_names() {
         id: Point::arora_type_id(),
         version: Point::arora_type_version(),
     };
-    let Some(TypeDefinitionFrozen::Structure(structure)) = records.get(&point) else {
+    let Some(TypeDefinitionFrozen::Structure(structure)) = records.types.get(&point) else {
         panic!("Point's record is a structure: {records:?}");
     };
     assert_eq!(structure.parent, parent);
     assert_eq!(structure.name, "Point");
-    assert!(matches!(
-        records.get(&FrozenReference {
-            id: Status::arora_type_id(),
-            version: Status::arora_type_version(),
-        }),
-        Some(TypeDefinitionFrozen::Enumeration(_))
-    ));
+    let status = FrozenReference {
+        id: Status::arora_type_id(),
+        version: Status::arora_type_version(),
+    };
+    let Some(TypeDefinitionFrozen::Enumeration(enumeration)) = records.types.get(&status) else {
+        panic!("Status's record is an enumeration: {records:?}");
+    };
+    assert_eq!(enumeration.parent, arora_behavior::BEHAVIOR_TREE_FOLDER.id);
+    assert_eq!(
+        records.folders,
+        arora_behavior::BEHAVIOR_TREE_FOLDER.records().collect()
+    );
+}
+
+/// A `Key` parameter or return travels as a string, so the record freezes it
+/// as the string primitive, as a derived type's `Key` field is, and names no
+/// record for it.
+#[test]
+fn a_key_is_frozen_as_the_string_primitive() {
+    let record = keys::Module::record(Uuid::nil());
+    let ExportKind::Function(follow) = &record.exports[&keys::ids::follow::FUNCTION].kind;
+    let string = FrozenTy::from(PrimitiveKind::String);
+    assert_eq!(follow.parameters[&keys::ids::follow::KEY].ty, string);
+    assert_eq!(follow.return_ty, string);
+    assert!(record.dependencies.is_empty(), "{:?}", record.dependencies);
+    assert_eq!(keys::Module::type_records(Uuid::nil()), Default::default());
+
+    let header = keys::Module::header(executor());
+    let ExportSymbol::Function(follow) = &header.exports[0];
+    assert!(
+        matches!(follow.parameters[0].ty, TypeRef::Scalar { id } if id == *arora_types::ty::STRING_ID)
+    );
 }
 
 #[test]

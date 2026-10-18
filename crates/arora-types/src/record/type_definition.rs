@@ -1,14 +1,16 @@
 //! A type record's frozen definition: what a registry answers for a type id at
 //! a version, and what `#[derive(AroraType)]` produces for a Rust type.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::enumeration::frozen::Enumeration;
+use super::folder::{public::Public as FolderPublic, DeclaredFolder};
 use super::structure::frozen::Structure;
 use super::ty::{FrozenTy, PrimitiveKind};
+use super::FrozenReference;
 
 /// A frozen type definition: a primitive, which has no record of its own, or
 /// a structure or an enumeration record.
@@ -59,5 +61,26 @@ impl TypeDefinitionFrozen {
         .for_each(|field| insert(&field.ty)),
     }
     references
+  }
+}
+
+/// The records describing a set of types, as a registry holds them: each
+/// type's structure or enumeration record under the reference that pins it,
+/// and the folders the types declare, with the folders holding those. What
+/// [`AroraType::register_records`](crate::AroraType::register_records) and
+/// [`AroraModule::type_records`](crate::module::declared::AroraModule::type_records)
+/// produce.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TypeRecords {
+  /// The folders, by id.
+  pub folders: BTreeMap<Uuid, FolderPublic>,
+  /// The type records, by the reference that pins each.
+  pub types: BTreeMap<FrozenReference, TypeDefinitionFrozen>,
+}
+
+impl TypeRecords {
+  /// Hold `folder` and the folders holding it.
+  pub fn insert_folder(&mut self, folder: &DeclaredFolder) {
+    self.folders.extend(folder.records());
   }
 }

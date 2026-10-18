@@ -9,7 +9,13 @@ All notable changes to `arora-module`. The format follows
 ### Added
 
 - A declaration's `type_records(parent)`, the records of the types its
-  functions name; see arora-module-macros 3.0.0. Requires arora-types 3.8.
+  functions name, each in the folder its type declares or in the module's
+  folder `parent`; see arora-module-macros 3.0.0. Requires arora-types 3.8.
+
+### Changed
+
+- A `Key` parameter or return is frozen in a declaration's record as the
+  string primitive (arora-module-macros 3.0.0).
 
 ## [2.1.0] - 2026-09-28
 

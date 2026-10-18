@@ -10,12 +10,10 @@
 //!
 //! [`AroraType`]: crate::AroraType
 
-use std::collections::BTreeMap;
-
 use crate::call::{Call, CallError, CallResult};
 use crate::module::low::{Executor, Header};
 use crate::record::module::frozen::{self, Function};
-use crate::record::{FrozenReference, TypeDefinitionFrozen};
+use crate::record::TypeRecords;
 use crate::Uuid;
 
 /// One function a declared module exports, callable: a [`Call`] in —
@@ -52,12 +50,15 @@ pub trait AroraModule {
   fn record(parent: Uuid) -> frozen::Module;
 
   /// The records of the types the module's functions name, and of the types
-  /// those name, in the folder `parent`, each under the reference that pins
-  /// it: with [`record`](Self::record), what a registry holds to describe the
-  /// module. A type without a record of its own
+  /// those name, each under the reference that pins it, with the folders the
+  /// types declare: with [`record`](Self::record), what a registry holds to
+  /// describe the module. A type declaring no folder
+  /// ([`AroraType::parent`](crate::AroraType::parent)) lives in `parent`, the
+  /// module's own folder, when a function names it, and where the type
+  /// naming it lives otherwise. A type without a record of its own
   /// ([`AroraType::record`](crate::AroraType::record)) is not among them.
-  fn type_records(_parent: Uuid) -> BTreeMap<FrozenReference, TypeDefinitionFrozen> {
-    BTreeMap::new()
+  fn type_records(_parent: Uuid) -> TypeRecords {
+    TypeRecords::default()
   }
 
   /// Every exported function, callable.

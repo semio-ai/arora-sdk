@@ -191,31 +191,49 @@ impl LocalRegistry {
     }
 
     /// Add the records of a module declared in Rust: its module record at
-    /// `version` — the version its header carries — and the records of the
-    /// types its functions name, transitively, all in the folder `parent`
-    /// (the root, [`ROOT_ID`], or a folder the registry holds). A record the
-    /// registry already holds identically is kept.
+    /// `version` — the version its header carries — in the folder `parent`
+    /// (the root, [`ROOT_ID`], or a folder the registry holds), and the
+    /// records of the types its functions name, transitively
+    /// ([`AroraModule::type_records`]): each in the folder its type declares,
+    /// added with that folder's records, or in `parent` for a type declaring
+    /// none. A record the registry already holds identically is kept, so
+    /// modules sharing a type that declares its folder add together.
     ///
     /// Fails without adding the module record when it names a type that has
     /// no record of its own — one implementing `AroraType` without a record,
-    /// or holding a fixed-length array, or naming such a type — naming each.
-    /// The type records it added before failing stay.
+    /// or holding a fixed-length array, or naming such a type — naming each,
+    /// and when a type record differs from the one the registry holds at its
+    /// id and version: a type two modules share in different folders without
+    /// declaring its own. The records it added before failing stay.
     pub async fn add_declared_module<M: AroraModule>(
         &mut self,
         version: Version,
         parent: Uuid,
     ) -> Result<(), RegistryError> {
-        for (reference, record) in M::type_records(parent) {
-            let (id, tag) = (reference.id, reference.version.0);
+        let records = M::type_records(parent);
+        crate::local_yaml::add_folders(records.folders.into_iter().collect(), self).await?;
+        for (reference, record) in records.types {
+            let name = record.name();
+            let (id, tag) = (reference.id, reference.version.0.clone());
             match record {
                 TypeDefinitionFrozen::Structure(structure) => {
-                    self.add_structure(id, tag, structure).await?
+                    self.add_structure(id, tag, structure).await
                 }
                 TypeDefinitionFrozen::Enumeration(enumeration) => {
-                    self.add_enumeration(id, tag, enumeration).await?
+                    self.add_enumeration(id, tag, enumeration).await
                 }
-                TypeDefinitionFrozen::Primitive(_) => {}
+                TypeDefinitionFrozen::Primitive(_) => Ok(()),
             }
+            .map_err(|error| match error {
+                RegistryError::DuplicateVersion { .. }
+                | RegistryError::DuplicateSelector { .. } => RegistryError::generic(&format!(
+                    "module '{}' names type '{name}' ({reference}), whose record conflicts \
+                         with one the registry holds ({error}): a type modules in different \
+                         folders share declares its own folder",
+                    M::record(parent).name,
+                )),
+                error => error,
+            })?;
         }
         let module = M::record(parent);
         let mut references = HashSet::new();
@@ -312,9 +330,7 @@ pub fn get_latest_frozen(
     version_index.iter().last().map(|(_, r)| r)
 }
 
-pub const ROOT_ID: Uuid = Uuid::from_bytes([
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-]);
+pub use arora_types::record::folder::ROOT_ID;
 
 #[cfg(test)]
 mod tests {
