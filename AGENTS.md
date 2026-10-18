@@ -275,6 +275,8 @@ Quick reference:
 | `arora-module-cpp` | C++ code generation |
 | `arora-behavior-tree` | Behavior tree runtime |
 | `arora-behavior-tree-types` | BT primitive types |
+| `arora-animation` | Keyframe clips, exact evaluation, players on the device clock |
+| `arora-animation-module` | The animation module (`modules/animation`), host-linked or a wasm guest |
 
 ## Tips for AI Agents
 
