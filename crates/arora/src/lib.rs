@@ -55,7 +55,7 @@ pub use run::{
     local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
     serve_local_ws_bridge, standard_frontend, DeviceCli,
 };
-pub use runtime::RuntimeError;
+pub use runtime::{list_keys, RuntimeError};
 
 /// Re-exported so an embedder can name the device's method index — what a
 /// Groot tree's tags resolve against and what each tick hands the
@@ -470,6 +470,17 @@ impl Arora {
         LocalCaller {
             tx: self.caller_tx.clone(),
         }
+    }
+
+    /// The device's callable methods whose name starts with `prefix` (all of
+    /// them when `None`), sorted by name, each with its full signature: what
+    /// a `DescribeMethods` from a remote or a [`LocalCaller`] answers, read
+    /// now rather than at a step. The method index changes only through
+    /// [`load_module`](Self::load_module), [`reload_module`](Self::reload_module)
+    /// and [`unload_module`](Self::unload_module), so what this reads holds
+    /// until one of them is called.
+    pub fn describe_methods(&self, prefix: Option<&str>) -> Vec<MethodSignature> {
+        runtime::describe_methods(&self.function_index, prefix)
     }
 
     /// Watch the behavior's standing error: the message of its latest failed
@@ -2743,6 +2754,51 @@ mod caller_tests {
         assert_eq!(methods[0].id, DOUBLE);
         assert_eq!(methods[0].name, "double");
         assert_eq!(methods[0].function.parameter_ordering, vec![DOUBLE_X]);
+    }
+
+    /// What the device answers a `ListKeys` and a `DescribeMethods` with is
+    /// readable without a step: `list_keys` over a sibling handle of its
+    /// store, `describe_methods` on the device.
+    #[test]
+    fn keys_and_methods_read_without_a_step_as_the_device_answers_them() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let store = arora.store().clone_box();
+        store
+            .set_meta(HashMap::from([(
+                Key::from("face/brow"),
+                KeyMeta::new().editable(),
+            )]))
+            .expect("describe a key");
+        store
+            .write(StateChange::set("face/mouth", Value::F64(0.5)))
+            .expect("write a key");
+
+        let read = list_keys(&*store, Some("face/"));
+        assert_eq!(
+            read.iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            ["face/brow", "face/mouth"],
+            "a described key and a held one, sorted: {read:?}"
+        );
+        let answered = settle(&mut arora, caller.list_keys(Some("face/".to_string())))
+            .expect("the device lists its keys");
+        assert_eq!(read, answered);
+
+        let read = arora.describe_methods(Some("stop"));
+        assert_eq!(read.len(), 2, "both modules' stop: {read:?}");
+        let answered = settle(
+            &mut arora,
+            caller.describe_methods(Some("stop".to_string())),
+        )
+        .expect("the device describes its methods");
+        assert_eq!(read, answered);
+        assert_eq!(
+            arora.describe_methods(None).len(),
+            arora.function_index.len(),
+            "no prefix describes the whole index"
+        );
     }
 
     #[test]
