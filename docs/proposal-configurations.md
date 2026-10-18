@@ -20,13 +20,16 @@ In short:
 - **Everything a device runs is a record.** Modules, structures and
   enumerations already are; behaviors and configurations become record kinds
   too. Records are versioned and frozen, held in `arora-registry`, and kept by
-  the store's backend (semio-db) as versioned assets. Releases, ranges and
-  content hashes are record metadata.
-- **A device resolves through its own `arora-registry`**, filled from a
-  **registry source**: local record directories, semio-db
-  (`arora-registry-remote`), or Studio. arora-sdk knows only the source trait;
-  the Studio source lives in studio-bridge's client, which already owns the
-  connection to Studio, the credentials and the device's cache directory.
+  the store's backend as versioned assets. Releases, ranges and content
+  hashes are record metadata.
+- **The store is the only source of records.** A device resolves through its
+  own `arora-registry`, filled through a **registry source**, and does not
+  serve records. arora-sdk knows only the source trait, so a backend could be
+  distributed; for now the only backend is Studio's, whose source lives in
+  studio-bridge's client, which already owns the connection to Studio, the
+  credentials and the device's cache directory.
+- **A type's record has one home folder**, the one the type declares, so
+  modules sharing a type ship one record and load together on a device.
 - **A guest module is indexed from its module record.** The header stays as it
   is; the record, checked against it, gives every export its frozen signature
   in the method index. This unblocks behaviors calling `step_values`
@@ -101,7 +104,7 @@ a registry on the device, and records to fill it.
 |---|---|---|---|
 | What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. Release metadata — content hashes, deprecation (`yanked`), the scoped name — attaches to a record version instead of forming a second vocabulary. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
-| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | A **registry source** trait in `arora-registry`, one implementation per origin | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. semio-db is the store's backend; Studio's source lives in studio-bridge's client. `arora-index`'s selection, verification and sealing become that source's implementation. |
+| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through a **registry source** trait in `arora-registry`, one implementation per backend | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. For now the store's only backend is Studio's, and its source lives in studio-bridge's client. `arora-index`'s selection, verification and sealing become that source's implementation. |
 | Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | studio-bridge's client | Arora works without Studio. The bridge client already holds the Studio connection and the device's credentials. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
 | Publishing | semio-cli (semio-db); Studio's web publishing | semio-cli for records, and the store's backend | semio-cli already creates and tags records and uploads blobs. |
@@ -122,8 +125,10 @@ STUDIO-347 on both kinds of devices.
 - **At `build`, a guest module whose module record is in the registry is
   indexed from it.** The record is the one at the module's id and the
   header's version. Each export of the header must have the same id, name and
-  parameter ids in the record, and each frozen type must name the id the
-  header's `TypeRef` names. A record that does not match its header fails the
+  parameter ids in the record, and each frozen type must be the header's
+  `TypeRef` frozen: a primitive id as that primitive — a `Key` parameter as
+  the string primitive — and any other id as a reference to it, at the
+  version the record pins. A record that does not match its header fails the
   build, naming the export: a wrong record is a packaging error, not a reason
   to index less. A guest module without a record keeps today's primitive-only
   indexing and warning.
@@ -155,10 +160,20 @@ declaration.
 ### 2.2 The producers
 
 - **Rust declarations.** The derive produces a structure or enumeration
-  record for each `AroraType` (`AroraType::record()`), at the version
+  record for each `AroraType` (`AroraType::record`), at the version
   `arora_type_version()` already returns, so a declared module exports the
-  closure of its records. Today the derive produces only the header
-  vocabulary's `Type`.
+  closure of its records. The module macros and the derive freeze a `Key` as
+  the string primitive, the one form the device's check accepts. Today the
+  derive produces only the header vocabulary's `Type`.
+- **Folders.** A type declares the folder its record lives in,
+  `#[arora(parent = FOLDER)]`, naming a `DeclaredFolder` (id, name, parent
+  folder); the record lives there whatever names the type, and the folder's
+  record ships alongside. A type declaring none lives in the folder of what
+  names it: the module's folder — the one the module's records are exported
+  to — when a module's function names it, the folder of the type naming it
+  otherwise. So a type several modules share has one home and the modules
+  only reference it: `Status` lives in `behavior_tree`, and vizij's types in
+  one fixed `vizij` folder.
 - **An export step** writes `records/` beside the header: for a declared
   module from `AroraModule::record` and the derived types; for a `module.yaml`
   module from `arora-module-cli`'s analysis, which already produces both.
@@ -272,11 +287,16 @@ pub trait RegistrySource {
   shape `RemoteCachedRegistry` has today. It persists under the device
   directory (records in the `records/` layout, artifacts by content hash), in
   the directory the bridge client already uses, not a second cache root.
-- **Implementations:** record directories (local, no network); semio-db
-  (`arora-registry-remote`); Studio, in studio-bridge's client, with its
-  connection, credentials, private-artifact sealing and offline fallback —
-  what `arora-index` implements today; Studio's page, backed by its own store
-  client.
+- **Implementations:** record directories (local, no network); Studio's
+  backend, in studio-bridge's client, with its connection, credentials,
+  private-artifact sealing and offline fallback — what `arora-index`
+  implements today; Studio's page, backed by its own store client; semio-db
+  (`arora-registry-remote`), which has no deployment.
+- **The store is the only source of records.** A client — Studio, a CLI —
+  reads a record from the store through a source, as a device does; a device
+  does not serve the records it holds. No arora-sdk code names a store: the
+  trait lets a backend be distributed, and for now the only backend is
+  Studio's.
 - **A source authenticates as the device**, never as a remote that asks the
   device for something.
 
@@ -470,8 +490,8 @@ with native modules changes them, by restarting.
 
 - **`arora-types` major.** `RecordType` gains `Behavior` and `Configuration`,
   and is matched exhaustively. The record kinds' frozen serde shapes join the
-  store's wire contract, with their golden tests; semio-db accepts the new
-  kinds.
+  store's wire contract, with their golden tests; the store's backend
+  accepts the new kinds.
 - **`arora-registry` minor.** The registry source trait, exact lookup, and
   the new kinds.
 - **`arora-bridge` major (7.0.0).** `BridgeOp` gains two variants and is
@@ -579,11 +599,15 @@ Each stage lands on its own.
    Unblocks STUDIO-347.
 2. **Module reload** on a running device, from the module-reload work: load,
    reload and unload between steps, instantiation before any old instance is
-   dropped, interrupted commands, native modules refused.
+   dropped, interrupted commands, native modules refused. A module loaded or
+   reloaded with its record in the registry is checked as at build. Its
+   record failures — a record that does not describe the header, a missing
+   dependency — are one `ModuleError` variant, `Record(RecordError)`, and
+   `ModuleError` stays exhaustive.
 3. **Record kinds and sources.** `arora-types`: behavior and configuration
    records; release metadata on record versions. `arora-registry`: the source
    trait, exact lookup, freezing a configuration with its checks. Sources:
-   record directories, semio-db.
+   record directories.
 4. **Configurations in the runtime.** `Arora::apply_configuration` with the
    diff and swap (3.6), persistence and the start-up apply,
    `--configuration` on the runner. No protocol change.
@@ -616,8 +640,10 @@ Each stage lands on its own.
   so the next operation or kind is a minor.
 - **A configuration module already in the base set**: refuse (proposed), or
   let the configuration replace it?
-- **Serving records.** Should a device answer a request for the records it
-  holds, for a client without the store?
+- **Is `RecordError` `#[non_exhaustive]`?** Proposed: yes. A caller of
+  `load_module` or `reload_module` reports a record failure and never handles
+  each one, and a non-exhaustive `RecordError` is what lets a new record
+  failure land as an `arora` minor; an exhaustive one makes each a major.
 - **Model family in requirements**: required, or left to Studio's binding
   check?
 
@@ -637,8 +663,33 @@ be translated at every boundary.
 ### arora-sdk knows a registry source, not Studio
 
 Arora works without Studio. The source trait lets a device fill its registry
-from local directories, semio-db or Studio alike; Studio's connection,
-credentials and cache stay in studio-bridge's client, which owns them already.
+from local directories or any backend of the store alike; Studio's backend,
+the only one for now, keeps its connection, credentials and cache in
+studio-bridge's client, which owns them already.
+
+### A device does not serve records
+
+The store is the one source of records. A device answering for the records it
+holds would be a second, partial store whose contents depend on what the
+device happens to run, and a second surface to authorize. A client reads
+records where the device does, from the store through a source.
+
+### A type's record has one home folder
+
+A record's folder is part of the record. Placing a type's record in the folder
+of each module naming it gives two records under one id and version, and a
+registry holds only one, so two modules sharing the type could not load
+together. A type therefore declares its folder, and the folder's record ships
+with it; a type declaring none takes the folder of what names it, which is
+right as long as one module or one type names it.
+
+### One frozen form for a header type
+
+A record's frozen type is the header's type frozen: a primitive id as that
+primitive, a `Key` included, and any other id as a reference. The module
+macros and the derive produce that one form, so the device checks a record
+against its header with one rule, and a record cannot describe the same
+parameter two ways.
 
 ### The header does not carry frozen types
 
