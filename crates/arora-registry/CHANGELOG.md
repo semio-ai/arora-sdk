@@ -13,12 +13,14 @@ All notable changes to `arora-registry`. The format follows
 - `LocalRegistry::missing_dependencies`: the records a record depends on,
   transitively, that the registry does not hold; a well-known type is never
   missing.
-- `LocalRegistry::add_declared_module::<M>(version, parent)`: a Rust-declared
-  module's record, in the folder `parent`, and the records of the types its
-  functions name, each in the folder its type declares — added with them —
-  or in `parent`. Fails, naming them, when the module names a type without a
-  record, and when a type record differs from the one held at its id and
-  version.
+- `LocalRegistry::add_declared_module::<M>(version)`: a Rust-declared
+  module's record, in the scope its declaration states, and the records of
+  the types its functions name, each in the scope its type states or in the
+  module's; each scope's folder is added with them, and a module declared
+  without a scope lives at the root. Fails, naming them, when the module
+  names a type without a record, when a type record differs from the one
+  held at its id and version, and when another record holds a type's name in
+  its scope.
 - `local_yaml::records_as_yaml` and `local_yaml::write_records_to_yaml_dir`:
   the records a registry holds, in the form `load_records` and
   `load_records_from_yaml_dir` read. The same records write the same YAML.
@@ -32,6 +34,9 @@ All notable changes to `arora-registry`. The format follows
   Several versions of one record are held side by side.
 - `load_records` and `load_records_from_yaml_dir` add each folder after its
   parent, whatever order the folders come in.
+- Another record under a path a record holds fails as `DuplicateSelector`
+  whatever its version: a name is unique within its folder, and so within
+  its scope.
 - `TypeDefinitionFrozen` is arora-types' (3.8), re-exported here unchanged,
   and so is `local::ROOT_ID`.
 - `tokio` is a development dependency only; `anyhow` and `url`, unused, are

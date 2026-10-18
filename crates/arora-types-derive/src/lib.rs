@@ -18,13 +18,12 @@
 //! that also name-hashes the struct's fields. `#[arora(version = "…")]` pins
 //! the record version (`1.0.0` by default).
 //!
-//! `#[arora(parent = FOLDER)]` on a type names the
-//! `arora_types::record::folder::DeclaredFolder` its record lives in, whatever
-//! names the type: a type several modules share declares its folder, so they
-//! ship one record, and the folder's record with it. A type declaring none
-//! lives in the folder of what names it — the module whose function names it
-//! (the folder the module's records are exported to), or the type whose field
-//! names it.
+//! `#[arora(scope = SCOPE)]` on a type names the
+//! `arora_types::record::scope::Scope` its record lives in, whatever names
+//! the type: a type modules of different scopes share states its scope, so
+//! they ship one record. A type stating none lives in the scope of what names
+//! it — the module whose function names it (the scope its declaration
+//! states), or the type whose field names it.
 //!
 //! A `#[arora(keyvalue)]` field crosses the value plane as-is when its Rust
 //! type is `Value`, and through `value_serde` (name-hashed, unseeded)
@@ -162,7 +161,7 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         <#ty as arora_types::AroraType>::register_types(registry);
       });
       register_record_calls.push(quote! {
-        <#ty as arora_types::AroraType>::register_records(parent, records);
+        <#ty as arora_types::AroraType>::register_records(scope, records);
       });
     }
 
@@ -204,14 +203,14 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
     field_idents.push(fname.clone());
   }
   let version_fn = version_fn(&meta);
-  let parent_fn = parent_fn(&meta);
+  let scope_fn = scope_fn(&meta);
   let register_self = register_self_record();
-  // The types a field names that declare no folder live where this one does.
+  // The types a field names that state no scope live where this one does.
   let register_named = if register_record_calls.is_empty() {
     quote! {}
   } else {
     quote! {
-      let parent = <Self as arora_types::AroraType>::parent().map_or(default_parent, |folder| folder.id);
+      let scope = <Self as arora_types::AroraType>::scope().or(default_scope);
       #(#register_record_calls)*
     }
   };
@@ -249,8 +248,12 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
         #(#register_calls)*
       }
 
-      fn record(default_parent: arora_types::Uuid) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
-        let parent = <Self as arora_types::AroraType>::parent().map_or(default_parent, |folder| folder.id);
+      fn record(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+      ) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        let parent = <Self as arora_types::AroraType>::scope()
+          .or(default_scope)
+          .map_or(arora_types::record::folder::ROOT_ID, |scope| scope.id);
         ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Structure(
           arora_types::record::structure::frozen::Structure {
             parent,
@@ -261,14 +264,14 @@ fn expand_struct(input: &DeriveInput, named: &syn::FieldsNamed) -> syn::Result<T
       }
 
       fn register_records(
-        default_parent: arora_types::Uuid,
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
         records: &mut arora_types::record::TypeRecords,
       ) {
         #register_self
         #register_named
       }
 
-      #parent_fn
+      #scope_fn
       #version_fn
     }
 
@@ -322,7 +325,7 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
     Span::call_site(),
   )?;
   let version_fn = version_fn(&meta);
-  let parent_fn = parent_fn(&meta);
+  let scope_fn = scope_fn(&meta);
   let register_self = register_self_record();
   let mismatch = format!("expected a `{}` enumeration", name_str);
 
@@ -398,8 +401,12 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
         registry.insert(id, <Self as arora_types::AroraType>::arora_type());
       }
 
-      fn record(default_parent: arora_types::Uuid) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
-        let parent = <Self as arora_types::AroraType>::parent().map_or(default_parent, |folder| folder.id);
+      fn record(
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
+      ) -> ::std::option::Option<arora_types::record::TypeDefinitionFrozen> {
+        let parent = <Self as arora_types::AroraType>::scope()
+          .or(default_scope)
+          .map_or(arora_types::record::folder::ROOT_ID, |scope| scope.id);
         ::std::option::Option::Some(arora_types::record::TypeDefinitionFrozen::Enumeration(
           arora_types::record::enumeration::frozen::Enumeration {
             parent,
@@ -410,13 +417,13 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
       }
 
       fn register_records(
-        default_parent: arora_types::Uuid,
+        default_scope: ::std::option::Option<arora_types::record::scope::Scope>,
         records: &mut arora_types::record::TypeRecords,
       ) {
         #register_self
       }
 
-      #parent_fn
+      #scope_fn
       #version_fn
     }
 
@@ -453,11 +460,11 @@ fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenSt
 }
 
 /// The start of `register_records`: the type's own record under the
-/// reference that pins it, with the records of the folder it declares.
-/// Returns when the record is already there (a type reachable from itself is
-/// visited once, and a type keeps the folder it was first reached with) or
-/// the type has no record (its shape has no record form, so the types it
-/// names are not reached through it).
+/// reference that pins it, with the scope it lives in. Returns when the
+/// record is already there (a type reachable from itself is visited once,
+/// and a type keeps the scope it was first reached with) or the type has no
+/// record (its shape has no record form, so the types it names are not
+/// reached through it).
 fn register_self_record() -> TokenStream2 {
   quote! {
     let reference = arora_types::record::FrozenReference {
@@ -467,23 +474,23 @@ fn register_self_record() -> TokenStream2 {
     if records.types.contains_key(&reference) {
       return;
     }
-    let ::std::option::Option::Some(record) = <Self as arora_types::AroraType>::record(default_parent) else {
+    let ::std::option::Option::Some(record) = <Self as arora_types::AroraType>::record(default_scope) else {
       return;
     };
-    if let ::std::option::Option::Some(folder) = <Self as arora_types::AroraType>::parent() {
-      records.insert_folder(folder);
+    if let ::std::option::Option::Some(scope) = <Self as arora_types::AroraType>::scope().or(default_scope) {
+      records.scopes.insert(scope);
     }
     records.types.insert(reference, record);
   }
 }
 
-/// The `parent` override, when `#[arora(parent = FOLDER)]` is set: the
-/// `DeclaredFolder` the type's record lives in.
-fn parent_fn(meta: &AroraMeta) -> TokenStream2 {
-  match &meta.parent {
-    Some(folder) => quote! {
-      fn parent() -> ::std::option::Option<&'static arora_types::record::folder::DeclaredFolder> {
-        ::std::option::Option::Some(&#folder)
+/// The `scope` override, when `#[arora(scope = SCOPE)]` is set: the `Scope`
+/// the type's record lives in.
+fn scope_fn(meta: &AroraMeta) -> TokenStream2 {
+  match &meta.scope {
+    Some(scope) => quote! {
+      fn scope() -> ::std::option::Option<arora_types::record::scope::Scope> {
+        ::std::option::Option::Some(#scope)
       }
     },
     None => quote! {},
@@ -553,9 +560,9 @@ struct AroraMeta {
   /// its contents dynamically typed. Used for a field that carries arbitrary
   /// arora values whose types are not known statically (e.g. a call's args).
   keyvalue: bool,
-  /// `#[arora(parent = PATH)]` on a type: the `DeclaredFolder` its record
-  /// lives in, whatever names it.
-  parent: Option<syn::Path>,
+  /// `#[arora(scope = PATH)]` on a type: the `Scope` its record lives in,
+  /// whatever names it.
+  scope: Option<syn::Path>,
 }
 
 /// Parse `#[arora(id = "…", name = "…")]` from an attribute list. `id` pins the
@@ -581,8 +588,8 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
       } else if meta.path.is_ident("keyvalue") {
         parsed.keyvalue = true;
         Ok(())
-      } else if meta.path.is_ident("parent") {
-        parsed.parent = Some(meta.value()?.parse()?);
+      } else if meta.path.is_ident("scope") {
+        parsed.scope = Some(meta.value()?.parse()?);
         Ok(())
       } else if meta.path.is_ident("version") {
         let lit: syn::LitStr = meta.value()?.parse()?;
@@ -599,7 +606,7 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
         Ok(())
       } else {
         Err(meta.error(
-          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, `version = \"…\"`, `parent = FOLDER`, or `keyvalue`)",
+          "unknown `arora` attribute (expected `id = \"…\"`, `name = \"…\"`, `version = \"…\"`, `scope = SCOPE`, or `keyvalue`)",
         ))
       }
     })?;
@@ -607,13 +614,13 @@ fn parse_arora_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
   Ok(parsed)
 }
 
-/// The `#[arora(…)]` of a field or a variant, which has no folder of its own.
+/// The `#[arora(…)]` of a field or a variant, which has no scope of its own.
 fn member_meta(attrs: &[Attribute]) -> syn::Result<AroraMeta> {
   let meta = parse_arora_meta(attrs)?;
-  if let Some(parent) = &meta.parent {
+  if let Some(scope) = &meta.scope {
     return Err(syn::Error::new_spanned(
-      parent,
-      "`parent` names the folder of a type's record; a field or a variant has none",
+      scope,
+      "`scope` names the scope of a type's record; a field or a variant has none",
     ));
   }
   Ok(meta)

@@ -8,25 +8,27 @@ All notable changes to `arora-types`. The format follows
 
 ### Added
 
-- `AroraType::parent()`: the folder a type declares as its record's home,
-  `None` by default. `AroraType::record(default_parent)`: a type's structure
-  or enumeration record, at its `arora_type_version`, in its declared folder,
-  else in `default_parent`, the folder of what names it; and
-  `AroraType::register_records(default_parent, records)`, the records of
-  every type it names with its own, and the folders they declare, a type
-  declaring none living where the type naming it does. `record` and
+- `record::scope::Scope`: a scope declared in Rust — its fixed id and its
+  handle, the name of its folder at the root — with its folder record.
+  `record::scope::ARORA`, the `arora` scope
+  (`61726f72-6100-0000-f01d-000000000000`). `record::folder::ROOT_ID`, the
+  root's id (arora-registry re-exports it).
+- `AroraType::scope()`: the scope a type states its record lives in, `None`
+  by default. `AroraType::record(default_scope)`: a type's structure or
+  enumeration record, at its `arora_type_version`, in its stated scope, else
+  in `default_scope`, the scope of what names it, else at the root; and
+  `AroraType::register_records(default_scope, records)`, the records of
+  every type it names with its own, and the scopes they live in, a type
+  stating none living where the type naming it does. `record` and
   `register_records` default to none, which a well-known type (a `Key`, a
   `TaskId`) keeps. `#[derive(AroraType)]` (arora-types-derive 2.0) produces
   them.
-- `record::folder::DeclaredFolder`: a folder declared in Rust — its id, name
-  and parent folder — with its record and those of the folders holding it.
-  `record::folder::ROOT_ID`, the root's id (arora-registry re-exports it).
 - `record::TypeRecords`: type records by the reference that pins each, with
-  the folders they live in.
-- `AroraModule::type_records(parent)`: the records of the types a declared
-  module's functions name, beside its `record`; a type declaring no folder
-  lives in `parent`, the module's. Defaults to none; arora-module-macros 3.0
-  produces it.
+  the scopes they live in.
+- `AroraModule::scope()`, the scope a declared module's records live in, and
+  `AroraModule::type_records()`, the records of the types its functions name,
+  beside its `record`; a type stating no scope lives in the module's. Both
+  default to none; arora-module-macros 3.0 produces them.
 - `record::TypeDefinitionFrozen`, a type's frozen definition (a primitive, a
   structure or an enumeration record), with `references()`, the pinned
   references its fields or variants name. arora-registry re-exports it.

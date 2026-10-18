@@ -9,6 +9,7 @@ use arora_module::AroraModule;
 use arora_types::call::{Call, CallBridge};
 use arora_types::module::low::{Executor, ExportSymbol, TypeRef};
 use arora_types::record::module::frozen::ExportKind;
+use arora_types::record::scope::{Scope, ARORA};
 use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::value::{StructureField, Value};
 use arora_types::{AroraType, Uuid};
@@ -23,6 +24,12 @@ pub struct Point {
     y: f64,
 }
 
+/// The scope `geometry`'s records live in.
+pub const SHAPES: Scope = Scope {
+    id: Uuid::from_u128(0x5a9e_f01d),
+    handle: "shapes",
+};
+
 #[arora_module::module(
     id = "11112222-3333-4444-8555-000000000001",
     name = "geometry",
@@ -30,7 +37,8 @@ pub struct Point {
     author = "Semio",
     license = "MIT",
     description = "A declared module under test",
-    executable_mime = "application/wasm"
+    executable_mime = "application/wasm",
+    scope = crate::SHAPES
 )]
 pub mod geometry {
     use super::{Point, Status};
@@ -204,16 +212,16 @@ fn the_declaration_is_also_the_store_record() {
 /// The records of the types a module's signatures name come with its own,
 /// each under the reference the module record pins it at, so a registry
 /// holding them all holds every record the module record depends on. A type
-/// declaring no folder (`Point`) lives in the module's folder; one declaring
-/// its folder (`Status`, in `behavior_tree`) lives there, and its folder's
-/// record comes with it.
+/// stating no scope (`Point`) lives in the module's, the scope its
+/// declaration states; one stating its scope (`Status`, in `arora`) lives
+/// there. The records name both scopes.
 #[test]
 fn the_declaration_carries_the_records_of_the_types_it_names() {
     use arora_types::record::{FrozenReference, TypeDefinitionFrozen};
 
-    let parent = Uuid::parse_str("11112222-3333-4444-8555-0000000000ff").unwrap();
-    let records = geometry::Module::type_records(parent);
-    let record = geometry::Module::record(parent);
+    assert_eq!(geometry::Module::scope(), Some(SHAPES));
+    let records = geometry::Module::type_records();
+    let record = geometry::Module::record(SHAPES.id);
     let named: std::collections::BTreeSet<FrozenReference> =
         record.dependencies.iter().cloned().collect();
     assert_eq!(
@@ -232,7 +240,7 @@ fn the_declaration_carries_the_records_of_the_types_it_names() {
     let Some(TypeDefinitionFrozen::Structure(structure)) = records.types.get(&point) else {
         panic!("Point's record is a structure: {records:?}");
     };
-    assert_eq!(structure.parent, parent);
+    assert_eq!(structure.parent, SHAPES.id);
     assert_eq!(structure.name, "Point");
     let status = FrozenReference {
         id: Status::arora_type_id(),
@@ -241,10 +249,10 @@ fn the_declaration_carries_the_records_of_the_types_it_names() {
     let Some(TypeDefinitionFrozen::Enumeration(enumeration)) = records.types.get(&status) else {
         panic!("Status's record is an enumeration: {records:?}");
     };
-    assert_eq!(enumeration.parent, arora_behavior::BEHAVIOR_TREE_FOLDER.id);
+    assert_eq!(enumeration.parent, ARORA.id);
     assert_eq!(
-        records.folders,
-        arora_behavior::BEHAVIOR_TREE_FOLDER.records().collect()
+        records.scopes,
+        std::collections::BTreeSet::from([SHAPES, ARORA])
     );
 }
 
@@ -259,7 +267,9 @@ fn a_key_is_frozen_as_the_string_primitive() {
     assert_eq!(follow.parameters[&keys::ids::follow::KEY].ty, string);
     assert_eq!(follow.return_ty, string);
     assert!(record.dependencies.is_empty(), "{:?}", record.dependencies);
-    assert_eq!(keys::Module::type_records(Uuid::nil()), Default::default());
+    assert_eq!(keys::Module::type_records(), Default::default());
+    // Declared without a scope: its records live at the root.
+    assert_eq!(keys::Module::scope(), None);
 
     let header = keys::Module::header(executor());
     let ExportSymbol::Function(follow) = &header.exports[0];

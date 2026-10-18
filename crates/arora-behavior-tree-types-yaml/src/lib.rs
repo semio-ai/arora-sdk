@@ -20,7 +20,7 @@ mod tests {
                 .resolve_id(&Uuid::from_str("325a5767-e344-4532-860e-0749bcf2e428").unwrap())
                 .await
                 .unwrap(),
-            "behavior_tree.Status"
+            "arora.Status"
         );
     }
 }

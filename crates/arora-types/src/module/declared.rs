@@ -13,6 +13,7 @@
 use crate::call::{Call, CallError, CallResult};
 use crate::module::low::{Executor, Header};
 use crate::record::module::frozen::{self, Function};
+use crate::record::scope::Scope;
 use crate::record::TypeRecords;
 use crate::Uuid;
 
@@ -49,15 +50,23 @@ pub trait AroraModule {
   /// The module as a store record, under the folder `parent`.
   fn record(parent: Uuid) -> frozen::Module;
 
+  /// The scope the module's records live in, as its declaration states it:
+  /// its own record (`record(scope.id)`) and those of the types it names that
+  /// state no scope of their own. `None` for a module declared without one,
+  /// whose records live at the root.
+  fn scope() -> Option<Scope> {
+    None
+  }
+
   /// The records of the types the module's functions name, and of the types
-  /// those name, each under the reference that pins it, with the folders the
-  /// types declare: with [`record`](Self::record), what a registry holds to
-  /// describe the module. A type declaring no folder
-  /// ([`AroraType::parent`](crate::AroraType::parent)) lives in `parent`, the
-  /// module's own folder, when a function names it, and where the type
+  /// those name, each under the reference that pins it, with the scopes they
+  /// live in: with [`record`](Self::record), what a registry holds to
+  /// describe the module. A type stating no scope
+  /// ([`AroraType::scope`](crate::AroraType::scope)) lives in the module's
+  /// [`scope`](Self::scope) when a function names it, and where the type
   /// naming it lives otherwise. A type without a record of its own
   /// ([`AroraType::record`](crate::AroraType::record)) is not among them.
-  fn type_records(_parent: Uuid) -> TypeRecords {
+  fn type_records() -> TypeRecords {
     TypeRecords::default()
   }
 

@@ -1390,7 +1390,7 @@ impl Registry {
         Ok(())
     }
 
-    /// Resolve a UUID string to a dot-separated name path (e.g. `"behavior_tree.Status"`).
+    /// Resolve a UUID string to a dot-separated name path (e.g. `"arora.Status"`).
     /// Returns `None` if the UUID is not known.
     #[wasm_bindgen(js_name = resolveId)]
     pub fn resolve_id(&self, id: &str) -> Option<String> {

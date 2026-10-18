@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree-types-yaml"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 include = ["enumeration/**.yaml", "structure/**.yaml", "LICENSE"]
@@ -13,7 +13,7 @@ uuid = { version = "1", features = ["v4"] }
 [build-dependencies]
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types" }
 arora-registry = { path = "../arora-registry" }
+arora-types = { path = "../arora-types" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-uuid = "1"
