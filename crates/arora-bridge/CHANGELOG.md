@@ -4,6 +4,14 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.2.0] - 2026-10-10
+
+### Changed
+
+- `client::method_info` describes a parameter or return of the uuid primitive
+  as `Type::Uuid` and one of the dynamic key-value type as `Type::KeyValue`,
+  the values they travel as; other records stay `Type::Structure`.
+
 ## [6.1.0] - 2026-10-05
 
 ### Added

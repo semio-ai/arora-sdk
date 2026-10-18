@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.2.0] - 2026-10-19
+
+### Added
+
+- `arora::list_keys(store, prefix)`: the keys a store holds or describes,
+  with their meta. This is what a device answers `ListKeys` with, and an
+  embedder holding a sibling handle of the store reads it without a step,
+  including while `run` owns the device.
+- `Arora::describe_methods(prefix)`: the device's methods with their
+  signatures, as `DescribeMethods` answers, read without a step.
+
 ## [13.1.0] - 2026-10-18
 
 ### Added

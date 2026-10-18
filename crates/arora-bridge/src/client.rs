@@ -287,10 +287,12 @@ pub fn run_of(spawned: &Value) -> Result<Run, String> {
 /// The value-plane shape of a frozen type: which [`Value`] a client sends for a
 /// parameter of that type, and which one the method answers with.
 ///
-/// A non-primitive is advertised as the shape it travels in — a structure, or an
-/// array of values — not as the record it is: pinning that down needs a type
-/// registry, which a client of the device does not hold. A client that knows
-/// the record sends its encoding either way.
+/// The uuid primitive and the dynamic key-value type travel as themselves
+/// ([`Type::Uuid`], [`Type::KeyValue`]). Any other non-primitive is advertised
+/// as the shape it travels in — a structure, or an array of values — not as the
+/// record it is: pinning that down needs a type registry, which a client of the
+/// device does not hold. A client that knows the record sends its encoding
+/// either way.
 fn value_type(ty: &FrozenTy) -> Type {
     match ty {
         FrozenTy::Primitive(primitive) => match primitive.kind {
@@ -320,6 +322,12 @@ fn value_type(ty: &FrozenTy) -> Type {
             PrimitiveKind::ArrayF64 => Type::ArrayF64,
             PrimitiveKind::ArrayString => Type::ArrayString,
         },
+        FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *arora_types::ty::UUID_ID => {
+            Type::Uuid
+        }
+        FrozenTy::FrozenScalar(scalar) if scalar.reference.id == *arora_types::ty::KEY_VALUE_ID => {
+            Type::KeyValue
+        }
         FrozenTy::FrozenScalar(_) => Type::Structure,
         FrozenTy::FrozenArray(_) => Type::ArrayValue,
         FrozenTy::FrozenOption(_) => Type::Option,
@@ -504,5 +512,38 @@ mod tests {
             interpreter_module::decode_spawn(&spawn(&inner)).expect("a spawn call"),
             (inner, RunPolicy::Concurrent)
         );
+    }
+
+    /// A uuid and a key-value parameter are described by their own types; any
+    /// other record as a structure.
+    #[test]
+    fn uuid_and_key_value_are_described_by_their_own_types() {
+        let (task, graph, point) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let parameter = |name: &str, ty: FrozenTy| Parameter {
+            name: name.to_string(),
+            ty,
+            mutable: false,
+        };
+        let signature = MethodSignature {
+            module_id: Uuid::from_u128(9),
+            id: Uuid::from_u128(10),
+            name: "start".to_string(),
+            function: Function {
+                parameters: HashMap::from([
+                    (task, parameter("task", scalar(*arora_types::ty::UUID_ID))),
+                    (
+                        graph,
+                        parameter("graph", scalar(*arora_types::ty::KEY_VALUE_ID)),
+                    ),
+                    (point, parameter("point", scalar(Uuid::from_u128(0x77)))),
+                ]),
+                parameter_ordering: vec![task, graph, point],
+                return_ty: scalar(*arora_types::ty::KEY_VALUE_ID),
+            },
+        };
+        let info = method_info(&signature);
+        let types: Vec<Type> = info.params.iter().map(|p| p.param_type.clone()).collect();
+        assert_eq!(types, vec![Type::Uuid, Type::KeyValue, Type::Structure]);
+        assert_eq!(info.return_type, Some(Type::KeyValue));
     }
 }

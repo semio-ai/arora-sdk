@@ -4,6 +4,44 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.2.0] - 2026-10-19
+
+### Changed
+
+- `AroraRuntime`'s operations that change the device (`call`, `invoke`,
+  `spawn`, `halt`) settle when no `run()` is ongoing, whether or not the page
+  steps the device. Each one asks for a step at a zero dt in the next
+  microtask, and the operations issued in one turn share that step, applied in
+  issue order. That step publishes `arora/dt` as zero, ticks the behavior once
+  (a node that counts ticks advances one) and writes the HAL and the bridges.
+  A page that steps in the same turn applies them with its own step instead.
+  On a device the page steps itself, an operation made outside the turn of a
+  `step()` takes a step at a zero dt before the page's next one. Under
+  `run()`, the run's next step applies them, and the cadence is the run's.
+- `setValue` and `writeValues` reach the HAL and the bridges by the same steps
+  (a step at a zero dt they share with the turn's operations, or the run's
+  next step). A write from inside a step is carried by that step.
+- `listKeys` and `describeMethods` answer at once from the device's current
+  state, with no step, whether or not `run()` owns the device. They do not see
+  an operation still queued. `invoke` reads its method's signature that way,
+  and its call takes one step.
+- A call from a callback the step itself invokes is queued like any other, and
+  a step at a zero dt taken as a task after the current step applies it, or
+  the run's next step does.
+- A step that fails, the page's own or one at a zero dt, rejects each
+  operation it left unanswered with its error. A later step still applies an
+  operation the failed step did not reach.
+- The `running` getter answers from inside a step, and `run()` from there
+  rejects as mid-step. Both used to panic.
+- Requires arora 13.2, whose `list_keys` and `Arora::describe_methods` the
+  read-only operations answer from.
+
+### Added
+
+- `AroraWeb::complete(reply)`: settles the reply of a `LocalCaller` operation
+  the way the JS surface's operations settle, for a Rust crate that wraps the
+  device.
+
 ## [10.1.0] - 2026-10-18
 
 ### Added
