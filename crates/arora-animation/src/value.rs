@@ -1,12 +1,15 @@
 //! The values a track holds and plays: numbers, booleans and strings.
 
+use std::fmt;
+
+use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
 /// A keypoint's value, and a track's value at a time.
 ///
 /// In a clip's document form a value is the JSON value itself: a number, a
 /// boolean or a string.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Value {
     /// A boolean, which plays as a step.
@@ -15,6 +18,49 @@ pub enum Value {
     Number(f64),
     /// A string, which plays as a step.
     Text(String),
+}
+
+// Read straight from the document: an untagged derive buffers every value
+// and tries each variant in turn, which makes it the larger part of
+// compiling a track.
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ValueVisitor;
+
+        impl Visitor<'_> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a number, a boolean or a string")
+            }
+
+            fn visit_bool<E: de::Error>(self, value: bool) -> Result<Value, E> {
+                Ok(Value::Bool(value))
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Value, E> {
+                Ok(Value::Number(value as f64))
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
+                Ok(Value::Number(value as f64))
+            }
+
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
+                Ok(Value::Number(value))
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Value, E> {
+                Ok(Value::Text(value.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Value, E> {
+                Ok(Value::Text(value))
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor)
+    }
 }
 
 /// What a track's values are: one kind for every keypoint of a track.

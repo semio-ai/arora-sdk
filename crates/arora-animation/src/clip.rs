@@ -27,7 +27,9 @@
 //! }
 //! ```
 
-use serde::de::{self, Deserializer};
+use std::fmt;
+
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
@@ -204,7 +206,7 @@ impl Transition {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(untagged)]
 enum TransitionForm {
     Named(String),
@@ -225,18 +227,60 @@ impl Serialize for Transition {
     }
 }
 
+// Read straight from the document: an untagged derive buffers every
+// transition and tries each form in turn, which makes it the larger part of
+// compiling a track.
 impl<'de> Deserialize<'de> for Transition {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        match TransitionForm::deserialize(deserializer)? {
-            TransitionForm::Handle { dt, dv } => Ok(Transition::Handle { dt, dv }),
-            TransitionForm::Named(name) => Transition::named(&name).ok_or_else(|| {
-                de::Error::custom(format!(
-                    "unknown transition {name:?}: an easing ({}), {AUTO_NAME:?} or {AUTO_CLAMPED_NAME:?}",
-                    Easing::ALL.map(|e| e.name()).join(", ")
-                ))
-            }),
+        struct TransitionVisitor;
+
+        impl<'de> Visitor<'de> for TransitionVisitor {
+            type Value = Transition;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a transition's name or a handle {dtNs, dv}")
+            }
+
+            fn visit_str<E: de::Error>(self, name: &str) -> Result<Transition, E> {
+                Transition::named(name).ok_or_else(|| {
+                    E::custom(format!(
+                        "unknown transition {name:?}: an easing ({}), {AUTO_NAME:?} or {AUTO_CLAMPED_NAME:?}",
+                        Easing::ALL.map(|e| e.name()).join(", ")
+                    ))
+                })
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Transition, M::Error> {
+                let (mut dt, mut dv) = (None, None);
+                while let Some(key) = map.next_key::<HandleField>()? {
+                    match key {
+                        HandleField::Dt => dt = Some(map.next_value::<f64>()?),
+                        HandleField::Dv => dv = Some(map.next_value::<f64>()?),
+                        HandleField::Other => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(Transition::Handle {
+                    dt: dt.ok_or_else(|| de::Error::missing_field("dtNs"))?,
+                    dv: dv.ok_or_else(|| de::Error::missing_field("dv"))?,
+                })
+            }
         }
+
+        deserializer.deserialize_any(TransitionVisitor)
     }
+}
+
+/// A key of a handle's document form; other keys are ignored.
+#[derive(Deserialize)]
+enum HandleField {
+    #[serde(rename = "dtNs")]
+    Dt,
+    #[serde(rename = "dv")]
+    Dv,
+    #[serde(other)]
+    Other,
 }
 
 /// Why a clip cannot play.
@@ -400,6 +444,15 @@ mod tests {
         assert!(
             matches!(Clip::from_json(unknown), Err(ClipError::Document(e)) if e.contains("bouncy"))
         );
+        let half_handle = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":1,"transitions":{"out":{"dtNs":5}}}]}]}"#;
+        assert!(
+            matches!(Clip::from_json(half_handle), Err(ClipError::Document(e)) if e.contains("dv"))
+        );
+        let no_value = r#"{"tracks":[{"id":"t","animatableId":"x","points":[{"id":"a","timeNs":0,"value":null}]}]}"#;
+        assert!(matches!(
+            Clip::from_json(no_value),
+            Err(ClipError::Document(_))
+        ));
         let clip = Clip {
             tracks: vec![Track {
                 id: "t".into(),
