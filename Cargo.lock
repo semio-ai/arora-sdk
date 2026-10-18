@@ -221,7 +221,9 @@ dependencies = [
  "arora-animation",
  "arora-engine",
  "arora-module",
+ "arora-registry",
  "arora-types",
+ "futures",
  "serde_json",
 ]
 
@@ -487,6 +489,7 @@ name = "arora-integration-tests"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arora",
  "arora-animation-module",
  "arora-buffers",
  "arora-cli",

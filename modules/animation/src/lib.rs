@@ -1,5 +1,6 @@
-//! `arora-animation` as an Arora module: host-linked, with a state per
-//! registration, or as a `wasm32-wasip1` guest.
+//! `arora-animation` as an Arora module: a `wasm32-wasip1` guest, which a
+//! device loads from its module directory (`module_dir`, the `module-dir`
+//! feature), or host-linked, with a state per registration.
 //!
 //! The functions are declared twice, with the same ids: as a contract
 //! ([`AnimationContract`]), whose methods take the state they act on, so a
@@ -9,6 +10,8 @@
 //! one state and give the guest its entry points and its header. A test
 //! holds the two declarations equal.
 mod convert;
+#[cfg(feature = "module-dir")]
+pub mod module_dir;
 mod records;
 mod state;
 use arora_types::module::declared::AroraFunction;
@@ -216,6 +219,7 @@ fn guest<T>(f: impl FnOnce(&mut AnimationModule) -> T) -> T {
     id = "76697a69-6a00-0000-0d00-000000000000",
     name = "arora-animation",
     version = "3.0.0",
+    scope = arora_types::record::scope::ARORA,
     author = "Semio",
     license = "MIT",
     description = "Keyframe animation, playback and baking over a nanosecond clock",

@@ -276,7 +276,7 @@ Quick reference:
 | `arora-behavior-tree` | Behavior tree runtime |
 | `arora-behavior-tree-types` | BT primitive types |
 | `arora-animation` | Keyframe clips, exact evaluation, players on the device clock |
-| `arora-animation-module` | The animation module (`modules/animation`), host-linked or a wasm guest |
+| `arora-animation-module` | The animation module (`modules/animation`): a wasm guest in a module directory with its records, or host-linked |
 
 ## Tips for AI Agents
 

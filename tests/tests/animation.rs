@@ -1,4 +1,5 @@
-//! The declared wasm guest and a host registration answer the same Calls.
+//! The declared wasm guest and a host registration answer the same Calls, and
+//! the guest's module directory describes every export on a device.
 use arora_animation_module::{
     animation::{self, ids},
     exports, AnimationModule, Clip, ClipKeypoint, ClipTrack, ClipTransition, PlayerState,
@@ -150,4 +151,74 @@ fn wasm_and_host_linked_animation_match_through_calls() {
         assert_eq!(state.time_ns, now % 1_000_000_000);
         assert_eq!(state.instances[0].rate, 1.0);
     }
+}
+
+/// The module directory the guest ships in loads on a device, which describes
+/// every export from the module's record: the record-typed ones a stepping
+/// behavior calls (`step_values`, `player_states`) and the 2.0 clip loader
+/// with their record types, at the versions the declaration gives them.
+#[test]
+fn the_guest_s_module_directory_describes_its_record_typed_exports() {
+    use arora_animation_module::{module_dir, StepValues};
+    use arora_types::record::reference::FrozenReference;
+    use arora_types::record::ty::{FrozenScalar, FrozenTy};
+    use arora_types::AroraType;
+    use std::future::Future;
+    use std::task::{Context, Poll};
+
+    let dir = std::env::temp_dir().join("arora-animation-module-directory");
+    let _ = std::fs::remove_dir_all(&dir);
+    let guest = std::path::PathBuf::from(env!(
+        "CARGO_CDYLIB_FILE_ARORA_ANIMATION_MODULE_arora_animation_module"
+    ));
+    module_dir::write(&dir, Some(&guest)).expect("the module directory is written");
+
+    let files = arora::module_dir::read(&dir).expect("the module directory reads");
+    let registry =
+        futures::executor::block_on(arora::module_dir::registry(std::slice::from_ref(&files)))
+            .expect("its records load");
+    let mut device = arora::Arora::builder()
+        .with_registry(registry)
+        .with_module(files.header, files.executable)
+        .build()
+        .expect("the record describes the header");
+
+    let caller = device.caller();
+    let mut methods = std::pin::pin!(caller.describe_methods(None));
+    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+    let methods = (0..8)
+        .find_map(|_| {
+            device
+                .step(std::time::Duration::from_millis(10))
+                .expect("the device steps");
+            match methods.as_mut().poll(&mut cx) {
+                Poll::Ready(methods) => Some(methods.expect("the device describes its methods")),
+                Poll::Pending => None,
+            }
+        })
+        .expect("an answer within eight steps");
+    for (name, function) in [
+        ("step_values", ids::step_values::FUNCTION),
+        ("player_states", ids::player_states::FUNCTION),
+        ("output_keys", ids::output_keys::FUNCTION),
+        ("load_clip", ids::load_clip::FUNCTION),
+        ("set_reversed", ids::set_reversed::FUNCTION),
+    ] {
+        let method = methods
+            .iter()
+            .find(|method| method.name == name)
+            .unwrap_or_else(|| panic!("{name} is described"));
+        assert_eq!(method.id, function, "{name}");
+    }
+    let step_values = methods.iter().find(|m| m.name == "step_values").unwrap();
+    assert_eq!(
+        step_values.function.return_ty,
+        FrozenTy::FrozenScalar(FrozenScalar {
+            reference: FrozenReference {
+                id: StepValues::arora_type_id(),
+                version: StepValues::arora_type_version(),
+            },
+        })
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

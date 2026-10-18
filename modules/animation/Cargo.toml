@@ -14,10 +14,23 @@ description = "Arora animation playback and baking as a host-linked module or We
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-arora-module = { path = "../../crates/arora-module", version = "2" }
-arora-types = { path = "../../crates/arora-types", version = "3" }
+# 2.2: a declaration's scope and the records of the types its functions name.
+arora-module = { path = "../../crates/arora-module", version = "2.2" }
+# 3.8: the records the derive gives each record type.
+arora-types = { path = "../../crates/arora-types", version = "3.8" }
 arora-animation = { path = "../../crates/arora-animation", version = "1" }
+# `module-dir`: write the module directory a device loads the guest from.
+arora-registry = { path = "../../crates/arora-registry", version = "2.1", optional = true }
+futures = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+module-dir = ["dep:arora-registry", "dep:futures", "dep:serde_json"]
 
 [dev-dependencies]
 arora-engine = { path = "../../crates/arora-engine", version = "5" }
 serde_json = "1"
+
+[[example]]
+name = "module_dir"
+required-features = ["module-dir"]

@@ -14,7 +14,9 @@ In short:
 - **Two crates.** `arora-animation` is the library: the clip format,
   exact evaluation with velocities, players, and the engine that steps them.
   It depends on no Arora runtime. `arora-animation-module` declares it as an
-  Arora module, host-linked or as a `wasm32-wasip1` guest.
+  Arora module: a `wasm32-wasip1` guest that every device, emulated or
+  real, loads from its module directory (header, guest and records), and
+  host-linkable for a native host.
 - **They move from vizij-rs with their history**, as the node graph does
   ([behavior languages](proposal-behavior-languages.md) §4).
   animation-player's history comes along, since vizij-rs forked from it.
@@ -274,9 +276,13 @@ under the cursor at that speed and keeps its shape at every other.
 
 ### 4.1 Arora on its own: a robot
 
-A device carries the module, host-linked into its runner or as a module
-directory (a `header.json` beside the guest's `.wasm`). It does not receive
-trajectories. A client delivers it clips and commands, and the device plays
+A device carries the module as a module directory: `header.json`, the
+guest's `.wasm`, and `records/`, the module's record and the records of the
+types its functions name, which the device describes its record-typed
+exports with (`arora` 13.1, `AroraBuilder::with_registry`). The crate's
+`module-dir` feature writes it (`module_dir::write`; the `module_dir`
+example). A native host may link the module instead. A device does not
+receive trajectories. A client delivers it clips and commands, and the device plays
 them on its own:
 
 - **Content.** `load_clip(clip)` (or `load_animation` for 1.x),
@@ -304,11 +310,13 @@ play the same values at the same device time.
 
 ### 4.2 Arora in Studio
 
-- **The World** registers the module host-linked in every device it
-  emulates, one module state per device:
-  `HostModule::from_exports(MODULE, arora_animation_module::exports(AnimationModule::new()))`.
-  The page fetches no guest, and the World binds calls by name over the
-  module's declared header.
+- **The World** loads the guest into every device it emulates, from the
+  module directory's header, guest and records, as a real device's runner
+  does, and gives each the stepping behavior that plays it (Studio's
+  `step_values` and `player_states` behavior graph). The emulated devices
+  and a real one therefore run the same module the same way.
+- **studio-arora links the library**, not the module: the editor's exact
+  evaluation (below) and the timeline's player.
 - **Real devices** receive the same calls over the Studio Bridge: a clip
   delivered, a withdrawal, a transport command. Studio's World queues them
   as it does today.
@@ -390,7 +398,7 @@ and a cubic Bézier is unchanged by that affine map.
 | Crate or surface | Version | Change |
 |---|---|---|
 | `arora-animation` | 1.0.0 | New. |
-| `arora-animation-module` | 1.0.0 (module 3.0.0) | New crate; the module's interface continues vizij's 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; `set_loop` takes `bounce`. Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
+| `arora-animation-module` | 1.0.0 (module 3.0.0) | New crate; the module's interface continues vizij's 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; `set_loop` takes `bounce`. The `module-dir` feature writes the module directory a device loads (header, guest, and the records in the `arora` scope). Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
 | `vizij-animation-core`, `vizij-animation-module` | — | No further release once vizij-rs depends on the arora crates. |
 | `@vizij/animation-module` (npm) | — | Deprecated, or a wrapper over the new guest. |
 | Semio Studio's stored animation | format 3 | Clip 2.0 plus the editor's fields. Studio reads 1, 2 and 3, writes 3, and writes 3 only once every client refuses a format newer than it reads. Published releases keep format 2. |
@@ -402,8 +410,11 @@ workflow's list carries both.
 
 **The guest needs a release channel.** arora-sdk's release workflow
 publishes crates only. A device that loads the module from a directory needs
-the `wasm32-wasip1` artifact and its header from somewhere: a GitHub release
-asset of arora-sdk is the simplest.
+the module directory — header, `wasm32-wasip1` guest and records — from
+somewhere: a GitHub release asset of arora-sdk is the simplest, built with
+`cargo build -p arora-animation-module --target wasm32-wasip1 --release` and
+the `module_dir` example. Studio builds the same directory from the crate
+it depends on, so it needs no package.
 
 ## 7. Decisions for review
 
@@ -413,13 +424,14 @@ asset of arora-sdk is the simplest.
 2. **The module's ids stay.** *Recommended*: keep every module, function,
    parameter and record id, so nothing that calls the module needs a change.
    The alternative is ids in an Arora namespace, changing every caller once.
-3. **Host-linked in the World, a guest for module directories.**
-   *Recommended*: Studio's World host-links the module, which removes the
-   page's fetch of the npm guest and the record-typed exports a
-   header-loaded guest has to describe; the guest build stays for devices
-   that load modules from a directory, released as in §6. This changes the
-   Studio-on-Arora plan's D11, which made the published guest the module's
-   home in the browser, compiled once per World.
+3. **The guest route on every device.** *Recommended*: every device,
+   emulated or real, loads the guest from its module directory, with the
+   module's records, and is given the stepping behavior that plays it, as
+   Studio's stepping behavior does; the Studio-on-Arora plan's D11, the
+   published guest as the module's home in the browser, stands. Host-linking
+   stays available to native hosts, and studio-arora links only the library,
+   for the editor. The alternative, the World host-linking the module, gives
+   an emulated device a module a real device cannot have.
 4. **The engine owns looping and bouncing.** This reverses the
    Studio-on-Arora plan's D7, which kept them in Studio's transport because
    vizij's player wraps each clip within its window. A robot playing on its

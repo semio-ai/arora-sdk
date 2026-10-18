@@ -149,8 +149,9 @@ time, or `Option(None)` for booleans and strings.
 Use the workspace's pinned nightly toolchain:
 
 ```sh
-cargo build -p arora-animation-module --target wasm32-wasip1
-cargo run -p arora-animation-module --example header
+cargo build -p arora-animation-module --target wasm32-wasip1 --release
+cargo run -p arora-animation-module --features module-dir --example module_dir -- \
+    <dir> target/wasm32-wasip1/release/arora_animation_module.wasm
 cargo test -p arora-animation-module
 cargo test -p arora-integration-tests --test animation
 cargo clippy -p arora-animation-module --all-targets -- -D warnings
@@ -159,5 +160,24 @@ cargo fmt -p arora-animation-module
 
 Module tests cover conversions, playback, transport, revisions, baking,
 independent host registrations, declaration equality, and the literal ids
-of the 25 retained functions and their parameters. The integration test
-loads the built wasm guest and compares its calls with a host registration.
+of the 25 retained functions and their parameters. The integration tests
+load the built wasm guest and compare its calls with a host registration,
+and load its module directory on a device, which describes every export
+from the module's record, `step_values` and `player_states` included.
+
+## The module directory
+
+A device loads the guest from a module directory (the `module-dir`
+feature's `module_dir::write`, or the `module_dir` example):
+
+```text
+<dir>/
+├── header.json            the declared header, for the wasm executor
+├── arora-animation.wasm   the guest
+└── records/               the module's record and the records of the types
+                           its functions name, in arora-registry's layout
+```
+
+The records live in the `arora` scope. A device given them (`arora` 13.1
+reads `records/`; arora-web takes them with `withRecords`) describes the
+record-typed exports a behavior calls.
