@@ -103,8 +103,10 @@ directory**, each use in a subdirectory of its own:
         ├── modules/               the modules the device loads at start, in name order
         │   └── <name>/            a module directory (what --module names elsewhere):
         │       ├── header.json    the module's header (its low-level Header, as JSON)
-        │       └── *.wasm         its artifact: the one file with the executor's extension —
-        │                          .wasm for wasm, .so / .dylib / .dll for native
+        │       ├── *.wasm         its artifact: the one file with the executor's extension —
+        │       │                  .wasm for wasm, .so / .dylib / .dll for native
+        │       └── records/       optional: the module's record and the records it depends
+        │                          on, in arora-registry's layout (module/, structure/, …)
         └── studio/                the Studio connection's credentials, kept by
             ├── key                arora-studio-bridge-client's DeviceCredentials
             ├── refresh_token
@@ -118,18 +120,22 @@ Anything else a device keeps goes in a subdirectory of its own beside these.
 
 A module directory is the layout a module is published in: the
 `@vizij/animation-module` package's `artifact/` — `header.json` beside
-`vizij_animation_module.wasm` — copied to `modules/animation/` is loaded at the
-next start. The artifact's name is free; its extension names it, so a module
+`vizij_animation_module.wasm`, and its `records/` when it ships them — copied
+to `modules/animation/` is loaded at the next start. The artifact's name is free; its extension names it, so a module
 directory holds one artifact. Entries whose name starts with `.` are neither
 module directories nor artifacts: OS metadata (`.DS_Store`, an AppleDouble
 `._x.wasm`) lands beside what it describes and is ignored. A module the device
 cannot load — a header it cannot read, no artifact or several, an executor it
 does not run, one module in two directories, an artifact the engine rejects —
 fails the start, naming the module. A loaded module's functions are reachable
-by any call — in-process (`Arora::call`), over a bridge — and `DescribeMethods`
-lists them under one rule: a function whose parameters and return are all
-primitives or optionals over a scalar primitive is described; any other — one
-naming a record type, a map or a fixed-length array — still dispatches
+by any call — in-process (`Arora::call`), over a bridge. `DescribeMethods`
+lists every function of a module whose record the device holds — the records
+of every module directory fill one registry — with the record's signature;
+a record that does not match its module's header, or that depends on a record
+no directory carries, fails the start, naming the module. Without a record, a
+function whose parameters and return are all primitives or optionals over a
+scalar primitive is described; any other — one naming a record type, a map or
+a fixed-length array — still dispatches
 ([`module_discovery`](src/module_discovery.rs)). A Groot tree the binary
 installs resolves its tags against the device's method index: its nodes are
 the native core nodes and the functions of the modules the device carries.

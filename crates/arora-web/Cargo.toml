@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "10.0.0"
+version = "10.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -23,8 +23,10 @@ arora-types = { path = "../arora-types", version = "3" }
 # (arora-hal, arora-bridge, …) itself for whatever it composes.
 # 12: the client operations of `LocalCaller` (invoke, spawn, halt,
 # list_keys, describe_methods), and `Arora`/`AroraBuilder` as this crate's
-# surface carries them.
-arora = { path = "../arora", version = "13", default-features = false }
+# surface carries them. 13.1: `AroraBuilder::with_registry`.
+arora = { path = "../arora", version = "13.1", default-features = false }
+# 2.1: the records `withRecords` loads, in arora-registry's layout.
+arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's
 # client form (`arora_bridge::client`).
 arora-bridge = { path = "../arora-bridge", version = "6.1" }

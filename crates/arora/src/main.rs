@@ -42,8 +42,13 @@ async fn main() -> anyhow::Result<()> {
         .with_data_store(Box::new(store))
         .with_frontend(arora::standard_frontend());
     // The modules the device carries: its device directory's, then `--module`'s.
-    // Each loads at build, where one the engine rejects fails the start.
-    for module in cli.modules()? {
+    // Each loads at build, where one the engine rejects fails the start. The
+    // records their directories carry describe them: a module whose record
+    // the registry holds has every export described, or fails the start when
+    // the record does not match it.
+    let modules = cli.modules()?;
+    builder = builder.with_registry(arora::module_dir::registry(&modules).await?);
+    for module in modules {
         builder = builder.with_module(module.header, module.executable);
     }
     // A Groot file is the device's behavior: the build resolves its tags

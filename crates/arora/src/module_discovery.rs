@@ -1,5 +1,7 @@
-//! Freezing a guest module's exports into discoverable signatures, for those
-//! whose types freeze without a registry.
+//! A guest module's exports as the method index describes them: from the
+//! module's record when the device holds it ([`check_record`] checks it
+//! against the header), else frozen from the header, for those exports whose
+//! types freeze without a registry.
 //!
 //! A host module declares its functions with pre-frozen signatures
 //! ([`ModuleBuilder::described_function`](arora_engine::module::ModuleBuilder::described_function)),
@@ -7,86 +9,28 @@
 //! carries a [`Header`](arora_types::module::low::Header) whose exports type
 //! their parameters and return with [`low::TypeRef`](arora_types::module::low::TypeRef)
 //! — a bare type id, no version. Freezing a reference to a *record* (a
-//! structure, an enumeration) needs a registry to pin its version, which the
-//! device builder does not hold. A **primitive** reference resolves
+//! structure, an enumeration) needs its version, which the module's record
+//! pins and the header does not. A **primitive** reference resolves
 //! intrinsically — its id is one of the well-known primitive ids — and so does
 //! an **optional** over a scalar primitive, which freezes as a
 //! [`FrozenOption`] over that primitive.
 //!
-//! This module turns a guest export whose parameters and return are all
-//! primitives or optional scalar primitives into a [`frozen::Function`],
+//! Without a record, a guest export whose parameters and return are all
+//! primitives or optional scalar primitives becomes a [`frozen::Function`],
 //! identical to what a host module declares for the same shape, so
 //! `DescribeMethods` lists it. An export with any other type yields `None`: it
 //! still dispatches, it is just not discoverable. A record (alone, in an array
-//! or in an optional) becomes describable once the builder holds a registry to
-//! pin its version; a map or a fixed-length array has no frozen form at all.
+//! or in an optional) is described from the module's record, which pins its
+//! version; a map or a fixed-length array has no frozen form at all.
 //!
 //! [`frozen::Function`]: Function
 
 use std::collections::HashMap;
 
-use arora_types::module::low::{ExportFunction, TypeRef};
-use arora_types::record::module::frozen::{Function, Parameter};
+use arora_types::module::low::{ExportFunction, ExportSymbol, Header, TypeRef};
+use arora_types::record::module::frozen::{self, ExportKind, Function, Parameter};
 use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
-use arora_types::ty;
 use uuid::Uuid;
-
-/// The [`PrimitiveKind`] a well-known primitive type id names, or `None` if the
-/// id is not a primitive (a structure, enumeration, or other registered type).
-fn primitive_kind_of(id: Uuid) -> Option<PrimitiveKind> {
-    use PrimitiveKind::*;
-    // The well-known primitive ids and their kinds — the scalar primitives and
-    // their homogeneous-array forms (see `arora_types::ty`).
-    let table = [
-        (*ty::UNIT_ID, Unit),
-        (*ty::BOOLEAN_ID, Boolean),
-        (*ty::U8_ID, U8),
-        (*ty::U16_ID, U16),
-        (*ty::U32_ID, U32),
-        (*ty::U64_ID, U64),
-        (*ty::I8_ID, I8),
-        (*ty::I16_ID, I16),
-        (*ty::I32_ID, I32),
-        (*ty::I64_ID, I64),
-        (*ty::F32_ID, F32),
-        (*ty::F64_ID, F64),
-        (*ty::STRING_ID, String),
-        (*ty::ARRAY_BOOLEAN_ID, ArrayBoolean),
-        (*ty::ARRAY_U8_ID, ArrayU8),
-        (*ty::ARRAY_U16_ID, ArrayU16),
-        (*ty::ARRAY_U32_ID, ArrayU32),
-        (*ty::ARRAY_U64_ID, ArrayU64),
-        (*ty::ARRAY_I8_ID, ArrayI8),
-        (*ty::ARRAY_I16_ID, ArrayI16),
-        (*ty::ARRAY_I32_ID, ArrayI32),
-        (*ty::ARRAY_I64_ID, ArrayI64),
-        (*ty::ARRAY_F32_ID, ArrayF32),
-        (*ty::ARRAY_F64_ID, ArrayF64),
-        (*ty::ARRAY_STRING_ID, ArrayString),
-    ];
-    table.iter().find(|(k, _)| *k == id).map(|(_, v)| *v)
-}
-
-/// The homogeneous-array [`PrimitiveKind`] over a scalar element kind, or
-/// `None` for a kind that has no array form (unit, or an already-array kind).
-fn array_kind_of(element: PrimitiveKind) -> Option<PrimitiveKind> {
-    use PrimitiveKind::*;
-    Some(match element {
-        Boolean => ArrayBoolean,
-        U8 => ArrayU8,
-        U16 => ArrayU16,
-        U32 => ArrayU32,
-        U64 => ArrayU64,
-        I8 => ArrayI8,
-        I16 => ArrayI16,
-        I32 => ArrayI32,
-        I64 => ArrayI64,
-        F32 => ArrayF32,
-        F64 => ArrayF64,
-        String => ArrayString,
-        _ => return None,
-    })
-}
 
 /// Freeze a [`TypeRef`] that needs no registry into a [`FrozenTy`], or `None`
 /// for one that does.
@@ -108,10 +52,10 @@ fn array_kind_of(element: PrimitiveKind) -> Option<PrimitiveKind> {
 /// map has no [`FrozenTy`] form.
 fn freeze_type_ref(ty: &TypeRef) -> Option<FrozenTy> {
     match ty {
-        TypeRef::Scalar { id } => primitive_kind_of(*id).map(FrozenTy::from),
-        TypeRef::Array { id } => array_kind_of(primitive_kind_of(*id)?).map(FrozenTy::from),
+        TypeRef::Scalar { id } => PrimitiveKind::from_id(id).map(FrozenTy::from),
+        TypeRef::Array { id } => PrimitiveKind::from_id(id)?.array_of().map(FrozenTy::from),
         TypeRef::Option { id } => {
-            let element = primitive_kind_of(*id)
+            let element = PrimitiveKind::from_id(id)
                 .filter(|kind| kind.is_scalar() && *kind != PrimitiveKind::Unit)?;
             Some(FrozenTy::FrozenOption(FrozenOption {
                 element: Box::new(FrozenTy::from(element)),
@@ -147,9 +91,94 @@ pub(crate) fn guest_function_signature(function: &ExportFunction) -> Option<Func
     })
 }
 
+/// Whether `record`, a guest module's record, describes `header`: the same
+/// exports, each with the same id and name, the same parameters in the same
+/// order (ids, names and mutability), and each type naming the id the
+/// header's names. `Err` says how they differ, naming the export.
+pub(crate) fn check_record(header: &Header, record: &frozen::Module) -> Result<(), String> {
+    for export in &header.exports {
+        let ExportSymbol::Function(function) = export;
+        let what = format!("export '{}' ({})", function.name, function.id);
+        let Some(declared) = record.exports.get(&function.id) else {
+            return Err(format!("{what} is not in the record"));
+        };
+        if declared.name != function.name {
+            return Err(format!("{what} is named '{}' in the record", declared.name));
+        }
+        let ExportKind::Function(declared) = &declared.kind;
+        let ids: Vec<Uuid> = function.parameters.iter().map(|p| p.id).collect();
+        if declared.parameter_ordering != ids {
+            return Err(format!(
+                "{what} has parameters {ids:?} in the header and {:?} in the record",
+                declared.parameter_ordering
+            ));
+        }
+        for parameter in &function.parameters {
+            let Some(described) = declared.parameters.get(&parameter.id) else {
+                return Err(format!(
+                    "{what}: the record orders parameter '{}' ({}) but does not declare it",
+                    parameter.name, parameter.id
+                ));
+            };
+            if described.name != parameter.name || described.mutable != parameter.mutable {
+                return Err(format!(
+                    "{what}: parameter {} is '{}'{} in the header and '{}'{} in the record",
+                    parameter.id,
+                    parameter.name,
+                    if parameter.mutable { " (mutable)" } else { "" },
+                    described.name,
+                    if described.mutable { " (mutable)" } else { "" },
+                ));
+            }
+            if !names(&described.ty, &parameter.ty) {
+                return Err(format!(
+                    "{what}: parameter '{}' is {:?} in the header and {:?} in the record",
+                    parameter.name, parameter.ty, described.ty
+                ));
+            }
+        }
+        if !names(&declared.return_ty, &function.ret) {
+            return Err(format!(
+                "{what} returns {:?} in the header and {:?} in the record",
+                function.ret, declared.return_ty
+            ));
+        }
+    }
+    let exported = |id: &Uuid| header.exports.iter().any(|export| export.id() == id);
+    if let Some((id, extra)) = record.exports.iter().find(|(id, _)| !exported(id)) {
+        return Err(format!(
+            "the record's export '{}' ({id}) is not in the header",
+            extra.name
+        ));
+    }
+    Ok(())
+}
+
+/// Whether the frozen type `frozen` names what the header's `type_ref`
+/// names: the primitive its well-known id names, or a reference to its id —
+/// as a scalar, an array or an optional, as the header has it. A
+/// fixed-length array or a map has no frozen form, so nothing names it.
+fn names(frozen: &FrozenTy, type_ref: &TypeRef) -> bool {
+    match (type_ref, frozen) {
+        (TypeRef::Scalar { id }, FrozenTy::Primitive(primitive)) => {
+            PrimitiveKind::from_id(id) == Some(primitive.kind)
+        }
+        (TypeRef::Scalar { id }, FrozenTy::FrozenScalar(scalar)) => scalar.reference.id == *id,
+        (TypeRef::Array { id }, FrozenTy::Primitive(primitive)) => {
+            PrimitiveKind::from_id(id).and_then(PrimitiveKind::array_of) == Some(primitive.kind)
+        }
+        (TypeRef::Array { id }, FrozenTy::FrozenArray(array)) => array.reference.id == *id,
+        (TypeRef::Option { id }, FrozenTy::FrozenOption(option)) => {
+            names(&option.element, &TypeRef::Scalar { id: *id })
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arora_types::ty;
 
     fn option_of(kind: PrimitiveKind) -> FrozenTy {
         FrozenTy::FrozenOption(FrozenOption {

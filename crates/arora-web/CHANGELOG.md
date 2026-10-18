@@ -4,6 +4,16 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.0] - 2026-10-18
+
+### Added
+
+- `AroraRuntimeBuilder.withRecords(records)`: the records guest modules are
+  described by, as a module's package ships its `records/` directory — each
+  record file's path under `records/` mapped to its YAML. A module whose
+  record the device holds has every export described, those taking or
+  returning a structure included (arora 13.1, `AroraBuilder::with_registry`).
+
 ## [10.0.0] - 2026-10-16
 
 ### Changed

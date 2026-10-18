@@ -4,6 +4,30 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.1.0] - 2026-10-18
+
+### Added
+
+- `AroraBuilder::with_registry(LocalRegistry)`: the records the device's
+  guest modules are described by, looked up by exact id and version. A guest
+  module whose module record the registry holds, at the version its header
+  carries, has every export indexed with the record's frozen signature, so an
+  export taking or returning a structure or an enumeration is listed by
+  `DescribeMethods` and reachable from a behavior tree. The build fails,
+  naming the module, when the record does not describe the header (naming the
+  export) or the registry lacks a record it depends on (naming each). A guest
+  module without a record is indexed from its header, as before; a module
+  loaded or reloaded on the running device is indexed from its header.
+- A module directory may carry `records/` beside `header.json`, in
+  arora-registry's layout. `module_dir::registry(&modules)` loads every
+  module directory's records into one registry (`ModuleFiles::records_dir`),
+  and the `arora` runner hands it to the device.
+- `LocalRegistry` is re-exported.
+
+### Changed
+
+- Requires arora-types 3.8 and arora-registry 2.1.
+
 ## [13.0.0] - 2026-10-16
 
 ### Added

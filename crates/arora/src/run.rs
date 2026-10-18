@@ -63,8 +63,10 @@ use crate::Arora;
 /// the device carries.
 /// The modules — the device directory's and `--module`'s — come out of
 /// [`modules`](Self::modules), each for
-/// [`with_module`](crate::AroraBuilder::with_module). The `arora` binary's
-/// `main` is the worked example.
+/// [`with_module`](crate::AroraBuilder::with_module), and the records their
+/// directories carry out of [`module_dir::registry`](crate::module_dir::registry),
+/// for [`with_registry`](crate::AroraBuilder::with_registry). The `arora`
+/// binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
 #[command(
@@ -77,9 +79,11 @@ use crate::Arora;
                   device DEVICE_LOCAL_ID names (`default` when unset) — then each --module \
                   directory. A module directory holds header.json (the module's header) \
                   beside its artifact, the one file with the extension the header's executor \
-                  names: .wasm for wasm, the platform's dynamic library for native. Entries \
-                  whose name starts with `.` (OS metadata) are ignored. A module that cannot \
-                  be loaded fails the start, naming it."
+                  names: .wasm for wasm, the platform's dynamic library for native — and \
+                  optionally records/, the module's record and the records it depends on, \
+                  which describe every function it exports. Entries whose name starts with \
+                  `.` (OS metadata) are ignored. A module that cannot be loaded, or whose \
+                  record does not match its header, fails the start, naming it."
 )]
 pub struct DeviceCli {
     /// Groot behavior-tree file to install as the device's behavior. Its tags
@@ -97,7 +101,7 @@ pub struct DeviceCli {
 
     /// A module directory to load besides the device directory's: header.json
     /// beside the one .wasm (executor wasm) or dynamic library (executor
-    /// native). Repeatable.
+    /// native), and optionally records/. Repeatable.
     #[arg(long, value_name = "DIR")]
     pub module: Vec<std::path::PathBuf>,
 }
