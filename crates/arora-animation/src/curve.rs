@@ -305,7 +305,8 @@ fn slope(b: &Bezier, u: f64) -> f64 {
 
 /// The parameter `u` in `[0, 1]` at which the time curve `x` reaches
 /// `target`, to double precision: Newton's method inside a bisection
-/// bracket, from the parameter a straight line would give. The result
+/// bracket, from the parameter a straight line would give, stopping once a
+/// step moves the parameter by no more than its last place. The result
 /// depends on `x` and `target` alone.
 fn solve(x: &[f64; 4], target: f64) -> f64 {
     let span = x[3];
@@ -320,6 +321,9 @@ fn solve(x: &[f64; 4], target: f64) -> f64 {
     let mut u = target / span;
     for _ in 0..100 {
         let error = bernstein(x, u) - target;
+        if error == 0.0 {
+            return u;
+        }
         if error < 0.0 {
             lo = u;
         } else {
@@ -332,18 +336,15 @@ fn solve(x: &[f64; 4], target: f64) -> f64 {
         } else {
             0.5 * (lo + hi)
         };
-        if next == u || hi - lo <= f64::EPSILON * hi {
-            break;
+        // Waiting for a step of exactly zero instead can cost dozens of
+        // iterations more where rounding alternates between neighbouring
+        // parameters, for no difference in the value.
+        if (next - u).abs() <= f64::EPSILON * next.max(u) || hi - lo <= f64::EPSILON * hi {
+            return next;
         }
         u = next;
     }
-    // The bracket's upper end is the least parameter found at or past the
-    // target; within a rounding of the root, the two ends agree.
-    if bernstein(x, u) >= target {
-        u
-    } else {
-        hi
-    }
+    u
 }
 
 #[cfg(test)]
