@@ -93,12 +93,16 @@ use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
 /// [`AroraBuilder::with_host_module`].
 pub use arora_engine::module::{FunctionDescription, HostModule, ModuleBuilder};
 use arora_hal::{FakeHal, Hal, KeyDescriptions, UpdatesStream};
+/// Re-exported so an embedder can fill the registry it hands the device with
+/// [`AroraBuilder::with_registry`].
+pub use arora_registry::local::LocalRegistry;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, KeyMeta, StateChange, Subscription};
 use arora_types::module::declared::AroraModule;
 use arora_types::module::low::{self, Header};
 use arora_types::record::module::frozen::ExportKind;
+use arora_types::record::FrozenReference;
 use arora_types::value::Value;
 use futures::channel::{mpsc, oneshot};
 use futures::stream::{self, Fuse, SelectAll};
@@ -753,6 +757,7 @@ pub struct AroraBuilder {
     interpreter: Option<Box<dyn BehaviorInterpreter>>,
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<GuestModule>,
+    registry: LocalRegistry,
     host_modules: Vec<HostModule>,
     groot: Option<String>,
     #[cfg(feature = "native")]
@@ -846,6 +851,11 @@ impl AroraBuilder {
     /// functions dispatch to guest code through the engine's `CallBridge` —
     /// what a behavior reaches to call them.
     ///
+    /// Its exports join the method index from the module's record when the
+    /// device's registry holds it ([`with_registry`](Self::with_registry)),
+    /// every export with its frozen signature; without one, those whose
+    /// parameters and return are primitives, frozen from the header.
+    ///
     /// For functions the engine hosts in-process (Rust closures rather than a
     /// loadable executable), use [`with_host_module`](Self::with_host_module).
     pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
@@ -877,9 +887,11 @@ impl AroraBuilder {
     /// comes from the declaration, and every export joins the method index
     /// with the declaration's frozen signature. Repeatable.
     ///
-    /// [`with_module`](Self::with_module) can index only primitive-typed
+    /// [`with_module`](Self::with_module) alone can index only primitive-typed
     /// exports, because a header carries no type versions to freeze a structure
-    /// or an enumeration against. The declaration does: `M::exports()` hands
+    /// or an enumeration against; the module's record, in the device's
+    /// registry ([`with_registry`](Self::with_registry)), carries them. The
+    /// declaration does too: `M::exports()` hands
     /// each function's frozen signature, so an export of any type — a
     /// `Status`-returning behavior leaf included — is discoverable and reachable
     /// from a behavior tree, exactly as the same crate registered in-process
@@ -910,6 +922,43 @@ impl AroraBuilder {
         }
         self.modules
             .push(GuestModule::Source(M::header(executor), executable.into()));
+        self
+    }
+
+    /// Give the device `registry`: the records its guest modules are
+    /// described by. Looked up by exact id and version only, from memory —
+    /// never tagged, resolved by path, or fetched.
+    ///
+    /// A guest module whose module record the registry holds — under the
+    /// module's id, at the version its header carries — has every export
+    /// indexed with the record's frozen signature, as
+    /// [`with_declared_module`](Self::with_declared_module) indexes a
+    /// declaration's: an export taking or returning a structure or an
+    /// enumeration is described, and reachable from a behavior tree. The
+    /// build fails, naming the module, when
+    /// - the record does not describe the header — each export with the same
+    ///   id and name, the same parameters in the same order (ids, names and
+    ///   mutability), and each type naming the id the header's names, and no
+    ///   other export — naming the export;
+    /// - the registry lacks a record the module record depends on,
+    ///   transitively, naming each: a device holds the whole description of
+    ///   what a module it describes takes and returns.
+    ///
+    /// A guest module without a record is indexed from its header, as
+    /// [`with_module`](Self::with_module) says. A module loaded or reloaded
+    /// on the built device ([`Arora::load_module`], [`Arora::reload_module`])
+    /// is indexed from its header. Default: an empty registry.
+    ///
+    /// ```ignore
+    /// let mut records = arora::LocalRegistry::new();
+    /// arora_registry::local_yaml::load_records_from_yaml_dir(dir.join("records"), &mut records).await?;
+    /// let device = Arora::builder()
+    ///     .with_module(header, wasm)
+    ///     .with_registry(records)
+    ///     .build()?;
+    /// ```
+    pub fn with_registry(mut self, registry: LocalRegistry) -> Self {
+        self.registry = registry;
         self
     }
 
@@ -1036,11 +1085,12 @@ impl AroraBuilder {
         // Load each guest module into the engine so its exported functions
         // dispatch through the engine's `CallBridge`. Done before the store and
         // seams are wired: a module that fails to load fails the whole build.
-        // Its exports whose parameters and return are all primitives or
-        // optionals over a scalar primitive also join the method index, so `DescribeMethods`
-        // lists them — a guest header carries no type versions, so a signature
-        // naming a record (which needs a registry to pin its version), a map
-        // or a fixed-length array dispatches but stays undiscoverable.
+        // Its exports also join the method index, so `DescribeMethods` lists
+        // them: every one from the module's record when the registry holds
+        // it, else those whose parameters and return are all primitives or
+        // optionals over a scalar primitive — a header carries no type
+        // versions, so a signature naming a record, a map or a fixed-length
+        // array dispatches but stays undiscoverable.
         //
         // One module id, one module: every source of guest modules (an
         // embedder's `with_module`, the device directory, `--module`) converges
@@ -1059,10 +1109,8 @@ impl AroraBuilder {
                 );
             }
             // An export its declaration already indexed
-            // (`with_declared_module`) keeps that frozen signature; only a
-            // bare header's exports are frozen from their primitives here.
-            let frozen: Vec<ModuleFunction> =
-                freeze_exports(header, |id| functions.contains_key(id)).collect();
+            // (`with_declared_module`) keeps that frozen signature.
+            let frozen = index_exports(header, &self.registry, |id| functions.contains_key(id))?;
             functions.extend(frozen.into_iter().map(|f| (f.function_id, f)));
             guest_exports.insert(module_id, export_ids(header));
             let function_count = header.exports.len();
@@ -1408,6 +1456,60 @@ fn export_ids(header: &Header) -> Vec<Uuid> {
     header.exports.iter().map(|export| *export.id()).collect()
 }
 
+/// The method-index entries of a guest module's exports: from the module's
+/// record when `registry` holds it at the header's id and version — checked
+/// against the header, with every record it depends on — else from the
+/// header ([`freeze_exports`]). An export `described` says is already
+/// indexed is skipped.
+fn index_exports(
+    header: &Header,
+    registry: &LocalRegistry,
+    described: impl Fn(&Uuid) -> bool,
+) -> Result<Vec<ModuleFunction>> {
+    let reference = FrozenReference {
+        id: header.id,
+        version: header.version.clone().into(),
+    };
+    let Some(record) = registry.module_at(&reference.id, &reference.version.0) else {
+        if registry.find_frozen_by_id(&reference.id).is_some() {
+            log::warn!(
+                "the device holds a record of module '{}' ({}) at another version than its \
+                 header's ({}): it is described from its header",
+                header.name,
+                reference.id,
+                reference.version
+            );
+        }
+        return Ok(freeze_exports(header, described).collect());
+    };
+    let module = format!("module '{}' ({reference})", header.name);
+    module_discovery::check_record(header, record)
+        .map_err(|why| anyhow::anyhow!("{module}: its record does not match its header: {why}"))?;
+    let missing = registry.missing_dependencies(&reference);
+    if !missing.is_empty() {
+        let missing: Vec<String> = missing.iter().map(ToString::to_string).collect();
+        anyhow::bail!(
+            "{module}: its record depends on records the device does not hold: {}",
+            missing.join(", ")
+        );
+    }
+    log::info!("{module}: its exports are described by its record");
+    Ok(header
+        .exports
+        .iter()
+        .filter(|export| !described(export.id()))
+        .map(|export| {
+            let ExportKind::Function(function) = &record.exports[export.id()].kind;
+            ModuleFunction {
+                module_id: header.id,
+                function_id: *export.id(),
+                function_name: export.name().clone(),
+                function: function.clone(),
+            }
+        })
+        .collect())
+}
+
 /// The method-index entries a guest module's header gives its exports: each
 /// export whose parameters and return are all primitives or optionals over a
 /// scalar primitive, frozen from them. A header carries no type versions, so
@@ -1435,7 +1537,8 @@ fn freeze_exports<'a>(
                 log::warn!(
                     "guest module {module_id} export '{}' ({}) has a parameter or return type \
                      that is neither a primitive nor an optional over a scalar primitive; it \
-                     dispatches but DescribeMethods does not list it",
+                     dispatches but DescribeMethods does not list it: the module's record, \
+                     in the device's registry, would describe it",
                     function.name,
                     function.id
                 );
@@ -1693,9 +1796,10 @@ mod module_loading_tests {
 
     /// A loaded guest module's exports join the method index with frozen
     /// signatures, so `DescribeMethods` lists them — the guest counterpart of
-    /// `described_host_functions_join_the_method_index`. The test module's
-    /// exports take and return primitives and optionals over a scalar
-    /// primitive only, so all of them are discoverable.
+    /// `described_host_functions_join_the_method_index`. Without the module's
+    /// record, those are the exports taking and returning primitives and
+    /// optionals over a scalar primitive; `reading`, which returns a
+    /// structure, is not among them (`module_records_tests`).
     #[test]
     fn guest_module_exports_join_the_method_index() {
         use arora_types::record::ty::{FrozenOption, FrozenTy, PrimitiveKind};
@@ -1760,9 +1864,10 @@ mod module_loading_tests {
         );
     }
 
-    /// A guest export is described with the signature its module's record
-    /// declares for it: what a host module registering the same declaration
-    /// would describe.
+    /// A guest export frozen from its header alone is described with the
+    /// signature its module's record declares for it: what a host module
+    /// registering the same declaration would describe. An export naming a
+    /// record does not freeze from the header.
     #[test]
     fn a_guest_export_is_described_as_its_module_record_declares_it() {
         use arora_types::record::module::frozen::ExportKind;
@@ -1773,12 +1878,12 @@ mod module_loading_tests {
         for export in &header.exports {
             let low::ExportSymbol::Function(function) = export;
             let ExportKind::Function(declared) = &record.exports[&function.id].kind;
-            assert_eq!(
-                module_discovery::guest_function_signature(function).as_ref(),
-                Some(declared),
-                "{}",
-                function.name
-            );
+            let frozen = module_discovery::guest_function_signature(function);
+            if ["reading", "readings"].contains(&function.name.as_str()) {
+                assert_eq!(frozen, None, "{} names a record", function.name);
+            } else {
+                assert_eq!(frozen.as_ref(), Some(declared), "{}", function.name);
+            }
         }
     }
 
@@ -2489,6 +2594,9 @@ mod stepping_tests;
 
 #[cfg(all(test, feature = "native"))]
 mod module_reload_tests;
+
+#[cfg(all(test, feature = "native"))]
+mod module_records_tests;
 
 /// The [`LocalCaller`]'s client operations on a device built and stepped in
 /// process: each is enqueued when the method returns and answered by the steps

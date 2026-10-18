@@ -195,8 +195,12 @@ through guest wasm.
 A module is a binary (host cdylib, wasm32-wasip1 .wasm, or cross-compiled
 ELF) plus a header, written at export from the module's declaration. The
 `arora` device runner loads modules from *module directories* — the header as
-`header.json` beside its artifact — under the device directory's `modules/`
-and from `--module` (see [`crates/arora/readme.md`](../crates/arora/readme.md)).
+`header.json` beside its artifact, and optionally the module's records in
+`records/` — under the device directory's `modules/` and from `--module` (see
+[`crates/arora/readme.md`](../crates/arora/readme.md)). A module's record,
+in the device's registry (`AroraBuilder::with_registry`), gives every export
+its frozen signature in the method index; without one, only the exports whose
+types are primitives are described.
 The header declares:
 
 - **Types**: `Enumeration`s and `Structure`s, identified by UUID.

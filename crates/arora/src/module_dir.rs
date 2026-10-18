@@ -4,16 +4,23 @@
 //! ```text
 //! <module directory>/
 //! ├── header.json      the module's low-level Header, as JSON
-//! └── <artifact>       the one file with the executor's extension: `.wasm`
-//!                      for `wasm`, the platform's dynamic library (`.so`,
-//!                      `.dylib`, `.dll`) for `native`
+//! ├── <artifact>       the one file with the executor's extension: `.wasm`
+//! │                    for `wasm`, the platform's dynamic library (`.so`,
+//! │                    `.dylib`, `.dll`) for `native`
+//! └── records/         optional: the module's record and the records it
+//!                      depends on, in arora-registry's layout
+//!                      (`module/<id>@<version>.yaml`, `structure/…`,
+//!                      `enumeration/…`, `folder/<id>.yaml`)
 //! ```
 //!
 //! The artifact's name is free — its extension names it — so a published
-//! artifact directory (a header beside its `.wasm`) is a module directory as
-//! is. A device loads every module directory under its device directory's
-//! `modules/` at start ([`in_device_dir`]), and any other the command line
-//! names (`--module`, [`DeviceCli::modules`](crate::DeviceCli::modules)).
+//! artifact directory (a header beside its `.wasm`, and its records) is a
+//! module directory as is. A device loads every module directory under its
+//! device directory's `modules/` at start ([`in_device_dir`]), and any other
+//! the command line names (`--module`, [`DeviceCli::modules`](crate::DeviceCli::modules)).
+//! The records of every module directory fill one registry ([`registry`]),
+//! which describes each module whose record it holds
+//! ([`AroraBuilder::with_registry`](crate::AroraBuilder::with_registry)).
 //!
 //! A module directory that cannot be read — a missing or malformed header, no
 //! artifact or several, an executor this runtime has no artifact convention
@@ -29,12 +36,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use arora_registry::local::LocalRegistry;
+use arora_registry::local_yaml::load_records_from_yaml_dir;
 use arora_types::module::low::Header;
 
 /// The subdirectory of the device directory holding its module directories.
 const MODULES_DIR: &str = "modules";
 /// The header's file name in a module directory.
 const HEADER_FILE: &str = "header.json";
+/// The subdirectory of a module directory holding its records.
+const RECORDS_DIR: &str = "records";
 
 /// A module directory, read: what
 /// [`AroraBuilder::with_module`](crate::AroraBuilder::with_module) loads.
@@ -46,6 +57,43 @@ pub struct ModuleFiles {
     pub header: Header,
     /// The artifact's bytes, in the format the header's executor runs.
     pub executable: Box<[u8]>,
+}
+
+impl ModuleFiles {
+    /// The module directory's `records/`, when it has one.
+    pub fn records_dir(&self) -> Option<PathBuf> {
+        Some(self.dir.join(RECORDS_DIR)).filter(|dir| dir.is_dir())
+    }
+}
+
+/// The registry holding the records every one of `modules` carries in its
+/// `records/`, for [`AroraBuilder::with_registry`](crate::AroraBuilder::with_registry).
+/// A record two directories carry identically is held once. A directory
+/// whose records do not read, or that carries a record another directory
+/// carries differently under the same id and version, is an error naming the
+/// module.
+pub async fn registry(modules: &[ModuleFiles]) -> Result<LocalRegistry> {
+    let mut registry = LocalRegistry::new();
+    for module in modules {
+        let Some(records) = module.records_dir() else {
+            continue;
+        };
+        load_records_from_yaml_dir(&records, &mut registry)
+            .await
+            .with_context(|| {
+                format!(
+                    "the records of module '{}' ({})",
+                    module.header.name,
+                    records.display()
+                )
+            })?;
+        log::info!(
+            "module directory {}: records of '{}' loaded",
+            module.dir.display(),
+            module.header.name
+        );
+    }
+    Ok(registry)
 }
 
 /// Read every module directory under `<device_dir>/modules`, in name order. A

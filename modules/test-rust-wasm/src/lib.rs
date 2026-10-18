@@ -1,6 +1,54 @@
 //! Engine-local, behavior-tree-free test guest. The Status-returning version
 //! lives in arora-sdk as test-rust-wasm-with-nodes.
 
+use arora_types::AroraType;
+
+/// What `reading` returns: an angle, its cosine and its quadrant. A record:
+/// a header names it by id alone, so a device describes the functions taking
+/// or returning it only from the module's record.
+#[derive(Debug, Clone, PartialEq, AroraType)]
+#[arora(id = "8679542f-73d4-474e-a037-324f02a0cae7", version = "1.1.0")]
+pub struct Reading {
+    #[arora(id = "539dca7b-1122-45a5-ba3d-424da221c754")]
+    pub angle: f32,
+    #[arora(id = "184c40cc-2c53-4465-9570-edea6828c907")]
+    pub cosine: f32,
+    #[arora(id = "a9abfe94-c3be-441d-93ad-a01185b27523")]
+    pub quadrant: Quadrant,
+}
+
+/// The quadrant an angle falls in.
+#[derive(Debug, Clone, Copy, PartialEq, AroraType)]
+#[arora(id = "424f4a46-f2f8-4a04-905c-b4f2dfb06322")]
+pub enum Quadrant {
+    #[arora(id = "d0878660-95b1-4742-b4d4-01b6721c7f0f")]
+    First,
+    #[arora(id = "b2973164-8913-4cdf-8d77-f8b9d0a0202e")]
+    Second,
+    #[arora(id = "3dcbdddc-33ff-4e5c-9245-70f0966e2c6e")]
+    Third,
+    #[arora(id = "5617b081-3add-4eb6-9789-f0f70fb20f16")]
+    Fourth,
+}
+
+impl Reading {
+    /// The reading of `angle`, in radians.
+    pub fn of(angle: f32) -> Reading {
+        let turn = angle.rem_euclid(std::f32::consts::TAU);
+        let quadrant = match (turn / std::f32::consts::FRAC_PI_2) as u32 {
+            0 => Quadrant::First,
+            1 => Quadrant::Second,
+            2 => Quadrant::Third,
+            _ => Quadrant::Fourth,
+        };
+        Reading {
+            angle,
+            cosine: angle.cos(),
+            quadrant,
+        }
+    }
+}
+
 #[arora_module::module(
     id = "665d6ec9-3fc9-4cfa-9100-5c8964e95aec",
     name = "test-rust-wasm",
@@ -11,6 +59,8 @@
     executable_mime = "application/wasm"
 )]
 pub mod test_rust_wasm {
+    use super::Reading;
+
     #[export(id = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6")]
     pub fn ping() {}
 
@@ -64,6 +114,23 @@ pub mod test_rust_wasm {
         (0..length).map(|i| seconds + f64::from(i)).collect()
     }
 
+    /// The reading of `angle`: a structure, naming an enumeration.
+    #[export(id = "df544fe1-3832-47d8-94e9-233c41867480")]
+    pub fn reading(#[param(id = "798768ab-0dc4-48c4-aef5-ba91ebe9b5ef")] angle: f32) -> Reading {
+        Reading::of(angle)
+    }
+
+    /// The readings of `count` angles a quarter turn apart, from zero: an
+    /// array of structures.
+    #[export(id = "bc460484-914b-4be5-b291-bae39b9342a8")]
+    pub fn readings(
+        #[param(id = "d565ec30-53bc-4a9b-9951-78855a06dcf2")] count: u32,
+    ) -> Vec<Reading> {
+        (0..count)
+            .map(|i| Reading::of(i as f32 * std::f32::consts::FRAC_PI_2))
+            .collect()
+    }
+
     /// A greeting, naming `name` when there is one.
     #[export(id = "c82c6987-656f-4fb1-9191-ec7a5cd6832b")]
     pub fn greet(
@@ -95,5 +162,16 @@ mod tests {
             vec![1.5, 2.5]
         );
         assert_eq!(positioned_by, Some(7));
+        assert_eq!(reading(0.0).quadrant, super::Quadrant::First);
+        let quadrants: Vec<_> = readings(4).into_iter().map(|r| r.quadrant).collect();
+        assert_eq!(
+            quadrants,
+            vec![
+                super::Quadrant::First,
+                super::Quadrant::Second,
+                super::Quadrant::Third,
+                super::Quadrant::Fourth
+            ]
+        );
     }
 }

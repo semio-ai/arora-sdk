@@ -13,7 +13,10 @@ crate-type = ["cdylib", "rlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arora-module = { path = "../../crates/arora-module", version = "2" }
+# 2.2: the declaration's `type_records`.
+arora-module = { path = "../../crates/arora-module", version = "2.2" }
+# The derived types' records (`#[derive(AroraType)]`, 3.8).
+arora-types = { path = "../../crates/arora-types", version = "3.8" }
 
 [dev-dependencies]
 anyhow = "*"
