@@ -33,8 +33,10 @@ from memory, and `LocalRegistry::missing_dependencies` lists the records a
 record depends on, transitively, that the registry does not hold.
 
 `LocalRegistry::add_declared_module` adds the records of a module declared in
-Rust: its module record and the records of the types its functions name,
-which `#[derive(AroraType)]` produces.
+Rust: its module record, in the folder given, and the records of the types
+its functions name, which `#[derive(AroraType)]` produces, each in the folder
+its type declares (added with them) or, for a type declaring none, in the
+module's. Modules sharing a type that declares its folder add together.
 
 ## YAML Records Layout
 

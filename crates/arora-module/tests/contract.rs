@@ -239,13 +239,14 @@ fn a_contract_carries_the_records_of_the_types_it_names() {
     let parent = Uuid::from_u128(0xf01de5);
     let records = tally::type_records(parent);
     assert_eq!(
-        records.keys().cloned().collect::<Vec<_>>(),
+        records.types.keys().cloned().collect::<Vec<_>>(),
         tally::record(parent).dependencies
     );
     assert_eq!(
-        records.values().next().map(|record| record.name()),
+        records.types.values().next().map(|record| record.name()),
         Some("Receipt".to_string())
     );
+    assert!(records.folders.is_empty());
 }
 
 #[test]

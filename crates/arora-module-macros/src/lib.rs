@@ -193,15 +193,19 @@ impl Kind {
     }
 
     /// The `record::ty::FrozenTy` a described signature carries. A user type
-    /// is pinned at the version its declaration carries (`#[arora(version)]`,
-    /// `1.0.0` when absent).
+    /// is frozen as a derived type's field is: one whose id is a primitive's
+    /// (a `Key`, a string) is that primitive, any other a reference pinned at
+    /// the version its declaration carries (`#[arora(version)]`, `1.0.0` when
+    /// absent).
     fn frozen_ty(&self) -> TokenStream2 {
-        let reference = |ty: &Type| {
+        let user = |ty: &Type| {
+            let type_ref = self.type_ref();
             quote! {
-              arora_types::record::FrozenReference {
-                id: <#ty as arora_types::AroraType>::arora_type_id(),
-                version: <#ty as arora_types::AroraType>::arora_type_version(),
-              }
+              arora_types::record::ty::FrozenTy::from_type_ref(
+                &#type_ref,
+                &<#ty as arora_types::AroraType>::arora_type_version(),
+              )
+              .expect("a scalar, an array or an optional has a frozen form")
             }
         };
         let dynamic_reference = quote! {
@@ -221,19 +225,13 @@ impl Kind {
             Kind::Dynamic => quote! {
               arora_types::record::ty::FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar { reference: #dynamic_reference })
             },
-            Kind::User(ty) => {
-                let reference = reference(ty);
-                quote! { arora_types::record::ty::FrozenTy::FrozenScalar(arora_types::record::ty::FrozenScalar { reference: #reference }) }
-            }
+            Kind::User(ty) => user(ty),
             Kind::Array(element) => match &**element {
                 Kind::Primitive { kind, .. } => {
                     let kind = format_ident!("Array{kind}");
                     quote! { arora_types::record::ty::FrozenTy::from(arora_types::record::ty::PrimitiveKind::#kind) }
                 }
-                Kind::User(ty) => {
-                    let reference = reference(ty);
-                    quote! { arora_types::record::ty::FrozenTy::FrozenArray(arora_types::record::ty::FrozenArray { reference: #reference }) }
-                }
+                Kind::User(ty) => user(ty),
                 _ => unreachable!("rejected at parse time"),
             },
             Kind::Option(element) => {
@@ -680,10 +678,13 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
         .iter()
         .map(|ty| {
             quote! {
-              out.push(arora_types::record::FrozenReference {
-                id: <#ty as arora_types::AroraType>::arora_type_id(),
-                version: <#ty as arora_types::AroraType>::arora_type_version(),
-              });
+              let id = <#ty as arora_types::AroraType>::arora_type_id();
+              if arora_types::record::ty::PrimitiveKind::from_id(&id).is_none() {
+                out.push(arora_types::record::FrozenReference {
+                  id,
+                  version: <#ty as arora_types::AroraType>::arora_type_version(),
+                });
+              }
             }
         })
         .collect();
@@ -759,7 +760,8 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
       pub const NAME: &str = #fn_name;
 
       /// The record references this function's signature pins (its user
-      /// types, versioned) — a module record's dependencies.
+      /// types, versioned, but for one frozen as a primitive) — a module
+      /// record's dependencies.
       pub fn dependencies() -> ::std::vec::Vec<arora_types::record::FrozenReference> {
         let mut out = ::std::vec::Vec::new();
         #(#dependency_pushes)*
@@ -767,10 +769,12 @@ fn function_items(export: &Export, callee: Callee) -> syn::Result<TokenStream2> 
       }
 
       /// Insert the records of the types this function's signature names,
-      /// and of the types those name, in the folder `parent`, into `records`.
+      /// and of the types those name, into `records`, with the folders they
+      /// declare; a type it names that declares none lives in `parent`, the
+      /// module's folder.
       pub fn register_records(
         parent: arora_types::Uuid,
-        records: &mut ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen>,
+        records: &mut arora_types::record::TypeRecords,
       ) {
         let _ = (&parent, &records);
         #(<#user_types as arora_types::AroraType>::register_records(parent, records);)*
@@ -1273,13 +1277,13 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
       }
 
       /// The records of the types the module's functions name, and of the
-      /// types those name, in the folder `parent`, each under the reference
-      /// that pins it: with [`record`], what a registry holds to describe the
-      /// module.
-      pub fn type_records(
-        parent: arora_types::Uuid,
-      ) -> ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen> {
-        let mut records = ::std::collections::BTreeMap::new();
+      /// types those name, each under the reference that pins it, with the
+      /// folders they declare: with [`record`], what a registry holds to
+      /// describe the module. A type declaring no folder lives in `parent`,
+      /// the module's folder, when a function names it, and where the type
+      /// naming it lives otherwise.
+      pub fn type_records(parent: arora_types::Uuid) -> arora_types::record::TypeRecords {
+        let mut records = arora_types::record::TypeRecords::default();
         #(#export_mods::register_records(parent, &mut records);)*
         records
       }
@@ -1301,9 +1305,7 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
         fn id() -> arora_types::Uuid { ids::MODULE }
         fn header(executor: arora_types::module::low::Executor) -> arora_types::module::low::Header { header(executor) }
         fn record(parent: arora_types::Uuid) -> arora_types::record::module::frozen::Module { record(parent) }
-        fn type_records(
-          parent: arora_types::Uuid,
-        ) -> ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen> {
+        fn type_records(parent: arora_types::Uuid) -> arora_types::record::TypeRecords {
           type_records(parent)
         }
         fn exports() -> ::std::vec::Vec<arora_types::module::declared::AroraFunction> { exports() }
@@ -1526,13 +1528,14 @@ fn expand_contract(args: ContractArgs, contract: &mut syn::ItemTrait) -> syn::Re
         }
 
         /// The records of the types the contract's functions name, and of
-        /// the types those name, in the folder `parent`, each under the
-        /// reference that pins it: with [`record`], what a registry holds to
-        /// describe a module implementing the contract.
-        pub fn type_records(
-          parent: arora_types::Uuid,
-        ) -> ::std::collections::BTreeMap<arora_types::record::FrozenReference, arora_types::record::TypeDefinitionFrozen> {
-          let mut records = ::std::collections::BTreeMap::new();
+        /// the types those name, each under the reference that pins it, with
+        /// the folders they declare: with [`record`], what a registry holds
+        /// to describe a module implementing the contract. A type declaring
+        /// no folder lives in `parent`, the implementing module's folder,
+        /// when a function names it, and where the type naming it lives
+        /// otherwise.
+        pub fn type_records(parent: arora_types::Uuid) -> arora_types::record::TypeRecords {
+          let mut records = arora_types::record::TypeRecords::default();
           #(#fn_mods::register_records(parent, &mut records);)*
           records
         }

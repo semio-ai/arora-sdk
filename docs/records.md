@@ -46,22 +46,48 @@ C++ code generation.
 ## Records from Rust declarations
 
 A type that derives `AroraType` is also its record:
-`AroraType::record(parent)` is the structure or enumeration under the type's
-id, at the version `#[arora(version = "…")]` gives (`1.0.0` by default), in
-the folder `parent`, and `register_records` collects it with the records of
-every type it names, each pinned at that type's own version. A type with a
+`AroraType::record(default_parent)` is the structure or enumeration under
+the type's id, at the version `#[arora(version = "…")]` gives (`1.0.0` by
+default), and `register_records` collects it with the records of every type
+it names, each pinned at that type's own version. A type with a
 fixed-length array field has no record: a record has no fixed-length form.
 
+**Folders.** A record lives in a folder:
+
+- A type declares its own with `#[arora(parent = FOLDER)]`, naming a
+  `DeclaredFolder` constant (its id, name and parent folder). Its record lives
+  there whatever names it, and the folder's record, with those of the folders
+  holding it, travels with it. A type several modules share declares its
+  folder, so every module ships the same record and they load together:
+  `Status` lives in `behavior_tree` (`arora_behavior::BEHAVIOR_TREE_FOLDER`).
+- A type declaring none lives in the folder of what names it: the module's
+  folder when a module's function names it, the folder of the type whose
+  field names it otherwise. A type reached first through one path keeps the
+  folder that path gives it.
+
+A type declaring no folder that two modules in different folders name is two
+different records under one id and version, and a registry refuses the
+second.
+
+```rust
+pub const VIZIJ: DeclaredFolder = DeclaredFolder { id: VIZIJ_FOLDER_ID, name: "vizij", parent: None };
+
+#[derive(AroraType)]
+#[arora(id = "…", parent = VIZIJ)]
+pub struct StepValues { … }
+```
+
 A module declared with `arora-module` carries the records of the types its
-functions name the same way (`type_records(parent)`), beside its module
-record (`record(parent)`). `LocalRegistry::add_declared_module` adds both at
-the version the module's header carries, and fails, naming them, when the
-module names a type without a record:
+functions name the same way (`type_records(parent)`, `parent` being the
+module's folder), beside its module record (`record(parent)`).
+`LocalRegistry::add_declared_module` adds both at the version the module's
+header carries, with the folders the types declare, and fails, naming them,
+when the module names a type without a record:
 
 ```rust
 let mut registry = LocalRegistry::new();
-registry.add_folder(folder_id, FolderPublic { name: "vizij".into(), parent: ROOT_ID }).await?;
-registry.add_declared_module::<animation::Module>(header.version.clone().into(), folder_id).await?;
+registry.add_folder(VIZIJ.id, VIZIJ.record()).await?;
+registry.add_declared_module::<animation::Module>(header.version.clone().into(), VIZIJ.id).await?;
 write_records_to_yaml_dir(&registry, artifact_dir.join("records"))?;
 ```
 

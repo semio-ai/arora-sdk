@@ -146,7 +146,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
 /// so a parent must be held first, whatever order the folders were read in.
 /// Fails with the error of a folder whose parent is neither the root, nor
 /// held, nor among `folders`.
-async fn add_folders(
+pub(crate) async fn add_folders(
     mut folders: Vec<(Uuid, FolderPublic)>,
     registry: &mut dyn EditableRegistry,
 ) -> Result<(), RegistryError> {

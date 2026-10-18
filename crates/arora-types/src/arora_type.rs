@@ -1,11 +1,10 @@
 //! A Rust type that describes itself as an arora [`low::Type`] and as a type
 //! record.
 
-use std::collections::BTreeMap;
-
 use uuid::Uuid;
 
-use crate::record::{FrozenReference, TypeDefinitionFrozen};
+use crate::record::folder::DeclaredFolder;
+use crate::record::{TypeDefinitionFrozen, TypeRecords};
 use crate::ty::{low, TypeRegistry};
 
 /// A Rust type that can produce its own arora [`low::Type`] and the
@@ -57,29 +56,41 @@ pub trait AroraType {
     (Self::arora_type(), registry)
   }
 
+  /// The folder this type declares as its record's home
+  /// (`#[arora(parent = …)]`), or `None` when it declares none. A type with a
+  /// home has its record there whatever names it, so modules sharing the
+  /// type ship one record.
+  fn parent() -> Option<&'static DeclaredFolder> {
+    None
+  }
+
   /// This type's record: the structure or enumeration a registry holds under
   /// [`arora_type_id`](AroraType::arora_type_id) at
-  /// [`arora_type_version`](AroraType::arora_type_version), in the folder
-  /// `parent`. Each type it names is pinned at that type's own version.
+  /// [`arora_type_version`](AroraType::arora_type_version). Each type it names
+  /// is pinned at that type's own version.
+  ///
+  /// The record lives in the folder the type declares
+  /// ([`parent`](AroraType::parent)); a type declaring none lives in
+  /// `default_parent`, the folder of what names it: the module whose function
+  /// names it, or the type whose field names it.
   ///
   /// `None` for a type with no record of its own — one that travels as a
   /// well-known type, as a [`Key`](crate::data::Key) travels as a string —
   /// and for one whose shape a record cannot express: a fixed-length array.
-  fn record(_parent: Uuid) -> Option<TypeDefinitionFrozen> {
+  fn record(_default_parent: Uuid) -> Option<TypeDefinitionFrozen> {
     None
   }
 
   /// Insert this type's [`record`](AroraType::record), and the record of
-  /// every type it names, in the folder `parent`, into `records`, each under
-  /// the reference that pins it. Idempotent, and safe for a type reachable
-  /// from itself. A type without a record inserts nothing, so a record
-  /// naming one names a record `records` does not hold: a registry's
+  /// every type it names, into `records`, each under the reference that pins
+  /// it, with the folders they declare. This type, when it declares no
+  /// folder, lives in `default_parent`; a type it names that declares none
+  /// lives where this one does. A type reached first through one path keeps
+  /// the folder that path gives it. Idempotent, and safe for a type reachable
+  /// from itself. A type without a record inserts nothing, so a record naming
+  /// one names a record `records` does not hold: a registry's
   /// `missing_dependencies` reports it.
-  fn register_records(
-    _parent: Uuid,
-    _records: &mut BTreeMap<FrozenReference, TypeDefinitionFrozen>,
-  ) {
-  }
+  fn register_records(_default_parent: Uuid, _records: &mut TypeRecords) {}
 }
 
 #[cfg(all(test, feature = "derive"))]
@@ -725,11 +736,11 @@ mod tests {
 
   /// `register_records` holds a type's record and those of every type it
   /// names, transitively, each once — a type reachable from itself included —
-  /// all in the folder given, under the references that pin them.
+  /// under the references that pin them. Types declaring no folder all live
+  /// in the folder given, and no folder record is added.
   #[test]
   fn register_records_collects_every_record_a_type_reaches_once() {
-    use crate::record::{FrozenReference, TypeDefinitionFrozen};
-    use std::collections::BTreeMap;
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
 
     #[derive(AroraType)]
     #[arora(id = "14141414-1414-4141-8141-000000000001")]
@@ -755,7 +766,7 @@ mod tests {
     }
 
     let folder = crate::Uuid::from_u128(0xf01d);
-    let mut records = BTreeMap::new();
+    let mut records = TypeRecords::default();
     Tree::register_records(folder, &mut records);
     Tree::register_records(folder, &mut records);
     let reference = |id: crate::Uuid, version: &str| FrozenReference {
@@ -764,6 +775,7 @@ mod tests {
     };
     assert_eq!(
       records
+        .types
         .keys()
         .cloned()
         .collect::<std::collections::BTreeSet<_>>(),
@@ -773,7 +785,7 @@ mod tests {
         reference(Kind::arora_type_id(), "1.0.0"),
       ])
     );
-    for record in records.values() {
+    for record in records.types.values() {
       let parent = match record {
         TypeDefinitionFrozen::Structure(s) => s.parent,
         TypeDefinitionFrozen::Enumeration(e) => e.parent,
@@ -781,14 +793,92 @@ mod tests {
       };
       assert_eq!(parent, folder);
     }
+    assert!(records.folders.is_empty());
+  }
+
+  /// A type declaring its folder (`#[arora(parent = …)]`) has its record
+  /// there whatever names it, and brings the folder's record and those of
+  /// the folders holding it. A type it names that declares no folder lives
+  /// there too; a type declaring none that the caller names directly lives
+  /// in the folder the caller gives.
+  #[test]
+  fn a_type_declaring_its_folder_keeps_it_whatever_names_it() {
+    use crate::record::folder::DeclaredFolder;
+    use crate::record::{FrozenReference, TypeDefinitionFrozen, TypeRecords};
+    use crate::Uuid;
+
+    const SHAPES: DeclaredFolder = DeclaredFolder {
+      id: Uuid::from_u128(0x5a9e),
+      name: "shapes",
+      parent: None,
+    };
+    const POLYGONS: DeclaredFolder = DeclaredFolder {
+      id: Uuid::from_u128(0x9019),
+      name: "polygons",
+      parent: Some(&SHAPES),
+    };
+
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000001")]
+    enum Winding {
+      #[arora(id = "16161616-1616-4161-8161-000000000011")]
+      Clockwise,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000002", parent = POLYGONS)]
+    struct Polygon {
+      #[arora(id = "16161616-1616-4161-8161-000000000021")]
+      winding: Winding,
+    }
+    #[derive(AroraType)]
+    #[arora(id = "16161616-1616-4161-8161-000000000003")]
+    struct Drawing {
+      #[arora(id = "16161616-1616-4161-8161-000000000031")]
+      outline: Polygon,
+    }
+
+    assert_eq!(Polygon::parent(), Some(&POLYGONS));
+    assert_eq!(Drawing::parent(), None);
+
+    let parent_of = |records: &TypeRecords, id: Uuid| {
+      let reference = FrozenReference {
+        id,
+        version: crate::record::Version::parse("1.0.0").unwrap(),
+      };
+      match records.types.get(&reference) {
+        Some(TypeDefinitionFrozen::Structure(s)) => s.parent,
+        Some(TypeDefinitionFrozen::Enumeration(e)) => e.parent,
+        other => panic!("{id} has no record: {other:?}"),
+      }
+    };
+    let module_folder = Uuid::from_u128(0x6d0d);
+    let mut records = TypeRecords::default();
+    Drawing::register_records(module_folder, &mut records);
+    assert_eq!(parent_of(&records, Drawing::arora_type_id()), module_folder);
+    assert_eq!(parent_of(&records, Polygon::arora_type_id()), POLYGONS.id);
+    assert_eq!(parent_of(&records, Winding::arora_type_id()), POLYGONS.id);
+    assert_eq!(
+      records.folders,
+      POLYGONS
+        .records()
+        .collect::<std::collections::BTreeMap<_, _>>()
+    );
+
+    // Named from another folder, the shared type and the type it names are
+    // the same records.
+    let mut elsewhere = TypeRecords::default();
+    Polygon::register_records(Uuid::from_u128(0xe15e), &mut elsewhere);
+    assert_eq!(elsewhere.types.len(), 2);
+    for (reference, record) in &elsewhere.types {
+      assert_eq!(records.types.get(reference), Some(record));
+    }
+    assert_eq!(elsewhere.folders, records.folders);
   }
 
   /// A fixed-length array has no record form, so neither has a type holding
   /// one; it registers no record.
   #[test]
   fn a_type_with_a_fixed_length_array_has_no_record() {
-    use std::collections::BTreeMap;
-
     #[derive(AroraType)]
     #[arora(id = "15151515-1515-4151-8151-000000000001")]
     struct Pose {
@@ -796,8 +886,8 @@ mod tests {
       covariance: [f64; 4],
     }
     assert!(Pose::record(crate::Uuid::nil()).is_none());
-    let mut records = BTreeMap::new();
+    let mut records = crate::record::TypeRecords::default();
     Pose::register_records(crate::Uuid::nil(), &mut records);
-    assert!(records.is_empty());
+    assert_eq!(records, crate::record::TypeRecords::default());
   }
 }
