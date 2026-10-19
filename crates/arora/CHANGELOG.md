@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.6.0] - 2026-10-19
+
+### Changed
+
+- A remote's `spawn_graph` of a graph whose root a live run has answers that
+  run's handle, the run taking the graph as its program
+  (arora-behavior-tree 9.1), so a client that lost a run's handle takes the
+  run over. The device follows that run once, logging the take-over and what
+  the graph now calls, rather than as a second run. Requires
+  arora-behavior-tree 9.1.
+
 ## [13.5.0] - 2026-10-19
 
 ### Added

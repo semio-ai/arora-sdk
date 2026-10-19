@@ -38,9 +38,12 @@ a module `Call`; `spawn_graph` starts one whose program is a `Graph`, ticked
 every step until it ends or is halted, its nodes reachable by `apply` like the
 main behavior's. A graph travels with its `GraphType`: the language it is
 written in and the version of that language's format, which the interpreter
-checks against what it reads. `halt` stops either. Each is a function of the interpreter
-module (`interpreter_module`), so a remote reaches them with an ordinary
-`Call`.
+checks against what it reads. A graph run is known by its graph's root:
+spawning a graph whose root a live run has answers that run's handle, the run
+now running the graph, so a client that lost a handle takes its run over by
+spawning its graph again. `halt` stops either. Each is a function of the
+interpreter module (`interpreter_module`), so a remote reaches them with an
+ordinary `Call`.
 
 ## Methods an interpreter implements
 

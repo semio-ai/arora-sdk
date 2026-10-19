@@ -4,6 +4,29 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.1.0] - 2026-10-19
+
+### Added
+
+- A run is known by its root. `spawn_graph` of a graph whose root a live run
+  has starts no second run: that run takes the graph as its program, and the
+  spawn answers the run's `TaskHandle`. Only what differs changes: the nodes
+  and links that differ, the run's nodes the graph does not have (which
+  leave, but for those the main behavior or another run also holds), and the
+  variables it declares anew. The run's nodes the graph leaves as they are keep
+  their state. A client that lost a run's `TaskId` takes the run over by
+  spawning its graph again, and a spawn of the graph a run already runs
+  changes nothing. Such a spawn used to be refused, its node "already
+  part of the device's behavior". A graph with a live run's root that also
+  holds a node of the main behavior or of another run, or the run's
+  decorator, is still refused.
+
+### Fixed
+
+- A `halt` keeps the main behavior's root when an edit has placed it under the
+  run too. The halt used to fail, the device's behavior left referring to the
+  root it removed, and the run no longer tracked.
+
 ## [9.0.1] - 2026-10-19
 
 ### Fixed

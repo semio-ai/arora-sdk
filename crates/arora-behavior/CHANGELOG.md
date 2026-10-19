@@ -4,6 +4,15 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.1] - 2026-10-19
+
+### Changed
+
+- The docs of `BehaviorInterpreter::spawn_graph` and of
+  `interpreter_module::SPAWN_GRAPH` state that a graph run is known by its
+  graph's root: spawning a graph whose root a live run has answers that run's
+  handle, the run taking the graph as its program.
+
 ## [9.5.0] - 2026-10-18
 
 ### Changed

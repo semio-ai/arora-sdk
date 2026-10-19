@@ -1477,6 +1477,7 @@ impl AroraBuilder {
                 move |call| {
                     let (graph_type, graph, policy) = interpreter_module::decode_spawn_graph(&call)
                         .map_err(|message| CallError::Guest { message })?;
+                    let graph_functions = graph.nodes.len();
                     let calls = runtime::RunCalls::Graph {
                         functions: graph.nodes.values().map(|node| node.function).collect(),
                     };
@@ -1491,9 +1492,22 @@ impl AroraBuilder {
                             })
                     })?;
                     if let Some(handle) = handle {
-                        task_runs
-                            .borrow_mut()
-                            .push(runtime::TaskRun::started(&handle, calls, policy));
+                        let mut runs = task_runs.borrow_mut();
+                        match runs.iter_mut().find(|run| run.id == handle.id) {
+                            // The graph's root is a live run's: that run now
+                            // runs the graph.
+                            Some(run) => {
+                                log::info!(
+                                    "task {} ({}) taken over: it runs the graph spawned with \
+                                     its root, naming {} function(s)",
+                                    handle.id.0,
+                                    run.label.as_deref().unwrap_or("just started"),
+                                    graph_functions
+                                );
+                                run.calls = calls;
+                            }
+                            None => runs.push(runtime::TaskRun::started(&handle, calls, policy)),
+                        }
                     }
                     Ok(result)
                 }
@@ -3139,10 +3153,9 @@ mod caller_tests {
         );
     }
 
-    /// `spawn_graph` starts a graph as a run: each step it calls a module
-    /// function and writes the return under a key, until a halt ends it.
-    #[test]
-    fn spawn_graph_runs_a_graph_every_step_until_halted() {
+    /// A graph that calls `double` with `x` each step, writing the return
+    /// under `tools/doubled`, and never ends.
+    fn doubling_graph(x: f64) -> arora_behavior::graph::Graph {
         use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
         use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
         use arora_behavior_tree::schema::_RET_PARAM_ID;
@@ -3180,17 +3193,26 @@ mod caller_tests {
         graph.links = vec![
             Link::new(
                 Port::new(double, DOUBLE_X),
-                LinkSource::Literal(Value::F64(2.0)),
+                LinkSource::Literal(Value::F64(x)),
             ),
             Link::new(Port::new(double, _RET_PARAM_ID), LinkSource::Variable(out)),
         ];
         graph.variables.insert(out, "tools/doubled".to_string());
+        graph
+    }
 
+    /// `spawn_graph` starts a graph as a run: each step it calls a module
+    /// function and writes the return under a key, until a halt ends it.
+    #[test]
+    fn spawn_graph_runs_a_graph_every_step_until_halted() {
         let mut arora = device();
         let caller = arora.caller();
         let graph_type = arora_behavior_tree::behavior::graph_type();
-        let handle = settle(&mut arora, caller.spawn_graph(&graph_type, &graph))
-            .expect("the graph starts as a run");
+        let handle = settle(
+            &mut arora,
+            caller.spawn_graph(&graph_type, &doubling_graph(2.0)),
+        )
+        .expect("the graph starts as a run");
         arora.step(Duration::from_millis(10)).expect("step");
         let running: Value = Status::Running.into();
         assert_eq!(
@@ -3208,6 +3230,52 @@ mod caller_tests {
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(failure)],
             "a halted run ends Failure"
+        );
+    }
+
+    /// A graph spawned again with the root of a live run answers that run,
+    /// which runs the graph from then on: a client that lost the handle takes
+    /// the run over and halts it. The device follows the run once.
+    #[test]
+    fn a_graph_spawned_again_answers_the_run_that_runs_it() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let graph_type = arora_behavior_tree::behavior::graph_type();
+        let first = settle(
+            &mut arora,
+            caller.spawn_graph(&graph_type, &doubling_graph(2.0)),
+        )
+        .expect("the graph starts as a run");
+        arora.step(Duration::from_millis(10)).expect("step");
+
+        let again = settle(
+            &mut arora,
+            caller.spawn_graph(&graph_type, &doubling_graph(3.0)),
+        )
+        .expect("the graph spawned again is answered");
+        assert_eq!(again, first, "the answer is the live run's handle");
+        assert_eq!(arora.task_runs.borrow().len(), 1, "one run is followed");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora
+                .store()
+                .read(&[first.status.clone(), Key::new("tools/doubled")]),
+            vec![Some(running), Some(Value::F64(6.0))],
+            "the run runs the graph spawned again"
+        );
+
+        settle(&mut arora, caller.halt(again.id)).expect("the halt is applied");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&first.status)),
+            vec![Some(failure)],
+            "the run taken over is halted"
+        );
+        assert!(
+            arora.task_runs.borrow().is_empty(),
+            "the ended run is reported once and no longer followed"
         );
     }
 
