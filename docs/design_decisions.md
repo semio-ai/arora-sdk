@@ -708,3 +708,25 @@ Behaviors read their inputs from store paths and write outputs back; the
 built-in keys are reserved names, not hard-wired node plumbing. Anything a node
 would be "predetermined" to read can be overridden by linking a different
 producer onto the same path.
+
+### Semio Studio is opt-in
+
+A device contacts Semio Studio only when it holds a saved Studio credential or
+its run asks for it: `--studio` (or `ARORA_STUDIO=1`) on a runner, or an
+embedder calling `studio::connect`. Otherwise it serves the open local bridge,
+and says so. Arora is free software, and Studio, its bridge and its backend
+are a commercial service beside it: free software does not sign its users up
+to a commercial service, nor report to one, unless they opted in. The
+connection itself sits behind the `studio-bridge` feature, which no default
+build enables, and a build with it still waits to be asked.
+
+The rule is the same on a terminal and headless. Connecting whenever nobody is
+there to decline would make every unattended start — a service, a CI job, an
+agent — a sign-up on Studio's production project. A saved credential stands
+for an earlier opt-in, so it still connects; a credential that does not read
+counts as none, because the client would sign the device up anew with it.
+
+The robot runners' `runner` feature still enables `studio` (arora's
+`studio-bridge`), because robots in the field are built with it and connect
+with their saved credentials. The next major stops both: `runner` no longer
+enables `studio`, and a device connects only when its run asks.

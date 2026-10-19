@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "13.4.0"
+version = "13.5.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "Apache-2.0"
@@ -12,8 +12,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "arora"
 path = "src/main.rs"
-# The binary is the headless Studio device runner, so it needs the opt-in
-# studio-bridge feature. On wasm, build the library with --no-default-features.
+# The binary is the headless device runner: the open local bridge, and Semio
+# Studio only in a build with the opt-in studio-bridge feature. On wasm, build
+# the library with --no-default-features.
 required-features = ["native"]
 
 # A worked example of a device-specific arora (custom HAL handed to
@@ -46,7 +47,9 @@ native = [
 # The Semio Studio connection: the studio-bridge Zenoh connector plus the
 # headless device runner (Firebase auth, token storage, app-data dir, logging)
 # that registers the device with Studio. Opt-in: a plain arora runtime (e.g.
-# Vizij hosting a local bridge) does not talk to the Semio store at all.
+# Vizij hosting a local bridge) does not talk to the Semio store at all. A
+# build with it still connects only a device holding a saved Studio
+# credential, or a run passing --studio.
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",
@@ -103,7 +106,8 @@ dirs = { version = "6", optional = true }
 serde_json = { version = "1", optional = true }
 # The saved Studio registration (`studio/device.json`) is (de)serialized.
 serde = { version = "1", features = ["derive"], optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
+# `env`: `--studio` also reads `ARORA_STUDIO`.
+clap = { version = "4", features = ["derive", "env"], optional = true }
 env_logger = { version = "0.11", optional = true }
 log = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }

@@ -1,13 +1,18 @@
 //! arora-restful: runs an HTTP-controlled robot as an Arora device.
 //!
-//! Usage: `arora-restful [--module <DIR>]... <CONFIG> [OVERRIDES]` (`--help`
-//! lists the options).
+//! Usage: `arora-restful [--module <DIR>]... [--studio | --no-studio] <CONFIG>
+//! [OVERRIDES]` (`--help` lists the options).
 //!
 //! There are no built-in robots: the first argument (or the `CONFIG` env var)
 //! is a path to a `RESTfulRobotConfig` JSON file describing the robot's HTTP
 //! API (see `configs/hackerbot.json`). An optional second JSON file overrides
-//! the selected config. Device identity, registration and token handling are
-//! env-driven inside arora's Semio Studio runner.
+//! the selected config.
+//!
+//! The device serves the open local bridge, and connects to Semio Studio
+//! instead when it holds a saved Studio credential or the run passes
+//! `--studio` (`ARORA_STUDIO=1`), which registers a device holding none;
+//! `--no-studio` keeps it on the local bridge. Its identity, registration and
+//! credential are arora's (`arora::studio`), configured from the environment.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
 //! then each `--module` directory, as the `arora` runner does
@@ -56,6 +61,8 @@ async fn main() -> anyhow::Result<()> {
         .with_frontend(arora::standard_frontend())
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
+    #[cfg(feature = "studio")]
+    let builder = builder.with_studio(cli.runner.studio.choice());
     let hal = RestfulHal::new(config)
         .map_err(|e| anyhow::anyhow!("failed to start the RESTful HAL: {e}"))?;
     builder.with_hal(Box::new(hal)).run().await
@@ -110,5 +117,32 @@ mod tests {
         let error = Cli::try_parse_from(["arora-restful", "--modules", "a", "hackerbot.json"])
             .expect_err("an unknown option is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
+
+    /// `--studio` and `--no-studio` give the run's Studio choice, anywhere on
+    /// the command line; neither leaves it to the saved credential.
+    #[cfg(feature = "studio")]
+    #[test]
+    fn studio_and_no_studio_give_the_run_s_studio_choice() {
+        use arora::studio::Choice;
+        let choice = |args: &[&str]| {
+            Cli::try_parse_from(args.iter().copied())
+                .expect("the command line parses")
+                .runner
+                .studio
+                .choice()
+        };
+        assert_eq!(
+            choice(&["arora-restful", "hackerbot.json"]),
+            Choice::IfSaved
+        );
+        assert_eq!(
+            choice(&["arora-restful", "--studio", "hackerbot.json"]),
+            Choice::Studio
+        );
+        assert_eq!(
+            choice(&["arora-restful", "hackerbot.json", "--no-studio"]),
+            Choice::Local
+        );
     }
 }

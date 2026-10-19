@@ -29,8 +29,8 @@ computer, and stay on a separate machine that drives the robot over the network.
 ## Try it on a NAO
 
 What you get: the robot says "Arora is ready" while its wrists rotate slightly and its hands
-open and close; the terminal UI plays it again when you press `r`; the device appears in
-your Semio Studio account. `arora-naoqi` runs on your computer and drives the robot over
+open and close; the terminal UI plays it again when you press `r`; with `--studio`, the
+device appears in your Semio Studio account. `arora-naoqi` runs on your computer and drives the robot over
 the network: nothing to cross-compile, nothing to install on the robot.
 
 ### 1. Prepare the robot
@@ -56,17 +56,16 @@ repository root, on macOS or Linux:
 cargo run --release -p arora-hal-naoqi --features runner --bin arora-naoqi -- tcp://<robot_name>.local:9559
 ```
 
-The first build takes a while (about ten minutes); the next runs start at once. For Semio
-Studio, your computer needs Internet access.
+The first build takes a while (about ten minutes); the next runs start at once. The device
+serves the open local bridge; to connect it to Semio Studio, see
+[Semio Studio](#semio-studio), which also needs Internet access.
 
 A robot that requires NAOqi authentication takes its credentials from a JSON file given
 after the address: `{"user": "nao", "password": "<password>"}`.
 
 ### 3. Use it
 
-The terminal UI asks three questions first (see [Semio Studio](#semio-studio)): your Studio
-owner UID, a device name, a model family (`nao`). Leave the owner empty to run without
-Studio. Then the device starts, the robot says "Arora is ready" with its hands, and:
+The device starts, the robot says "Arora is ready" with its hands, and:
 
 | Key | Does |
 |---|---|
@@ -75,13 +74,17 @@ Studio. Then the device starts, the robot says "Arora is ready" with its hands, 
 | `q`, `Ctrl-C` | stop the device |
 
 More logs: set `RUST_LOG=debug` before the command. Without a terminal (`nohup`, a
-service), the runner is headless: it takes the Studio answers from `DEVICE_OWNERS`,
-`DEVICE_NAME` and `MODEL_FAMILY`, and connects to Studio only when `DEVICE_OWNERS` is set.
+service), the runner is headless and asks nothing.
 
-Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; a JSON
-configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling period, joint
-speed, sensor families, Autonomous Life) can replace the address, and a second JSON file
-overrides it.
+With `--studio` ([Semio Studio](#semio-studio)), a device not yet registered asks three
+questions on the terminal UI before it starts: your Studio owner UID, a device name, a model
+family (`nao`). Leave the owner empty to run without Studio after all.
+
+Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; `--studio`
+connects to Semio Studio, `--no-studio` keeps a registered device on the local bridge; a
+JSON configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling period,
+joint speed, sensor families, Autonomous Life) can replace the address, and a second JSON
+file overrides it.
 
 Modules: the device loads every module directory in its device directory's `modules/`,
 then each `--module <dir>` (repeatable), as the `arora` runner does: a module's
@@ -149,8 +152,10 @@ ssh -t nao@<robot_name>.local   # -t: the terminal UI needs a terminal
 ./arora-naoqi tcp://localhost:9559
 ```
 
-The device then behaves as [from your computer](#3-use-it). To leave it running after you
-log out, run it headless with `nohup` and the Studio variables.
+The device then behaves as [from your computer](#3-use-it). To register it with Semio
+Studio, run it once with `--studio` and answer the prompts. To leave it running after you
+log out, run it headless with `nohup`: a registered device connects to Studio with its saved
+credential.
 
 On the robot, the device directory follows the same rule as anywhere: `DEVICE_DIR` when it
 is set, else `semio/arora/devices/<DEVICE_LOCAL_ID>/` in the user data directory
@@ -182,18 +187,28 @@ bridge client, Studio included: the runner opens `command.ready` to remote write
 
 ## Semio Studio
 
-The runner is built with the Studio bridge (`arora`'s `studio-bridge` feature): when the
-terminal UI asks for an owner and you give one, the device registers with Semio Studio and
-connects to it. There is no pairing code yet: a device declares its owners itself, by their
-Studio user ids (UIDs).
+Semio Studio is opt-in. The runner is built with the Studio connection (this crate's
+`studio` feature, which `runner` enables), and a device connects to Studio only when it
+holds a saved Studio credential, or when the run passes `--studio` (or sets
+`ARORA_STUDIO=1`). Otherwise it serves the open local bridge, and says so:
+`Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.`
+`--no-studio` keeps a device that holds a credential on the local bridge.
+
+There is no pairing code yet: a device declares its owners itself, by their Studio user ids
+(UIDs).
 
 1. **Find your Studio UID.** Studio does not display it yet. Sign in to Studio in a
    browser, open the developer tools, then Application (Storage in Firefox) → IndexedDB →
    `firebaseLocalStorageDb` → `firebaseLocalStorage`: the entry's `value.uid` is your UID.
-2. **Start the device** and answer the prompts: the owner UID (several, comma-separated, for
-   a shared robot), a device name (`arora-device-<id>` when left empty), the model family
-   `nao`. Or set `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`: a variable that is set
-   skips its question.
+2. **Start the device with `--studio`** and answer the prompts: the owner UID (several,
+   comma-separated, for a shared robot), a device name (`arora-device-<id>` when left empty),
+   the model family `nao`. Or set `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`: a variable
+   that is set skips its question. Headless, nobody is asked, and the device registers what
+   the variables give.
+
+   ```sh
+   cargo run --release -p arora-hal-naoqi --features runner,studio --bin arora-naoqi -- --studio tcp://<robot_name>.local:9559
+   ```
 3. The logs say `Registered device <id> with Studio`, then that the Zenoh session is open.
    The robot is now in your device list in Studio, where you bind it to a robot model and
    drive it.
@@ -201,9 +216,14 @@ Studio user ids (UIDs).
 The device's identity (its Studio credentials) is kept on the machine that runs
 `arora-naoqi`, under `semio/arora/devices/default/studio/` in its user data directory:
 `~/.local/share` on Linux and on the robot, `~/Library/Application Support` on macOS. The
-next runs reuse it without asking again; a device run from your computer, then deployed on
-the robot, registers twice. To register the robot afresh, delete that directory, or give the run another
-identity with `DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`).
+next runs connect with it, without `--studio` and without asking again; a device run from
+your computer, then deployed on the robot, registers twice. To register the robot afresh,
+delete that directory and run with `--studio`, or give the run another identity with
+`DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`).
+
+The next major of this crate stops enabling `studio` from `runner`, and a runner then
+connects to Studio only with `--studio`: build it with `--features runner,studio`, as above,
+and pass `--studio` on every run that should connect.
 
 ## Keys
 

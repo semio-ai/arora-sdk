@@ -122,12 +122,14 @@ jobs:
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
   # The robot runners (arora-ros2, arora-restful, arora-naoqi) build only
-  # with their crates' `runner` feature, which the test and lint jobs leave
-  # off, so they would never be compiled. Lint them and run their tests with
-  # it whenever a change reaches one of their crates.
+  # with their crates' `runner` feature, and arora's Semio Studio connection
+  # (which decides whether a runner contacts Studio) only with its
+  # `studio-bridge` feature. The test and lint jobs leave both off, so they
+  # would never be compiled. Lint them and run their tests with them whenever
+  # a change reaches one of their crates.
   runners:
     needs: select
-    if: needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
+    if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -154,6 +156,12 @@ jobs:
 
       - name: Test the robot runners
         run: cargo test $RUNNERS --bins
+
+      - name: Clippy arora's Studio connection
+        run: cargo clippy -p arora --features studio-bridge --all-targets -- -D warnings
+
+      - name: Test arora's Studio connection
+        run: "cargo test -p arora --features studio-bridge --lib studio::"
 
   lint:
     needs: select

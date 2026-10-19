@@ -131,7 +131,7 @@ Stage 1 is a stopgap. A developer supplies the model file by hand only until Sta
 ### How a developer runs against the live Studio
 
 1. Put the GLB at `crates/arora-hal-ros2/models/<name>.glb`, or set `model_glb_path` in an overrides file or a full config.
-2. Start `arora-ros2` with Studio on. Give the uid of the Studio account of the developer as owner, and the family of the robot, for example `quori`.
+2. Start `arora-ros2 --studio` (built with `--features runner,studio`). Give the uid of the Studio account of the developer as owner, and the family of the robot, for example `quori`. Later runs connect with the saved credential.
 3. The bridge client registers the device in the legacy shape. `normalizeLegacyDevice` changes it to the v2 shape. The device appears in the device list of the developer.
 4. In Studio, open a project that the developer owns. The project contains the same GLB as a model, with the same family. The developer can upload it as a project asset. After the Quori publication, the developer can add `@quori/quori` as a dependency.
 5. Make the binding in Studio. Values flow. The joint ids match, because Studio and the device use the same GLB.

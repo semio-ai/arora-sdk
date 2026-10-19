@@ -1,13 +1,17 @@
 //! arora-naoqi: runs a NAOqi robot (NAO, Pepper) as an Arora device.
 //!
-//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... <ROBOT> [OVERRIDES]` (`--help`
-//! lists the options).
+//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... [--studio | --no-studio]
+//! <ROBOT> [OVERRIDES]` (`--help` lists the options).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var) is the
 //! address of its NAOqi or a path to a `NaoqiRobotConfig` JSON file (see
-//! `configs/nao.json`). An optional second JSON file overrides the selected config. Device
-//! identity, registration and token handling are env-driven inside arora's Semio Studio
-//! runner.
+//! `configs/nao.json`). An optional second JSON file overrides the selected config.
+//!
+//! The device serves the open local bridge, and connects to Semio Studio instead when it
+//! holds a saved Studio credential or the run passes `--studio` (`ARORA_STUDIO=1`), which
+//! registers a device holding none; `--no-studio` keeps it on the local bridge. Its identity,
+//! registration and credential are arora's (`arora::studio`), configured from the
+//! environment.
 //!
 //! The device runs a behavior tree: by default `trees/ready.groot.xml`, which says "Arora is
 //! ready" with a hand gesture at start; `--tree` runs another one, `--no-tree` none. The
@@ -118,6 +122,8 @@ async fn main() -> anyhow::Result<()> {
         .with_frontend(frontend)
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
+    #[cfg(feature = "studio")]
+    let builder = builder.with_studio(cli.runner.studio.choice());
 
     // One runtime carries everything: the HAL's tasks spawn on it at construction, the
     // voice speaks on it, and arora drives the device on it.
@@ -232,5 +238,32 @@ mod tests {
         let error = Cli::try_parse_from(["arora-naoqi", "--modules", "a", "tcp://nao.local:9559"])
             .expect_err("an unknown option is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
+
+    /// `--studio` and `--no-studio` give the run's Studio choice, anywhere on
+    /// the command line; neither leaves it to the saved credential.
+    #[cfg(feature = "studio")]
+    #[test]
+    fn studio_and_no_studio_give_the_run_s_studio_choice() {
+        use arora::studio::Choice;
+        let choice = |args: &[&str]| {
+            Cli::try_parse_from(args.iter().copied())
+                .expect("the command line parses")
+                .runner
+                .studio
+                .choice()
+        };
+        assert_eq!(
+            choice(&["arora-naoqi", "tcp://nao.local:9559"]),
+            Choice::IfSaved
+        );
+        assert_eq!(
+            choice(&["arora-naoqi", "--studio", "tcp://nao.local:9559"]),
+            Choice::Studio
+        );
+        assert_eq!(
+            choice(&["arora-naoqi", "tcp://nao.local:9559", "--no-studio"]),
+            Choice::Local
+        );
     }
 }

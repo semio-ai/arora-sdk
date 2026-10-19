@@ -12,7 +12,8 @@ path = "src/main.rs"
 
 [features]
 # Serve through Semio Studio instead of the open local bridge (the `arora`
-# crate's Studio connection: sign-in, device registration, the Zenoh link).
+# crate's Studio connection: sign-in, device registration, the Zenoh link),
+# when the device holds a saved Studio credential or the run passes --studio.
 studio = ["arora/studio-bridge"]
 # Speak on board with Piper. libpiper and espeak-ng are GPLv3: a binary built
 # with this feature is GPL-affected, so it is opt-in.

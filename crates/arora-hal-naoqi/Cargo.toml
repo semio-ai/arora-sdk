@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-naoqi"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "NAOqi HAL for Arora: drives NAO and Pepper robots through the qi framework (libqi-rs) as Arora devices"
@@ -15,9 +15,15 @@ path = "src/bin/arora-naoqi.rs"
 required-features = ["runner"]
 
 [features]
-# The arora-naoqi binary: pulls the full arora runtime with the Semio Studio
-# connection. The library (the HAL itself) stays lean without it.
-runner = ["dep:arora", "dep:anyhow", "dep:arora-simple-data-store", "dep:clap", "tokio/macros", "tokio/rt-multi-thread"]
+# The arora-naoqi binary: pulls the full arora runtime. The library (the HAL
+# itself) stays lean without it. It enables `studio` for now; the next major
+# stops, and a runner that connects to Semio Studio is then built with
+# `--features runner,studio`.
+runner = ["dep:arora", "dep:anyhow", "dep:arora-simple-data-store", "dep:clap", "tokio/macros", "tokio/rt-multi-thread", "studio"]
+# The Semio Studio connection (arora's `studio-bridge`): the runner takes
+# `--studio` and `--no-studio`, and connects a device holding a saved Studio
+# credential.
+studio = ["arora/studio-bridge"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
@@ -28,8 +34,9 @@ arora-hal = { path = "../arora-hal", version = "4" }
 arora-module = { path = "../arora-module", version = "2.1" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1", optional = true }
 arora-types = { path = "../arora-types", version = "3" }
-# 13.3: `AroraBuilder::with_module_dirs`, the modules the runner carries.
-arora = { path = "../arora", version = "13.3", features = ["studio-bridge"], optional = true }
+# 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
+# Studio choice.
+arora = { path = "../arora", version = "13.5", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"

@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-restful"
-version = "4.3.0"
+version = "4.4.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerbot) as Arora devices"
@@ -16,9 +16,15 @@ path = "src/bin/arora-restful.rs"
 required-features = ["runner"]
 
 [features]
-# The arora-restful binary: pulls the full arora runtime with the Semio Studio
-# connection. The library (the HAL itself) stays lean without it.
-runner = ["dep:arora", "dep:anyhow", "dep:clap"]
+# The arora-restful binary: pulls the full arora runtime. The library (the HAL
+# itself) stays lean without it. It enables `studio` for now; the next major
+# stops, and a runner that connects to Semio Studio is then built with
+# `--features runner,studio`.
+runner = ["dep:arora", "dep:anyhow", "dep:clap", "studio"]
+# The Semio Studio connection (arora's `studio-bridge`): the runner takes
+# `--studio` and `--no-studio`, and connects a device holding a saved Studio
+# credential.
+studio = ["arora/studio-bridge"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
@@ -26,8 +32,9 @@ anyhow = { version = "1", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
-# 13.3: `AroraBuilder::with_module_dirs`, the modules the runner carries.
-arora = { path = "../arora", version = "13.3", features = ["studio-bridge"], optional = true }
+# 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
+# Studio choice.
+arora = { path = "../arora", version = "13.5", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
