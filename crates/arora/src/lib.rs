@@ -53,7 +53,7 @@ pub use arora_bridge_ws as bridge_ws;
 #[cfg(feature = "native")]
 pub use run::{
     local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
-    serve_local_ws_bridge, standard_frontend, DeviceCli,
+    serve_local_ws_bridge, standard_frontend, DeviceCli, RunnerArgs,
 };
 pub use runtime::{list_keys, RuntimeError};
 
@@ -769,6 +769,11 @@ pub struct AroraBuilder {
     functions: HashMap<Uuid, ModuleFunction>,
     modules: Vec<GuestModule>,
     registry: LocalRegistry,
+    /// The records the module directories carry (`with_module_dirs`), kept
+    /// apart from `registry` and merged into it at build, so the order of
+    /// `with_registry` and `with_module_dirs` does not matter.
+    #[cfg(feature = "native")]
+    module_dir_records: LocalRegistry,
     host_modules: Vec<HostModule>,
     groot: Option<String>,
     #[cfg(feature = "native")]
@@ -961,8 +966,9 @@ impl AroraBuilder {
     /// on the built device ([`Arora::load_module`], [`Arora::reload_module`])
     /// is indexed from its header. Default: an empty registry.
     ///
-    /// `registry` replaces the one the builder holds, with the records
-    /// module directories added to it (`with_module_dirs`): give it first.
+    /// Given again, `registry` replaces the one given before. The records of
+    /// the device's module directories (`with_module_dirs`) join it at build,
+    /// whichever of the two is given first.
     ///
     /// ```ignore
     /// let mut records = arora::LocalRegistry::new();
@@ -983,24 +989,32 @@ impl AroraBuilder {
     /// ([`device_dir::from_env`]) and its `--module` directories.
     ///
     /// Each module loads at [`build`](Self::build) as
-    /// [`with_module`](Self::with_module) loads one, and the records its
-    /// directory carries in `records/` join the device's registry
-    /// ([`with_registry`](Self::with_registry)): a module whose record they
-    /// hold has every export described, record-typed ones included.
+    /// [`with_module`](Self::with_module) loads one, and at build the records
+    /// its directory carries in `records/` join the device's registry
+    /// ([`with_registry`](Self::with_registry), given before or after): a
+    /// module whose record they hold has every export described, record-typed
+    /// ones included.
     ///
-    /// Fails, naming the module, when a directory cannot be read as a module,
-    /// when one module is in two directories, or when a directory's records
-    /// do not read or differ from a record the registry already holds under
-    /// the same id and version. A device directory without `modules/` carries
-    /// no module.
+    /// What the directories hold is read here: this fails, naming the module,
+    /// when a directory cannot be read as a module, when one module is in two
+    /// directories, or when a directory's records do not read or differ from
+    /// a record another directory carries under the same id and version. A
+    /// device directory without `modules/` carries no module. What the engine
+    /// and the registry decide fails [`build`](Self::build): an artifact the
+    /// engine rejects (a native module where the platform loads none, a wasm
+    /// it does not compile), a record that does not describe its module's
+    /// header, or one that differs from a record of the registry given with
+    /// `with_registry`, naming the record.
     ///
-    /// ```ignore
-    /// Arora::builder()
-    ///     .with_hal(hal)
-    ///     .with_module_dirs(&arora::device_dir::from_env()?, &module_dirs)
+    /// ```no_run
+    /// # async fn runner(module_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    /// arora::Arora::builder()
+    ///     .with_hal(Box::new(arora_hal::FakeHal::new()))
+    ///     .with_module_dirs(&arora::device_dir::from_env()?, module_dirs)
     ///     .await?
     ///     .run()
     ///     .await
+    /// # }
     /// ```
     #[cfg(feature = "native")]
     pub async fn with_module_dirs(
@@ -1009,7 +1023,7 @@ impl AroraBuilder {
         dirs: &[std::path::PathBuf],
     ) -> Result<Self> {
         let modules = module_dir::read_device_modules(device_dir, dirs)?;
-        module_dir::load_records(&modules, &mut self.registry).await?;
+        module_dir::load_records(&modules, &mut self.module_dir_records).await?;
         for module in modules {
             self = self.with_module(module.header, module.executable);
         }
@@ -1136,6 +1150,13 @@ impl AroraBuilder {
         // loaded guest modules and the host modules fold their functions in.
         let mut functions = self.functions;
 
+        // The records the device's module directories carry join the
+        // registry the embedder gave, whichever was given first.
+        #[cfg(feature = "native")]
+        let registry = module_dir::merge_records(self.registry, &self.module_dir_records)?;
+        #[cfg(not(feature = "native"))]
+        let registry = self.registry;
+
         // Load each guest module into the engine so its exported functions
         // dispatch through the engine's `CallBridge`. Done before the store and
         // seams are wired: a module that fails to load fails the whole build.
@@ -1164,7 +1185,7 @@ impl AroraBuilder {
             }
             // An export its declaration already indexed
             // (`with_declared_module`) keeps that frozen signature.
-            let frozen = index_exports(header, &self.registry, |id| functions.contains_key(id))?;
+            let frozen = index_exports(header, &registry, |id| functions.contains_key(id))?;
             functions.extend(frozen.into_iter().map(|f| (f.function_id, f)));
             guest_exports.insert(module_id, export_ids(header));
             let function_count = header.exports.len();

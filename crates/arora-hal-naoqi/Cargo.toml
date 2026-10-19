@@ -17,10 +17,12 @@ required-features = ["runner"]
 [features]
 # The arora-naoqi binary: pulls the full arora runtime with the Semio Studio
 # connection. The library (the HAL itself) stays lean without it.
-runner = ["dep:arora", "dep:anyhow", "dep:arora-simple-data-store", "tokio/macros", "tokio/rt-multi-thread"]
+runner = ["dep:arora", "dep:anyhow", "dep:arora-simple-data-store", "dep:clap", "tokio/macros", "tokio/rt-multi-thread"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
+# The runner's command line; `env` reads the robot from `ROBOT`.
+clap = { version = "4", features = ["derive", "env"], optional = true }
 arora-behavior = { path = "../arora-behavior", version = "9.1" }
 arora-hal = { path = "../arora-hal", version = "4" }
 arora-module = { path = "../arora-module", version = "2.1" }

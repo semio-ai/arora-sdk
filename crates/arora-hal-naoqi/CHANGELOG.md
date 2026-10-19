@@ -10,16 +10,25 @@ All notable changes to `arora-hal-naoqi`. The format follows
 
 - The `arora-naoqi` runner carries modules as the `arora` runner does: every
   module directory under its device directory's `modules/`, then each
-  `--module <dir>` (repeatable), with the records their `records/` carry, so
-  the device describes a guest module's record-typed exports and a tree's
-  leaves call them. A module directory that does not read fails the start,
-  naming the module, before the robot is reached. The binary cross-compiled
-  for the robot is static, so it loads WebAssembly modules; a native module
-  fails the start, naming it.
+  `--module <DIR>` (or `--module=<DIR>`, repeatable), with the records their
+  `records/` carry, so the device describes a guest module's record-typed
+  exports and a tree's leaves call them.
+  - A module directory that does not read (no header, no artifact or several,
+    records that do not parse or differ between directories) fails the start,
+    naming the module, before the robot is reached.
+  - What the engine and the device's registry decide fails when the device is
+    built, after the HAL has started: an artifact the engine rejects (a native
+    module where the platform loads none, a wasm it does not compile), or a
+    record that does not describe its module's header. The binary
+    cross-compiled for the robot is static, so a native module fails there,
+    naming it.
 
 ### Changed
 
-- The `runner` feature requires `arora` 13.3 (`AroraBuilder::with_module_dirs`).
+- The runner's command line is parsed with clap (`arora::RunnerArgs` for
+  `--module`): `-h` and `--help` print its options, and `--tree` and
+  `--no-tree` together are refused rather than the last one winning.
+- The `runner` feature requires `arora` 13.3 and `clap` 4.
 
 ## [0.1.0] - 2026-10-12
 

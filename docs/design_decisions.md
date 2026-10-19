@@ -628,6 +628,16 @@ animation module, a policy — exactly as the plain runner does. A runner that
 loaded no module directory would make a module installed on the device
 present on one runner and absent on another, with nothing at start to say so.
 
+The module directories' records are kept apart from the registry an embedder
+gives (`with_registry`) and join it when the device is built, refusing a
+record that differs from one it holds. Merging at build makes the order of the
+two calls irrelevant: a registry given after the directories would otherwise
+replace their records, and the record-typed exports would fall back to their
+headers, undescribed, with no more than a warning. A directory is read when
+it is given, so a directory that does not read fails a runner's start before
+the robot is reached; what the engine and the registry decide waits for the
+build.
+
 The artifact is found by its extension — the one `.wasm` for the `wasm`
 executor, the one dynamic library for `native` — rather than by a fixed name
 or a path in the header. The header carries no path (it is written at export,

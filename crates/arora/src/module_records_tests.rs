@@ -430,7 +430,16 @@ fn with_module_dirs(
     device_dir: &std::path::Path,
     dirs: &[std::path::PathBuf],
 ) -> anyhow::Result<AroraBuilder> {
-    futures::executor::block_on(Arora::builder().with_module_dirs(device_dir, dirs))
+    load_module_dirs(Arora::builder(), device_dir, dirs)
+}
+
+/// `builder` loading the module directories of `device_dir` and `dirs`.
+fn load_module_dirs(
+    builder: AroraBuilder,
+    device_dir: &std::path::Path,
+    dirs: &[std::path::PathBuf],
+) -> anyhow::Result<AroraBuilder> {
+    futures::executor::block_on(builder.with_module_dirs(device_dir, dirs))
 }
 
 /// The return type of the function `function` as the device describes it.
@@ -593,5 +602,78 @@ fn two_modules_sharing_a_type_load_together_on_one_device() {
         Reading::try_from(called.ret).expect("a Reading").quadrant,
         Quadrant::Second
     );
+    std::fs::remove_dir_all(&device_dir).unwrap();
+}
+
+/// The records a module directory carries join the registry given with
+/// `with_registry`, whether it is given before the directories or after:
+/// `compass`, described by the given registry, and the module directory's
+/// `test-rust-wasm` both have their record-typed exports described. The
+/// `Reading` and `Quadrant` records both carry are held once.
+#[test]
+fn a_module_directory_s_records_join_the_registry_given_before_or_after() {
+    let device_dir = device_dir("records-join-registry");
+    write_module_dir(&device_dir, "trigonometry", &header(), &records());
+    let given = || {
+        Arora::builder()
+            .with_module(compass::header(wasm()), WASM.to_vec())
+            .with_registry(packaged::<compass::Module>())
+    };
+    let before = load_module_dirs(given(), &device_dir, &[]).expect("the directory loads");
+    let after = with_module_dirs(&device_dir, &[])
+        .expect("the directory loads")
+        .with_module(compass::header(wasm()), WASM.to_vec())
+        .with_registry(packaged::<compass::Module>());
+    for (order, builder) in [("registry first", before), ("directories first", after)] {
+        let arora = builder
+            .build()
+            .unwrap_or_else(|e| panic!("{order}: the device builds: {e:#}"));
+        for function in [
+            declared::ids::reading::FUNCTION,
+            compass::ids::bearing::FUNCTION,
+        ] {
+            assert_eq!(described_return(&arora, function), reading_ty(), "{order}");
+        }
+    }
+    std::fs::remove_dir_all(&device_dir).unwrap();
+}
+
+/// A record a module directory carries that differs from the record the
+/// given registry holds under the same id and version fails the build,
+/// naming the record, whichever is given first.
+#[test]
+fn a_module_directory_s_record_that_differs_from_the_registry_s_is_refused() {
+    let device_dir = device_dir("records-differ-from-registry");
+    write_module_dir(&device_dir, "trigonometry", &header(), &records());
+    let given = || {
+        let mut tampered = Module::record(ROOT_ID);
+        tampered
+            .exports
+            .get_mut(&declared::ids::reading::FUNCTION)
+            .unwrap()
+            .name = "read".to_string();
+        registry_with(tampered, true)
+    };
+    let before = load_module_dirs(Arora::builder().with_registry(given()), &device_dir, &[])
+        .expect("the directory loads");
+    let after = with_module_dirs(&device_dir, &[])
+        .expect("the directory loads")
+        .with_registry(given());
+    for (order, builder) in [("registry first", before), ("directories first", after)] {
+        let error = builder
+            .build()
+            .err()
+            .unwrap_or_else(|| panic!("{order}: a differing record fails the build"));
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(&format!(
+                "the device's module directories carry module record {}@{}, which does not \
+                 join its registry",
+                Module::id(),
+                version().0
+            )),
+            "{order}: {message}"
+        );
+    }
     std::fs::remove_dir_all(&device_dir).unwrap();
 }

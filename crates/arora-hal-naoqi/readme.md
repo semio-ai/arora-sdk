@@ -88,7 +88,10 @@ then each `--module <dir>` (repeatable), as the `arora` runner does: a module's
 `header.json` beside its artifact, and optionally its records in `records/`, which describe
 every function it exports. The layout is in
 [arora's readme](../arora/readme.md#where-a-device-keeps-its-data). A tree's leaves call
-the functions of these modules as they call `Say` and `HandsReady`.
+the functions of these modules as they call `Say` and `HandsReady`. A module directory that
+does not read fails the start, naming the module, before the robot is reached; a module the
+engine rejects, or whose record does not describe it, fails once the robot is connected.
+`--help` lists the options.
 
 ## Deploy it on the robot
 
@@ -149,9 +152,12 @@ ssh -t nao@<robot_name>.local   # -t: the terminal UI needs a terminal
 The device then behaves as [from your computer](#3-use-it). To leave it running after you
 log out, run it headless with `nohup` and the Studio variables.
 
-On the robot, the device directory is `~/.local/share/semio/arora/devices/default/`, and
-its modules go in `modules/` there. The binary is static, so it loads WebAssembly modules:
-a native module (a dynamic library) fails the start, naming it.
+On the robot, the device directory follows the same rule as anywhere: `DEVICE_DIR` when it
+is set, else `semio/arora/devices/<DEVICE_LOCAL_ID>/` in the user data directory
+(`~/.local/share` on the robot), with `default` as the local id when `DEVICE_LOCAL_ID` is
+unset; [arora's readme](../arora/readme.md#where-a-device-keeps-its-data) has the whole
+rule. Its modules go in `modules/` there. The binary is static, so it loads WebAssembly
+modules: a native module (a dynamic library) fails the start, naming it.
 
 ## The default behavior
 

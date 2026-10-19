@@ -99,10 +99,31 @@ pub struct DeviceCli {
     #[arg(long)]
     pub open: bool,
 
-    /// A module directory to load besides the device directory's: header.json
-    /// beside the one .wasm (executor wasm) or dynamic library (executor
-    /// native), and optionally records/. Repeatable.
-    #[arg(long, value_name = "DIR")]
+    /// A module directory to load besides the device directory's, as
+    /// [`RunnerArgs::module`] takes one.
+    #[arg(long, value_name = "DIR", help = MODULE_HELP)]
+    pub module: Vec<std::path::PathBuf>,
+}
+
+/// What `--module` says in a runner's help.
+#[cfg(feature = "native")]
+const MODULE_HELP: &str = "A module directory to load besides the device directory's: \
+                           header.json beside the one .wasm (executor wasm) or dynamic library \
+                           (executor native), and optionally records/. Repeatable.";
+
+/// The options every device runner takes besides its own, as a clap helper to
+/// `#[command(flatten)]` into the runner's command line: `--module <DIR>`
+/// (or `--module=<DIR>`), repeatable. Load the directories it names, with the
+/// device directory's, through
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs). The robot
+/// runners of `arora-hal-ros2`, `arora-hal-restful` and `arora-hal-naoqi`
+/// take it; the `arora` binary's [`DeviceCli`] takes the same `--module`.
+#[cfg(feature = "native")]
+#[derive(Debug, Default, clap::Args)]
+pub struct RunnerArgs {
+    /// The module directories to load besides the device directory's, in
+    /// the order given.
+    #[arg(long, value_name = "DIR", help = MODULE_HELP)]
     pub module: Vec<std::path::PathBuf>,
 }
 
@@ -395,4 +416,30 @@ pub fn standard_frontend() -> Frontend {
         }
     }
     crate::operator::default_frontend()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, clap::Parser)]
+    struct Runner {
+        #[command(flatten)]
+        runner: RunnerArgs,
+    }
+
+    /// `--module` takes its directory as the next argument or after `=`, and
+    /// repeats, in order, on a runner's command line and on the `arora`
+    /// binary's.
+    #[test]
+    fn module_takes_its_directory_either_way_and_repeats() {
+        let expected = vec![std::path::PathBuf::from("a"), "b".into()];
+        let runner = Runner::try_parse_from(["runner", "--module", "a", "--module=b"])
+            .expect("the runner's options parse");
+        assert_eq!(runner.runner.module, expected);
+        let device = DeviceCli::try_parse_from(["arora", "--module=a", "--module", "b"])
+            .expect("the arora binary's options parse");
+        assert_eq!(device.module, expected);
+    }
 }

@@ -1,6 +1,7 @@
 //! arora-ros2: runs a ROS 2 robot as an Arora device.
 //!
-//! Usage: `arora-ros2 [--module <dir>]... <nao|pepper|quori|ur3|ur5|g1|config.json> [overrides.json]`
+//! Usage: `arora-ros2 [--module <DIR>]... <ROBOT> [OVERRIDES]` (`--help` lists
+//! the options).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var)
 //! is a well-known robot name or a path to a `ROS2RobotConfig` JSON file. An
@@ -14,14 +15,23 @@
 //! `header.json` beside its artifact, and optionally its records in
 //! `records/`, which describe every function it exports.
 
-use std::path::PathBuf;
-
-use anyhow::{bail, Context};
-use arora::Arora;
+use arora::{Arora, RunnerArgs};
 use arora_hal_ros2::{configs, ROS2RobotConfig, Ros2Hal};
+use clap::Parser;
 
-const USAGE: &str = "usage: arora-ros2 [--module <dir>]... \
-                     <nao|pepper|quori|ur3|ur5|g1|config.json> [overrides.json]";
+/// The runner's command line.
+#[derive(Debug, Parser)]
+#[command(name = "arora-ros2", about = "Runs a ROS 2 robot as an Arora device")]
+struct Cli {
+    /// The robot: a well-known name (nao, pepper, quori, ur3, ur5, g1) or a
+    /// ROS2RobotConfig JSON file.
+    #[arg(env = "ROBOT")]
+    robot: String,
+    /// A JSON file overriding the robot's configuration.
+    overrides: Option<String>,
+    #[command(flatten)]
+    runner: RunnerArgs,
+}
 
 fn load_config(selector: &str) -> ROS2RobotConfig {
     match selector {
@@ -40,39 +50,10 @@ fn load_config(selector: &str) -> ROS2RobotConfig {
     }
 }
 
-struct Cli {
-    selector: String,
-    overrides: Option<String>,
-    modules: Vec<PathBuf>,
-}
-
-fn parse_cli() -> anyhow::Result<Cli> {
-    let mut modules = Vec::new();
-    let mut positional = Vec::new();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--module" => modules.push(PathBuf::from(args.next().context(USAGE)?)),
-            flag if flag.starts_with("--") => bail!("unknown option {flag}\n{USAGE}"),
-            _ => positional.push(arg),
-        }
-    }
-    let mut positional = positional.into_iter();
-    let selector = positional
-        .next()
-        .or_else(|| std::env::var("ROBOT").ok())
-        .context(USAGE)?;
-    Ok(Cli {
-        selector,
-        overrides: positional.next(),
-        modules,
-    })
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = parse_cli()?;
-    let mut config = load_config(&cli.selector);
+    let cli = Cli::parse();
+    let mut config = load_config(&cli.robot);
     if let Some(overrides_path) = &cli.overrides {
         config.apply_overrides(load_config(overrides_path));
     }
@@ -86,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     // module directory that does not read fails the start at once.
     let builder = Arora::builder()
         .with_frontend(arora::standard_frontend())
-        .with_module_dirs(&arora::device_dir::from_env()?, &cli.modules)
+        .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
     // construction, and arora drives the device on it.
@@ -94,4 +75,55 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the ROS 2 HAL: {e}"))?;
     builder.with_hal(Box::new(hal)).run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+    use clap::CommandFactory;
+
+    #[test]
+    fn the_command_line_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    /// The robot, its overrides and `--module` in any order, the directory
+    /// after a space or `=`.
+    #[test]
+    fn the_robot_its_overrides_and_module_directories_parse() {
+        let cli = Cli::try_parse_from([
+            "arora-ros2",
+            "--module",
+            "a",
+            "nao",
+            "--module=b",
+            "overrides.json",
+        ])
+        .expect("the command line parses");
+        assert_eq!(cli.robot, "nao");
+        assert_eq!(cli.overrides.as_deref(), Some("overrides.json"));
+        assert_eq!(
+            cli.runner.module,
+            vec![std::path::PathBuf::from("a"), "b".into()]
+        );
+    }
+
+    /// `-h` and `--help` print the help and exit 0; neither is a robot.
+    #[test]
+    fn help_is_not_a_robot() {
+        for flag in ["-h", "--help"] {
+            let error = Cli::try_parse_from(["arora-ros2", flag]).expect_err("help stops");
+            assert_eq!(error.kind(), ErrorKind::DisplayHelp, "{flag}");
+            assert_eq!(error.exit_code(), 0, "{flag}");
+        }
+    }
+
+    /// An option the runner does not take is refused, not read as a robot.
+    #[test]
+    fn an_unknown_option_is_refused() {
+        let error = Cli::try_parse_from(["arora-ros2", "--modules", "a", "nao"])
+            .expect_err("an unknown option is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
 }

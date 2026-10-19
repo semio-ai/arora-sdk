@@ -11,15 +11,24 @@ All notable changes to `arora`. The format follows
 - `AroraBuilder::with_module_dirs(device_dir, dirs)`: the modules a device
   runner carries, as module directories: every one under `device_dir`'s
   `modules/`, in name order, then each of `dirs`. Each loads at build as
-  `with_module` loads one, and the records its `records/` carries join the
-  device's registry, so a module whose record they hold has every export
-  described, record-typed ones included. It fails, naming the module, when a
-  directory does not read as a module, when one module is in two
-  directories, or when a directory's records do not read or differ from a
-  record the registry holds under the same id and version. The `arora`
-  binary loads its device directory's and `--module` directories with it, as
-  the robot runners of `arora-hal-ros2`, `arora-hal-restful` and
-  `arora-hal-naoqi` do.
+  `with_module` loads one. At build, the records each directory's `records/`
+  carries join the registry given with `with_registry`, whether that registry
+  is given before or after, so a module whose record they hold has every
+  export described, record-typed ones included.
+  - It fails, naming the module, when a directory does not read as a module,
+    when one module is in two directories, or when a directory's records do
+    not read or differ from a record another directory carries.
+  - The build fails, naming the record, when a directory's record differs
+    from one the given registry holds under the same id and version, and, as
+    for any guest module, when an artifact does not load or a record does not
+    describe its module's header.
+  - The `arora` binary loads its device directory's and `--module`
+    directories with it, as the robot runners of `arora-hal-ros2`,
+    `arora-hal-restful` and `arora-hal-naoqi` do.
+- `RunnerArgs`: the options every device runner takes besides its own, as a
+  clap helper to flatten into the runner's command line: `--module <DIR>` or
+  `--module=<DIR>`, repeatable. The robot runners take it; `DeviceCli`'s
+  `--module` reads the same.
 
 ## [13.2.0] - 2026-10-19
 

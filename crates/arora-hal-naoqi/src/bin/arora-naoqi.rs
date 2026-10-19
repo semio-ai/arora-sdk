@@ -1,6 +1,7 @@
 //! arora-naoqi: runs a NAOqi robot (NAO, Pepper) as an Arora device.
 //!
-//! Usage: `arora-naoqi [--tree <tree.groot.xml> | --no-tree] [--module <dir>]... <tcp://host:9559 | config.json> [overrides.json]`
+//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... <ROBOT> [OVERRIDES]` (`--help`
+//! lists the options).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var) is the
 //! address of its NAOqi or a path to a `NaoqiRobotConfig` JSON file (see
@@ -23,9 +24,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use arora::tui::{commands_frontend, TuiCommand};
-use arora::{Arora, HostModule};
+use arora::{Arora, HostModule, RunnerArgs};
 use arora_hal::Hal;
 use arora_hal_naoqi::{
     gestures::naoqi_gestures, ready_tree_initial_state, say, say::naoqi_say, NaoqiHal,
@@ -34,10 +35,8 @@ use arora_hal_naoqi::{
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key, KeyMeta, StateChange};
 use arora_types::value::Value;
+use clap::Parser;
 use futures::StreamExt;
-
-const USAGE: &str = "usage: arora-naoqi [--tree <tree.groot.xml> | --no-tree] [--module <dir>]... \
-                     <tcp://host:9559 | config.json> [overrides.json]";
 
 /// The step period: 50 Hz, a pace NAOqi's `setAngles` round trips keep up with.
 const STEP_PERIOD: Duration = Duration::from_millis(20);
@@ -55,48 +54,43 @@ fn load_config(selector: &str) -> anyhow::Result<NaoqiRobotConfig> {
         .with_context(|| format!("failed to parse robot config {selector}"))
 }
 
+/// The runner's command line.
+#[derive(Debug, Parser)]
+#[command(
+    name = "arora-naoqi",
+    about = "Runs a NAOqi robot (NAO, Pepper) as an Arora device"
+)]
 struct Cli {
-    tree: Option<String>,
-    selector: String,
+    /// A Groot behavior tree to run instead of the default one.
+    #[arg(long, value_name = "FILE", conflicts_with = "no_tree")]
+    tree: Option<PathBuf>,
+    /// Run no behavior tree.
+    #[arg(long)]
+    no_tree: bool,
+    /// The robot: its NAOqi's address (tcp://<host>:9559) or a NaoqiRobotConfig
+    /// JSON file.
+    #[arg(env = "ROBOT")]
+    robot: String,
+    /// A JSON file overriding the robot's configuration.
     overrides: Option<String>,
-    modules: Vec<PathBuf>,
+    #[command(flatten)]
+    runner: RunnerArgs,
 }
 
-fn parse_cli() -> anyhow::Result<Cli> {
-    let mut tree = Some(READY_TREE.to_string());
-    let mut modules = Vec::new();
-    let mut positional = Vec::new();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--tree" => {
-                let path = args.next().context(USAGE)?;
-                tree = Some(
-                    std::fs::read_to_string(&path)
-                        .with_context(|| format!("failed to read the tree {path}"))?,
-                );
-            }
-            "--no-tree" => tree = None,
-            "--module" => modules.push(PathBuf::from(args.next().context(USAGE)?)),
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                std::process::exit(0);
-            }
-            flag if flag.starts_with("--") => bail!("unknown option {flag}\n{USAGE}"),
-            _ => positional.push(arg),
+impl Cli {
+    /// The Groot XML of the tree the device runs: `--tree`'s file, none under
+    /// `--no-tree`, else the default behavior.
+    fn tree(&self) -> anyhow::Result<Option<String>> {
+        if self.no_tree {
+            return Ok(None);
+        }
+        match &self.tree {
+            Some(path) => std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read the tree {}", path.display()))
+                .map(Some),
+            None => Ok(Some(READY_TREE.to_string())),
         }
     }
-    let mut positional = positional.into_iter();
-    let selector = positional
-        .next()
-        .or_else(|| std::env::var("ROBOT").ok())
-        .context(USAGE)?;
-    Ok(Cli {
-        tree,
-        selector,
-        overrides: positional.next(),
-        modules,
-    })
 }
 
 fn ready() -> StateChange {
@@ -105,8 +99,9 @@ fn ready() -> StateChange {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = parse_cli()?;
-    let mut config = load_config(&cli.selector)?;
+    let cli = Cli::parse();
+    let tree = cli.tree()?;
+    let mut config = load_config(&cli.robot)?;
     if let Some(overrides) = &cli.overrides {
         config.apply_overrides(load_config(overrides)?);
     }
@@ -121,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     // that does not read fails the start at once.
     let builder = Arora::builder()
         .with_frontend(frontend)
-        .with_module_dirs(&arora::device_dir::from_env()?, &cli.modules)
+        .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
 
     // One runtime carries everything: the HAL's tasks spawn on it at construction, the
@@ -134,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
     // The default behavior starts at once; the request key is open to remote writers, so
     // Studio or a bridge client can play it again as the terminal UI does.
     let store = SimpleDataStore::new();
-    if cli.tree.is_some() {
+    if tree.is_some() {
         let state = hal
             .read_all()
             .await
@@ -159,8 +154,83 @@ async fn main() -> anyhow::Result<()> {
         .with_host_module(HostModule::of::<naoqi_say::Module>())
         .with_host_module(HostModule::of::<naoqi_gestures::Module>())
         .with_step_period(STEP_PERIOD);
-    if let Some(tree) = cli.tree {
+    if let Some(tree) = tree {
         builder = builder.with_groot(tree);
     }
     builder.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+    use clap::CommandFactory;
+
+    #[test]
+    fn the_command_line_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    /// The robot, its overrides, the tree and `--module` in any order, the
+    /// directory after a space or `=`.
+    #[test]
+    fn the_robot_the_tree_and_module_directories_parse() {
+        let cli = Cli::try_parse_from([
+            "arora-naoqi",
+            "--module",
+            "a",
+            "--tree",
+            "wave.groot.xml",
+            "tcp://nao.local:9559",
+            "--module=b",
+            "overrides.json",
+        ])
+        .expect("the command line parses");
+        assert_eq!(cli.robot, "tcp://nao.local:9559");
+        assert_eq!(cli.overrides.as_deref(), Some("overrides.json"));
+        assert_eq!(cli.tree, Some(PathBuf::from("wave.groot.xml")));
+        assert_eq!(cli.runner.module, vec![PathBuf::from("a"), "b".into()]);
+    }
+
+    /// Without `--tree` the default behavior runs; `--no-tree` runs none.
+    #[test]
+    fn the_default_tree_runs_unless_none_is_asked() {
+        let default = Cli::try_parse_from(["arora-naoqi", "tcp://nao.local:9559"]).unwrap();
+        assert_eq!(default.tree().unwrap().as_deref(), Some(READY_TREE));
+        let none =
+            Cli::try_parse_from(["arora-naoqi", "--no-tree", "tcp://nao.local:9559"]).unwrap();
+        assert_eq!(none.tree().unwrap(), None);
+    }
+
+    /// `--tree` and `--no-tree` together are refused.
+    #[test]
+    fn a_tree_and_no_tree_conflict() {
+        let error = Cli::try_parse_from([
+            "arora-naoqi",
+            "--tree",
+            "wave.groot.xml",
+            "--no-tree",
+            "tcp://nao.local:9559",
+        ])
+        .expect_err("the two are refused together");
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    /// `-h` and `--help` print the help and exit 0; neither is a robot.
+    #[test]
+    fn help_is_not_a_robot() {
+        for flag in ["-h", "--help"] {
+            let error = Cli::try_parse_from(["arora-naoqi", flag]).expect_err("help stops");
+            assert_eq!(error.kind(), ErrorKind::DisplayHelp, "{flag}");
+            assert_eq!(error.exit_code(), 0, "{flag}");
+        }
+    }
+
+    /// An option the runner does not take is refused, not read as a robot.
+    #[test]
+    fn an_unknown_option_is_refused() {
+        let error = Cli::try_parse_from(["arora-naoqi", "--modules", "a", "tcp://nao.local:9559"])
+            .expect_err("an unknown option is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
 }

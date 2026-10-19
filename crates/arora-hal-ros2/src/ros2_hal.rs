@@ -143,7 +143,7 @@ impl Ros2Hal {
             .collect();
 
         let domain_id: u16 = config.domain_id.unwrap_or(0);
-        println!("Connecting to ROS2 domain {}", domain_id);
+        info!("Connecting to ROS 2 domain {domain_id}");
 
         // Create ROS2 context and node
         let context_options = ros2_client::ContextOptions::new().domain_id(domain_id);
