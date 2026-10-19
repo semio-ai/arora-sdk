@@ -722,9 +722,14 @@ build enables, and a build with it still waits to be asked.
 
 The rule is the same on a terminal and headless. Connecting whenever nobody is
 there to decline would make every unattended start — a service, a CI job, an
-agent — a sign-up on Studio's production project. A saved credential stands
-for an earlier opt-in, so it still connects; a credential that does not read
-counts as none, because the client would sign the device up anew with it.
+agent — a sign-up on Studio's production project. A credential that does not
+read counts as none, because the client would sign the device up anew with it.
+
+A saved credential still connects, for one release, because robots in the
+field hold one and must stay connected. It is not proof of an opt-in: a
+headless run of arora 13.4 or earlier signed the device up unasked, and an
+embedder's `studio::connect` shares the per-user device directory. That is why
+the next major connects only a run that asks.
 
 The robot runners' `runner` feature still enables `studio` (arora's
 `studio-bridge`), because robots in the field are built with it and connect

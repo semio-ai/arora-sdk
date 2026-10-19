@@ -165,13 +165,21 @@ saved Studio credential, or when the run asks for it, on a terminal or not:
 | `--studio`, or sets `ARORA_STUDIO=1` | either | connects to Studio; a device holding none signs up as a new Studio device and registers |
 | `--no-studio` | either | serves the open local bridge |
 
-`--no-studio` wins over `--studio` and `ARORA_STUDIO`. The credential is the
-refresh token of the device's Studio account, in its device directory's
-`studio/`: a device holds one once a run with `--studio` has connected. Its
-first connection is therefore always asked for; later runs connect with the
-credential, unless `--no-studio`. A credential that does not read (its key
-missing, the file damaged) counts as none, since connecting with it would sign
-the device up anew. The run says what it decided in one line:
+`--no-studio` wins over `--studio` and `ARORA_STUDIO`, and `--studio` over
+`ARORA_STUDIO`, which is a boolean (`1`, `true`, `yes`, `on`, or their
+opposites); blank counts as unset, and any other value fails the start.
+
+The credential is the refresh token of the device's Studio account, in its
+device directory's `studio/`. A device holds one once any connection has
+signed it in, and every later run without a flag connects with it, unless
+`--no-studio`; deleting `studio/` makes it a device with none. That
+connection need not have been asked for: a headless run of arora 13.4 or
+earlier connected on its own, and an embedder's `studio::connect` — Vizij's
+`--studio` — keeps its credential in the same per-user `default` device
+unless `DEVICE_LOCAL_ID` names another. A credential that does not read (its
+key missing, the file damaged, an `IDENTITY_FILE` naming nothing) counts as
+none, since connecting with it would sign the device up anew. The run says
+what it decided in one line:
 
 ```text
 Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.

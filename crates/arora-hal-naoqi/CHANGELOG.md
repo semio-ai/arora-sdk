@@ -8,8 +8,8 @@ All notable changes to `arora-hal-naoqi`. The format follows
 
 ### Added
 
-- The `studio` feature: the Semio Studio connection (`arora`'s
-  `studio-bridge`). `runner` enables it.
+- The `studio` feature: the runner's Semio Studio connection (`arora`'s
+  `studio-bridge`); it adds nothing to the library. `runner` enables it.
 - The `arora-naoqi` runner takes `--studio`, which connects to Semio Studio and
   registers a device holding no saved Studio credential (`ARORA_STUDIO=1` asks
   the same), and `--no-studio`, which serves the open local bridge even for a

@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     #[cfg(feature = "studio-bridge")]
     {
-        builder = builder.with_studio(cli.studio.choice());
+        builder = builder.with_studio(cli.studio.choice()?);
     }
     // A Groot file is the device's behavior: the build resolves its tags
     // against the method index it assembles — the native nodes and the

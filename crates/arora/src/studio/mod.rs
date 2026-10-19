@@ -33,8 +33,11 @@
 //! The saved credential is the refresh token of the device's Studio account,
 //! in its device directory's `studio/` subdirectory ([`crate::device_dir`]).
 //! Only a run that asks for Studio signs a device up: one that does not ask
-//! connects only with a credential that reads, on a terminal or not. A run
-//! says what it decided in one line of its log.
+//! connects only with a credential that reads, on a terminal or not. A saved
+//! credential is not proof of an opt-in — a headless run of arora 13.4 or
+//! earlier signed the device up unasked — which is why the next major
+//! connects only a run that asks. A run says what it decided in one line of
+//! its log.
 //!
 //! The `connect` functions below are themselves the ask: an embedder calling
 //! one connects, a device holding no credential registering.
@@ -148,20 +151,19 @@ pub enum Choice {
     Local,
 }
 
+/// The variable that asks for Studio as `--studio` does.
+const STUDIO_VAR: &str = "ARORA_STUDIO";
+
 /// The Studio options of a runner's command line, as a clap helper that
 /// [`RunnerArgs`](crate::RunnerArgs) and [`DeviceCli`](crate::DeviceCli)
-/// flatten: `--studio`, which `ARORA_STUDIO=1` (or `true`, `yes`, `on`) also
-/// gives, and `--no-studio`, which wins over both: a run told both declines.
+/// flatten: `--studio` and `--no-studio`. [`choice`](Self::choice) reads
+/// `ARORA_STUDIO` beside them.
 #[derive(Clone, Debug, Default, clap::Args)]
 pub struct StudioArgs {
     /// Connect to Semio Studio, registering this device with it when it holds
-    /// no saved Studio credential. Without it, the device connects only when
-    /// it holds one.
-    #[arg(
-        long,
-        env = "ARORA_STUDIO",
-        value_parser = clap::builder::BoolishValueParser::new()
-    )]
+    /// no saved Studio credential; ARORA_STUDIO=1 asks the same. Without
+    /// either, the device connects only when it holds one.
+    #[arg(long)]
     studio: bool,
     /// Serve the open local bridge, even when this device holds a saved Studio
     /// credential, or --studio or ARORA_STUDIO asks for Studio.
@@ -170,14 +172,34 @@ pub struct StudioArgs {
 }
 
 impl StudioArgs {
-    /// What these options ask of Studio.
-    pub fn choice(&self) -> Choice {
+    /// What these options and `ARORA_STUDIO` ask of Studio. `--no-studio`
+    /// wins over the other two, and `--studio` over the variable. The variable
+    /// is a boolean — `1`, `true`, `yes`, `on`, or `0`, `false`, `no`, `off`,
+    /// in any case — and blank, like unset, asks nothing; any other value is
+    /// an error naming it.
+    pub fn choice(&self) -> Result<Choice> {
+        let studio_var =
+            std::env::var_os(STUDIO_VAR).map(|value| value.to_string_lossy().into_owned());
+        self.choice_with(studio_var.as_deref())
+    }
+
+    /// [`choice`](Self::choice), with `studio_var` the value of
+    /// `ARORA_STUDIO`, if set.
+    fn choice_with(&self, studio_var: Option<&str>) -> Result<Choice> {
         if self.no_studio {
-            Choice::Local
-        } else if self.studio {
-            Choice::Studio
-        } else {
-            Choice::IfSaved
+            return Ok(Choice::Local);
+        }
+        if self.studio {
+            return Ok(Choice::Studio);
+        }
+        let value = studio_var.map(str::trim).unwrap_or_default();
+        match value.to_ascii_lowercase().as_str() {
+            "" | "0" | "false" | "no" | "off" => Ok(Choice::IfSaved),
+            "1" | "true" | "yes" | "on" => Ok(Choice::Studio),
+            _ => anyhow::bail!(
+                "{STUDIO_VAR}={value:?} is not a boolean: set it to 1, true, yes or on to ask \
+                 for Semio Studio, or leave it unset"
+            ),
         }
     }
 }
@@ -268,12 +290,27 @@ fn decide(
 /// connection looks, after the same migrations ([`credentials::from_env`]),
 /// so the two agree on whether the device holds one; like a connection, the
 /// lookup creates the directory, empty, when it is missing.
+///
+/// A device directory that cannot be named fails, as it fails the device's
+/// modules. Credentials that cannot be resolved there — a deprecated
+/// `IDENTITY_FILE` naming nothing, a directory that cannot be created — do
+/// not read: the run serves the local bridge and says why.
 fn credential_from_env() -> Result<(PathBuf, Credential)> {
     let dir = device_dir::from_env()?.join(credentials::STUDIO_DIR);
-    Ok((dir, held(&credentials::from_env()?)))
+    Ok((dir, resolved(credentials::from_env())))
 }
 
-/// What `credentials` hold of a Studio credential.
+/// What credentials resolved as `credentials` hold.
+fn resolved(credentials: Result<DeviceCredentials>) -> Credential {
+    match credentials {
+        Ok(credentials) => held(&credentials),
+        Err(error) => Credential::Unreadable(format!("{error:#}")),
+    }
+}
+
+/// What `credentials` hold of a Studio credential. A token that reads is what
+/// the client signs in with; it signs up only with none, and with one that
+/// does not read (`arora-studio-bridge-client` 10).
 fn held(credentials: &DeviceCredentials) -> Credential {
     match credentials.refresh_token() {
         Ok(Some(_)) => Credential::Saved,
@@ -300,12 +337,35 @@ pub(crate) async fn default_bridge(
     description: &HalDescription,
     choice: Choice,
 ) -> Result<Box<dyn Bridge>> {
-    let decision = decide(choice, credential_from_env)?;
-    decision.log();
-    if !decision.connects() {
-        return crate::run::local_ws_bridge().await;
-    }
+    bridge_for(
+        decide(choice, credential_from_env)?,
+        connect_studio(frontend, description),
+        crate::run::local_ws_bridge(),
+    )
+    .await
+}
 
+/// The bridge `decision` picks, once it is logged: `studio` when it connects,
+/// `local` otherwise. Only the one picked runs.
+async fn bridge_for(
+    decision: Decision,
+    studio: impl std::future::Future<Output = Result<Box<dyn Bridge>>>,
+    local: impl std::future::Future<Output = Result<Box<dyn Bridge>>>,
+) -> Result<Box<dyn Bridge>> {
+    decision.log();
+    if decision.connects() {
+        studio.await
+    } else {
+        local.await
+    }
+}
+
+/// The Studio connection of a run that connects, through the operator under
+/// the terminal UI: the open local bridge when the operator declines.
+async fn connect_studio(
+    frontend: &crate::operator::Frontend,
+    description: &HalDescription,
+) -> Result<Box<dyn Bridge>> {
     // Interactive front end (the terminal UI): ask the operator for the device
     // info nothing else gives. An empty owner means "disable Studio", in which
     // case we do not connect at all and fall through to the open local bridge
@@ -1089,55 +1149,92 @@ mod tests {
         studio: StudioArgs,
     }
 
-    fn choice_of(args: &[&str]) -> Choice {
+    /// What `args` ask, with `ARORA_STUDIO` at `studio_var`.
+    fn choice_of(args: &[&str], studio_var: Option<&str>) -> Result<Choice> {
         use clap::Parser;
         Runner::try_parse_from(std::iter::once("runner").chain(args.iter().copied()))
             .expect("the Studio options parse")
             .studio
-            .choice()
+            .choice_with(studio_var)
     }
 
     #[test]
     fn the_flags_say_what_the_run_asks_no_studio_winning() {
-        assert_eq!(choice_of(&[]), Choice::IfSaved);
-        assert_eq!(choice_of(&["--studio"]), Choice::Studio);
-        assert_eq!(choice_of(&["--no-studio"]), Choice::Local);
-        assert_eq!(choice_of(&["--studio", "--no-studio"]), Choice::Local);
-        assert_eq!(choice_of(&["--no-studio", "--studio"]), Choice::Local);
+        let choice = |args: &[&str]| choice_of(args, None).unwrap();
+        assert_eq!(choice(&[]), Choice::IfSaved);
+        assert_eq!(choice(&["--studio"]), Choice::Studio);
+        assert_eq!(choice(&["--no-studio"]), Choice::Local);
+        assert_eq!(choice(&["--studio", "--no-studio"]), Choice::Local);
+        assert_eq!(choice(&["--no-studio", "--studio"]), Choice::Local);
     }
 
-    /// `ARORA_STUDIO` is `--studio`'s variable, read as a boolean; the test
-    /// reads the command's definition rather than setting the variable, which
-    /// other tests' threads would see.
     #[test]
-    fn arora_studio_asks_for_studio_and_no_studio_wins_over_it() {
-        use clap::CommandFactory;
-        use std::ffi::OsStr;
-        let command = Runner::command();
-        let studio = command
-            .get_arguments()
-            .find(|arg| arg.get_id() == "studio")
-            .expect("--studio");
-        assert_eq!(studio.get_env(), Some(OsStr::new("ARORA_STUDIO")));
-        let accepted: Vec<String> = studio
-            .get_value_parser()
-            .possible_values()
-            .expect("a boolean's values")
-            .map(|value| value.get_name().to_string())
-            .collect();
-        for yes in ["1", "true", "yes", "on"] {
-            assert!(
-                accepted.iter().any(|value| value == yes),
-                "{yes}: {accepted:?}"
+    fn arora_studio_is_a_boolean_blank_asking_nothing() {
+        for yes in ["1", "true", "TRUE", "yes", "On", " 1 "] {
+            assert_eq!(
+                choice_of(&[], Some(yes)).unwrap(),
+                Choice::Studio,
+                "{yes:?}"
             );
         }
-        // Set by the variable, `studio` stands beside a `--no-studio`, which
-        // declines.
-        let both = StudioArgs {
-            studio: true,
-            no_studio: true,
-        };
-        assert_eq!(both.choice(), Choice::Local);
+        for no in ["", "  ", "0", "false", "no", "OFF"] {
+            assert_eq!(choice_of(&[], Some(no)).unwrap(), Choice::IfSaved, "{no:?}");
+        }
+        let error = choice_of(&[], Some("maybe")).unwrap_err().to_string();
+        assert!(error.contains("ARORA_STUDIO=\"maybe\""), "{error}");
+    }
+
+    #[test]
+    fn the_flags_win_over_arora_studio() {
+        assert_eq!(
+            choice_of(&["--no-studio"], Some("1")).unwrap(),
+            Choice::Local
+        );
+        assert_eq!(
+            choice_of(&["--no-studio"], Some("maybe")).unwrap(),
+            Choice::Local
+        );
+        assert_eq!(choice_of(&["--studio"], Some("0")).unwrap(), Choice::Studio);
+    }
+
+    #[test]
+    fn a_run_asks_nothing_unless_told() {
+        assert_eq!(Choice::default(), Choice::IfSaved);
+        assert_eq!(crate::Arora::builder().studio, Choice::IfSaved);
+        let builder = crate::Arora::builder().with_studio(Choice::Local);
+        assert_eq!(builder.studio, Choice::Local);
+    }
+
+    #[test]
+    fn credentials_that_cannot_be_resolved_do_not_read() {
+        let credential = resolved(Err(anyhow::anyhow!("IDENTITY_FILE names nothing")));
+        assert!(
+            matches!(&credential, Credential::Unreadable(error) if error.contains("IDENTITY_FILE")),
+            "{credential:?}"
+        );
+    }
+
+    /// The bridge [`bridge_for`] serves for `decision`: `"studio"` or
+    /// `"local"`, as the future it ran says.
+    fn bridge_for_(decision: Decision) -> String {
+        let studio = async { Err(anyhow::anyhow!("studio")) };
+        let local = async { Err(anyhow::anyhow!("local")) };
+        let ran = futures::executor::block_on(bridge_for(decision, studio, local));
+        ran.err()
+            .expect("the futures fail, naming themselves")
+            .to_string()
+    }
+
+    #[test]
+    fn only_a_decision_that_connects_runs_the_studio_connection() {
+        assert_eq!(bridge_for_(Decision::Asked), "studio");
+        assert_eq!(bridge_for_(Decision::Saved(studio_dir())), "studio");
+        assert_eq!(bridge_for_(Decision::Declined), "local");
+        assert_eq!(bridge_for_(Decision::Unregistered(studio_dir())), "local");
+        assert_eq!(
+            bridge_for_(Decision::Unreadable(studio_dir(), "damaged".to_string())),
+            "local"
+        );
     }
 
     #[test]

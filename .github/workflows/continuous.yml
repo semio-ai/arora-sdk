@@ -161,7 +161,7 @@ jobs:
         run: cargo clippy -p arora --features studio-bridge --all-targets -- -D warnings
 
       - name: Test arora's Studio connection
-        run: "cargo test -p arora --features studio-bridge --lib studio::"
+        run: "cargo test -p arora --features studio-bridge --lib -- studio:: run::"
 
   lint:
     needs: select

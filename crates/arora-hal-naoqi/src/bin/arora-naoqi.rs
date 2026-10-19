@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
     #[cfg(feature = "studio")]
-    let builder = builder.with_studio(cli.runner.studio.choice());
+    let builder = builder.with_studio(cli.runner.studio.choice()?);
 
     // One runtime carries everything: the HAL's tasks spawn on it at construction, the
     // voice speaks on it, and arora drives the device on it.
@@ -240,8 +240,9 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
-    /// `--studio` and `--no-studio` give the run's Studio choice, anywhere on
-    /// the command line; neither leaves it to the saved credential.
+    /// `--studio` and `--no-studio` parse into the run's Studio choice,
+    /// anywhere on the command line; neither leaves it to the saved
+    /// credential.
     #[cfg(feature = "studio")]
     #[test]
     fn studio_and_no_studio_give_the_run_s_studio_choice() {
@@ -252,6 +253,7 @@ mod tests {
                 .runner
                 .studio
                 .choice()
+                .expect("ARORA_STUDIO is unset or a boolean")
         };
         assert_eq!(
             choice(&["arora-naoqi", "tcp://nao.local:9559"]),

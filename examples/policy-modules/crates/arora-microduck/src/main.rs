@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
         studio,
         speech: cli.speech,
         #[cfg(feature = "studio")]
-        studio_choice: cli.studio.choice(),
+        studio_choice: cli.studio.choice()?,
     };
 
     let result = match cli.duration {
