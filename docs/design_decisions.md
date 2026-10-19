@@ -655,12 +655,16 @@ exceptions are deliberate: an entry whose name starts with `.` is OS metadata
 directory copied through a file manager would otherwise never start — and a
 `modules/` without any directory carries no module.
 
-One module id, one module, refused by the builder: every source of guest
-modules (an embedder's `with_module`, the device directory, `--module`)
-converges in `AroraBuilder::build`, while the engine answers an already-loaded
-id with Ok, which would dispatch the first and describe the last. The device
-directory reader refuses the same case earlier, naming the two directories,
-because the builder sees headers, not where they came from.
+One module id, one module, refused by the builder: every source of modules
+(an embedder's `with_module` and `with_host_module`, the device directory,
+`--module`, the HAL module and the interpreter module) converges in
+`AroraBuilder::build`. The engine answers a guest under an already-loaded id
+with Ok, and registering a host module under a taken id replaces the module
+there, so either case would leave a device that describes one module's
+functions and dispatches another's. A host module has no name, so the error
+names it by the functions it describes. The device directory reader refuses
+two directories carrying one module earlier, naming both directories, because
+the builder sees headers, not where they came from.
 
 ### Keys are paths; attributes are a convention
 

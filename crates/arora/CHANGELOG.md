@@ -4,6 +4,23 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.4.0] - 2026-10-19
+
+### Changed
+
+- A guest module and a host module with one id fail the build, as two guest
+  modules already do, and so do two host modules with one id. Among the host
+  modules are the two every device registers: the HAL module
+  (`arora_hal::hal_module::ID`) and the interpreter module
+  (`interpreter_module::ID`). Such a build used to succeed with a device whose
+  method list and dispatch disagree: the host module registered last took the
+  id in dispatch, while `DescribeMethods` still listed the functions of the
+  module it replaced, and a call to any of them failed with
+  `FunctionNotFound`. The error names both modules: a guest module by its
+  header's name, the HAL and interpreter modules as such, any other host
+  module by the functions it describes. The two-guest error now names each
+  as a guest module (`guest module 'a' and guest module 'b' both have id …`).
+
 ## [13.3.0] - 2026-10-19
 
 ### Added
