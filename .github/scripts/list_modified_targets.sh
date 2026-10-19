@@ -21,7 +21,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Changes here select nothing. `verify` fails if a build reads one of them.
 IGNORE=(
-  '*.md' LICENSE 'docs/*' 'examples/*' '.vscode/*' .gitignore
+  '*.md' LICENSE NOTICE 'docs/*' 'examples/*' '.vscode/*' .gitignore
   .github/workflows/release.yml .github/workflows/markdown-link-check-config.json
 )
 # Files outside a member that it reads: "<glob> <package>".

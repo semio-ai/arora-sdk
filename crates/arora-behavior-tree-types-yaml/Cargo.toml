@@ -2,7 +2,7 @@
 name = "arora-behavior-tree-types-yaml"
 version = "0.2.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 include = ["enumeration/**.yaml", "structure/**.yaml", "LICENSE"]
 
 [dev-dependencies]

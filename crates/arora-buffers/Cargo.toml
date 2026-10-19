@@ -3,7 +3,7 @@ name = "arora-buffers"
 version = "3.0.0"
 edition = "2021"
 description = "Binary read/write buffers and type tags for the Arora module value ABI."
-license = "MIT"
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

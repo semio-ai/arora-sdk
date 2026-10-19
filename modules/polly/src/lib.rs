@@ -39,7 +39,7 @@ lazy_static::lazy_static! {
     name = "polly",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "AWS Polly support module",
     executable_mime = "application/x-binary"
 )]

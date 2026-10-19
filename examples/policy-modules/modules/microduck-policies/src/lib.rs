@@ -460,7 +460,7 @@ fn failing(message: String) -> Status {
     name = "microduck-policies",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Microduck's learned locomotion policies as behavior leaves",
     executable_mime = "application/wasm"
 )]

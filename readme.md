@@ -111,5 +111,8 @@ which everything below `arora-engine` can be built without.
 
 ## License
 
-Arora is released under the [MIT License](LICENSE), copyright Semio Community. Each
-published crate ships the same license file.
+Arora is released under the [Apache License, Version 2.0](LICENSE), copyright Semio
+Community ([NOTICE](NOTICE)), except the example module
+[`say-piper`](examples/policy-modules/modules/say-piper), which links Piper (GPLv3)
+and is licensed GPL-3.0-or-later. Each published crate ships the license and notice
+files.

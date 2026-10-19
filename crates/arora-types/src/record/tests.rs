@@ -498,7 +498,7 @@ fn header_is_versioned() {
     name: "polly".into(),
     author: "Semio".into(),
     description: None,
-    license: "Proprietary".into(),
+    license: "Apache-2.0".into(),
     version: SemanticVersion {
       major: 1,
       minor: 4,

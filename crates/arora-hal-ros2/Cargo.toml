@@ -2,7 +2,7 @@
 name = "arora-hal-ros2"
 version = "5.4.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
 
 [lib]

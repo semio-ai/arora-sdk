@@ -2,7 +2,7 @@
 name = "arora-hal-restful"
 version = "4.3.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerbot) as Arora devices"
 
 [lib]

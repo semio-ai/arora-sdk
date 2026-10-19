@@ -512,7 +512,7 @@ git branch -D vizij-extract
    removed. Their last published versions stay on crates.io.
 
 The vizij-rs crates are licensed "MIT OR Apache-2.0", which allows them under
-arora-sdk's MIT.
+arora-sdk's Apache-2.0.
 
 ## 5. Versions and compatibility
 

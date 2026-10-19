@@ -41,7 +41,7 @@ const HAND_PERIOD: f64 = 4.0 / 3.0;
     name = "naoqi-gestures",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Gestures of NAOqi robots as behavior-tree leaves: timed joint targets"
 )]
 pub mod naoqi_gestures {

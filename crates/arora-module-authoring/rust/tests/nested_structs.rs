@@ -312,7 +312,7 @@ id: 55555555-5555-4555-8555-555555555555
 name: animation
 author: Semio
 description: Fixture animation module
-license: Proprietary
+license: Apache-2.0
 version:
   major: 0
   minor: 1

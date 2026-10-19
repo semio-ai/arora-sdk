@@ -3,7 +3,7 @@ name = "arora-vfs"
 version = "0.1.1"
 edition = "2021"
 description = "A minimal in-memory virtual filesystem (files and directories) for the Arora runtime."
-license = "MIT"
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

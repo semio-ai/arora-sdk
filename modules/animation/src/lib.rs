@@ -222,7 +222,7 @@ fn guest<T>(f: impl FnOnce(&mut AnimationModule) -> T) -> T {
     version = "3.0.0",
     scope = arora_types::record::scope::ARORA,
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Keyframe animation, playback and baking over a nanosecond clock",
     executable_mime = "application/wasm"
 )]

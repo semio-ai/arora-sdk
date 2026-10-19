@@ -2,7 +2,7 @@
 name = "arora-bridge-ros2"
 version = "11.0.2"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
 repository = "https://github.com/semio-ai/arora-sdk"
 

@@ -4,7 +4,7 @@ version = "5.3.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 crate-type = ["rlib"]
