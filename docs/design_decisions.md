@@ -550,8 +550,10 @@ with two.
 whole changed graph again, and the new tree takes over the state of every node
 the change left in place, by node id: a `SequenceStar`'s position, a run's
 latch, a tree-local variable such a node reads. A node the change adds,
-replaces or relinks starts afresh. Spawning, editing, halting or ending one
-run therefore leaves the main behavior and every other run where they stand.
+replaces, relinks or re-keys starts afresh, and a tree-local variable does
+when every node reading it does: a load keeps one a run also reads, as the run
+the load leaves in place sees it. Spawning, editing, halting or ending one run
+therefore leaves the main behavior and every other run where they stand.
 Lowering each run on its own would confine a change too, but runs and the
 main behavior can share what a tree holds: an edit may place one node under
 both, or link a run's node to a port of the main behavior's, and both may read

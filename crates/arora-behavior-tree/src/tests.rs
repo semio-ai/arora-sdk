@@ -1583,12 +1583,15 @@ mod kept_state {
     use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::behavior::{graph_type, BehaviorTreeInterpreter};
     use crate::nodes;
-    use arora_behavior::graph::{Graph, GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::graph::{Graph, GraphDiff, Io, Link, LinkSource, Node as GraphNode, Port};
     use arora_behavior::Status;
-    use arora_behavior::{BehaviorContext, BehaviorInterpreter, RunPolicy};
+    use arora_behavior::{
+        BehaviorContext, BehaviorError, BehaviorInterpreter, FunctionIndex, RunPolicy,
+    };
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::call::Call;
     use arora_types::data::DataStore;
+    use arora_types::gen_uuid_from_str;
     use arora_types::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -1602,6 +1605,7 @@ mod kept_state {
         store: SimpleDataStore,
         statuses: LeafStatuses,
         ticks: LeafTicks,
+        functions: FunctionIndex,
     }
 
     impl Device {
@@ -1615,16 +1619,21 @@ mod kept_state {
                 store: SimpleDataStore::new(),
                 statuses,
                 ticks,
+                functions: FunctionIndex::new(),
             }
         }
 
-        fn tick(&mut self) {
+        fn try_tick(&mut self) -> Result<(), BehaviorError> {
             let mut ctx = BehaviorContext {
-                functions: &arora_behavior::FunctionIndex::new(),
+                functions: &self.functions,
                 store: &self.store,
                 call_bridge: &mut self.bridge,
             };
-            self.interp.tick(&mut ctx).expect("the tick succeeds");
+            self.interp.tick(&mut ctx).map(|_| ())
+        }
+
+        fn tick(&mut self) {
+            self.try_tick().expect("the tick succeeds");
         }
 
         /// How many times the scripted leaf `leaf` was called.
@@ -1850,54 +1859,56 @@ mod kept_state {
         assert_eq!(device.calls(a1), 3, "a relinked seq_star restarts");
     }
 
+    /// The nodes of a `once` behavior.
+    const ONCE: [u128; 5] = [0x10, 0x11, 0x12, 0x13, 0x14];
+
+    /// `Fallback(IsStringSet(.done), Sequence(call m, SetString(.done)))` on
+    /// nodes `ids`: it calls `m` once, then `.done` is set.
+    fn once(m: Uuid, ids: [u128; 5]) -> Graph {
+        let [root, done, first, call, set] = ids.map(Uuid::from_u128);
+        let variable = gen_uuid_from_str(".done");
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph.nodes.insert(
+            root,
+            control(root, nodes::FALLBACK_FUNCTION_ID, vec![done, first]),
+        );
+        graph.nodes.insert(
+            first,
+            control(first, nodes::SEQ_FUNCTION_ID, vec![call, set]),
+        );
+        graph
+            .nodes
+            .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+        graph
+            .nodes
+            .insert(set, leaf_node(set, nodes::SET_STR_FUNCTION_ID));
+        add_call(&mut graph, call, m);
+        graph.links.extend([
+            Link::new(
+                Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
+                LinkSource::Variable(variable),
+            ),
+            Link::new(
+                Port::new(set, nodes::SET_STR_VARIABLE_PARAM_ID),
+                LinkSource::Variable(variable),
+            ),
+            Link::new(
+                Port::new(set, nodes::SET_STR_VALUE_PARAM_ID),
+                LinkSource::Literal(Value::String("yes".to_string())),
+            ),
+        ]);
+        graph.variables.insert(variable, ".done".to_string());
+        graph
+    }
+
     /// A tree-local variable keeps its value while a node the change left in
     /// place reads it, and starts afresh with the nodes that read it.
     #[test]
     fn a_tree_local_variable_lives_as_long_as_a_node_reading_it() {
-        use arora_types::gen_uuid_from_str;
-        // `Fallback(IsStringSet(.done), Sequence(call m, SetString(.done)))`
-        // calls `m` once: then `.done` is set.
-        let once = |m: Uuid| {
-            let [root, done, first, call, set] =
-                [0x10, 0x11, 0x12, 0x13, 0x14].map(Uuid::from_u128);
-            let variable = gen_uuid_from_str(".done");
-            let mut graph = Graph::empty();
-            graph.root = Some(root);
-            graph.nodes.insert(
-                root,
-                control(root, nodes::FALLBACK_FUNCTION_ID, vec![done, first]),
-            );
-            graph.nodes.insert(
-                first,
-                control(first, nodes::SEQ_FUNCTION_ID, vec![call, set]),
-            );
-            graph
-                .nodes
-                .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
-            graph
-                .nodes
-                .insert(set, leaf_node(set, nodes::SET_STR_FUNCTION_ID));
-            add_call(&mut graph, call, m);
-            graph.links.extend([
-                Link::new(
-                    Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
-                    LinkSource::Variable(variable),
-                ),
-                Link::new(
-                    Port::new(set, nodes::SET_STR_VARIABLE_PARAM_ID),
-                    LinkSource::Variable(variable),
-                ),
-                Link::new(
-                    Port::new(set, nodes::SET_STR_VALUE_PARAM_ID),
-                    LinkSource::Literal(Value::String("yes".to_string())),
-                ),
-            ]);
-            graph.variables.insert(variable, ".done".to_string());
-            graph
-        };
         let [m, r] = [0xA1, 0xB1].map(Uuid::from_u128);
         let mut device = Device::new(&[(m, Status::Success), (r, Status::Running)]);
-        device.interp.load(once(m)).unwrap();
+        device.interp.load(once(m, ONCE)).unwrap();
         device.tick();
         device.tick();
         assert_eq!(device.calls(m), 1);
@@ -1915,13 +1926,286 @@ mod kept_state {
         device.tick();
         assert_eq!(device.calls(m), 1, "a spawn and a halt kept .done");
 
-        device.interp.load(once(m)).unwrap();
+        device.interp.load(once(m, ONCE)).unwrap();
         device.tick();
         assert_eq!(
             device.calls(m),
             2,
             "a load restarts the behavior, .done with it"
         );
+    }
+
+    /// A load keeps a tree-local variable a run also reads: the run, which the
+    /// load leaves in place, sees it unchanged.
+    #[test]
+    fn a_load_keeps_a_tree_local_variable_a_run_reads() {
+        let [m, r] = [0xA1, 0xB1].map(Uuid::from_u128);
+        let mut device = Device::new(&[(m, Status::Success), (r, Status::Running)]);
+        device.interp.load(once(m, ONCE)).unwrap();
+        // The run calls `r`, then would check `.done`.
+        let [root, call, done] = [0x30, 0x31, 0x32].map(Uuid::from_u128);
+        let variable = gen_uuid_from_str(".done");
+        let mut run = Graph::empty();
+        run.root = Some(root);
+        run.nodes.insert(
+            root,
+            control(root, nodes::SEQ_FUNCTION_ID, vec![call, done]),
+        );
+        run.nodes
+            .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+        add_call(&mut run, call, r);
+        run.links.push(Link::new(
+            Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
+            LinkSource::Variable(variable),
+        ));
+        run.variables.insert(variable, ".done".to_string());
+        device
+            .interp
+            .spawn_graph(&graph_type(), run, RunPolicy::Concurrent)
+            .unwrap();
+        device.tick();
+        device.tick();
+        assert_eq!(device.calls(m), 1);
+
+        device
+            .interp
+            .load(once(m, [0x40, 0x41, 0x42, 0x43, 0x44]))
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(m), 1, "the run's .done kept its value");
+    }
+
+    /// Unlinking a node's input, or setting the predetermined key of one,
+    /// restarts the node.
+    #[test]
+    fn unlinking_or_rekeying_a_node_restarts_it() {
+        let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
+        let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
+        let root = Uuid::from_u128(0x20);
+        let extra = Port::new(root, Uuid::from_u128(0xE0));
+        let mut graph = seq_star([0x20, 0x21, 0x22], [a1, a2]);
+        graph.nodes.get_mut(&root).unwrap().inputs = vec![Io::new(extra.port)];
+        graph
+            .links
+            .push(Link::new(extra, LinkSource::Literal(Value::U8(7))));
+        device.interp.load(graph).unwrap();
+        device.tick();
+
+        device
+            .interp
+            .apply(GraphDiff {
+                remove_links: vec![extra],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 2, "an unlinked seq_star restarts");
+
+        device
+            .interp
+            .apply(GraphDiff {
+                set_predetermined: vec![(extra, Some(".k".to_string()))],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 3, "a re-keyed seq_star restarts");
+    }
+
+    /// A refused edit restarts nothing, at the next lowering either.
+    #[test]
+    fn a_refused_edit_restarts_nothing() {
+        let [a1, a2, r] = [0xA1, 0xA2, 0xB1].map(Uuid::from_u128);
+        let mut device = Device::new(&[
+            (a1, Status::Success),
+            (a2, Status::Running),
+            (r, Status::Running),
+        ]);
+        let [root, first, second] = [0x20, 0x21, 0x22].map(Uuid::from_u128);
+        device
+            .interp
+            .load(seq_star([0x20, 0x21, 0x22], [a1, a2]))
+            .unwrap();
+        device.tick();
+
+        // It relinks the seq_star's index, and names a child that is not a
+        // node: refused whole.
+        let refused = device.interp.apply(GraphDiff {
+            add_nodes: vec![control(
+                root,
+                nodes::SEQ_STAR_FUNCTION_ID,
+                vec![first, second, Uuid::from_u128(0xBAD)],
+            )],
+            add_links: vec![first_child(root)],
+            ..GraphDiff::default()
+        });
+        assert!(refused.is_err());
+        device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                sequence([0x30, 0x31], r),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 1, "the seq_star kept its place");
+    }
+
+    /// A graph that does not lower leaves the previous lowering in place, and
+    /// the next lowering that succeeds takes over its state.
+    #[test]
+    fn a_graph_that_does_not_lower_keeps_its_state_for_the_next_lowering() {
+        use crate::ModuleFunction;
+        use arora_types::data::Key;
+        use arora_types::record::module::frozen::{Function, Parameter};
+        use arora_types::record::ty::{FrozenTy, PrimitiveKind};
+        use std::collections::HashMap;
+
+        let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
+        let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
+        let [function, frame] = [0xF00, 0xF01].map(Uuid::from_u128);
+        device.functions = HashMap::from([(
+            function,
+            ModuleFunction {
+                module_id: Uuid::from_u128(0xF05),
+                function_id: function,
+                function_name: "consume".to_string(),
+                function: Function {
+                    parameters: HashMap::from([(
+                        frame,
+                        Parameter {
+                            name: "frame".to_string(),
+                            ty: FrozenTy::from(PrimitiveKind::U64),
+                            mutable: true,
+                        },
+                    )]),
+                    parameter_ordering: vec![frame],
+                    return_ty: FrozenTy::from(PrimitiveKind::U8),
+                },
+            },
+        )]);
+        device
+            .interp
+            .load(seq_star([0x20, 0x21, 0x22], [a1, a2]))
+            .unwrap();
+        device.tick();
+
+        // A selection onto a parameter the index declares mutable: the edit
+        // applies, and the lowering refuses it.
+        let consumer = Uuid::from_u128(0x30);
+        device
+            .interp
+            .apply(GraphDiff {
+                add_nodes: vec![GraphNode {
+                    id: consumer,
+                    function,
+                    inputs: vec![Io::new(frame)],
+                    ..GraphNode::default()
+                }],
+                add_links: vec![Link::new(
+                    Port::new(consumer, frame),
+                    LinkSource::Select {
+                        source: Box::new(LinkSource::Variable(Uuid::from_u128(0x31))),
+                        path: Key::new(".a"),
+                    },
+                )],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        assert!(device.try_tick().is_err(), "the graph does not lower");
+        device
+            .interp
+            .apply(GraphDiff {
+                remove_nodes: vec![consumer],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(
+            (device.calls(a1), device.calls(a2)),
+            (1, 2),
+            "the seq_star kept its place across the failed lowering"
+        );
+    }
+
+    /// A tree-local variable that a node left in place reads through a
+    /// selection keeps its value.
+    #[test]
+    fn a_variable_read_through_a_selection_keeps_its_value() {
+        use arora_types::data::Key;
+        use arora_types::value::{Structure, StructureField};
+
+        let m = Uuid::from_u128(0xA1);
+        let mut device = Device::new(&[(m, Status::Success)]);
+        let [root, equal, first, call, unpack] =
+            [0x10, 0x11, 0x12, 0x13, 0x14].map(Uuid::from_u128);
+        let x = gen_uuid_from_str(".x");
+        let field = Uuid::from_u128(0xF1E1D);
+        let values = Link::new(
+            Port::new(unpack, nodes::UNPACK_VALUES_PARAM_ID),
+            LinkSource::Literal(Value::ArrayValue(vec![Value::Structure(Structure {
+                id: Uuid::from_u128(0x50),
+                fields: vec![StructureField {
+                    id: field,
+                    value: Box::new(Value::U64(42)),
+                }],
+            })])),
+        );
+        // `Fallback(Equal(.x.field, 42), Sequence(call m, Unpack(→ .x)))`
+        // calls `m` once: then `.x` holds the structure.
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph.nodes.insert(
+            root,
+            control(root, nodes::FALLBACK_FUNCTION_ID, vec![equal, first]),
+        );
+        graph.nodes.insert(
+            first,
+            control(first, nodes::SEQ_FUNCTION_ID, vec![call, unpack]),
+        );
+        graph
+            .nodes
+            .insert(equal, leaf_node(equal, nodes::EQUAL_FUNCTION_ID));
+        graph
+            .nodes
+            .insert(unpack, leaf_node(unpack, nodes::UNPACK_FUNCTION_ID));
+        add_call(&mut graph, call, m);
+        graph.links.extend([
+            Link::new(
+                Port::new(equal, nodes::EQUAL_A_PARAM_ID),
+                LinkSource::Select {
+                    source: Box::new(LinkSource::Variable(x)),
+                    path: Key::new(format!(".{field}")),
+                },
+            ),
+            Link::new(
+                Port::new(equal, nodes::EQUAL_B_PARAM_ID),
+                LinkSource::Literal(Value::U64(42)),
+            ),
+            values.clone(),
+            Link::new(
+                Port::new(unpack, nodes::UNPACK_OUT_PARAM_IDS[0]),
+                LinkSource::Variable(x),
+            ),
+        ]);
+        graph.variables.insert(x, ".x".to_string());
+        device.interp.load(graph).unwrap();
+        device.tick();
+        device.tick();
+        assert_eq!(device.calls(m), 1);
+
+        // Relinking `Unpack` restarts it; `Equal` reads `.x` through a
+        // selection and keeps it.
+        device
+            .interp
+            .apply(GraphDiff {
+                add_links: vec![values],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(m), 1, ".x kept its value");
     }
 }
 
