@@ -19,9 +19,11 @@
 //! A run is known by its root. Spawning a graph whose root a live run has
 //! grafts nothing: that run takes the graph as its program — the nodes and
 //! links that differ change, and the run's nodes the graph does not have
-//! leave — and the spawn answers the run's [`TaskHandle`]. A client that lost
-//! a run's [`TaskId`] takes the run over by spawning its graph again, and a
-//! spawn of the graph a run already runs changes nothing.
+//! leave — and the spawn answers the run's [`TaskHandle`]. The run keeps its
+//! id, status key and [`RunPolicy`]. A client that lost a run's [`TaskId`]
+//! takes the run over by spawning its graph again, and a spawn of the graph a
+//! run already runs changes nothing. The graph names only the run's own nodes
+//! and new ones: one the main behavior or another run also holds is refused.
 //!
 //! The runner ticks the main behavior first, then the runs in the order they
 //! were spawned.
@@ -571,11 +573,16 @@ impl BehaviorTreeInterpreter {
     /// graph's nodes the run lacks or holds otherwise, the links into them,
     /// the run's nodes the graph does not have (but for those another node
     /// also holds), and the variables the graph declares anew. A graph the run
-    /// already runs changes nothing.
+    /// already runs changes nothing. The graph may name only the run's own
+    /// nodes and new ones: a node the main behavior or another run also holds
+    /// is theirs as much as the run's, and stays as they hold it.
     fn respawn(&mut self, at: usize, graph: Graph) -> Result<TaskHandle, BehaviorError> {
         let decorator = self.runs[at].decorator;
         let mut held = subtree(&self.graph, decorator);
         held.remove(&decorator);
+        let mut leaving = held.clone();
+        leaving.insert(decorator);
+        let staying = self.held_outside(&leaving);
         if let Some(id) = graph
             .nodes
             .keys()
@@ -583,6 +590,12 @@ impl BehaviorTreeInterpreter {
         {
             return Err(behavior_error(format!(
                 "node {id} is already part of the device's behavior"
+            )));
+        }
+        if let Some(id) = graph.nodes.keys().find(|id| staying.contains(id)) {
+            return Err(behavior_error(format!(
+                "node {id} is held by the main behavior or another run too: a graph spawned \
+                 again with its run's root names only the run's own nodes and new ones"
             )));
         }
         let declared = self.graph.variables.keys().copied().collect();
@@ -595,9 +608,6 @@ impl BehaviorTreeInterpreter {
             .map(|link| (link.target, &link.source))
             .collect();
         let linked: HashSet<Port> = graph.links.iter().map(|link| link.target).collect();
-        let mut leaving = held.clone();
-        leaving.insert(decorator);
-        let staying = self.held_outside(&leaving);
         let diff = GraphDiff {
             remove_nodes: held
                 .iter()

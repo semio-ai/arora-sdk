@@ -345,6 +345,68 @@ fn a_reload_interrupts_the_task_runs_calling_the_module() {
     );
 }
 
+/// A graph run taken over by a spawn of another graph with its root is
+/// followed as calling what the new graph calls: a reload of a module only
+/// the new graph calls interrupts it.
+#[test]
+fn a_reload_interrupts_a_run_taken_over_to_call_the_module() {
+    use arora_behavior::graph::{Graph, Node};
+    use arora_behavior_tree::nodes::PARALLEL_FUNCTION_ID;
+
+    let other = Uuid::from_u128(0xabc);
+    let other_succeed = Uuid::from_u128(0xabd);
+    let mut arora = Arora::builder()
+        .with_compiled_module(&v2())
+        .with_compiled_module(&other_module(other, other_succeed, true))
+        .build()
+        .expect("build");
+    // A parallel over one node calling `function`.
+    let calling = |function: Uuid| {
+        let [root, leaf] = [0x1, 0x2].map(Uuid::from_u128);
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph.nodes.insert(
+            root,
+            Node {
+                id: root,
+                function: PARALLEL_FUNCTION_ID,
+                children: Some(vec![leaf]),
+                ..Node::default()
+            },
+        );
+        graph.nodes.insert(
+            leaf,
+            Node {
+                id: leaf,
+                function,
+                ..Node::default()
+            },
+        );
+        graph
+    };
+    let spawn = |arora: &mut Arora, graph: Graph| {
+        let spawned = arora
+            .call(interpreter_module::encode_spawn_graph(
+                &arora_behavior_tree::behavior::graph_type(),
+                &graph,
+                arora_behavior::RunPolicy::Concurrent,
+            ))
+            .expect("the spawn is answered");
+        interpreter_module::decode_spawn_result(&spawned.ret).expect("a handle")
+    };
+    let run = spawn(&mut arora, calling(other_succeed));
+    let taken_over = spawn(&mut arora, calling(PING));
+    assert_eq!(taken_over.id, run.id, "the spawn answered the live run");
+
+    arora.reload_module(&v2()).expect("reloads");
+    let runs = arora.task_runs.borrow();
+    assert_eq!(runs.len(), 1);
+    assert!(
+        runs[0].interrupted.is_some(),
+        "the run now calls the reloaded module"
+    );
+}
+
 /// A call to the module the device received and has not applied yet fails
 /// with the reload's reason; a call elsewhere is applied at the next step.
 #[test]

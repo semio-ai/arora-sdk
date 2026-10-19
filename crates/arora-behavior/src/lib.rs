@@ -228,10 +228,12 @@ pub trait BehaviorInterpreter {
     ///
     /// A run is known by its graph's root, which the client chooses. Spawning
     /// a graph whose root a live run has starts no second run: that run takes
-    /// the graph as its program, and the answer is its handle. So a client
-    /// that lost a run's [`TaskId`] takes the run over by spawning its graph
-    /// again, a retried spawn does not start a second copy, and the handle
-    /// answered always names the run that runs the graph spawned.
+    /// the graph as its program, keeping its id, status key and policy, and
+    /// the answer is its handle. So a client that lost a run's [`TaskId`]
+    /// takes the run over by spawning its graph again, a retried spawn does
+    /// not start a second copy, and the handle answered always names the run
+    /// that runs the graph spawned. Every client holding that handle halts the
+    /// one run.
     ///
     /// The default rejects spawning a graph — override it in interpreters that
     /// host a graph as a run (a behavior-tree subtree, a node-graph subgraph).
