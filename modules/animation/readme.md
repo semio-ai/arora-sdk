@@ -93,7 +93,8 @@ numbers and handles.
   until it enters its window, and the end of a window that states none;
   absent, the latest end of its instances), `set_reversed` (the heading
   another player has after a turn at a bound, for a player started
-  alongside it); instance controls:
+  alongside it; a held player keeps it for its next start, so send it
+  before `play_at`); instance controls:
   `set_weight`, `set_start_offset`, `set_time_scale`, `set_rate`.
 - Feedback: `player_states` reports each player's transport and instances.
 - Baking: `bake` and `bake_with_derivatives` sample a loaded clip over a

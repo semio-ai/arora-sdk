@@ -21,7 +21,8 @@ All notable changes to `arora-animation`. The format follows
 - Players on a device clock (`player`): a window, `once`, `loop`, `bounce`
   and `ping_pong`, a signed speed of at most `MAX_SPEED` (2^20) either way,
   a start at a given device time, the heading another player has after a
-  turn (`set_reversed`); travel is the exact integer product of elapsed time
+  turn (`set_reversed`, which a held player keeps for its next start, as it
+  keeps a new speed); travel is the exact integer product of elapsed time
   and speed from the last start, so a player does not drift.
 - The engine (`engine`): clips, players and their instances (an offset and a
   speed multiplier each), stepped together into one value per key, blended

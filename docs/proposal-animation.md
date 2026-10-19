@@ -249,7 +249,11 @@ reverses the heading without changing the speed. A speed of the other sign,
 a `play` or a `seek` starts the rules afresh: no turn taken, the window not
 yet entered, not ended. `set_reversed` gives a player the heading another
 has after a turn, so one started late (an instance delivered mid-bounce)
-plays alongside the others, to within a nanosecond at a speed that rounds.
+plays alongside the others, to within a nanosecond at a speed that rounds. A
+held player (paused or stopped) keeps that heading for its next start and
+through a `seek` before it, as it keeps a new speed, so a client sends the
+heading before the start: a device taking each command late then catches up
+on a past `play_at` instant the way it is to head.
 A speed is at most 2^20 either way, which keeps every travel exact.
 
 **Commands** take effect at the device time of the last step, so a client
