@@ -16,6 +16,13 @@
 //!   that graph;
 //! - [`halt`](BehaviorInterpreter::halt)ing prunes the fragment.
 //!
+//! A run is known by its root. Spawning a graph whose root a live run has
+//! grafts nothing: that run takes the graph as its program — the nodes and
+//! links that differ change, and the run's nodes the graph does not have
+//! leave — and the spawn answers the run's [`TaskHandle`]. A client that lost
+//! a run's [`TaskId`] takes the run over by spawning its graph again, and a
+//! spawn of the graph a run already runs changes nothing.
+//!
 //! The runner ticks the main behavior first, then the runs in the order they
 //! were spawned.
 //!
@@ -118,13 +125,13 @@ pub fn graph_type() -> GraphType {
     }
 }
 
-/// One task run's place in the scaffold: its decorator, and the status key the
-/// decorator publishes to. The run's nodes are the decorator's subtree in the
-/// graph; this is the bookkeeping that maps a [`TaskId`] onto it.
+/// One task run's place in the scaffold: its decorator, and the handle its
+/// spawn answered, whose status key the decorator publishes to. The run's
+/// nodes are the decorator's subtree in the graph; this is the bookkeeping
+/// that maps a [`TaskId`] onto it.
 struct Run {
-    id: TaskId,
+    handle: TaskHandle,
     decorator: Uuid,
-    status_key: Key,
     /// The variables the run's spawn declared: they leave with the run when
     /// no remaining link reads them.
     variables: Vec<Uuid>,
@@ -409,6 +416,14 @@ impl BehaviorTreeInterpreter {
         }
     }
 
+    /// The root of `run`'s program: its decorator's one child.
+    fn root_of(&self, run: &Run) -> Option<Uuid> {
+        self.graph.nodes[&run.decorator]
+            .children
+            .as_deref()
+            .and_then(|children| children.first().copied())
+    }
+
     /// Every run, live then finished.
     fn all_runs(&self) -> impl Iterator<Item = &Run> {
         self.runs.iter().chain(&self.finished)
@@ -516,25 +531,114 @@ impl BehaviorTreeInterpreter {
             Port::new(decorator, RUN_STATUS_LATCH_PARAM_ID),
             LinkSource::Literal(Value::Unit),
         ));
-        self.runs.push(Run {
-            id: task,
-            decorator,
-            status_key: status_key.clone(),
-            variables,
-        });
-        fragment.add_nodes.push(self.runner_node());
-        self.edit(fragment).inspect_err(|_| {
-            self.runs.pop();
-        })?;
-
-        Ok(TaskHandle {
+        let handle = TaskHandle {
             id: task,
             stop: interpreter_module::encode_halt(task),
             status: status_key,
             feedback: vec![Key::from(format!("{prefix}/feedback"))],
             result: vec![Key::from(format!("{prefix}/result"))],
             update: vec![Key::from(format!("{prefix}/update"))],
-        })
+        };
+        self.runs.push(Run {
+            handle: handle.clone(),
+            decorator,
+            variables,
+        });
+        fragment.add_nodes.push(self.runner_node());
+        self.edit(fragment).inspect_err(|_| {
+            self.runs.pop();
+        })?;
+        Ok(handle)
+    }
+
+    /// The nodes something besides `leaving` holds, with what they reach: the
+    /// main behavior, from its root even when `leaving` holds that too, and
+    /// every node `leaving` does not have.
+    fn held_outside(&self, leaving: &HashSet<Uuid>) -> HashSet<Uuid> {
+        reach(
+            &self.graph,
+            self.graph
+                .nodes
+                .keys()
+                .filter(|id| **id != self.runner && !leaving.contains(id))
+                .copied()
+                .chain(self.main_root),
+        )
+    }
+
+    /// Bring the live run `self.runs[at]`, whose root is `graph`'s, to run
+    /// `graph`, and answer the run's handle. Only what differs changes: the
+    /// graph's nodes the run lacks or holds otherwise, the links into them,
+    /// the run's nodes the graph does not have (but for those another node
+    /// also holds), and the variables the graph declares anew. A graph the run
+    /// already runs changes nothing.
+    fn respawn(&mut self, at: usize, graph: Graph) -> Result<TaskHandle, BehaviorError> {
+        let decorator = self.runs[at].decorator;
+        let mut held = subtree(&self.graph, decorator);
+        held.remove(&decorator);
+        if let Some(id) = graph
+            .nodes
+            .keys()
+            .find(|id| self.graph.nodes.contains_key(id) && !held.contains(id))
+        {
+            return Err(behavior_error(format!(
+                "node {id} is already part of the device's behavior"
+            )));
+        }
+        let declared = self.graph.variables.keys().copied().collect();
+        self.check_renames(&graph.variables, &declared, "the device's behavior")?;
+
+        let links: HashMap<Port, &LinkSource> = self
+            .graph
+            .links
+            .iter()
+            .map(|link| (link.target, &link.source))
+            .collect();
+        let linked: HashSet<Port> = graph.links.iter().map(|link| link.target).collect();
+        let mut leaving = held.clone();
+        leaving.insert(decorator);
+        let staying = self.held_outside(&leaving);
+        let diff = GraphDiff {
+            remove_nodes: held
+                .iter()
+                .filter(|id| !graph.nodes.contains_key(id) && !staying.contains(id))
+                .copied()
+                .collect(),
+            remove_links: links
+                .keys()
+                .filter(|port| graph.nodes.contains_key(&port.node) && !linked.contains(port))
+                .copied()
+                .collect(),
+            add_nodes: graph
+                .nodes
+                .values()
+                .filter(|node| self.graph.nodes.get(&node.id) != Some(*node))
+                .cloned()
+                .collect(),
+            add_links: graph
+                .links
+                .iter()
+                .filter(|link| links.get(&link.target) != Some(&&link.source))
+                .cloned()
+                .collect(),
+            variables: graph
+                .variables
+                .iter()
+                .filter(|(id, name)| self.graph.variables.get(*id) != Some(*name))
+                .map(|(id, name)| (*id, name.clone()))
+                .collect(),
+            ..GraphDiff::default()
+        };
+        if diff != GraphDiff::default() {
+            self.edit(diff)?;
+        }
+        let run = &mut self.runs[at];
+        for id in graph.variables.keys() {
+            if !run.variables.contains(id) {
+                run.variables.push(*id);
+            }
+        }
+        Ok(run.handle.clone())
     }
 
     /// Prune `runs`, already taken out of the live and finished lists: each
@@ -546,14 +650,7 @@ impl BehaviorTreeInterpreter {
             return Ok(());
         }
         let leaving = reach(&self.graph, runs.iter().map(|run| run.decorator));
-        let staying = reach(
-            &self.graph,
-            self.graph
-                .nodes
-                .keys()
-                .filter(|id| **id != self.runner && !leaving.contains(id))
-                .copied(),
-        );
+        let staying = self.held_outside(&leaving);
         let diff = GraphDiff {
             remove_nodes: leaving.difference(&staying).copied().collect(),
             add_nodes: vec![self.runner_node()],
@@ -599,7 +696,7 @@ impl BehaviorTreeInterpreter {
     /// finished list: its fragment is latched inert, pruned at the next edit.
     fn sweep_terminal_runs(&mut self, store: &dyn DataStore) {
         let terminal = |run: &Run| {
-            let value = store.read(std::slice::from_ref(&run.status_key));
+            let value = store.read(std::slice::from_ref(&run.handle.status));
             matches!(
                 value.first().and_then(|v| v.clone()).map(Status::try_from),
                 Some(Ok(Status::Success)) | Some(Ok(Status::Failure))
@@ -689,7 +786,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             if let Some(run) = self.decorated_by(&id) {
                 return Err(behavior_error(format!(
                     "node {id} is the decorator of task run {}: an edit cannot change it",
-                    run.id.0
+                    run.handle.id.0
                 )));
             }
         }
@@ -700,7 +797,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             }) {
                 return Err(behavior_error(format!(
                     "node {root} is the root of task run {}: halt the run to remove it",
-                    run.id.0
+                    run.handle.id.0
                 )));
             }
         }
@@ -817,8 +914,9 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 "the spawned graph's root {root} is not one of its nodes"
             )));
         }
-        // The run is its own region of the scaffold: one tree of new nodes,
-        // of functions the interpreter runs, whose links stay among them and
+        // The run is its own region of the scaffold: one tree of nodes the
+        // device does not have (or its own, for a live run's root), of
+        // functions the interpreter runs, whose links stay among them and
         // lower, renaming no declared variable.
         check_tree(&graph, root)?;
         if let Some(node) = graph
@@ -844,6 +942,15 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the spawned graph does not lower: {e:?}")))?;
         self.prune_finished()?;
+        // A run is known by its root: the live run whose root this is runs
+        // the graph from now on.
+        if let Some(at) = self
+            .runs
+            .iter()
+            .position(|run| self.root_of(run) == Some(root))
+        {
+            return self.respawn(at, graph);
+        }
         if let Some(id) = graph
             .nodes
             .keys()
@@ -875,11 +982,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // can follow at once; the terminal status is written on the next
         // tick, which owns the store. Idempotent — halting an unknown or
         // finished run is a clean no-op.
-        let Some(at) = self.runs.iter().position(|run| run.id == task) else {
+        let Some(at) = self.runs.iter().position(|run| run.handle.id == task) else {
             return Ok(());
         };
         let run = self.runs.remove(at);
-        let status_key = run.status_key.clone();
+        let status_key = run.handle.status.clone();
         self.prune(vec![run])?;
         self.halted.push(status_key);
         Ok(())

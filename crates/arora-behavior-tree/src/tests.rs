@@ -1507,6 +1507,305 @@ mod task_runs {
             .expect("the finished run's ids are free");
     }
 
+    /// A `seq_star` (`ids[0]`) over two run-call leaves (`ids[1]`, `ids[2]`)
+    /// calling `leaves`. With the first succeeding and the second running, it
+    /// stands at its second: calling the first again means it restarted.
+    fn seq_star_graph(ids: [u128; 3], leaves: [Uuid; 2]) -> arora_behavior::graph::Graph {
+        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+        let [root, first, second] = ids.map(Uuid::from_u128);
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph.nodes.insert(
+            root,
+            GraphNode {
+                id: root,
+                function: nodes::SEQ_STAR_FUNCTION_ID,
+                children: Some(vec![first, second]),
+                ..GraphNode::default()
+            },
+        );
+        graph.links.push(Link::new(
+            Port::new(root, nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID),
+            LinkSource::Literal(Value::U16(0)),
+        ));
+        for (node, leaf) in [(first, leaves[0]), (second, leaves[1])] {
+            graph.nodes.insert(
+                node,
+                GraphNode {
+                    id: node,
+                    function: nodes::RUN_CALL_FUNCTION_ID,
+                    inputs: vec![Io::new(nodes::RUN_CALL_PARAM_ID)],
+                    ..GraphNode::default()
+                },
+            );
+            graph.links.push(Link::new(
+                Port::new(node, nodes::RUN_CALL_PARAM_ID),
+                LinkSource::Literal(
+                    arora_types::value_serde::to_value(&call_to(0xB0, leaf)).unwrap(),
+                ),
+            ));
+        }
+        graph
+    }
+
+    /// A graph spawned again as a live run runs it answers that run's handle
+    /// and changes nothing: the run goes on where it stood.
+    #[test]
+    fn a_graph_spawned_again_as_it_runs_answers_its_run() {
+        let [a1, a2] = [0x91, 0x92].map(Uuid::from_u128);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (a1, Status::Success),
+            (a2, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses, ticks.clone());
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let spawned = interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let mut ctx = BehaviorContext {
+            functions: &arora_behavior::FunctionIndex::new(),
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+
+        let before = interp.graph().clone();
+        let again = interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .expect("the run's graph spawned again is answered");
+        assert_eq!(again, spawned, "the answer is the run's handle");
+        assert_eq!(interp.graph(), &before, "the graph it runs is unchanged");
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(ticks.borrow().get(&a1), Some(&1), "the run did not restart");
+        assert_eq!(ticks.borrow().get(&a2), Some(&2), "the run goes on");
+    }
+
+    /// A graph spawned with a live run's root and other nodes or links is that
+    /// run's program from then on: the nodes and links that differ change,
+    /// the nodes it drops leave but for one the main behavior holds, and the
+    /// handle answered halts it.
+    #[test]
+    fn a_graph_spawned_again_with_changes_becomes_its_run_s_program() {
+        use arora_behavior::graph::{GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+        let [a, b] = [0xA1, 0xB1].map(Uuid::from_u128);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (a, Status::Running),
+            (b, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses, ticks.clone());
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let spawned = interp
+            .spawn_graph(
+                &graph_type(),
+                stepping_graph([0xC0, 0xC1, 0xC2], a),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let mut ctx = BehaviorContext {
+            functions: &arora_behavior::FunctionIndex::new(),
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+
+        // An edit puts the main behavior's root under the run too, and links
+        // a port of the run's root.
+        let [parallel, call_node, run, added] = [0xC0, 0xC1, 0xC2, 0xC3].map(Uuid::from_u128);
+        let main = Uuid::from_u128(0xA0);
+        interp
+            .load(reading(0xA0, Uuid::from_u128(0x8), "face/x"))
+            .unwrap();
+        let extra = Port::new(parallel, Uuid::from_u128(0x5));
+        interp
+            .apply(GraphDiff {
+                add_nodes: vec![GraphNode {
+                    id: parallel,
+                    function: nodes::PARALLEL_FUNCTION_ID,
+                    children: Some(vec![call_node, run, main]),
+                    ..GraphNode::default()
+                }],
+                add_links: vec![Link::new(extra, LinkSource::Literal(Value::Unit))],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+
+        // The call leaf calls `b`, and a new `Run` node replaces the old one.
+        let mut changed = stepping_graph([0xC0, 0xC1, 0xC2], b);
+        changed.nodes.remove(&run);
+        changed.nodes.insert(
+            added,
+            GraphNode {
+                id: added,
+                function: nodes::RUN_FUNCTION_ID,
+                ..GraphNode::default()
+            },
+        );
+        changed.nodes.get_mut(&parallel).unwrap().children = Some(vec![call_node, added]);
+        let again = interp
+            .spawn_graph(&graph_type(), changed, RunPolicy::Concurrent)
+            .expect("a graph with a live run's root is answered");
+        assert_eq!(again, spawned, "the answer is the run's handle");
+        let graph = interp.graph();
+        assert!(
+            graph.nodes.contains_key(&added),
+            "the new node joined the run"
+        );
+        assert!(!graph.nodes.contains_key(&run), "the dropped node left");
+        assert!(
+            graph.nodes.contains_key(&main),
+            "a dropped node the main behavior holds stays"
+        );
+        assert_eq!(graph.link_to(&extra), None, "a link the graph lacks left");
+        assert_eq!(
+            graph.link_to(&Port::new(call_node, nodes::RUN_CALL_PARAM_ID)),
+            Some(&Link::new(
+                Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
+                LinkSource::Literal(arora_types::value_serde::to_value(&call_to(0xB0, b)).unwrap()),
+            )),
+            "the call leaf's link is the new graph's"
+        );
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(ticks.borrow().get(&a), Some(&1), "the old call is gone");
+        assert_eq!(
+            ticks.borrow().get(&b),
+            Some(&1),
+            "the run calls the new leaf"
+        );
+
+        interp.halt(again.id).unwrap();
+        interp.tick(&mut ctx).unwrap();
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&spawned.status)),
+            vec![Some(failure)],
+            "the handle answered halts the run"
+        );
+        assert_eq!(
+            interp.graph().nodes.len(),
+            2,
+            "the runner and the main behavior remain"
+        );
+    }
+
+    /// A graph with a live run's root is refused, changing nothing, when it
+    /// holds a node of the main behavior or of another run, the run's
+    /// decorator, or a variable in use renamed.
+    #[test]
+    fn a_graph_with_a_live_run_s_root_and_others_nodes_is_refused() {
+        use arora_behavior::graph::Node as GraphNode;
+        let leaf = Uuid::from_u128(0xD1);
+        let mut interp = BehaviorTreeInterpreter::new();
+        interp
+            .spawn_graph(
+                &graph_type(),
+                stepping_graph([0xE0, 0xE1, 0xE2], leaf),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        interp
+            .spawn_graph(
+                &graph_type(),
+                stepping_graph([0xF0, 0xF1, 0xF2], leaf),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let variable = Uuid::from_u128(0x7);
+        interp.load(reading(0xA0, variable, "face/x")).unwrap();
+        let before = interp.graph().clone();
+        let decorator = before.nodes[&before.root.unwrap()]
+            .children
+            .as_ref()
+            .unwrap()[1];
+
+        let [parallel, call_node] = [0xE0, 0xE1].map(Uuid::from_u128);
+        let holding = |other: Uuid| {
+            let mut graph = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
+            graph.nodes.insert(
+                other,
+                GraphNode {
+                    id: other,
+                    function: nodes::RUN_FUNCTION_ID,
+                    ..GraphNode::default()
+                },
+            );
+            graph.nodes.get_mut(&parallel).unwrap().children =
+                Some(vec![call_node, Uuid::from_u128(0xE2), other]);
+            graph
+        };
+        let mut renaming = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
+        renaming.variables.insert(variable, "face/y".to_string());
+        for (what, graph) in [
+            (
+                "a node of the main behavior",
+                holding(Uuid::from_u128(0xA0)),
+            ),
+            ("a node of another run", holding(Uuid::from_u128(0xF2))),
+            ("the run's decorator", holding(decorator)),
+            ("a variable in use renamed", renaming),
+        ] {
+            assert!(
+                interp
+                    .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
+                    .is_err(),
+                "a graph with {what} is refused"
+            );
+            assert_eq!(interp.graph(), &before, "{what}: the graph is unchanged");
+        }
+    }
+
+    /// A halt keeps the nodes the main behavior also holds, its root
+    /// included: an edit may place the main behavior's root under a run.
+    #[test]
+    fn a_halt_keeps_the_main_behavior_s_root_a_run_also_holds() {
+        use arora_behavior::graph::{GraphDiff, Node as GraphNode};
+        let leaf = Uuid::from_u128(0xD2);
+        let mut interp = BehaviorTreeInterpreter::new();
+        let handle = interp
+            .spawn_graph(
+                &graph_type(),
+                stepping_graph([0x60, 0x61, 0x62], leaf),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let main = Uuid::from_u128(0xA0);
+        interp
+            .load(reading(0xA0, Uuid::from_u128(0x9), "face/x"))
+            .unwrap();
+        let [parallel, call_node, run] = [0x60, 0x61, 0x62].map(Uuid::from_u128);
+        interp
+            .apply(GraphDiff {
+                add_nodes: vec![GraphNode {
+                    id: parallel,
+                    function: nodes::PARALLEL_FUNCTION_ID,
+                    children: Some(vec![call_node, run, main]),
+                    ..GraphNode::default()
+                }],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+
+        interp.halt(handle.id).expect("the halt applies");
+        let graph = interp.graph();
+        assert!(graph.nodes.contains_key(&main), "the main behavior stays");
+        assert_eq!(
+            graph.nodes.len(),
+            2,
+            "the runner and the main behavior remain"
+        );
+    }
+
     /// An edit cannot place the runner or a decorator elsewhere, call a node
     /// that is not there, or close a cycle; a refused edit changes nothing.
     #[test]

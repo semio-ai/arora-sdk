@@ -15,7 +15,8 @@
 //! - [`SPAWN_GRAPH`] →
 //!   [`BehaviorInterpreter::spawn_graph`](crate::BehaviorInterpreter::spawn_graph):
 //!   start a task run whose program is a [`Graph`] of a [`GraphType`], under
-//!   a [`RunPolicy`], returning a [`TaskHandle`];
+//!   a [`RunPolicy`], returning a [`TaskHandle`] — the live run's own, when
+//!   one already has the graph's root, which then runs the graph;
 //! - [`HALT`] → [`BehaviorInterpreter::halt`](crate::BehaviorInterpreter::halt):
 //!   stop the run named by a [`TaskId`].
 //!
@@ -76,7 +77,8 @@ pub const HALT_ARG: Uuid = uuid!("61726f72-6100-0000-0000-00000000000a");
 
 /// Function id of **spawn_graph**: start a task run whose program is a
 /// [`Graph`] of a [`GraphType`], under a [`RunPolicy`], returning a
-/// [`TaskHandle`].
+/// [`TaskHandle`]. A live run whose root is the graph's takes the graph as its
+/// program instead, and the handle returned is that run's.
 pub const SPAWN_GRAPH: Uuid = uuid!("61726f72-6100-0000-0000-00000000000b");
 
 /// Argument id of [`SPAWN_GRAPH`]'s `graph_type`: the name of the graph's

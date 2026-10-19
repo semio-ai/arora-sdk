@@ -542,9 +542,8 @@ client that gives a device a program of its own — a behavior that calls a
 module each tick and writes what it returns — therefore neither evicts the
 behavior the device runs, as `load` would, nor needs a module of its own on
 the device. A change to a running program is one `edit` of its links, applied
-between two ticks; replacing the run takes a halt and a spawn, which a remote's
-two calls may deliver on different steps, leaving a step with no program or
-with two.
+between two ticks, and so is a new program for the run: a `spawn_graph` of a
+graph with its root.
 
 **A change restarts only the nodes it touches.** The interpreter lowers the
 whole changed graph again, and the new tree takes over the state of every node
@@ -558,6 +557,25 @@ Lowering each run on its own would confine a change too, but runs and the
 main behavior can share what a tree holds: an edit may place one node under
 both, or link a run's node to a port of the main behavior's, and both may read
 one tree-local variable. Separate lowerings would each hold their own copy.
+
+**A graph run is known by its root.** The client chooses a graph's node ids,
+so the graph's root names its run. Spawning a graph whose root a live run has
+starts no second run: the run takes the graph as its program, only what
+differs changing and the nodes left as they are keeping their state, and the
+spawn answers the run's handle. A client that lost a run's `TaskId` (a page
+reload, a second tab) takes the run over with the spawn it would make anyway,
+a retried spawn starts no second copy, and a new program replaces the old one
+between two ticks.
+
+The run's handle comes back as the spawn's answer because an answer is the
+one thing that reaches every client as a value: a bridge carries a refused
+call's reason as text, and a `BehaviorError` is a message. The alternatives
+each keep a refusal a client would have to read. A `halt` by root adds a
+function to the interpreter module and leaves a new program to two calls, a
+halt and a spawn, which a remote may deliver on different steps, leaving a
+step with no program or with two. A replace policy would sit in `RunPolicy`,
+which `spawn` shares although a spawned call has no root its client chose, and
+which is reserved for arbitration between runs.
 
 **A graph travels with its type and version.** `spawn_graph` takes the
 graph's language (`behavior-tree`) and the version of that language's format
