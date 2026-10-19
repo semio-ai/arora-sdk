@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "10.2.0"
+version = "10.3.0"
 dependencies = [
  "arora",
  "arora-behavior",
