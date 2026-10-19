@@ -93,7 +93,12 @@ impl BehaviorTree {
                             take_local(cell, held);
                         }
                     }
-                    _ => {}
+                    // Another node's argument, or a cell the tree was built
+                    // with: not this node's to carry. `selected_source` has
+                    // unwrapped every selection.
+                    Expression::NodeArgument(_)
+                    | Expression::Variable(_)
+                    | Expression::Select { .. } => {}
                 }
             }
         }

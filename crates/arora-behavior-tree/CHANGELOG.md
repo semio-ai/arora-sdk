@@ -12,9 +12,12 @@ All notable changes to `arora-behavior-tree`. The format follows
   where they stand. The tree lowered from the changed graph takes over the
   state of every node the change left in place: a `seq_star`'s place, a run's
   latch, a tree-local variable such a node reads. A node the change adds,
-  replaces or relinks starts afresh, and so does a tree-local variable only
-  such nodes read. A `spawn`, `spawn_graph`, `edit`, `halt` or `load`, or a
-  run ending, used to restart the main behavior and every run.
+  replaces, relinks or re-keys starts afresh, and so does a tree-local
+  variable only such nodes read: a `load` keeps one a run also reads. A
+  `spawn`, `spawn_graph`, `edit`, `halt` or `load`, or a run ending, used to
+  restart the main behavior and every run.
+- A graph that does not lower leaves the previous lowering in place, unticked,
+  so the state carries over to the next lowering that succeeds.
 
 ## [9.0.0] - 2026-10-16
 

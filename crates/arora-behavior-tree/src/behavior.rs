@@ -61,9 +61,12 @@
 //! keeps the state of every node the change left in place — a `seq_star`'s
 //! index, a run's latch, a tree-local variable such a node reads — so changing
 //! one run leaves the main behavior and every other run where they were. A
-//! node the change adds, replaces or relinks starts afresh, and so does a
-//! tree-local variable only such nodes read: a load restarts the main
-//! behavior, an edit restarts the nodes it touches.
+//! node the change adds, replaces, relinks or re-keys starts afresh, and so
+//! does a tree-local variable only such nodes read. A load thus restarts the
+//! main behavior's nodes, but a tree-local variable a run also reads keeps its
+//! value, as the run left in place sees it; an edit restarts the nodes it
+//! touches. A graph that does not lower leaves the previous lowering in place,
+//! unticked, and the next lowering takes over its state.
 
 use std::collections::{HashMap, HashSet};
 
@@ -300,6 +303,28 @@ fn reach(graph: &Graph, starts: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid>
     found
 }
 
+/// The nodes `diff` changes but does not remove: those it adds or replaces,
+/// the targets of the links it adds or removes, and the nodes whose
+/// predetermined keys it sets. Every field of a diff is named, so a new one
+/// must be placed here.
+fn changed_nodes(diff: &GraphDiff) -> impl Iterator<Item = Uuid> + '_ {
+    let GraphDiff {
+        add_nodes,
+        remove_nodes: _,
+        add_links,
+        remove_links,
+        set_predetermined,
+        set_root: _,
+        variables: _,
+    } = diff;
+    add_nodes
+        .iter()
+        .map(|node| node.id)
+        .chain(add_links.iter().map(|link| link.target.node))
+        .chain(remove_links.iter().map(|port| port.node))
+        .chain(set_predetermined.iter().map(|(port, _)| port.node))
+}
+
 fn behavior_error(message: impl Into<String>) -> BehaviorError {
     BehaviorError {
         message: message.into(),
@@ -440,14 +465,7 @@ impl BehaviorTreeInterpreter {
     /// would not lower. A selection feeding a parameter the function declares
     /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
-        let changed: Vec<Uuid> = diff
-            .add_nodes
-            .iter()
-            .map(|node| node.id)
-            .chain(diff.add_links.iter().map(|link| link.target.node))
-            .chain(diff.remove_links.iter().map(|port| port.node))
-            .chain(diff.set_predetermined.iter().map(|(port, _)| port.node))
-            .collect();
+        let changed: Vec<Uuid> = changed_nodes(&diff).collect();
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
@@ -666,14 +684,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 "node {id} is the runner or a task run's decorator: an edit cannot place it"
             )));
         }
-        let touched = diff
-            .add_nodes
-            .iter()
-            .map(|node| node.id)
-            .chain(diff.remove_nodes.iter().copied())
-            .chain(diff.add_links.iter().map(|link| link.target.node))
-            .chain(diff.remove_links.iter().map(|port| port.node))
-            .chain(diff.set_predetermined.iter().map(|(port, _)| port.node));
+        let touched = changed_nodes(&diff).chain(diff.remove_nodes.iter().copied());
         for id in touched {
             if let Some(run) = self.decorated_by(&id) {
                 return Err(behavior_error(format!(
