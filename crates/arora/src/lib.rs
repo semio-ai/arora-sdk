@@ -872,6 +872,9 @@ impl AroraBuilder {
     /// every export with its frozen signature; without one, those whose
     /// parameters and return are primitives, frozen from the header.
     ///
+    /// [`build`](Self::build) fails, naming both, when another module — guest
+    /// or host — has the header's id.
+    ///
     /// For functions the engine hosts in-process (Rust closures rather than a
     /// loadable executable), use [`with_host_module`](Self::with_host_module).
     pub fn with_module(mut self, header: Header, executable: impl Into<Box<[u8]>>) -> Self {
@@ -1040,7 +1043,11 @@ impl AroraBuilder {
     /// (Rust closures). Either way its functions dispatch through the engine's
     /// `CallBridge` — reachable from a behavior (a graph `ExternalFunction`
     /// node), an in-process caller, or a remote — under the module id and the
-    /// function ids it was built with. Loaded at [`build`](Self::build).
+    /// function ids it was built with. Loaded at [`build`](Self::build),
+    /// which fails, naming both, when another module has its id: a guest
+    /// module, another host module, the HAL module
+    /// ([`arora_hal::hal_module::ID`]) or the interpreter module
+    /// ([`interpreter_module::ID`]).
     ///
     /// ```ignore
     /// let module = arora::ModuleBuilder::new(module_id)
@@ -1140,7 +1147,11 @@ impl AroraBuilder {
     /// endpoint's inbound stream and merge them, subscribe to the HAL and store
     /// feeds, and return the finished [`Arora`].
     ///
-    /// Fails only if the engine's executor host cannot be created. Fully
+    /// Fails, naming what it refuses, when the device's parts do not fit
+    /// together — a guest module that does not load or that its record does
+    /// not describe, two modules (guest or host) under one id, a method both a
+    /// module and the behavior interpreter implement, a Groot tree that does
+    /// not load — or when the engine's executor host cannot be created. Fully
     /// synchronous: there is nothing to spawn — the HAL and bridges own any
     /// async internally, behind their stream/push seams.
     pub fn build(self) -> Result<Arora> {
@@ -1167,22 +1178,30 @@ impl AroraBuilder {
         // versions, so a signature naming a record, a map or a fixed-length
         // array dispatches but stays undiscoverable.
         //
-        // One module id, one module: every source of guest modules (an
-        // embedder's `with_module`, the device directory, `--module`) converges
-        // here, and the engine answers an already-loaded id with Ok — which
-        // would dispatch the first and describe the last.
-        let mut guest_modules: HashMap<Uuid, String> = HashMap::new();
+        // One module id, one module. The engine answers a guest under an
+        // already-loaded id with Ok, and registering a host module under a
+        // taken id replaces the module there: either way the device would
+        // dispatch one module and describe another's functions. Every source
+        // of modules converges in this build — an embedder's `with_module` and
+        // `with_host_module`, the device directory, `--module`, the HAL
+        // module and the interpreter module — so each claims its id here, and
+        // a second claim fails the build, naming both modules.
+        let mut module_ids: HashMap<Uuid, String> = HashMap::new();
+        claim_module_id(
+            &mut module_ids,
+            interpreter_module::ID,
+            "the interpreter module".to_string(),
+        )?;
         let mut guest_exports: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
         for module in self.modules {
             let header = module.header();
             let module_id = header.id;
             let module_name = header.name.clone();
-            if let Some(first) = guest_modules.insert(module_id, module_name.clone()) {
-                anyhow::bail!(
-                    "guest modules '{first}' and '{module_name}' both have id {module_id}: a \
-                     device loads one module per id"
-                );
-            }
+            claim_module_id(
+                &mut module_ids,
+                module_id,
+                format!("guest module '{module_name}'"),
+            )?;
             // An export its declaration already indexed
             // (`with_declared_module`) keeps that frozen signature.
             let frozen = index_exports(header, &registry, |id| functions.contains_key(id))?;
@@ -1217,9 +1236,17 @@ impl AroraBuilder {
         // engine's `CallBridge`, exactly like a loaded guest module's. Its
         // described functions join the method index, so introspection
         // (`DescribeMethods`) lists them with their signatures.
-        let host_modules =
-            std::iter::once(hal_module::module(hal.clone())).chain(self.host_modules);
-        for module in host_modules {
+        let host_modules = std::iter::once((
+            "the HAL module".to_string(),
+            hal_module::module(hal.clone()),
+        ))
+        .chain(
+            self.host_modules
+                .into_iter()
+                .map(|module| (host_module_name(&module), module)),
+        );
+        for (name, module) in host_modules {
+            claim_module_id(&mut module_ids, module.id(), name)?;
             for description in module.descriptions() {
                 functions.insert(
                     description.id,
@@ -1523,6 +1550,31 @@ impl AroraBuilder {
         // open, and listed, from its first step.
         runtime::describe_hal_keys(&*arora.store, &mut arora.hal_keys, &mut arora.hal_stated);
         Ok(arora)
+    }
+}
+
+/// Claim `id` for the module `name` names, among the ids `claimed` holds:
+/// refused, naming both modules, when another module claimed it first.
+fn claim_module_id(claimed: &mut HashMap<Uuid, String>, id: Uuid, name: String) -> Result<()> {
+    if let Some(first) = claimed.get(&id) {
+        anyhow::bail!("{first} and {name} both have id {id}: a device loads one module per id");
+    }
+    claimed.insert(id, name);
+    Ok(())
+}
+
+/// How a build error names a host module, which carries no name of its own:
+/// by the functions it describes, as a remote finds them.
+fn host_module_name(module: &HostModule) -> String {
+    let functions: Vec<String> = module
+        .descriptions()
+        .iter()
+        .map(|description| format!("'{}'", description.name))
+        .collect();
+    if functions.is_empty() {
+        "a host module describing no function".to_string()
+    } else {
+        format!("the host module describing {}", functions.join(", "))
     }
 }
 
@@ -2247,8 +2299,52 @@ mod module_loading_tests {
         assert!(
             error
                 .to_string()
-                .contains("guest modules 'test-rust-wasm' and 'test-rust-wasm-again' both have id"),
+                .contains("guest module 'test-rust-wasm' and guest module 'test-rust-wasm-again' both have id"),
             "{error}"
+        );
+    }
+
+    /// A guest module and a host module with one id fail the build, naming
+    /// both: the host module would take the guest's place in dispatch while
+    /// the method index still describes the guest's exports, a call to any of
+    /// them failing with `FunctionNotFound`.
+    #[test]
+    fn a_guest_and_a_host_module_with_one_id_fail_the_build() {
+        let header = test_module_header();
+        let id = header.id;
+        let error = Arora::builder()
+            .with_module(header, WASM.to_vec())
+            .with_host_module(ModuleBuilder::new(id).build())
+            .build()
+            .err()
+            .expect("one id, a guest and a host module is refused");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "guest module 'test-rust-wasm' and a host module describing no function both \
+                 have id {id}: a device loads one module per id"
+            )
+        );
+    }
+
+    /// A guest module under the HAL module's id fails the build: every device
+    /// registers the HAL module, which would take the guest's place.
+    #[test]
+    fn a_guest_module_under_the_hal_module_s_id_fails_the_build() {
+        let mut header = test_module_header();
+        header.id = arora_hal::hal_module::ID;
+        let error = Arora::builder()
+            .with_module(header, WASM.to_vec())
+            .build()
+            .err()
+            .expect("a guest under the HAL module's id is refused");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "guest module 'test-rust-wasm' and the HAL module both have id {}: a device \
+                 loads one module per id",
+                arora_hal::hal_module::ID
+            )
         );
     }
 
@@ -2316,7 +2412,7 @@ mod module_loading_tests {
         assert!(
             error
                 .to_string()
-                .contains("guest modules 'test-rust-wasm' and 'test-rust-wasm-again' both have id"),
+                .contains("guest module 'test-rust-wasm' and guest module 'test-rust-wasm-again' both have id"),
             "{error}"
         );
     }
@@ -2573,6 +2669,60 @@ mod host_module_tests {
         assert_eq!(entry.function_name, "look_at");
         assert_eq!(entry.function, signature);
         assert!(!arora.function_index.contains_key(&undescribed));
+    }
+
+    /// Two host modules with one id fail the build, naming both by the
+    /// functions they describe: the second would replace the first in
+    /// dispatch while the method index still describes the first's functions.
+    #[test]
+    fn two_host_modules_with_one_id_fail_the_build() {
+        let id = Uuid::from_u128(0x6761);
+        let module = |function: u128, name: &str| {
+            ModuleBuilder::new(id)
+                .described_function(Uuid::from_u128(function), name, unit_signature(), |_call| {
+                    Ok(CallResult {
+                        ret: Value::Unit,
+                        mutated: Vec::new(),
+                    })
+                })
+                .build()
+        };
+        let error = Arora::builder()
+            .with_host_module(module(0x6c61, "look_at"))
+            .with_host_module(module(0x6c62, "wave"))
+            .build()
+            .err()
+            .expect("one id, two host modules is refused");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "the host module describing 'look_at' and the host module describing 'wave' \
+                 both have id {id}: a device loads one module per id"
+            )
+        );
+    }
+
+    /// A host module under the id of a module every device registers, the
+    /// HAL module or the interpreter module, fails the build, naming it.
+    #[test]
+    fn a_host_module_under_the_hal_or_the_interpreter_module_s_id_fails_the_build() {
+        for (id, owner) in [
+            (arora_hal::hal_module::ID, "the HAL module"),
+            (interpreter_module::ID, "the interpreter module"),
+        ] {
+            let error = Arora::builder()
+                .with_host_module(ModuleBuilder::new(id).build())
+                .build()
+                .err()
+                .expect("a host module under a reserved id is refused");
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "{owner} and a host module describing no function both have id {id}: a \
+                     device loads one module per id"
+                )
+            );
+        }
     }
 
     /// An interpreter hosting `look_at` as a task run of its own.
