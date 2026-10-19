@@ -222,3 +222,91 @@ fn the_guest_s_module_directory_describes_its_record_typed_exports() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The records `@vizij/animation-module` 4.1.0 publishes in the `vizij`
+/// scope (`fixtures/vizij-animation-module-4.1.0`) and those of this
+/// module's directory load into one registry, in either order, as a device
+/// loads its module directories' records, and into a registry a host adds
+/// the declared module to: no record of one holds an id and version a
+/// different record of the other holds. A record both carry is held at both
+/// versions, each in its own scope.
+#[test]
+fn vizij_s_published_records_and_the_module_directory_s_load_into_one_registry() {
+    use arora::module_dir::{registry, ModuleFiles};
+    use arora_animation_module::{module_dir, AnimationClip, OutputKeys, StepValues};
+    use arora_registry::local::LocalRegistry;
+    use arora_registry::local_yaml::load_records_from_yaml_dir;
+    use arora_registry::TypeDefinitionFrozen;
+    use arora_types::record::scope::ARORA;
+    use arora_types::record::Version;
+    use arora_types::AroraType;
+    use futures::executor::block_on;
+    use std::path::{Path, PathBuf};
+
+    let vizij = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join("vizij-animation-module-4.1.0");
+    let arora = std::env::temp_dir().join("arora-animation-module-directory-beside-vizij");
+    let _ = std::fs::remove_dir_all(&arora);
+    module_dir::write(&arora, None).expect("the module directory is written");
+    let files = |dir: &Path| ModuleFiles {
+        dir: dir.to_path_buf(),
+        header: serde_yaml::from_str(
+            &std::fs::read_to_string(dir.join("header.json")).expect("the header reads"),
+        )
+        .expect("the header parses"),
+        executable: Box::new([]),
+    };
+
+    let v = |s: &str| Version::parse(s).expect("a valid version").0;
+    let parent = |registry: &LocalRegistry, id, version: &str| match registry
+        .type_at(&id, &v(version))
+        .unwrap_or_else(|| panic!("{id}@{version} is held"))
+    {
+        TypeDefinitionFrozen::Structure(structure) => structure.parent,
+        other => panic!("{id}@{version} is a structure, not {other:?}"),
+    };
+    let vizij_scope = parent(
+        &block_on(registry(&[files(&vizij)])).expect("vizij's records load"),
+        AnimationClip::arora_type_id(),
+        "1.1.0",
+    );
+    assert_ne!(vizij_scope, ARORA.id);
+    let holds_both = |registry: &LocalRegistry| {
+        for (id, vizij_version, version) in [
+            (AnimationClip::arora_type_id(), "1.1.0", "1.2.0"),
+            (StepValues::arora_type_id(), "1.0.0", "1.1.0"),
+            (OutputKeys::arora_type_id(), "1.0.0", "1.1.0"),
+        ] {
+            assert_eq!(parent(registry, id, vizij_version), vizij_scope);
+            assert_eq!(parent(registry, id, version), ARORA.id);
+        }
+        let module = animation::ids::MODULE;
+        assert_eq!(
+            registry.module_at(&module, &v("2.0.0")).unwrap().name,
+            "animation"
+        );
+        assert_eq!(
+            registry.module_at(&module, &v("3.0.0")).unwrap().name,
+            "animation"
+        );
+    };
+
+    for modules in [
+        [files(&arora), files(&vizij)],
+        [files(&vizij), files(&arora)],
+    ] {
+        let registry = block_on(registry(&modules)).expect("both modules' records load");
+        holds_both(&registry);
+    }
+    let mut registry = LocalRegistry::new();
+    block_on(load_records_from_yaml_dir(
+        vizij.join("records"),
+        &mut registry,
+    ))
+    .expect("vizij's records load");
+    block_on(registry.add_declared_module::<animation::Module>(v("3.0.0")))
+        .expect("the declared module adds beside them");
+    holds_both(&registry);
+    std::fs::remove_dir_all(&arora).unwrap();
+}

@@ -1,0 +1,29 @@
+parent: 76697a69-6a00-0000-f01d-000000000000
+name: BakedAnimation
+fields:
+  76697a69-6a00-0000-0120-000000000001:
+    name: frame_rate
+    type:
+      type: primitive
+      value:
+        kind: f32
+  76697a69-6a00-0000-0120-000000000002:
+    name: start_ns
+    type:
+      type: primitive
+      value:
+        kind: u64
+  76697a69-6a00-0000-0120-000000000003:
+    name: end_ns
+    type:
+      type: primitive
+      value:
+        kind: u64
+  76697a69-6a00-0000-0120-000000000004:
+    name: tracks
+    type:
+      type: frozenArray
+      value:
+        reference:
+          id: 76697a69-6a00-0000-0000-000000000121
+          version: 1.0.0

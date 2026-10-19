@@ -1,0 +1,17 @@
+parent: 76697a69-6a00-0000-f01d-000000000000
+name: StepValues
+fields:
+  76697a69-6a00-0000-0113-000000000001:
+    name: revision
+    type:
+      type: primitive
+      value:
+        kind: u32
+  76697a69-6a00-0000-0113-000000000002:
+    name: values
+    type:
+      type: frozenScalar
+      value:
+        reference:
+          id: 00000000-0000-0000-0000-00000000001b
+          version: 1.0.0

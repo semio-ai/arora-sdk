@@ -1,0 +1,15 @@
+parent: 76697a69-6a00-0000-f01d-000000000000
+name: OutputKeys
+fields:
+  76697a69-6a00-0000-0114-000000000001:
+    name: revision
+    type:
+      type: primitive
+      value:
+        kind: u32
+  76697a69-6a00-0000-0114-000000000002:
+    name: keys
+    type:
+      type: primitive
+      value:
+        kind: arrayString

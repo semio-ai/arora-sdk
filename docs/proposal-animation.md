@@ -13,15 +13,17 @@ In short:
 
 - **Two crates.** `arora-animation` is the library: the clip format,
   exact evaluation with velocities, players, and the engine that steps them.
-  It depends on no Arora runtime. `arora-animation-module` declares it as an
-  Arora module: a `wasm32-wasip1` guest that every device, emulated or
-  real, loads from its module directory (header, guest and records), and
-  host-linkable for a native host.
+  It depends on no Arora runtime. `arora-animation-module` declares it as
+  the Arora module `@arora/animation`: a `wasm32-wasip1` guest that every
+  device, emulated or real, loads from its module directory (header, guest
+  and records), and host-linkable for a native host.
 - **They move from vizij-rs with their history**, as the node graph does
   ([behavior languages](proposal-behavior-languages.md) §4).
   animation-player's history comes along, since vizij-rs forked from it.
 - **The module keeps its ids**: module, functions, parameters and records.
-  A caller of vizij's module reaches this one unchanged.
+  A caller of vizij's module reaches this one unchanged. A record both
+  modules carry is here at a version above vizij's, so their records load
+  into one registry.
 - **Clip format 2.0** carries what an author made: keypoints at signed
   nanoseconds of clip-local time, and on each side of a keypoint an explicit
   handle in time and value units, an easing, or an inferred tangent. Clip
@@ -44,9 +46,10 @@ In short:
 
 - `vizij-animation-core` 5.0.0: the clip model, sampling, players, blending
   and baking.
-- `vizij-animation-module` (module version 2.0.0): the core declared as an
-  Arora module with `#[arora_module::module]`. Its guest ships on npm as
-  `@vizij/animation-module`.
+- `vizij-animation-module`: the core declared as the Arora module
+  `@vizij/animation` 2.0.0 with `#[arora_module::module]`, its records in
+  the `vizij` scope. Its guest, header and records ship on npm as
+  `@vizij/animation-module` (4.1.0).
 
 The [behavior languages](proposal-behavior-languages.md) proposal moves
 vizij's node graph into arora-sdk and keeps `vizij-animation-core` in
@@ -398,7 +401,7 @@ and a cubic Bézier is unchanged by that affine map.
 | Crate or surface | Version | Change |
 |---|---|---|
 | `arora-animation` | 1.0.0 | New. |
-| `arora-animation-module` | 1.0.0 (module 3.0.0) | New crate; the module's interface continues vizij's 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; `set_loop` takes `bounce`. The `module-dir` feature writes the module directory a device loads (header, guest, and the records in the `arora` scope). Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
+| `arora-animation-module` | 1.0.0 (module `@arora/animation` 3.0.0) | New crate; the module's interface continues `@vizij/animation` 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; every other record vizij publishes is at the next minor, with the same fields, in the `arora` scope (`AnimationClip`, `AnimTrack` and `Keypoint` 1.2.0; `TransitionHandle`, `TrackOutput`, `StepValues`, `OutputKeys`, `BakedAnimation` and `BakedTrack` 1.1.0), so both modules' records load into one registry; `set_loop` takes `bounce`. The `module-dir` feature writes the module directory a device loads (header, guest `animation.wasm`, and the records in the `arora` scope, the module's at `arora.animation`). Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
 | `vizij-animation-core`, `vizij-animation-module` | — | No further release once vizij-rs depends on the arora crates. |
 | `@vizij/animation-module` (npm) | — | Deprecated, or a wrapper over the new guest. |
 | Semio Studio's stored animation | format 3 | Clip 2.0 plus the editor's fields. Studio reads 1, 2 and 3, writes 3, and writes 3 only once every client refuses a format newer than it reads. Published releases keep format 2. |

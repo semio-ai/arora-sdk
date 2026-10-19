@@ -3,7 +3,7 @@
 //! ```text
 //! <dir>/
 //! ├── header.json            the declared header, for the wasm executor
-//! ├── arora-animation.wasm   the guest
+//! ├── animation.wasm         the guest
 //! └── records/               the module's record and the records of the
 //!                            types its functions name, in arora-registry's
 //!                            layout
@@ -25,7 +25,7 @@ use arora_types::module::low::{Executor, Header};
 use crate::animation;
 
 /// The guest's file name in a module directory.
-pub const GUEST_FILE: &str = "arora-animation.wasm";
+pub const GUEST_FILE: &str = "animation.wasm";
 
 /// The header the guest is loaded with, for the wasm executor.
 pub fn guest_header() -> Header {
