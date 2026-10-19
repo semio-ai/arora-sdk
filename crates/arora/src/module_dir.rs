@@ -38,7 +38,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use arora_registry::local::LocalRegistry;
-use arora_registry::local_yaml::load_records_from_yaml_dir;
+use arora_registry::local_yaml::{
+    load_records as load_records_from_yaml, load_records_from_yaml_dir, records_as_yaml, RecordKind,
+};
 use arora_types::module::low::Header;
 
 /// The subdirectory of the device directory holding its module directories.
@@ -107,6 +109,44 @@ pub(crate) async fn load_records(
         );
     }
     Ok(())
+}
+
+/// `registry` with every record `records` holds added: one it holds
+/// identically is held once, and one it holds differently under the same id
+/// and version is an error naming the record.
+///
+/// The folders go in first, together, so each finds its parent; then each
+/// other record on its own, so an error names the record.
+pub(crate) fn merge_records(
+    mut registry: LocalRegistry,
+    records: &LocalRegistry,
+) -> Result<LocalRegistry> {
+    let (folders, others): (Vec<_>, Vec<_>) = records_as_yaml(records)?
+        .into_iter()
+        .partition(|(kind, _, _)| *kind == RecordKind::Folder);
+    // A local registry is in memory and the records are in hand: each future
+    // completes without waiting on anything.
+    futures::executor::block_on(load_records_from_yaml(
+        folders
+            .iter()
+            .map(|(kind, stem, yaml)| (*kind, stem.as_str(), yaml.clone())),
+        &mut registry,
+    ))
+    .context("the folders of the device's module directories do not join its registry")?;
+    for (kind, stem, yaml) in &others {
+        futures::executor::block_on(load_records_from_yaml(
+            [(*kind, stem.as_str(), yaml.clone())],
+            &mut registry,
+        ))
+        .with_context(|| {
+            format!(
+                "the device's module directories carry {} record {stem}, which does not join \
+                 its registry",
+                kind.directory()
+            )
+        })?;
+    }
+    Ok(registry)
 }
 
 /// Read the module directories a device carries: every one under

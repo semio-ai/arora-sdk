@@ -34,6 +34,9 @@ jobs:
       test-polly: ${{ steps.affected.outputs.test-polly }}
       test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
+      test-arora-hal-ros2: ${{ steps.affected.outputs.test-arora-hal-ros2 }}
+      test-arora-hal-restful: ${{ steps.affected.outputs.test-arora-hal-restful }}
+      test-arora-hal-naoqi: ${{ steps.affected.outputs.test-arora-hal-naoqi }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -117,6 +120,40 @@ jobs:
 
       - name: Test the ROS 2 bridge on the Zenoh backend
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
+
+  # The robot runners (arora-ros2, arora-restful, arora-naoqi) build only
+  # with their crates' `runner` feature, which the test and lint jobs leave
+  # off, so they would never be compiled. Lint them and run their tests with
+  # it whenever a change reaches one of their crates.
+  runners:
+    needs: select
+    if: needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Line tables are enough for a failing test's backtrace, and keep three
+      # linked runtimes within the runner's disk.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure cargo git access
+        run: |
+          mkdir -p ~/.cargo
+          echo "net.git-fetch-with-cli = true" >> ~/.cargo/config.toml
+          echo "${{ secrets.GH_PAT_STUDIO_ARORA }}" > ~/.my-credentials
+          git config --global credential.helper 'store --file ~/.my-credentials'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy the robot runners
+        run: cargo clippy $RUNNERS --all-targets -- -D warnings
+
+      - name: Test the robot runners
+        run: cargo test $RUNNERS --bins
 
   lint:
     needs: select

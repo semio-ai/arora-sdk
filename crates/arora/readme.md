@@ -88,7 +88,10 @@ options the binary parses (the Groot file, `--open`, `--module`); flatten it
 into a larger CLI and inject the results through the builder. A runner's
 modules, its device directory's and those its command line names, load with
 `AroraBuilder::with_module_dirs(&device_dir::from_env()?, &dirs)`, records
-included, as the `arora` binary and the robot runners load theirs.
+included, as the `arora` binary and the robot runners load theirs. A runner
+with a command line of its own flattens `RunnerArgs` into it for `--module`,
+as the robot runners do. The records join the registry `with_registry` gives
+when the device is built, whichever of the two calls comes first.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
 carries the wasmtime and dynamic-library hosts, the operator flow, and the

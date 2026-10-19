@@ -8,20 +8,29 @@ All notable changes to `arora-hal-restful`. The format follows
 
 ### Added
 
-- The `arora-restful` runner carries modules as the `arora` runner does:
-  every module directory under its device directory's `modules/`, then each
-  `--module <dir>` (repeatable), with the records their `records/` carry, so
-  the device describes a guest module's record-typed exports and a behavior
-  calls them. A module directory that does not read fails the start, naming
-  the module, before the robot is reached.
+- The `arora-restful` runner carries modules as the `arora` runner does: every
+  module directory under its device directory's `modules/`, then each
+  `--module <DIR>` (or `--module=<DIR>`, repeatable), with the records their
+  `records/` carry, so the device describes a guest module's record-typed
+  exports and a behavior calls them.
+  - A module directory that does not read (no header, no artifact or several,
+    records that do not parse or differ between directories) fails the start,
+    naming the module, before the robot is reached.
+  - What the engine and the device's registry decide fails when the device is
+    built, after the HAL has started: an artifact the engine rejects (a native
+    module where the platform loads none, a wasm it does not compile), or a
+    record that does not describe its module's header.
+- `-h` and `--help` print the runner's options and exit.
 
 ### Changed
 
+- The runner's command line is parsed with clap (`arora::RunnerArgs` for
+  `--module`): an option it does not take, or a missing configuration file,
+  fails the start with clap's message and usage, rather than being read as
+  the configuration file, or panicking.
 - The runner's front end, and the log sink it installs, start before the
   HAL: what the HAL logs while it starts is shown.
-- An unknown `--` option fails the start with the usage, instead of being
-  read as the configuration file.
-- The `runner` feature requires `arora` 13.3 (`AroraBuilder::with_module_dirs`).
+- The `runner` feature requires `arora` 13.3 and `clap` 4.
 
 ## [4.2.0] - 2026-10-16
 
