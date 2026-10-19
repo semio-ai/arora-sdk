@@ -4,6 +4,42 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.5.0] - 2026-10-19
+
+### Added
+
+- `--studio` and `--no-studio`, in a `studio-bridge` build. `studio::StudioArgs`
+  parses them, and `RunnerArgs` and `DeviceCli` flatten it as their `studio`
+  field; `AroraBuilder::with_studio(studio::Choice)` hands what they ask to
+  `run`, and the `arora` binary passes it.
+  - `--studio` connects to Semio Studio, registering a device that holds no
+    saved Studio credential. `ARORA_STUDIO=1` (or `true`, `yes`, `on`) asks
+    the same.
+  - `--no-studio` serves the open local bridge, even for a device holding a
+    credential. It wins over `--studio` and `ARORA_STUDIO`.
+
+### Changed
+
+- A `studio-bridge` run connects to Semio Studio only when the device holds a
+  saved Studio credential (a refresh token that reads, in
+  `<device dir>/studio/`) or when the run asks for it. Otherwise it serves the
+  open local bridge, on a terminal or not, and logs
+  `Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.`
+  - Started without a terminal, such a run used to connect at once, signing a
+    device with no credential up as a new anonymous account on Studio's
+    production project. On a terminal, it asked the operator for an owner.
+  - A device holding a credential connects as before, and logs that it does.
+  - A credential that does not read (its key missing, the file damaged) no
+    longer signs the device up anew: the run serves the local bridge and
+    warns.
+  - The `studio::connect` functions are unchanged: an embedder calling one
+    asks for Studio.
+
+### Deprecated
+
+- Connecting on a saved credential alone (`studio::Choice::IfSaved`). The next
+  major connects only a run that asks for Studio (`--studio`).
+
 ## [13.4.0] - 2026-10-19
 
 ### Changed

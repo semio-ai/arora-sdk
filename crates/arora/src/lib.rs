@@ -780,6 +780,8 @@ pub struct AroraBuilder {
     step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
+    #[cfg(feature = "studio-bridge")]
+    studio: studio::Choice,
 }
 
 impl AroraBuilder {
@@ -1097,14 +1099,31 @@ impl AroraBuilder {
         self
     }
 
+    /// What the run asks of Semio Studio when [`run`](AroraBuilder::run)
+    /// fills the default bridge: a runner passes what its command line says
+    /// ([`StudioArgs::choice`](studio::StudioArgs::choice)). Default:
+    /// [`Choice::IfSaved`](studio::Choice::IfSaved), Studio only for a device
+    /// holding a saved Studio credential. See
+    /// [whether a run connects](studio#whether-a-run-connects).
+    #[cfg(feature = "studio-bridge")]
+    pub fn with_studio(mut self, choice: studio::Choice) -> Self {
+        self.studio = choice;
+        self
+    }
+
     /// Run the assembled device to completion with the standard operator flow:
     /// pick the front end (the injected one, else terminal UI or headless by
-    /// terminal detection), fill the default bridge
-    /// when none was injected — Semio Studio under the `studio-bridge` feature
-    /// (operator prompt, local-bridge fallback when declined), the open local
-    /// bridge otherwise — default any other unset seam (a private
-    /// `SimpleDataStore`, the fake HAL, an empty interpreter), and drive the
-    /// step loop.
+    /// terminal detection), fill the default bridge when none was injected,
+    /// default any other unset seam (a private `SimpleDataStore`, the fake
+    /// HAL, an empty interpreter), and drive the step loop.
+    ///
+    /// The default bridge is the open local bridge, unless the `studio-bridge`
+    /// feature is on and the run connects to Semio Studio: when the device
+    /// holds a saved Studio credential, or when the run asks for it
+    /// (`with_studio`), as `arora::studio` says. Under the
+    /// terminal UI, a run that connects asks the operator for the
+    /// registration nothing else gives, and serves the open local bridge when
+    /// the operator declines.
     ///
     /// **Stopping is dropping**: everything the run holds — the front end (and
     /// its terminal takeover), the device, its bridges and their servers —
@@ -1133,7 +1152,8 @@ impl AroraBuilder {
                     Some(hal) => hal.describe().await,
                     None => arora_hal::HalDescription::default(),
                 };
-                self = self.with_bridge(studio::default_bridge(&frontend, &description).await?);
+                let bridge = studio::default_bridge(&frontend, &description, self.studio).await?;
+                self = self.with_bridge(bridge);
             }
             #[cfg(not(feature = "studio-bridge"))]
             {

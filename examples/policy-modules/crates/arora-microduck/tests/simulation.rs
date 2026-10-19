@@ -20,6 +20,8 @@ fn device(tree: &str, executor: Executor, command: Command) -> Device {
         command,
         studio: None,
         speech: Speech::Silent,
+        #[cfg(feature = "studio")]
+        studio_choice: arora::studio::Choice::Local,
     };
     Device::build(config).expect("the device builds")
 }

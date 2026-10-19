@@ -1,13 +1,18 @@
 //! arora-ros2: runs a ROS 2 robot as an Arora device.
 //!
-//! Usage: `arora-ros2 [--module <DIR>]... <ROBOT> [OVERRIDES]` (`--help` lists
-//! the options).
+//! Usage: `arora-ros2 [--module <DIR>]... [--studio | --no-studio] <ROBOT>
+//! [OVERRIDES]` (`--help` lists the options).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var)
 //! is a well-known robot name or a path to a `ROS2RobotConfig` JSON file. An
 //! optional second JSON file overrides the selected config. `ROS_DOMAIN_ID`
-//! overrides the config's domain id. Device identity, registration and token
-//! handling are env-driven inside arora's Semio Studio runner.
+//! overrides the config's domain id.
+//!
+//! The device serves the open local bridge, and connects to Semio Studio
+//! instead when it holds a saved Studio credential or the run passes
+//! `--studio` (`ARORA_STUDIO=1`), which registers a device holding none;
+//! `--no-studio` keeps it on the local bridge. Its identity, registration and
+//! credential are arora's (`arora::studio`), configured from the environment.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
 //! then each `--module` directory, as the `arora` runner does
@@ -69,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
         .with_frontend(arora::standard_frontend())
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
+    #[cfg(feature = "studio")]
+    let builder = builder.with_studio(cli.runner.studio.choice());
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
     // construction, and arora drives the device on it.
     let hal = Ros2Hal::new(config)
@@ -125,5 +132,23 @@ mod tests {
         let error = Cli::try_parse_from(["arora-ros2", "--modules", "a", "nao"])
             .expect_err("an unknown option is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
+
+    /// `--studio` and `--no-studio` give the run's Studio choice, anywhere on
+    /// the command line; neither leaves it to the saved credential.
+    #[cfg(feature = "studio")]
+    #[test]
+    fn studio_and_no_studio_give_the_run_s_studio_choice() {
+        use arora::studio::Choice;
+        let choice = |args: &[&str]| {
+            Cli::try_parse_from(args.iter().copied())
+                .expect("the command line parses")
+                .runner
+                .studio
+                .choice()
+        };
+        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::IfSaved);
+        assert_eq!(choice(&["arora-ros2", "--studio", "nao"]), Choice::Studio);
+        assert_eq!(choice(&["arora-ros2", "nao", "--no-studio"]), Choice::Local);
     }
 }

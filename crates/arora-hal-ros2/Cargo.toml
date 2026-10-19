@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "5.4.0"
+version = "5.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
@@ -23,9 +23,15 @@ required-features = ["runner"]
 default = ["dds"]
 dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
 zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
-# The arora-ros2 binary: pulls the full arora runtime with the Semio Studio
-# connection. The library (the HAL itself) stays lean without it.
-runner = ["dep:arora", "dep:anyhow", "dep:clap"]
+# The arora-ros2 binary: pulls the full arora runtime. The library (the HAL
+# itself) stays lean without it. It enables `studio` for now; the next major
+# stops, and a runner that connects to Semio Studio is then built with
+# `--features runner,studio`.
+runner = ["dep:arora", "dep:anyhow", "dep:clap", "studio"]
+# The Semio Studio connection (arora's `studio-bridge`): the runner takes
+# `--studio` and `--no-studio`, and connects a device holding a saved Studio
+# credential.
+studio = ["arora/studio-bridge"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
@@ -38,8 +44,9 @@ arora-types = { path = "../arora-types", version = "3.1" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-# 13.3: `AroraBuilder::with_module_dirs`, the modules the runner carries.
-arora = { path = "../arora", version = "13.3", features = ["studio-bridge"], optional = true }
+# 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
+# Studio choice.
+arora = { path = "../arora", version = "13.5", optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"

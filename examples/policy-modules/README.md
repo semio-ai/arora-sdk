@@ -57,22 +57,23 @@ its Live Data page writes the commands. Once:
 
 Then, for each demo:
 
-4. Run the device with the Studio bridge:
+4. Run the device with the Studio bridge, asking for Studio with `--studio`:
 
    ```sh
    cargo run --release -p arora-microduck --features studio,piper -- \
-       --studio-model assets/microduck/studio-model.glb
+       --studio --studio-model assets/microduck/studio-model.glb
    ```
 
    The terminal asks for the owner (your Studio user id, shown in Studio's
    **Register Device** dialog) and a device name, once: the device saves the
-   answers and registers with them on every later run. An empty owner serves
-   the local bridge instead of Studio. The model family is the GLB's robot
+   answers and its Studio credential, and every later run connects and
+   registers with them, `--studio` or not (`--no-studio` declines). An empty
+   owner serves the local bridge instead of Studio. The model family is the GLB's robot
    name, capitalised (`Microduck`), and the hardware version `mujoco`.
    `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION`
    override them.
-   Without a terminal nothing is asked: the device connects to Studio and
-   registers what those variables say. The device keeps its Studio identity
+   Without a terminal nothing is asked: a run that connects registers what
+   those variables say. The device keeps its Studio identity
    in its device directory, `~/Library/Application
    Support/semio/arora/devices/<DEVICE_LOCAL_ID>/studio/` on macOS
    (`~/.local/share/…` on Linux; `default` when `DEVICE_LOCAL_ID` is unset),
@@ -101,8 +102,10 @@ and downloads a voice; libpiper is GPLv3, hence opt-in. Without it, or with
 
 ## Without Studio
 
-Built without `--features studio`, the device serves the open local bridge
-on `ws://127.0.0.1:9000`, the standard Arora bridge any local client talks
+Built without `--features studio` — or with it, when the device holds no
+saved Studio credential and the run does not pass `--studio`, or passes
+`--no-studio` — the device serves the open local bridge on
+`ws://127.0.0.1:9000`, the standard Arora bridge any local client talks
 to: JSON messages, a `values_changed` push per step with every key that
 changed, and writes as
 
