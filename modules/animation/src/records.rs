@@ -1,10 +1,24 @@
 //! Records carried across the module boundary.
+//!
+//! The records keep the ids of the module `@vizij/animation` 2.0.0, which
+//! this module (`@arora/animation` 3.0.0) continues, so its callers reach this
+//! one unchanged. Its records live in the `vizij` scope and these in the
+//! `arora` scope: a record both carry differs by its parent, and a registry
+//! holds one record per id and version. Each record `@vizij/animation`
+//! publishes is here at the next minor above its version there: with the
+//! same fields, or, for `PlayerState` and `InstanceState`, with the fields
+//! that minor adds. Both modules' records so load into one registry, a
+//! reference to a 1.x record resolves to the newer, and a value of the older
+//! reads as the newer.
 use arora_types::{value::Value, AroraType};
 
 /// A clip of format 1.x: tracks at stamps that are fractions of `duration`
 /// milliseconds, read through `arora_animation::clip1`.
+///
+/// Record 1.2.0 has the fields of 1.1.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000100", version = "1.1.0")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000100", version = "1.2.0")]
 pub struct AnimationClip {
     #[arora(id = "76697a69-6a00-0000-0100-000000000001")]
     pub name: String,
@@ -14,8 +28,11 @@ pub struct AnimationClip {
     pub tracks: Vec<AnimTrack>,
 }
 /// A 1.x track: the key it animates (`animatable_id`) and its keypoints.
+///
+/// Record 1.2.0 has the fields of 1.1.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000101", version = "1.1.0")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000101", version = "1.2.0")]
 pub struct AnimTrack {
     #[arora(id = "76697a69-6a00-0000-0101-000000000001")]
     pub id: String,
@@ -29,8 +46,11 @@ pub struct AnimTrack {
 /// A 1.x keypoint: a stamp as a fraction of the clip's duration, a scalar
 /// value, and zero or one CSS-style timing handle per side, normalized to its
 /// segment.
+///
+/// Record 1.2.0 has the fields of 1.1.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000102", version = "1.1.0")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000102", version = "1.2.0")]
 pub struct Keypoint {
     #[arora(id = "76697a69-6a00-0000-0102-000000000001")]
     pub id: String,
@@ -44,8 +64,11 @@ pub struct Keypoint {
     pub transitions_out: Vec<TransitionHandle>,
 }
 /// A 1.x timing handle in normalized segment space: `x` time, `y` value.
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000103")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000103", version = "1.1.0")]
 pub struct TransitionHandle {
     #[arora(id = "76697a69-6a00-0000-0103-000000000001")]
     pub x: f32,
@@ -54,8 +77,11 @@ pub struct TransitionHandle {
 }
 /// One output position's value at a step: the track that first writes it,
 /// the key it carries, and the value.
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000110")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000110", version = "1.1.0")]
 pub struct TrackOutput {
     #[arora(id = "76697a69-6a00-0000-0110-000000000001")]
     pub track_id: String,
@@ -66,8 +92,11 @@ pub struct TrackOutput {
 }
 /// A step's values by output position, and the revision of the table
 /// `output_keys` lays them out by; `Unit` where no instance weighs.
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000113")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000113", version = "1.1.0")]
 pub struct StepValues {
     #[arora(id = "76697a69-6a00-0000-0113-000000000001")]
     pub revision: u32,
@@ -76,8 +105,11 @@ pub struct StepValues {
 }
 /// The key of each output position, and the table's revision: per player in
 /// creation order, each key in the order its instances first write it.
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000114")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000114", version = "1.1.0")]
 pub struct OutputKeys {
     #[arora(id = "76697a69-6a00-0000-0114-000000000001")]
     pub revision: u32,
@@ -148,8 +180,11 @@ pub struct InstanceState {
 }
 /// A clip sampled at `frame_rate` over a window of its clip-local time, in
 /// nanoseconds: samples from `start_ns` up to the first at or past `end_ns`.
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000120")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000120", version = "1.1.0")]
 pub struct BakedAnimation {
     #[arora(id = "76697a69-6a00-0000-0120-000000000001")]
     pub frame_rate: f32,
@@ -163,8 +198,11 @@ pub struct BakedAnimation {
 /// One track's samples: its key, its values (an `ArrayValue`), and from
 /// `bake_with_derivatives` one `Option` of an `F64` velocity per sample, per
 /// second of clip-local time (`None` for a boolean or string).
+///
+/// Record 1.1.0 has the fields of 1.0.0, which `@vizij/animation` publishes in
+/// the `vizij` scope.
 #[derive(Debug, Clone, PartialEq, AroraType)]
-#[arora(id = "76697a69-6a00-0000-0000-000000000121")]
+#[arora(id = "76697a69-6a00-0000-0000-000000000121", version = "1.1.0")]
 pub struct BakedTrack {
     #[arora(id = "76697a69-6a00-0000-0121-000000000001")]
     pub animatable_id: String,

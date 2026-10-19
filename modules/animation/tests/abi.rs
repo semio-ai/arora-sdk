@@ -121,3 +121,55 @@ fn host_dispatch_matches_arguments_by_id_and_registrations_own_their_state() {
         Value::U32(u32::MAX)
     );
 }
+
+/// The module is `@arora/animation`: named `animation`, without the
+/// `-module` its crate carries, in the `arora` scope, at 3.0.0.
+#[test]
+fn the_module_is_animation_in_the_arora_scope() {
+    use arora_types::module::declared::AroraModule;
+    use arora_types::module::low::Executor;
+    let header = animation::header(Executor {
+        name: "wasm".to_string(),
+        min_version: None,
+        max_version: None,
+    });
+    assert_eq!(header.name, "animation");
+    assert_eq!(header.version.to_string(), "3.0.0");
+    assert_eq!(animation::record(Uuid::nil()).name, "animation");
+    assert_eq!(
+        animation::Module::scope(),
+        Some(arora_types::record::scope::ARORA)
+    );
+}
+
+/// Each record's version. A record `@vizij/animation` 2.0.0 publishes is at
+/// the next minor above its version there, so the two modules' records,
+/// which differ by their scope, load into one registry.
+#[test]
+fn records_are_at_their_versions() {
+    use arora_animation_module::*;
+    use arora_types::AroraType;
+    fn version<T: AroraType>() -> String {
+        T::arora_type_version().to_string()
+    }
+    for (record, actual, expected) in [
+        ("AnimationClip", version::<AnimationClip>(), "1.2.0"),
+        ("AnimTrack", version::<AnimTrack>(), "1.2.0"),
+        ("Keypoint", version::<Keypoint>(), "1.2.0"),
+        ("TransitionHandle", version::<TransitionHandle>(), "1.1.0"),
+        ("TrackOutput", version::<TrackOutput>(), "1.1.0"),
+        ("PlayerState", version::<PlayerState>(), "1.3.0"),
+        ("InstanceState", version::<InstanceState>(), "1.2.0"),
+        ("StepValues", version::<StepValues>(), "1.1.0"),
+        ("OutputKeys", version::<OutputKeys>(), "1.1.0"),
+        ("StepSamples", version::<StepSamples>(), "1.0.0"),
+        ("BakedAnimation", version::<BakedAnimation>(), "1.1.0"),
+        ("BakedTrack", version::<BakedTrack>(), "1.1.0"),
+        ("Clip", version::<Clip>(), "2.0.0"),
+        ("ClipTrack", version::<ClipTrack>(), "2.0.0"),
+        ("ClipKeypoint", version::<ClipKeypoint>(), "2.0.0"),
+        ("ClipTransition", version::<ClipTransition>(), "2.0.0"),
+    ] {
+        assert_eq!(actual, expected, "{record}");
+    }
+}

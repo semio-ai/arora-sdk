@@ -1,0 +1,728 @@
+parent: 76697a69-6a00-0000-f01d-000000000000
+name: animation
+exports:
+  76697a69-6a00-0000-0f00-000000000001:
+    name: load_animation
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f01-000000000001:
+            name: clip
+            type:
+              type: frozenScalar
+              value:
+                reference:
+                  id: 76697a69-6a00-0000-0000-000000000100
+                  version: 1.1.0
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f01-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000002:
+    name: create_player
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f02-000000000001:
+            name: name
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: string
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f02-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000003:
+    name: add_instance
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f03-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f03-000000000002:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f03-000000000001
+        - 76697a69-6a00-0000-0f03-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000004:
+    name: step
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f04-000000000001:
+            name: dt_ns
+            type:
+              type: primitive
+              value:
+                kind: u64
+            mutable: false
+          76697a69-6a00-0000-0f04-000000000002:
+            name: time_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f04-000000000001
+        - 76697a69-6a00-0000-0f04-000000000002
+        returnType:
+          type: frozenArray
+          value:
+            reference:
+              id: 76697a69-6a00-0000-0000-000000000110
+              version: 1.0.0
+  76697a69-6a00-0000-0f00-000000000005:
+    name: play
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f05-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f05-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000006:
+    name: pause
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f06-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f06-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000007:
+    name: stop
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f07-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f07-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000008:
+    name: seek
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f08-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f08-000000000002:
+            name: time_ns
+            type:
+              type: primitive
+              value:
+                kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f08-000000000001
+        - 76697a69-6a00-0000-0f08-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000009:
+    name: set_speed
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f09-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f09-000000000002:
+            name: speed
+            type:
+              type: primitive
+              value:
+                kind: f32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f09-000000000001
+        - 76697a69-6a00-0000-0f09-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-00000000000a:
+    name: set_loop
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f0a-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0a-000000000002:
+            name: mode
+            type:
+              type: primitive
+              value:
+                kind: string
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f0a-000000000001
+        - 76697a69-6a00-0000-0f0a-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-00000000000b:
+    name: set_weight
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f0b-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0b-000000000002:
+            name: instance
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0b-000000000003:
+            name: weight
+            type:
+              type: primitive
+              value:
+                kind: f32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f0b-000000000001
+        - 76697a69-6a00-0000-0f0b-000000000002
+        - 76697a69-6a00-0000-0f0b-000000000003
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-00000000000c:
+    name: remove_instance
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f0c-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0c-000000000002:
+            name: instance
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f0c-000000000001
+        - 76697a69-6a00-0000-0f0c-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-00000000000d:
+    name: player_states
+    kind:
+      type: func
+      value:
+        parameters: {}
+        parameterOrdering: []
+        returnType:
+          type: frozenArray
+          value:
+            reference:
+              id: 76697a69-6a00-0000-0000-000000000111
+              version: 1.2.0
+  76697a69-6a00-0000-0f00-00000000000e:
+    name: bake
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f0e-000000000001:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0e-000000000002:
+            name: frame_rate
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: f32
+            mutable: false
+          76697a69-6a00-0000-0f0e-000000000003:
+            name: start_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+          76697a69-6a00-0000-0f0e-000000000004:
+            name: end_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f0e-000000000001
+        - 76697a69-6a00-0000-0f0e-000000000002
+        - 76697a69-6a00-0000-0f0e-000000000003
+        - 76697a69-6a00-0000-0f0e-000000000004
+        returnType:
+          type: frozenOption
+          value:
+            element:
+              type: frozenScalar
+              value:
+                reference:
+                  id: 76697a69-6a00-0000-0000-000000000120
+                  version: 1.0.0
+  76697a69-6a00-0000-0f00-00000000000f:
+    name: bake_with_derivatives
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f0f-000000000001:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f0f-000000000002:
+            name: frame_rate
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: f32
+            mutable: false
+          76697a69-6a00-0000-0f0f-000000000003:
+            name: start_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+          76697a69-6a00-0000-0f0f-000000000004:
+            name: end_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f0f-000000000001
+        - 76697a69-6a00-0000-0f0f-000000000002
+        - 76697a69-6a00-0000-0f0f-000000000003
+        - 76697a69-6a00-0000-0f0f-000000000004
+        returnType:
+          type: frozenOption
+          value:
+            element:
+              type: frozenScalar
+              value:
+                reference:
+                  id: 76697a69-6a00-0000-0000-000000000120
+                  version: 1.0.0
+  76697a69-6a00-0000-0f00-000000000010:
+    name: unload_animation
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f10-000000000001:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f10-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: boolean
+  76697a69-6a00-0000-0f00-000000000011:
+    name: remove_player
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f11-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f11-000000000001
+        returnType:
+          type: primitive
+          value:
+            kind: boolean
+  76697a69-6a00-0000-0f00-000000000012:
+    name: add_instance_with_weight
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f12-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f12-000000000002:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f12-000000000003:
+            name: weight
+            type:
+              type: primitive
+              value:
+                kind: f32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f12-000000000001
+        - 76697a69-6a00-0000-0f12-000000000002
+        - 76697a69-6a00-0000-0f12-000000000003
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000013:
+    name: reload_animation
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f13-000000000001:
+            name: anim
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f13-000000000002:
+            name: clip
+            type:
+              type: frozenScalar
+              value:
+                reference:
+                  id: 76697a69-6a00-0000-0000-000000000100
+                  version: 1.1.0
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f13-000000000001
+        - 76697a69-6a00-0000-0f13-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: boolean
+  76697a69-6a00-0000-0f00-000000000014:
+    name: set_window
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f14-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f14-000000000002:
+            name: start_ns
+            type:
+              type: primitive
+              value:
+                kind: u64
+            mutable: false
+          76697a69-6a00-0000-0f14-000000000003:
+            name: end_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f14-000000000001
+        - 76697a69-6a00-0000-0f14-000000000002
+        - 76697a69-6a00-0000-0f14-000000000003
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000015:
+    name: play_at
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f15-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f15-000000000002:
+            name: time_ns
+            type:
+              type: primitive
+              value:
+                kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f15-000000000001
+        - 76697a69-6a00-0000-0f15-000000000002
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000016:
+    name: set_start_offset
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f16-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f16-000000000002:
+            name: instance
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f16-000000000003:
+            name: offset_ns
+            type:
+              type: primitive
+              value:
+                kind: i64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f16-000000000001
+        - 76697a69-6a00-0000-0f16-000000000002
+        - 76697a69-6a00-0000-0f16-000000000003
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000017:
+    name: set_time_scale
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f17-000000000001:
+            name: player
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f17-000000000002:
+            name: instance
+            type:
+              type: primitive
+              value:
+                kind: u32
+            mutable: false
+          76697a69-6a00-0000-0f17-000000000003:
+            name: time_scale
+            type:
+              type: primitive
+              value:
+                kind: f32
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f17-000000000001
+        - 76697a69-6a00-0000-0f17-000000000002
+        - 76697a69-6a00-0000-0f17-000000000003
+        returnType:
+          type: primitive
+          value:
+            kind: u32
+  76697a69-6a00-0000-0f00-000000000018:
+    name: step_values
+    kind:
+      type: func
+      value:
+        parameters:
+          76697a69-6a00-0000-0f18-000000000001:
+            name: dt_ns
+            type:
+              type: primitive
+              value:
+                kind: u64
+            mutable: false
+          76697a69-6a00-0000-0f18-000000000002:
+            name: time_ns
+            type:
+              type: frozenOption
+              value:
+                element:
+                  type: primitive
+                  value:
+                    kind: u64
+            mutable: false
+        parameterOrdering:
+        - 76697a69-6a00-0000-0f18-000000000001
+        - 76697a69-6a00-0000-0f18-000000000002
+        returnType:
+          type: frozenScalar
+          value:
+            reference:
+              id: 76697a69-6a00-0000-0000-000000000113
+              version: 1.0.0
+  76697a69-6a00-0000-0f00-000000000019:
+    name: output_keys
+    kind:
+      type: func
+      value:
+        parameters: {}
+        parameterOrdering: []
+        returnType:
+          type: frozenScalar
+          value:
+            reference:
+              id: 76697a69-6a00-0000-0000-000000000114
+              version: 1.0.0
+executable: null
+dependencies:
+- id: 76697a69-6a00-0000-0000-000000000100
+  version: 1.1.0
+- id: 76697a69-6a00-0000-0000-000000000110
+  version: 1.0.0
+- id: 76697a69-6a00-0000-0000-000000000111
+  version: 1.2.0
+- id: 76697a69-6a00-0000-0000-000000000120
+  version: 1.0.0
+- id: 76697a69-6a00-0000-0000-000000000113
+  version: 1.0.0
+- id: 76697a69-6a00-0000-0000-000000000114
+  version: 1.0.0

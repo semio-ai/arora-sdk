@@ -1,0 +1,25 @@
+parent: 76697a69-6a00-0000-f01d-000000000000
+name: BakedTrack
+fields:
+  76697a69-6a00-0000-0121-000000000001:
+    name: animatable_id
+    type:
+      type: primitive
+      value:
+        kind: string
+  76697a69-6a00-0000-0121-000000000002:
+    name: values
+    type:
+      type: frozenScalar
+      value:
+        reference:
+          id: 00000000-0000-0000-0000-00000000001b
+          version: 1.0.0
+  76697a69-6a00-0000-0121-000000000003:
+    name: derivatives
+    type:
+      type: frozenScalar
+      value:
+        reference:
+          id: 00000000-0000-0000-0000-00000000001b
+          version: 1.0.0

@@ -2,7 +2,8 @@
 
 Keyframe animation, players and baking as an Arora module over
 [`arora-animation`](../../crates/arora-animation). The package is version
-1.0.0; its declared module is `arora-animation` version 3.0.0, id
+1.0.0; its declared module is `@arora/animation` (named `animation` in the
+`arora` scope, record path `arora.animation`) version 3.0.0, id
 `76697a69-6a00-0000-0d00-000000000000`.
 
 ## Host and guest
@@ -36,22 +37,31 @@ carry Arora `Value`s on the self-describing value wire.
 
 | Record | Version | Contents |
 |---|---|---|
-| `AnimationClip` | 1.1.0 | Name, duration in milliseconds, 1.x tracks |
-| `AnimTrack` | 1.1.0 | Id, name, `animatable_id`, keypoints |
-| `Keypoint` | 1.1.0 | Id, normalized stamp, scalar value, normalized transition handles |
-| `TransitionHandle` | 1.0.0 | Normalized x and y |
+| `AnimationClip` | 1.2.0 | Name, duration in milliseconds, 1.x tracks |
+| `AnimTrack` | 1.2.0 | Id, name, `animatable_id`, keypoints |
+| `Keypoint` | 1.2.0 | Id, normalized stamp, scalar value, normalized transition handles |
+| `TransitionHandle` | 1.1.0 | Normalized x and y |
 | `Clip` | 2.0.0 | Name, optional signed `length_ns`, 2.0 tracks |
 | `ClipTrack` | 2.0.0 | Id, name, target output key, keypoints |
 | `ClipKeypoint` | 2.0.0 | Id, signed `time_ns`, scalar value, arrive/leave transitions, pairing |
 | `ClipTransition` | 2.0.0 | Kind, `dt_ns`, `dv` |
-| `TrackOutput` | 1.0.0 | Track id, default authored key, sampled value |
-| `StepValues` | 1.0.0 | Output revision and values by position |
+| `TrackOutput` | 1.1.0 | Track id, default authored key, sampled value |
+| `StepValues` | 1.1.0 | Output revision and values by position |
 | `StepSamples` | 1.0.0 | Output revision, values and velocities by position |
-| `OutputKeys` | 1.0.0 | Output revision and keys by position |
+| `OutputKeys` | 1.1.0 | Output revision and keys by position |
 | `PlayerState` | 1.3.0 | Player id, state, position, length, speed, name, instances, loop mode, ended, window, reversed, waiting |
 | `InstanceState` | 1.2.0 | Instance id, animation id, weight, signed start offset, time scale, rate |
-| `BakedAnimation` | 1.0.0 | Frame rate, window in nanoseconds, tracks |
-| `BakedTrack` | 1.0.0 | Target key, sample values and optional derivatives |
+| `BakedAnimation` | 1.1.0 | Frame rate, window in nanoseconds, tracks |
+| `BakedTrack` | 1.1.0 | Target key, sample values and optional derivatives |
+
+The records keep the ids of the module `@vizij/animation` 2.0.0, whose
+records live in the `vizij` scope; these live in the `arora` scope. Each
+record both modules carry is here at the next minor above
+`@vizij/animation`'s version (`AnimationClip` 1.1.0 there, 1.2.0 here),
+with the same fields, or for `PlayerState` and `InstanceState` with the
+fields that minor adds. A registry holds one record per id and version, so
+the records of both modules load into one registry, and a reference to a
+1.x record resolves to the one here.
 
 Both clip formats accept numbers, booleans and strings. Composite values
 are refused. A 1.x track whose numbers are all `F32` outputs `F32`; every
@@ -173,11 +183,11 @@ feature's `module_dir::write`, or the `module_dir` example):
 ```text
 <dir>/
 ├── header.json            the declared header, for the wasm executor
-├── arora-animation.wasm   the guest
+├── animation.wasm         the guest
 └── records/               the module's record and the records of the types
                            its functions name, in arora-registry's layout
 ```
 
-The records live in the `arora` scope. A device given them (`arora` 13.1
-reads `records/`; arora-web takes them with `withRecords`) describes the
-record-typed exports a behavior calls.
+The records live in the `arora` scope, the module's at `arora.animation`.
+A device given them (`arora` 13.1 reads `records/`; arora-web takes them
+with `withRecords`) describes the record-typed exports a behavior calls.

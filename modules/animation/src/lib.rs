@@ -1,6 +1,7 @@
-//! `arora-animation` as an Arora module: a `wasm32-wasip1` guest, which a
-//! device loads from its module directory (`module_dir`, the `module-dir`
-//! feature), or host-linked, with a state per registration.
+//! `arora-animation` as the Arora module `@arora/animation`: a
+//! `wasm32-wasip1` guest, which a device loads from its module directory
+//! (`module_dir`, the `module-dir` feature), or host-linked, with a state per
+//! registration.
 //!
 //! The functions are declared twice, with the same ids: as a contract
 //! ([`AnimationContract`]), whose methods take the state they act on, so a
@@ -21,7 +22,7 @@ pub use state::AnimationModule;
 
 /// The module's functions, on the state of one registration. See the crate's
 /// readme for what each does.
-#[arora_module::contract(name = "arora-animation")]
+#[arora_module::contract(name = "animation")]
 pub trait AnimationContract {
     #[export(id = "76697a69-6a00-0000-0f00-000000000001")]
     fn load_animation(
@@ -217,7 +218,7 @@ fn guest<T>(f: impl FnOnce(&mut AnimationModule) -> T) -> T {
 /// function, each acting on the guest's state.
 #[arora_module::module(
     id = "76697a69-6a00-0000-0d00-000000000000",
-    name = "arora-animation",
+    name = "animation",
     version = "3.0.0",
     scope = arora_types::record::scope::ARORA,
     author = "Semio",
