@@ -71,9 +71,12 @@ reserved **built-in keys** a behavior can rely on:
 A behavior that paces itself — an animation module, a graph time node — reads
 them from `ctx.store` like any other slot, so timing composes as ordinary data
 rather than a special tick parameter. They live under the reserved `arora/`
-namespace (`built_in::is_built_in`) and stay local to the device: the runtime never
-forwards them out over the bridge. The names and the predicate are in the
-[`built_in`](src/built_in.rs) module.
+namespace (`built_in::is_built_in`), which the runtime owns: behaviors must not
+write their own keys there. The keys travel outbound with every other change,
+so a remote reads the device's clock and derives what it needs from it — a step
+rate, jitter, a stalled loop. A remote that does not want them filters them on
+its side. The names and the predicate are in the [`built_in`](src/built_in.rs)
+module.
 
 Part of the device runtime interfaces, with
 [`arora-hal`](https://docs.rs/arora-hal) and
