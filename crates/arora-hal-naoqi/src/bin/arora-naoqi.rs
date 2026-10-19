@@ -1,6 +1,6 @@
 //! arora-naoqi: runs a NAOqi robot (NAO, Pepper) as an Arora device.
 //!
-//! Usage: `arora-naoqi [--tree <tree.groot.xml> | --no-tree] <tcp://host:9559 | config.json> [overrides.json]`
+//! Usage: `arora-naoqi [--tree <tree.groot.xml> | --no-tree] [--module <dir>]... <tcp://host:9559 | config.json> [overrides.json]`
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var) is the
 //! address of its NAOqi or a path to a `NaoqiRobotConfig` JSON file (see
@@ -13,7 +13,14 @@
 //! tree's leaves are the robot's voice (`Say`), its gestures (`HandsReady`) and the
 //! native `IsStringSet` and `UnsetString`. On the terminal UI, `r` requests it again through
 //! `ready`, which plays the default behavior again; the key is open to remote writers too.
+//!
+//! The device carries the modules its device directory holds under `modules/`, then each
+//! `--module` directory, as the `arora` runner does (`AroraBuilder::with_module_dirs`): a
+//! module directory is a module's `header.json` beside its artifact, and optionally its
+//! records in `records/`, which describe every function it exports. A tree's leaves call
+//! their functions as they call `Say` and `HandsReady`.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{bail, Context};
@@ -29,7 +36,7 @@ use arora_types::data::{DataStore, Key, KeyMeta, StateChange};
 use arora_types::value::Value;
 use futures::StreamExt;
 
-const USAGE: &str = "usage: arora-naoqi [--tree <tree.groot.xml> | --no-tree] \
+const USAGE: &str = "usage: arora-naoqi [--tree <tree.groot.xml> | --no-tree] [--module <dir>]... \
                      <tcp://host:9559 | config.json> [overrides.json]";
 
 /// The step period: 50 Hz, a pace NAOqi's `setAngles` round trips keep up with.
@@ -52,10 +59,12 @@ struct Cli {
     tree: Option<String>,
     selector: String,
     overrides: Option<String>,
+    modules: Vec<PathBuf>,
 }
 
 fn parse_cli() -> anyhow::Result<Cli> {
     let mut tree = Some(READY_TREE.to_string());
+    let mut modules = Vec::new();
     let mut positional = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -68,6 +77,7 @@ fn parse_cli() -> anyhow::Result<Cli> {
                 );
             }
             "--no-tree" => tree = None,
+            "--module" => modules.push(PathBuf::from(args.next().context(USAGE)?)),
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -85,6 +95,7 @@ fn parse_cli() -> anyhow::Result<Cli> {
         tree,
         selector,
         overrides: positional.next(),
+        modules,
     })
 }
 
@@ -106,6 +117,12 @@ async fn main() -> anyhow::Result<()> {
         label: "say \"Arora is ready\"".to_string(),
         prompt: None,
     }]);
+    // The modules the device carries, read before the robot is reached: a module directory
+    // that does not read fails the start at once.
+    let builder = Arora::builder()
+        .with_frontend(frontend)
+        .with_module_dirs(&arora::device_dir::from_env()?, &cli.modules)
+        .await?;
 
     // One runtime carries everything: the HAL's tasks spawn on it at construction, the
     // voice speaks on it, and arora drives the device on it.
@@ -136,8 +153,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let mut builder = Arora::builder()
-        .with_frontend(frontend)
+    let mut builder = builder
         .with_data_store(Box::new(store))
         .with_hal(Box::new(hal))
         .with_host_module(HostModule::of::<naoqi_say::Module>())

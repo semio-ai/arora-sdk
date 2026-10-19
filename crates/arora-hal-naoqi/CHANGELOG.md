@@ -4,6 +4,23 @@ All notable changes to `arora-hal-naoqi`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-19
+
+### Added
+
+- The `arora-naoqi` runner carries modules as the `arora` runner does: every
+  module directory under its device directory's `modules/`, then each
+  `--module <dir>` (repeatable), with the records their `records/` carry, so
+  the device describes a guest module's record-typed exports and a tree's
+  leaves call them. A module directory that does not read fails the start,
+  naming the module, before the robot is reached. The binary cross-compiled
+  for the robot is static, so it loads WebAssembly modules; a native module
+  fails the start, naming it.
+
+### Changed
+
+- The `runner` feature requires `arora` 13.3 (`AroraBuilder::with_module_dirs`).
+
 ## [0.1.0] - 2026-10-12
 
 ### Added

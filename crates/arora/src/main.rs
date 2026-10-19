@@ -46,11 +46,9 @@ async fn main() -> anyhow::Result<()> {
     // records their directories carry describe them: a module whose record
     // the registry holds has every export described, or fails the start when
     // the record does not match it.
-    let modules = cli.modules()?;
-    builder = builder.with_registry(arora::module_dir::registry(&modules).await?);
-    for module in modules {
-        builder = builder.with_module(module.header, module.executable);
-    }
+    builder = builder
+        .with_module_dirs(&arora::device_dir::from_env()?, &cli.module)
+        .await?;
     // A Groot file is the device's behavior: the build resolves its tags
     // against the method index it assembles — the native nodes and the
     // functions of every module the device carries — and fails when the tree

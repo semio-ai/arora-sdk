@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-naoqi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "NAOqi HAL for Arora: drives NAO and Pepper robots through the qi framework (libqi-rs) as Arora devices"
@@ -26,7 +26,8 @@ arora-hal = { path = "../arora-hal", version = "4" }
 arora-module = { path = "../arora-module", version = "2.1" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1", optional = true }
 arora-types = { path = "../arora-types", version = "3" }
-arora = { path = "../arora", version = "13", features = ["studio-bridge"], optional = true }
+# 13.3: `AroraBuilder::with_module_dirs`, the modules the runner carries.
+arora = { path = "../arora", version = "13.3", features = ["studio-bridge"], optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"

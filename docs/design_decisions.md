@@ -616,13 +616,17 @@ what its hardware takes.
 
 ### A device carries its modules as module directories
 
-The `arora` runner loads the guest modules under its device directory's
-`modules/` (and any `--module` directory): each a `header.json` beside its
-artifact, and optionally the module's records in `records/`. An operator
-installs a module by copying a directory, with no custom binary; the embedder
-path (`AroraBuilder::with_module`) stays what it is, and the runner feeds it
-from the same `load::load_module_from_parts` the CLI and the browser runtime
-use.
+Every device runner — `arora`, and the robot runners `arora-ros2`,
+`arora-restful` and `arora-naoqi` — loads the guest modules under its device
+directory's `modules/` (and any `--module` directory): each a `header.json`
+beside its artifact, and optionally the module's records in `records/`. An
+operator installs a module by copying a directory, with no custom binary; the
+embedder path (`AroraBuilder::with_module`, `with_registry`) stays what it is,
+and the runners feed it through one builder call,
+`AroraBuilder::with_module_dirs`, so a robot carries a guest module — the
+animation module, a policy — exactly as the plain runner does. A runner that
+loaded no module directory would make a module installed on the device
+present on one runner and absent on another, with nothing at start to say so.
 
 The artifact is found by its extension — the one `.wasm` for the `wasm`
 executor, the one dynamic library for `native` — rather than by a fixed name

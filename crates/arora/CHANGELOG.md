@@ -4,6 +4,23 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.3.0] - 2026-10-19
+
+### Added
+
+- `AroraBuilder::with_module_dirs(device_dir, dirs)`: the modules a device
+  runner carries, as module directories: every one under `device_dir`'s
+  `modules/`, in name order, then each of `dirs`. Each loads at build as
+  `with_module` loads one, and the records its `records/` carries join the
+  device's registry, so a module whose record they hold has every export
+  described, record-typed ones included. It fails, naming the module, when a
+  directory does not read as a module, when one module is in two
+  directories, or when a directory's records do not read or differ from a
+  record the registry holds under the same id and version. The `arora`
+  binary loads its device directory's and `--module` directories with it, as
+  the robot runners of `arora-hal-ros2`, `arora-hal-restful` and
+  `arora-hal-naoqi` do.
+
 ## [13.2.0] - 2026-10-19
 
 ### Added

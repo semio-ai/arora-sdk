@@ -83,6 +83,13 @@ configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling perio
 speed, sensor families, Autonomous Life) can replace the address, and a second JSON file
 overrides it.
 
+Modules: the device loads every module directory in its device directory's `modules/`,
+then each `--module <dir>` (repeatable), as the `arora` runner does: a module's
+`header.json` beside its artifact, and optionally its records in `records/`, which describe
+every function it exports. The layout is in
+[arora's readme](../arora/readme.md#where-a-device-keeps-its-data). A tree's leaves call
+the functions of these modules as they call `Say` and `HandsReady`.
+
 ## Deploy it on the robot
 
 Once it works from your computer, deploy it: the same device, cross-compiled, runs on the
@@ -141,6 +148,10 @@ ssh -t nao@<robot_name>.local   # -t: the terminal UI needs a terminal
 
 The device then behaves as [from your computer](#3-use-it). To leave it running after you
 log out, run it headless with `nohup` and the Studio variables.
+
+On the robot, the device directory is `~/.local/share/semio/arora/devices/default/`, and
+its modules go in `modules/` there. The binary is static, so it loads WebAssembly modules:
+a native module (a dynamic library) fails the start, naming it.
 
 ## The default behavior
 
