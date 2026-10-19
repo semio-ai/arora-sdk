@@ -1716,6 +1716,72 @@ mod task_runs {
         );
     }
 
+    /// A take-over restarts only the nodes it changes: the run's nodes the
+    /// new graph leaves as they are keep their state.
+    #[test]
+    fn a_take_over_keeps_the_state_of_the_nodes_it_leaves_as_they_are() {
+        use arora_behavior::graph::Io;
+        let [a1, a2, a3] = [0x91, 0x92, 0x95].map(Uuid::from_u128);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (a1, Status::Success),
+            (a2, Status::Running),
+            (a3, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses, ticks.clone());
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let ids = [0x90, 0x93, 0x94];
+        let spawned = interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star_graph(ids, [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let mut ctx = BehaviorContext {
+            functions: &arora_behavior::FunctionIndex::new(),
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        interp.tick(&mut ctx).unwrap();
+
+        // The second child calls `a3`: the seq_star, left as it is, keeps
+        // its place at that child.
+        let again = interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star_graph(ids, [a1, a3]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        assert_eq!(again, spawned);
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(
+            ticks.borrow().get(&a1),
+            Some(&1),
+            "the seq_star kept its place"
+        );
+        assert_eq!(ticks.borrow().get(&a3), Some(&1), "the relinked child runs");
+
+        // The seq_star itself changes: it restarts from its first child.
+        let mut changed = seq_star_graph(ids, [a1, a3]);
+        changed
+            .nodes
+            .get_mut(&Uuid::from_u128(0x90))
+            .unwrap()
+            .inputs = vec![Io::new(Uuid::from_u128(0xE0))];
+        interp
+            .spawn_graph(&graph_type(), changed, RunPolicy::Concurrent)
+            .unwrap();
+        interp.tick(&mut ctx).unwrap();
+        assert_eq!(
+            ticks.borrow().get(&a1),
+            Some(&2),
+            "the changed seq_star restarted"
+        );
+    }
+
     /// A graph with a live run's root is refused, changing nothing, when it
     /// holds a node of the main behavior or of another run — one an edit
     /// placed under the run too — the run's decorator, or a variable in use
