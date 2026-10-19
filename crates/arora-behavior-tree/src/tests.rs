@@ -1549,7 +1549,8 @@ mod task_runs {
     }
 
     /// A graph spawned again as a live run runs it answers that run's handle
-    /// and changes nothing: the run goes on where it stood.
+    /// and changes nothing, its variables included: the run goes on where it
+    /// stood.
     #[test]
     fn a_graph_spawned_again_as_it_runs_answers_its_run() {
         let [a1, a2] = [0x91, 0x92].map(Uuid::from_u128);
@@ -1561,10 +1562,16 @@ mod task_runs {
         let mut bridge = TestBridge::new(statuses, ticks.clone());
         let store = SimpleDataStore::new();
         let mut interp = BehaviorTreeInterpreter::new();
+        let declaring = |mut graph: arora_behavior::graph::Graph| {
+            graph
+                .variables
+                .insert(Uuid::from_u128(0x7A), "face/w".to_string());
+            graph
+        };
         let spawned = interp
             .spawn_graph(
                 &graph_type(),
-                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
+                declaring(seq_star_graph([0x90, 0x93, 0x94], [a1, a2])),
                 RunPolicy::Concurrent,
             )
             .unwrap();
@@ -1579,7 +1586,7 @@ mod task_runs {
         let again = interp
             .spawn_graph(
                 &graph_type(),
-                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
+                declaring(seq_star_graph([0x90, 0x93, 0x94], [a1, a2])),
                 RunPolicy::Concurrent,
             )
             .expect("the run's graph spawned again is answered");
@@ -1653,6 +1660,12 @@ mod task_runs {
             },
         );
         changed.nodes.get_mut(&parallel).unwrap().children = Some(vec![call_node, added]);
+        let declared = Uuid::from_u128(0x7B);
+        changed.variables.insert(declared, "face/z".to_string());
+        changed.links.push(Link::new(
+            Port::new(added, Uuid::from_u128(0x6)),
+            LinkSource::Variable(declared),
+        ));
         let again = interp
             .spawn_graph(&graph_type(), changed, RunPolicy::Concurrent)
             .expect("a graph with a live run's root is answered");
@@ -1697,14 +1710,19 @@ mod task_runs {
             2,
             "the runner and the main behavior remain"
         );
+        assert!(
+            !interp.graph().variables.contains_key(&declared),
+            "a variable the run's new graph declared leaves with it"
+        );
     }
 
     /// A graph with a live run's root is refused, changing nothing, when it
-    /// holds a node of the main behavior or of another run, the run's
-    /// decorator, or a variable in use renamed.
+    /// holds a node of the main behavior or of another run — one an edit
+    /// placed under the run too — the run's decorator, or a variable in use
+    /// renamed.
     #[test]
     fn a_graph_with_a_live_run_s_root_and_others_nodes_is_refused() {
-        use arora_behavior::graph::Node as GraphNode;
+        use arora_behavior::graph::{GraphDiff, Node as GraphNode};
         let leaf = Uuid::from_u128(0xD1);
         let mut interp = BehaviorTreeInterpreter::new();
         interp
@@ -1760,6 +1778,44 @@ mod task_runs {
                     .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
                     .is_err(),
                 "a graph with {what} is refused"
+            );
+            assert_eq!(interp.graph(), &before, "{what}: the graph is unchanged");
+        }
+
+        // An edit places the main behavior's root and the other run's root
+        // under the run: the run holds them, but not as its own.
+        let [main, other_root, run] = [0xA0, 0xF0, 0xE2].map(Uuid::from_u128);
+        interp
+            .apply(GraphDiff {
+                add_nodes: vec![GraphNode {
+                    id: parallel,
+                    function: nodes::PARALLEL_FUNCTION_ID,
+                    children: Some(vec![call_node, run, main, other_root]),
+                    ..GraphNode::default()
+                }],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        let before = interp.graph().clone();
+        for (what, shared) in [
+            ("the main behavior's root", main),
+            ("another run's root", other_root),
+        ] {
+            let mut graph = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
+            graph.nodes.insert(
+                shared,
+                GraphNode {
+                    id: shared,
+                    function: nodes::RUN_FUNCTION_ID,
+                    ..GraphNode::default()
+                },
+            );
+            graph.nodes.get_mut(&parallel).unwrap().children = Some(vec![call_node, run, shared]);
+            assert!(
+                interp
+                    .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
+                    .is_err(),
+                "a graph redefining {what}, which the run shares, is refused"
             );
             assert_eq!(interp.graph(), &before, "{what}: the graph is unchanged");
         }

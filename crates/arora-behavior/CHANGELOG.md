@@ -4,14 +4,16 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [9.5.1] - 2026-10-19
+## [9.6.0] - 2026-10-19
 
 ### Changed
 
-- The docs of `BehaviorInterpreter::spawn_graph` and of
-  `interpreter_module::SPAWN_GRAPH` state that a graph run is known by its
-  graph's root: spawning a graph whose root a live run has answers that run's
-  handle, the run taking the graph as its program.
+- `BehaviorInterpreter::spawn_graph`'s contract: a graph run is known by its
+  graph's root. Spawning a graph whose root a live run has answers that run's
+  handle, the run taking the graph as its program and keeping its id, status
+  key and policy. An interpreter that overrides `spawn_graph` answers so; the
+  behavior tree's does from arora-behavior-tree 9.1.
+  `interpreter_module::SPAWN_GRAPH` and the readme say the same.
 
 ## [9.5.0] - 2026-10-18
 
