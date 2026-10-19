@@ -8,9 +8,13 @@
 //! editor draws them with ([`crate::resolve`]), so every reader of a clip
 //! plays one curve.
 //!
-//! **The document form** is JSON, the core of a stored Studio animation
-//! (`formatVersion` 3), whose other fields — the animation's id, its groups,
-//! a track's colour — are the editor's and are ignored here:
+//! **The document form** is JSON. A stored Studio animation of
+//! `formatVersion` 3 is this document without `lengthNs`, beside fields that
+//! are the editor's (the animation's id, its groups, a track's colour, the
+//! viewport's extent) and are ignored here. `lengthNs` is the clip's, not the
+//! authored file's: a host gives it when it delivers a clip or prepares one
+//! to play on its own (Studio: the latest of the content's end, its viewport
+//! hint and 1 s):
 //!
 //! ```json
 //! {
@@ -42,9 +46,11 @@ use crate::value::{Kind, Value};
 pub struct Clip {
     #[serde(default)]
     pub name: String,
-    /// How long the clip plays when nothing else bounds it, in nanoseconds
-    /// of clip-local time from 0: a player whose window is not set plays it
-    /// to there. Absent, the clip plays to its last keypoint.
+    /// The clip's natural end, in nanoseconds of clip-local time from 0: a
+    /// player given no window and no length, such as a behavior-tree node's
+    /// playing the clip on its own, plays it to there. Absent, the clip ends
+    /// at its last keypoint. A host sets it when it delivers the clip; an
+    /// authored document carries none.
     #[serde(default, rename = "lengthNs", skip_serializing_if = "Option::is_none")]
     pub length: Option<Nanos>,
     pub tracks: Vec<Track>,

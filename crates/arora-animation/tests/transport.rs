@@ -226,17 +226,40 @@ fn a_held_player_keeps_the_heading_it_is_given_for_its_start() {
 }
 
 #[test]
+fn a_kept_heading_serves_one_start_and_survives_the_commands_before_it() {
+    // Kept for one start: the next is afresh.
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.play(0, LENGTH);
+    assert!(p.reversed());
+    p.pause(0, LENGTH);
+    p.play(0, LENGTH);
+    assert!(!p.reversed(), "a second start heads with the speed");
+    // Kept on a stopped player, and through a speed of the same sign.
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.stop(0, LENGTH);
+    p.seek(0, 3_000 * MS, LENGTH);
+    p.set_reversed(0, true, LENGTH);
+    p.set_speed(0, 2.0, LENGTH);
+    p.play_at(0, 0, LENGTH);
+    assert_eq!(at(&mut p, 500), 2_000);
+}
+
+#[test]
 fn a_player_not_reversed_starts_forward() {
     let mut p = held(LoopMode::Bounce, 3_000);
     p.play_at(0, 0, LENGTH);
     assert!(!p.reversed());
     assert_eq!(at(&mut p, 500), 3_500);
-    // A heading given back to the speed's sign is kept too.
+    // A heading given back to the speed's sign is kept too, with no turn
+    // taken: the bounce turns at the end and has not ended.
     let mut p = held(LoopMode::Bounce, 3_000);
     p.set_reversed(0, true, LENGTH);
     p.set_reversed(0, false, LENGTH);
     p.play(0, LENGTH);
     assert_eq!(at(&mut p, 500), 3_500);
+    assert_eq!(at(&mut p, 2_500), 4_500);
+    assert!(p.reversed() && !p.ended());
 }
 
 #[test]

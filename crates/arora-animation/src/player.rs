@@ -27,11 +27,14 @@
 //!
 //! **Direction.** The speed is signed: a negative speed plays backwards. A
 //! turn at a bound reverses the heading without changing the speed; a new
-//! speed of the other sign, `play` and `seek` start the rules afresh — no
-//! turn taken, the window not yet entered, not ended. `set_reversed` gives a
-//! player the heading another has after a turn, so a player started late
-//! plays alongside it — to within a nanosecond at a speed that rounds, as
-//! each player's travel is rounded from its own start.
+//! speed of the other sign, `play`, `play_at` and `seek` start the rules
+//! afresh — no turn taken, the window not yet entered, not ended.
+//! `set_reversed` gives a player the heading another has after a turn, so a
+//! player started late plays alongside it — to within a nanosecond at a
+//! speed that rounds, as each player's travel is rounded from its own start.
+//! A held player (paused or stopped) keeps that heading for its next start,
+//! and through a `seek` before it, as it keeps a new speed; reversed, the
+//! heading counts as the turn taken, so a bounce ends at the next bound.
 
 use crate::time::Nanos;
 
