@@ -4,6 +4,18 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.0.1] - 2026-10-19
+
+### Fixed
+
+- A change of the interpreter's graph leaves the behaviors it does not touch
+  where they stand. The tree lowered from the changed graph takes over the
+  state of every node the change left in place: a `seq_star`'s place, a run's
+  latch, a tree-local variable such a node reads. A node the change adds,
+  replaces or relinks starts afresh, and so does a tree-local variable only
+  such nodes read. A `spawn`, `spawn_graph`, `edit`, `halt` or `load`, or a
+  run ending, used to restart the main behavior and every run.
+
 ## [9.0.0] - 2026-10-16
 
 ### Changed

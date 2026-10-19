@@ -1575,6 +1575,356 @@ mod task_runs {
     }
 }
 
+/// What a change of the graph keeps: the state of every node it leaves in
+/// place. A `seq_star` whose first child succeeded and whose second runs
+/// stands at its second child; calling its first child again means it
+/// restarted.
+mod kept_state {
+    use super::{LeafStatuses, LeafTicks, TestBridge};
+    use crate::behavior::{graph_type, BehaviorTreeInterpreter};
+    use crate::nodes;
+    use arora_behavior::graph::{Graph, GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::Status;
+    use arora_behavior::{BehaviorContext, BehaviorInterpreter, RunPolicy};
+    use arora_simple_data_store::SimpleDataStore;
+    use arora_types::call::Call;
+    use arora_types::data::DataStore;
+    use arora_types::value::Value;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use uuid::Uuid;
+
+    /// An interpreter, what its ticks need, and the scripted leaves'
+    /// statuses and calls.
+    struct Device {
+        interp: BehaviorTreeInterpreter,
+        bridge: TestBridge,
+        store: SimpleDataStore,
+        statuses: LeafStatuses,
+        ticks: LeafTicks,
+    }
+
+    impl Device {
+        /// A device whose scripted leaves answer `statuses`.
+        fn new(statuses: &[(Uuid, Status)]) -> Self {
+            let statuses: LeafStatuses = Rc::new(RefCell::new(statuses.iter().cloned().collect()));
+            let ticks = LeafTicks::default();
+            Device {
+                interp: BehaviorTreeInterpreter::new(),
+                bridge: TestBridge::new(statuses.clone(), ticks.clone()),
+                store: SimpleDataStore::new(),
+                statuses,
+                ticks,
+            }
+        }
+
+        fn tick(&mut self) {
+            let mut ctx = BehaviorContext {
+                functions: &arora_behavior::FunctionIndex::new(),
+                store: &self.store,
+                call_bridge: &mut self.bridge,
+            };
+            self.interp.tick(&mut ctx).expect("the tick succeeds");
+        }
+
+        /// How many times the scripted leaf `leaf` was called.
+        fn calls(&self, leaf: Uuid) -> u32 {
+            self.ticks.borrow().get(&leaf).copied().unwrap_or(0)
+        }
+    }
+
+    /// The link that makes the run-call leaf `node` call the scripted leaf
+    /// `leaf`.
+    fn call_link(node: Uuid, leaf: Uuid) -> Link {
+        let call = Call {
+            module_id: Some(Uuid::from_u128(0xB0)),
+            id: leaf,
+            args: Vec::new(),
+        };
+        Link::new(
+            Port::new(node, nodes::RUN_CALL_PARAM_ID),
+            LinkSource::Literal(arora_types::value_serde::to_value(&call).unwrap()),
+        )
+    }
+
+    /// Add to `graph` the run-call leaf `node`, calling `leaf`.
+    fn add_call(graph: &mut Graph, node: Uuid, leaf: Uuid) {
+        graph
+            .nodes
+            .insert(node, leaf_node(node, nodes::RUN_CALL_FUNCTION_ID));
+        graph.links.push(call_link(node, leaf));
+    }
+
+    fn leaf_node(id: Uuid, function: Uuid) -> GraphNode {
+        GraphNode {
+            id,
+            function,
+            ..GraphNode::default()
+        }
+    }
+
+    fn control(id: Uuid, function: Uuid, children: Vec<Uuid>) -> GraphNode {
+        GraphNode {
+            id,
+            function,
+            children: Some(children),
+            ..GraphNode::default()
+        }
+    }
+
+    /// The link that starts the `seq_star` `node` at its first child.
+    fn first_child(node: Uuid) -> Link {
+        Link::new(
+            Port::new(node, nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID),
+            LinkSource::Literal(Value::U16(0)),
+        )
+    }
+
+    /// A `seq_star` (`ids[0]`) over two run-call leaves (`ids[1]`, `ids[2]`)
+    /// calling `leaves`.
+    fn seq_star(ids: [u128; 3], leaves: [Uuid; 2]) -> Graph {
+        let [root, first, second] = ids.map(Uuid::from_u128);
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph.nodes.insert(
+            root,
+            control(root, nodes::SEQ_STAR_FUNCTION_ID, vec![first, second]),
+        );
+        graph.links.push(first_child(root));
+        add_call(&mut graph, first, leaves[0]);
+        add_call(&mut graph, second, leaves[1]);
+        graph
+    }
+
+    /// A sequence (`ids[0]`) over one run-call leaf (`ids[1]`) calling
+    /// `leaf`: it ends when the leaf does.
+    fn sequence(ids: [u128; 2], leaf: Uuid) -> Graph {
+        let [root, call] = ids.map(Uuid::from_u128);
+        let mut graph = Graph::empty();
+        graph.root = Some(root);
+        graph
+            .nodes
+            .insert(root, control(root, nodes::SEQ_FUNCTION_ID, vec![call]));
+        add_call(&mut graph, call, leaf);
+        graph
+    }
+
+    /// Spawning a run, editing it, halting it, and another run ending, leave
+    /// the main behavior's `seq_star` and another run's where they stand.
+    #[test]
+    fn a_run_s_changes_leave_the_other_behaviors_where_they_stand() {
+        let [m1, m2, a1, a2, b1, b2] = [0xA1, 0xA2, 0xB1, 0xB2, 0xC1, 0xC2].map(Uuid::from_u128);
+        let mut device = Device::new(&[
+            (m1, Status::Success),
+            (m2, Status::Running),
+            (a1, Status::Success),
+            (a2, Status::Running),
+            (b1, Status::Running),
+            (b2, Status::Running),
+        ]);
+        device
+            .interp
+            .load(seq_star([0x10, 0x11, 0x12], [m1, m2]))
+            .unwrap();
+        device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star([0x20, 0x21, 0x22], [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        device.tick();
+        let mut ticks = 1;
+        // Each tick resumes both at their second child.
+        let mut tick = |device: &mut Device, after: &str| {
+            device.tick();
+            ticks += 1;
+            for (first, second) in [(m1, m2), (a1, a2)] {
+                assert_eq!(
+                    device.calls(first),
+                    1,
+                    "{after}, {first}'s seq_star restarted"
+                );
+                assert_eq!(device.calls(second), ticks, "{after}");
+            }
+        };
+
+        let b = device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                sequence([0x30, 0x31], b1),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        tick(&mut device, "after a spawn");
+        device
+            .interp
+            .apply(GraphDiff {
+                add_links: vec![call_link(Uuid::from_u128(0x31), b2)],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        tick(&mut device, "after an edit");
+        assert_eq!(device.calls(b2), 1, "the edited run calls its new leaf");
+        device.interp.halt(b.id).unwrap();
+        tick(&mut device, "after a halt");
+
+        let b = device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                sequence([0x30, 0x31], b1),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        device.statuses.borrow_mut().insert(b1, Status::Success);
+        tick(&mut device, "after a run ended");
+        tick(&mut device, "after the ended run left");
+        let success: Value = Status::Success.into();
+        assert_eq!(
+            device.store.read(std::slice::from_ref(&b.status)),
+            vec![Some(success)]
+        );
+        assert_eq!(
+            device.interp.graph().nodes.len(),
+            1 + 3 + 4,
+            "the ended run left"
+        );
+    }
+
+    /// An edit restarts the nodes it replaces or relinks, and only them.
+    #[test]
+    fn an_edit_restarts_the_nodes_it_touches() {
+        let [a1, a2, a3] = [0xA1, 0xA2, 0xA3].map(Uuid::from_u128);
+        let mut device = Device::new(&[
+            (a1, Status::Success),
+            (a2, Status::Running),
+            (a3, Status::Running),
+        ]);
+        let [root, first, second] = [0x20, 0x21, 0x22].map(Uuid::from_u128);
+        device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star([0x20, 0x21, 0x22], [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        device.tick();
+
+        device
+            .interp
+            .apply(GraphDiff {
+                add_links: vec![call_link(second, a3)],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 1, "a relinked child leaves its seq_star");
+        assert_eq!(device.calls(a3), 1, "the relinked child calls its new leaf");
+
+        device
+            .interp
+            .apply(GraphDiff {
+                add_nodes: vec![control(
+                    root,
+                    nodes::SEQ_STAR_FUNCTION_ID,
+                    vec![first, second],
+                )],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 2, "a replaced seq_star restarts");
+
+        device
+            .interp
+            .apply(GraphDiff {
+                add_links: vec![first_child(root)],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(device.calls(a1), 3, "a relinked seq_star restarts");
+    }
+
+    /// A tree-local variable keeps its value while a node the change left in
+    /// place reads it, and starts afresh with the nodes that read it.
+    #[test]
+    fn a_tree_local_variable_lives_as_long_as_a_node_reading_it() {
+        use arora_types::gen_uuid_from_str;
+        // `Fallback(IsStringSet(.done), Sequence(call m, SetString(.done)))`
+        // calls `m` once: then `.done` is set.
+        let once = |m: Uuid| {
+            let [root, done, first, call, set] =
+                [0x10, 0x11, 0x12, 0x13, 0x14].map(Uuid::from_u128);
+            let variable = gen_uuid_from_str(".done");
+            let mut graph = Graph::empty();
+            graph.root = Some(root);
+            graph.nodes.insert(
+                root,
+                control(root, nodes::FALLBACK_FUNCTION_ID, vec![done, first]),
+            );
+            graph.nodes.insert(
+                first,
+                control(first, nodes::SEQ_FUNCTION_ID, vec![call, set]),
+            );
+            graph
+                .nodes
+                .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+            graph
+                .nodes
+                .insert(set, leaf_node(set, nodes::SET_STR_FUNCTION_ID));
+            add_call(&mut graph, call, m);
+            graph.links.extend([
+                Link::new(
+                    Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
+                    LinkSource::Variable(variable),
+                ),
+                Link::new(
+                    Port::new(set, nodes::SET_STR_VARIABLE_PARAM_ID),
+                    LinkSource::Variable(variable),
+                ),
+                Link::new(
+                    Port::new(set, nodes::SET_STR_VALUE_PARAM_ID),
+                    LinkSource::Literal(Value::String("yes".to_string())),
+                ),
+            ]);
+            graph.variables.insert(variable, ".done".to_string());
+            graph
+        };
+        let [m, r] = [0xA1, 0xB1].map(Uuid::from_u128);
+        let mut device = Device::new(&[(m, Status::Success), (r, Status::Running)]);
+        device.interp.load(once(m)).unwrap();
+        device.tick();
+        device.tick();
+        assert_eq!(device.calls(m), 1);
+
+        let run = device
+            .interp
+            .spawn_graph(
+                &graph_type(),
+                sequence([0x30, 0x31], r),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        device.tick();
+        device.interp.halt(run.id).unwrap();
+        device.tick();
+        assert_eq!(device.calls(m), 1, "a spawn and a halt kept .done");
+
+        device.interp.load(once(m)).unwrap();
+        device.tick();
+        assert_eq!(
+            device.calls(m),
+            2,
+            "a load restarts the behavior, .done with it"
+        );
+    }
+}
+
 /// The interpreter module's own functions are not reachable from a tree: a
 /// Groot tag does not resolve to them, and a spawned graph calling one is
 /// refused.

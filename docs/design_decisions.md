@@ -544,8 +544,18 @@ behavior the device runs, as `load` would, nor needs a module of its own on
 the device. A change to a running program is one `edit` of its links, applied
 between two ticks; replacing the run takes a halt and a spawn, which a remote's
 two calls may deliver on different steps, leaving a step with no program or
-with two. An edit re-lowers the whole tree, so it resets the state its nodes
-hold (a `SequenceStar`'s position) in every run and in the main behavior.
+with two.
+
+**A change restarts only the nodes it touches.** The interpreter lowers the
+whole changed graph again, and the new tree takes over the state of every node
+the change left in place, by node id: a `SequenceStar`'s position, a run's
+latch, a tree-local variable such a node reads. A node the change adds,
+replaces or relinks starts afresh. Spawning, editing, halting or ending one
+run therefore leaves the main behavior and every other run where they stand.
+Lowering each run on its own would confine a change too, but runs and the
+main behavior can share what a tree holds: an edit may place one node under
+both, or link a run's node to a port of the main behavior's, and both may read
+one tree-local variable. Separate lowerings would each hold their own copy.
 
 **A graph travels with its type and version.** `spawn_graph` takes the
 graph's language (`behavior-tree`) and the version of that language's format

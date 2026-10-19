@@ -56,11 +56,14 @@
 //! other runs tick on.
 //!
 //! The lowered tree persists across ticks and is rebuilt only when the graph
-//! changed (an edit, a load, a spawn, a prune), unregistering the previous
-//! lowering's engine callables. Re-lowering resets node-parameter state (a
-//! `seq_star` index, a run's latch) across the whole scaffold — which is why
-//! finished fragments are pruned before the next lowering rather than left to
-//! re-fire.
+//! changed (an edit, a load, a spawn, a halt, a finished run pruned),
+//! unregistering the previous lowering's engine callables. The rebuilt tree
+//! keeps the state of every node the change left in place — a `seq_star`'s
+//! index, a run's latch, a tree-local variable such a node reads — so changing
+//! one run leaves the main behavior and every other run where they were. A
+//! node the change adds, replaces or relinks starts afresh, and so does a
+//! tree-local variable only such nodes read: a load restarts the main
+//! behavior, an edit restarts the nodes it touches.
 
 use std::collections::{HashMap, HashSet};
 
@@ -141,7 +144,7 @@ pub struct BehaviorTreeInterpreter {
     /// Live task runs, in spawn order: the order the runner ticks them in.
     runs: Vec<Run>,
     /// Finished runs awaiting pruning: latched inert, removed at the next
-    /// graph edit (a re-lowering would reset their latches and re-fire them).
+    /// change of the graph.
     finished: Vec<Run>,
     /// The status keys of the runs halted since the last tick: the next tick
     /// (which owns the store) writes their terminal status.
@@ -150,6 +153,10 @@ pub struct BehaviorTreeInterpreter {
     lowered: Option<LoweredTree>,
     /// The graph changed since the last lowering.
     dirty: bool,
+    /// The nodes the graph's changes since the last lowering added, replaced
+    /// or relinked: they start afresh at the next lowering, and every other
+    /// node keeps its state.
+    fresh: HashSet<Uuid>,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -332,6 +339,7 @@ impl BehaviorTreeInterpreter {
             halted: Vec::new(),
             lowered: None,
             dirty: true,
+            fresh: HashSet::new(),
         }
     }
 
@@ -432,6 +440,14 @@ impl BehaviorTreeInterpreter {
     /// would not lower. A selection feeding a parameter the function declares
     /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
+        let changed: Vec<Uuid> = diff
+            .add_nodes
+            .iter()
+            .map(|node| node.id)
+            .chain(diff.add_links.iter().map(|link| link.target.node))
+            .chain(diff.remove_links.iter().map(|port| port.node))
+            .chain(diff.set_predetermined.iter().map(|(port, _)| port.node))
+            .collect();
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
@@ -445,6 +461,7 @@ impl BehaviorTreeInterpreter {
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
         self.graph = graph;
         self.dirty = true;
+        self.fresh.extend(changed);
         Ok(())
     }
 
@@ -553,8 +570,8 @@ impl BehaviorTreeInterpreter {
         Ok(())
     }
 
-    /// Prune the runs that finished since the last edit: an edit re-lowers the
-    /// tree anyway, so their latches no longer need to hold them inert.
+    /// Prune the runs that finished since the last change of the graph, which
+    /// is changing anyway: until then their latches hold them inert.
     fn prune_finished(&mut self) -> Result<(), BehaviorError> {
         let finished = std::mem::take(&mut self.finished);
         self.prune(finished)
@@ -585,18 +602,21 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // The halted runs' terminal status first: this tick owns the store.
         self.write_halts(ctx.store)?;
 
-        // The graph changed: replace the lowering. The old registration is
-        // undone first; finished fragments leave now (re-lowering would reset
-        // their latches and re-fire them). A lowering error is transient — the
-        // graph stays, the next tick retries — surfaced like any failed tick.
+        // The graph changed: replace the lowering. Finished fragments leave
+        // first. The new tree takes over the old one's state but for the
+        // fresh nodes, then the old registration is undone. A lowering error
+        // is transient — the graph stays, the next tick retries — surfaced
+        // like any failed tick.
         if self.dirty {
             self.prune_finished()?;
-            if let Some(lowered) = self.lowered.take() {
-                lowered.unregister(ctx.call_bridge);
-            }
             check_selections(&self.graph, ctx.functions)?;
             let tree = build_behavior_tree(&self.graph, &direct_resolver(ctx.store))
                 .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?;
+            if let Some(lowered) = self.lowered.take() {
+                tree.keep_state(lowered.tree(), &self.fresh);
+                lowered.unregister(ctx.call_bridge);
+            }
+            self.fresh.clear();
             self.lowered = Some(
                 lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
                     .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?,

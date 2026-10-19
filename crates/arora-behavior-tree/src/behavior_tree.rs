@@ -23,7 +23,11 @@ use arora_types::{
 };
 use error::BehaviorTreeError;
 use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 use uuid::Uuid;
 
 use crate::nodes::{
@@ -53,6 +57,71 @@ pub struct BehaviorTree {
 /// An `Unpack` node's output cells, by port index up to its last bound port:
 /// `None` for an unbound port.
 type UnpackOutputs = Rc<[Option<VariableCell>]>;
+
+impl BehaviorTree {
+    /// Take over the state `previous` holds for every node of this tree that
+    /// `fresh` does not name: a tree built again from a changed graph goes on
+    /// where the previous one was for the nodes the change left in place.
+    ///
+    /// A node's state is the tree-local cells its arguments hold — a literal
+    /// argument's cell, which a node such as `seq_star` advances, and the
+    /// tree-local variables it reads or writes. Each such cell takes the value
+    /// it holds in `previous`, which gives up that value: `previous` is the
+    /// tree being replaced. A cell bound to another node's argument is that
+    /// node's to carry, and a store-backed cell holds nothing of the tree's. A
+    /// tree-local variable that only fresh nodes read starts afresh with them.
+    pub(crate) fn keep_state(&self, previous: &BehaviorTree, fresh: &HashSet<Uuid>) {
+        let mut read = HashSet::new();
+        for node in self.node_index.values() {
+            if fresh.contains(&node.id) {
+                continue;
+            }
+            for (parameter, expression) in &node.arguments {
+                match selected_source(expression) {
+                    Expression::VariableId(variable) => {
+                        read.insert(*variable);
+                    }
+                    Expression::Value(_) | Expression::Uuid(_) | Expression::Call(_) => {
+                        let at = NodeParameterId {
+                            node: node.id,
+                            parameter: *parameter,
+                        };
+                        if let (Some(cell), Some(held)) = (
+                            self.node_arg_variables.get(&at),
+                            previous.node_arg_variables.get(&at),
+                        ) {
+                            take_local(cell, held);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let (cells, held) = (self.variables.borrow(), previous.variables.borrow());
+        for variable in read {
+            if let (Some(cell), Some(held)) = (cells.get(&variable), held.get(&variable)) {
+                take_local(cell, held);
+            }
+        }
+    }
+}
+
+/// The expression a selection reads, through any nesting; `expression`
+/// itself when it is not a selection.
+fn selected_source(expression: &Expression) -> &Expression {
+    match expression {
+        Expression::Select { source, .. } => selected_source(source),
+        expression => expression,
+    }
+}
+
+/// Move `held`'s value into `cell` when both are tree-local, leaving `held`
+/// the value `cell` had.
+fn take_local(cell: &VariableCell, held: &VariableCell) {
+    if let (VariableCell::Local(cell), VariableCell::Local(held)) = (cell, held) {
+        cell.swap(held);
+    }
+}
 
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,

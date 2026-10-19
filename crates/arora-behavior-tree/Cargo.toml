@@ -1,12 +1,16 @@
 [package]
 name = "arora-behavior-tree"
-version = "9.0.0"
+version = "9.0.1"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "Apache-2.0"
 
 [lib]
 path = "src/behavior_tree.rs"
+
+[[bench]]
+name = "edit"
+harness = false
 
 [dependencies]
 arora-buffers = { path = "../arora-buffers", version = "3" }
