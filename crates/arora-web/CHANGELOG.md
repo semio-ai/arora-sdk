@@ -4,6 +4,18 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.3.0] - 2026-10-19
+
+### Added
+
+- `AroraWeb::request_step()`: asks for the step at a zero dt that the
+  operations changing the device take, for a Rust crate wrapping the device
+  that changes it by another way than its caller or its store (a setting its
+  behavior reads). The request shares the step of the turn's operations and
+  store writes, a page's own step in the same turn takes its place, one made
+  from inside a step is taken as a task after it, and under `run()` it lapses:
+  the run's next step acts on the change.
+
 ## [10.2.0] - 2026-10-19
 
 ### Changed

@@ -1016,6 +1016,99 @@ async fn a_call_from_inside_a_run_step_applies_at_the_next_one() {
     );
 }
 
+/// `request_step` on a device nobody steps takes one step at a zero dt, and
+/// one turn's requests share it with the turn's operations and writes.
+#[wasm_bindgen_test]
+async fn a_requested_step_is_shared_with_the_turn_s_operations() {
+    let bench = bench();
+    let web = &bench.web;
+
+    web.request_step();
+    web.request_step();
+    yield_to_tasks().await;
+    assert_eq!(bench.ticks(), [ZERO_DT], "one step for both requests");
+
+    bench.ticks.borrow_mut().clear();
+    web.request_step();
+    let called = web.call(&double_call(1.0));
+    web.set_value("face/mouth", r#"{"f64": 0.5}"#)
+        .expect("write");
+    web.request_step();
+    settles(called, "call").await.expect("the call answers");
+    yield_to_tasks().await;
+    assert_eq!(*bench.doubled.borrow(), [1.0]);
+    assert_eq!(bench.ticks(), [ZERO_DT], "one step for the whole turn");
+
+    bench.ticks.borrow_mut().clear();
+    web.request_step();
+    web.step(10.0).expect("step");
+    yield_to_tasks().await;
+    let ticks = bench.ticks();
+    assert_eq!(ticks.len(), 1, "the page's step alone: {ticks:?}");
+    assert_eq!(ticks[0].dt_ns, 10_000_000, "{ticks:?}");
+}
+
+/// Under `run()`, `request_step` adds no step: the run's steps are the only
+/// ones, and stopping the run takes none at a zero dt.
+#[wasm_bindgen_test]
+async fn a_requested_step_under_run_adds_none() {
+    let bench = bench();
+    let web = &bench.web;
+
+    let running = web.run(Some(20.0));
+    sleep(30).await;
+    for _ in 0..3 {
+        web.request_step();
+        yield_to_tasks().await;
+    }
+    sleep(30).await;
+    web.stop();
+    settles(running, "the run").await.expect("the run stops");
+    sleep(20).await;
+    let ticks = bench.ticks();
+    assert!(ticks.len() >= 2, "the run stepped: {ticks:?}");
+    assert!(
+        ticks.iter().all(|tick| tick.running),
+        "every step was the run's: {ticks:?}"
+    );
+}
+
+/// `request_step` from inside a step nests none: the step it asks for is
+/// taken as a task once the current one has ended.
+#[wasm_bindgen_test]
+async fn a_step_requested_from_inside_a_step_follows_it() {
+    let bench = bench();
+    let web = &bench.web;
+
+    let ticks_in_hook: Rc<RefCell<Vec<usize>>> = Rc::default();
+    {
+        let ticks = bench.ticks.clone();
+        let ticks_in_hook = ticks_in_hook.clone();
+        let mut fired = false;
+        *bench.hook.borrow_mut() = Some(Box::new(move |web: &AroraWeb| {
+            if std::mem::replace(&mut fired, true) {
+                return;
+            }
+            web.request_step();
+            web.request_step();
+            ticks_in_hook.borrow_mut().push(ticks.borrow().len());
+        }));
+    }
+
+    web.step(10.0).expect("step");
+    assert_eq!(*ticks_in_hook.borrow(), [1], "nothing nested in the step");
+    yield_to_tasks().await;
+    assert_eq!(bench.ticks().len(), 1, "no step in the step's microtasks");
+    sleep(20).await;
+    let ticks = bench.ticks();
+    assert_eq!(
+        ticks.len(),
+        2,
+        "the page's step, then one at a zero dt: {ticks:?}"
+    );
+    assert_eq!(ticks[1], ZERO_DT, "{ticks:?}");
+}
+
 // =============================================================================
 // Draining the store's changes
 // =============================================================================

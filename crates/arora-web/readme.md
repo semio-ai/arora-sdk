@@ -155,7 +155,10 @@ same JS surface. The `store_json` module exposes the Value↔JSON accessors over
 any store for wrappers that add their own methods, and `AroraWeb::caller` the
 typed client operations. An operation through the caller is a remote's: it
 applies at the device's next step. `AroraWeb::complete(reply)` settles it as
-this surface's operations settle.
+this surface's operations settle. `AroraWeb::request_step()` asks for the step
+those operations take — at a zero dt, shared with the turn's operations and
+writes, none under `run()` — for a change a wrapper makes to the device by
+another way than the caller or the store.
 
 ## Engine / BehaviorTreeRunner JS surface (see [src/lib.rs](src/lib.rs)):
 

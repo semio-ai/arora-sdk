@@ -296,8 +296,9 @@ enum Stepped {
 /// Steps the device at a zero dt for what the page asked of it while no
 /// [`run`](AroraWeb::run) is ongoing.
 ///
-/// The requests of one turn — the page's operations and its writes to the
-/// store — share one step, taken in the next microtask. It applies everything
+/// The requests of one turn — the page's operations, its writes to the store,
+/// and a wrapping crate's [`request_step`](AroraWeb::request_step) — share one
+/// step, taken in the next microtask. It applies everything
 /// queued on the device's inbound channel (the page's operations in the order
 /// it issued them, and what bridges delivered), ticks the behavior with no
 /// time elapsed, and writes the HAL and the bridges what changed, the page's
@@ -447,8 +448,10 @@ impl StepScheduler {
 ///
 /// Every method is an ordinary Rust method too, for a Rust crate that wraps
 /// this device in its own `wasm_bindgen` type; [`caller`](Self::caller) hands
-/// such a crate the typed operations, and [`complete`](Self::complete) has
-/// them settle as this surface's do.
+/// such a crate the typed operations, [`complete`](Self::complete) has
+/// them settle as this surface's do, and [`request_step`](Self::request_step)
+/// asks for the step they would take, for a change the crate makes by
+/// another way.
 #[wasm_bindgen(js_name = AroraRuntime)]
 pub struct AroraWeb {
     // The device and the zero-dt steps taken for the page. The device parks
@@ -925,6 +928,21 @@ impl AroraWeb {
                 }
             }
         }
+    }
+
+    /// Ask for a step at a zero dt, as this surface's operations that change
+    /// the device do: for a change a wrapping crate makes to the device by
+    /// another way than its caller or its store — a setting its behavior
+    /// reads — that the device should act on whether or not the page steps
+    /// it.
+    ///
+    /// The step is the one the turn's operations and store writes share,
+    /// taken in the next microtask, and a page's own [`step`](Self::step) in
+    /// the same turn takes its place. Asked from inside a step, it is taken
+    /// as a task once that step has ended. While [`run`](Self::run) owns the
+    /// device, the request lapses: the run's next step acts on the change.
+    pub fn request_step(&self) {
+        self.steps.request();
     }
 
     /// After a page's write to the store: fold it into what the page has not
