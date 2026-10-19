@@ -35,7 +35,7 @@ pub const SHAPES: Scope = Scope {
     name = "geometry",
     version = "0.2.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module under test",
     executable_mime = "application/wasm",
     scope = crate::SHAPES
@@ -82,7 +82,7 @@ pub mod geometry {
     name = "keys",
     version = "1.0.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     executable_mime = "application/wasm"
 )]
 pub mod keys {

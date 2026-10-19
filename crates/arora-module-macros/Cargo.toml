@@ -3,7 +3,7 @@ name = "arora-module-macros"
 version = "3.0.0"
 edition = "2021"
 description = "Declare an Arora module on a Rust module: #[module], #[export], #[param], declare_module!, #[contract], module_from_header!."
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 

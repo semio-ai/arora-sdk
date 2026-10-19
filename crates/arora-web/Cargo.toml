@@ -2,7 +2,7 @@
 name = "arora-web"
 version = "10.3.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 description = "Run an Arora device in the browser: the AroraRuntime wasm-bindgen device over the arora runtime, plus engine and module tooling."
 

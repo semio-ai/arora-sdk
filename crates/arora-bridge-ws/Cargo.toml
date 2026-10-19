@@ -3,7 +3,7 @@ name = "arora-bridge-ws"
 version = "7.2.4"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]

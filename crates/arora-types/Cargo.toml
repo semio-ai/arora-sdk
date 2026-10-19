@@ -3,7 +3,7 @@ name = "arora-types"
 version = "3.8.0"
 edition = "2021"
 description = "Shared type definitions for the Semio Arora framework"
-license = "MIT"
+license = "Apache-2.0"
 # arora-types lives in the arora-engine workspace since the multi-repo
 # consolidation; the old standalone arora-types repo is gone.
 repository = "https://github.com/semio-ai/arora-sdk"

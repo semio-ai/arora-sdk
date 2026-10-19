@@ -79,7 +79,7 @@ impl Reading {
     name = "test-rust-wasm",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Test WASM module written in Rust",
     executable_mime = "application/wasm",
     scope = crate::TESTS
@@ -177,7 +177,7 @@ pub mod test_rust_wasm {
     name = "compass",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Test WASM module sharing a type with test-rust-wasm",
     executable_mime = "application/wasm",
     scope = crate::NAVIGATION

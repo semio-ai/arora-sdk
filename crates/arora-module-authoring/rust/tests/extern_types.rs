@@ -144,7 +144,7 @@ id: {MODULE_ID}
 name: reporter
 author: Semio
 description: A record with a declared Rust type through the generator
-license: Proprietary
+license: Apache-2.0
 version: {{ major: 0, minor: 1, patch: 0 }}
 executor:
   name: wasm

@@ -2,7 +2,7 @@
 name = "arora-animation-module"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 description = "Arora animation playback and baking as a host-linked module or WebAssembly guest."

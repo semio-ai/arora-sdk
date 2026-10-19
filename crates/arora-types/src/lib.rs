@@ -135,7 +135,7 @@ ret:
 id: 325c5e47-32db-4e23-a38f-7a2849647e0c
 author: Semio
 description: Test C++ module
-license: Proprietary
+license: Apache-2.0
 name: test-cpp-2
 version:
   major: 0

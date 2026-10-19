@@ -126,7 +126,7 @@ id: {MODULE_ID}
 name: sampler
 author: Semio
 description: Optional types through the generator
-license: Proprietary
+license: Apache-2.0
 version: {{ major: 0, minor: 1, patch: 0 }}
 executor:
   name: wasm

@@ -3,7 +3,7 @@ name = "arora-module"
 version = "2.2.0"
 edition = "2021"
 description = "Write an Arora module in Rust: the declaration macros and the traits they implement."
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 

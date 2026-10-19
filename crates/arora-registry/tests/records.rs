@@ -64,7 +64,7 @@ pub struct Window {
     name = "sampler",
     version = "0.3.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module whose functions name records",
     executable_mime = "application/wasm",
     scope = crate::SAMPLES
@@ -91,7 +91,7 @@ pub mod sampler {
     name = "windowed",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module naming a type without a record",
     executable_mime = "application/wasm"
 )]
@@ -110,7 +110,7 @@ pub mod windowed {
     name = "resampler",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module sharing a type that states no scope",
     executable_mime = "application/wasm",
     scope = crate::STUDIO
@@ -132,7 +132,7 @@ pub mod resampler {
     name = "upsampler",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module of the scope its shared type lives in",
     executable_mime = "application/wasm",
     scope = crate::SAMPLES
@@ -187,7 +187,7 @@ pub enum Scale {
     name = "thermometer",
     version = "1.0.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module naming a shared type",
     executable_mime = "application/wasm",
     scope = crate::WEATHER
@@ -209,7 +209,7 @@ pub mod thermometer {
     name = "logger",
     version = "1.0.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "Another declared module naming the shared type",
     executable_mime = "application/wasm",
     scope = crate::LOGS
@@ -237,7 +237,7 @@ pub struct Level {
     name = "leveler",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "A declared module without a scope",
     executable_mime = "application/wasm"
 )]

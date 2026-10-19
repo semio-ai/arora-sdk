@@ -24,7 +24,7 @@ pub const TICKS_PER_CHARACTER: usize = 5;
     name = "silent-say",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "The say contract without a speaker: a sentence takes a speaker's time, then is logged"
 )]
 pub mod silent {

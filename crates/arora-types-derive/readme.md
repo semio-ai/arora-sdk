@@ -82,4 +82,4 @@ Primitive scalars (`bool`, `u8..=u64`, `i8..=i64`, `f32`, `f64`, `String`), othe
 
 ## License
 
-MIT.
+Apache-2.0.

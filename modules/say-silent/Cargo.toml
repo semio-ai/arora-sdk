@@ -2,7 +2,7 @@
 name = "say-silent"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 authors = ["Semio"]
 description = "The say contract of behavior trees without a speaker: a sentence takes a speaker's time, then is logged"
 readme = "readme.md"

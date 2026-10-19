@@ -37,7 +37,7 @@ pub const IDLE_STOP: Duration = Duration::from_millis(250);
     name = "naoqi-say",
     version = "0.1.0",
     author = "Semio",
-    license = "MIT",
+    license = "Apache-2.0",
     description = "The say contract in a NAOqi robot's voice (ALTextToSpeech)"
 )]
 pub mod naoqi_say {

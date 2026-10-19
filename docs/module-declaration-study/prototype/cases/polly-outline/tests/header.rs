@@ -76,7 +76,7 @@ fn the_declared_header_keeps_what_the_generator_strips() {
     max_version: None,
   });
   assert_eq!(declared.author, "Semio");
-  assert_eq!(declared.license, "Proprietary");
+  assert_eq!(declared.license, "Apache-2.0");
   assert_eq!(
     declared.description.as_deref(),
     Some("AWS Polly support module")
