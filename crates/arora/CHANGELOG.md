@@ -10,11 +10,13 @@ All notable changes to `arora`. The format follows
 
 - `--studio` and `--no-studio`, in a `studio-bridge` build. `studio::StudioArgs`
   parses them, and `RunnerArgs` and `DeviceCli` flatten it as their `studio`
-  field; `AroraBuilder::with_studio(studio::Choice)` hands what they ask to
-  `run`, and the `arora` binary passes it.
+  field; `StudioArgs::choice` reads them with `ARORA_STUDIO`, and
+  `AroraBuilder::with_studio(studio::Choice)` hands what they ask to `run`.
+  The `arora` binary passes it.
   - `--studio` connects to Semio Studio, registering a device that holds no
     saved Studio credential. `ARORA_STUDIO=1` (or `true`, `yes`, `on`) asks
-    the same.
+    the same; blank counts as unset, and a value that is not a boolean fails
+    the start.
   - `--no-studio` serves the open local bridge, even for a device holding a
     credential. It wins over `--studio` and `ARORA_STUDIO`.
 
@@ -28,17 +30,19 @@ All notable changes to `arora`. The format follows
   - Started without a terminal, such a run used to connect at once, signing a
     device with no credential up as a new anonymous account on Studio's
     production project. On a terminal, it asked the operator for an owner.
-  - A device holding a credential connects as before, and logs that it does.
-  - A credential that does not read (its key missing, the file damaged) no
-    longer signs the device up anew: the run serves the local bridge and
-    warns.
+  - A device holding a credential connects as before, and logs that it does,
+    including a credential a headless run of 13.4 or earlier saved unasked:
+    `--no-studio`, or deleting `studio/`, stops it.
+  - A credential that does not read (its key missing, the file damaged, an
+    `IDENTITY_FILE` naming nothing) no longer signs the device up anew, nor
+    fails the start: the run serves the local bridge and warns.
   - The `studio::connect` functions are unchanged: an embedder calling one
     asks for Studio.
 
 ### Deprecated
 
-- Connecting on a saved credential alone (`studio::Choice::IfSaved`). The next
-  major connects only a run that asks for Studio (`--studio`).
+- Connecting on a saved credential alone, what a run that asks nothing does.
+  The next major connects only a run that asks for Studio (`--studio`).
 
 ## [13.4.0] - 2026-10-19
 

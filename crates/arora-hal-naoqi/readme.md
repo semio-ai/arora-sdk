@@ -76,9 +76,9 @@ The device starts, the robot says "Arora is ready" with its hands, and:
 More logs: set `RUST_LOG=debug` before the command. Without a terminal (`nohup`, a
 service), the runner is headless and asks nothing.
 
-With `--studio` ([Semio Studio](#semio-studio)), a device not yet registered asks three
-questions on the terminal UI before it starts: your Studio owner UID, a device name, a model
-family (`nao`). Leave the owner empty to run without Studio after all.
+A run that connects to Studio ([Semio Studio](#semio-studio)) first asks, on the terminal
+UI, what neither the Studio variables nor an earlier answer give: your Studio owner UID, a
+device name, a model family (`nao`). Leave the owner empty to run without Studio after all.
 
 Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; `--studio`
 connects to Semio Studio, `--no-studio` keeps a registered device on the local bridge; a
@@ -192,7 +192,9 @@ Semio Studio is opt-in. The runner is built with the Studio connection (this cra
 holds a saved Studio credential, or when the run passes `--studio` (or sets
 `ARORA_STUDIO=1`). Otherwise it serves the open local bridge, and says so:
 `Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.`
-`--no-studio` keeps a device that holds a credential on the local bridge.
+`--no-studio` keeps a device that holds a credential on the local bridge. A device may hold
+one without having asked: a headless run of an earlier `arora-naoqi` connected on its own.
+Delete the device's `studio/` directory (below) to make it a device with none.
 
 There is no pairing code yet: a device declares its owners itself, by their Studio user ids
 (UIDs).
