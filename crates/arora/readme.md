@@ -45,7 +45,11 @@ cargo build                      # builds arora into target/debug/arora
 
 At start the device loads every module in its device directory's `modules/`
 (the layout is [below](#where-a-device-keeps-its-data)), then each `--module`
-directory. A module that cannot be loaded fails the start, naming it.
+directory. A module that cannot be loaded fails the start, naming it. The
+robot runners — `arora-ros2` ([`arora-hal-ros2`](../arora-hal-ros2)),
+`arora-restful` ([`arora-hal-restful`](../arora-hal-restful)) and
+`arora-naoqi` ([`arora-hal-naoqi`](../arora-hal-naoqi)) — load their modules
+the same way, and take `--module <dir>` too.
 
 ## Use it as a library
 
@@ -81,9 +85,10 @@ per-device feature flag: the [`device` example](examples/device.rs) provides
 its own `Hal` and hands it to `run_with`; swap in a real robot HAL and the
 studio-bridge connector and it is a real device build. `DeviceCli` is the clap
 options the binary parses (the Groot file, `--open`, `--module`); flatten it
-into a larger CLI and inject the results through the builder —
-`DeviceCli::modules` reads the modules it names together with the device
-directory's, each for `with_module`.
+into a larger CLI and inject the results through the builder. A runner's
+modules, its device directory's and those its command line names, load with
+`AroraBuilder::with_module_dirs(&device_dir::from_env()?, &dirs)`, records
+included, as the `arora` binary and the robot runners load theirs.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
 carries the wasmtime and dynamic-library hosts, the operator flow, and the

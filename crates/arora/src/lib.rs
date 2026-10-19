@@ -961,6 +961,9 @@ impl AroraBuilder {
     /// on the built device ([`Arora::load_module`], [`Arora::reload_module`])
     /// is indexed from its header. Default: an empty registry.
     ///
+    /// `registry` replaces the one the builder holds, with the records
+    /// module directories added to it (`with_module_dirs`): give it first.
+    ///
     /// ```ignore
     /// let mut records = arora::LocalRegistry::new();
     /// arora_registry::local_yaml::load_records_from_yaml_dir(dir.join("records"), &mut records).await?;
@@ -972,6 +975,45 @@ impl AroraBuilder {
     pub fn with_registry(mut self, registry: LocalRegistry) -> Self {
         self.registry = registry;
         self
+    }
+
+    /// Load the modules a device carries as module directories
+    /// ([`module_dir`]): every one under `device_dir`'s `modules/`, in name
+    /// order, then each of `dirs`. A device runner passes its device directory
+    /// ([`device_dir::from_env`]) and its `--module` directories.
+    ///
+    /// Each module loads at [`build`](Self::build) as
+    /// [`with_module`](Self::with_module) loads one, and the records its
+    /// directory carries in `records/` join the device's registry
+    /// ([`with_registry`](Self::with_registry)): a module whose record they
+    /// hold has every export described, record-typed ones included.
+    ///
+    /// Fails, naming the module, when a directory cannot be read as a module,
+    /// when one module is in two directories, or when a directory's records
+    /// do not read or differ from a record the registry already holds under
+    /// the same id and version. A device directory without `modules/` carries
+    /// no module.
+    ///
+    /// ```ignore
+    /// Arora::builder()
+    ///     .with_hal(hal)
+    ///     .with_module_dirs(&arora::device_dir::from_env()?, &module_dirs)
+    ///     .await?
+    ///     .run()
+    ///     .await
+    /// ```
+    #[cfg(feature = "native")]
+    pub async fn with_module_dirs(
+        mut self,
+        device_dir: &std::path::Path,
+        dirs: &[std::path::PathBuf],
+    ) -> Result<Self> {
+        let modules = module_dir::read_device_modules(device_dir, dirs)?;
+        module_dir::load_records(&modules, &mut self.registry).await?;
+        for module in modules {
+            self = self.with_module(module.header, module.executable);
+        }
+        Ok(self)
     }
 
     /// Add a host-side module: a set of in-process functions under a module id,

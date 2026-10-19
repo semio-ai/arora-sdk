@@ -4,6 +4,25 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.4.0] - 2026-10-19
+
+### Added
+
+- The `arora-ros2` runner carries modules as the `arora` runner does: every
+  module directory under its device directory's `modules/`, then each
+  `--module <dir>` (repeatable), with the records their `records/` carry, so
+  the device describes a guest module's record-typed exports and a behavior
+  calls them. A module directory that does not read fails the start, naming
+  the module, before the robot is reached.
+
+### Changed
+
+- The runner's front end, and the log sink it installs, start before the
+  HAL: what the HAL logs while it starts is shown.
+- An unknown `--` option fails the start with the usage, instead of being
+  read as the robot's name or configuration file.
+- The `runner` feature requires `arora` 13.3 (`AroraBuilder::with_module_dirs`).
+
 ## [5.3.0] - 2026-10-16
 
 ### Added

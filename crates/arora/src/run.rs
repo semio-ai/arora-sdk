@@ -61,12 +61,12 @@ use crate::Arora;
 /// to [`with_groot`](crate::AroraBuilder::with_groot), which resolves its tags
 /// against the device's method index, so the tree's leaves call the modules
 /// the device carries.
-/// The modules — the device directory's and `--module`'s — come out of
-/// [`modules`](Self::modules), each for
-/// [`with_module`](crate::AroraBuilder::with_module), and the records their
-/// directories carry out of [`module_dir::registry`](crate::module_dir::registry),
-/// for [`with_registry`](crate::AroraBuilder::with_registry). The `arora`
-/// binary's `main` is the worked example.
+/// The modules — the device directory's and `--module`'s — load with
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs), given the
+/// device directory ([`device_dir::from_env`](crate::device_dir::from_env))
+/// and `module`, the records their directories carry included;
+/// [`modules`](Self::modules) reads them for a binary that loads them itself.
+/// The `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
 #[command(
@@ -116,13 +116,7 @@ impl DeviceCli {
     ///
     /// [`device_dir::from_env`]: crate::device_dir::from_env
     pub fn modules(&self) -> Result<Vec<ModuleFiles>> {
-        let device_dir = crate::device_dir::from_env()?;
-        let mut modules = crate::module_dir::in_device_dir(&device_dir)?;
-        for dir in &self.module {
-            modules.push(crate::module_dir::read(dir)?);
-        }
-        crate::module_dir::distinct(&modules)?;
-        Ok(modules)
+        crate::module_dir::read_device_modules(&crate::device_dir::from_env()?, &self.module)
     }
 }
 
@@ -135,7 +129,9 @@ pub async fn run() -> Result<()> {
 /// Run a device over `hal` with the default bridge — the one call that turns
 /// a HAL into a running device. Sugar for
 /// `Arora::builder().with_hal(hal).run()`; use the builder directly to inject
-/// any other part (a custom [`DataStore`], extra bridges, modules, …).
+/// any other part (a custom [`DataStore`], extra bridges, modules, …). A
+/// device runner's module directories load with
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
 #[cfg(feature = "native")]
 pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
     Arora::builder().with_hal(hal).run().await

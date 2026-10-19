@@ -61,6 +61,16 @@ fn records() -> LocalRegistry {
     packaged::<Module>()
 }
 
+/// A reference to the `Reading` record, at its declared version.
+fn reading_ty() -> FrozenTy {
+    FrozenTy::FrozenScalar(FrozenScalar {
+        reference: FrozenReference {
+            id: Reading::arora_type_id(),
+            version: Reading::arora_type_version(),
+        },
+    })
+}
+
 /// A registry holding `module` as the guest's record, and the records of the
 /// types the guest names when `with_types`.
 fn registry_with(module: frozen::Module, with_types: bool) -> LocalRegistry {
@@ -259,15 +269,7 @@ fn a_module_record_describes_every_export_with_its_signature() {
         .iter()
         .find(|method| method.name == "reading")
         .expect("reading is listed");
-    assert_eq!(
-        reading.function.return_ty,
-        FrozenTy::FrozenScalar(FrozenScalar {
-            reference: FrozenReference {
-                id: Reading::arora_type_id(),
-                version: Reading::arora_type_version(),
-            },
-        })
-    );
+    assert_eq!(reading.function.return_ty, reading_ty());
     let angle = &reading.function.parameters[&declared::ids::reading::ANGLE];
     assert_eq!(angle.ty, FrozenTy::from(PrimitiveKind::F32));
 }
@@ -422,25 +424,43 @@ fn write_module_dir(
     dir
 }
 
-/// The runner's path: a module directory carrying `records/` beside its
-/// header and artifact fills the device's registry, which describes the
-/// module; records that do not read fail, naming the module.
+/// The builder loading the module directories a device carries, as the
+/// device runners do: its device directory's, then those `dirs` names.
+fn with_module_dirs(
+    device_dir: &std::path::Path,
+    dirs: &[std::path::PathBuf],
+) -> anyhow::Result<AroraBuilder> {
+    futures::executor::block_on(Arora::builder().with_module_dirs(device_dir, dirs))
+}
+
+/// The return type of the function `function` as the device describes it.
+fn described_return(arora: &Arora, function: Uuid) -> FrozenTy {
+    arora
+        .function_index
+        .get(&function)
+        .unwrap_or_else(|| panic!("{function} is described"))
+        .function
+        .return_ty
+        .clone()
+}
+
+/// The runners' path: a module directory under the device directory's
+/// `modules/`, carrying `records/` beside its header and artifact, fills the
+/// device's registry, which describes the module; records that do not read
+/// fail, naming the module.
 #[test]
 fn a_module_directory_s_records_describe_its_module() {
     let device_dir = device_dir("module-records");
     let dir = write_module_dir(&device_dir, "trigonometry", &header(), &records());
 
-    let modules = module_dir::in_device_dir(&device_dir).expect("the module directory reads");
-    let registry = futures::executor::block_on(module_dir::registry(&modules))
-        .expect("the module directory's records load");
-    let mut builder = Arora::builder().with_registry(registry);
-    for module in modules {
-        builder = builder.with_module(module.header, module.executable);
-    }
-    let arora = builder.build().expect("the device builds");
-    assert!(arora
-        .function_index
-        .contains_key(&declared::ids::reading::FUNCTION));
+    let arora = with_module_dirs(&device_dir, &[])
+        .expect("the module directory and its records load")
+        .build()
+        .expect("the device builds");
+    assert_eq!(
+        described_return(&arora, declared::ids::reading::FUNCTION),
+        reading_ty()
+    );
 
     std::fs::write(
         dir.join("records")
@@ -449,8 +469,7 @@ fn a_module_directory_s_records_describe_its_module() {
         "not: [a structure",
     )
     .unwrap();
-    let modules = module_dir::in_device_dir(&device_dir).expect("the module directory reads");
-    let error = futures::executor::block_on(module_dir::registry(&modules))
+    let error = with_module_dirs(&device_dir, &[])
         .err()
         .expect("a record that does not read fails");
     let message = format!("{error:#}");
@@ -459,6 +478,50 @@ fn a_module_directory_s_records_describe_its_module() {
         "{message}"
     );
     std::fs::remove_dir_all(&device_dir).unwrap();
+}
+
+/// A runner given a module directory (`--module`) loads it after the device
+/// directory's, its records joining theirs: each module's record-typed export
+/// is described. One module both in the device directory and given is
+/// refused, naming both directories.
+#[test]
+fn a_runner_given_a_module_directory_describes_its_record_typed_exports() {
+    let elsewhere = device_dir("given-module-dir-elsewhere");
+    let given = write_module_dir(&elsewhere, "trigonometry", &header(), &records());
+    let device_dir = device_dir("given-module-dir");
+    write_module_dir(
+        &device_dir,
+        "compass",
+        &compass::header(wasm()),
+        &packaged::<compass::Module>(),
+    );
+
+    let arora = with_module_dirs(&device_dir, std::slice::from_ref(&given))
+        .expect("the device directory's module and the given one load")
+        .build()
+        .expect("the device builds with both");
+    for function in [
+        declared::ids::reading::FUNCTION,
+        compass::ids::bearing::FUNCTION,
+    ] {
+        assert_eq!(described_return(&arora, function), reading_ty());
+    }
+
+    let twin = write_module_dir(&device_dir, "trigonometry", &header(), &records());
+    let error = with_module_dirs(&device_dir, std::slice::from_ref(&given))
+        .err()
+        .expect("one module in two directories is refused");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains(&format!(
+            "module directories {} and {} both carry module 'test-rust-wasm'",
+            twin.display(),
+            given.display()
+        )),
+        "{message}"
+    );
+    std::fs::remove_dir_all(&device_dir).unwrap();
+    std::fs::remove_dir_all(&elsewhere).unwrap();
 }
 
 /// Two modules of different scopes sharing `Reading`, which states its
@@ -514,15 +577,7 @@ fn two_modules_sharing_a_type_load_together_on_one_device() {
             .get(&function)
             .unwrap_or_else(|| panic!("{function} is described"));
         assert_eq!(indexed.module_id, module);
-        assert_eq!(
-            indexed.function.return_ty,
-            FrozenTy::FrozenScalar(FrozenScalar {
-                reference: arora_types::record::FrozenReference {
-                    id: Reading::arora_type_id(),
-                    version: Reading::arora_type_version(),
-                },
-            })
-        );
+        assert_eq!(indexed.function.return_ty, reading_ty());
     }
     let called = arora
         .call(Call {

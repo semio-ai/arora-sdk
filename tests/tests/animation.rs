@@ -1,5 +1,5 @@
 //! The declared wasm guest and a host registration answer the same Calls, and
-//! the guest's module directory describes every export on a device.
+//! a device runner given the guest's module directory describes every export.
 use arora_animation_module::{
     animation::{self, ids},
     exports, AnimationModule, Clip, ClipKeypoint, ClipTrack, ClipTransition, PlayerState,
@@ -153,12 +153,13 @@ fn wasm_and_host_linked_animation_match_through_calls() {
     }
 }
 
-/// The module directory the guest ships in loads on a device, which describes
-/// every export from the module's record: the record-typed ones a stepping
-/// behavior calls (`step_values`, `player_states`) and the 2.0 clip loader
-/// with their record types, at the versions the declaration gives them.
+/// A device runner given the module directory the guest ships in
+/// (`--module`) loads it, and describes every export from the module's
+/// record: the record-typed ones a stepping behavior calls (`step_values`,
+/// `player_states`) and the 2.0 clip loader with their record types, at the
+/// versions the declaration gives them.
 #[test]
-fn the_guest_s_module_directory_describes_its_record_typed_exports() {
+fn a_runner_given_the_guest_s_module_directory_describes_its_record_typed_exports() {
     use arora_animation_module::{module_dir, StepValues};
     use arora_types::record::reference::FrozenReference;
     use arora_types::record::ty::{FrozenScalar, FrozenTy};
@@ -166,22 +167,24 @@ fn the_guest_s_module_directory_describes_its_record_typed_exports() {
     use std::future::Future;
     use std::task::{Context, Poll};
 
-    let dir = std::env::temp_dir().join("arora-animation-module-directory");
-    let _ = std::fs::remove_dir_all(&dir);
+    let root = std::env::temp_dir().join(format!(
+        "arora-animation-module-directory-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let device_dir = root.join("device");
+    let dir = root.join("animation");
     let guest = std::path::PathBuf::from(env!(
         "CARGO_CDYLIB_FILE_ARORA_ANIMATION_MODULE_arora_animation_module"
     ));
     module_dir::write(&dir, Some(&guest)).expect("the module directory is written");
 
-    let files = arora::module_dir::read(&dir).expect("the module directory reads");
-    let registry =
-        futures::executor::block_on(arora::module_dir::registry(std::slice::from_ref(&files)))
-            .expect("its records load");
-    let mut device = arora::Arora::builder()
-        .with_registry(registry)
-        .with_module(files.header, files.executable)
-        .build()
-        .expect("the record describes the header");
+    let mut device = futures::executor::block_on(
+        arora::Arora::builder().with_module_dirs(&device_dir, std::slice::from_ref(&dir)),
+    )
+    .expect("the module directory and its records load")
+    .build()
+    .expect("the record describes the header");
 
     let caller = device.caller();
     let mut methods = std::pin::pin!(caller.describe_methods(None));
@@ -220,7 +223,7 @@ fn the_guest_s_module_directory_describes_its_record_typed_exports() {
             },
         })
     );
-    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 /// The records `@vizij/animation-module` 4.1.0 publishes in the `vizij`

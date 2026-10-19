@@ -15,9 +15,10 @@
 //!
 //! The artifact's name is free — its extension names it — so a published
 //! artifact directory (a header beside its `.wasm`, and its records) is a
-//! module directory as is. A device loads every module directory under its
-//! device directory's `modules/` at start ([`in_device_dir`]), and any other
-//! the command line names (`--module`, [`DeviceCli::modules`](crate::DeviceCli::modules)).
+//! module directory as is. A device runner loads every module directory under
+//! its device directory's `modules/` at start ([`in_device_dir`]), then any
+//! other its command line names (`--module`), with
+//! [`AroraBuilder::with_module_dirs`](crate::AroraBuilder::with_module_dirs).
 //! The records of every module directory fill one registry ([`registry`]),
 //! which describes each module whose record it holds
 //! ([`AroraBuilder::with_registry`](crate::AroraBuilder::with_registry)).
@@ -74,11 +75,23 @@ impl ModuleFiles {
 /// module.
 pub async fn registry(modules: &[ModuleFiles]) -> Result<LocalRegistry> {
     let mut registry = LocalRegistry::new();
+    load_records(modules, &mut registry).await?;
+    Ok(registry)
+}
+
+/// Load into `registry` the records every one of `modules` carries in its
+/// `records/`, as [`registry`] does into an empty one: a record `registry`
+/// already holds identically is held once, and one it holds differently
+/// under the same id and version is an error naming the module.
+pub(crate) async fn load_records(
+    modules: &[ModuleFiles],
+    registry: &mut LocalRegistry,
+) -> Result<()> {
     for module in modules {
         let Some(records) = module.records_dir() else {
             continue;
         };
-        load_records_from_yaml_dir(&records, &mut registry)
+        load_records_from_yaml_dir(&records, registry)
             .await
             .with_context(|| {
                 format!(
@@ -93,7 +106,19 @@ pub async fn registry(modules: &[ModuleFiles]) -> Result<LocalRegistry> {
             module.header.name
         );
     }
-    Ok(registry)
+    Ok(())
+}
+
+/// Read the module directories a device carries: every one under
+/// `<device_dir>/modules` ([`in_device_dir`]), then each of `dirs`, in that
+/// order. One module in two of them is an error naming both directories.
+pub(crate) fn read_device_modules(device_dir: &Path, dirs: &[PathBuf]) -> Result<Vec<ModuleFiles>> {
+    let mut modules = in_device_dir(device_dir)?;
+    for dir in dirs {
+        modules.push(read(dir)?);
+    }
+    distinct(&modules)?;
+    Ok(modules)
 }
 
 /// Read every module directory under `<device_dir>/modules`, in name order. A
@@ -127,7 +152,7 @@ pub fn read(dir: &Path) -> Result<ModuleFiles> {
 /// Checks that no two of `modules` carry one module id: the engine keeps the
 /// first it loads and the method index the last, so a module in two
 /// directories is a configuration to refuse, not to resolve.
-pub(crate) fn distinct(modules: &[ModuleFiles]) -> Result<()> {
+fn distinct(modules: &[ModuleFiles]) -> Result<()> {
     let mut seen: HashMap<uuid::Uuid, &ModuleFiles> = HashMap::new();
     for module in modules {
         if let Some(first) = seen.insert(module.header.id, module) {
