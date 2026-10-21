@@ -407,3 +407,48 @@ pub(crate) fn literal(value: &Value) -> String {
         other => other.to_string(),
     }
 }
+
+/// The name a native control or status node shows as.
+fn native_name(function: Uuid) -> Option<&'static str> {
+    use crate::nodes::{
+        FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID,
+        SEQ_FUNCTION_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    };
+    Some(match function {
+        PARALLEL_FUNCTION_ID => "PARALLEL",
+        SEQ_FUNCTION_ID => "SEQUENCE",
+        SEQ_STAR_FUNCTION_ID => "SEQUENCE*",
+        FALLBACK_FUNCTION_ID => "FALLBACK",
+        SUCCEED_FUNCTION_ID => "SUCCEED",
+        FAIL_FUNCTION_ID => "FAIL",
+        RUN_FUNCTION_ID => "RUNNING",
+        _ => return None,
+    })
+}
+
+impl crate::BehaviorTree {
+    /// The tree as text: one node per line, its children indented under it,
+    /// a control node by its name and any other node as the call it makes.
+    pub fn display(&self, names: Names) -> String {
+        fn write(
+            tree: &crate::BehaviorTree,
+            node: &Node,
+            names: Names,
+            depth: usize,
+            out: &mut String,
+        ) {
+            out.push_str(&"  ".repeat(depth));
+            match native_name(node.function) {
+                Some(name) => out.push_str(name),
+                None => out.push_str(&node.display(names).to_string()),
+            }
+            out.push('\n');
+            for child in node.children.iter().flatten() {
+                write(tree, &tree.node_index[child], names, depth + 1, out);
+            }
+        }
+        let mut out = String::new();
+        write(self, &self.root, names, 0, &mut out);
+        out
+    }
+}

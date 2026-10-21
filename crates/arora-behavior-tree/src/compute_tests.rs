@@ -23,7 +23,7 @@ use crate::{load_behavior_tree_with_compute, BehaviorTree, BehaviorTreeRuntime, 
 use arora_behavior::Status;
 
 /// The variable id of the store key or tree-local name `name`.
-fn var(name: &str) -> Uuid {
+pub(crate) fn var(name: &str) -> Uuid {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     name.hash(&mut hasher);
@@ -31,28 +31,28 @@ fn var(name: &str) -> Uuid {
 }
 
 /// The variable `name`: a store key, or tree-local when it starts with `.`.
-fn key(name: &str) -> Expression {
+pub(crate) fn key(name: &str) -> Expression {
     Expression::VariableId(var(name))
 }
 
-fn id(node: u128) -> Uuid {
+pub(crate) fn id(node: u128) -> Uuid {
     Uuid::from_u128(node)
 }
 
 /// `#node`: a compute node's return value.
-fn read(node: u128) -> Expression {
+pub(crate) fn read(node: u128) -> Expression {
     port(node, _RET_PARAM_ID)
 }
 
 /// `#node.parameter`: a mutable parameter's value after the node's last call.
-fn port(node: u128, parameter: Uuid) -> Expression {
+pub(crate) fn port(node: u128, parameter: Uuid) -> Expression {
     Expression::Computed(NodeParameterId {
         node: id(node),
         parameter,
     })
 }
 
-fn compute(
+pub(crate) fn compute(
     node: u128,
     function: Uuid,
     inputs: Vec<(Uuid, Expression)>,
@@ -68,12 +68,12 @@ fn compute(
 }
 
 /// `below(x, limit: limit)`, a leaf of the tree.
-fn below(node_id: u128, x: Expression, limit: f64) -> Node {
+pub(crate) fn below(node_id: u128, x: Expression, limit: f64) -> Node {
     node(node_id, BELOW, vec![(BELOW_X, x), (BELOW_LIMIT, f(limit))])
 }
 
 /// The names of every variable the tests use, for the resolver and display.
-const NAMES: &[&str] = &[
+pub(crate) const NAMES: &[&str] = &[
     "sensor/distance",
     "left",
     "right",
@@ -87,7 +87,7 @@ const NAMES: &[&str] = &[
     ".v",
 ];
 
-fn names() -> HashMap<Uuid, String> {
+pub(crate) fn names() -> HashMap<Uuid, String> {
     NAMES
         .iter()
         .map(|name| (var(name), name.to_string()))
@@ -95,23 +95,27 @@ fn names() -> HashMap<Uuid, String> {
 }
 
 /// Build a tree whose variables are the store's keys, but for the `.` ones.
-fn build(store: &SimpleDataStore, nodes: Vec<Node>, compute: Vec<ComputeNode>) -> BehaviorTree {
+pub(crate) fn build(
+    store: &SimpleDataStore,
+    nodes: Vec<Node>,
+    compute: Vec<ComputeNode>,
+) -> BehaviorTree {
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
     load_behavior_tree_with_compute(nodes, compute, &resolver, &names()).expect("the tree builds")
 }
 
-fn set(store: &SimpleDataStore, name: &str, value: f64) {
+pub(crate) fn set(store: &SimpleDataStore, name: &str, value: f64) {
     store
         .write(StateChange::set(name, Value::F64(value)))
         .expect("the store writes");
 }
 
-fn get(store: &SimpleDataStore, name: &str) -> Option<Value> {
+pub(crate) fn get(store: &SimpleDataStore, name: &str) -> Option<Value> {
     store.read(&[Key::from(name)]).remove(0)
 }
 
 /// How many calls each function received since the last time this was asked.
-fn take(calls: &Calls) -> HashMap<&'static str, usize> {
+pub(crate) fn take(calls: &Calls) -> HashMap<&'static str, usize> {
     let mut counts = HashMap::new();
     for (name, _) in calls.borrow_mut().drain(..) {
         *counts.entry(name).or_insert(0) += 1;
@@ -121,7 +125,7 @@ fn take(calls: &Calls) -> HashMap<&'static str, usize> {
 
 /// `#raw = mul(a: {sensor/distance}, b: 100)`, `#cm = clamp(x: #raw, lo: 0)`:
 /// the distance in centimetres, never negative.
-fn centimetres_nodes() -> Vec<ComputeNode> {
+pub(crate) fn centimetres_nodes() -> Vec<ComputeNode> {
     vec![
         compute(
             10,
@@ -140,7 +144,7 @@ fn centimetres_nodes() -> Vec<ComputeNode> {
 
 /// Three conditions under a parallel, each reading the distance in
 /// centimetres against its own limit.
-fn three_readers(x: impl Fn() -> Expression) -> Vec<Node> {
+pub(crate) fn three_readers(x: impl Fn() -> Expression) -> Vec<Node> {
     vec![
         control(1, PARALLEL_FUNCTION_ID, &[2, 3, 4]),
         below(2, x(), 10.0),
@@ -177,7 +181,7 @@ fn a_node_read_by_several_leaves_calls_its_function_once_per_tick() {
 
 /// `#l = mul({left}, 2)`, `#r = mul({right}, 3)`, `#sum = add(#l, #r)`, read
 /// by one leaf.
-fn two_branches(store: &SimpleDataStore) -> BehaviorTree {
+pub(crate) fn two_branches(store: &SimpleDataStore) -> BehaviorTree {
     build(
         store,
         vec![below(1, read(22), 100.0)],

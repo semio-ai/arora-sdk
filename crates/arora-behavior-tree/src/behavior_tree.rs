@@ -2,6 +2,9 @@ pub mod behavior;
 #[cfg(test)]
 mod call_expression_tests;
 pub mod compute;
+pub mod compute_parallel;
+#[cfg(test)]
+mod compute_parallel_tests;
 #[cfg(test)]
 mod compute_tests;
 pub mod core_nodes;
@@ -18,6 +21,7 @@ pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
 use compute::ComputeGraph;
 pub use compute::{ComputeNode, ComputePlan};
+pub use compute_parallel::{edge_variable, load_behavior_tree_with_compute_as_leaves};
 
 use crate::display::{stated_id, Names};
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
