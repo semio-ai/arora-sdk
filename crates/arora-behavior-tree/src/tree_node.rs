@@ -85,7 +85,7 @@ impl TreeNode {
                 resolver,
                 names,
             )?;
-            arguments.insert(param_id, expression);
+            arguments.insert(param_id, crate::with_call_site_cells(expression));
         }
         Ok(Rc::new(Node {
             id: node_id,
