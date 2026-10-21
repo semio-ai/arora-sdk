@@ -1,6 +1,9 @@
 pub mod behavior;
 #[cfg(test)]
 mod call_expression_tests;
+pub mod compute;
+#[cfg(test)]
+mod compute_tests;
 pub mod core_nodes;
 pub mod display;
 pub mod error;
@@ -14,6 +17,8 @@ mod tests;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
+use compute::ComputeGraph;
+pub use compute::{ComputeNode, ComputePlan};
 
 use crate::display::{stated_id, Names};
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
@@ -58,6 +63,8 @@ pub struct BehaviorTree {
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     /// Each `Unpack` and `Scatter` node's outputs, bound at load.
     outputs: HashMap<Uuid, Outputs>,
+    /// The compute nodes the tree reads, held beside it.
+    compute: Rc<ComputeGraph>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -71,6 +78,49 @@ enum Outputs {
 }
 
 impl BehaviorTree {
+    /// How the tree's compute nodes are evaluated.
+    pub fn compute_plan(&self) -> &ComputePlan {
+        self.compute.plan()
+    }
+
+    /// How many times the compute node `id` has called its function.
+    pub fn compute_calls(&self, id: Uuid) -> Option<u64> {
+        self.compute.calls(id)
+    }
+
+    /// The tree's compute nodes as text, one per line, inputs before their
+    /// readers.
+    pub fn display_compute(&self, names: Names) -> String {
+        self.compute
+            .nodes()
+            .map(|node| format!("{}\n", node.display(names)))
+            .collect()
+    }
+
+    /// Tick `root` once, its compute nodes around it: they are out of date
+    /// until read, and the sinks are brought up to date and written after the
+    /// tree has ticked.
+    fn tick_root(
+        &self,
+        root: &TickId,
+        caller: &mut dyn CallBridge,
+    ) -> Result<Status, BehaviorTreeError> {
+        self.compute.begin_tick();
+        let status = root.tick(caller)?;
+        let variables = self.variables.borrow();
+        let calls = FunctionIndex::new();
+        self.compute.tick_sinks(
+            Scope {
+                variables: &variables,
+                node_parameters_variables: &self.node_arg_variables,
+                calls: &calls,
+                compute: &self.compute,
+            },
+            caller,
+        )?;
+        Ok(status)
+    }
+
     /// Take over the state `previous` holds for every node of this tree that
     /// `fresh` does not name: a tree built again from a changed graph goes on
     /// where the previous one was for the nodes the change left in place.
@@ -117,6 +167,7 @@ impl BehaviorTree {
                     // unwrapped every selection.
                     Expression::NodeArgument(_)
                     | Expression::Variable(_)
+                    | Expression::Computed(_)
                     | Expression::Select { .. } => {}
                 }
             }
@@ -150,6 +201,7 @@ fn take_local(cell: &VariableCell, held: &VariableCell) {
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,
     tick: TickId,
+    tree: &'a BehaviorTree,
 }
 
 impl<'a> BehaviorTreeRuntime<'a> {
@@ -160,12 +212,14 @@ impl<'a> BehaviorTreeRuntime<'a> {
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
         let mut callables = Vec::new();
+        tree.compute.lower(functions)?;
         let tick = setup_tick_function(
             tree.root.clone(),
             &tree.node_index,
             functions,
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
+            tree.compute.clone(),
             &tree.outputs,
             caller,
             if trace {
@@ -175,11 +229,11 @@ impl<'a> BehaviorTreeRuntime<'a> {
             },
             &mut callables,
         )?;
-        Ok(Self { caller, tick })
+        Ok(Self { caller, tick, tree })
     }
 
     pub fn tick(&mut self) -> Result<Status, BehaviorTreeError> {
-        self.tick.tick(self.caller)
+        self.tree.tick_root(&self.tick, self.caller)
     }
 }
 
@@ -211,12 +265,14 @@ pub fn lower_behavior_tree(
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
     let mut callables = Vec::new();
+    tree.compute.lower(functions)?;
     let root = setup_tick_function(
         tree.root.clone(),
         &tree.node_index,
         functions,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
+        tree.compute.clone(),
         &tree.outputs,
         caller,
         if trace {
@@ -238,7 +294,7 @@ impl LoweredTree {
     /// children and returns the root's status — [`Status::Running`] means "see
     /// you next tick", never "spin".
     pub fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-        self.root.tick(caller)
+        self.tree.tick_root(&self.root, caller)
     }
 
     /// The lowered tree, for callers that inspect its cells.
@@ -288,6 +344,7 @@ fn setup_tick_function(
     functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    compute: Rc<ComputeGraph>,
     outputs: &HashMap<Uuid, Outputs>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
@@ -316,6 +373,7 @@ fn setup_tick_function(
                 functions,
                 variables.clone(),
                 node_arg_variables.clone(),
+                compute.clone(),
                 outputs,
                 caller,
                 trace,
@@ -334,6 +392,7 @@ fn setup_tick_function(
             .collect(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
+        compute,
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
         trace,
@@ -394,7 +453,7 @@ fn tick_builtin(
             }
         })?;
         let value = compute_expression(scope, expression, caller, &node_parameter)?;
-        if let (Expression::Call(_), Some(cell)) = (
+        if let (Expression::Call(_) | Expression::Computed(_), Some(cell)) = (
             expression,
             scope.node_parameters_variables.get(&node_parameter),
         ) {
@@ -637,6 +696,7 @@ fn tick(
     argument_order: &[Uuid],
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    compute: &ComputeGraph,
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: Rc<Node>,
@@ -660,6 +720,7 @@ fn tick(
             variables: &variables.borrow(),
             node_parameters_variables: &node_parameters_variables,
             calls,
+            compute,
         },
         outputs,
         child_tick_ids,
@@ -752,6 +813,7 @@ fn tick(
             variables: &variables,
             node_parameters_variables: &node_parameters_variables,
             calls,
+            compute,
         };
         for param_id in argument_order {
             let value_expression = &node.arguments[param_id];
@@ -762,10 +824,13 @@ fn tick(
             let variable =
                 get_node_parameter_variable(&node_parameter, &node_parameters_variables)?;
 
-            // If the parameter expression is a call, perform the call to update the value.
-            if let Expression::Call(parameter_call_expression) = value_expression {
-                let value =
-                    call_expression(scope, parameter_call_expression, caller, &node_parameter)?;
+            // A call, or a compute node's output, is computed into the
+            // argument's cell.
+            if matches!(
+                value_expression,
+                Expression::Call(_) | Expression::Computed(_)
+            ) {
+                let value = compute_expression(scope, value_expression, caller, &node_parameter)?;
                 variable.set_opt(Some(value).filter(|value| *value != Value::Unit));
             };
 
@@ -826,7 +891,7 @@ fn tick(
 }
 
 /// Whether `function` declares its parameter `parameter` as an optional.
-fn is_optional(function: &Function, parameter: &Uuid) -> bool {
+pub(crate) fn is_optional(function: &Function, parameter: &Uuid) -> bool {
     function
         .parameters
         .get(parameter)
@@ -839,7 +904,7 @@ fn is_optional(function: &Function, parameter: &Uuid) -> bool {
 /// value means, and a value passes framed as `Some(value)` (unless it already
 /// is an optional). To any other parameter, an absent value passes `()`, which
 /// the function refuses unless it takes it.
-fn argument_value(value: Option<Value>, optional: bool) -> Value {
+pub(crate) fn argument_value(value: Option<Value>, optional: bool) -> Value {
     match (value, optional) {
         (Some(value @ Value::Option(_)), _) => value,
         (Some(value), true) => Value::Option(Some(Box::new(value))),
@@ -853,7 +918,7 @@ fn argument_value(value: Option<Value>, optional: bool) -> Value {
 /// onto the cell's presence: `Some(v)` writes `v` (creating the store key if
 /// it did not exist), `None` unsets the cell — and leaves an already-unset one
 /// untouched. Any other value is written as is.
-fn write_back(variable: &VariableCell, value: Value, optional: bool) {
+pub(crate) fn write_back(variable: &VariableCell, value: Value, optional: bool) {
     match value {
         Value::Option(Some(value)) if optional => variable.set(*value),
         Value::Option(None) if optional => {
@@ -907,6 +972,7 @@ struct TickFunction {
     argument_order: Rc<[Uuid]>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    compute: Rc<ComputeGraph>,
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
     children: Vec<TickId>,
@@ -922,6 +988,7 @@ impl Tickable for TickFunction {
             &self.argument_order,
             self.locals.clone(),
             self.node_arg_variables.clone(),
+            &self.compute,
             self.outputs.as_ref(),
             &self.children,
             self.node.clone(),
@@ -954,6 +1021,19 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 /// ([`build_behavior_tree`](crate::graph::build_behavior_tree)) uses.
 pub fn load_behavior_tree_nodes_with(
     nodes: Vec<Node>,
+    resolver: &VariableResolver,
+    names: &HashMap<Uuid, String>,
+) -> Result<BehaviorTree, BehaviorTreeError> {
+    load_behavior_tree_with_compute(nodes, Vec::new(), resolver, names)
+}
+
+/// Like [`load_behavior_tree_nodes_with`], with `compute` nodes held beside
+/// the tree, which its nodes read through [`Expression::Computed`]. See
+/// [`compute`] for how they are evaluated, and
+/// [`BehaviorTree::compute_plan`] for which of them are.
+pub fn load_behavior_tree_with_compute(
+    nodes: Vec<Node>,
+    compute: Vec<ComputeNode>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) -> Result<BehaviorTree, BehaviorTreeError> {
@@ -1040,6 +1120,14 @@ pub fn load_behavior_tree_nodes_with(
         }
     }
 
+    let mut tree_reads = Vec::new();
+    for node in node_index.values() {
+        for argument in node.arguments.values() {
+            compute::references_in(argument, &mut tree_reads);
+        }
+    }
+    let compute = ComputeGraph::build(compute, tree_reads, &mut variables, resolver, names)?;
+
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
             message: "behavior tree has no nodes".to_string(),
@@ -1048,6 +1136,7 @@ pub fn load_behavior_tree_nodes_with(
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
         outputs,
+        compute: Rc::new(compute),
     })
 }
 
@@ -1209,25 +1298,41 @@ pub(crate) fn setup_node_parameter_variable(
         Expression::Call(_) => {
             // The variables the call reads, at any depth, get their cells now:
             // a call reads them when the node ticks.
-            let mut calls = Vec::new();
-            calls_in(argument_expression, &mut calls);
-            for call in calls {
-                let parts = [&call.module, &call.function].into_iter().chain(
-                    call.arguments
-                        .iter()
-                        .flat_map(|(parameter, argument)| [parameter, argument]),
-                );
-                for part in parts {
-                    if let Expression::VariableId(id) = selected_source(part) {
-                        variable_cell(*id, variables, resolver, names);
-                    }
-                }
-            }
+            bind_variables(argument_expression, variables, resolver, names);
             VariableCell::local()
         }
+        // The compute node keeps its output: the argument's cell holds what
+        // the node read last.
+        Expression::Computed(_) => VariableCell::local(),
     };
     node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
     Ok(variable)
+}
+
+/// Give every variable `expression` reads, at any depth, its cell.
+pub(crate) fn bind_variables(
+    expression: &Expression,
+    variables: &mut HashMap<Uuid, VariableCell>,
+    resolver: &VariableResolver,
+    names: &HashMap<Uuid, String>,
+) {
+    match expression {
+        Expression::VariableId(id) => {
+            variable_cell(*id, variables, resolver, names);
+        }
+        Expression::Select { source, .. } => bind_variables(source, variables, resolver, names),
+        Expression::Call(call) => {
+            let parts = [&call.module, &call.function].into_iter().chain(
+                call.arguments
+                    .iter()
+                    .flat_map(|(parameter, argument)| [parameter, argument]),
+            );
+            for part in parts {
+                bind_variables(part, variables, resolver, names);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The cell of the variable `variable_id`, created at its first reference:
@@ -1236,7 +1341,7 @@ pub(crate) fn setup_node_parameter_variable(
 /// tree-local name never reaches the resolver. The cell is keyed by its own
 /// id, so every reference to the same `{var}` shares it (see the
 /// `shared_variable_id_resolves_to_one_cell` regression test).
-fn variable_cell(
+pub(crate) fn variable_cell(
     variable_id: Uuid,
     variables: &mut HashMap<Uuid, VariableCell>,
     resolver: &VariableResolver,
@@ -1259,13 +1364,15 @@ fn variable_cell(
 /// of the nodes' arguments, and the signatures of the functions its calls
 /// state.
 #[derive(Clone, Copy)]
-struct Scope<'a> {
-    variables: &'a HashMap<Uuid, VariableCell>,
-    node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
-    calls: &'a FunctionIndex,
+pub(crate) struct Scope<'a> {
+    pub(crate) variables: &'a HashMap<Uuid, VariableCell>,
+    pub(crate) node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+    pub(crate) calls: &'a FunctionIndex,
+    /// The tree's compute nodes, which a [`Expression::Computed`] reads.
+    pub(crate) compute: &'a ComputeGraph,
 }
 
-fn compute_expression(
+pub(crate) fn compute_expression(
     scope: Scope,
     expression: &Expression,
     caller: &mut dyn CallBridge,
@@ -1280,6 +1387,7 @@ fn compute_expression(
             variable.get_or_unit()
         }
         Expression::Call(call) => call_expression(scope, call, caller, node_parameter)?,
+        Expression::Computed(port) => scope.compute.read(port, scope, caller)?,
         Expression::NodeArgument(other_node_parameter) => {
             let variable =
                 get_node_parameter_variable(other_node_parameter, scope.node_parameters_variables)?;
@@ -1345,7 +1453,7 @@ fn try_into_uuid(value: &Value, variable_id: &Option<&Uuid>) -> Result<Uuid, Beh
 /// anonymous cell or node argument its argument reads. A literal argument is
 /// an anonymous cell once the tree is built ([`with_call_site_cells`]). A
 /// selection or a computed value has no cell of its own.
-fn written_cell(scope: Scope, argument: &Expression) -> Option<VariableCell> {
+pub(crate) fn written_cell(scope: Scope, argument: &Expression) -> Option<VariableCell> {
     match argument {
         Expression::Variable(cell) => Some(cell.clone()),
         Expression::VariableId(id) => scope.variables.get(id).cloned(),
@@ -1460,27 +1568,41 @@ fn calls_in<'e>(expression: &'e Expression, found: &mut Vec<&'e CallExpression>)
 /// Refuses, naming the call:
 /// - a call to the interpreter module's functions, which a tree does not call;
 /// - an argument for a parameter the function does not have;
-/// - a mutable parameter fed by a selection or a computed value: the function
+/// - a mutable parameter fed by a selection, a call or a compute node's output: the function
 ///   writes it back, and neither has a cell to hold what it writes. A literal
 ///   holds it at the call site, a variable or a node argument in its cell.
 fn call_signatures(
     node: &Node,
     functions: &FunctionIndex,
 ) -> Result<FunctionIndex, BehaviorTreeError> {
-    let mut signatures = FunctionIndex::new();
+    let mut signatures = expression_call_signatures(
+        &format!("node {}", node.id),
+        node.arguments.values(),
+        functions,
+    )?;
     if let Some(function) = functions.get(&node.function) {
         signatures.insert(node.function, function.clone());
     }
+    Ok(signatures)
+}
+
+/// The signatures of the functions the calls in `arguments` state, checked as
+/// [`call_signatures`] says; `owner` names what holds them in a refusal.
+pub(crate) fn expression_call_signatures<'e>(
+    owner: &str,
+    arguments: impl IntoIterator<Item = &'e Expression>,
+    functions: &FunctionIndex,
+) -> Result<FunctionIndex, BehaviorTreeError> {
+    let mut signatures = FunctionIndex::new();
     let mut calls = Vec::new();
-    for argument in node.arguments.values() {
+    for argument in arguments {
         calls_in(argument, &mut calls);
     }
     let names = Names::functions(functions);
     let refuse = |call: &CallExpression, why: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
             message: format!(
-                "node {}: {} {why}",
-                node.id,
+                "{owner}: {} {why}",
                 Expression::Call(Box::new(call.clone())).display(names)
             ),
         })
@@ -1512,7 +1634,10 @@ fn call_signatures(
                 );
             };
             if declared.mutable
-                && matches!(argument, Expression::Select { .. } | Expression::Call(_))
+                && matches!(
+                    argument,
+                    Expression::Select { .. } | Expression::Call(_) | Expression::Computed(_)
+                )
             {
                 return refuse(
                     call,

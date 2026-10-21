@@ -129,6 +129,7 @@ impl TreeNode {
             variables: Rc::new(RefCell::new(variables)),
             node_arg_variables: Rc::new(node_arg_variables),
             outputs,
+            compute: Rc::new(crate::compute::ComputeGraph::empty()),
         })
     }
 }

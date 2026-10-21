@@ -19,6 +19,7 @@
 //! | another node's argument | `@<node>.<parameter>` |
 //! | a selection | `source[path]` |
 //! | a call | `function(parameter: value, …)` |
+//! | a compute node's output | `#node`, its return value; `#node.parameter`, a mutable parameter's value |
 //!
 //! A call names its function and parameters from the [`Names`] it is shown
 //! with. Without them, or for a function they do not have, it shows the ids:
@@ -33,6 +34,10 @@
 //! A node shows as the call it makes: `function(parameter: value, …)`, with
 //! `{target} = ` in front when it binds its return (`_ret`). Its children are
 //! not shown.
+//!
+//! A compute node shows as `#node = function(parameter: value, …)`, with
+//! ` -> {output}` after it when it writes a variable and `volatile ` before
+//! the function when it is volatile.
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
@@ -40,6 +45,7 @@ use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_types::value::Value;
 use uuid::Uuid;
 
+use crate::compute::ComputeNode;
 use crate::schema::{CallExpression, Expression, Node, _RET_PARAM_ID};
 
 /// The width past which `{:#}` breaks a call over several lines.
@@ -53,6 +59,8 @@ pub struct Names<'a> {
     pub functions: Option<&'a FunctionIndex>,
     /// The variables' names, by id.
     pub variables: Option<&'a HashMap<Uuid, String>>,
+    /// The compute nodes' names, by id.
+    pub compute: Option<&'a HashMap<Uuid, String>>,
 }
 
 impl<'a> Names<'a> {
@@ -60,8 +68,28 @@ impl<'a> Names<'a> {
     pub fn functions(functions: &'a FunctionIndex) -> Self {
         Self {
             functions: Some(functions),
-            variables: None,
+            ..Self::default()
         }
+    }
+
+    fn compute_node(&self, id: Uuid) -> String {
+        self.compute
+            .and_then(|nodes| nodes.get(&id))
+            .cloned()
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// A parameter's name, from whichever function has it: parameter ids
+    /// are unique.
+    fn any_parameter(&self, id: Uuid) -> String {
+        self.functions
+            .and_then(|functions| {
+                functions
+                    .values()
+                    .find_map(|function| function.function.parameters.get(&id))
+            })
+            .map(|parameter| parameter.name.clone())
+            .unwrap_or_else(|| id.to_string())
     }
 
     fn function(&self, id: Uuid) -> Option<&'a ModuleFunction> {
@@ -147,6 +175,52 @@ impl Display for NodeDisplay<'_> {
     }
 }
 
+/// A [`ComputeNode`] shown with [`Names`]; see the [module docs](self).
+pub struct ComputeNodeDisplay<'a> {
+    node: &'a ComputeNode,
+    names: Names<'a>,
+}
+
+impl ComputeNode {
+    /// This node as text, with `names` in place of ids.
+    pub fn display<'a>(&'a self, names: Names<'a>) -> ComputeNodeDisplay<'a> {
+        ComputeNodeDisplay { node: self, names }
+    }
+}
+
+impl Display for ComputeNodeDisplay<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let node = self.node;
+        let signature = self.names.function(node.function);
+        let target = format!("#{} = ", self.names.compute_node(node.id));
+        let head = format!(
+            "{}{}",
+            if node.volatile { "volatile " } else { "" },
+            signature
+                .map(|signature| signature.function_name.clone())
+                .unwrap_or_else(|| node.function.to_string())
+        );
+        let arguments: Vec<(String, &Expression)> = node
+            .inputs
+            .iter()
+            .map(|(parameter, input)| (parameter_name(signature, *parameter), input))
+            .collect();
+        f.write_str(&target)?;
+        f.write_str(&call_text(
+            &head,
+            &arguments,
+            &self.names,
+            f.alternate(),
+            0,
+            target.len(),
+        ))?;
+        if let Some(output) = node.output {
+            write!(f, " -> {{{}}}", self.names.variable(output))?;
+        }
+        Ok(())
+    }
+}
+
 /// A node's arguments in its function's parameter order, then any others by
 /// id: a node holds them in a map.
 pub(crate) fn ordered<'e>(
@@ -209,6 +283,14 @@ fn expression(expression: &Expression, names: &Names, pretty: bool, indent: usiz
             )
         }
         Expression::Call(call) => call_expression(call, names, pretty, indent),
+        Expression::Computed(port) if port.parameter == _RET_PARAM_ID => {
+            format!("#{}", names.compute_node(port.node))
+        }
+        Expression::Computed(port) => format!(
+            "#{}.{}",
+            names.compute_node(port.node),
+            names.any_parameter(port.parameter)
+        ),
     }
 }
 

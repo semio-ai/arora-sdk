@@ -800,10 +800,10 @@ fn groot_expression_to_link_source(
             source: Box::new(groot_expression_to_link_source(source)?),
             path: path.clone(),
         },
-        Expression::Variable(_) | Expression::Call(_) => {
+        Expression::Variable(_) | Expression::Call(_) | Expression::Computed(_) => {
             return Err(BehaviorTreeError::InconsistentTreeError {
-                message: "Groot lowering does not support runtime variable cells or nested \
-                          call expressions"
+                message: "Groot lowering does not support runtime variable cells, nested \
+                          call expressions or compute nodes"
                     .to_string(),
             })
         }
