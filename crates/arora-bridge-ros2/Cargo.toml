@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "11.0.2"
+version = "11.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -20,8 +20,8 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "
 # `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
 # where the bridge creates hash-keyed publishers. 2.3 carries the
 # `vizij_face_msgs`, `hri_actions_msgs` and `diagnostic_msgs` types the
-# ROS4HRI preset binds.
-arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2.3" }
+# ROS4HRI preset binds; 2.4 is on ros2-client 0.14, the line this crate speaks.
+arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2.4" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -30,7 +30,7 @@ log = "0.4"
 # It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
 # compatible), chosen by this crate's `dds` / `zenoh` features (see [features]);
 # `jazzy` selects the ROS 2 distro wire format and is always on.
-ros2-client = { package = "ros2-client-multi-rmw", version = "0.13.1", default-features = false, features = ["jazzy"] }
+ros2-client = { package = "ros2-client-multi-rmw", version = "0.14", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }

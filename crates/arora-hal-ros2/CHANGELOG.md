@@ -4,6 +4,17 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.6.0] - 2026-10-21
+
+### Changed
+
+- Requires `ros2-client-multi-rmw` 0.14 (RustDDS 0.14), the line
+  arora-bridge-ros2 11.1 speaks, so a runner serving both resolves one
+  ros2-client. On DDS a reliable writer's send window is now
+  `ResourceLimits::max_samples` (8192 when unset) rather than its history
+  depth: a publish no longer blocks for its blocking time, then drops the
+  sample, each time a reader is behind by one.
+
 ## [5.5.0] - 2026-10-19
 
 ### Added

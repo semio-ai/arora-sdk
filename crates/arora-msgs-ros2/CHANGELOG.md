@@ -2,6 +2,16 @@
 
 All notable changes.
 
+## [2.4.0] - 2026-10-21
+
+### Changed
+
+- Requires `ros2-client-multi-rmw` 0.14 (RustDDS 0.14), the line
+  arora-bridge-ros2 11.1 and arora-hal-ros2 5.6 build on. The `interop` hash
+  reads ros2-client's `type_description`, so a build that also depends on
+  ros2-client holds one copy of it only when every requirement names the same
+  line.
+
 ## [2.3.0] - 2026-10-12
 
 ### Added
