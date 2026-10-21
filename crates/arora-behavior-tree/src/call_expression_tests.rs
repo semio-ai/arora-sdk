@@ -27,38 +27,38 @@ use crate::nodes::{
 use crate::schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use crate::{load_behavior_tree_nodes, BehaviorTree, BehaviorTreeRuntime};
 
-const SENSORS: Uuid = Uuid::from_u128(0x5E00);
-const DISTANCE: Uuid = Uuid::from_u128(0x5E01);
-const BATTERY: Uuid = Uuid::from_u128(0x5E02);
+pub(crate) const SENSORS: Uuid = Uuid::from_u128(0x5E00);
+pub(crate) const DISTANCE: Uuid = Uuid::from_u128(0x5E01);
+pub(crate) const BATTERY: Uuid = Uuid::from_u128(0x5E02);
 
-const MATH: Uuid = Uuid::from_u128(0x3A00);
-const ADD: Uuid = Uuid::from_u128(0x3A01);
-const ADD_A: Uuid = Uuid::from_u128(0x3A11);
-const ADD_B: Uuid = Uuid::from_u128(0x3A12);
-const MUL: Uuid = Uuid::from_u128(0x3A02);
-const MUL_A: Uuid = Uuid::from_u128(0x3A21);
-const MUL_B: Uuid = Uuid::from_u128(0x3A22);
-const CLAMP: Uuid = Uuid::from_u128(0x3A03);
-const CLAMP_X: Uuid = Uuid::from_u128(0x3A31);
-const CLAMP_LO: Uuid = Uuid::from_u128(0x3A32);
-const CLAMP_HI: Uuid = Uuid::from_u128(0x3A33);
+pub(crate) const MATH: Uuid = Uuid::from_u128(0x3A00);
+pub(crate) const ADD: Uuid = Uuid::from_u128(0x3A01);
+pub(crate) const ADD_A: Uuid = Uuid::from_u128(0x3A11);
+pub(crate) const ADD_B: Uuid = Uuid::from_u128(0x3A12);
+pub(crate) const MUL: Uuid = Uuid::from_u128(0x3A02);
+pub(crate) const MUL_A: Uuid = Uuid::from_u128(0x3A21);
+pub(crate) const MUL_B: Uuid = Uuid::from_u128(0x3A22);
+pub(crate) const CLAMP: Uuid = Uuid::from_u128(0x3A03);
+pub(crate) const CLAMP_X: Uuid = Uuid::from_u128(0x3A31);
+pub(crate) const CLAMP_LO: Uuid = Uuid::from_u128(0x3A32);
+pub(crate) const CLAMP_HI: Uuid = Uuid::from_u128(0x3A33);
 
-const FILTERS: Uuid = Uuid::from_u128(0xF100);
-const SMOOTH: Uuid = Uuid::from_u128(0xF101);
-const SMOOTH_X: Uuid = Uuid::from_u128(0xF111);
-const SMOOTH_ALPHA: Uuid = Uuid::from_u128(0xF112);
-const SMOOTH_STATE: Uuid = Uuid::from_u128(0xF113);
+pub(crate) const FILTERS: Uuid = Uuid::from_u128(0xF100);
+pub(crate) const SMOOTH: Uuid = Uuid::from_u128(0xF101);
+pub(crate) const SMOOTH_X: Uuid = Uuid::from_u128(0xF111);
+pub(crate) const SMOOTH_ALPHA: Uuid = Uuid::from_u128(0xF112);
+pub(crate) const SMOOTH_STATE: Uuid = Uuid::from_u128(0xF113);
 
-const CHECKS: Uuid = Uuid::from_u128(0xC400);
-const BELOW: Uuid = Uuid::from_u128(0xC401);
-const BELOW_X: Uuid = Uuid::from_u128(0xC411);
-const BELOW_LIMIT: Uuid = Uuid::from_u128(0xC412);
+pub(crate) const CHECKS: Uuid = Uuid::from_u128(0xC400);
+pub(crate) const BELOW: Uuid = Uuid::from_u128(0xC401);
+pub(crate) const BELOW_X: Uuid = Uuid::from_u128(0xC411);
+pub(crate) const BELOW_LIMIT: Uuid = Uuid::from_u128(0xC412);
 
-fn f64_ty() -> FrozenTy {
+pub(crate) fn f64_ty() -> FrozenTy {
     FrozenTy::from(PrimitiveKind::F64)
 }
 
-fn parameter(name: &str, ty: FrozenTy, mutable: bool) -> Parameter {
+pub(crate) fn parameter(name: &str, ty: FrozenTy, mutable: bool) -> Parameter {
     Parameter {
         name: name.to_string(),
         ty,
@@ -66,7 +66,7 @@ fn parameter(name: &str, ty: FrozenTy, mutable: bool) -> Parameter {
     }
 }
 
-fn function(
+pub(crate) fn function(
     module: Uuid,
     id: Uuid,
     name: &str,
@@ -88,7 +88,7 @@ fn function(
 }
 
 /// The four modules' functions, as the device's index describes them.
-fn index() -> FunctionIndex {
+pub(crate) fn index() -> FunctionIndex {
     let number = |name| parameter(name, f64_ty(), false);
     let optional = FrozenTy::FrozenOption(FrozenOption {
         element: Box::new(f64_ty()),
@@ -138,25 +138,25 @@ fn index() -> FunctionIndex {
 }
 
 /// What the engine was asked: each call's function name and arguments.
-type Calls = Rc<RefCell<Vec<(&'static str, HashMap<Uuid, Value>)>>>;
+pub(crate) type Calls = Rc<RefCell<Vec<(&'static str, HashMap<Uuid, Value>)>>>;
 
 /// A fake engine hosting the four modules. A call naming a function under
 /// another module than its own is not found, as the engine dispatches on both.
 #[derive(Default)]
-struct Engine {
+pub(crate) struct Engine {
     registered: HashMap<u64, Rc<dyn Callable>>,
     next_id: u64,
-    sensors: Rc<RefCell<HashMap<Uuid, f64>>>,
-    calls: Calls,
+    pub(crate) sensors: Rc<RefCell<HashMap<Uuid, f64>>>,
+    pub(crate) calls: Calls,
 }
 
 impl Engine {
-    fn set(&self, sensor: Uuid, value: f64) {
+    pub(crate) fn set(&self, sensor: Uuid, value: f64) {
         self.sensors.borrow_mut().insert(sensor, value);
     }
 }
 
-fn number(args: &HashMap<Uuid, Value>, id: Uuid) -> Result<f64, CallError> {
+pub(crate) fn number(args: &HashMap<Uuid, Value>, id: Uuid) -> Result<f64, CallError> {
     match args.get(&id) {
         Some(Value::F64(value)) => Ok(*value),
         other => Err(CallError::Generic {
@@ -165,7 +165,7 @@ fn number(args: &HashMap<Uuid, Value>, id: Uuid) -> Result<f64, CallError> {
     }
 }
 
-fn returns(value: Value) -> CallResult {
+pub(crate) fn returns(value: Value) -> CallResult {
     CallResult {
         ret: value,
         mutated: Vec::new(),
@@ -254,12 +254,12 @@ impl CallBridge for Engine {
 
 // Building expressions and nodes.
 //================================================================
-fn f(value: f64) -> Expression {
+pub(crate) fn f(value: f64) -> Expression {
     Expression::Value(Value::F64(value))
 }
 
 /// `function(arguments…)`, under the module the index names for it.
-fn call(function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Expression {
+pub(crate) fn call(function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Expression {
     let module = index()[&function].module_id;
     Expression::Call(Box::new(CallExpression {
         module: Expression::Uuid(module),
@@ -271,7 +271,7 @@ fn call(function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Expression {
     }))
 }
 
-fn node(id: u128, function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Node {
+pub(crate) fn node(id: u128, function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Node {
     Node {
         id: Uuid::from_u128(id),
         function,
@@ -280,7 +280,7 @@ fn node(id: u128, function: Uuid, arguments: Vec<(Uuid, Expression)>) -> Node {
     }
 }
 
-fn control(id: u128, function: Uuid, children: &[u128]) -> Node {
+pub(crate) fn control(id: u128, function: Uuid, children: &[u128]) -> Node {
     Node {
         id: Uuid::from_u128(id),
         function,
@@ -289,13 +289,13 @@ fn control(id: u128, function: Uuid, children: &[u128]) -> Node {
     }
 }
 
-fn variable(name: u128) -> Expression {
+pub(crate) fn variable(name: u128) -> Expression {
     Expression::VariableId(Uuid::from_u128(name))
 }
 
 /// `clamp(x: mul(a: distance(), b: 100.0), lo: 0.0)`: the distance in
 /// centimetres, never negative. Three modules, three levels deep.
-fn centimetres() -> Expression {
+pub(crate) fn centimetres() -> Expression {
     call(
         CLAMP,
         vec![
@@ -311,12 +311,12 @@ fn centimetres() -> Expression {
     )
 }
 
-fn tree(nodes: Vec<Node>) -> BehaviorTree {
+pub(crate) fn tree(nodes: Vec<Node>) -> BehaviorTree {
     load_behavior_tree_nodes(nodes).expect("the tree builds")
 }
 
 /// The value a tree variable holds.
-fn read(tree: &BehaviorTree, name: u128) -> Option<Value> {
+pub(crate) fn read(tree: &BehaviorTree, name: u128) -> Option<Value> {
     tree.variables.borrow()[&Uuid::from_u128(name)].get()
 }
 
@@ -730,6 +730,7 @@ fn a_node_shows_as_the_call_it_makes() {
             Uuid::from_u128(0x1E7E1),
             "face/level".to_string(),
         )])),
+        ..Default::default()
     };
     let level = node(
         2,
