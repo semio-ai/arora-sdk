@@ -62,7 +62,8 @@ Semio organization.
 - **The interpreter is a module** under `interpreter_module::ID`, with five
   functions: `LOAD(Graph)`, `EDIT(GraphDiff)`, `SPAWN(Call, RunPolicy)`,
   `SPAWN_GRAPH(graph_type, graph_version, Graph, RunPolicy)` and
-  `HALT(TaskId)`.
+  `HALT(TaskId)`. `spawn`, `spawn_graph` and `halt` are described, so
+  `DescribeMethods` lists them; `LOAD` and `EDIT` are reached by id.
 - **A graph states its type and version.** `arora_behavior::GraphType` names
   the language and its format version. The behavior tree reads
   `behavior-tree 1.1`: the control nodes, the status leaves, the task-run
@@ -180,10 +181,12 @@ The **plan** classifies every node from what reads it: `every_tick` holds the
 sinks and what they read, `on_demand` what the tree reads, and `unused` the
 rest (`BehaviorTree::compute_plan()`).
 
-**The build refuses** a cycle, since feedback goes through a store key; a
-reference to no compute node; and a compute node that reads a tree node's
-argument. **Lowering refuses** a port that is neither a return value nor a
-mutable parameter, and a mutable parameter fed by another node's port.
+**The build refuses** two compute nodes with one id; a cycle, since feedback
+goes through a store key; a reference to no compute node; and a compute node
+that reads a tree node's argument. **Lowering refuses** a call to the
+interpreter module, an argument to no parameter of the function, a port that
+is neither a return value nor a mutable parameter, and a mutable parameter fed
+by another node's port, a call or a selection.
 
 ### 3.3 Either flow alone
 
@@ -323,8 +326,9 @@ stay:
 - **A graph travels with its type and version** in load, edit and spawn, as
   it already does in `SPAWN_GRAPH`. The device declares one type,
   `behavior-tree`, whose format gains compute nodes (§7).
-- **The behavior module's functions are described**, so `DescribeMethods`
-  lists them, and `branches()` lists what runs and what each writes.
+- **Every function of the behavior module is described**: `load` and `edit`
+  join `spawn`, `spawn_graph` and `halt` in `DescribeMethods`, and
+  `branches()` lists what runs and what each writes.
 - **Loaded graphs and runs tick in a stated order**: the loaded graphs in
   load order, then the runs in spawn order.
 - **Two runs writing one key is an error.** The keys a tree writes are
@@ -363,20 +367,19 @@ Each stage lands on its own and states what it hands to the next.
    with it. `look_at`, `play_viseme` and `say` become trees. A face's
    `taskrun` and `spawn` nodes become tree leaves and spawned runs.
 4. **Faces on the tree.** Vizij's host loads the imported face as a tree with
-   compute nodes. `ProcessingGraph` and `vizij-arora-behavior` retire, and
-   vizij-rs depends on the arora crates.
+   compute nodes. `ProcessingGraph` and `vizij-arora-behavior` retire.
 5. **Authoring.** Studio and Vizij's editors show the decision flow and the
    data flow joined by links, and edit both (§3.5).
-6. **The device-level parts of §5**: described functions and `branches()`,
-   write analysis with sinks, `Replace` and `Overlap`.
+6. **The device-level parts of §5**: `load` and `edit` described,
+   `branches()`, write analysis with sinks, `Replace` and `Overlap`.
 
 ## 7. Versions and compatibility
 
 | Crate or surface | Change |
 |---|---|
 | `arora-behavior-tree` (9.1) | Major: `Expression::Computed`, compute nodes, `behavior-tree 1.2`. |
-| `arora-behavior` (9.6) | Minor: compute nodes in `Graph` and `GraphDiff`. Major with §5: the run policies and the write analysis. |
-| `arora` (13.6), `arora-web` | Minor: the described functions. |
+| `arora-behavior` (9.6) | Major: compute nodes in `Graph` and `GraphDiff`, whose fields are public. Minor: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
+| `arora` (13.6), `arora-web` | Minor: `load` and `edit` described. Major with §5: `Concurrent` refuses an overlap it accepted before. |
 | `arora-node-graph`, `arora-shape` | New, `1.0.0`. |
 | `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No further release once vizij-rs depends on the arora crates. |
 | `vizij-arora-host` | Major: it registers the skills as trees. |
@@ -391,8 +394,8 @@ Node graphs run as compute nodes beside the behavior tree, the design of §3,
 first proposed in [#396](https://github.com/semio-ai/arora-sdk/pull/396).
 It was chosen over the five designs of §8.2, compared on the examples of
 [The NGBT spectrum](ngbt-spectrum.html). Its *Greet, then rest* example
-compares them best: control around dataflow, where branches start and stop
-and a smoothing restarts.
+compares them best: control around dataflow, where branches start and stop,
+and each design resumes or restarts a branch's smoothing in its own way.
 
 The design was chosen because:
 
@@ -471,10 +474,11 @@ nodes wired into their `child_N` inputs. A node that only control reads is
 lazy, and runs only when its branch is ticked.
 - *What it keeps:* one graph, and lazy branches that cost nothing until they
   are ticked.
-- *Why not:* the decision flow becomes child edges inside the dataflow, so the
-  two flows are not shown apart. The tree's runtime (task runs, asynchronous
-  module calls, halting, Groot interchange) would be rebuilt in the graph's
-  evaluator. Nothing is cached.
+- *Why not:* the decision flow lives inside the dataflow graph, as control
+  nodes wired by child edges, so the tree's runtime is rebuilt in the graph's
+  evaluator. #257 builds ticking and halting. Typed calls with mutable
+  parameters, Groot interchange, and the host's runs and policies remain to
+  rebuild. Nothing is cached.
 
 ## 9. Open details
 
