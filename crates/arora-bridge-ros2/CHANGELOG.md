@@ -4,6 +4,20 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.1.0] - 2026-10-21
+
+### Changed
+
+- Requires `ros2-client-multi-rmw` 0.14 (RustDDS 0.14) and arora-msgs-ros2
+  2.4. On DDS a reliable writer's send window is now
+  `ResourceLimits::max_samples` (8192 when unset) rather than its history
+  depth: a reliable key topic's writer no longer blocks for its 100 ms, then
+  drops the sample, each time a reader is behind by one, and the feedback,
+  status and result writers of an action hold back a message only once 8192
+  samples await a reader that stopped acknowledging. RustDDS 0.14 also
+  reassembles DATAFRAG under reliable delivery, matches XCDR1/XCDR2 data
+  representations and handles stale ACKNACKs.
+
 ## [11.0.2] - 2026-10-19
 
 ### Fixed
