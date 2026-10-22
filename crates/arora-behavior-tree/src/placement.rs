@@ -1,13 +1,14 @@
 //! Load-time placement of detached computations before their readers.
 //!
 //! Placement preserves port references and makes each used detached node an
-//! attached `_on_change` leaf when its arguments contain no calls. Other
-//! detached nodes remain detached. Store-bound outputs keep private ports and
-//! publish through native `Copy` nodes after their computation: a tree node
-//! reading its key sees the new value in the same tick,
-//! instead of the next tick. Sinks run before the root rather than after it.
-//! Stateful functions, writes during a tick, errors, and store-key feedback
-//! therefore need not behave like demand-driven detached evaluation.
+//! attached `_on_change` leaf, unless its arguments contain a call or it
+//! publishes a key that a sink staying detached also publishes: those nodes
+//! remain detached ([`place_detached`] says why). Store-bound outputs keep
+//! private ports and publish through native `Copy` nodes after their
+//! computation: a tree node reading its key sees the new value in the same
+//! tick, instead of the next tick. Sinks run before the root rather than after
+//! it. Stateful functions, writes during a tick, errors, and store-key
+//! feedback therefore need not behave like demand-driven detached evaluation.
 use std::collections::{HashMap, HashSet};
 
 use arora_types::value::Value;
@@ -58,6 +59,14 @@ const PORT: u128 = 0x504f5200000040008000000000000000;
 // The incoming child index distinguishes repeated children of one parent.
 type ReaderPath = Vec<(Uuid, usize)>;
 
+/// A store key: the name of the variable that names it, which two variables
+/// may share, or the cell itself when no named variable holds it.
+#[derive(PartialEq, Eq, Hash)]
+enum StoreKey {
+    Named(String),
+    Cell(usize),
+}
+
 /// Place the used detached nodes in `nodes`, without evaluating any function
 /// or writing any cell. The first node is the root. `functions`, `resolver`
 /// and `names` are the metadata used when loading the resulting tree: mutable
@@ -69,12 +78,30 @@ type ReaderPath = Vec<(Uuid, usize)>;
 /// `PARALLEL` nodes. A `WITH` executes these groups before its body and returns
 /// the body's status. Groups at one anchor follow their first listed node.
 /// A final root prerequisite publishes placed sinks in file order from their
-/// private ports, after all prerequisite computations and before the body.
+/// private ports, after all prerequisite computations and before the body;
+/// each sink's outputs publish in detached publication's order, its return
+/// first, then its mutable parameters in signature order.
 /// Every path of a shared reader contributes to the common ancestor. A root
-/// reader or any sink forces a root anchor. Only used nodes without argument
-/// calls join groups; other detached nodes are retained without attachment.
+/// reader or any sink forces a root anchor. An input a detached node's output
+/// feeds reads a fresh tree-local variable in place of the store key its
+/// argument names, as it reads a private cell when detached.
 /// Inert loose controls are retained. Generated ids and list order are stable,
 /// including when an existing id collides with a generated one.
+///
+/// A detached node stays detached, unchanged in the file, when:
+///
+/// - nothing uses it, so the detached layer never evaluates it;
+/// - its arguments contain a call: the incremental executor never caches a
+///   node with a nested call, which keeps call-site state, so placed it would
+///   be called at every tick, while detached its call is cached by argument
+///   value;
+/// - it is a sink publishing a key that a sink staying detached also
+///   publishes, and so on until no placed sink shares a key with one: a
+///   detached sink publishes after the tree and a placed one before the body,
+///   so the publishers of one key stay together and publish in file order.
+///   Two variables of one name name one key.
+///
+/// Every other used node joins a group.
 ///
 /// Detached validation is shared with runtime lowering. Attached cycles and
 /// missing children are rejected, because they have no finite reader paths.
@@ -115,12 +142,45 @@ pub fn place_detached(
         Ok(())
     }
     walk(root, &tree, 0, &mut Vec::new(), &mut paths)?;
-    let active: HashSet<usize> = (0..detached.len())
+    let mut active: HashSet<usize> = (0..detached.len())
         .filter(|at| {
             !analysis.unused.contains(&detached[*at].id)
                 && !crate::incremental::has_call(&detached[*at])
         })
         .collect();
+    // A detached sink publishes after the tree, and a placed one before the
+    // body. A sink sharing a key with a sink that stays detached stays too, so
+    // the publishers of one key all publish after the tree, in file order.
+    let named: HashMap<usize, String> = tree
+        .variables
+        .borrow()
+        .iter()
+        .filter_map(|(id, cell)| Some((cell.identity(), names.get(id)?.clone())))
+        .collect();
+    let keys = |at: usize| {
+        analysis.publications[at].iter().map(|(_, cell)| {
+            named
+                .get(&cell.identity())
+                .map_or(StoreKey::Cell(cell.identity()), |name| {
+                    StoreKey::Named(name.clone())
+                })
+        })
+    };
+    let mut retained: HashSet<StoreKey> = analysis
+        .sinks
+        .iter()
+        .filter(|at| !active.contains(at))
+        .flat_map(|at| keys(*at))
+        .collect();
+    while let Some(at) = analysis
+        .sinks
+        .iter()
+        .copied()
+        .find(|at| active.contains(at) && keys(*at).any(|key| retained.contains(&key)))
+    {
+        active.remove(&at);
+        retained.extend(keys(at));
+    }
     // Keep dependencies across retained detached calls: a placed consumer
     // pulls those calls, so their placed inputs must already have executed.
     let mut dependencies = vec![HashSet::new(); detached.len()];
@@ -148,8 +208,12 @@ pub fn place_detached(
         .chain(names.keys().copied())
         .chain(tree.variables.borrow().keys().copied())
         .collect();
-    // A detached return feeding an input bound to a key uses a local cell,
-    // not that key. Preserve the loader's isolation when attachment changes.
+    // An input a detached node's output feeds reads that output's cell, even
+    // when its argument names a store key: loading gives the two a private
+    // cell only while the writer is detached. A fresh tree-local variable
+    // keeps the input, and the writer with it, off the key once the writer is
+    // attached. Whether an input is fed comes from the detached analysis: a
+    // detached input that names a key and is not fed reads the key.
     let mut isolated = HashMap::new();
     for node in &mut nodes {
         let mut parameters: Vec<_> = node.arguments.keys().copied().collect();
@@ -165,7 +229,7 @@ pub fn place_detached(
                 Expression::Variable(cell) => Some(cell.clone()),
                 _ => None,
             };
-            if !matches!(stored, Some(VariableCell::Stored(_))) || tree.detached.publishes(&port) {
+            if !matches!(stored, Some(VariableCell::Stored(_))) || !analysis.fed.contains(&port) {
                 continue;
             }
             if let Some(VariableCell::Local(cell)) = tree.node_arg_variables.get(&port) {
@@ -178,23 +242,21 @@ pub fn place_detached(
             }
         }
     }
-    let placeable_ids: HashSet<_> = active.iter().map(|at| detached[*at].id).collect();
+    let placeable: HashMap<Uuid, usize> = active.iter().map(|at| (detached[*at].id, *at)).collect();
     let mut publications: HashMap<Uuid, Vec<Node>> = HashMap::new();
     let mut inputs: HashMap<Uuid, Vec<Node>> = HashMap::new();
     for node in &mut nodes {
-        if !placeable_ids.contains(&node.id) {
+        let Some(at) = placeable.get(&node.id) else {
             continue;
-        }
-        let mut parameters: Vec<_> = node.arguments.keys().copied().collect();
-        parameters.sort_unstable();
-        for parameter in parameters {
+        };
+        // Detached publication's order: of two outputs bound to one key, the
+        // later one's value stands.
+        for (parameter, _) in &analysis.publications[*at] {
+            let parameter = *parameter;
             let port = NodeParameterId {
                 node: node.id,
                 parameter,
             };
-            if !tree.detached.publishes_output(&port) {
-                continue;
-            }
             let target = node
                 .arguments
                 .insert(
@@ -311,7 +373,7 @@ pub fn place_detached(
     }
 
     for node in &mut nodes {
-        if placeable_ids.contains(&node.id) {
+        if placeable.contains_key(&node.id) {
             node.children = None;
             node.arguments
                 .insert(_ON_CHANGE_PARAM_ID, Expression::Value(Value::Boolean(true)));

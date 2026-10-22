@@ -136,8 +136,10 @@ struct Lowered {
     order: Vec<usize>,
     /// By node: its arguments in signature order, `_ret` aside.
     arguments: Vec<Vec<Uuid>>,
-    /// The inputs another detached node's output is bound to: each reads the
-    /// cell that node writes, even when its argument names a store key.
+    /// The inputs, of detached and attached nodes alike, that read a cell
+    /// another detached node's output writes, such as an input that output is
+    /// bound to: each reads that cell, even when its argument names a store
+    /// key.
     fed: HashSet<NodeParameterId>,
     /// By node: its outputs, each a port, the tree-local cell it writes, and
     /// the store key it publishes to after the tree ticks.
@@ -595,6 +597,8 @@ impl Detached {
             .nodes
             .iter()
             .enumerate()
+            .map(|(at, node)| (Some(at), &**node))
+            .chain(attached.iter().map(|node| (None, &**node)))
             .flat_map(|(at, node)| {
                 node.arguments
                     .keys()
@@ -605,7 +609,7 @@ impl Detached {
                 let np = NodeParameterId { node, parameter };
                 let cell = node_parameters_variables.get(&np)?;
                 match writers.get(&cell_id(cell)) {
-                    Some((Some(writer), _)) if *writer != at => Some(np),
+                    Some((Some(writer), _)) if Some(*writer) != at => Some(np),
                     _ => None,
                 }
             })
@@ -665,22 +669,6 @@ impl Detached {
         Ok(())
     }
 
-    pub(crate) fn publishes(&self, port: &NodeParameterId) -> bool {
-        self.bindings.contains_key(port)
-    }
-
-    /// Whether this port is an output that actually publishes a key.
-    pub(crate) fn publishes_output(&self, port: &NodeParameterId) -> bool {
-        self.nodes
-            .iter()
-            .position(|node| node.id == port.node)
-            .is_some_and(|at| {
-                self.lowered.borrow().outputs[at]
-                    .iter()
-                    .any(|(parameter, _, key)| *parameter == port.parameter && key.is_some())
-            })
-    }
-
     /// The same dependency graph used for pulls, with all nodes in data order.
     pub(crate) fn placement(&self) -> PlacementAnalysis {
         let lowered = self.lowered.borrow();
@@ -690,6 +678,17 @@ impl Detached {
             sinks: lowered.sinks.clone(),
             order: lowered.order.clone(),
             unused: lowered.plan.unused.iter().copied().collect(),
+            fed: lowered.fed.clone(),
+            publications: lowered
+                .outputs
+                .iter()
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter_map(|(port, _, key)| Some((*port, key.clone()?)))
+                        .collect()
+                })
+                .collect(),
         }
     }
 
@@ -1103,4 +1102,9 @@ pub(crate) struct PlacementAnalysis {
     pub(crate) sinks: Vec<usize>,
     pub(crate) order: Vec<usize>,
     pub(crate) unused: HashSet<Uuid>,
+    /// The inputs that read a cell another detached node's output writes.
+    pub(crate) fed: HashSet<NodeParameterId>,
+    /// By node: each port that publishes a store key, and the key, in the
+    /// order detached publication writes them.
+    pub(crate) publications: Vec<Vec<(Uuid, VariableCell)>>,
 }

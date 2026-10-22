@@ -13,7 +13,7 @@ use arora_behavior::Status;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key};
 use arora_types::value::Value;
-use fixture::{Bridge, Op, MODULE, STATE, X, Y};
+use fixture::{Bridge, Op, MODULE, OUT, STATE, X, Y};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -69,6 +69,7 @@ fn names() -> HashMap<Uuid, String> {
         (9003, "gate"),
         (9004, "out/a"),
         (9005, "out/b"),
+        (9006, "out/a"),
     ]
     .into_iter()
     .map(|(n, s)| (id(n), s.into()))
@@ -1413,4 +1414,163 @@ fn placed_sink_publication_keeps_file_order_across_components() {
         assert_eq!(results[0], results[1]);
         assert_eq!(results[0], results[2]);
     }
+}
+
+/// Tick the detached file and its placement under each scope in lockstep, each
+/// from its own store holding `keys`, and check after every tick that each
+/// form observes `expected`, the detached form included.
+fn in_lockstep<T: PartialEq + std::fmt::Debug>(
+    source: &[Node],
+    ops: &[(u128, Op)],
+    keys: &[(&str, f64)],
+    expected: T,
+    observe: impl Fn(&LoweredTree, &SimpleDataStore) -> T,
+) {
+    let scopes = [
+        None,
+        Some(PlacementScope::Readers),
+        Some(PlacementScope::Root),
+    ];
+    let stores = scopes.map(|_| SimpleDataStore::new());
+    let mut bridges = scopes.map(|_| {
+        let mut b = bridge(source);
+        for (function, op) in ops {
+            b.ops.insert(id(*function), *op);
+        }
+        b
+    });
+    let trees: Vec<_> = scopes
+        .iter()
+        .zip(&stores)
+        .zip(&mut bridges)
+        .map(|((scope, store), b)| {
+            for (key, x) in keys {
+                put(store, key, *x);
+            }
+            let file =
+                scope.map_or_else(|| source.to_vec(), |s| place(source.to_vec(), s, b, store));
+            lower(file, b, store, scope.is_some())
+        })
+        .collect();
+    for step in 0..6 {
+        for (at, scope) in scopes.iter().enumerate() {
+            tick(&trees[at], &mut bridges[at]);
+            assert_eq!(
+                observe(&trees[at], &stores[at]),
+                expected,
+                "{scope:?}, tick {step}"
+            );
+        }
+        assert_eq!(stores[0].snapshot(), stores[1].snapshot(), "tick {step}");
+        assert_eq!(stores[0].snapshot(), stores[2].snapshot(), "tick {step}");
+    }
+}
+
+/// A return bound to a detached reader's input that names a store key feeds
+/// that input alone, so the key keeps its value once both nodes are placed.
+#[test]
+fn a_return_feeding_a_detached_input_leaves_its_key_unwritten() {
+    let source = vec![
+        module(1, port(11)),
+        node(
+            11,
+            id(20011),
+            vec![(X, var(9001)), (Y, lit(0.0)), (_RET_PARAM_ID, var(30011))],
+        ),
+        node(
+            10,
+            id(20010),
+            vec![
+                (X, lit(1.0)),
+                (Y, lit(2.0)),
+                (_RET_PARAM_ID, parameter(11, X)),
+            ],
+        ),
+    ];
+    in_lockstep(
+        &source,
+        &[],
+        &[("input/b", 99.0)],
+        [Some(99.0), Some(3.0), Some(3.0)].map(|x| x.map(Value::F64)),
+        |tree, store| [get(store, "input/b"), value(tree, 11, X), value(tree, 1, X)],
+    );
+}
+
+/// A sink publishes its return, then its mutable parameters in signature
+/// order: of two outputs bound to one key, the parameter's value stands.
+#[test]
+fn a_placed_sink_publishes_its_outputs_in_detached_order() {
+    let source = vec![
+        control(1, SEQ_FUNCTION_ID, &[2, 3]),
+        module(2, port(10)),
+        module(3, parameter(10, STATE)),
+        node(
+            10,
+            id(20010),
+            vec![
+                (X, lit(3.0)),
+                (Y, lit(7.0)),
+                (STATE, var(9004)),
+                (_RET_PARAM_ID, var(9004)),
+            ],
+        ),
+    ];
+    in_lockstep(
+        &source,
+        &[(20010, Op::Split)],
+        &[("out/a", 0.0)],
+        [Some(7.0), Some(3.0), Some(7.0)].map(|x| x.map(Value::F64)),
+        |tree, store| [get(store, "out/a"), value(tree, 2, X), value(tree, 3, X)],
+    );
+}
+
+/// Every sink of a key that a detached sink publishes stays detached, and so,
+/// in turn, does every sink of a key one of those publishes: all publishers of
+/// one key publish after the tree, and the later listed wins, as detached.
+#[test]
+fn sinks_sharing_a_key_with_a_detached_sink_stay_detached() {
+    // `out/a`: 10 (with a call), then 11 through a second variable of that
+    // name. `out/b`: 11's `OUT`, then 12.
+    let source = vec![
+        node(1, SUCCEED_FUNCTION_ID, vec![]),
+        node(
+            10,
+            id(20010),
+            vec![
+                (X, add_call(lit(1.0))),
+                (Y, lit(2.0)),
+                (_RET_PARAM_ID, var(9004)),
+            ],
+        ),
+        node(
+            11,
+            id(20011),
+            vec![
+                (X, lit(5.0)),
+                (Y, lit(2.0)),
+                (OUT, var(9005)),
+                (_RET_PARAM_ID, var(9006)),
+            ],
+        ),
+        node(
+            12,
+            id(20012),
+            vec![(X, lit(4.0)), (Y, lit(5.0)), (_RET_PARAM_ID, var(9005))],
+        ),
+    ];
+    in_lockstep(
+        &source,
+        &[(29999, Op::Add)],
+        &[("out/a", 0.0), ("out/b", 0.0)],
+        [Some(7.0), Some(9.0), Some(3.0), Some(7.0), Some(9.0)].map(|x| x.map(Value::F64)),
+        |tree, store| {
+            [
+                get(store, "out/a"),
+                get(store, "out/b"),
+                value(tree, 10, _RET_PARAM_ID),
+                value(tree, 11, _RET_PARAM_ID),
+                value(tree, 12, _RET_PARAM_ID),
+            ]
+        },
+    );
 }
