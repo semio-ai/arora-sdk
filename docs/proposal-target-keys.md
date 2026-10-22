@@ -1,7 +1,7 @@
 # Proposal: target keys as an entity, `k/target.c`
 
 Status: draft, for review.
-Date: 2026-10-12.
+Date: 2026-10-22.
 
 A device's inputs are mostly targets: the value a client asks one component of
 an entity to reach — a joint's position, its velocity, its torque. This
@@ -29,11 +29,24 @@ In short:
   value `eye.position` (§5). Studio's per-axis keys, axis first today
   (`eye.x.target_position`, `eye.x.position`), move to it in stages that are
   each safe to ship (§6).
+- **A whole value covers its fields.** `k/target.c` covers
+  `k/target.c.<field>`, as `k.c` covers `k.c.<field>`: a later write of the
+  whole drops earlier writes of its fields, and within one change the whole
+  applies first (§5).
+- **A device has the keys it describes.** The component names the quantity
+  (`position`, `color`, `intensity`), and no component implies another: a
+  position brings no velocity, a measured value no target (§2).
 
 Keys are paths, and an `.attribute` is a naming convention of the consumers that
 adopt it ([keys are paths](design_decisions.md#keys-are-paths-attributes-are-a-convention)).
 This proposal is a change to that convention as the HALs and their clients use
 it; stores, bridges and key meta are unaffected.
+
+It sets how the address of a target is spelled. Semio Studio's rule of one
+address per value under a device (decision D3 of its Studio-on-Arora plan,
+semio_studio `docs/studio-on-arora/05-decisions.md`) stands: `k/target.c` is
+how a target's address is spelled under it, in place of the
+`k.target_position` D3 names.
 
 ---
 
@@ -65,10 +78,12 @@ it; stores, bridges and key meta are unaffected.
   `eye.x.target_position` is `x`, and `set_targets` reads it as no target.
 - **A device's inputs are its key meta.** A remote may write only a key whose
   meta is `editable`, stated on the key or on a prefix that covers it, and
-  `ListKeys` lists the keys a device holds or describes, with their meta. No HAL
-  describes its keys yet; that is the key-description trait of
-  [HAL components](proposal-hal-components.md) 3.5
-  ([ARORA-103](https://linear.app/semio-ai/issue/ARORA-103)).
+  `ListKeys` lists the keys a device holds or describes, with their meta. A HAL
+  describes its keys (`Hal::describe_keys`, arora-hal 4.3;
+  [HAL components](proposal-hal-components.md) 3.5), and the runtime states the
+  description to the store: `FakeHal`, `RestfulHal` and `Ros2Hal` describe
+  each target they read, in both forms, as an open input. A HAL that describes
+  no key leaves its host to open its inputs through key meta.
 
 ## 2. The convention
 
@@ -81,6 +96,7 @@ it targets.
 | A joint's position | `hip_yaw.position` | `hip_yaw/target.position` | `hip_yaw.target_position` |
 | A joint's velocity | `hip_yaw.velocity` | `hip_yaw/target.velocity` | `hip_yaw.target_velocity` |
 | A joint's torque | `hip_yaw.torque` | `hip_yaw/target.torque` | `hip_yaw.target_torque` |
+| A light's colour | `light.color` | `light/target.color` | `light.target_color` |
 | A string or a boolean | `k.value` | `k/target.value` (see 8) | `k.target_value` |
 | A namespaced joint | `robot/hip_yaw.position` | `robot/hip_yaw/target.position` | `robot/hip_yaw.target_position` |
 | One axis of a structured value | `eye.position.x` | `eye/target.position.x` | `eye.target_position.x` |
@@ -93,6 +109,31 @@ segment is `target` with no attribute, or a `target.c` at the root (no `k`), is
 not a target. Under a namespace, a last segment `target.c` is always this form:
 `x/target.target_position` targets `x.target_position`, so a joint named
 `target` keeps the current form only at the root.
+
+The component names the quantity, whatever the value's type: a joint's
+`position`, a light's `color` (`light/target.color`; one channel,
+`light.color.r`), an LED's `intensity` (`led/target.intensity`). A number is
+not a position for being a number.
+
+### Which keys a device has
+
+A device has the keys it describes, and this convention spells them. A HAL
+describes each component it reports as `k.c`, closed, and each component it
+takes as a target as `k/target.c`, open, with `k.target_c` beside it during
+the transition (`arora_hal::target_keys` gives both). Nothing exists
+undescribed, and no component implies another:
+
+- **A position brings no velocity or acceleration.** A joint `k1` described
+  with a position, measured and targeted, has `k1.position` and
+  `k1/target.position` (and `k1.target_position` during the transition), and
+  no other key. That is what `FakeHal` describes for each joint.
+- **A measured value brings no target, and a target no measured value.** An
+  actuator driven feedforward, such as a light, describes its target and no
+  measured value: a light described with a colour target has
+  `light/target.color`, and no `light.color` unless it reports one.
+
+The convention says how a described component's keys are spelled; it is not a
+list of components every actuator has.
 
 ### Why
 
@@ -136,8 +177,10 @@ current one. The rule:
    write wins" cannot apply within one change, and the form decides. Across
    changes, the later write wins, whichever form each was written in; a HAL
    that merges a backlog of changes into one keeps that
-   (`arora_hal::fold_newest_wins`). The two forms are distinct keys of the
-   store: a store or a bridge never merges them.
+   (`arora_hal::fold_newest_wins`). A whole target covers its fields: a later
+   write or unset of the whole drops earlier writes of its fields, and within
+   one change the whole applies before its fields (§5). The two forms are
+   distinct keys of the store: a store or a bridge never merges them.
 5. **A device may keep the two forms of a target in agreement.** A device
    whose own consumers read targets from the store, rather than from the
    change it is handed, writes the value that wins by rule 4 into both keys,
@@ -177,9 +220,10 @@ The current form is retired by a major of each HAL crate once Studio writes
   MuJoCo HAL of the policy-modules example
   ([arora-sdk#243](https://github.com/semio-ai/arora-sdk/pull/243)) — reads
   its targets through `set_targets` to accept both.
-- No HAL declares inputs today; the device opens them through its store's key
-  meta. Rule 2 applies to a device that does, and to HALs once they describe
-  their keys.
+- The three HALs describe each target they read in both forms
+  (`Hal::describe_keys`, arora-hal 4.3), as rule 2 states. A device whose HAL
+  describes no key opens its inputs through its store's key meta, and rule 2
+  applies to that meta.
 
 On the Studio side, the device commander resolves each animatable's target key
 by rule 3 and stops writing `<id>.studio_value`; §6 covers its per-axis keys.
@@ -200,20 +244,67 @@ after the component:
 measured key beside it. A key with the axis before the component —
 `eye.x.target_position`, `eye.x/target.position` — is no target.
 
-A device lists what it takes: the whole value, its axes, or both. Writing
-`eye/target.position` with a whole vector and writing `eye/target.position.x`
-with a number are one contract: both set the target of `eye`'s position, the
-second one field of it.
+A device lists what it takes: the whole value, its axes, or both.
+`eye/target.position` and `eye/target.position.x` are distinct keys, related
+by the rule below.
+
+### A whole value and its fields
+
+For any key, not only a target: `k.c` covers `k.c.<field>`, and `k/target.c`
+covers `k/target.c.<field>`. The rule holds for keys in general because a
+per-field write may land on a rig input or a key-table entry as well as on a
+target (§6). It orders writes; it is no prefix (prefixes match on `/`
+boundaries only, below), and a store or a bridge carries each key as it is.
+
+- **A later write or unset of the whole drops earlier writes of its fields.**
+  `eye/target.position.x` set to 5, then `eye/target.position` set to
+  (0, 0, 0) in a later change, leaves x at 0.
+- **Within one change, the whole applies first, then its fields.** A change
+  that sets `eye/target.position` to (0, 0, 0) and `eye/target.position.x` to
+  5 leaves x at 5. The keys of a change carry no order, so the rule decides,
+  as the form does in §3 rule 4.
+- **A device that lists both the whole and its fields keeps them in
+  agreement**, as §3 rule 5 does for the two forms of a target, so a consumer
+  that reads the store sees `eye/target.position` and `eye/target.position.x`
+  agree.
+- **Merging a field write into the whole is optional.** A device MAY accept a
+  write of one field to an input that takes the whole value, and merge it
+  into the value it holds; it need not. Most HALs and bridges cannot: a ROS 2
+  command or a REST request carries the whole value, and Arora devices
+  exchange whole values at the pace their steps set. A client writes what the
+  device lists (§3 rule 3): the whole value, where that is all it lists.
+- **Whether a per-field write is meaningful depends on the value.** The fields
+  of a vector, an euler or a colour are independent; those of a quaternion or
+  a pose are not, and one of them set alone makes no valid value. Saying
+  which needs a declaration, on the key's meta or the value's type, which
+  this proposal does not settle (§8).
+
+In arora-hal, `set_targets` and `fold_newest_wins` read a whole target and a
+field's as unrelated
+([ARORA-186](https://linear.app/semio-ai/issue/ARORA-186) applies the rule):
+
+- `set_targets` returns one target per measured key, in no particular order
+  (`HashMap::into_values`), so a whole and one of its fields come out as two
+  targets in either order. Under the rule it returns the whole first.
+- `fold_newest_wins` drops an earlier target only when the later change sets
+  or unsets one with the same measured key, so an earlier
+  `eye/target.position.x` survives a later `eye/target.position`. Under the
+  rule a later set or unset of the whole, in either form, also drops the
+  earlier sets of its fields' targets, in either form.
 
 ### Why the axis comes after
 
 - **The component names the quantity; the axis selects a field of its value.**
   `eye.position` is the position, whole: a vector. `eye.position.x` is a field
   of it. This is the order of arora-types' selector paths: `Key::select`
-  descends one attribute per level (`.<field>.<index>`), so `eye.position.x`
-  is the field `x` of the value `eye.position` holds, and the path that reads
-  it out of that value. In `eye.x.position`, `x` would be a value holding a
-  `position`, and there is no such value.
+  descends one attribute per level, so `eye.position.x` reads the field `x`
+  out of the value `eye.position` holds. `select` matches a `KeyValue` field
+  by its string key, a `Structure` field by its id (a UUID) and an array
+  element by its index, so the name `x` selects directly only from a
+  `KeyValue`. From a `Structure`, the reader first maps the name to the
+  field's id through the value's structure type, which names each field id;
+  from an array, to the element's index. In `eye.x.position`, `x` would be a
+  value holding a `position`, and there is no such value.
 - **Axis first has no spelling in the `k/target.c` form.** `eye.x/target.position`
   puts a `.` before the last `/`, and attributes belong to the last segment
   only ([keys are paths](design_decisions.md#keys-are-paths-attributes-are-a-convention));
@@ -276,6 +367,17 @@ stack* is the Studio-on-Arora branch `feat/studio-arora-target-keys`, whose
 top is semio_studio PR 542 (each bound device resolves its own input key per
 animatable).
 
+A target key is a device's input: the output of the pipeline that drives the
+device, not what a track addresses. A device's behavior writes the animation
+module's values to the keys of a key table (the module's `output_keys`,
+written by the stepping behavior's `Scatter` node,
+[arora-sdk#399](https://github.com/semio-ai/arora-sdk/pull/399)), and
+`k/target.c` is one possible entry of that table. A track may drive a rig
+input or another controllable, from which a rig derives the joint values; its
+key is then no device target. The derivation below of an axis's device key
+from its animatable id is the binding while a track writes a device input
+directly.
+
 ### 6.1 How Studio spells an axis
 
 - **Ids.** A vector (`x`, `y`, `z`), euler (`r`, `p`, `y`), RGB (`r`, `g`,
@@ -317,6 +419,13 @@ animatable).
   when none is listed). `Animatable` reads `group.axis`, and the key
   uniqueness check applies to the pair of `k` and axis. `undriven` names the
   keys tried, as for a scalar.
+- **The component** (stack). The World names the component of every number
+  `position` (`Animatable::declared`), so a colour's channel reads
+  `light.position.r`. It names a grouped animatable's component from its
+  group's type instead, `light.color.r` for a colour (§2;
+  [STUDIO-394](https://linear.app/semio-ai/issue/STUDIO-394)). It renames
+  keys devices read, so it ships with stage (c), resolved per device like the
+  rest.
 - **The scene binding** (`packages/utils/src/scene-binding.ts`). Inputs need
   no change: the binding reads each device's input keys from the World
   (`inputKeys`) and spells none. `feedbackKey` takes the axis and gives
@@ -397,14 +506,34 @@ each target.
 4. **Transports.** A ROS 2 topic name has no `.`, so neither form travels as a
    topic path as it is; an exposure profile names each one it carries. Whether
    the `/target` segment changes how profiles group a joint's keys is open.
-5. **The component of a number that is not a joint.** Studio names the
-   component of every number `position` (`animatable.rs`), so a colour's axis
-   reads `light.position.r`. Whether a group's type names its component
-   (`light.color.r`, `light.value.r`) is Studio's key rule to settle; the order
-   of §5 holds whatever the component is.
-6. **A whole value and one of its fields in one change.** `eye/target.position`
-   and `eye/target.position.x` target different measured keys, so `set_targets`
-   returns both, and rule 4's precedence between forms does not order them. A
-   device that takes both would apply the whole value, then the field; whether
-   that is stated as a rule, or a client is held to write one of them per
-   change, is open.
+
+### Related, not settled here
+
+These bear on the keys but are outside this proposal.
+
+- **The authoring experience does not change.** Users create tracks per axis
+  from the sidebar controls, and splines keep their per-axis and per-group
+  display. Which key a track reaches on a device, a target or a rig input
+  (§6), stays below the animation library.
+- **Track paths and sub-channels.** The editor organizes tracks by path
+  (`namespaceId/instanceId/trackId`), each with sub-channels (the spline, its
+  handles, its violations). Aligning those paths with this key syntax would be
+  an internal change.
+- **Which values' fields can be written independently** (§5): a declaration,
+  on key meta or the value's type.
+- **Tracing violations back to tracks and groups**
+  ([ARORA-61](https://linear.app/semio-ai/issue/ARORA-61)). §5's relation lets
+  a field's violation roll up to its quantity. Past that, an error passes back
+  per field through a separable node (composing a vector from its axes) and
+  only per group through a coupled one (IK), so each node declares which it
+  is.
+- **Group-level constraints.** Key meta carries one range per key; a norm, a
+  reach limit or self-collision across joints has no place to be declared,
+  in Studio or on a device.
+- **Several writers of one value.** The later-write rules here order the
+  writes a device's HAL-level keys receive, a single writer's delayed changes
+  included. How a value written by several different sources is resolved
+  belongs to the node-graph work.
+
+Field independence, violation tracing and group-level constraints belong to
+the key-schema and attribution note of Studio's target architecture ([STUDIO-81](https://linear.app/semio-ai/issue/STUDIO-81)).
