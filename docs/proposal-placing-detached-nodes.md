@@ -180,27 +180,30 @@ Pro, release profile, native test bridge.
 
 | N = 1000 | settled | one input changes | every input changes |
 |---|--:|--:|--:|
-| attached-naive | 993 µs · 1000 calls | 998 µs · 1000 calls | 1103 µs · 1000 calls |
-| attached-incremental | 14 µs · 0 | 42 µs · 10 | 1048 µs · 841 |
-| attached-incremental-with | 11 µs · 0 | 42 µs · 10 | 1071 µs · 841 |
-| detached | 218 µs · 0 | 229 µs · 10 | 434 µs · 828 |
-| placed | 12 µs · 0 | 42 µs · 10 | 1059 µs · 828 |
+| attached-naive | 975 µs · 1000 calls | 983 µs · 1000 calls | 1072 µs · 1000 calls |
+| attached-incremental | 14 µs · 0 | 41 µs · 10 | 1014 µs · 841 |
+| attached-incremental-with | 11 µs · 0 | 41 µs · 10 | 1029 µs · 841 |
+| detached | 40 µs · 0 | 44 µs · 10 | 232 µs · 828 |
+| placed | 11 µs · 0 | 41 µs · 10 | 1014 µs · 828 |
 
-At N = 10 and 100, settled: placed 0.27 and 1.1 µs, detached 1.9 and 22 µs.
+At N = 10 and 100, settled: placed 0.28 and 1.2 µs, detached 0.43 and 3.8 µs.
+These are measured on main with arora-behavior-tree 9.5.0's detached
+evaluator, which compares a node's arguments in place and lends them to its
+call.
 
 - **Placed and detached make the same module calls** in every scenario and
   size here.
-- **A settled placed group is skipped whole.** Its `PARALLEL` has no `RUN`,
-  so a settled tick dispatches only the `WITH` and its body. Written as
-  `WITH[ PARALLEL[ leaf × N ], RUN ]`, attached leaves cost the same: the
-  saving comes from the shape, which any attached node graph can take.
-- **Publishing costs dispatches, not calls.** Each placed sink adds a `Copy`,
-  so when every input changes a tick makes 1755 dispatches for 828 calls.
-  When one input changes, the publication group checks each of its children's
-  caches, which puts placed level with the other incremental forms.
-- **When every input changes, detached nodes are cheapest.** A placed node is
-  an attached leaf, ticked through an engine dispatch with its `Copy`; a
-  detached node is called directly and publishes from its cache.
+- **Settled, a placed group costs about a quarter of detached nodes.** Its
+  `PARALLEL` has no `RUN`, so a settled tick dispatches only the `WITH` and
+  its body, where every detached sink is brought up to date and published.
+  Written as `WITH[ PARALLEL[ leaf × N ], RUN ]`, attached leaves cost the
+  same: the saving comes from the shape, which any attached node graph can
+  take.
+- **When one input changes, the forms cost the same**: the calls dominate.
+- **When every input changes, detached nodes are about 4.4× cheaper.** A
+  placed node is an attached leaf, ticked through an engine dispatch, with a
+  `Copy` for each sink: 1755 dispatches for 828 calls here. A detached node is
+  called directly, with its arguments lent in place.
 
 ## 5. Open details
 
@@ -226,3 +229,14 @@ At N = 10 and 100, settled: placed 0.27 and 1.1 µs, detached 1.9 and 22 µs.
   executor from a dirty tree, which costs one full tick.
 - **Load time.** Placement walks every path of the attached tree. It is not
   measured.
+- **Hosts that observe detached nodes.** `observe_detached` and
+  `detached_outputs` serve an editor's view of every node of a graph. A node
+  placement attached is no longer detached: observing it does nothing, and
+  its outputs read as `None`, as a node not yet run does, while
+  `argument_value` still reads its bound cells. A host that both places and
+  observes needs placement to leave observed nodes detached, or those calls
+  to read a placed node's cells. No host does both today: the node-graph
+  importer does not place.
+- **The name.** The node-graph importer already uses "placement" for where a
+  call to another module goes. This pass may want another name, such as
+  hoisting.
