@@ -18,6 +18,8 @@ pub const MODULE: Uuid = Uuid::from_u128(0x10000);
 #[derive(Clone, Copy)]
 pub enum Op {
     Add,
+    #[allow(dead_code)] // Exercised by the tests sharing this host.
+    Approach,
     Mul,
     Clamp,
     Remap,
@@ -104,6 +106,18 @@ impl CallBridge for Bridge {
         let mut mutated = Vec::new();
         let ret = match op {
             Op::Add => Value::F64(x + y),
+            Op::Approach => {
+                let next = if (x - state).abs() < 1e-3 {
+                    x
+                } else {
+                    state + (x - state) / 2.0
+                };
+                mutated.push(StructureField {
+                    id: STATE,
+                    value: Box::new(Value::F64(next)),
+                });
+                Value::F64(next)
+            }
             Op::Mul => Value::F64(x * y),
             Op::Clamp => Value::F64(x.max(0.0).min(y.abs() + 1.0)),
             Op::Remap => Value::F64((x - y) * 0.5),

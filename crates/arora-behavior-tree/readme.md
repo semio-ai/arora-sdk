@@ -115,23 +115,46 @@ since states are meant to be accessible in the behavior tree.
 `LoweredTree::set_incremental(true)` (or the same method on
 `BehaviorTreeRuntime`) enables an opt-in executor that keeps terminal statuses
 and skips clean child ticks before engine dispatch. The default is off. A clean
-root makes no indirect dispatch; `Running` nodes and their ancestors are polled
-every tick. A skipped node emits no trace line. A new lowering starts dirty.
+root makes no indirect dispatch; a skipped node emits no trace line. A new
+lowering starts dirty.
 
 Native controls and value computations can cache. Module leaves run on every
 visit unless their `arguments` contain
 `schema::_ON_CHANGE_PARAM_ID: Expression::Value(Value::Boolean(true))`.
 This reserved `_on_change` argument stays in the tree, never in a module call.
-It promises that a terminal status and its outputs remain valid until a read
-changes. Mutable argument cells count as reads. A node containing a nested call
-expression always runs, preserving the nested call's effects and call-site state.
+It promises that a terminal status and its outputs remain valid until an argument
+changes. Nested calls, including under a selection, always disable caching.
+`SetString`, `UnsetString`, `RunCall` and `Scatter` are never cached.
 
-Writes advance a cell's version only when its value changes and invalidate its
-readers and their ancestors. A node's own write does not invalidate its current
-visit; a later writer invalidates an earlier reader for the next tick. Store
-values are read live and compared at tick boundaries to detect external writes.
-This comparison and the polling scan are linear in the lowered tree's store
-cells and attached paths; a settled tree avoids dispatch, not all bookkeeping.
+Every argument except `_ret` contributes its read cells, including mutable
+parameters and in-out state. A visit records their versions before executing.
+If any version advances during the visit, even through the node's own write,
+the node and its ancestors remain dirty for the next tick. Stateful computations
+therefore run until their state settles, and an action that resets its state on
+completion starts again when reached. A write only to a `_ret` destination
+does not self-invalidate; a foreign overwrite still invalidates its producer.
+
+Only nodes visited in the previous tick keep polling alive: Running nodes and
+non-cacheable nodes dirty themselves and their ancestors; readers with detached
+pulls dirty their parent so the pulls stay reachable. A bypassed Running child
+drops out of the polling list. Its cached Running status cannot answer a later
+visit, so it executes when reached again.
+
+Subscribed cells advance their version only when their observed value changes.
+Store values are read live. Each tick first observes all store-backed read cells
+for outside changes. An effectful visit or a stored-cell write flags possible
+store movement. Before skipping a clean subtree, the executor observes its
+deduplicated store reads, then checks its cache again; an executing node also
+synchronizes its own store reads before recording argument versions. There is
+no whole-store comparison after each visit. Tick-boundary observation costs one
+pass over store-backed read cells; lazy checks cover disjoint skipped subtrees,
+and polling follows only the previous tick's visits.
+
 Detached inputs are pulled before a reader's cache check, and detached sinks
-still publish after the root. Control order and the absence of halt stay the
-same.
+still publish after the root. Later writes invalidate earlier readers for the
+next tick. Control order and the absence of halt stay the same.
+
+With the flag off there are no incremental subscriptions, value comparisons or
+value copies for change tracking on writes. Enabling subscribes the lowered read
+sets and initializes their last-seen values; disabling drops those subscriptions
+and invalidates cached statuses. Reusing a lowering preserves its caches.

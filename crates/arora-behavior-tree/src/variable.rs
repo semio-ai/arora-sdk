@@ -43,6 +43,9 @@ struct Changes {
 }
 impl Changes {
     fn observe(&self, value: Option<Value>) {
+        if self.readers.borrow().is_empty() {
+            return;
+        }
         if *self.seen.borrow() == value {
             return;
         }
@@ -87,21 +90,15 @@ impl VariableCell {
     /// A local cell holding `value`.
     pub fn local_with(value: Value) -> Self {
         Self::Local(Rc::new(LocalCell {
-            value: RefCell::new(Some(value.clone())),
-            changes: Changes {
-                seen: RefCell::new(Some(value)),
-                ..Changes::default()
-            },
+            value: RefCell::new(Some(value)),
+            changes: Changes::default(),
         }))
     }
 
     /// Wrap a store slot handed back by a [`VariableResolver`].
     pub fn stored(slot: Box<dyn Slot>) -> Self {
         Self::Stored(Rc::new(StoredCell {
-            changes: Changes {
-                seen: RefCell::new(slot.get()),
-                ..Changes::default()
-            },
+            changes: Changes::default(),
             slot,
         }))
     }
@@ -129,7 +126,8 @@ impl VariableCell {
     pub fn set_opt(&self, value: Option<Value>) {
         // A store can move without this handle seeing it. Observe that move
         // before the write, so overwriting it cannot hide a value change.
-        if matches!(self, Self::Stored(_)) {
+        let observed = !self.changes().readers.borrow().is_empty();
+        if observed && matches!(self, Self::Stored(_)) {
             self.observe();
         }
         match self {
@@ -141,13 +139,16 @@ impl VariableCell {
             // keep the tick signature unchanged. Revisit if write failures must
             // fail a tick.
             VariableCell::Stored(slot) => {
+                crate::incremental::store_written();
                 let _ = slot.slot.set(value);
             }
         }
-        self.changes().observe(self.get());
+        if observed {
+            self.changes().observe(self.get());
+        }
     }
 
-    /// Number of observed value changes. Rewriting an equal value keeps it unchanged.
+    /// Number of value changes observed while subscribed. Equal writes keep it unchanged.
     pub fn version(&self) -> u64 {
         self.changes().version.get()
     }
@@ -162,14 +163,26 @@ impl VariableCell {
         let _external = crate::incremental::Visit::detached();
         self.changes().observe(self.get());
     }
-    pub(crate) fn observe_written(&self) {
-        self.changes().observe(self.get());
-    }
     pub(crate) fn subscribe(&self, reader: &Rc<State>) {
-        self.changes()
-            .readers
-            .borrow_mut()
-            .push(Rc::downgrade(reader));
+        let changes = self.changes();
+        let mut readers = changes.readers.borrow_mut();
+        readers.retain(|reader| reader.strong_count() > 0);
+        if readers.is_empty() {
+            *changes.seen.borrow_mut() = self.get();
+        }
+        if !readers
+            .iter()
+            .any(|held| held.ptr_eq(&Rc::downgrade(reader)))
+        {
+            readers.push(Rc::downgrade(reader));
+        }
+    }
+    pub(crate) fn unsubscribe(&self, reader: &Rc<State>) {
+        let mut readers = self.changes().readers.borrow_mut();
+        readers.retain(|held| held.strong_count() > 0 && !held.ptr_eq(&Rc::downgrade(reader)));
+        if readers.is_empty() {
+            *self.changes().seen.borrow_mut() = None;
+        }
     }
     pub(crate) fn identity(&self) -> usize {
         match self {

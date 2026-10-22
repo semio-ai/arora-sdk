@@ -10,6 +10,7 @@ use crate::{is_native, nodes};
 
 thread_local! {
     static WRITER: Cell<usize> = const { Cell::new(0) };
+    static STORE_MOVED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Restores the enclosing visitor when a child returns, including on errors.
@@ -28,12 +29,32 @@ impl Drop for Visit {
     }
 }
 
+/// Tracks stored-cell writes, including detached publication, for this tick.
+pub(crate) struct StoreVisit(Option<bool>);
+impl Drop for StoreVisit {
+    fn drop(&mut self) {
+        if let Some(previous) = self.0 {
+            // A nested tree's store writes also affect its enclosing visitor.
+            STORE_MOVED.with(|moved| moved.set(previous || moved.get()));
+        }
+    }
+}
+pub(crate) fn store_written() {
+    STORE_MOVED.with(|moved| moved.set(true));
+}
+pub(crate) fn store_moved() -> bool {
+    STORE_MOVED.with(Cell::get)
+}
+
 pub(crate) struct State {
     pub(crate) dirty: Cell<bool>,
     pub(crate) status: Cell<Option<Status>>,
     pub(crate) parent: Option<Weak<State>>,
     pub(crate) cacheable: bool,
     pub(crate) pulls: bool,
+    pub(crate) reads: Vec<VariableCell>,
+    pub(crate) arguments: Vec<VariableCell>,
+    pub(crate) subtree_stored: RefCell<Vec<VariableCell>>,
 }
 impl State {
     pub(crate) fn mark(&self) {
@@ -58,47 +79,55 @@ pub(crate) struct Incremental {
     pub(crate) enabled: Cell<bool>,
     pub(crate) states: RefCell<Vec<Weak<State>>>,
     pub(crate) stored: RefCell<Vec<VariableCell>>,
+    polled: RefCell<Vec<Weak<State>>>,
 }
 impl Incremental {
     pub(crate) fn set_enabled(&self, enabled: bool) {
         if self.enabled.replace(enabled) != enabled {
+            self.polled.borrow_mut().clear();
             for state in self.states.borrow().iter().filter_map(Weak::upgrade) {
+                for cell in &state.reads {
+                    if enabled {
+                        cell.subscribe(&state);
+                    } else {
+                        cell.unsubscribe(&state);
+                    }
+                }
                 state.status.set(None);
                 state.mark();
             }
         }
     }
-    /// Observe writes performed through raw store slots (Scatter or a module)
-    /// before a later sibling decides whether its subtree can be skipped.
-    pub(crate) fn observe_writes(&self) {
-        if self.enabled.get() {
-            for cell in self.stored.borrow().iter() {
-                cell.observe_written();
-            }
+    pub(crate) fn visited(&self, state: &Rc<State>) {
+        if state.status.get() == Some(Status::Running) || !state.cacheable || state.pulls {
+            self.polled.borrow_mut().push(Rc::downgrade(state));
         }
     }
-    pub(crate) fn begin_tick(&self) {
+    pub(crate) fn begin_tick(&self) -> StoreVisit {
         if !self.enabled.get() {
-            return;
+            return StoreVisit(None);
         }
+        let previous = STORE_MOVED.with(|moved| moved.replace(false));
         for cell in self.stored.borrow().iter() {
             cell.observe();
         }
-        for state in self.states.borrow().iter().filter_map(Weak::upgrade) {
-            // An unvisited child's initial dirtiness does not invalidate a
-            // parent that already short-circuited before reaching it. It will
-            // still have no cache if a later visit reaches it.
-            if state.status.get() == Some(Status::Running)
-                || (!state.cacheable && state.status.get().is_some())
-            {
+        for state in self
+            .polled
+            .take()
+            .into_iter()
+            .filter_map(|state| state.upgrade())
+        {
+            // A Running child bypassed by its parent drops out after that tick.
+            if state.status.get() == Some(Status::Running) || !state.cacheable {
                 state.mark();
             }
-            if state.pulls && state.status.get().is_some() {
+            if state.pulls {
                 if let Some(parent) = state.parent.as_ref().and_then(Weak::upgrade) {
                     parent.mark();
                 }
             }
         }
+        StoreVisit(Some(previous))
     }
 }
 

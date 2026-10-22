@@ -3,6 +3,8 @@
 //! and engine indirect dispatches per measured tick. Defaults: 500 ticks, 7 samples.
 //! Sizes are 10, 100, 1000; inputs feed independent chains of add/mul/clamp/remap
 //! calls. `one-input` changes one chain, `all-inputs` changes all chains.
+//! `attached-plain-incremental` enables the flag on the attached tree without
+//! `_on_change`, measuring the incremental cost for existing effectful trees.
 //!
 //! Attached leaves bind `_ret` to a tree-local port and mirror the computed
 //! value through a mutable `out` parameter to a store key. Detached nodes bind
@@ -119,7 +121,10 @@ fn measure(
         load_behavior_tree_nodes_with(nodes, &|name| Some(store.slot(&Key::from(name))), &names)
             .unwrap();
     let tree = lower_behavior_tree(tree, &bridge.index(), &mut bridge, false).unwrap();
-    tree.set_incremental(mode == "attached-incremental");
+    tree.set_incremental(matches!(
+        mode,
+        "attached-incremental" | "attached-plain-incremental"
+    ));
     let update = |step: usize| {
         let changed = match scenario {
             "settled" => 0,
@@ -175,7 +180,12 @@ fn main() {
     for n in [10, 100, 1000] {
         for scenario in ["settled", "one-input", "all-inputs"] {
             let mut expected = None;
-            for mode in ["attached-naive", "attached-incremental", "detached"] {
+            for mode in [
+                "attached-naive",
+                "attached-plain-incremental",
+                "attached-incremental",
+                "detached",
+            ] {
                 let (time, calls, dispatches, outputs) = measure(n, mode, scenario, ticks, samples);
                 if let Some(expected) = &expected {
                     assert_eq!(&outputs, expected, "{n} {scenario} {mode}");

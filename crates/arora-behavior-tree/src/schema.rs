@@ -13,10 +13,18 @@ pub const _RET_PARAM_ID: Uuid = Uuid::from_bytes([
 ]);
 
 /// Reserved `_on_change` argument: a literal `true` opts a module leaf into
-/// incremental caching. Its status and outputs stand until a read changes;
-/// `Running` is still polled every tick. This argument is never sent to a module.
-/// The promise is that keeping a terminal result is valid until an input changes;
-/// it is not a purity check. Nested call expressions always disable caching.
+/// incremental caching. Its status and outputs stand until an argument changes.
+/// Every argument except `_ret` contributes its read cells, including in-out
+/// and mutable state. If any advances its version during a visit, whoever wrote
+/// it, the node stays dirty for the next tick: stateful computations run until
+/// settled, and completed actions that reset their state run again when reached.
+/// A write only to the `_ret` destination does not self-invalidate; a foreign
+/// overwrite still invalidates its producer. Visited `Running` nodes are polled.
+/// This argument is never sent to a module. The promise is not a purity check.
+/// Nested calls, including under `Select`, always disable caching.
+/// Store changes are observed at tick boundaries and lazily before skipping a
+/// subtree after possible store movement. With incremental execution disabled,
+/// cells have no incremental subscriptions or write-observation cost.
 pub const _ON_CHANGE_PARAM_ID: Uuid = uuid::uuid!("5f6f6e5f-6368-416e-8765-000000000000");
 
 #[derive(Serialize, Deserialize, Debug)]

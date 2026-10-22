@@ -138,7 +138,7 @@ impl BehaviorTree {
         root: &TickLink,
         caller: &mut dyn CallBridge,
     ) -> Result<Status, BehaviorTreeError> {
-        root.function.incremental.begin_tick();
+        let _store = root.function.incremental.begin_tick();
         self.detached.begin_tick();
         let status = root.tick(caller);
         let variables = self.variables.borrow();
@@ -265,8 +265,11 @@ pub struct BehaviorTreeRuntime<'a> {
 }
 
 impl<'a> BehaviorTreeRuntime<'a> {
-    /// Enable incremental ticking. A skipped node emits no trace line. Changing
-    /// this flag invalidates the cache; a fresh lowering starts entirely dirty.
+    /// Enable incremental ticking (off by default), with the rules documented
+    /// on [`LoweredTree::set_incremental`]: argument-version invalidation,
+    /// lazy store observation, polling from the previous tick's visits, and no
+    /// write observation while disabled. A skipped node emits no trace line.
+    /// Changing this flag invalidates the cache; a fresh lowering starts dirty.
     pub fn set_incremental(&self, enabled: bool) {
         self.tick.function.incremental.set_enabled(enabled);
     }
@@ -324,11 +327,23 @@ pub fn lower_behavior_tree(
 impl LoweredTree {
     /// Enable incremental ticking (off by default). Clean children and a clean
     /// root return their cached status without engine dispatch or trace output.
-    /// Running nodes are polled each tick; module leaves require `_on_change`
-    /// to cache terminal results (see [`schema::_ON_CHANGE_PARAM_ID`]). Store
-    /// reads are compared at each tick's start. Detached pulls precede a reader's
-    /// clean check, and sinks still run after the root. A write by a later node
-    /// invalidates an earlier reader for the next tick. No halt is introduced.
+    /// Only Running and non-cacheable nodes visited last tick are polled, along
+    /// with parents of visited detached readers. A bypassed Running child drops
+    /// out; its cached Running status cannot answer when reached again.
+    /// Module leaves require literal `_on_change: true` to cache terminal
+    /// results (see [`schema::_ON_CHANGE_PARAM_ID`]).
+    ///
+    /// Every argument except `_ret` contributes its read cells, including
+    /// mutable parameters. A version change during a visit, whoever wrote it,
+    /// dirties the node for the next tick. A write only to its `_ret` cell
+    /// does not self-invalidate; foreign overwrites still invalidate its producer.
+    /// Store reads are observed at tick start and lazily before skipping clean
+    /// subtrees after possible store movement, never globally after each visit.
+    /// Detached pulls precede a reader's clean check; sinks still run after the
+    /// root. Later writes invalidate earlier readers for the next tick.
+    /// With the flag off, subscriptions are dropped and cell writes do no value
+    /// observation. Enabling subscribes reads and initializes last-seen values.
+    /// Changing the flag invalidates statuses. No halt is introduced.
     pub fn set_incremental(&self, enabled: bool) {
         self.root.function.incremental.set_enabled(enabled);
     }
@@ -442,23 +457,17 @@ fn setup_tick_function(
     parent: Option<std::rc::Weak<incremental::State>>,
 ) -> Result<TickLink, BehaviorTreeError> {
     let pulls = detached.pulls(&node.id);
-    let state = Rc::new(incremental::State {
-        dirty: std::cell::Cell::new(true),
-        status: std::cell::Cell::new(None),
-        parent,
-        cacheable: incremental::cacheable(&node),
-        pulls: pulls.is_some(),
-    });
-    incremental.states.borrow_mut().push(Rc::downgrade(&state));
     let mut reads = Vec::new();
+    let mut arguments = Vec::new();
     for (parameter, expression) in &node.arguments {
+        let mut cells = Vec::new();
         detached::cells_read(
             expression,
             &variables.borrow(),
             &node_arg_variables,
-            &mut reads,
+            &mut cells,
         );
-        reads.extend(
+        cells.extend(
             node_arg_variables
                 .get(&NodeParameterId {
                     node: node.id,
@@ -466,16 +475,40 @@ fn setup_tick_function(
                 })
                 .cloned(),
         );
+        if *parameter != _RET_PARAM_ID {
+            arguments.extend(cells.iter().cloned());
+        }
+        reads.extend(cells);
     }
     let mut seen = HashSet::new();
     reads.retain(|cell| seen.insert(cell.identity()));
-    for cell in &reads {
-        cell.subscribe(&state);
-        if matches!(cell, VariableCell::Stored(_)) {
-            let mut stored = incremental.stored.borrow_mut();
-            if !stored.iter().any(|held| held.identity() == cell.identity()) {
-                stored.push(cell.clone());
-            }
+    seen.clear();
+    arguments.retain(|cell| seen.insert(cell.identity()));
+    let stored: Vec<_> = reads
+        .iter()
+        .filter(|cell| matches!(cell, VariableCell::Stored(_)))
+        .cloned()
+        .collect();
+    let state = Rc::new(incremental::State {
+        dirty: std::cell::Cell::new(true),
+        status: std::cell::Cell::new(None),
+        parent,
+        cacheable: incremental::cacheable(&node),
+        pulls: pulls.is_some(),
+        reads,
+        arguments,
+        subtree_stored: RefCell::new(stored.clone()),
+    });
+    incremental.states.borrow_mut().push(Rc::downgrade(&state));
+    for cell in &state.reads {
+        if incremental.enabled.get() {
+            cell.subscribe(&state);
+        }
+    }
+    for cell in stored {
+        let mut stored = incremental.stored.borrow_mut();
+        if !stored.iter().any(|held| held.identity() == cell.identity()) {
+            stored.push(cell);
         }
     }
     let nof_children = node
@@ -510,10 +543,22 @@ fn setup_tick_function(
             children_ticks.push(tick_function_with_id);
         }
     }
+    let mut seen: HashSet<_> = state
+        .subtree_stored
+        .borrow()
+        .iter()
+        .map(VariableCell::identity)
+        .collect();
+    for child in &children_ticks {
+        for cell in child.function.state.subtree_stored.borrow().iter() {
+            if seen.insert(cell.identity()) {
+                state.subtree_stored.borrow_mut().push(cell.clone());
+            }
+        }
+    }
     let tick_function = Rc::new(TickFunction {
         state,
         incremental,
-        reads,
         node: node.clone(),
         function: functions.get(&node.function).cloned(),
         calls: Rc::new(call_signatures(&node, functions)?),
@@ -1143,7 +1188,6 @@ impl Tickable for TickLink {
 
 struct TickFunction {
     state: Rc<incremental::State>,
-    reads: Vec<VariableCell>,
     incremental: Rc<incremental::Incremental>,
     node: Rc<Node>,
     /// The module function the node calls, resolved against the device's
@@ -1174,11 +1218,6 @@ impl TickFunction {
         if !self.incremental.enabled.get() {
             return Ok(None);
         }
-        for cell in &self.reads {
-            if matches!(cell, VariableCell::Stored(_)) {
-                cell.observe();
-            }
-        }
         // Pulls precede the clean check, including when a parent checks a child
         // without dispatch. A changed port can invalidate this very visit.
         if let Some(pulls) = self.pulls.as_deref() {
@@ -1193,7 +1232,15 @@ impl TickFunction {
                 caller,
             )?;
         }
+        if self.state.cacheable && !self.state.dirty.get() && incremental::store_moved() {
+            for cell in self.state.subtree_stored.borrow().iter() {
+                cell.observe();
+            }
+        }
         if self.state.cacheable && !self.state.dirty.get() {
+            if self.state.pulls {
+                self.incremental.visited(&self.state);
+            }
             Ok(self
                 .state
                 .status
@@ -1210,6 +1257,26 @@ impl Tickable for TickFunction {
         if let Some(status) = self.cached(caller)? {
             return Ok(status);
         }
+        let enabled = self.incremental.enabled.get();
+        // A dirty visit reads live slots too. Bring just its own read versions
+        // up to date before recording the argument snapshot; a raw write by an
+        // earlier sibling must not look like a change during this visit.
+        if enabled && incremental::store_moved() {
+            for cell in &self.state.reads {
+                if matches!(cell, VariableCell::Stored(_)) {
+                    cell.observe();
+                }
+            }
+        }
+        let versions: Vec<_> = if enabled {
+            self.state
+                .arguments
+                .iter()
+                .map(VariableCell::version)
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.state.dirty.set(false);
         let _visit = incremental::Visit::enter(&self.state);
         let result = tick(
@@ -1225,12 +1292,22 @@ impl Tickable for TickFunction {
             self.node.clone(),
             self.trace,
         );
-        if !self.state.cacheable {
-            self.incremental.observe_writes();
-        }
-        self.state.status.set(result.as_ref().ok().copied());
-        if self.state.dirty.get() {
-            self.state.mark();
+        if enabled {
+            if !self.state.cacheable {
+                incremental::store_written();
+            }
+            self.state.status.set(result.as_ref().ok().copied());
+            if self.state.dirty.get()
+                || self
+                    .state
+                    .arguments
+                    .iter()
+                    .zip(versions)
+                    .any(|(cell, version)| cell.version() != version)
+            {
+                self.state.mark();
+            }
+            self.incremental.visited(&self.state);
         }
         result
     }

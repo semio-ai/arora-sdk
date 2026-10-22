@@ -81,6 +81,7 @@ fn lower(
         (id(9001), "b".into()),
         (id(9002), "c".into()),
         (id(9003), "d".into()),
+        (id(9010), "a".into()),
         (id(9004), "out".into()),
         (id(9005), "y".into()),
         (id(9006), "seen".into()),
@@ -157,23 +158,27 @@ fn a_changed_store_key_ticks_only_its_readers_and_ancestors() {
 
 #[test]
 fn a_running_leaf_and_its_ancestors_are_polled_every_tick() {
-    let mut bridge = Bridge::default();
-    bridge.ops.insert(id(20002), Op::Running(4));
     let mut leaf = module(2, lit(1.0), true);
     leaf.arguments.insert(STATE, lit(0.0));
-    let tree = lower(
+    let mut pair = Lockstep::new(
         vec![control(1, SEQ_FUNCTION_ID, vec![2]), leaf],
-        &mut bridge,
-        &SimpleDataStore::new(),
-        true,
+        HashMap::from([(id(20002), Op::Running(4))]),
     );
-    for _ in 0..4 {
-        assert_eq!(tick(&tree, &mut bridge), Status::Running);
-        assert_eq!((bridge.dispatches, bridge.calls.len()), (2, 1));
+    for step in 0..12 {
+        let expected = if step % 5 == 4 {
+            Status::Success
+        } else {
+            Status::Running
+        };
+        assert_eq!(pair.tick(), expected);
+        assert_eq!(
+            (
+                pair.incremental_bridge.dispatches,
+                pair.incremental_bridge.calls.len()
+            ),
+            (2, 1)
+        );
     }
-    assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!((bridge.dispatches, bridge.calls.len()), (0, 0));
 }
 
 #[test]
@@ -458,7 +463,21 @@ fn relowering_an_edit_starts_dirty_and_keeps_the_result_correct() {
 
 #[test]
 fn cell_versions_change_only_when_the_value_changes() {
-    let cell = crate::variable::VariableCell::local();
+    let mut bridge = Bridge::default();
+    let tree = lower(
+        vec![node(
+            1,
+            EQUAL_FUNCTION_ID,
+            vec![
+                (EQUAL_A_PARAM_ID, variable(8001)),
+                (EQUAL_B_PARAM_ID, variable(9000)),
+            ],
+        )],
+        &mut bridge,
+        &SimpleDataStore::new(),
+        true,
+    );
+    let cell = tree.tree().variables.borrow()[&id(8001)].clone();
     assert_eq!(cell.version(), 0);
     cell.set(Value::F64(1.0));
     assert_eq!(cell.version(), 1);
@@ -467,7 +486,20 @@ fn cell_versions_change_only_when_the_value_changes() {
     cell.set_opt(None);
     assert_eq!(cell.version(), 2);
     let store = SimpleDataStore::new();
-    let stored = crate::variable::VariableCell::stored(store.slot(&Key::from("a")));
+    let tree = lower(
+        vec![node(
+            1,
+            EQUAL_FUNCTION_ID,
+            vec![
+                (EQUAL_A_PARAM_ID, variable(9000)),
+                (EQUAL_B_PARAM_ID, lit(0.0)),
+            ],
+        )],
+        &mut bridge,
+        &store,
+        true,
+    );
+    let stored = tree.tree().variables.borrow()[&id(9000)].clone();
     put(&store, "a", Some(Value::F64(2.0)));
     stored.observe();
     assert_eq!(stored.version(), 1);
@@ -536,7 +568,7 @@ impl Generator {
                     vec![
                         (
                             EQUAL_A_PARAM_ID,
-                            variable(9000 + self.random.next(4) as u128),
+                            variable([9000, 9001, 9002, 9003, 9010][self.random.next(5) as usize]),
                         ),
                         (EQUAL_B_PARAM_ID, lit(self.random.next(5) as f64)),
                     ],
@@ -549,10 +581,10 @@ impl Generator {
                                 [self.random.next(self.results.len() as u64) as usize],
                         )
                     } else {
-                        variable(9000 + self.random.next(4) as u128)
+                        variable([9000, 9001, 9002, 9003, 9010][self.random.next(5) as usize])
                     };
-                    let mut leaf = module(n, input, opted);
-                    let op = match kind {
+                    let mut leaf = module(n, input.clone(), opted);
+                    let mut op = match kind {
                         4 => Op::Add,
                         5 => Op::Mul,
                         6 => Op::Clamp,
@@ -567,6 +599,13 @@ impl Generator {
                     } else {
                         leaf.arguments.insert(_RET_PARAM_ID, variable(8000 + n));
                         self.results.push(n);
+                    }
+                    if opted && self.random.next(4) == 0 {
+                        op = Op::Approach;
+                        leaf.arguments.insert(STATE, lit(0.0));
+                    }
+                    if kind < 8 && self.random.next(8) == 0 {
+                        leaf.arguments.insert(_RET_PARAM_ID, input);
                     }
                     // Some outputs are both tree-local and store-visible through
                     // an in-out port, so differential checks cover both writes.
@@ -811,6 +850,9 @@ fn a_scatter_write_dirties_a_later_readers_cached_ancestor() {
     );
     put(&store, "b", Some(Value::ArrayF64(vec![1.0])));
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
+    // The first live read observes Scatter's initial raw-slot write while its
+    // ancestor is visiting, leaving that ancestor dirty for one more pass.
+    tick(&tree, &mut bridge);
     tick(&tree, &mut bridge);
     assert_eq!(
         bridge.dispatches, 2,
@@ -878,4 +920,433 @@ fn unvisited_dirty_children_do_not_prevent_a_terminal_root_from_settling() {
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
     assert_eq!(bridge.dispatches, 0);
     assert!(bridge.calls.is_empty());
+}
+
+// Targeted regressions compare statuses, every lowered cell, store keys, and
+// ordered ordinary module calls at each tick, before proceeding to the next.
+struct Lockstep {
+    naive: LoweredTree,
+    incremental: LoweredTree,
+    naive_bridge: Bridge,
+    incremental_bridge: Bridge,
+    stores: [SimpleDataStore; 2],
+    opted: HashSet<Uuid>,
+}
+impl Lockstep {
+    fn new(nodes: Vec<Node>, ops: HashMap<Uuid, Op>) -> Self {
+        let opted = nodes
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.arguments.get(&_ON_CHANGE_PARAM_ID),
+                    Some(Expression::Value(Value::Boolean(true)))
+                )
+            })
+            .map(|node| node.function)
+            .collect();
+        let copy = nodes
+            .iter()
+            .map(|node| Node {
+                id: node.id,
+                function: node.function,
+                arguments: node.arguments.clone(),
+                children: node.children.clone(),
+            })
+            .collect();
+        let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
+        let mut naive_bridge = Bridge::default();
+        naive_bridge.ops = ops.clone();
+        let mut incremental_bridge = Bridge::default();
+        incremental_bridge.ops = ops;
+        let naive = lower(nodes, &mut naive_bridge, &stores[0], false);
+        let incremental = lower(copy, &mut incremental_bridge, &stores[1], true);
+        Self {
+            naive,
+            incremental,
+            naive_bridge,
+            incremental_bridge,
+            stores,
+            opted,
+        }
+    }
+    fn put(&self, name: &str, value: Option<Value>) {
+        for store in &self.stores {
+            put(store, name, value.clone());
+        }
+    }
+    fn tick(&mut self) -> Status {
+        let expected = tick(&self.naive, &mut self.naive_bridge);
+        assert_eq!(
+            tick(&self.incremental, &mut self.incremental_bridge),
+            expected
+        );
+        assert_eq!(cells(&self.incremental), cells(&self.naive));
+        for key in ["a", "b", "c", "d", "out", "y", "seen"] {
+            assert_eq!(
+                self.stores[0].slot(&Key::from(key)).get(),
+                self.stores[1].slot(&Key::from(key)).get(),
+                "{key}"
+            );
+        }
+        let ordinary = |bridge: &Bridge| {
+            bridge
+                .calls
+                .iter()
+                .filter(|(id, _)| !self.opted.contains(id))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ordinary(&self.incremental_bridge),
+            ordinary(&self.naive_bridge)
+        );
+        expected
+    }
+}
+
+#[test]
+fn own_argument_versions_keep_feedback_writers_dirty() {
+    for input in [8001, 9000] {
+        let mut leaf = module(1, variable(input), true);
+        leaf.arguments.insert(_RET_PARAM_ID, variable(input));
+        let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20001), Op::Add)]));
+        for n in 1..=4 {
+            assert_eq!(pair.tick(), Status::Success);
+            assert_eq!(
+                pair.incremental.tree().variables.borrow()[&id(input)].get(),
+                Some(Value::F64(2.0 * n as f64))
+            );
+            assert_eq!(pair.incremental_bridge.calls.len(), 1);
+        }
+    }
+}
+
+fn feedback_regex(n: u128) -> Node {
+    node(
+        n,
+        REGEX_MATCH_FUNCTION_ID,
+        vec![
+            (REGEX_MATCH_VALUE_PARAM_ID, variable(9000)),
+            (
+                REGEX_MATCH_MATCHER_PARAM_ID,
+                Expression::Value(Value::String("\\Ba".into())),
+            ),
+            (REGEX_MATCH_FIRST_MATCH_PARAM_ID, variable(9000)),
+        ],
+    )
+}
+
+#[test]
+fn native_in_out_arguments_dirty_their_own_reader() {
+    let mut pair = Lockstep::new(vec![feedback_regex(1)], HashMap::new());
+    pair.put("a", Some(Value::String("ba".into())));
+    for expected in [Status::Success, Status::Failure, Status::Failure] {
+        assert_eq!(pair.tick(), expected);
+    }
+}
+
+#[test]
+fn native_feedback_preserves_short_circuit_effectful_calls() {
+    let mut effect = module(3, lit(0.0), false);
+    effect.arguments.insert(STATE, lit(0.0));
+    let mut pair = Lockstep::new(
+        vec![
+            control(1, SEQ_FUNCTION_ID, vec![2, 3]),
+            feedback_regex(2),
+            effect,
+        ],
+        HashMap::from([(id(20003), Op::Effect)]),
+    );
+    pair.put("a", Some(Value::String("ba".into())));
+    for expected in [Status::Success, Status::Failure, Status::Failure] {
+        assert_eq!(pair.tick(), expected);
+        assert_eq!(
+            pair.incremental_bridge.calls.len(),
+            usize::from(expected == Status::Success)
+        );
+    }
+}
+
+fn alias_pair(visited_ancestor: bool) -> Lockstep {
+    let mut writer = module(2, variable(9001), true);
+    writer.arguments.insert(_RET_PARAM_ID, variable(9010));
+    let mut nodes = vec![
+        control(1, SEQ_FUNCTION_ID, vec![2, 3]),
+        writer,
+        control(
+            3,
+            if visited_ancestor {
+                FALLBACK_FUNCTION_ID
+            } else {
+                SEQ_FUNCTION_ID
+            },
+            if visited_ancestor {
+                vec![5, 4]
+            } else {
+                vec![4]
+            },
+        ),
+        node(
+            4,
+            EQUAL_FUNCTION_ID,
+            vec![
+                (EQUAL_A_PARAM_ID, variable(9000)),
+                (EQUAL_B_PARAM_ID, lit(3.0)),
+            ],
+        ),
+    ];
+    if visited_ancestor {
+        nodes.push(node(
+            5,
+            EQUAL_FUNCTION_ID,
+            vec![
+                (EQUAL_A_PARAM_ID, variable(9001)),
+                (EQUAL_B_PARAM_ID, lit(99.0)),
+            ],
+        ));
+    }
+    Lockstep::new(nodes, HashMap::from([(id(20002), Op::Add)]))
+}
+
+#[test]
+fn lazy_store_observation_reaches_aliases_under_a_clean_ancestor() {
+    let mut pair = alias_pair(false);
+    assert_eq!(pair.tick(), Status::Failure);
+    assert_eq!(pair.tick(), Status::Failure);
+    pair.put("b", Some(Value::F64(1.0)));
+    assert_eq!(pair.tick(), Status::Success);
+    assert_eq!(pair.tick(), Status::Success);
+}
+
+#[test]
+fn lazy_store_observation_checks_a_clean_child_of_a_dirty_ancestor() {
+    let mut pair = alias_pair(true);
+    assert_eq!(pair.tick(), Status::Failure);
+    assert_eq!(pair.tick(), Status::Failure);
+    pair.put("b", Some(Value::F64(1.0)));
+    assert_eq!(pair.tick(), Status::Success);
+    assert_eq!(pair.tick(), Status::Success);
+}
+
+#[test]
+fn only_running_nodes_visited_last_tick_keep_polling_alive() {
+    let mut pair = Lockstep::new(
+        vec![
+            control(1, FALLBACK_FUNCTION_ID, vec![2, 3]),
+            node(
+                2,
+                EQUAL_FUNCTION_ID,
+                vec![
+                    (EQUAL_A_PARAM_ID, variable(9000)),
+                    (EQUAL_B_PARAM_ID, lit(1.0)),
+                ],
+            ),
+            node(3, RUN_FUNCTION_ID, vec![]),
+        ],
+        HashMap::new(),
+    );
+    pair.put("a", Some(Value::F64(0.0)));
+    assert_eq!(pair.tick(), Status::Running);
+    pair.put("a", Some(Value::F64(1.0)));
+    assert_eq!(pair.tick(), Status::Success);
+    for _ in 0..5 {
+        assert_eq!(pair.tick(), Status::Success);
+        assert_eq!(pair.incremental_bridge.dispatches, 0);
+    }
+    pair.put("a", Some(Value::F64(0.0)));
+    assert_eq!(pair.tick(), Status::Running);
+    assert_eq!(
+        pair.incremental_bridge.dispatches, 3,
+        "cached Running cannot answer"
+    );
+}
+
+#[test]
+fn detached_return_fed_into_a_store_named_input_is_pulled_before_skipping() {
+    let mut detached = module(3, variable(9000), false);
+    detached
+        .arguments
+        .insert(_RET_PARAM_ID, port(2, EQUAL_A_PARAM_ID));
+    let mut pair = Lockstep::new(
+        vec![
+            control(1, SEQ_FUNCTION_ID, vec![2]),
+            node(
+                2,
+                EQUAL_FUNCTION_ID,
+                vec![
+                    (EQUAL_A_PARAM_ID, variable(9001)),
+                    (EQUAL_B_PARAM_ID, lit(3.0)),
+                ],
+            ),
+            detached,
+        ],
+        HashMap::from([(id(20003), Op::Add)]),
+    );
+    pair.put("a", Some(Value::F64(0.0)));
+    assert_eq!(pair.tick(), Status::Failure);
+    assert_eq!(pair.tick(), Status::Failure);
+    pair.put("a", Some(Value::F64(1.0)));
+    assert_eq!(pair.tick(), Status::Success);
+    assert_eq!(pair.tick(), Status::Success);
+}
+
+#[test]
+fn stateful_on_change_computation_runs_until_its_state_settles() {
+    let mut leaf = module(1, lit(8.0), true);
+    leaf.arguments.insert(STATE, lit(0.0));
+    leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
+    let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20001), Op::Approach)]));
+    for _ in 0..15 {
+        pair.tick();
+        assert_eq!(pair.incremental_bridge.calls.len(), 1);
+    }
+    for _ in 0..5 {
+        pair.tick();
+        assert!(pair.incremental_bridge.calls.is_empty());
+        assert_eq!(pair.incremental_bridge.dispatches, 0);
+    }
+}
+
+#[test]
+fn reserved_on_change_argument_never_crosses_the_module_bridge() {
+    let mut leaf = module(1, lit(0.0), true);
+    leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
+    let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20001), Op::Add)]));
+    pair.tick();
+    for bridge in [&pair.naive_bridge, &pair.incremental_bridge] {
+        assert_eq!(bridge.calls.len(), 1);
+        assert!(bridge
+            .calls
+            .iter()
+            .all(|(_, args)| args.iter().all(|field| field.id != _ON_CHANGE_PARAM_ID)));
+    }
+}
+
+#[test]
+fn only_literal_true_opts_a_module_leaf_into_caching() {
+    for argument in [
+        Expression::Value(Value::Boolean(false)),
+        lit(1.0),
+        variable(9000),
+    ] {
+        let mut leaf = module(1, lit(0.0), false);
+        leaf.arguments.insert(_ON_CHANGE_PARAM_ID, argument);
+        leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
+        let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20001), Op::Add)]));
+        pair.put("a", Some(Value::Boolean(true)));
+        for _ in 0..4 {
+            pair.tick();
+            assert_eq!(pair.incremental_bridge.calls.len(), 1);
+        }
+    }
+}
+
+#[test]
+fn effectful_native_leaves_never_cache_terminal_results() {
+    use arora_types::call::Call;
+    for leaf in [
+        node(
+            1,
+            SET_STR_FUNCTION_ID,
+            vec![
+                (SET_STR_VARIABLE_PARAM_ID, variable(9000)),
+                (
+                    SET_STR_VALUE_PARAM_ID,
+                    Expression::Value(Value::String("hello".into())),
+                ),
+            ],
+        ),
+        node(
+            1,
+            UNSET_STR_FUNCTION_ID,
+            vec![(UNSET_STR_VARIABLE_PARAM_ID, variable(9000))],
+        ),
+        node(
+            1,
+            RUN_CALL_FUNCTION_ID,
+            vec![(
+                RUN_CALL_PARAM_ID,
+                Expression::Value(
+                    arora_types::value_serde::to_value(&Call {
+                        module_id: Some(fixture::MODULE),
+                        id: id(20002),
+                        args: vec![],
+                    })
+                    .unwrap(),
+                ),
+            )],
+        ),
+    ] {
+        let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20002), Op::Add)]));
+        for _ in 0..4 {
+            pair.tick();
+            assert_eq!(pair.incremental_bridge.dispatches, 1);
+        }
+    }
+}
+
+#[test]
+fn a_call_nested_under_select_disables_caching() {
+    use crate::schema::CallExpression;
+    let input = Expression::Select {
+        source: Box::new(Expression::Call(Box::new(CallExpression {
+            module: Expression::Uuid(fixture::MODULE),
+            function: Expression::Uuid(id(40000)),
+            arguments: vec![
+                (Expression::Uuid(X), lit(2.0)),
+                (Expression::Uuid(Y), lit(3.0)),
+            ],
+        }))),
+        path: Key::new(""),
+    };
+    let mut leaf = module(1, input, true);
+    leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
+    let mut pair = Lockstep::new(
+        vec![leaf],
+        HashMap::from([(id(20001), Op::Add), (id(40000), Op::Mul)]),
+    );
+    for _ in 0..4 {
+        pair.tick();
+        assert_eq!(
+            pair.incremental_bridge
+                .calls
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![id(40000), id(20001)]
+        );
+    }
+}
+
+#[test]
+fn cells_without_subscribers_do_not_observe_writes() {
+    let store = SimpleDataStore::new();
+    let mut bridge = Bridge::default();
+    let tree = lower(
+        vec![node(
+            1,
+            EQUAL_FUNCTION_ID,
+            vec![
+                (EQUAL_A_PARAM_ID, variable(9000)),
+                (EQUAL_B_PARAM_ID, lit(0.0)),
+            ],
+        )],
+        &mut bridge,
+        &store,
+        false,
+    );
+    let cell = tree.tree().variables.borrow()[&id(9000)].clone();
+    cell.set(Value::F64(1.0));
+    assert_eq!(cell.version(), 0);
+    tree.set_incremental(true);
+    cell.set(Value::F64(1.0));
+    assert_eq!(cell.version(), 0, "seen is initialized when subscribing");
+    cell.set(Value::F64(2.0));
+    assert_eq!(cell.version(), 1);
+    tree.set_incremental(false);
+    cell.set(Value::F64(3.0));
+    assert_eq!(cell.version(), 1, "disabling drops subscriptions");
+    tree.set_incremental(true);
+    cell.set(Value::F64(3.0));
+    assert_eq!(cell.version(), 1);
 }
