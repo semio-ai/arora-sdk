@@ -125,23 +125,62 @@ impl Bridge {
         self.dispatches = 0;
     }
 }
-impl CallBridge for Bridge {
-    fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+/// A call's arguments as the host receives them: owned, through
+/// [`CallBridge::arora_call`], or lent, through
+/// [`CallBridge::arora_call_borrowed`]. The host reads either in place; it
+/// copies lent arguments only to record them, in the order it was given them.
+trait Arguments {
+    fn get(&self, id: Uuid) -> Option<&Value>;
+    fn into_recorded(self) -> Vec<StructureField>;
+}
+impl Arguments for Vec<StructureField> {
+    fn get(&self, id: Uuid) -> Option<&Value> {
+        self.iter()
+            .find(|field| field.id == id)
+            .map(|field| &*field.value)
+    }
+    fn into_recorded(self) -> Vec<StructureField> {
+        self
+    }
+}
+impl Arguments for &[(Uuid, &Value)] {
+    fn get(&self, id: Uuid) -> Option<&Value> {
+        self.iter()
+            .find(|(parameter, _)| *parameter == id)
+            .map(|(_, value)| *value)
+    }
+    fn into_recorded(self) -> Vec<StructureField> {
+        self.iter()
+            .map(|(id, value)| StructureField {
+                id: *id,
+                value: Box::new((*value).clone()),
+            })
+            .collect()
+    }
+}
+impl Bridge {
+    /// Answer a call of the function `id`: both entry points answer, count
+    /// and record a call alike.
+    fn answer(
+        &mut self,
+        module_id: Option<Uuid>,
+        id: Uuid,
+        args: impl Arguments,
+    ) -> Result<CallResult, CallError> {
         let op = self
             .ops
-            .get(&call.id)
+            .get(&id)
             .copied()
-            .ok_or(CallError::FunctionNotFound { id: call.id })?;
-        assert_eq!(call.module_id, Some(MODULE));
+            .ok_or(CallError::FunctionNotFound { id })?;
+        assert_eq!(module_id, Some(MODULE));
         if matches!(op, Op::WriteThenTick) {
             let slot = self.raw_write.as_ref().expect("a raw store slot");
             slot.set(Some(Value::F64(self.raw_writes as f64))).unwrap();
             self.raw_writes += 1;
-            let children = call.args.iter().find(|field| field.id == CHILDREN).unwrap();
-            let children = (*children.value).clone().into_elements().unwrap();
+            let children = args.get(CHILDREN).unwrap().clone().into_elements().unwrap();
             self.module_calls += 1;
             if !self.count_only {
-                self.calls.push((call.id, call.args));
+                self.calls.push((id, args.into_recorded()));
             }
             let mut status = Status::Success;
             for child in children {
@@ -161,13 +200,7 @@ impl CallBridge for Bridge {
                 mutated: Vec::new(),
             });
         }
-        let value = |id| {
-            call.args
-                .iter()
-                .find(|field| field.id == id)
-                .map(|field| &*field.value)
-        };
-        let number = |id| match value(id) {
+        let number = |id| match args.get(id) {
             Some(Value::F64(x)) => *x,
             _ => 0.0,
         };
@@ -211,7 +244,7 @@ impl CallBridge for Bridge {
                 }
             }
         };
-        if value(OUT).is_some() {
+        if args.get(OUT).is_some() {
             mutated.push(StructureField {
                 id: OUT,
                 value: Box::new(ret.clone()),
@@ -219,9 +252,22 @@ impl CallBridge for Bridge {
         }
         self.module_calls += 1;
         if !self.count_only {
-            self.calls.push((call.id, call.args));
+            self.calls.push((id, args.into_recorded()));
         }
         Ok(CallResult { ret, mutated })
+    }
+}
+impl CallBridge for Bridge {
+    fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+        self.answer(call.module_id, call.id, call.args)
+    }
+    fn arora_call_borrowed(
+        &mut self,
+        module_id: Option<Uuid>,
+        id: Uuid,
+        args: &[(Uuid, &Value)],
+    ) -> Result<CallResult, CallError> {
+        self.answer(module_id, id, args)
     }
     fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {
         self.next += 1;

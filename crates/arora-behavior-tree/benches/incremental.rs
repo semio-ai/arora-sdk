@@ -1,26 +1,45 @@
 //! `cargo bench -p arora-behavior-tree --offline --bench incremental -- [ticks] [samples]`
 //! prints median microseconds per tick after 50 warm-up ticks, plus module calls
 //! and engine indirect dispatches per measured tick. Defaults: 500 ticks, 7 samples.
-//! Sizes are 10, 100, 1000; inputs feed independent chains of add/mul/clamp/remap
-//! calls. `one-input` changes one chain, `all-inputs` changes all chains.
-//! `attached-plain-incremental` enables the flag on the attached tree without
-//! `_on_change`, measuring the incremental cost for existing effectful trees.
 //!
-//! `attached-guarded` is the attached tree on today's executor (flag off) with
-//! each leaf wrapped as `FALLBACK[SEQ[Equal(a: 0, b: 1), leaf], SUCCEED]`, the
-//! pattern a tree uses to skip an unchanged node without the flag. `Equal` on
-//! two different literals always fails, so no leaf is called: the row is the
-//! cost of the guard alone on a settled graph, four native nodes ticked per
-//! graph node and no module call. A literal guard cannot follow an input
-//! change, so this form runs in `settled` only, and it is left out of the
-//! output comparison because its leaves never publish.
+//! The graph has N = 10, 100, 1000 module calls (add, mul, clamp, remap) and
+//! K = max(2, N/10) store inputs `input/j`, feeding K independent chains: call
+//! `i` reads input `i` when `i < K`, else the return of call `i - K`. Each call
+//! takes the same two arguments, `x` and `y`, in every form. Only the last call
+//! of each chain, which no call reads, publishes: its `_ret` is bound to the
+//! chain's store key `output/j`. Every other return is a value the next call
+//! of its chain reads, and stays in the tree. `settled` changes no input,
+//! `one-input` one chain's, `all-inputs` every chain's.
 //!
-//! Attached leaves bind `_ret` to a tree-local port and mirror the computed
-//! value through a mutable `out` parameter to a store key. Detached nodes bind
-//! `_ret` directly to those keys (sink publication). The host ignores `out`'s
-//! incoming value. Store publication is included in all timings. Counters are
-//! collected without recording call arguments; this measures a native test
-//! bridge, not wasm execution. Compare counts as well as times.
+//! The forms:
+//!
+//! - `attached-naive`: today's executor, `PARALLEL[ leaf × N, RUN ]`. An
+//!   intermediate leaf binds `_ret` to a tree-local variable, which its
+//!   reader's `@node` reads; a chain's last leaf binds `_ret` to its key.
+//! - `attached-plain-incremental`: the same tree with the incremental flag on
+//!   and no `_on_change`: the incremental cost for existing effectful trees.
+//! - `attached-incremental`: the same tree, its leaves `_on_change`, on the
+//!   incremental executor.
+//! - `detached`: the same calls as detached nodes under a root `RUN`. A chain's
+//!   last node binds `_ret` to its key, a sink; every other binds nothing and
+//!   is read through `@node`, so it runs because it feeds a sink.
+//! - `attached-guarded`: the attached leaves and bindings on today's executor
+//!   (flag off), each leaf wrapped as `FALLBACK[SEQ[Equal(a: 0, b: 1), leaf],
+//!   SUCCEED]`, the pattern a tree uses to skip an unchanged node without the
+//!   flag. `Equal` on two different literals always fails, so no leaf is
+//!   called: the row is the cost of the guard alone on a settled graph, four
+//!   native nodes ticked per graph node and no module call. A literal guard
+//!   cannot follow an input change, so this form runs in `settled` only, and
+//!   it is left out of the output comparison because its leaves never publish.
+//!
+//! Every other form must publish the same K keys, which the bench compares.
+//! Store publication is included in all timings.
+//!
+//! The host is a native test bridge, not wasm execution. It answers the owned
+//! calls the attached executor makes (`arora_call`) and the borrowed calls the
+//! detached evaluator makes (`arora_call_borrowed`) alike: it computes from the
+//! arguments where they are, copies none, and records none, counting module
+//! calls the same way on both. Compare counts as well as times.
 mod support {
     pub mod incremental;
 }
@@ -40,7 +59,7 @@ use arora_behavior_tree::{load_behavior_tree_nodes_with, lower_behavior_tree};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key};
 use arora_types::value::Value;
-use support::incremental::{Bridge, Op, OUT, X, Y};
+use support::incremental::{Bridge, Op, X, Y};
 use uuid::Uuid;
 
 fn id(n: usize) -> Uuid {
@@ -71,10 +90,11 @@ fn measure(
             slot
         })
         .collect();
-    let outputs: Vec<_> = (0..n)
-        .map(|i| {
-            let key = format!("output/{i}");
-            names.insert(id(90000 + i), key.clone());
+    // One published key per chain, written by its last node.
+    let outputs: Vec<_> = (0..k)
+        .map(|j| {
+            let key = format!("output/{j}");
+            names.insert(id(90000 + j), key.clone());
             store.slot(&Key::from(key))
         })
         .collect();
@@ -106,16 +126,16 @@ fn measure(
                 parameter: _RET_PARAM_ID,
             })
         };
-        let mut arguments = HashMap::from([
-            (X, input),
-            (Y, Expression::Value(Value::F64(1.1))),
-            (
-                _RET_PARAM_ID,
-                variable(if detached { 90000 + i } else { 30000 + i }),
-            ),
-        ]);
-        if !detached {
-            arguments.insert(OUT, variable(90000 + i));
+        let mut arguments = HashMap::from([(X, input), (Y, Expression::Value(Value::F64(1.1)))]);
+        // Leaf `i + k` reads leaf `i`; a leaf no other reads ends chain `i % k`
+        // and publishes its return to that chain's key. An attached reader
+        // reads the tree-local variable `_ret` is bound to; a detached reader
+        // reads the port `@node` names, so an intermediate detached node binds
+        // nothing and runs because the sink of its chain reads it.
+        if i + k >= n {
+            arguments.insert(_RET_PARAM_ID, variable(90000 + i % k));
+        } else if !detached {
+            arguments.insert(_RET_PARAM_ID, variable(30000 + i));
         }
         if mode == "attached-incremental" {
             arguments.insert(_ON_CHANGE_PARAM_ID, Expression::Value(Value::Boolean(true)));
