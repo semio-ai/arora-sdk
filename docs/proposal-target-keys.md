@@ -188,8 +188,13 @@ current one. The rule:
    runtime hands its HAL each step's store changes merged key by key into one
    change (`flush`, `crates/arora/src/runtime.rs`), so writes to the two forms
    within one step also reach the HAL as one change, and the form decides
-   there too. That loses no order: a writer writes one form, and the writes of
-   two writers within one step carry no order between them. Across steps, the
+   there too. That loses no order between remotes: a writer writes one form,
+   and the writes of two remotes within one step carry no order between them.
+   It does override one order the runtime sets: it applies a step's bridge
+   events before it ticks the behavior (`Arora::step`), so on one key the
+   behavior's write wins, but where a remote and the behavior write different
+   forms of one target within one step, `k/target.c`'s value applies,
+   whichever of them wrote it. Across steps, the
    later write wins, whichever form each was written in; a HAL that merges a
    backlog of changes into one keeps that (`arora_hal::fold_newest_wins`), and
    rule 5 keeps the store from dropping the later write. A whole target
