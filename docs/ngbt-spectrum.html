@@ -749,8 +749,9 @@ class ComputeEngine extends TreeEngine {
     this.cache.set(id, key); return v;
   }
   block(n) {
-    // A graph alone: the tree does nothing, and the sinks write after it.
-    if (n === this.model.tree) { this.m.visits++; return "R"; }
+    // A graph alone: the tree is one RUNNING leaf, which tickTree counted,
+    // and the sinks write after it.
+    if (n === this.model.tree) return "R";
     for (const id of n.outputs) { this.m.visits++; const node = this.model.nodes[id]; const v = this.pull(node.a.in); this.write(node.key, v); this.mark(id, v); }
     this.m.visits++; return "R";
   }
