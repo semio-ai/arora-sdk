@@ -1372,3 +1372,55 @@ fn an_output_bound_to_a_store_backed_tree_input_feeds_it() {
     );
     assert_eq!(tree.detached_plan().on_demand, vec![id(50)]);
 }
+
+/// An output feeds another node's input only when that input reads a cell:
+/// lowering refuses an output bound to an input a call or a selection
+/// computes, and a mutable parameter bound to an input naming a store key.
+#[test]
+fn lowering_refuses_an_output_bound_to_an_input_with_no_cell_to_feed() {
+    let feeding = |target: Expression| {
+        let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+        add.arguments.insert(_RET_PARAM_ID, target);
+        add
+    };
+    // A detached reader whose input a call computes.
+    let consumer = compute(
+        51,
+        ADD,
+        vec![
+            (ADD_A, call(ADD, vec![(ADD_A, f(5.0)), (ADD_B, f(5.0))])),
+            (ADD_B, f(1.0)),
+        ],
+        Some("out"),
+    );
+    let error = lowering_error(
+        vec![below(1, f(1.0), 3.0)],
+        vec![consumer, feeding(port(51, ADD_A))],
+    );
+    assert!(error.contains("a call or a selection computes"), "{error}");
+
+    // A tree node whose input a selection computes.
+    let selection = Expression::Select {
+        source: Box::new(key(".x")),
+        path: Key::new(".field"),
+    };
+    let error = lowering_error(
+        vec![below(1, selection, 3.0)],
+        vec![feeding(port(1, BELOW_X))],
+    );
+    assert!(error.contains("a call or a selection computes"), "{error}");
+
+    // A mutable parameter bound to a tree node's input naming a store key.
+    let smooth = compute(
+        50,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, f(1.0)),
+            (SMOOTH_ALPHA, f(1.0)),
+            (SMOOTH_STATE, port(1, BELOW_X)),
+        ],
+        None,
+    );
+    let error = lowering_error(vec![below(1, key("in"), 3.0)], vec![smooth]);
+    assert!(error.contains("names a store key"), "{error}");
+}

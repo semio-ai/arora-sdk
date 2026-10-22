@@ -34,8 +34,10 @@ All notable changes to `arora-behavior-tree`. The format follows
     other nodes by id.
   - Lowering refuses detached nodes that read each other in a cycle, a
     detached node reading an output of its own other than its state, a call
-    in a detached node's arguments writing back a store key, a read of a port
-    that is neither a return value nor a mutable parameter, and a tree-local
+    in a detached node's arguments writing back a store key, an output bound
+    to an input that a call or a selection computes, a mutable parameter bound
+    to another node's input that names a store key, a read of a port that is
+    neither a return value nor a mutable parameter, and a tree-local
     cell that a detached node and another node both write. The writes counted
     include nested calls', at any depth, native nodes' such as `Unpack`'s, and
     a call-valued argument's cell; a call whose function or parameter is

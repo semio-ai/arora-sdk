@@ -274,7 +274,9 @@ impl Detached {
     /// a selection or a call, neither of which has a cell to hold what the
     /// function writes back; a tree-local cell two nodes write; a call in a
     /// detached node's arguments that writes back to a store key, which a
-    /// detached node writes only through its outputs; a read of a mutable
+    /// detached node writes only through its outputs; an output bound to an
+    /// input a call or a selection computes; a mutable parameter bound to
+    /// another node's input that names a store key; a read of a mutable
     /// parameter's port that is no output; a detached node reading its own
     /// output other than as its state; and detached nodes that read each other
     /// in a cycle. A function `functions` does not have fails the node when it
@@ -419,6 +421,50 @@ impl Detached {
             claim_attached(node, functions, &output_cell, &mut claim)?;
             for cell in call_writes(node, functions, variables, node_parameters_variables) {
                 claim(&cell, None, node.id)?;
+            }
+        }
+
+        // An output bound to another node's input feeds it in place of its
+        // argument, so that input reads a cell: a call or a selection computes
+        // its value instead. A mutable parameter is known only now, after the
+        // loader gave a port bound to a store key a sink's binding, so one
+        // bound to an input naming a store key is refused: both bind a
+        // tree-local variable instead.
+        for (at, node) in self.nodes.iter().enumerate() {
+            for (port, ..) in &outputs[at] {
+                let Some(Expression::NodeArgument(input)) = node.arguments.get(port) else {
+                    continue;
+                };
+                let refuse = |why: &str| {
+                    Err(inconsistent(format!(
+                        "detached node {}: {} binds an output to {}, {why}",
+                        node.id,
+                        node.display(names),
+                        Expression::NodeArgument(input.clone()).display(names)
+                    )))
+                };
+                let computed = self
+                    .nodes
+                    .iter()
+                    .chain(attached)
+                    .find(|reader| reader.id == input.node)
+                    .and_then(|reader| reader.arguments.get(&input.parameter))
+                    .is_some_and(|argument| {
+                        matches!(argument, Expression::Call(_) | Expression::Select { .. })
+                    });
+                if computed {
+                    return refuse("an input a call or a selection computes, with no cell to feed");
+                }
+                if *port != _RET_PARAM_ID
+                    && self.bindings.contains_key(&NodeParameterId {
+                        node: node.id,
+                        parameter: *port,
+                    })
+                {
+                    return refuse(
+                        "an input that names a store key: bind both to a tree-local variable",
+                    );
+                }
             }
         }
 
