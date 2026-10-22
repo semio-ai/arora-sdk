@@ -2550,6 +2550,63 @@ mod kept_state {
         );
     }
 
+    /// An edit the detached nodes' lowering refuses leaves the previous
+    /// lowering and its state in place: once the edit is undone, the tree goes
+    /// on where it was.
+    #[test]
+    fn a_refused_detached_lowering_keeps_the_previous_one() {
+        let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
+        let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
+        device
+            .interp
+            .load(seq_star([0x20, 0x21, 0x22], [a1, a2]))
+            .unwrap();
+        device.tick();
+
+        // Two detached nodes returning into one tree-local variable: the edit
+        // applies, and the lowering refuses it.
+        let variable = Uuid::from_u128(0x31);
+        let writers = [0x30, 0x32].map(Uuid::from_u128);
+        device
+            .interp
+            .apply(GraphDiff {
+                add_nodes: writers
+                    .iter()
+                    .map(|id| GraphNode {
+                        id: *id,
+                        function: Uuid::from_u128(0xF00),
+                        ..GraphNode::default()
+                    })
+                    .collect(),
+                add_links: writers
+                    .iter()
+                    .map(|id| {
+                        Link::new(
+                            Port::new(*id, crate::schema::_RET_PARAM_ID),
+                            LinkSource::Variable(variable),
+                        )
+                    })
+                    .collect(),
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        let error = device.try_tick().expect_err("two writers of one cell");
+        assert!(error.message.contains("one tree-local cell"), "{error}");
+        device
+            .interp
+            .apply(GraphDiff {
+                remove_nodes: writers.to_vec(),
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(
+            (device.calls(a1), device.calls(a2)),
+            (1, 2),
+            "the seq_star kept its place across the refused lowering"
+        );
+    }
+
     /// A tree-local variable that a node left in place reads through a
     /// selection keeps its value.
     #[test]

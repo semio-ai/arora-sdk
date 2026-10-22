@@ -73,6 +73,9 @@ All notable changes to `arora-behavior-tree`. The format follows
 - A tree that does not lower, such as one naming a child that does not exist,
   leaves no tick registered in the engine: the ticks registered before the
   refusal are unregistered.
+- When the interpreter's edited graph does not lower, the previous lowering
+  stays registered with its state, and the edit's fresh nodes stay fresh,
+  until a lowering succeeds: undoing the edit resumes the tree where it was.
 
 ## [9.2.0] - 2026-10-22
 

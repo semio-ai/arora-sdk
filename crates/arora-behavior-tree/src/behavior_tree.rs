@@ -98,14 +98,24 @@ impl BehaviorTree {
             .collect()
     }
 
-    /// Find who reads which detached node, against `functions`.
+    /// Find who reads which detached node, against `functions`. The attached
+    /// nodes are the root and the nodes it holds: a loose node that is not
+    /// detached is inert, and writes nothing.
     fn lower_detached(&self, functions: &FunctionIndex) -> Result<(), BehaviorTreeError> {
-        let attached: Vec<Rc<Node>> = self
-            .node_index
-            .values()
-            .filter(|node| !self.detached.contains(&node.id))
-            .cloned()
-            .collect();
+        let mut attached: Vec<Rc<Node>> = Vec::new();
+        let mut seen = HashSet::new();
+        let mut held = vec![self.root.clone()];
+        while let Some(node) = held.pop() {
+            if seen.insert(node.id) {
+                held.extend(
+                    node.children
+                        .iter()
+                        .flatten()
+                        .filter_map(|child| self.node_index.get(child).cloned()),
+                );
+                attached.push(node);
+            }
+        }
         self.detached.lower(
             functions,
             &attached,
@@ -484,9 +494,11 @@ fn tick_builtin(
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
-    // An argument's value, computed from its expression: a selection applies
-    // its path. A call's result is kept in the argument's cell, as a module
-    // leaf keeps it, for a node that reads this argument.
+    // An argument's value: a call or a selection is computed, a selection
+    // applying its path, and any other argument reads the argument's cell, as
+    // a module leaf's does, which an output bound to this input writes. A
+    // call's result is kept in the argument's cell, as a module leaf keeps
+    // it, for a node that reads this argument.
     let argument = |caller: &mut dyn CallBridge, parameter: Uuid| {
         let node_parameter = NodeParameterId {
             node: node.id,
@@ -497,11 +509,14 @@ fn tick_builtin(
                 message: format!("{node_parameter} has no argument"),
             }
         })?;
-        let value = compute_expression(scope, expression, caller, &node_parameter)?;
-        if let (Expression::Call(_), Some(cell)) = (
-            expression,
-            scope.node_parameters_variables.get(&node_parameter),
-        ) {
+        let cell = scope.node_parameters_variables.get(&node_parameter);
+        let value = match (expression, cell) {
+            (Expression::Call(_) | Expression::Select { .. }, _) | (_, None) => {
+                compute_expression(scope, expression, caller, &node_parameter)?
+            }
+            (_, Some(cell)) => cell.get_or_unit(),
+        };
+        if let (Expression::Call(_), Some(cell)) = (expression, cell) {
             cell.set_opt(Some(value.clone()).filter(|value| *value != Value::Unit));
         }
         Ok::<_, BehaviorTreeError>(value)

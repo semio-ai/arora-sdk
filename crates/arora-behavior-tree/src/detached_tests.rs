@@ -1235,3 +1235,63 @@ fn an_output_bound_to_an_input_feeds_its_reader() {
     assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
     assert_eq!(tree.detached_plan().on_demand, vec![id(50)]);
 }
+
+/// A native node reads an input an output is bound to: `Equal` compares the
+/// detached node's result, not its argument's literal.
+#[test]
+fn a_native_reader_reads_the_output_bound_to_its_input() {
+    use crate::nodes::{EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID};
+    let store = SimpleDataStore::new();
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments
+        .insert(_RET_PARAM_ID, port(1, EQUAL_A_PARAM_ID));
+    // Equal(a: 5, b: 2) fails; with a = add(1, 1) it holds.
+    let equal = node(
+        1,
+        EQUAL_FUNCTION_ID,
+        vec![(EQUAL_A_PARAM_ID, f(5.0)), (EQUAL_B_PARAM_ID, f(2.0))],
+    );
+    let tree = build(&store, vec![equal], vec![add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+}
+
+/// An output bound to a detached node's input feeds it as it feeds a tree
+/// node: the binding is a write, not a read of a port.
+#[test]
+fn an_output_bound_to_a_detached_input_feeds_it() {
+    let store = SimpleDataStore::new();
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(51, ADD_A));
+    let sink = compute(51, ADD, vec![(ADD_A, f(5.0)), (ADD_B, f(1.0))], Some("out"));
+    let tree = build(&store, vec![below(1, f(1.0), 3.0)], vec![sink, add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    runtime.tick().expect("it ticks");
+    assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
+}
+
+/// A loose node that is not detached is inert: it writes nothing, so a
+/// detached node writing the cell it names has that one writer.
+#[test]
+fn a_loose_native_writer_stays_inert() {
+    use crate::nodes::{SET_STR_FUNCTION_ID, SET_STR_VALUE_PARAM_ID, SET_STR_VARIABLE_PARAM_ID};
+    let store = SimpleDataStore::new();
+    let loose = node(
+        60,
+        SET_STR_FUNCTION_ID,
+        vec![
+            (SET_STR_VARIABLE_PARAM_ID, key(".v")),
+            (SET_STR_VALUE_PARAM_ID, key("in")),
+        ],
+    );
+    let add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], Some(".v"));
+    let tree = build(&store, vec![below(1, key(".v"), 3.0)], vec![loose, add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+}

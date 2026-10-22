@@ -111,7 +111,6 @@ pub struct DetachedPlan {
 pub(crate) struct Detached {
     /// The detached nodes, in the order the tree lists them.
     nodes: Vec<Rc<Node>>,
-    ids: HashSet<Uuid>,
     /// The store keys the ports of detached nodes publish to, by port; the
     /// port itself is the tree-local cell the node's argument has.
     bindings: HashMap<NodeParameterId, VariableCell>,
@@ -221,7 +220,6 @@ impl Detached {
     ) -> Self {
         let caches = RefCell::new(vec![Cache::default(); nodes.len()]);
         Self {
-            ids: nodes.iter().map(|node| node.id).collect(),
             nodes,
             bindings,
             lowered: RefCell::default(),
@@ -233,17 +231,11 @@ impl Detached {
     pub(crate) fn empty() -> Self {
         Self {
             nodes: Vec::new(),
-            ids: HashSet::new(),
             bindings: HashMap::new(),
             lowered: RefCell::default(),
             caches: RefCell::default(),
             tick: Cell::new(1),
         }
-    }
-
-    /// Whether `id` is a detached node.
-    pub(crate) fn contains(&self, id: &Uuid) -> bool {
-        self.ids.contains(id)
     }
 
     /// The detached nodes, in the order the tree lists them.
@@ -422,9 +414,13 @@ impl Detached {
             }
         }
 
-        // A port read must be an output of a detached node.
+        // A port read must be an output of a detached node. A port the return
+        // is bound to is where the node writes, not a read.
         for node in self.nodes.iter().chain(attached) {
-            for argument in node.arguments.values() {
+            for (parameter, argument) in &node.arguments {
+                if *parameter == _RET_PARAM_ID {
+                    continue;
+                }
                 let mut ports = Vec::new();
                 ports_named(argument, &mut ports);
                 for port in ports {

@@ -739,10 +739,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         self.write_halts(ctx.store)?;
 
         // The graph changed: replace the lowering. Finished fragments leave
-        // first. The new tree takes over the old one's state but for the
-        // fresh nodes, then the old registration is undone. A lowering error
-        // is transient — the graph stays, the next tick retries — surfaced
-        // like any failed tick.
+        // first. The new tree is lowered beside the old one; once it is, it
+        // takes over the old one's state but for the fresh nodes, then the old
+        // registration is undone. A lowering error is transient — the graph
+        // stays, the next tick retries — surfaced like any failed tick, and
+        // leaves the old lowering, its state and the fresh nodes as they were.
         if self.dirty {
             self.prune_finished()?;
             check_selections(&self.graph, ctx.functions)?;
@@ -750,15 +751,14 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             let tree = build_behavior_tree(&self.graph, &*resolver)
                 .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?
                 .with_key_resolver(resolver);
-            if let Some(lowered) = self.lowered.take() {
-                tree.keep_state(lowered.tree(), &self.fresh);
-                lowered.unregister(ctx.call_bridge);
+            let lowered = lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
+                .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?;
+            if let Some(previous) = self.lowered.take() {
+                lowered.tree().keep_state(previous.tree(), &self.fresh);
+                previous.unregister(ctx.call_bridge);
             }
             self.fresh.clear();
-            self.lowered = Some(
-                lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
-                    .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?,
-            );
+            self.lowered = Some(lowered);
             self.dirty = false;
         }
 
