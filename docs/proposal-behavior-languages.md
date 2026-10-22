@@ -401,8 +401,10 @@ stay:
 - **Loaded graphs and runs tick in a stated order**: the loaded graphs in
   load order, then the runs in spawn order.
 - **Two runs writing one key is an error.** The keys a tree writes are
-  analyzed from the tree, and now include its sinks' keys. An overlap refuses
-  the spawn, or fails the write. `Replace` and `Overlap` join `Concurrent` as
+  analyzed from the tree, and now include its sinks' keys. A `Scatter` whose
+  `within` is empty or left out writes every key of the tree's namespace, as
+  a module function's mutable parameter is written whether or not a call
+  writes it. An overlap refuses the spawn, or fails the write. `Replace` and `Overlap` join `Concurrent` as
   run policies.
 - **Skills are behavior trees.** `look_at`, `play_viseme` and `say` become
   trees whose computation is detached nodes of the run.

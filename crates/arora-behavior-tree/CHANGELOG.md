@@ -4,6 +4,18 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.4.0] - 2026-10-22
+
+### Added
+
+- `Scatter`'s `within` may be empty or left out: the node then writes
+  anywhere in the tree's namespace, every key but a tree-local one, which a
+  tick refuses as it refuses a key outside a non-empty `within`. An analysis
+  of the keys a tree writes counts such a node as writing every key of the
+  namespace, as it counts a module function's mutable parameter as written. A
+  non-empty `within` bounds the keys as before. Groot reads and writes a
+  `<Scatter values="…" keys="…"/>` without its `within` port.
+
 ## [9.3.0] - 2026-10-22
 
 ### Added
