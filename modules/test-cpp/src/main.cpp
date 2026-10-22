@@ -17,7 +17,3 @@ std::optional<std::uint32_t> test_cpp::test_optional(
   }
   return std::nullopt;
 }
-
-int main(int argc, char *argv[])
-{
-}

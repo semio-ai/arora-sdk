@@ -4,6 +4,16 @@ All notable changes to `arora-module-rust`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-10-22
+
+### Changed
+
+- **Breaking:** depends on arora-module-core 3, whose `ModuleAsset`s
+  `generate_sources` takes.
+- The generated header carries the module's version, author, license,
+  description and executor bounds as its `module.yaml` declares them, and is
+  written as `header.json` beside `module.yaml`.
+
 ## [3.0.0] - 2026-10-16
 
 ### Added

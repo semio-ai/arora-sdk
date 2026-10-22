@@ -226,8 +226,10 @@ See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) (wasm guest) or
 
 **In another language** (C++), the interface is a `module.yaml` and the
 `arora-module-*` generators produce the bindings: write the YAML, a `build.rs`
-calling `arora-module-core`, then implement the functions. See
-[`modules/test-cpp/`](modules/test-cpp/).
+driving the CMake build, then implement the functions. The guest links as a
+WASI reactor, and `arora_module_directory` (`libs/cpp/CMakeLists.txt`)
+writes the module directory a device loads, the form a Rust guest ships in.
+See [`examples/modules/cpp/`](examples/modules/cpp/readme.md).
 
 ### Module Interface Contract
 

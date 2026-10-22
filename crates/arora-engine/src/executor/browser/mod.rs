@@ -5,7 +5,9 @@
 //! ABI: every guest module is expected to export `arora_buffer_alloc`,
 //! `arora_buffer_free`, and `arora_function_<uuid_with_underscores>`
 //! for each function declared in its `Header`, and to import
-//! `env.arora_dispatch` / `env.arora_dispatch_indirect` for callbacks.
+//! `env.arora_dispatch` / `env.arora_dispatch_indirect` for callbacks. A
+//! guest that exports `_initialize` (a WASI reactor) has it called once, when
+//! it loads.
 //!
 //! Guest modules built for `wasm32-wasip1` also import a subset of
 //! `wasi_snapshot_preview1`; we provide minimal stubs sufficient to
@@ -258,6 +260,16 @@ fn bind_exports(
         memory: memory.clone(),
         malloc: malloc.clone(),
     });
+
+    // A WASI reactor (a C or C++ guest linked with `-mexec-model=reactor`)
+    // exports `_initialize`, which runs its static constructors: it is called
+    // once, before any other export.
+    let initialize = Reflect::get(&exports, &"_initialize".into()).map_err(js_to_load_err)?;
+    if let Some(initialize) = initialize.dyn_ref::<Function>() {
+        initialize
+            .call0(&JsValue::NULL)
+            .map_err(|e| LoadModuleError::Internal(format!("guest _initialize: {e:?}")))?;
+    }
 
     Ok(Box::new(BrowserModule {
         _instance: instance,

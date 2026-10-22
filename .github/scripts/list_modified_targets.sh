@@ -21,13 +21,14 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Changes here select nothing. `verify` fails if a build reads one of them.
 IGNORE=(
-  '*.md' LICENSE NOTICE 'docs/*' 'examples/*' '.vscode/*' .gitignore
+  '*.md' LICENSE NOTICE 'docs/*' 'examples/policy-modules/*' '.vscode/*' .gitignore
   .github/workflows/release.yml .github/workflows/markdown-link-check-config.json
 )
 # Files outside a member that it reads: "<glob> <package>".
 INPUTS=(
   'libs/cpp/* test-cpp'      # cmake builds of the C++ modules (build.rs)
   'libs/cpp/* test-cpp-2'
+  'libs/cpp/* example-cpp'
   'crates/arora-engine/wit/* test-rust-component'   # wit_bindgen::generate!
 )
 

@@ -42,9 +42,11 @@ pub fn locate_or_download() -> Result<PathBuf> {
     Ok(install)
 }
 
-/// Path to the CMake toolchain file shipped with WASI SDK.
+/// Path to the WASI SDK's CMake toolchain file for `wasm32-wasip1`, the target
+/// the Rust guests build for. (The SDK's generic `wasi-sdk.cmake` names the
+/// deprecated `wasm32-wasi` alias.)
 pub fn cmake_toolchain_file(sdk_root: &Path) -> PathBuf {
-    sdk_root.join("share/cmake/wasi-sdk.cmake")
+    sdk_root.join("share/cmake/wasi-sdk-p1.cmake")
 }
 
 /// Path to clang.

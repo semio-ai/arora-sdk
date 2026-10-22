@@ -299,6 +299,16 @@ impl WebAssemblyModule {
             .ok_or_else(|| anyhow::anyhow!("guest does not export 'memory'"))?;
         store.data_mut().malloc = Some(arora_buffer_alloc.clone());
 
+        // A WASI reactor (a C or C++ guest linked with
+        // `-mexec-model=reactor`) exports `_initialize`, which runs its static
+        // constructors: it is called once, before any other export.
+        if let Some(initialize) = instance.get_func(&mut store, "_initialize") {
+            initialize
+                .typed::<(), ()>(&store)?
+                .call(&mut store, ())
+                .map_err(|e| anyhow::Error::from(e).context("running the guest's _initialize"))?;
+        }
+
         Ok(Self {
             module,
             store,
@@ -485,5 +495,62 @@ mod tests {
             engine.dispatch(&module_id, &undeclared, &[]),
             Err(DispatchError::FunctionNotFound { id }) if id == undeclared
         ));
+    }
+
+    /// A WASI reactor guest: `_initialize` adds one to the last byte of the
+    /// result buffer `count` returns, so the result tells how many times it
+    /// ran.
+    const REACTOR: &str = r#"(module
+        (memory (export "memory") 1)
+        (data (i32.const 2048) "\05\00\00\00\00")
+        (func (export "_initialize")
+            (i32.store8 (i32.const 2052)
+                (i32.add (i32.load8_u (i32.const 2052)) (i32.const 1))))
+        (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "arora_buffer_free") (param i32))
+        (func (export "arora_function_00000000_0000_0000_0000_000000000003")
+            (param i32) (result i32) i32.const 2048))"#;
+
+    /// A guest's `_initialize` runs once, when it loads, before its first
+    /// call — not again before each call.
+    #[test]
+    fn a_reactor_guest_is_initialized_once_when_it_loads() {
+        let module_id = Uuid::from_u128(1);
+        let count = Uuid::from_u128(3);
+        let header: Header = serde_yaml::from_str(&format!(
+            r#"
+id: {module_id}
+name: reactor
+author: ""
+description: ~
+license: ""
+version: {{ major: 1, minor: 0, patch: 0 }}
+executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+imports: []
+executable_mime: ""
+exports:
+  - type: function
+    id: {count}
+    name: count
+    parameters: []
+    ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}
+"#
+        ))
+        .expect("parse the header");
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        engine
+            .load_compiled_module(
+                &CompiledModule::new(header, REACTOR.as_bytes()).expect("compiles"),
+            )
+            .expect("loads");
+
+        for _ in 0..2 {
+            let result = engine
+                .dispatch(&module_id, &count, &[])
+                .expect("dispatches");
+            assert_eq!(&*result, &[5, 0, 0, 0, 1]);
+        }
     }
 }

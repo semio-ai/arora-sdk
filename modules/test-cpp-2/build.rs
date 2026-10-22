@@ -23,8 +23,9 @@ fn main() -> Result<()> {
     let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
     let tools_dir = out_dir.join("arora-tools");
     std::fs::create_dir_all(&tools_dir).ok();
-    let arora_module_cli = tools_dir.join("arora-module-cli");
-    let arora_module_cpp = tools_dir.join("arora-module-cpp");
+    let exe = std::env::consts::EXE_SUFFIX;
+    let arora_module_cli = tools_dir.join(format!("arora-module-cli{exe}"));
+    let arora_module_cpp = tools_dir.join(format!("arora-module-cpp{exe}"));
     copy_executable(&arora_module_cli_src, &arora_module_cli)?;
     copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
@@ -43,10 +44,19 @@ fn main() -> Result<()> {
         .join("test-cpp")
         .join("records");
     let local_records = manifest_dir.join("records");
+    // The module directory a device loads the module from, which the cmake
+    // build writes (`arora_module_directory`, libs/cpp/CMakeLists.txt).
+    let module_dir = workspace_root
+        .join("target")
+        .join(&profile)
+        .join("modules")
+        .join("test-cpp-2");
 
+    // The target hint is test-cpp's (see its build.rs): wasm32-wasip1, which
+    // the toolchain file compiles for, as the Rust guests build for it.
     let dst = cmake::Config::new(&manifest_dir)
-        .target("wasm32-wasi")
-        .host("wasm32-wasi")
+        .target("wasm32-wasip1")
+        .host("wasm32-wasip1")
         .no_default_flags(true)
         .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
         .define("ARORA_MODULE_CLI", &arora_module_cli)
@@ -56,7 +66,9 @@ fn main() -> Result<()> {
         .define("ARORA_INCLUDE_DIR", &arora_include_dir)
         .define("TEST_CPP_RECORDS", &test_cpp_records)
         .define("LOCAL_RECORDS", &local_records)
-        .build_target("test-cpp-2")
+        .define("ARORA_MODULE_DIR", &module_dir)
+        // Its module directory, which builds the guest first.
+        .build_target("test-cpp-2-module-directory")
         .very_verbose(false)
         .build();
 
@@ -65,20 +77,14 @@ fn main() -> Result<()> {
         return Err(anyhow!("expected wasm at {} but not found", wasm.display()));
     }
     println!("cargo:wasm={}", wasm.display());
-
-    let stable = workspace_root.join("target").join(&profile).join("modules");
-    std::fs::create_dir_all(&stable).ok();
-    let stable_wasm = stable.join("test-cpp-2.wasm");
-    std::fs::copy(&wasm, &stable_wasm)
-        .with_context(|| format!("copying {} to {}", wasm.display(), stable_wasm.display()))?;
-    println!("cargo:wasm-stable={}", stable_wasm.display());
-
-    let generated_module_yaml = dst.join("build").join("arora").join("module.yaml");
-    if generated_module_yaml.is_file() {
-        let stable_dir = stable.join("test-cpp-2");
-        std::fs::create_dir_all(&stable_dir).ok();
-        std::fs::copy(&generated_module_yaml, stable_dir.join("module.yaml")).ok();
+    let module_wasm = module_dir.join("test-cpp-2.wasm");
+    if !module_wasm.is_file() || !module_dir.join("header.json").is_file() {
+        return Err(anyhow!(
+            "expected the module directory {} with header.json and test-cpp-2.wasm",
+            module_dir.display()
+        ));
     }
+    println!("cargo:module-dir={}", module_dir.display());
     Ok(())
 }
 

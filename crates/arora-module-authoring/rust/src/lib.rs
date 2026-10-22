@@ -1,7 +1,7 @@
 pub mod rustfmt;
 
 use arora_module_core::{
-    header::generate_header_file, ImportAsset, ModuleAsset, ModuleDeclarationError,
+    header::generate_header_file, ImportAsset, ModuleAsset, ModuleDeclarationError, ModuleMetadata,
 };
 use arora_registry::{
     local::LocalRegistry, EnumerationFrozen, ModuleFrozen, ReadableRegistry, RegistryError,
@@ -44,7 +44,7 @@ pub async fn generate_sources(
 ) -> Result<Directory, GenerationError> {
     let mut result = generate_common_sources()?;
     let mut imports_by_module: HashMap<Uuid, Vec<ImportAsset>> = HashMap::new();
-    let mut current_module = Option::<(Uuid, ModuleFrozen, String)>::None;
+    let mut current_module = Option::<(Uuid, Version, ModuleFrozen, ModuleMetadata)>::None;
     for asset in assets {
         match asset {
             // A record with a declared Rust type is not generated.
@@ -87,12 +87,12 @@ pub async fn generate_sources(
                     }
                 }
             }
-            ModuleAsset::Module(ref module_id, _, ref module, ref executor) => {
-                let module_sources = generate_module_source(module, registry, extern_types).await?;
+            ModuleAsset::Module(module_id, version, module, metadata) => {
+                let module_sources =
+                    generate_module_source(&module, registry, extern_types).await?;
                 result = result.merge_with(&module_sources);
                 assert!(current_module.is_none()); // Only one module to generate at a time.
-                current_module =
-                    Some((module_id.to_owned(), module.to_owned(), executor.to_owned()));
+                current_module = Some((module_id, version, module, metadata));
             }
         }
     }
@@ -122,8 +122,9 @@ pub async fn generate_sources(
         &generate_header_file(
             &current_module.0,
             &current_module.1,
-            &all_imports,
             &current_module.2,
+            &all_imports,
+            &current_module.3,
         )
         .map_err(GenerationError::ModuleDeclarationError)?,
     );

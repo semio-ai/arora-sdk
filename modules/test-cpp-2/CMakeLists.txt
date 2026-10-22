@@ -10,10 +10,11 @@ project(test-cpp-2 CXX)
 #   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
 #   TEST_CPP_RECORDS            test-cpp's published records dir
 #   LOCAL_RECORDS               this module's records/ dir
-# CMAKE_TOOLCHAIN_FILE must be the WASI SDK toolchain file.
+#   ARORA_MODULE_DIR            the module directory to write (see below)
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip1 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
             ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
-            TEST_CPP_RECORDS LOCAL_RECORDS)
+            TEST_CPP_RECORDS LOCAL_RECORDS ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set. "
             "Either invoke through modules/test-cpp-2/build.rs or pass -D${VAR}=... explicitly.")
@@ -34,7 +35,10 @@ set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_UTIL_LIB})
 set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
 
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
+# The records are written afresh: the generator adds files and removes none,
+# so a version module.yaml no longer declares would stay among them.
 add_custom_target(generate-test-cpp-2-wrapper ALL
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${GENERATED_DIR}/records
   COMMAND ${ARORA_MODULE_CLI}
     --include ${TEST_CPP_RECORDS}
     --include ${LOCAL_RECORDS}
@@ -49,8 +53,10 @@ add_custom_target(generate-test-cpp-2-wrapper ALL
     ${GENERATED_DIR}/source/test-cpp.cpp
     ${GENERATED_DIR}/include/types/TestStructure1.hpp
     ${GENERATED_DIR}/source/types/TestStructure1.cpp
+    ${GENERATED_DIR}/header.json
 )
 
+# Linked as a WASI reactor, as test-cpp is (see its CMakeLists.txt).
 add_executable(test-cpp-2
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp-2.cpp
@@ -62,8 +68,15 @@ target_include_directories(test-cpp-2 PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DI
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp-2 PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(test-cpp-2 PRIVATE
-  -Wl,--no-entry
+  -mexec-model=reactor
   -Wl,--export=arora_buffer_alloc
   -Wl,--export=arora_buffer_free
   -Wl,--allow-multiple-definition
 )
+
+# The module directory a device loads the module from, written by the target
+# test-cpp-2-module-directory: its header, the guest,
+# its record, and the records of the types its functions name.
+arora_module_directory(test-cpp-2 ${ARORA_MODULE_DIR}
+  HEADER ${GENERATED_DIR}/header.json
+  RECORDS ${GENERATED_DIR}/records ${LOCAL_RECORDS})

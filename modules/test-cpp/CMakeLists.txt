@@ -7,9 +7,10 @@ project(test-cpp CXX)
 #   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp (built inline below)
-# CMAKE_TOOLCHAIN_FILE must be the WASI SDK toolchain file.
+#   ARORA_MODULE_DIR            the module directory to write (see below)
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip1 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
-            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR)
+            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set. "
             "Either invoke through modules/test-cpp/build.rs or pass -D${VAR}=... explicitly.")
@@ -41,7 +42,10 @@ set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_IN
 
 # Code generation: module.yaml -> {include,source}/test-cpp.{hpp,cpp}
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
+# The records are written afresh: the generator adds files and removes none,
+# so a version module.yaml no longer declares would stay among them.
 add_custom_target(generate-test-cpp-wrapper ALL
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${GENERATED_DIR}/records
   COMMAND ${ARORA_MODULE_CLI}
     generate
     -l cpp
@@ -51,11 +55,13 @@ add_custom_target(generate-test-cpp-wrapper ALL
     ${GENERATED_DIR}/include/test-cpp.hpp
     ${GENERATED_DIR}/source/test-cpp.cpp
     ${GENERATED_DIR}/module.yaml
+    ${GENERATED_DIR}/header.json
 )
 
-# The wasm module is built as an executable (so wasi-sdk wasm-ld produces a
-# proper .wasm), but with --no-entry so the engine can load it as a library
-# and call the exported functions.
+# The wasm module is linked as a WASI reactor: no `main`, no `_start`, and an
+# `_initialize` the engine calls once, when it loads the module, to run the
+# C++ static constructors. Its state then lives across calls, as a Rust
+# guest's does.
 add_executable(test-cpp
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp.cpp
@@ -65,8 +71,15 @@ target_include_directories(test-cpp PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}
 target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp)
 target_compile_options(test-cpp PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(test-cpp PRIVATE
-  -Wl,--no-entry
+  -mexec-model=reactor
   -Wl,--export=arora_buffer_alloc
   -Wl,--export=arora_buffer_free
   -Wl,--allow-multiple-definition
 )
+
+# The module directory a device loads the module from, written by the target
+# test-cpp-module-directory: its header, the guest,
+# and its record.
+arora_module_directory(test-cpp ${ARORA_MODULE_DIR}
+  HEADER ${GENERATED_DIR}/header.json
+  RECORDS ${GENERATED_DIR}/records)

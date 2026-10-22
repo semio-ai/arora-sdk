@@ -102,15 +102,15 @@ builds, so each C++ module's `build.rs` calls
 
 ```rust
 cmake::Config::new(...)
-  .target("wasm32-wasi")
-  .host("wasm32-wasi")
+  .target("wasm32-wasip1")
+  .host("wasm32-wasip1")
   .no_default_flags(true)
   ...
 ```
 
 The cmake "target triple" here is purely a hint to cmake-rs's flag synthesis;
-the actual toolchain comes from `CMAKE_TOOLCHAIN_FILE` (wasi-sdk's, or the
-musl cross-toolchain's).
+the actual toolchain comes from `CMAKE_TOOLCHAIN_FILE` (wasi-sdk's
+`wasi-sdk-p1.cmake`, or the musl cross-toolchain's).
 
 ## Target choices
 
@@ -153,11 +153,29 @@ shims that would otherwise need to be polyfilled in JS.
 `crates/wasi-sdk` downloads and caches wasi-sdk-33 to
 `target/wasi-sdk-33/` on first use unless `WASI_SDK_PATH` is set. It exposes
 `clang()`, `clangpp()`, and `cmake_toolchain_file()` to other `build.rs`
-scripts.
+scripts. `cmake_toolchain_file()` is the SDK's `wasi-sdk-p1.cmake`, which
+compiles for `wasm32-wasip1`, the target the Rust guests build for; the SDK's
+generic `wasi-sdk.cmake` names the deprecated `wasm32-wasi` alias. The SDK
+also ships `wasi-sdk-p2.cmake` and `wasi-sdk-p3.cmake`, so the C++ guests
+follow the Rust guests to another target by changing that one file.
 
-**Why:** older versions defaulted to `wasm32-wasi` (legacy alias); 33+
-defaults to `wasm32-wasip1`, matching the Rust side. No suitable crates.io
-crate exists (`lucet-wasi-sdk` is unmaintained since 2020).
+**Why:** no suitable crates.io crate exists (`lucet-wasi-sdk` is
+unmaintained since 2020).
+
+### C++ guests are WASI reactors in module directories, as Rust guests are
+
+A C++ guest links with `-mexec-model=reactor`: it has no `main` and no
+`_start`, and exports `_initialize`, which the engine calls once when it
+loads the guest and which runs the C++ static constructors. A guest linked
+as a WASI command instead runs them only from `_start`, which the engine
+never calls, so a global with a dynamic initializer stays zeroed memory.
+
+Its build writes the module directory a device loads it from, the form a
+Rust guest ships in: `header.json`, the guest as `<name>.wasm`, and
+`records/` (`arora_module_directory` in `libs/cpp/CMakeLists.txt`). The
+header `arora-module-cli` generates carries the module's version, so a
+device describes the module from its record. `tests/tests/guest_parity.rs`
+checks that the C++ and Rust guests have the same form.
 
 ### NAO through a Rust HAL, not a C++ module
 
@@ -185,7 +203,9 @@ selects between them by the `executor.name` in a module's header:
 `native` uses `libloading` to dlopen host cdylibs. `wasm` uses `wasmtime`
 core modules with the legacy malloc/dispatch ABI. `component` uses
 `wasmtime::component` against the `arora:module` WIT world plus
-`wasmtime-wasi` p2. `browser` uses
+`wasmtime-wasi` p2, with wasmtime's concurrency support off: the world
+declares no async function, stream or future, so a component that uses the
+component model's concurrency ABI is refused at compilation. `browser` uses
 `js_sys::WebAssembly::{Module, Instance, Memory}` and implements its own
 WASI stubs (`proc_exit`, `fd_write` → console, `random_get` via
 `crypto.getRandomValues`, …).

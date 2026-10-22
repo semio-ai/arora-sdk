@@ -38,12 +38,12 @@ pub async fn generate<R: ReadableRegistry + Resolver>(
     registry: &mut R,
 ) -> anyhow::Result<()> {
     let assets = analyze_module_from_path(cmd.module_file, registry).await?;
-    let (module_id, tag, module, executor) = match assets.last() {
-        Some(ModuleAsset::Module(module_id, tag, module, executor)) => (
+    let (module_id, tag, module, metadata) = match assets.last() {
+        Some(ModuleAsset::Module(module_id, tag, module, metadata)) => (
             module_id.to_owned(),
             tag.to_owned(),
             module.to_owned(),
-            executor.to_owned(),
+            metadata.to_owned(),
         ),
         _ => panic!("last module asset should be the module!"),
     };
@@ -103,7 +103,7 @@ pub async fn generate<R: ReadableRegistry + Resolver>(
 
     let mut module_low = std::path::PathBuf::new();
     module_low.push(cmd.output_directory);
-    let header_file = generate_header_file(&module_id, &module, &imports, &executor)?;
+    let header_file = generate_header_file(&module_id, &tag, &module, &imports, &metadata)?;
     header_file
         .sync(module_low)
         .await

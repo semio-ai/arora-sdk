@@ -2,6 +2,7 @@ pub mod header;
 pub mod resolve;
 use arora_registry::{ModuleFrozen, ReadableRegistry, RegistryError, TypeDefinitionFrozen};
 use arora_types::module::high::ModuleDefinition;
+use arora_types::module::low::Executor;
 use arora_types::record::ty::FrozenTy;
 use arora_types::record::{module::frozen::Export, FrozenReference, Resolver};
 use arora_types::record::{RecordType, Selector};
@@ -39,10 +40,19 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
     let module_id = module_definition.id;
     let module_version = module_definition.version.clone();
+    let metadata = ModuleMetadata {
+        executor: Executor {
+            name: module_definition.executor.name.clone(),
+            min_version: module_definition.executor.min_version.clone(),
+            max_version: module_definition.executor.max_version.clone(),
+        },
+        author: module_definition.author.clone(),
+        license: module_definition.license.clone(),
+        description: module_definition.description.clone(),
+    };
 
     // Resolve the module contents into a description compatible with the registry.
     // It already includes the dependencies (internal and external) as references.
-    let executor_name = module_definition.executor.name.to_owned();
     let resolved_module = resolve_high_module(module_definition, registry).await?;
 
     // Collect the actual types behind the references. The module's declared
@@ -97,7 +107,7 @@ pub async fn analyze_module<R: ReadableRegistry + Resolver>(
         module_id,
         module_version.into(),
         resolved_module.module,
-        executor_name,
+        metadata,
     ));
     Ok(assets)
 }
@@ -133,8 +143,20 @@ pub enum ModuleAsset {
     Type(Uuid, Version, TypeDefinitionFrozen),
     /// Imported symbol, including the identifier of its origin module.
     Import(ImportAsset),
-    /// Module, including its identifier, version and executor type.
-    Module(Uuid, Version, ModuleFrozen, String),
+    /// Module, including its identifier, version, and the parts of its header
+    /// its record does not hold.
+    Module(Uuid, Version, ModuleFrozen, ModuleMetadata),
+}
+
+/// The parts of a module's header that its frozen record does not hold: the
+/// executor that runs it, and who wrote it under which license. Generated
+/// headers carry them as the module declares them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleMetadata {
+    pub executor: Executor,
+    pub author: String,
+    pub license: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,5 +290,79 @@ executable_mime: application/wasm";
 
         let header: ModuleDefinition = serde_yaml::from_str(module_string).unwrap();
         assert!(header.name == "test-cpp-2");
+    }
+
+    /// A header generated from a module definition carries the definition's
+    /// version, author, license, description and executor, in both forms it is
+    /// written in: a device matches the module's record by its version.
+    #[tokio::test]
+    async fn a_generated_header_carries_the_declared_version_and_metadata() {
+        use crate::header::generate_header_file;
+        use crate::{analyze_module, ModuleAsset};
+        use arora_registry::local::LocalRegistry;
+        use arora_types::module::low::Header;
+        use arora_vfs::Entry;
+
+        let definition: ModuleDefinition = serde_yaml::from_str(
+            "id: 23a75559-025c-4be8-8b48-0784e30dc9ec
+author: Semio
+description: Test C++ module
+license: Apache-2.0
+name: test-cpp
+version:
+  major: 0
+  minor: 1
+  patch: 2
+executor:
+  name: wasm
+  min_version: { major: 1, minor: 0, patch: 0 }
+exports:
+  - type: function
+    id: b213a552-77ad-465a-a26d-352e8eccfd63
+    name: test_2_args
+    parameters:
+      - id: 55dbec70-1c3a-433e-a6e6-27446b7f065e
+        name: a
+        type:
+          kind: scalar
+          id: u32
+    ret:
+      kind: scalar
+      id: bool
+imports: []
+dependencies: []
+executable_mime: application/wasm",
+        )
+        .unwrap();
+        let mut registry = LocalRegistry::new();
+        let assets = analyze_module(definition, &mut registry).await.unwrap();
+        let Some(ModuleAsset::Module(id, version, module, metadata)) = assets.last() else {
+            panic!("the last asset is the module");
+        };
+        let header_files = generate_header_file(id, version, module, &[], metadata).unwrap();
+
+        let file = |name: &str| match header_files.get(name) {
+            Some(Entry::File(file)) => String::from_utf8(file.data.to_vec()).unwrap(),
+            _ => panic!("no {name} among the header files"),
+        };
+        let headers: [Header; 2] = [
+            serde_yaml::from_str(&file("module.yaml")).unwrap(),
+            serde_json::from_str(&file("header.json")).unwrap(),
+        ];
+        for header in headers {
+            assert_eq!(
+                (
+                    header.version.major,
+                    header.version.minor,
+                    header.version.patch
+                ),
+                (0, 1, 2)
+            );
+            assert_eq!(header.author, "Semio");
+            assert_eq!(header.license, "Apache-2.0");
+            assert_eq!(header.description.as_deref(), Some("Test C++ module"));
+            assert_eq!(header.executor.name, "wasm");
+            assert_eq!(header.executor.min_version.map(|v| v.major), Some(1));
+        }
     }
 }

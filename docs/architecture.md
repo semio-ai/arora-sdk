@@ -60,6 +60,8 @@ arora-sdk/
 │   ├── design_decisions.md    why things are the way they are
 │   └── dispatch.md            direct vs indirect dispatch; how BTs use it
 ├── examples/
+│   ├── modules/cpp            example C++ module → a module directory
+│   └── policy-modules         control policies as modules (own workspace)
 ├── wit/                  arora:module WIT world for component guests
 ├── .cargo/config.toml    unstable flags + i686-musl cross linker (NAO runner)
 ├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2
@@ -92,7 +94,7 @@ graph TB
     subgraph mods["Modules"]
         rust_wasm["Rust → wasm32-wasip1\nbehavior-tree-nodes, test-rust-wasm"]
         rust_component["Rust → wasm32-wasip2 component\ntest-rust-component"]
-        cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2"]
+        cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2, example-cpp"]
         native_cdylib["Native cdylib\npolly"]
     end
 
@@ -252,8 +254,8 @@ edits to generated files are lost — change the YAML (including `imports:` and
 `cargo` drives the build. A bare `cargo build` covers the workspace
 `default-members` (engine, host tools, host builds of the Rust modules, the
 integration-test crate); `cargo build --workspace` additionally builds the
-heavier `test-cpp` / `test-cpp-2` members, which `default-members`
-excludes. Cross-target artefacts are expressed as artifact dependencies
+heavier `test-cpp` / `test-cpp-2` / `example-cpp` members, which
+`default-members` excludes. Cross-target artefacts are expressed as artifact dependencies
 (`-Z bindeps`):
 
 - **Host bins** (e.g. `arora-module-cli`) — `build-dependencies` with
