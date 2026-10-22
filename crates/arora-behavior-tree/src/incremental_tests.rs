@@ -82,6 +82,8 @@ fn lower(
         (id(9002), "c".into()),
         (id(9003), "d".into()),
         (id(9004), "out".into()),
+        (id(9005), "y".into()),
+        (id(9006), "seen".into()),
     ]);
     let tree =
         load_behavior_tree_nodes_with(nodes, &|name| Some(store.slot(&Key::from(name))), &names)
@@ -219,6 +221,82 @@ fn on_change_calls_only_when_a_read_changes_and_keeps_its_output() {
         tree.tree().variables.borrow()[&id(8001)].get(),
         Some(Value::F64(5.0))
     );
+}
+
+/// An output overwrite invalidates its cached producer, including when a
+/// sibling writes within the tick; the producer's own write lets it settle.
+#[test]
+fn an_overwritten_output_is_restored_by_its_cached_writer() {
+    for case in ["store", "later sibling", "earlier sibling"] {
+        let naive_store = SimpleDataStore::new();
+        let incremental_store = SimpleDataStore::new();
+        for store in [&naive_store, &incremental_store] {
+            put(store, "y", Some(Value::F64(0.0)));
+        }
+        let nodes = || {
+            let mut leaf = module(2, lit(1.0), true);
+            leaf.arguments.insert(_RET_PARAM_ID, variable(9005));
+            let mut reader = module(3, variable(9005), false);
+            reader.arguments.insert(Y, lit(0.0));
+            reader.arguments.insert(_RET_PARAM_ID, variable(9006));
+            let children = match case {
+                "store" => vec![2, 3],
+                "later sibling" => vec![2, 3, 4],
+                _ => vec![4, 2, 3],
+            };
+            let mut nodes = vec![control(1, SEQ_FUNCTION_ID, children), leaf, reader];
+            if case != "store" {
+                let mut writer = module(4, lit(7.0), false);
+                writer.arguments.insert(OUT, variable(9005));
+                writer.arguments.insert(_RET_PARAM_ID, variable(8004));
+                nodes.push(writer);
+            }
+            nodes
+        };
+        let mut naive_bridge = Bridge::default();
+        let mut incremental_bridge = Bridge::default();
+        for bridge in [&mut naive_bridge, &mut incremental_bridge] {
+            for n in 2..=4 {
+                bridge.ops.insert(id(20000 + n), Op::Add);
+            }
+        }
+        let naive = lower(nodes(), &mut naive_bridge, &naive_store, false);
+        let incremental = lower(nodes(), &mut incremental_bridge, &incremental_store, true);
+        for step in 0..6 {
+            if case == "store" && step == 2 {
+                put(&naive_store, "y", Some(Value::F64(9.0)));
+                put(&incremental_store, "y", Some(Value::F64(9.0)));
+            }
+            let expected = tick(&naive, &mut naive_bridge);
+            assert_eq!(
+                tick(&incremental, &mut incremental_bridge),
+                expected,
+                "{case}, tick {step}"
+            );
+            assert_eq!(expected, Status::Success);
+            for name in ["y", "seen"] {
+                let expected = naive_store.slot(&Key::from(name)).get();
+                assert_eq!(
+                    incremental_store.slot(&Key::from(name)).get(),
+                    expected,
+                    "{case}, tick {step}, key {name}"
+                );
+                let value = if name == "y" && case == "later sibling" {
+                    9.0
+                } else {
+                    3.0
+                };
+                assert_eq!(expected, Some(Value::F64(value)));
+            }
+            let calls = incremental_bridge
+                .calls
+                .iter()
+                .filter(|(function, _)| *function == id(20002))
+                .count();
+            let expected_calls = usize::from(case != "store" || step == 0 || step == 2);
+            assert_eq!(calls, expected_calls, "{case}, tick {step}");
+        }
+    }
 }
 
 #[test]
@@ -484,6 +562,8 @@ impl Generator {
                     };
                     if kind >= 8 {
                         leaf.arguments.insert(STATE, lit(0.0));
+                    } else if opted && self.random.next(3) == 0 {
+                        leaf.arguments.insert(_RET_PARAM_ID, variable(9004));
                     } else {
                         leaf.arguments.insert(_RET_PARAM_ID, variable(8000 + n));
                         self.results.push(n);
@@ -516,9 +596,42 @@ fn generated(seed: u64) -> Generator {
         shareable: Vec::new(),
         results: Vec::new(),
     };
-    generator.build(0);
+    let root = generator.build(0);
+    // Even seeds visit a cached output between two ordinary writers, even when
+    // the random subtree short-circuits before reaching module leaves. Odd
+    // seeds keep the random root, so a settled root's cache is compared too:
+    // the ordinary writers keep the wrapper dirty every tick.
+    let top = if seed.is_multiple_of(2) {
+        let wrapper = generator.next + 1;
+        let earlier = wrapper + 1;
+        let cached = wrapper + 2;
+        let later = wrapper + 3;
+        for n in [earlier, cached, later] {
+            let opted = n == cached;
+            let mut leaf = module(n, variable(9000 + (n % 4)), opted);
+            if opted {
+                leaf.arguments.insert(_RET_PARAM_ID, variable(9004));
+                generator.opted.insert(leaf.function);
+            } else {
+                leaf.arguments.insert(OUT, variable(9004));
+                leaf.arguments.insert(_RET_PARAM_ID, variable(8000 + n));
+            }
+            generator.ops.insert(leaf.function, Op::Add);
+            generator.nodes.push(leaf);
+        }
+        generator.nodes.push(control(
+            wrapper,
+            PARALLEL_FUNCTION_ID,
+            vec![earlier, cached, later, root],
+        ));
+        wrapper
+    } else {
+        root
+    };
     // Loading takes the first listed node as the root.
-    generator.nodes.sort_by_key(|node| node.id);
+    generator
+        .nodes
+        .sort_by_key(|node| (node.id != id(top), node.id));
     generator
 }
 fn cells(
@@ -543,8 +656,9 @@ fn cells(
 }
 
 /// Replays 81,920 deterministic ticks across controls, mutable call-site state,
-/// shared paths, tree-local results and store writes. Ordinary calls must match
-/// in order; every omitted opt-in call must have unchanged module arguments.
+/// shared paths, tree-local results and overwritten cached outputs. Ordinary
+/// calls must match in order; every omitted opt-in call must have unchanged
+/// module arguments.
 #[test]
 fn seeded_trees_match_the_naive_executor_in_lockstep() {
     for seed in 1..=320 {
@@ -556,12 +670,14 @@ fn seeded_trees_match_the_naive_executor_in_lockstep() {
         incremental_bridge.ops = std::mem::take(&mut b.ops);
         let naive_store = SimpleDataStore::new();
         let incremental_store = SimpleDataStore::new();
+        put(&naive_store, "out", Some(Value::F64(0.0)));
+        put(&incremental_store, "out", Some(Value::F64(0.0)));
         let naive = lower(a.nodes, &mut naive_bridge, &naive_store, false);
         let incremental = lower(b.nodes, &mut incremental_bridge, &incremental_store, true);
         let mut script = Random(seed ^ 0x9e3779b97f4a7c15);
         let mut last_opted = HashMap::new();
         for step in 0..256 {
-            for name in ["a", "b", "c", "d"] {
+            for name in ["a", "b", "c", "d", "out"] {
                 if script.next(4) == 0 {
                     let value = (script.next(8) != 0).then(|| Value::F64(script.next(5) as f64));
                     put(&naive_store, name, value.clone());
