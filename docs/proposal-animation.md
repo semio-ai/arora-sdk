@@ -52,8 +52,8 @@ In short:
   `@vizij/animation-module` (4.1.0).
 
 The [behavior languages](proposal-behavior-languages.md) proposal moves
-vizij's node graph into arora-sdk and keeps `vizij-animation-core` in
-vizij-rs.
+vizij's node graph into arora-sdk. Its §4.1 lists animation among the crates
+that move.
 
 **In Semio Studio**, on the Studio-on-Arora branch:
 
@@ -421,9 +421,9 @@ it depends on, so it needs no package.
 
 ## 7. Decisions for review
 
-1. **Animation moves with the node graph.** This reverses §4.1 of the
-   behavior-languages proposal, which keeps `vizij-animation-core` in
-   vizij-rs. *Recommended*: move it, as this proposal does.
+1. **Animation moves with the node graph**, as §4.1 of the
+   behavior-languages proposal lists. *Recommended*: move it, as this
+   proposal does.
 2. **The module's ids stay.** *Recommended*: keep every module, function,
    parameter and record id, so nothing that calls the module needs a change.
    The alternative is ids in an Arora namespace, changing every caller once.

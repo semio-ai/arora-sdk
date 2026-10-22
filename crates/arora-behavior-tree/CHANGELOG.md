@@ -4,6 +4,93 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.3.0] - 2026-10-22
+
+### Added
+
+- Detached nodes (`detached`): a call to a module function that the tree's
+  nodes list but none holds, being neither the root nor a child of a held
+  node, and that holds no children, runs when what it outputs is about to be
+  read. It is described as any node is, and binds its outputs the same way:
+  its return value through `_ret`, each mutable parameter through the cell its
+  argument names; its return value is a port whether or not `_ret` is bound.
+  - A node reads it through `@node` or `@node.parameter` (a `NodeArgument` on
+    its port), or through the variable an output is bound to. An output bound
+    to another node's input feeds it in place of its argument, even one
+    naming a store key, and so does one bound to a port that aliases it,
+    through detached nodes' inputs too. A mutable parameter bound to a store
+    key has the key's value as its state, which its port holds before the
+    node reads its arguments. A port bound to
+    a store key reads the node's current result, not the key. Nothing marks
+    the read: lowering finds the detached node that writes each tree-local
+    cell, and a node brings the detached nodes it reads up to date before it
+    ticks.
+  - It runs at most once per tick, and calls its function only when its
+    argument values changed; otherwise its outputs keep their last values,
+    whatever its nested calls wrote. A mutable parameter the function does
+    not report keeps the value it was given. A failed evaluation fails every read of it in
+    that tick without calling again, and is tried again at the next. Its
+    outputs are written return first, then in its function's parameter order,
+    so two that share a destination leave the same value at every load. A store key is read as the store holds it.
+  - One with an output bound to a store key is a sink: it is brought up to
+    date at every tick, after the tree ticks, even when the tree fails; the
+    tick then reports the tree's error. A sink that fails stops no other: the
+    others publish, and the failing one publishes nothing that tick. Once every sink is up to date,
+    each writes its keys, from its cache when its inputs did not change, so a
+    sink reads another sink's key as it was before the tick. Of two sinks of
+    one key, the later listed wins. A shared `Graph` lists its root, then its
+    other nodes by id.
+  - Lowering refuses detached nodes that read each other in a cycle, a
+    detached node reading an output of its own other than its state, a call
+    in a detached node's arguments writing back a store key, an output bound
+    to an input that a call or a selection computes, directly or through the
+    ports that alias it, a mutable parameter bound
+    to another node's input that names a store key, a read of a port that is
+    neither a return value nor a mutable parameter, and a tree-local
+    cell that a detached node and another node both write. The writes counted
+    include nested calls', at any depth, native nodes' such as `Unpack`'s, and
+    a call-valued argument's cell; a call whose function or parameter is
+    computed counts every cell its arguments name.
+  - `BehaviorTree::detached_plan` (`DetachedPlan`: `every_tick`, `on_demand`,
+    `unused`), `detached_calls` and `display_detached`.
+- A node's argument can nest calls to module functions (`Expression::Call`),
+  evaluated innermost first each time the node ticks.
+  - A call's signature is resolved from the function index when the tree is
+    lowered, and an absent value passes `None` to an optional parameter.
+  - A literal argument of a call is the call site's own cell, so a stateful
+    function keeps its mutable parameter from tick to tick; a rebuilt tree
+    takes over each call site's state and the variables its calls name.
+  - Lowering refuses a call to the interpreter module, an argument for a
+    parameter the function does not have, and a mutable parameter fed by a
+    selection or a call. When a call computes the parameter's id, the tick
+    fails if the function writes back such a parameter.
+  - A leaf evaluates its arguments in its function's parameter order; the core
+    string nodes compute theirs too, and read a selection's value. A call computing a module, function or
+    parameter id keeps a call site's state as an argument's call does.
+- `display`: a text form of expressions and nodes, with names from the
+  function index (`Names`), on one line with `{}` or broken over lines with
+  `{:#}`: `level: {face/level} = add(a: @cm, b: 1f64)`. Lowering errors and
+  traces use it.
+- The interpreter reads `behavior-tree 1.3` (`GRAPH_TYPE_VERSION`), the
+  version that runs detached nodes; it still runs `1.0`, `1.1` and `1.2`
+  graphs.
+
+### Changed
+
+- A call to a module function that no node holds runs as a detached node; it
+  was never ticked. A node of another kind that no node holds, such as a
+  control node an edit adds before the edit that places it, or a node with
+  children, is still left aside until a node holds it.
+
+### Fixed
+
+- A tree that does not lower, such as one naming a child that does not exist,
+  leaves no tick registered in the engine: the ticks registered before the
+  refusal are unregistered.
+- When the interpreter's edited graph does not lower, the previous lowering
+  stays registered with its state, and the edit's fresh nodes stay fresh,
+  until a lowering succeeds: undoing the edit resumes the tree where it was.
+
 ## [9.2.0] - 2026-10-22
 
 ### Added

@@ -1,0 +1,2022 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Six designs for running node graphs and behavior trees on one Arora device, simulated side by side with live call counts and timings. Open this file in a browser; it needs no server.">
+<title>The NGBT spectrum</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a lab bench. Tabs across the top, one per design; each tab is an
+   instrument panel (inputs and meters on the left, the circuit on the right). */
+:root {
+  --bg: #f2f3ef;
+  --panel: #ffffff;
+  --panel-2: #e9ebe5;
+  --ink: #191c1a;
+  --muted: #5d645f;
+  --line: #d5d9d2;
+  --grid: #e4e7e1;
+  --p-compare: #191c1a;
+  --p-interp: #5c940d;
+  --p-shape: #6741d9;
+  --p-calls: #364fc7;
+  --p-compute: #0b7285;
+  --p-leaves: #a35200;
+  --p-control: #a61e4d;
+  --ok: #2b8a3e;
+  --fail: #c92a2a;
+  --run: #d9730d;
+  --changed: #e8590c;
+  --same: #4263eb;
+  --cached: #a3aaa5;
+  --halted: #868e96;
+  --wire: #5f6f94;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --accent: var(--p-compare);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111312; --panel: #191c1a; --panel-2: #212522; --ink: #e7eae6; --muted: #98a19b;
+    --line: #2d332f; --grid: #242926; --p-compare: #e7eae6; --p-interp: #94d82d; --p-shape: #9775fa; --p-calls: #7d95ff;
+    --p-compute: #3bc9db; --p-leaves: #ffa94d; --p-control: #f06595; --ok: #51cf66; --fail: #ff6b6b;
+    --run: #ffa94d; --changed: #ff8743; --same: #7d95ff; --cached: #59625c; --halted: #7c868f; --wire: #8d9cc4;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111312; --panel: #191c1a; --panel-2: #212522; --ink: #e7eae6; --muted: #98a19b;
+  --line: #2d332f; --grid: #242926; --p-compare: #e7eae6; --p-interp: #94d82d; --p-shape: #9775fa; --p-calls: #7d95ff;
+  --p-compute: #3bc9db; --p-leaves: #ffa94d; --p-control: #f06595; --ok: #51cf66; --fail: #ff6b6b;
+  --run: #ffa94d; --changed: #ff8743; --same: #7d95ff; --cached: #59625c; --halted: #7c868f; --wire: #8d9cc4;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 14px/1.5 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1360px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+h1 { font: 800 clamp(28px, 4vw, 40px)/1 var(--display); font-stretch: 118%; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+.flag { display: inline-block; height: .78em; width: 1.17em; vertical-align: -.02em; margin-left: .12em; border-radius: 3px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.lede { margin: 6px 0 0; color: var(--muted); max-width: 72ch; }
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+button, select { font: 500 13px var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.tick-readout { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-width: 9ch; }
+label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+
+nav.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+nav.tabs button { border: 0; border-radius: 6px 6px 0 0; background: transparent; padding: 10px 14px 9px; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border-bottom: 3px solid transparent; white-space: nowrap; }
+nav.tabs button .t { font: 700 14px var(--display); font-stretch: 112%; }
+nav.tabs button .s { font: 400 11px var(--mono); color: var(--muted); }
+nav.tabs button[aria-selected="true"] { background: var(--panel); border-bottom-color: var(--tab-color); }
+
+.proposal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 18px; }
+.proposal h2 { margin: 0; font: 750 20px var(--display); font-stretch: 110%; text-wrap: balance; }
+.proposal p { margin: 4px 0 0; max-width: 90ch; }
+.proposal ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); max-width: 95ch; }
+.proposal a { color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+.bench { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.card h3 { margin: 0 0 8px; font: 650 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.examples { display: flex; flex-direction: column; gap: 2px; }
+.examples button { text-align: left; border: 1px solid transparent; background: transparent; padding: 6px 8px; display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
+.examples button .n { font: 500 12px var(--mono); color: var(--muted); }
+.examples button[aria-pressed="true"] { background: var(--panel-2); border-color: var(--line); font-weight: 600; }
+.summary { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.control { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 4px 0; }
+.control label { font: 500 12px var(--mono); }
+.control output { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.control input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.control select { grid-column: 1 / -1; }
+.switch { display: inline-flex; align-items: center; gap: 6px; }
+canvas.plot { width: 100%; height: 120px; display: block; }
+.plot-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 11px var(--mono); color: var(--muted); margin-top: 4px; }
+.plot-keys i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+
+.meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.meter { background: var(--panel-2); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+.meter .k { font: 500 11px var(--body); color: var(--muted); }
+.meter .v { font: 600 20px var(--display); font-stretch: 105%; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.meter .a { font: 400 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+canvas.spark { width: 100%; height: 34px; display: block; margin-top: 6px; }
+.fine { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+.views { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.viewbar-left { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg.sub button { padding: 6px 10px; font-size: 12px; }
+.viewbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; border-radius: 0; padding: 6px 12px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 2px solid var(--line); }
+.sw.changed { border-color: var(--changed); background: color-mix(in srgb, var(--changed) 28%, transparent); }
+.sw.same { border-color: var(--same); }
+.sw.cached { border-color: var(--cached); border-style: dotted; }
+.sw.idle { border-color: var(--line); opacity: .5; }
+.sw.halted { border-color: var(--halted); border-style: dashed; }
+.canvas-box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; min-height: 220px; }
+.canvas-box svg { display: block; }
+svg .edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+svg .edge.child { stroke: var(--accent); stroke-dasharray: 5 4; opacity: .7; }
+svg .edge.live { stroke: var(--muted); stroke-width: 2; }
+svg .node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+svg .node .nm { font: 600 12px var(--mono); fill: var(--ink); }
+svg .node .op { font: 400 11px var(--mono); fill: var(--muted); }
+svg .node .vl { font: 500 11px var(--mono); fill: var(--ink); }
+svg .node.changed rect { stroke: var(--changed); stroke-width: 2.5; fill: color-mix(in srgb, var(--changed) 14%, var(--panel)); }
+svg .node.same rect { stroke: var(--same); stroke-width: 2.5; }
+svg .node.cached rect { stroke: var(--cached); stroke-dasharray: 2 3; stroke-width: 2; }
+svg .node.idle { opacity: .45; }
+svg .node.halted rect { stroke: var(--halted); stroke-dasharray: 6 4; stroke-width: 2; }
+svg .node.ctl rect { fill: var(--panel-2); }
+svg .badge { font: 600 10px var(--mono); fill: var(--accent); }
+svg .region { fill: color-mix(in srgb, var(--accent) 6%, transparent); stroke: var(--accent); stroke-opacity: .35; stroke-dasharray: 3 3; }
+svg .region-label { font: 600 10px var(--body); letter-spacing: .06em; fill: var(--accent); text-transform: uppercase; }
+svg .st { font: 700 10px var(--mono); }
+svg .st.S { fill: var(--ok); } svg .st.F { fill: var(--fail); } svg .st.R { fill: var(--run); }
+svg .node.bt .gl { fill: var(--accent); }
+svg .node.bt.host > rect, svg .node.bt.flow > rect, svg .node.bt.sequence > rect, svg .node.bt.fallback > rect, svg .node.bt.parallel > rect, svg .node.bt.inverter > rect, svg .node.bt.sequence_with_memory > rect { fill: var(--panel-2); }
+svg .node.bt.S > rect:not(.pillbg) { stroke: var(--ok); stroke-width: 2; }
+svg .node.bt.R > rect:not(.pillbg) { stroke: var(--run); stroke-width: 2; }
+svg .node.bt.F > rect:not(.pillbg) { stroke: var(--fail); stroke-width: 2; }
+svg .link { fill: none; stroke: var(--wire); stroke-width: 1.5; opacity: .8; }
+svg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; opacity: .45; }
+svg .wire.via { stroke-dasharray: 5 4; }
+svg .wire.live { opacity: .8; }
+svg .wire.hot { opacity: 1; stroke: var(--accent); stroke-width: 2.4; }
+svg .port { fill: var(--panel); stroke: var(--wire); stroke-width: 1.3; }
+svg .port.wired { fill: var(--wire); }
+svg .node .pt { font: 400 10.5px var(--mono); fill: var(--muted); }
+svg .node .under { fill: var(--panel-2); stroke: var(--line); }
+svg .node .chev { fill: var(--muted); }
+svg g.fold { cursor: pointer; outline: none; }
+svg g.fold:focus-visible > rect:not(.pillbg):not(.under) { stroke: var(--accent); stroke-width: 3; }
+svg .minis rect.mini { fill: var(--line); stroke: none; }
+svg .minis rect.mini.S { fill: var(--ok); } svg .minis rect.mini.F { fill: var(--fail); } svg .minis rect.mini.R { fill: var(--run); }
+svg .minis rect.mini.changed { fill: var(--changed); } svg .minis rect.mini.same { fill: var(--same); }
+svg .minis rect.mini.cached, svg .minis rect.mini.halted { fill: none; stroke: var(--halted); stroke-width: 1.2; stroke-dasharray: 2 1.5; }
+svg .node .pillbg { fill: var(--panel); stroke: var(--line); stroke-width: 1; stroke-dasharray: none; }
+svg .node .pillbg.S { stroke: var(--ok); fill: color-mix(in srgb, var(--ok) 14%, var(--panel)); }
+svg .node .pillbg.R { stroke: var(--run); fill: color-mix(in srgb, var(--run) 14%, var(--panel)); }
+svg .node .pillbg.F { stroke: var(--fail); fill: color-mix(in srgb, var(--fail) 14%, var(--panel)); }
+svg .node .st:not(.S):not(.R):not(.F) { fill: var(--muted); }
+
+.tree { font: 13px var(--mono); padding: 10px 0; min-width: max-content; }
+.tree .row { display: grid; grid-template-columns: 26px 1fr; gap: 6px; align-items: center; padding: 2px 14px 2px 10px; white-space: pre; }
+.tree .row .lbl { color: var(--ink); }
+.tree .row .lbl em { font-style: normal; color: var(--muted); }
+.tree .row.data .lbl { border-left: 3px solid var(--line); padding-left: 6px; }
+.tree .row.data.changed .lbl { border-color: var(--changed); }
+.tree .row.data.same .lbl { border-color: var(--same); }
+.tree .row.data.cached .lbl { border-color: var(--cached); border-left-style: dotted; }
+.tree .row.data.idle { opacity: .45; }
+.tree .row.data.halted .lbl { border-color: var(--halted); border-left-style: dashed; }
+.tree .chev { display: inline-block; width: 2.2ch; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; line-height: inherit; text-align: left; cursor: pointer; }
+.tree span.chev { cursor: default; }
+.sw.wire { border: 0; height: 2px; border-radius: 1px; background: var(--wire); width: 18px; }
+.sw.wire.via { background: repeating-linear-gradient(90deg, var(--wire) 0 4px, transparent 4px 7px); }
+.tree .section { padding: 10px 10px 2px; font: 650 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pill { font: 700 10px var(--mono); text-align: center; border-radius: 4px; padding: 1px 0; border: 1px solid var(--line); color: var(--muted); }
+.pill.S { color: var(--ok); border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.pill.F { color: var(--fail); border-color: var(--fail); background: color-mix(in srgb, var(--fail) 12%, transparent); }
+.pill.R { color: var(--run); border-color: var(--run); background: color-mix(in srgb, var(--run) 12%, transparent); }
+.pill.idle { opacity: .5; }
+pre.stored { margin: 0; padding: 14px 16px; font: 12.5px/1.55 var(--mono); white-space: pre; }
+.readings { font: 12px var(--mono); color: var(--muted); }
+.readings b { color: var(--ink); font-weight: 600; }
+
+table.cmp { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.table-box { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+table.cmp th, table.cmp td { text-align: right; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.cmp th { font: 600 11px var(--body); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+table.cmp td:first-child, table.cmp th:first-child { text-align: left; }
+table.cmp td .who { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+table.cmp td .who i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+table.cmp td .sub { display: block; font: 400 11px var(--mono); color: var(--muted); }
+table.cmp tr:last-child td { border-bottom: 0; }
+table.cmp td.big { font: 600 16px var(--display); font-stretch: 105%; }
+.bars { display: flex; flex-direction: column; gap: 6px; }
+.bar { display: grid; grid-template-columns: 150px minmax(0, 1fr) 90px; gap: 10px; align-items: center; font-size: 12px; }
+.bar .track { height: 12px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.bar .fill { height: 100%; border-radius: 3px; }
+.bar .num { font: 500 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .bar { grid-template-columns: 100px minmax(0, 1fr) 72px; } }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.note { font-size: 13px; color: var(--muted); max-width: 85ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>The NGBT spectrum <svg class="flag" viewBox="0 0 60 40" role="img" aria-label="Intersex-inclusive progress pride flag"><rect y="0.000" width="60" height="6.717" fill="#E40303"/><rect y="6.667" width="60" height="6.717" fill="#FF8C00"/><rect y="13.333" width="60" height="6.717" fill="#FFED00"/><rect y="20.000" width="60" height="6.717" fill="#008026"/><rect y="26.667" width="60" height="6.717" fill="#004CFF"/><rect y="33.333" width="60" height="6.717" fill="#732982"/><polygon points="0,0 12,0 32,20 12,40 0,40" fill="#000000"/><polygon points="0,0 8.5,0 28.5,20 8.5,40 0,40" fill="#784F17"/><polygon points="0,0 5,0 25,20 5,40 0,40" fill="#5BCEFA"/><polygon points="0,0 1.5,0 21.5,20 1.5,40 0,40" fill="#F5A9B8"/><polygon points="0,0 -2,0 18,20 -2,40 0,40" fill="#FFFFFF"/><polygon points="0,0 -5.5,0 14.5,20 -5.5,40 0,40" fill="#FFD800"/><circle cx="5" cy="20" r="3.4" fill="none" stroke="#7902AA" stroke-width="1.3"/></svg></h1>
+      <p class="lede">Six designs for running node graphs and behavior trees on one device, simulated side by side. Each tab ticks the same example with that design's rules; the meters count what it does.</p>
+    </div>
+    <div class="transport" role="group" aria-label="Clock">
+      <button id="play" class="primary" type="button">Pause</button>
+      <button id="step" type="button">Step</button>
+      <button id="reset" type="button">Reset</button>
+      <label class="inline" for="rate">rate
+        <select id="rate"><option value="10">10 Hz</option><option value="30" selected>30 Hz</option><option value="60">60 Hz</option></select>
+      </label>
+      <label class="inline" for="cost">one call costs
+        <select id="cost"><option value="0">nothing</option><option value="2" selected>≈2 µs</option><option value="20">≈20 µs</option></select>
+      </label>
+      <span class="tick-readout" id="tickno">tick 0</span>
+    </div>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Designs"></nav>
+  <main id="main"></main>
+</div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Examples: one dataflow graph and one control tree each, shared by every design.
+// In `a`, a string names another node; a number or boolean is a literal.
+// ---------------------------------------------------------------------------
+const DT = 1 / 30;
+const EXAMPLES = [
+  {
+    id: "smile", title: "Smile mapping",
+    summary: "A pure mapping, one node graph and nothing else. Move the slider: only the path from the input needs to run, and once the easing settles nothing needs to run at all.",
+    from: "Oops, All Behavior Trees, example 1",
+    seed: { "face/smile": 0.2 },
+    controls: [{ key: "face/smile", kind: "slider", min: -0.5, max: 1.5, step: 0.01 }],
+    plot: ["rig/mouth_corner", "rig/cheek_raise"], range: [-0.3, 1.1],
+    nodes: {
+      smile: { op: "input", key: "face/smile" },
+      amount: { op: "clamp", a: { x: "smile", min: 0, max: 1 } },
+      corner: { op: "remap", a: { x: "amount", in_min: 0, in_max: 1, out_min: -0.2, out_max: 1 } },
+      ease: { op: "damp", a: { target: "corner", half_life: 0.12 } },
+      mouth: { op: "output", key: "rig/mouth_corner", a: { in: "ease" } },
+      cheek: { op: "mul", a: { a: "amount", b: 0.6 } },
+      cheeks: { op: "output", key: "rig/cheek_raise", a: { in: "cheek" } },
+    },
+    tree: () => ({ k: "block", label: "Smile mapping", outputs: ["mouth", "cheeks"] }),
+  },
+  {
+    id: "breathing", title: "Breathing",
+    summary: "Driven by time, so the oscillator's path changes every tick. The amplitude and the flush depend only on face/energy, so a design that caches keeps them until it changes.",
+    from: "Oops, All Behavior Trees, example 2",
+    seed: { "face/energy": 0.4, "face/breath_rate": 0.3 },
+    controls: [
+      { key: "face/energy", kind: "slider", min: 0, max: 1, step: 0.01 },
+      { key: "face/breath_rate", kind: "slider", min: 0.1, max: 1, step: 0.01 },
+    ],
+    plot: ["rig/chest", "face/flush"], range: [0, 1],
+    nodes: {
+      t: { op: "time" },
+      rate: { op: "input", key: "face/breath_rate" },
+      wave: { op: "osc", a: { t: "t", frequency: "rate" } },
+      energy: { op: "input", key: "face/energy" },
+      amplitude: { op: "remap", a: { x: "energy", in_min: 0, in_max: 1, out_min: 0.03, out_max: 0.2 } },
+      swell: { op: "mul", a: { a: "wave", b: "amplitude" } },
+      chest: { op: "add", a: { a: "swell", b: 0.5 } },
+      write_chest: { op: "output", key: "rig/chest", a: { in: "chest" } },
+      flush: { op: "remap", a: { x: "energy", in_min: 0, in_max: 1, out_min: 0.15, out_max: 0.85 } },
+      write_flush: { op: "output", key: "face/flush", a: { in: "flush" } },
+    },
+    tree: () => ({ k: "block", label: "Breathing", outputs: ["write_chest", "write_flush"] }),
+  },
+  {
+    id: "greet", title: "Greet, then rest",
+    summary: "Control around dataflow. When a person is visible and not yet greeted, wave until a 2 s timer ends, then mark them greeted; otherwise ease the arm to rest. Watch the arm when a branch starts again: each design restarts its easing differently.",
+    from: "Oops, All Behavior Trees, example 3",
+    seed: { "person/visible": false, "social/greeted": false, "rig/arm_raise": 0, "rig/arm_wave": 0 },
+    controls: [
+      { key: "person/visible", kind: "toggle" },
+      { key: "social/greeted", kind: "toggle" },
+    ],
+    plot: ["rig/arm_raise", "rig/arm_wave"], range: [-0.7, 1.1],
+    nodes: {
+      visible: { op: "input", key: "person/visible" },
+      greeted: { op: "input", key: "social/greeted" },
+      fresh: { op: "not", a: { x: "greeted" } },
+      t: { op: "time" },
+      up: { op: "const", value: 1 },
+      cur_raise: { op: "input", key: "rig/arm_raise" },
+      raise: { op: "damp", a: { target: "up", half_life: 0.12, initial: "cur_raise" } },
+      write_raise: { op: "output", key: "rig/arm_raise", a: { in: "raise" } },
+      osc: { op: "osc", a: { t: "t", frequency: 1.6 } },
+      sway: { op: "mul", a: { a: "osc", b: 0.6 } },
+      write_wave: { op: "output", key: "rig/arm_wave", a: { in: "sway" } },
+      cur_r: { op: "input", key: "rig/arm_raise" },
+      ease_r: { op: "damp", a: { target: 0, half_life: 0.2, initial: "cur_r" } },
+      rest_raise: { op: "output", key: "rig/arm_raise", a: { in: "ease_r" } },
+      cur_w: { op: "input", key: "rig/arm_wave" },
+      ease_w: { op: "damp", a: { target: 0, half_life: 0.2, initial: "cur_w" } },
+      rest_wave: { op: "output", key: "rig/arm_wave", a: { in: "ease_w" } },
+    },
+    tree: () => ({
+      k: "fallback", label: "greet or rest", children: [
+        { k: "seq", label: "greet", children: [
+          { k: "check", label: "person visible?", node: "visible" },
+          { k: "check", label: "not greeted yet?", node: "fresh" },
+          { k: "parallel", policy: "any", label: "wave until the timer ends", children: [
+            { k: "block", label: "Wave", outputs: ["write_raise", "write_wave"] },
+            { k: "wait", label: "timer", seconds: 2 },
+          ] },
+          { k: "set", label: "mark greeted", key: "social/greeted", value: true },
+        ] },
+        { k: "block", label: "Rest arm", outputs: ["rest_raise", "rest_wave"] },
+      ],
+    }),
+  },
+  {
+    id: "readers", title: "Three readers of one value",
+    summary: "The cascade of our tests, distance → mul → clamp, read by three conditions. Under a parallel all three read it; under a fallback the first that holds wins and the rest are never asked.",
+    from: "semio-ai/arora-sdk#395–#397, vizij-rs#257 tests",
+    seed: { "sensor/distance": 0.2 },
+    controls: [
+      { key: "sensor/distance", kind: "slider", min: 0, max: 0.8, step: 0.01 },
+      { key: "root", kind: "structure", options: ["parallel", "fallback"], value: "parallel" },
+    ],
+    plot: [{ node: "cm" }], range: [0, 80],
+    nodes: {
+      distance: { op: "input", key: "sensor/distance" },
+      raw: { op: "mul", a: { a: "distance", b: 100 } },
+      cm: { op: "clamp", a: { x: "raw", min: 0, max: 1000 } },
+      near: { op: "lt", a: { a: "cm", b: 10 } },
+      mid: { op: "lt", a: { a: "cm", b: 30 } },
+      far: { op: "lt", a: { a: "cm", b: 50 } },
+    },
+    tree: (o) => ({
+      k: o.root, policy: "all", label: o.root === "parallel" ? "all three" : "first that holds", children: [
+        { k: "check", label: "nearer than 10 cm?", node: "near", show: "cm" },
+        { k: "check", label: "nearer than 30 cm?", node: "mid", show: "cm" },
+        { k: "check", label: "nearer than 50 cm?", node: "far", show: "cm" },
+      ],
+    }),
+  },
+  {
+    id: "order", title: "Order within a tick",
+    summary: "The tree writes v, reads v × 10, writes again, reads again, in one tick. When does a read see a write? The readings below the views show what each design answers.",
+    from: "detached-node and control-node tests",
+    seed: { v: 0 },
+    controls: [],
+    plot: ["v"], range: null,
+    nodes: {
+      v: { op: "input", key: "v" },
+      inc: { op: "add", a: { a: "v", b: 1 } },
+      scaled: { op: "mul", a: { a: "v", b: 10 } },
+      ok: { op: "lt", a: { a: "scaled", b: 1e12 } },
+    },
+    tree: () => ({
+      k: "seq", label: "write, then read", children: [
+        { k: "set", label: "v = v + 1", key: "v", node: "inc" },
+        { k: "check", label: "read v × 10", node: "ok", show: "scaled" },
+        { k: "set", label: "v = v + 1 again", key: "v", node: "inc" },
+        { k: "check", label: "read v × 10 again", node: "ok", show: "scaled" },
+      ],
+    }),
+  },
+];
+
+const OP_SIG = {
+  clamp: ["x", "min", "max"], remap: ["x", "in_min", "in_max", "out_min", "out_max"], mul: ["a", "b"],
+  add: ["a", "b"], lt: ["a", "b"], not: ["x"], osc: ["t", "frequency"], damp: ["target", "half_life", "initial"],
+};
+const SOURCE = new Set(["input", "time", "const"]);
+
+// ---------------------------------------------------------------------------
+// The cost of one function call: a calibrated spin, so that caching shows in
+// wall time as it would with real module calls.
+// ---------------------------------------------------------------------------
+let SPIN_PER_US = 50, CALL_COST = 2, SINK = 0;
+(function calibrate() {
+  let n = 200000, x = 0; const t0 = performance.now();
+  for (let i = 0; i < n; i++) x += i ^ (i >> 3);
+  const us = (performance.now() - t0) * 1000; SINK ^= x;
+  SPIN_PER_US = Math.max(5, Math.round(n / Math.max(us, 1)));
+})();
+function spin() { const n = SPIN_PER_US * CALL_COST; let x = 0; for (let i = 0; i < n; i++) x += i ^ (i >> 3); SINK ^= x; }
+
+function runOp(node, args, st, useInitial) {
+  switch (node.op) {
+    case "clamp": return Math.min(args.max, Math.max(args.min, args.x));
+    case "remap": return args.out_min + (args.x - args.in_min) * (args.out_max - args.out_min) / (args.in_max - args.in_min);
+    case "mul": return args.a * args.b;
+    case "add": return args.a + args.b;
+    case "lt": return args.a < args.b;
+    case "not": return !args.x;
+    case "osc": return Math.sin(2 * Math.PI * args.frequency * args.t);
+    case "damp": {
+      if (st.v === undefined) st.v = (useInitial && typeof args.initial === "number") ? args.initial : args.target;
+      let v = st.v + (args.target - st.v) * (1 - Math.pow(2, -DT / args.half_life));
+      if (Math.abs(args.target - v) < 1e-4) v = args.target;
+      st.v = v; return v;
+    }
+  }
+  throw new Error("unknown op " + node.op);
+}
+
+// ---------------------------------------------------------------------------
+// The model of an example: topological order, readers, the tree with ids,
+// each block's nodes, and the nodes the tree reads outside blocks.
+// ---------------------------------------------------------------------------
+function refs(node) { return Object.values(node.a || {}).filter((v) => typeof v === "string"); }
+function argRefs(node) { return Object.entries(node.a || {}).filter(([, v]) => typeof v === "string"); }
+
+function buildModel(ex, structure) {
+  const nodes = ex.nodes, ids = Object.keys(nodes);
+  const order = [], seen = new Set();
+  const visit = (id) => { if (seen.has(id)) return; seen.add(id); refs(nodes[id]).forEach(visit); order.push(id); };
+  ids.forEach(visit);
+  const pos = new Map(order.map((id, i) => [id, i]));
+  const readers = new Map(ids.map((id) => [id, []]));
+  ids.forEach((id) => refs(nodes[id]).forEach((r) => readers.get(r).push(id)));
+  const upstream = (starts) => {
+    const out = new Set(), stack = [...starts];
+    while (stack.length) { const id = stack.pop(); if (out.has(id)) continue; out.add(id); refs(nodes[id]).forEach((r) => stack.push(r)); }
+    return [...out].sort((a, b) => pos.get(a) - pos.get(b));
+  };
+  const tree = ex.tree(structure);
+  const blocks = [], leaves = [], all = [];
+  const assign = (n, id, depth) => {
+    n.id = id; n.depth = depth; all.push(n);
+    if (n.children) n.children.forEach((c, i) => assign(c, id + "." + i, depth + 1));
+    if (n.k === "block") { n.nodes = upstream(n.outputs); blocks.push(n); }
+    if (n.k === "check" || n.k === "set") leaves.push(n);
+  };
+  assign(tree, "root", 0);
+  const loose = upstream(leaves.filter((l) => l.node).map((l) => l.node));
+  // Depth for drawing: longest path from a source.
+  const depth = new Map();
+  order.forEach((id) => depth.set(id, Math.max(-1, ...refs(nodes[id]).map((r) => depth.get(r))) + 1));
+  return { ex, nodes, order, pos, readers, upstream, tree, blocks, loose, all, depth, structure };
+}
+
+function newMetrics() { return { calls: 0, visits: 0, compares: 0, writes: 0 }; }
+function fmt(v) {
+  if (v === undefined) return "·";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "string") return v;
+  if (Math.abs(v) >= 1e6) return v.toExponential(0);
+  const s = (Math.abs(v) < 5e-4 ? 0 : v).toFixed(3);
+  return s.replace(/\.?0+$/, "") || "0";
+}
+function argText(node, show) {
+  return (OP_SIG[node.op] || []).filter((p) => node.a && p in node.a).map((p) => `${p}: ${show(node.a[p], p)}`).join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// The behavior-tree runtime the four Arora designs share: textbook sequence,
+// fallback and parallel, a wait leaf, and halting at the end of the tick for
+// what stopped being ticked. Each design supplies its leaves and dataflow.
+// ---------------------------------------------------------------------------
+class TreeEngine {
+  constructor(model) {
+    this.model = model; this.store = new Map(Object.entries(model.ex.seed || {}));
+    this.tickNo = 0; this.t = 0; this.val = new Map(); this.act = new Map(); this.status = new Map();
+    this.ranAt = new Map(); this.leafState = new Map(); this.readings = []; this.m = newMetrics(); this.totals = newMetrics();
+    this.evals = new Map(); this.compile();
+  }
+  setInput(key, v) { this.store.set(key, v); }
+  read(key) { return this.store.get(key); }
+  write(key, v) { this.store.set(key, v); this.m.writes++; }
+  nodeValue(id) { return this.val.get(id); }
+  mark(id, v) {
+    const before = this.val.get(id);
+    this.act.set(id, before === v ? "same" : "changed"); this.val.set(id, v);
+    this.evals.set(id, (this.evals.get(id) || 0) + 1);
+  }
+  call(id, args, st, useInitial) { this.m.calls++; if (CALL_COST) spin(); const v = runOp(this.model.nodes[id], args, st, useInitial); this.mark(id, v); return v; }
+  tick() {
+    this.tickNo++; this.t = this.tickNo * DT; this.m = newMetrics(); this.readings = []; this.evals = new Map();
+    this.act = new Map(this.model.order.map((id) => [id, "idle"]));
+    this.beforeTree();
+    this.rootStatus = this.tickTree(this.model.tree);
+    this.sweep();
+    this.afterTree();
+    for (const k in this.m) this.totals[k] += this.m[k];
+  }
+  tickTree(n) {
+    this.m.visits++; this.ranAt.set(n.id, this.tickNo); let s;
+    switch (n.k) {
+      case "seq": s = "S"; for (const c of n.children) { const cs = this.tickTree(c); if (cs !== "S") { s = cs; break; } } break;
+      case "fallback": s = "F"; for (const c of n.children) { const cs = this.tickTree(c); if (cs !== "F") { s = cs; break; } } break;
+      case "parallel": {
+        const ss = n.children.map((c) => this.tickTree(c));
+        const S = ss.filter((x) => x === "S").length, F = ss.filter((x) => x === "F").length;
+        if (n.policy === "any") s = S > 0 ? "S" : F === ss.length ? "F" : "R";
+        else s = F > 0 ? "F" : S === ss.length ? "S" : "R";
+        if (s !== "R") n.children.forEach((c, i) => { if (ss[i] === "R") this.halt(c); });
+        break;
+      }
+      case "wait": {
+        let st = this.leafState.get(n.id);
+        if (!st) { st = { start: this.t }; this.leafState.set(n.id, st); }
+        s = this.t - st.start >= n.seconds - 1e-9 ? "S" : "R";
+        if (s === "S") this.leafState.delete(n.id);
+        break;
+      }
+      case "running": s = "R"; break;
+      case "check": { const v = this.checkValue(n); if (n.show) this.readings.push([n.label, this.val.get(n.show)]); s = v ? "S" : "F"; break; }
+      case "set": { this.write(n.key, n.node ? this.setValue(n) : n.value); s = "S"; break; }
+      case "block": s = this.block(n); break;
+    }
+    this.status.set(n.id, s); return s;
+  }
+  halt(n) {
+    const walk = (x) => { this.leafState.delete(x.id); this.ranAt.delete(x.id); if (x.k === "block") this.onHalt(x); (x.children || []).forEach(walk); };
+    walk(n);
+  }
+  sweep() { for (const n of this.model.all) if (this.ranAt.get(n.id) === this.tickNo - 1) this.halt(n); }
+  ticked(id) { return this.ranAt.get(id) === this.tickNo; }
+  beforeTree() {}
+  afterTree() {}
+  onHalt() {}
+}
+
+// ---- semio-ai/arora-sdk#299: interpreters, running graphs as host branches --
+// The host ticks every branch once per step: loaded graphs in load order,
+// then runs in spawn order. A node graph evaluates every node, in data order.
+// The tree reaches a graph only through the store and run_graph.
+class InterpEngine extends TreeEngine {
+  compile() {
+    const M = this.model;
+    this.treeReads = new Set(M.all.filter((n) => n.node).map((n) => n.node));
+    this.feeder = M.loose.filter((id) => M.nodes[id].op !== "const");
+    this.loaded = { vals: new Map(), state: new Map() };
+    this.runs = new Map(); // block id -> its run, in spawn order
+  }
+  graph(ids, G) {
+    this.m.visits++; // the graph's flow
+    const arg = (x) => typeof x === "string" ? (this.model.nodes[x].op === "const" ? this.model.nodes[x].value : G.vals.get(x)) : x;
+    for (const id of ids) {
+      const n = this.model.nodes[id]; let v;
+      this.m.visits++;
+      if (n.op === "input") { v = this.read(n.key); this.mark(id, v); }
+      else if (n.op === "time") { v = this.t; this.mark(id, v); }
+      else if (n.op === "output") { v = arg(n.a.in); this.write(n.key, v); this.mark(id, v); }
+      else {
+        const args = {}; for (const [p, x] of Object.entries(n.a)) args[p] = arg(x);
+        let st = G.state.get(id); if (!st) { st = {}; G.state.set(id, st); }
+        v = this.call(id, args, st, false);
+      }
+      G.vals.set(id, v);
+    }
+  }
+  // Branch 1, loaded before the tree: computes what the tree reads, into keys.
+  beforeTree() {
+    if (!this.feeder.length) return;
+    this.graph(this.feeder, this.loaded);
+    for (const id of this.feeder) if (this.treeReads.has(id)) this.write("behavior/" + id, this.loaded.vals.get(id));
+  }
+  // run_graph: the first tick spawns the run, which the host ticks from the next step.
+  block(n) {
+    if (!this.runs.has(n.id)) this.runs.set(n.id, { block: n, from: this.tickNo + 1, vals: new Map(), state: new Map() });
+    return "R";
+  }
+  afterTree() {
+    for (const [id, r] of this.runs) {
+      if (r.from > this.tickNo) continue;
+      this.ranAt.set("run:" + id, this.tickNo); this.status.set("run:" + id, "R");
+      this.graph(r.block.nodes.filter((x) => this.model.nodes[x].op !== "const"), r);
+    }
+  }
+  // Halting the leaf halts its run: the run's values and smoothing are dropped.
+  onHalt(b) {
+    if (!this.runs.delete(b.id)) return;
+    this.ranAt.delete("run:" + b.id);
+    b.nodes.forEach((id) => { if (this.model.nodes[id].op !== "const") this.act.set(id, "halted"); });
+  }
+  checkValue(n) { return this.read("behavior/" + n.node); }
+  setValue(n) { return this.read("behavior/" + n.node); }
+}
+
+// ---- semio-ai/arora-sdk#332: node graphs as a shape of the tree ------------
+class ShapeEngine extends TreeEngine {
+  compile() {
+    const M = this.model;
+    this.ver = new Map(); // store key -> version
+    const graph = (id, label, ids, outsideReaders) => ({ id, label, ids: ids.filter((n) => M.nodes[n].op !== "const"), vars: new Map(), seen: new Map(), again: new Set(), damp: new Map(), started: false, outsideReaders });
+    this.graphs = new Map(M.blocks.map((b) => [b.id, graph(b.id, b.label, b.nodes)]));
+    this.feeder = M.loose.length ? graph("feeder", "values the tree reads", M.loose) : null;
+  }
+  setInput(key, v) { if (this.store.get(key) !== v) this.ver.set(key, (this.ver.get(key) || 0) + 1); this.store.set(key, v); }
+  write(key, v) { if (this.store.get(key) !== v) { this.ver.set(key, (this.ver.get(key) || 0) + 1); this.store.set(key, v); this.m.writes++; } }
+  watched(id) { return shapeWatched(this.model, id); }
+  version(G, w) {
+    if (w === "time") return this.tickNo;
+    if (w.startsWith("k:")) return this.ver.get(w.slice(2)) || 0;
+    const v = G.vars.get(w.slice(2)); return v ? v.version : -1;
+  }
+  tickGraph(G) {
+    this.m.visits += 2; // the graph's PARALLEL and its RUNNING leaf
+    for (const id of G.ids) this.pattern(G, id);
+    G.started = true;
+  }
+  pattern(G, id) {
+    const n = this.model.nodes[id];
+    this.m.visits += 3; // FALLBACK, SEQ, changed?
+    const watch = this.watched(id), seen = G.seen.get(id);
+    let changed = !G.started || !seen || G.again.has(id);
+    if (!changed) for (const w of watch) { this.m.compares++; if (this.version(G, w) > (seen.get(w) ?? -1)) { changed = true; break; } }
+    if (!changed) { this.m.visits++; this.act.set(id, "cached"); this.val.set(id, G.vars.get(id)?.value); return; } // SUCCEED
+    this.m.visits++;
+    let v;
+    const arg = (x) => typeof x === "string" ? (this.model.nodes[x].op === "const" ? this.model.nodes[x].value : G.vars.get(x)?.value) : x;
+    if (n.op === "input") { v = this.read(n.key); this.mark(id, v); }
+    else if (n.op === "time") { v = this.t; this.mark(id, v); }
+    else if (n.op === "output") { v = arg(n.a.in); this.write(n.key, v); this.mark(id, v); }
+    else {
+      const args = {}; for (const [p, x] of Object.entries(n.a)) args[p] = arg(x);
+      let st = G.damp.get(id); if (!st) { st = {}; G.damp.set(id, st); }
+      v = this.call(id, args, st, true);
+      if (n.op === "damp" && st.v !== args.target) G.again.add(id); else G.again.delete(id);
+    }
+    const old = G.vars.get(id);
+    if (!old || old.value !== v) G.vars.set(id, { value: v, version: (old ? old.version : 0) + 1 });
+    G.seen.set(id, new Map(watch.map((w) => [w, this.version(G, w)])));
+  }
+  beforeTree() { if (this.feeder) { this.m.visits++; this.tickGraph(this.feeder); } }
+  block(n) { this.m.visits--; this.tickGraph(this.graphs.get(n.id)); return "R"; }
+  checkValue(n) { return this.feeder.vars.get(n.node)?.value; }
+  setValue(n) { return this.feeder.vars.get(n.node)?.value; }
+  onHalt(b) {
+    const G = this.graphs.get(b.id); if (!G) return;
+    G.vars.clear(); G.seen.clear(); G.again.clear(); G.damp.clear(); G.started = false;
+    G.ids.forEach((id) => this.act.set(id, "halted"));
+  }
+}
+
+// ---- semio-ai/arora-sdk#395: nested call expressions in the tree -----------
+class CallsEngine extends TreeEngine {
+  compile() {
+    const M = this.model; this.vars = new Map(); this.cells = new Map();
+    this.plans = new Map(M.blocks.map((b) => {
+      const inBlock = new Set(b.nodes);
+      const named = new Set(b.nodes.filter((id) => {
+        const n = M.nodes[id];
+        if (n.op === "output") return true;
+        if (SOURCE.has(n.op)) return false;
+        return M.readers.get(id).filter((r) => inBlock.has(r)).length > 1;
+      }));
+      return [b.id, { named, leaves: b.nodes.filter((id) => named.has(id)) }];
+    }));
+  }
+  expr(id, named, self, leaf) {
+    const n = this.model.nodes[id];
+    if (id !== self && named.has(id)) return this.vars.get(id);
+    switch (n.op) {
+      case "input": { const v = this.read(n.key); this.mark(id, v); return v; }
+      case "time": this.mark(id, this.t); return this.t;
+      case "const": return n.value;
+      case "output": return this.expr(n.a.in, named, null, leaf);
+    }
+    const args = {};
+    for (const [p, x] of Object.entries(n.a)) args[p] = typeof x === "string" ? this.expr(x, named, null, leaf) : x;
+    const key = leaf + "/" + id; let st = this.cells.get(key); if (!st) { st = {}; this.cells.set(key, st); }
+    return this.call(id, args, st, true);
+  }
+  block(n) {
+    const P = this.plans.get(n.id);
+    for (const id of P.leaves) {
+      this.m.visits++;
+      const v = this.expr(id, P.named, id, n.id + ":" + id);
+      const node = this.model.nodes[id];
+      if (node.op === "output") { this.write(node.key, v); this.mark(id, v); } else this.vars.set(id, v);
+    }
+    this.m.visits++; // RUNNING
+    return "R";
+  }
+  checkValue(n) { return this.expr(n.node, new Set(), null, n.id); }
+  setValue(n) { return this.expr(n.node, new Set(), null, n.id); }
+}
+
+// ---- semio-ai/arora-sdk#396: detached nodes, on demand and cached ----------
+class ComputeEngine extends TreeEngine {
+  compile() { this.cache = new Map(); this.state = new Map(); this.pulled = new Map(); }
+  pull(id) {
+    const n = this.model.nodes[id];
+    if (n.op === "input") { const v = this.read(n.key); this.mark(id, v); return v; }
+    if (n.op === "time") { this.mark(id, this.t); return this.t; }
+    if (n.op === "const") return n.value;
+    if (this.pulled.get(id) === this.tickNo) return this.val.get(id);
+    this.pulled.set(id, this.tickNo); this.m.visits++;
+    const args = {}; for (const [p, x] of Object.entries(n.a)) args[p] = typeof x === "string" ? this.pull(x) : x;
+    let st = this.state.get(id); if (!st) { st = {}; this.state.set(id, st); }
+    const key = Object.values(args).concat(n.op === "damp" ? [st.v] : []);
+    const c = this.cache.get(id);
+    if (c) {
+      let same = true;
+      for (let i = 0; i < key.length; i++) { this.m.compares++; if (c[i] !== key[i]) { same = false; break; } }
+      if (same) { this.act.set(id, "cached"); return this.val.get(id); }
+    }
+    const v = this.call(id, args, st, true);
+    this.cache.set(id, key); return v;
+  }
+  block(n) {
+    for (const id of n.outputs) { this.m.visits++; const node = this.model.nodes[id]; const v = this.pull(node.a.in); this.write(node.key, v); this.mark(id, v); }
+    this.m.visits++; return "R";
+  }
+  checkValue(n) { return this.pull(n.node); }
+  setValue(n) { return this.pull(n.node); }
+}
+
+// ---- semio-ai/arora-sdk#397: graph nodes as leaves, in data order ---------
+class LeavesEngine extends TreeEngine {
+  compile() {
+    const M = this.model; this.vars = new Map(); this.state = new Map();
+    const read = new Set();
+    M.blocks.forEach((b) => b.outputs.forEach((o) => read.add(M.nodes[o].a.in)));
+    M.all.forEach((n) => { if (n.node) read.add(n.node); });
+    this.leaves = M.upstream([...read]).filter((id) => !SOURCE.has(M.nodes[id].op));
+  }
+  arg(x) {
+    if (typeof x !== "string") return x;
+    const n = this.model.nodes[x];
+    if (n.op === "input") { const v = this.read(n.key); this.mark(x, v); return v; }
+    if (n.op === "time") { this.mark(x, this.t); return this.t; }
+    if (n.op === "const") return n.value;
+    return this.vars.get(x);
+  }
+  beforeTree() {
+    this.m.visits++; // the root PARALLEL
+    for (const id of this.leaves) {
+      this.m.visits++;
+      const n = this.model.nodes[id]; const args = {};
+      for (const [p, x] of Object.entries(n.a)) args[p] = this.arg(x);
+      let st = this.state.get(id); if (!st) { st = {}; this.state.set(id, st); }
+      this.vars.set(id, this.call(id, args, st, true));
+    }
+  }
+  block(n) {
+    for (const id of n.outputs) { this.m.visits++; const node = this.model.nodes[id]; const v = this.vars.get(node.a.in); this.write(node.key, v); this.mark(id, v); }
+    this.m.visits++; return "R";
+  }
+  checkValue(n) { return this.arg(n.node); }
+  setValue(n) { return this.arg(n.node); }
+}
+
+// ---- vizij-ai/vizij-rs#257: control nodes in the node graph -----------------
+class ControlEngine {
+  constructor(model) {
+    this.model = model; this.store = new Map(Object.entries(model.ex.seed || {}));
+    this.tickNo = 0; this.t = 0; this.val = new Map(); this.act = new Map(); this.status = new Map(); this.readings = [];
+    this.m = newMetrics(); this.totals = newMetrics(); this.evals = new Map(); this.compile();
+  }
+  compile() {
+    const M = this.model; const G = new Map(); // id -> {kind, data refs, children}
+    for (const id of M.order) G.set(id, { id, kind: "data", node: M.nodes[id], refs: refs(M.nodes[id]), children: [] });
+    const add = (n) => {
+      if (n.k === "block") {
+        const run = n.id + ".running";
+        G.set(run, { id: run, kind: "running", refs: [], children: [], label: "Running" });
+        G.set(n.id, { id: n.id, kind: "parallel", policy: "all", refs: [], children: [...n.outputs, run], label: n.label, tree: n });
+      } else if (n.k === "check") G.set(n.id, { id: n.id, kind: "condition", refs: [n.node], children: [], label: n.label, tree: n });
+      else if (n.k === "wait") G.set(n.id, { id: n.id, kind: "wait", refs: [], children: [], label: n.label, tree: n });
+      else if (n.k === "set") G.set(n.id, { id: n.id, kind: "write", refs: n.node ? [n.node] : [], children: [], label: n.label, tree: n });
+      else if (n.k === "running") G.set(n.id, { id: n.id, kind: "running", refs: [], children: [], label: n.label, tree: n });
+      else { G.set(n.id, { id: n.id, kind: n.k === "seq" ? "sequence" : n.k, policy: n.policy, refs: [], children: n.children.map((c) => c.id), label: n.label, tree: n }); n.children.forEach(add); }
+    };
+    add(M.tree);
+    this.G = G;
+    // readers through data edges and child edges
+    const readers = new Map([...G.keys()].map((id) => [id, []]));
+    for (const g of G.values()) { g.refs.forEach((r) => readers.get(r).push({ by: g.id, child: false })); g.children.forEach((c, k) => readers.get(c).push({ by: g.id, child: true, k })); }
+    // topological order: what a node reads, then the node
+    const order = [], seen = new Set();
+    const visit = (id) => { if (seen.has(id)) return; seen.add(id); const g = G.get(id); g.refs.forEach(visit); g.children.forEach(visit); order.push(id); };
+    [...G.keys()].forEach(visit);
+    const pos = new Map(order.map((id, i) => [id, i]));
+    const lazy = new Map();
+    for (const id of [...order].reverse()) { const r = readers.get(id); lazy.set(id, r.length > 0 && r.every((x) => x.child || lazy.get(x.by))); }
+    const up = (start, children) => {
+      const out = new Set([start]), stack = [start];
+      while (stack.length) { const g = G.get(stack.pop()); for (const r of [...g.refs, ...(children ? g.children : [])]) if (lazy.get(r) && !out.has(r)) { out.add(r); stack.push(r); } }
+      return [...out].sort((a, b) => pos.get(a) - pos.get(b));
+    };
+    this.childPlan = new Map();
+    for (const g of G.values()) g.children.forEach((c, k) => {
+      const branch = up(c, false), sub = up(c, true), excl = new Set(), exclusive = [];
+      for (const id of [...sub].reverse()) {
+        if (readers.get(id).every((x) => (x.by === g.id && x.child && x.k === k && id === c) || excl.has(x.by))) { excl.add(id); exclusive.push(id); }
+      }
+      this.childPlan.set(g.id + "#" + k, { source: c, branch, exclusive });
+    });
+    this.lazy = lazy; this.readersOf = readers; this.order = order;
+    this.eager = order.filter((id) => !lazy.get(id));
+    this.stateful = order.filter((id) => lazy.get(id) && (G.get(id).kind === "wait" || G.get(id).node?.op === "damp")).reverse();
+    this.ran = new Map(); this.nodeState = new Map();
+  }
+  setInput(key, v) { this.store.set(key, v); }
+  nodeValue(id) { return this.val.get(id); }
+  ranBefore(id) { const r = this.ran.get(id) || 0; return r !== 0 && r === this.tickNo - 1; }
+  tick() {
+    this.tickNo++; this.t = this.tickNo * DT; this.m = newMetrics(); this.readings = []; this.evals = new Map();
+    this.act = new Map(this.model.order.map((id) => [id, "idle"]));
+    this.staged = new Map(this.store); this.writes = [];
+    for (const id of this.eager) this.evaluate(id);
+    for (const id of this.stateful) if (this.ranBefore(id)) this.halt(id);
+    for (const [k, v] of this.writes) { this.store.set(k, v); this.m.writes++; }
+    this.rootStatus = this.status.get("root");
+    for (const k in this.m) this.totals[k] += this.m[k];
+  }
+  evaluate(id) {
+    if (this.ran.get(id) === this.tickNo) return;
+    this.ran.set(id, this.tickNo);
+    const g = this.G.get(id);
+    if (g.kind !== "data" && g.kind !== "write" && g.kind !== "condition" && g.kind !== "wait" && g.kind !== "running") return this.tickControl(g);
+    this.m.visits++;
+    const value = (x) => typeof x === "string" ? this.val.get(x) : x;
+    if (g.kind === "data") {
+      const n = g.node; let v;
+      if (n.op === "input") v = this.staged.get(n.key);
+      else if (n.op === "time") v = this.t;
+      else if (n.op === "const") v = n.value;
+      else if (n.op === "output") { v = value(n.a.in); this.writes.push([n.key, v]); }
+      else {
+        const args = {}; for (const [p, x] of Object.entries(n.a)) args[p] = value(x);
+        let st = this.nodeState.get(id); if (!st) { st = {}; this.nodeState.set(id, st); }
+        this.m.calls++; if (CALL_COST) spin(); v = runOp(n, args, st, false);
+      }
+      const before = this.val.get(id); this.act.set(id, before === v ? "same" : "changed"); this.val.set(id, v);
+      this.evals.set(id, (this.evals.get(id) || 0) + 1);
+    } else if (g.kind === "condition") {
+      const v = this.val.get(g.refs[0]); const s = v ? "S" : "F"; this.val.set(id, s); this.status.set(id, s);
+      if (g.tree.show) this.readings.push([g.label, this.val.get(g.tree.show)]);
+    } else if (g.kind === "write") {
+      const v = g.refs.length ? this.val.get(g.refs[0]) : g.tree.value; this.writes.push([g.tree.key, v]); this.val.set(id, "S"); this.status.set(id, "S");
+    } else if (g.kind === "wait") {
+      let st = this.nodeState.get(id); if (!st) { st = { start: this.t }; this.nodeState.set(id, st); }
+      const s = this.t - st.start >= g.tree.seconds - 1e-9 ? "S" : "R"; if (s === "S") this.nodeState.delete(id);
+      this.val.set(id, s); this.status.set(id, s);
+    } else if (g.kind === "running") { this.val.set(id, "R"); this.status.set(id, "R"); }
+  }
+  tickChild(g, k) {
+    const plan = this.childPlan.get(g.id + "#" + k);
+    for (const id of plan.branch) this.evaluate(id);
+    const v = this.val.get(plan.source);
+    return v === "R" || v === "F" || v === "S" ? v : "S";
+  }
+  tickControl(g) {
+    this.m.visits++;
+    const n = g.children.length, ticked = new Array(n).fill(false);
+    const tick = (k) => { ticked[k] = true; return this.tickChild(g, k); };
+    let s;
+    if (g.kind === "sequence") { s = "S"; for (let k = 0; k < n; k++) { const c = tick(k); if (c !== "S") { s = c; break; } } }
+    else if (g.kind === "fallback") { s = "F"; for (let k = 0; k < n; k++) { const c = tick(k); if (c !== "F") { s = c; break; } } }
+    else {
+      const ss = []; for (let k = 0; k < n; k++) ss.push(tick(k));
+      const S = ss.filter((x) => x === "S").length, F = ss.filter((x) => x === "F").length;
+      const need = g.policy === "any" ? 1 : n;
+      s = S >= need ? "S" : F > n - need ? "F" : "R";
+      if (s !== "R") ss.forEach((x, k) => { if (x === "R") this.haltChild(g, k); });
+    }
+    for (let k = 0; k < n; k++) if (!ticked[k] && this.ranBefore(g.children[k])) this.haltChild(g, k);
+    this.val.set(g.id, s); this.status.set(g.id, s);
+  }
+  haltChild(g, k) {
+    for (const id of this.childPlan.get(g.id + "#" + k).exclusive) {
+      const r = this.ran.get(id) || 0;
+      if (r === this.tickNo || this.ranBefore(id)) this.halt(id);
+    }
+  }
+  halt(id) {
+    this.nodeState.delete(id); this.ran.set(id, 0);
+    if (this.model.nodes[id]) this.act.set(id, "halted");
+  }
+  ticked(id) { return this.ran.get(id) === this.tickNo; }
+}
+
+// ---------------------------------------------------------------------------
+// The six designs: what each one is, and its stored form.
+// ---------------------------------------------------------------------------
+const exprShow = (model, named, self) => {
+  const show = (id) => {
+    const n = model.nodes[id];
+    if (id !== self && named && named.has(id)) return n.op === "output" ? `{${n.key}}` : `{.${id}}`;
+    if (n.op === "input") return `{${n.key}}`;
+    if (n.op === "time") return "{arora/time}";
+    if (n.op === "const") return fmt(n.value);
+    if (n.op === "output") return show(n.a.in);
+    return `${n.op}(${argText(n, (x) => typeof x === "string" ? show(x) : fmt(x))})`;
+  };
+  return show;
+};
+
+function treeLines(model, leafLine, indent0 = 0) {
+  const out = [];
+  const walk = (n, d) => {
+    const pad = "  ".repeat(d);
+    if (n.k === "seq") out.push(pad + "SEQUENCE   " + n.label);
+    else if (n.k === "fallback") out.push(pad + "FALLBACK   " + n.label);
+    else if (n.k === "parallel") out.push(pad + `PARALLEL${n.policy === "any" ? " (succeed_on: any)" : ""}   ` + n.label);
+    else if (n.k === "wait") out.push(pad + `Wait(seconds: ${n.seconds})   ` + n.label);
+    else if (n.k === "running") out.push(pad + "RUNNING");
+    else { leafLine(n, pad, out); return; }
+    (n.children || []).forEach((c) => walk(c, d + 1));
+  };
+  walk(model.tree, indent0);
+  return out;
+}
+
+const DESIGNS = [
+  {
+    id: "interp", tab: "NG + BT", sub: "#299 · two interpreters, host branches", name: "Interpreters running graphs as branches",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/299", prText: "semio-ai/arora-sdk#299",
+    doc: "https://github.com/semio-ai/arora-sdk/blob/fe3dbe78ef4df545b84dea224a64de13f72e0c51/docs/proposal-behavior-languages.md", color: "--p-interp",
+    lede: "The merged design that #332 revises. Behavior trees and node graphs run on interpreters of their own, as branches the host ticks once per step: loaded graphs in load order, then runs in spawn order. They meet only through the store and the run_graph leaf.",
+    rules: ["A node graph evaluates every node every tick, in data order, as Vizij's evaluator does. Nothing is skipped or cached.", "The tree reads what a graph computes through store keys: here a loaded graph, ticked before the tree, writes the values its conditions read.", "run_graph starts its graph as a run on its first tick, and a branch added during a step runs from the next one, after the loaded graphs. Halting the leaf halts the run and drops its state; the node graph's damp has no initial input."],
+    make: (m) => new InterpEngine(m),
+    stored(model) {
+      const E = new InterpEngine(model), out = [], live = (id) => model.nodes[id].op !== "const";
+      const show = (x) => typeof x === "string" ? (model.nodes[x].op === "const" ? fmt(model.nodes[x].value) : x) : fmt(x);
+      const node = (id) => { const n = model.nodes[id]; return n.op === "input" ? `${id}: input  path: ${n.key}` : n.op === "time" ? `${id}: time` : n.op === "output" ? `${id}: output  path: ${n.key}  in: ${show(n.a.in)}` : `${id}: ${n.op}(${argText(n, show)})`; };
+      let k = 1;
+      if (model.loose.length) {
+        out.push(`branch ${k++} · loaded · node-graph 1 · values the tree reads`, "  flow");
+        model.loose.filter(live).forEach((id) => out.push("    " + node(id)));
+        model.loose.filter((id) => E.treeReads.has(id)).forEach((id) => out.push(`    write_${id}: output  path: behavior/${id}  in: ${id}`));
+        out.push("");
+      }
+      out.push(`branch ${k++} · loaded · behavior-tree 1`);
+      out.push(...treeLines(model, (n, pad, o) => {
+        if (n.k === "block") o.push(`${pad}run_graph(graph_type: node-graph, graph_version: 1, graph: ⟨${n.label}⟩)`);
+        else if (n.k === "check") o.push(`${pad}Truthy({behavior/${n.node}})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `{behavior/${n.node}}` : fmt(n.value)}   ${n.label}`);
+      }, 1));
+      model.blocks.forEach((b) => { out.push("", `run · spawned by run_graph, ticked from the next step · node-graph 1 · ⟨${b.label}⟩`, "  flow"); b.nodes.filter(live).forEach((id) => out.push("    " + node(id))); });
+      return out.join("\n");
+    },
+  },
+  {
+    id: "shape", tab: "NG as BT", sub: "#332 · one tree, guarded patterns", name: "Node graphs as a shape of the tree",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/332", prText: "semio-ai/arora-sdk#332",
+    doc: "https://github.com/semio-ai/arora-sdk/blob/db4c533cb9a49765419bf67561b96fe3515485d7/docs/proposal-behavior-languages.md", color: "--p-shape",
+    lede: "One language, the behavior tree. A node graph is a PARALLEL with one pattern per node, FALLBACK[SEQ[changed?, f], SUCCEED], and a RUNNING leaf last.",
+    rules: ["Edges are tree-local variables. A write advances a variable's version only when the value differs; changed? compares integers.", "A halt drops a node graph's state: variables, seen versions, smoothing. Damping restarts from its initial input.", "Values pass between node graphs and the tree through keys: here a feeder graph under a root PARALLEL computes what the tree's conditions read."],
+    make: (m) => new ShapeEngine(m),
+    stored(model) {
+      const out = [];
+      const patterns = (ids, pad) => ids.filter((id) => model.nodes[id].op !== "const").forEach((id) => {
+        const w = shapeWatched(model, id).map(watchText).join(", "), f = shapeCall(model, id).join(" = ");
+        out.push(`${pad}FALLBACK`, `${pad}  SEQUENCE`, `${pad}    changed?(${w})`, `${pad}    ${f}`, `${pad}  SUCCEED`);
+      });
+      if (model.loose.length) { out.push("PARALLEL   device root", "  PARALLEL   ◇ node graph: values the tree reads"); patterns(model.loose, "    "); out.push("    RUNNING"); }
+      const lines = treeLines(model, (n, pad, o) => {
+        if (n.k === "block") { o.push(`${pad}PARALLEL   ◇ node graph: ${n.label}`); const tmp = out.length; patterns(n.nodes, pad + "  "); o.push(...out.splice(tmp)); o.push(`${pad}  RUNNING`); }
+        else if (n.k === "check") o.push(`${pad}Truthy({.${n.node}})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `{.${n.node}}` : fmt(n.value)}   ${n.label}`);
+      }, model.loose.length ? 1 : 0);
+      return out.concat(lines).join("\n");
+    },
+  },
+  {
+    id: "calls", tab: "BT with expressions", sub: "#395 · nested call expressions", name: "Call expressions as a node graph",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/395", prText: "semio-ai/arora-sdk#395", color: "--p-calls",
+    lede: "A leaf's arguments nest calls to module functions, evaluated innermost first each time the leaf ticks. A cascade reads in place.",
+    rules: ["A value read by several nodes of a block gets its own leaf and a tree-local variable; a condition inlines its whole cascade.", "Every call runs every tick its leaf ticks. Nothing is cached.", "A literal on a mutable parameter is the call site's own cell: damping keeps its state, also while its branch is not ticked."],
+    make: (m) => new CallsEngine(m),
+    stored(model) {
+      const E = new CallsEngine(model);
+      return treeLines(model, (n, pad, o) => {
+        if (n.k === "block") {
+          const P = E.plans.get(n.id); o.push(`${pad}PARALLEL   ${n.label}`);
+          P.leaves.forEach((id) => { const node = model.nodes[id]; const show = exprShow(model, P.named, id); o.push(`${pad}  ${node.op === "output" ? `{${node.key}}` : `{.${id}}`} = ${show(id)}`); });
+          o.push(`${pad}  RUNNING`);
+        } else if (n.k === "check") o.push(`${pad}Truthy(x: ${exprShow(model)(n.node)})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? exprShow(model)(n.node) : fmt(n.value)}   ${n.label}`);
+      }).join("\n");
+    },
+  },
+  {
+    id: "compute", tab: "NG in BT detached", sub: "#396 · on demand, cached", name: "Graph nodes detached from the tree",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/396", prText: "semio-ai/arora-sdk#396", color: "--p-compute",
+    lede: "A graph node is written like a tree node, with inputs and outputs; the tree just does not hold it. Detached, it runs when a node that reads its output, as @node, is about to tick: once per tick, and only when its argument values changed.",
+    rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "Detached nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
+    make: (m) => new ComputeEngine(m),
+    stored(model) {
+      const show = (x) => { if (typeof x !== "string") return fmt(x); const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}`; };
+      const out = ["tree, held from its root"];
+      out.push(...treeLines(model, (n, pad, o) => {
+        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = @${model.nodes[id].a.in}`)); o.push(`${pad}  RUNNING`); }
+        else if (n.k === "check") o.push(`${pad}Truthy(@${n.node})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `@${n.node}` : fmt(n.value)}   ${n.label}`);
+      }, 1));
+      out.push("", "detached nodes: listed after the tree, held by no node");
+      model.order.filter((id) => !SOURCE.has(model.nodes[id].op) && model.nodes[id].op !== "output").forEach((id) => { const n = model.nodes[id]; out.push(`  ${id}: ${n.op}(${argText(n, show)})`); });
+      return out.join("\n");
+    },
+  },
+  {
+    id: "leaves", tab: "NG in BT ∥", sub: "#397 · data order, every tick", name: "Graph nodes as leaves in data order",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/397", prText: "semio-ai/arora-sdk#397", color: "--p-leaves",
+    lede: "The same graph nodes, resolved the same way, attached as plain module leaves under a root PARALLEL in data order, ahead of the tree.",
+    rules: ["Every leaf runs every tick, whatever branch the tree takes. A node read by three conditions is one leaf: it runs once.", "The tree reads this tick's values; what the tree writes reaches the leaves at the next tick.", "Damping runs every tick even while its branch is inactive, so a branch that starts again jumps to where its easing already is."],
+    make: (m) => new LeavesEngine(m),
+    stored(model) {
+      const E = new LeavesEngine(model);
+      const show = (x) => { if (typeof x !== "string") return fmt(x); const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `{.#${x}}`; };
+      const out = ["PARALLEL   device root"];
+      E.leaves.forEach((id) => { const n = model.nodes[id]; out.push(`  {.#${id}} = ${n.op}(${argText(n, show)})`); });
+      return out.concat(treeLines(model, (n, pad, o) => {
+        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = {.#${model.nodes[id].a.in}}`)); o.push(`${pad}  RUNNING`); }
+        else if (n.k === "check") o.push(`${pad}Truthy(${show(n.node)})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? show(n.node) : fmt(n.value)}   ${n.label}`);
+      }, 1)).join("\n");
+    },
+  },
+  {
+    id: "control", tab: "BT in NG", sub: "#257 · Vizij graph, lazy branches", name: "Control nodes in the node graph",
+    pr: "https://github.com/vizij-ai/vizij-rs/pull/257", prText: "vizij-ai/vizij-rs#257", color: "--p-control",
+    lede: "The node graph hosts the tree: sequence, fallback and parallel tick the nodes wired into their child_N inputs. A node only control reads is lazy and runs only when its branch is ticked.",
+    rules: ["Each branch is planned once; a node runs at most once per tick. Nothing is cached.", "A node a control node stops ticking halts at once when its branch owns it, at the end of the tick when branches share it. Vizij's damp has no initial input: it restarts from its target.", "Inputs are staged before the tick and outputs land after it: every read in a tick sees the store as it was."],
+    make: (m) => new ControlEngine(m),
+    stored(model) {
+      const E = new ControlEngine(model); const out = ["nodes"]; const kindOf = (g) => g.kind === "data" ? (g.node.op === "input" ? "input" : g.node.op === "output" ? "output" : g.node.op === "const" ? "constant" : g.node.op === "time" ? "time" : "externalfunction") : g.kind === "write" ? "output" : g.kind === "wait" ? "action" : g.kind === "running" ? "constant" : g.kind;
+      const w = Math.max(...[...E.G.keys()].map((k) => k.length));
+      for (const id of E.order) {
+        const g = E.G.get(id); let d = "";
+        if (g.kind === "data") { const n = g.node; d = n.op === "input" ? `path: ${n.key}` : n.op === "output" ? `path: ${n.key}` : n.op === "const" ? `value: ${fmt(n.value)}` : n.op === "time" ? "" : `function: ${n.op}`; }
+        else if (g.kind === "write") d = `path: ${g.tree.key}`;
+        else if (g.kind === "wait") d = `function: wait(${g.tree.seconds} s)`;
+        else if (g.kind === "running") d = "value: Running";
+        else if (g.kind === "parallel") d = g.policy === "any" ? "success_threshold: 1" : "";
+        out.push(`  ${id.padEnd(w)}  ${kindOf(g).padEnd(16)} ${d.padEnd(28)} ${E.lazy.get(id) ? "lazy" : "eager"}`);
+      }
+      out.push("", "edges");
+      for (const g of E.G.values()) {
+        g.refs.forEach((r, i) => out.push(`  ${r} → ${g.id}.${g.kind === "data" ? (argRefs(g.node)[i] || ["in"])[0] : "in"}`));
+        g.children.forEach((c, k) => out.push(`  ${c} → ${g.id}.child_${k}   (child edge)`));
+      }
+      return out.join("\n");
+    },
+  },
+];
+
+// ---------------------------------------------------------------------------
+// App state
+// ---------------------------------------------------------------------------
+const STATE = { tab: "compare", example: "readers", view: "graph", treeMode: "diagram", folds: {}, playing: true, rate: 30, structure: { root: "parallel" }, inputs: {}, pending: {} };
+const HIST = 240, SPARK = 120;
+let RUN = null;
+try { const saved = JSON.parse(localStorage.getItem("five-ways") || "{}"); if (saved.example) STATE.example = saved.example; if (saved.view) STATE.view = saved.view; if (saved.treeMode) STATE.treeMode = saved.treeMode; } catch (e) {}
+const hashTab = (location.hash || "").replace("#", "");
+if (["compare", ...DESIGNS.map((d) => d.id)].includes(hashTab)) STATE.tab = hashTab;
+function persist() { try { localStorage.setItem("five-ways", JSON.stringify({ example: STATE.example, view: STATE.view, treeMode: STATE.treeMode })); } catch (e) {} }
+
+function exampleById(id) { return EXAMPLES.find((e) => e.id === id); }
+function startRun() {
+  const ex = exampleById(STATE.example);
+  STATE.inputs = { ...ex.seed }; STATE.pending = {};
+  ex.controls.forEach((c) => { if (c.kind === "structure") STATE.structure[c.key] = STATE.structure[c.key] || c.value; });
+  const engines = DESIGNS.map((d) => {
+    const model = buildModel(ex, STATE.structure);
+    return { d, model, e: d.make(model), hist: [], spark: [], times: [] };
+  });
+  RUN = { ex, engines, tick: 0 };
+  document.getElementById("tickno").textContent = "tick 0";
+}
+// A control writes its key on the tick after the person changes it, and only then,
+// so values the tree writes to the same key stay until the next change.
+function tickAll() {
+  RUN.tick++;
+  const changes = STATE.pending; STATE.pending = {};
+  for (const R of RUN.engines) {
+    for (const key in changes) R.e.setInput(key, changes[key]);
+    const t0 = performance.now(); R.e.tick(); const dt = performance.now() - t0;
+    R.times.push(dt); if (R.times.length > SPARK) R.times.shift();
+    R.spark.push({ ...R.e.m }); if (R.spark.length > SPARK) R.spark.shift();
+    R.hist.push(RUN.ex.plot.map((p) => typeof p === "string" ? R.e.store.get(p) : R.e.nodeValue(p.node))); if (R.hist.length > HIST) R.hist.shift();
+  }
+  document.getElementById("tickno").textContent = "tick " + RUN.tick;
+}
+
+// ---------------------------------------------------------------------------
+// Rendering helpers
+// ---------------------------------------------------------------------------
+const $ = (sel, root = document) => root.querySelector(sel);
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") el.className = v; else if (k.startsWith("on")) el.addEventListener(k.slice(2), v); else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v); }
+  kids.flat().forEach((k) => el.append(k instanceof Node ? k : document.createTextNode(String(k))));
+  return el;
+};
+const S = (tag, attrs = {}) => { const el = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const avg = (arr, f) => arr.length ? arr.reduce((s, x) => s + f(x), 0) / arr.length : 0;
+
+function renderTabs() {
+  const nav = document.getElementById("tabs"); nav.textContent = "";
+  const tabs = [{ id: "compare", tab: "overview", sub: "all six, same tick", color: "--p-compare" }, ...DESIGNS];
+  for (const t of tabs) {
+    const b = h("button", { role: "tab", "aria-selected": STATE.tab === t.id ? "true" : "false", style: `--tab-color: var(${t.color})`, type: "button", onclick: () => { STATE.tab = t.id; try { history.replaceState(null, "", "#" + t.id); } catch (e) {} renderAll(); } },
+      h("span", { class: "t" }, t.tab), h("span", { class: "s" }, t.sub));
+    nav.append(b);
+  }
+}
+
+function exampleList() {
+  return h("div", { class: "card" }, h("h3", {}, "Example"),
+    h("div", { class: "examples" }, EXAMPLES.map((ex, i) => h("button", { type: "button", "aria-pressed": ex.id === STATE.example ? "true" : "false", onclick: () => { STATE.example = ex.id; persist(); startRun(); renderAll(); } }, h("span", { class: "n" }, String(i + 1)), h("span", {}, ex.title)))),
+    h("p", { class: "summary" }, RUN.ex.summary), h("p", { class: "fine" }, "From " + RUN.ex.from + "."));
+}
+
+function controlsCard(R) {
+  const card = h("div", { class: "card" }, h("h3", {}, "Inputs"));
+  const boxes = [];
+  if (!RUN.ex.controls.length) card.append(h("p", { class: "fine" }, "No input: the tree drives v itself. Reset starts v at 0."));
+  for (const c of RUN.ex.controls) {
+    const id = "in-" + c.key.replace(/\W/g, "-");
+    if (c.kind === "slider") {
+      const out = h("output", { for: id }, fmt(STATE.inputs[c.key]));
+      card.append(h("div", { class: "control" }, h("label", { for: id }, c.key), out,
+        h("input", { type: "range", id, min: c.min, max: c.max, step: c.step, value: STATE.inputs[c.key], oninput: (e) => { STATE.inputs[c.key] = STATE.pending[c.key] = +e.target.value; out.textContent = fmt(+e.target.value); } })));
+    } else if (c.kind === "toggle") {
+      const box = h("input", { type: "checkbox", id, onchange: (e) => { STATE.inputs[c.key] = STATE.pending[c.key] = e.target.checked; } });
+      box.checked = !!R.e.store.get(c.key); boxes.push([box, c.key]);
+      card.append(h("div", { class: "control" }, h("label", { for: id, class: "switch" }, box, c.key), h("output", {}, "")));
+    } else if (c.kind === "structure") {
+      const sel = h("select", { id, onchange: (e) => { STATE.structure[c.key] = e.target.value; startRun(); renderAll(); } }, c.options.map((o) => h("option", { value: o }, o)));
+      sel.value = STATE.structure[c.key];
+      card.append(h("div", { class: "control" }, h("label", { for: id }, "tree root"), h("output", {}, ""), sel));
+    }
+  }
+  if (RUN.ex.id === "greet") card.append(h("p", { class: "fine" }, "Turn person/visible on to wave. Turn social/greeted off again to greet once more."));
+  // A checkbox shows its key as the shown design's store holds it, unless a change is waiting for the next tick.
+  card._draw = () => { for (const [box, key] of boxes) if (!(key in STATE.pending)) box.checked = !!R.e.store.get(key); };
+  return card;
+}
+
+function plotCard(engines, single) {
+  const canvas = h("canvas", { class: "plot", "aria-label": "Plot of the example's outputs over the last ticks" });
+  const keys = h("div", { class: "plot-keys" });
+  const label = (p) => typeof p === "string" ? p : p.node;
+  if (single) RUN.ex.plot.forEach((p, i) => keys.append(h("span", {}, h("i", { style: `background:${["var(--changed)", "var(--same)", "var(--ok)"][i]}` }), label(p))));
+  else engines.forEach((R) => keys.append(h("span", {}, h("i", { style: `background:var(${R.d.color})` }), R.d.tab)));
+  const card = h("div", { class: "card" }, h("h3", {}, single ? "Outputs" : `${label(RUN.ex.plot[0])}, per design`), canvas, keys);
+  card._draw = () => drawPlot(canvas, engines, single);
+  return card;
+}
+
+function drawPlot(canvas, engines, single) {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, ht = canvas.clientHeight;
+  if (!w) return;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = ht * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, ht);
+  const series = [];
+  if (single) RUN.ex.plot.forEach((_, i) => series.push({ data: engines[0].hist.map((r) => r[i]), color: css(["--changed", "--same", "--ok"][i]) }));
+  else engines.forEach((R) => series.push({ data: R.hist.map((r) => r[0]), color: css(R.d.color) }));
+  let [lo, hi] = RUN.ex.range || [Infinity, -Infinity];
+  if (!RUN.ex.range) { series.forEach((s) => s.data.forEach((v) => { if (typeof v === "number") { lo = Math.min(lo, v); hi = Math.max(hi, v); } })); if (!isFinite(lo)) { lo = 0; hi = 1; } if (hi - lo < 1) hi = lo + 1; }
+  const y = (v) => ht - 6 - (v - lo) / (hi - lo) * (ht - 12);
+  g.strokeStyle = css("--grid"); g.lineWidth = 1;
+  for (const v of [lo, (lo + hi) / 2, hi]) { g.beginPath(); g.moveTo(0, y(v)); g.lineTo(w, y(v)); g.stroke(); }
+  g.fillStyle = css("--muted"); g.font = "10px " + css("--mono"); g.fillText(fmt(hi), 4, 12); g.fillText(fmt(lo), 4, ht - 8);
+  series.forEach((s, si) => {
+    g.strokeStyle = s.color; g.lineWidth = single ? 2 : 1.6; g.setLineDash(single || si % 2 === 0 ? [] : [4, 3]); g.beginPath(); let started = false;
+    s.data.forEach((v, i) => { const x = w - (s.data.length - 1 - i) * (w / (HIST - 1)); const val = typeof v === "boolean" ? +v : v; if (typeof val !== "number") { started = false; return; } if (!started) { g.moveTo(x, y(val)); started = true; } else g.lineTo(x, y(val)); });
+    g.stroke();
+  });
+  g.setLineDash([]);
+}
+
+function drawSpark(canvas, values, color) {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, ht = canvas.clientHeight;
+  if (!w) return;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = ht * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, ht);
+  const max = Math.max(1, ...values), bw = w / SPARK;
+  g.fillStyle = color;
+  values.forEach((v, i) => { const bh = v / max * (ht - 2); g.fillRect(w - (values.length - i) * bw, ht - bh, Math.max(1, bw - 1), bh); });
+}
+
+function metersCard(R) {
+  const card = h("div", { class: "card" }, h("h3", {}, "Meters, this tick"));
+  const grid = h("div", { class: "meters" });
+  const cells = {};
+  [["calls", "function calls"], ["visits", "nodes visited"], ["compares", "change checks"], ["us", "µs per tick"]].forEach(([k, label]) => {
+    const v = h("div", { class: "v" }, "0"), a = h("div", { class: "a" }, "");
+    cells[k] = { v, a }; grid.append(h("div", { class: "meter" }, h("div", { class: "k" }, label), v, a));
+  });
+  const spark = h("canvas", { class: "spark", "aria-label": "Function calls per tick, last 120 ticks" });
+  card.append(grid, h("div", { class: "fine" }, "function calls per tick, last 120 ticks"), spark,
+    h("p", { class: "fine" }, "µs per tick is this simulator's wall time in your browser, averaged over the last 120 ticks; the call cost above adds a fixed spin per function call."));
+  card._draw = () => {
+    const m = R.e.m;
+    cells.calls.v.textContent = m.calls; cells.calls.a.textContent = `avg ${avg(R.spark, (x) => x.calls).toFixed(1)} · total ${R.e.totals.calls}`;
+    cells.visits.v.textContent = m.visits; cells.visits.a.textContent = `avg ${avg(R.spark, (x) => x.visits).toFixed(1)}`;
+    cells.compares.v.textContent = m.compares; cells.compares.a.textContent = `avg ${avg(R.spark, (x) => x.compares).toFixed(1)}`;
+    cells.us.v.textContent = (avg(R.times, (x) => x) * 1000).toFixed(1); cells.us.a.textContent = `writes ${m.writes} this tick`;
+    drawSpark(spark, R.spark.map((x) => x.calls), css(R.d.color));
+  };
+  return card;
+}
+
+// ---- graph view -------------------------------------------------------------
+function graphView(R) {
+  const model = R.model, isControl = R.d.id === "control";
+  const W = 160, GX = 64, GY = 14, PAD = 24, HEAD = 40, LINE = 14;
+  const colOf = new Map(model.order.map((id) => [id, model.depth.get(id)]));
+  const maxData = Math.max(...colOf.values()), ctl = [];
+  if (isControl) {
+    const E = R.e; const height = new Map();
+    const hgt = (id) => { const g = E.G.get(id); if (g.kind === "data") return 0; if (height.has(id)) return height.get(id); const v = 1 + Math.max(0, ...g.children.map(hgt), ...g.refs.map(hgt)); height.set(id, v); return v; };
+    for (const g of E.G.values()) if (g.kind !== "data") { colOf.set(g.id, maxData + hgt(g.id)); ctl.push(g.id); }
+  }
+  const ids = [...model.order, ...ctl];
+  // Ports: one per parameter of a data node, in signature order; one per data
+  // input and one per child of a control node. `from` is the node wired in.
+  const ports = new Map(ids.map((id) => {
+    const n = model.nodes[id];
+    if (n) {
+      if (SOURCE.has(n.op)) return [id, []];
+      const params = n.op === "output" ? ["in"] : (OP_SIG[n.op] || []).filter((p) => n.a && p in n.a);
+      return [id, params.map((p) => typeof n.a[p] === "string" ? { name: p, from: n.a[p] } : { name: p, lit: fmt(n.a[p]) })];
+    }
+    const g = R.e.G.get(id);
+    return [id, [...g.refs.map((r) => ({ name: "in", from: r })), ...g.children.map((c, k) => ({ name: "child_" + k, from: c, child: true }))]];
+  }));
+  const hOf = (id) => Math.max(46, HEAD + LINE * ports.get(id).length + 2);
+  const portCy = (i) => HEAD + 5 + LINE * i;
+  const cols = new Map();
+  ids.forEach((id) => { const c = colOf.get(id); if (!cols.has(c)) cols.set(c, []); cols.get(c).push(id); });
+  const colH = new Map([...cols].map(([c, list]) => [c, list.reduce((s, id) => s + hOf(id), 0) + GY * (list.length - 1)]));
+  const maxH = Math.max(...colH.values()), place = new Map();
+  for (const [c, list] of cols) { let y = PAD + 16 + (maxH - colH.get(c)) / 2; for (const id of list) { place.set(id, { x: PAD + c * (W + GX), y, h: hOf(id) }); y += hOf(id) + GY; } }
+  const width = PAD * 2 + (Math.max(...cols.keys()) + 1) * (W + GX) - GX, height = PAD * 2 + 16 + maxH;
+  const svg = S("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Node graph of the example, colored by what ran this tick" });
+  // regions
+  const region = (idsIn, label) => {
+    const ps = idsIn.map((id) => place.get(id)).filter(Boolean); if (!ps.length) return;
+    const x0 = Math.min(...ps.map((p) => p.x)) - 10, y0 = Math.min(...ps.map((p) => p.y)) - 20, x1 = Math.max(...ps.map((p) => p.x)) + W + 10, y1 = Math.max(...ps.map((p) => p.y + p.h)) + 8;
+    svg.append(S("rect", { class: "region", x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 10 }));
+    const t = S("text", { class: "region-label", x: x0 + 8, y: y0 + 13 }); t.textContent = label; svg.append(t);
+  };
+  if (R.d.id === "shape") { model.blocks.forEach((b) => region(b.nodes.filter((id) => model.nodes[id].op !== "const"), "◇ node graph · " + b.label)); if (model.loose.length) region(model.loose, "◇ feeder graph"); }
+  if (R.d.id === "calls") model.blocks.forEach((b) => region(b.nodes, "leaves of " + b.label));
+  if (R.d.id === "interp") { const live = (id) => model.nodes[id].op !== "const"; if (model.loose.length) region(model.loose.filter(live), "◇ branch 1 · loaded graph"); model.blocks.forEach((b) => region(b.nodes.filter(live), "◇ run · " + b.label)); }
+  // links: from a node's output port to each input port that reads it
+  const hasOut = new Set();
+  for (const id of ids) ports.get(id).forEach((p, i) => {
+    const a = p.from && place.get(p.from), b = place.get(id); if (!a || !b) return;
+    hasOut.add(p.from);
+    const x1 = a.x + W, y1 = a.y + 17, x2 = b.x, y2 = b.y + portCy(i), dx = Math.max(30, (x2 - x1) / 2);
+    svg.append(S("path", { class: p.child ? "edge child" : "link", d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` }));
+  });
+  // nodes
+  const els = new Map();
+  ids.forEach((id) => {
+    const p = place.get(id), n = model.nodes[id], grp = S("g", { class: "node" + (n ? "" : " ctl"), transform: `translate(${p.x},${p.y})` });
+    grp.append(S("rect", { width: W, height: p.h, rx: 7 }));
+    const nm = S("text", { class: "nm", x: 10, y: 17 }), op = S("text", { class: "op", x: 10, y: 32 }), vl = S("text", { class: "vl", x: W - 10, y: 17, "text-anchor": "end" });
+    let badge = null;
+    if (R.d.id === "leaves" && R.e.leaves.includes(id)) { badge = S("text", { class: "badge", x: W - 10, y: 32, "text-anchor": "end" }); badge.textContent = "leaf " + (R.e.leaves.indexOf(id) + 1); }
+    if (R.d.id === "calls" || R.d.id === "compute") badge = S("text", { class: "badge", x: W - 10, y: 32, "text-anchor": "end" });
+    if (isControl && R.e.lazy.get(id)) { badge = S("text", { class: "op", x: W - 10, y: 32, "text-anchor": "end" }); badge.textContent = "lazy"; }
+    const room = badge ? 13 : 21;
+    if (n) { nm.textContent = id; op.textContent = (n.op === "input" || n.op === "output" ? `${n.op} ${n.key}` : n.op).slice(0, room); }
+    else { const g = R.e.G.get(id); nm.textContent = (g.label || id).slice(0, 17); op.textContent = g.kind === "wait" ? "action" : g.kind === "write" ? "output" : g.kind; }
+    grp.append(nm, op, vl);
+    if (badge) grp.append(badge);
+    ports.get(id).forEach((pt, i) => {
+      grp.append(S("circle", { class: "port" + (pt.from ? " wired" : ""), cx: 0, cy: portCy(i), r: 3.2 }));
+      const t = S("text", { class: "pt", x: 9, y: portCy(i) + 3.5 }); t.textContent = pt.lit != null ? `${pt.name}  ${pt.lit}` : pt.name; grp.append(t);
+    });
+    if (hasOut.has(id)) grp.append(S("circle", { class: "port wired", cx: W, cy: 17, r: 3.2 }));
+    svg.append(grp); els.set(id, { grp, vl, badge });
+  });
+  const box = h("div", { class: "canvas-box" }, svg);
+  box._draw = () => {
+    for (const [id, el] of els) {
+      if (model.nodes[id]) {
+        const a = R.e.act.get(id) || "idle", n = model.nodes[id];
+        el.grp.setAttribute("class", "node " + (n.op === "const" ? "same" : a));
+        const v = n.op === "const" ? n.value : R.e.val.get(id); el.vl.textContent = fmt(v);
+        if (el.badge && R.d.id === "calls") { const c = R.e.evals.get(id) || 0; el.badge.textContent = c > 1 ? `×${c} inline` : ""; }
+        if (el.badge && R.d.id === "compute") el.badge.textContent = a === "cached" ? "cache hit" : (a === "changed" || a === "same") && !SOURCE.has(n.op) && n.op !== "output" ? "called" : "";
+      } else {
+        const s = R.e.ticked(id) ? R.e.status.get(id) : null;
+        el.grp.setAttribute("class", "node ctl " + (s ? "same" : "idle"));
+        el.vl.textContent = s || "–"; el.vl.setAttribute("class", "vl st " + (s || ""));
+      }
+    }
+  };
+  return box;
+}
+
+// ---- tree view --------------------------------------------------------------
+// One row per tree node, in depth-first order. `label` is the text form;
+// `type`, `title`, `sub` and `ports` are what the diagram draws. A row that
+// produces a value names it in `out`; a port that reads one names it in `src`,
+// and the diagram links the two.
+function treeRows(R) {
+  const model = R.model, rows = [], designId = R.d.id, E = R.e;
+  const row = (depth, label, kind, ref, type, title, sub, extra = {}) => rows.push({ depth, label, kind, ref, type, title, sub, ...extra });
+  const live = (id) => model.nodes[id].op !== "const";
+  const constText = (x) => fmt(model.nodes[x].value);
+  const source = (x) => { const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : fmt(n.value); };
+  const isCompute = (x) => !SOURCE.has(model.nodes[x].op) && model.nodes[x].op !== "output";
+  // One port per parameter, in signature order. `link(x)` is what a reference
+  // arrives through, or null to show `text(x)` in the port instead.
+  const portsOf = (id, link, text) => {
+    const n = model.nodes[id];
+    if (n.op === "input") return [{ name: "path", text: `{${n.key}}` }];
+    if (n.op === "time" || n.op === "const") return [];
+    const params = n.op === "output" ? ["in"] : (OP_SIG[n.op] || []).filter((p) => n.a && p in n.a);
+    return params.map((p) => { const x = n.a[p]; return typeof x === "string" ? { name: p, src: link(x), text: text(x) } : { name: p, text: fmt(x) }; });
+  };
+  // A node of one dataflow graph, whose references stay within `scope`.
+  const graphNode = (d, label, id, scope, extra = {}) => {
+    const n = model.nodes[id];
+    row(d, label, "data", id, "data", `${id} = ${n.op === "output" ? `output {${n.key}}` : n.op}`, extra.sub || "",
+      { ports: portsOf(id, (x) => live(x) ? `${scope}:${x}` : null, (x) => live(x) ? x : constText(x)), out: n.op === "output" ? null : `${scope}:${id}`, ...extra });
+  };
+  // The port of a tree leaf that reads node `x`, as each design reads it.
+  const readPort = (name, x) => ({ name, ...{
+    shape: { src: `feeder:${x}`, text: `{.${x}}` },
+    interp: { src: `feeder:${x}`, text: `{behavior/${x}}`, via: "store" },
+    compute: isCompute(x) ? { src: `c:${x}`, text: `@${x}` } : { text: source(x) },
+    leaves: E.leaves?.includes(x) ? { src: `l:${x}`, text: `{.#${x}}` } : { text: source(x) },
+    calls: { text: exprShow(model)(x) },
+  }[designId] });
+  // #332: a node of a graph is its pattern, FALLBACK[SEQ[changed?, call], SUCCEED],
+  // with each status read off what the pattern did this tick.
+  const pattern = (d, graph, id) => {
+    const scope = graph || "feeder", on = () => graph === null || E.ticked(graph), act = () => E.act.get(id);
+    const ran = () => on() && (act() === "changed" || act() === "same"), skipped = () => on() && act() === "cached";
+    const guard = shapeWatched(model, id).map(watchText).join(", "), [target, rhs] = shapeCall(model, id), n = model.nodes[id];
+    row(d, `FALLBACK  <em>${id}</em>`, "tree", null, "fallback", "FALLBACK", id, { pattern: true, statusFn: () => ran() || skipped() ? "S" : null });
+    row(d + 1, "SEQUENCE", "tree", null, "sequence", "SEQUENCE", "", { statusFn: () => ran() ? "S" : skipped() ? "F" : null });
+    row(d + 2, `changed?(${guard})`, "tree", null, "condition", "changed?", guard, { statusFn: () => ran() ? "S" : skipped() ? "F" : null });
+    row(d + 2, `${target} = ${rhs}`, "data", id, "data", `${target} = ${n.op}`, "", {
+      leaf: true, ports: portsOf(id, (x) => live(x) ? `${scope}:${x}` : null, (x) => live(x) ? `{.${x}}` : constText(x)), out: n.op === "output" ? null : `${scope}:${id}`,
+      actFn: () => ran() ? act() : act() === "halted" ? "halted" : "idle", statusFn: () => ran() ? "S" : null,
+    });
+    row(d + 1, "SUCCEED", "tree", null, "action", "SUCCEED", "", { statusFn: () => skipped() ? "S" : null });
+  };
+  if (designId === "shape" && model.loose.length) {
+    row(0, "PARALLEL  device root", "fixed", null, "parallel", "PARALLEL", "device root");
+    row(1, "PARALLEL  ◇ node graph: values the tree reads", "fixed", null, "parallel", "PARALLEL", "◇ node graph · values the tree reads", { fixedStatus: "R" });
+    model.loose.filter(live).forEach((id) => pattern(2, null, id));
+    row(2, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the graph ticking", { fixedStatus: "R" });
+  }
+  if (designId === "compute") {
+    // The diagram spreads these beside their readers; the text lists them.
+    rows.push({ section: "Detached nodes", textOnly: true });
+    model.order.filter(isCompute).forEach((id) => row(0, `${id}: ${model.nodes[id].op}(…)`, "data", id, "data", `${id}: ${model.nodes[id].op}`, "",
+      { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `@${x}` : source(x)), out: `c:${id}`, float: true }));
+    rows.push({ section: "", textOnly: true });
+  }
+  if (designId === "leaves") {
+    row(0, "PARALLEL  device root", "fixed", null, "parallel", "PARALLEL", "device root");
+    E.leaves.forEach((id, i) => row(1, `leaf ${i + 1}  {.#${id}} = ${model.nodes[id].op}(…)`, "data", id, "data", `leaf ${i + 1} · {.#${id}} = ${model.nodes[id].op}`, "",
+      { leaf: true, ports: portsOf(id, (x) => E.leaves.includes(x) ? `l:${x}` : null, (x) => E.leaves.includes(x) ? `{.#${x}}` : source(x)), out: `l:${id}` }));
+  }
+  if (designId === "control") {
+    const childData = new Set();
+    for (const g of E.G.values()) g.children.forEach((c) => { if (E.G.get(c).kind === "data") childData.add(c); });
+    // The node graph inside the tree: under each node that reads data, the
+    // lazy nodes its branch runs when it is ticked. A node several branches
+    // share sits in the first branch that runs it; the others link to it.
+    const eager = model.order.filter((id) => live(id) && !childData.has(id) && !E.lazy.get(id));
+    if (eager.length) {
+      rows.push({ section: "Eager nodes: every tick" });
+      eager.forEach((id) => graphNode(0, `${id}  ${model.nodes[id].op}  <em>eager</em>`, id, "g"));
+      rows.push({ section: "" });
+    }
+    const placed = new Set(eager);
+    const branch = (d, reads) => {
+      const need = [], seen = new Set(), up = (x) => { if (seen.has(x) || !live(x) || placed.has(x) || childData.has(x) || !E.lazy.get(x)) return; seen.add(x); refs(model.nodes[x]).forEach(up); need.push(x); };
+      reads.forEach(up);
+      if (!need.length) return;
+      need.forEach((x) => placed.add(x));
+      row(d, "◇ branch  <em>runs when ticked</em>", "fixed", null, "flow", "branch", "lazy · runs when its node is ticked");
+      need.forEach((x) => graphNode(d + 1, `${x}  ${model.nodes[x].op}`, x, "g"));
+    };
+    const input = (g) => g.refs.length ? { name: "in", src: `g:${g.refs[0]}`, text: g.refs[0] } : { name: "in", text: fmt(g.tree.value) };
+    const walk = (id, d) => {
+      const g = E.G.get(id);
+      if (g.kind === "data") { const what = `${g.node.op}${g.node.key ? " " + g.node.key : ""}`; graphNode(d, `${id}  ${what}  <em>(child)</em>`, id, "g", { leaf: true, sub: "child" }); branch(d + 1, refs(g.node)); return; }
+      if (g.kind === "parallel" && g.tree?.k === "block") row(d, `parallel  ${g.label}  <em>(the block's outputs)</em>`, "tree", id, "parallel", "parallel", `${g.label} · the block's outputs`);
+      else if (g.kind === "running") row(d, "constant  Running", "tree", id, "action", "Running", "constant");
+      else if (g.kind === "write") { row(d, `output  ${g.tree.key} = ${g.refs[0] || fmt(g.tree.value)}  <em>${g.label}</em>`, "tree", id, "action", g.label, `output {${g.tree.key}}`, { ports: [input(g)] }); branch(d + 1, g.refs); }
+      else if (g.kind === "condition") { row(d, `condition(${g.refs[0]})  <em>${g.label}</em>`, "tree", id, "condition", g.label, "condition", { ports: [input(g)] }); branch(d + 1, g.refs); }
+      else if (g.kind === "wait") row(d, `action wait ${g.tree.seconds} s  <em>${g.label}</em>`, "tree", id, "action", g.label, `action wait ${g.tree.seconds} s`);
+      else row(d, `${g.kind}  ${g.label}`, "tree", id, g.kind, g.kind + (g.policy === "any" ? " (any)" : ""), g.label);
+      g.children.forEach((c) => walk(c, d + 1));
+    };
+    walk("root", 0);
+    return rows;
+  }
+  if (designId === "interp") {
+    row(0, "HOST  branches, in tick order", "fixed", null, "host", "HOST", "branches, in tick order");
+    if (model.loose.length) {
+      row(1, "node graph  <em>branch 1 · loaded · values the tree reads</em>", "fixed", null, "flow", "node graph", "branch 1 · loaded · values the tree reads");
+      model.loose.filter(live).forEach((id) => { const read = E.treeReads.has(id) ? ` → {behavior/${id}}` : ""; graphNode(2, `${id} = ${patternBody(model, id)}${read}`, id, "feeder", { sub: read.trim() }); });
+    }
+    const k = model.loose.length ? 2 : 1;
+    row(1, `behavior tree  <em>branch ${k} · loaded</em>`, "fixed", null, "host", "behavior tree", `branch ${k} · loaded`);
+  }
+  const base = designId === "interp" ? 2 : (designId === "shape" && model.loose.length) || designId === "leaves" ? 1 : 0;
+  const walk = (n, d) => {
+    if (n.k === "block" && designId === "interp") { row(d, `run_graph(node-graph, 1, ⟨${n.label}⟩)  <em>${n.label}</em>`, "tree", n.id, "action", n.label, `run_graph(node-graph, 1, ⟨${n.label}⟩)`); return; }
+    if (n.k === "block") {
+      const graph = designId === "shape" ? "◇ node graph: " : "";
+      row(d, `PARALLEL  ${graph}${n.label}`, "tree", n.id, "parallel", "PARALLEL", (designId === "shape" ? "◇ node graph · " : "") + n.label);
+      if (designId === "shape") n.nodes.filter(live).forEach((id) => pattern(d + 1, n.id, id));
+      else if (designId === "calls") {
+        const P = E.plans.get(n.id), scope = "n:" + n.id, show = exprShow(model, P.named, null);
+        P.leaves.forEach((id) => {
+          const node = model.nodes[id], isOut = node.op === "output", target = isOut ? `{${node.key}}` : `{.${id}}`, top = isOut ? node.a.in : id;
+          const named = (x) => P.named.has(x) && x !== id, viaVar = isOut && named(top);
+          const ports = viaVar ? [{ name: "in", src: `${scope}:${top}`, text: `{.${top}}` }] : portsOf(top, (x) => named(x) ? `${scope}:${x}` : null, show);
+          row(d + 1, `${target} = ${exprShow(model, P.named, id)(id)}`, "data", id, "data", `${target} = ${viaVar ? "output" : model.nodes[top].op}`, "", { leaf: true, ports, out: isOut ? null : `${scope}:${id}` });
+        });
+      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? `@${src}` : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
+      row(d + 1, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the block ticking", { fixedStatus: "R" });
+      return;
+    }
+    if (n.k === "seq") row(d, `SEQUENCE  ${n.label}`, "tree", n.id, "sequence", "SEQUENCE", n.label);
+    else if (n.k === "fallback") row(d, `FALLBACK  ${n.label}`, "tree", n.id, "fallback", "FALLBACK", n.label);
+    else if (n.k === "parallel") { const any = n.policy === "any" ? " (any)" : ""; row(d, `PARALLEL${any}  ${n.label}`, "tree", n.id, "parallel", "PARALLEL" + any, n.label); }
+    else if (n.k === "wait") row(d, `Wait ${n.seconds} s  <em>${n.label}</em>`, "tree", n.id, "action", n.label, `Wait ${n.seconds} s`);
+    else if (n.k === "check") row(d, `${checkText(designId, model, n)}  <em>${n.label}</em>`, "tree", n.id, "condition", n.label, "Truthy", { ports: [readPort("x", n.node)] });
+    else if (n.k === "set") row(d, `{${n.key}} = ${setText(designId, model, n)}  <em>${n.label}</em>`, "tree", n.id, "action", n.label, `write {${n.key}}`, { ports: [n.node ? readPort("value", n.node) : { name: "value", text: fmt(n.value) }] });
+    else row(d, n.k, "tree", n.id, "action", n.k, "");
+    (n.children || []).forEach((c) => walk(c, d + 1));
+  };
+  walk(model.tree, base);
+  if (designId === "interp") model.blocks.forEach((b) => {
+    row(1, `node graph  <em>run · ${b.label} · spawned by run_graph</em>`, "tree", "run:" + b.id, "flow", "node graph", `run · ${b.label} · spawned by run_graph`);
+    b.nodes.filter(live).forEach((id) => graphNode(2, `${id} = ${patternBody(model, id)}`, id, "run:" + b.id));
+  });
+  return rows;
+}
+
+// Each row's place in the tree: its parent, children, descendants, and a key
+// that stays the same while the tree does, so a fold survives a redraw.
+function indexRows(rows) {
+  const stack = []; let group = 0, roots = 0;
+  for (const r of rows) {
+    if ("section" in r) { group++; roots = 0; stack.length = 0; continue; }
+    stack.length = r.depth;
+    const parent = r.depth > 0 ? stack[r.depth - 1] : null;
+    r.parentRow = parent; r.kids = []; r.desc = [];
+    r.key = parent ? `${parent.key}.${parent.kids.length}` : `${group}:${roots++}`;
+    if (parent) parent.kids.push(r);
+    for (let a = parent; a; a = a.parentRow) a.desc.push(r);
+    stack[r.depth] = r;
+  }
+  return rows;
+}
+// The row that stands for `r`: its outermost folded ancestor, or itself.
+function visibleRep(r, folds) { let rep = r; for (let a = r.parentRow; a; a = a.parentRow) if (folds.has(a.key)) rep = a; return rep; }
+
+// A row's status this tick: its own rule, a tree node's, or Success for a
+// leaf whose value ran. Null when it was not ticked.
+function rowStatus(R, r) {
+  if (r.statusFn) return r.statusFn();
+  if (r.kind === "tree") return R.e.ticked(r.ref) ? R.e.status.get(r.ref) : null;
+  if (r.leaf) { const a = R.e.act.get(r.ref); return a === "changed" || a === "same" ? "S" : null; }
+  return null;
+}
+const rowAct = (R, r) => r.actFn ? r.actFn() : R.e.act.get(r.ref) || "idle";
+
+// What is folded, per design, example and structure. It lasts until reload.
+function foldsFor(R) {
+  const k = `${R.d.id}|${RUN.ex.id}|${JSON.stringify(R.model.structure || {})}`;
+  return STATE.folds[k] || (STATE.folds[k] = new Set());
+}
+// Rebuilding on a fold keeps the scroll position and the focus.
+function treeView(R) {
+  const rows = indexRows(treeRows(R)), folds = foldsFor(R), holder = h("div", {});
+  let inner = null;
+  const build = () => {
+    const prev = inner;
+    inner = STATE.treeMode === "text" ? treeText(R, rows, folds, refold) : treeDiagram(R, rows, folds, refold);
+    if (!prev) { holder.append(inner); return; }
+    inner._centered = true; holder.replaceChildren(inner); inner.scrollLeft = prev.scrollLeft; inner._draw();
+  };
+  const refold = (key) => {
+    if (folds.has(key)) folds.delete(key); else folds.add(key);
+    build(); holder.querySelector(`[data-key="${key}"]`)?.focus();
+  };
+  build();
+  holder._draw = () => inner._draw();
+  return holder;
+}
+
+function treeText(R, rows, folds, refold) {
+  const list = h("div", { class: "tree" }), els = [];
+  const html = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])).replace(/&lt;em&gt;/g, "<em>").replace(/&lt;\/em&gt;/g, "</em>");
+  for (const r of rows) {
+    if ("section" in r) { if (r.section) list.append(h("div", { class: "section" }, r.section)); continue; }
+    if (visibleRep(r, folds) !== r) continue;
+    const folded = r.kids.length > 0 && folds.has(r.key), plain = r.label.replace(/<\/?em>/g, "");
+    const pill = h("span", { class: "pill" }, r.kind === "tree" || r.leaf ? "–" : "");
+    const chev = r.kids.length
+      ? h("button", { type: "button", class: "chev", "data-key": r.key, "aria-expanded": folded ? "false" : "true", "aria-label": `${folded ? "Unfold" : "Fold"} ${plain}`, onclick: () => refold(r.key) }, folded ? "▸" : "▾")
+      : h("span", { class: "chev" });
+    const txt = h("span"); txt.innerHTML = html(r.label);
+    const lbl = h("span", { class: "lbl" }, "  ".repeat(r.depth), chev, txt, folded ? h("em", {}, `  +${r.desc.length}`) : "");
+    const el = h("div", { class: "row " + (r.kind === "data" ? "data" : "") }, pill, lbl);
+    if (r.kind !== "tree" && !r.leaf) pill.style.visibility = "hidden";
+    list.append(el); els.push({ r, el, pill });
+  }
+  const box = h("div", { class: "canvas-box" }, list);
+  box._draw = () => {
+    for (const { r, el, pill } of els) {
+      if (r.kind === "tree" || r.leaf) { const s = rowStatus(R, r); pill.textContent = s || "–"; pill.className = "pill " + (s || "idle"); }
+      if (r.kind === "data") el.className = "row data " + rowAct(R, r);
+    }
+  };
+  return box;
+}
+
+// Top-down, as behavior-tree editors draw it. A node stacks its children in an
+// indented column when they are patterns, or all leaves and either data or
+// more than four. Links run behind the nodes, from the port that produces a
+// value to each port that reads it. A folded node hides its subtree and shows
+// one square per node it hides, colored by that node's state.
+const BT_GLYPH = { flow: "◇", sequence: "→", fallback: "?", parallel: "⇉", inverter: "¬", sequence_with_memory: "→*" };
+function wrapText(s, max) {
+  if (s.length <= max) return [s];
+  const lines = []; let rest = s;
+  while (rest.length > max) {
+    let cut = Math.max(rest.lastIndexOf(", ", max), rest.lastIndexOf(" ", max));
+    cut = cut > max * 0.4 ? cut + 1 : max;
+    lines.push(rest.slice(0, cut).trimEnd()); rest = rest.slice(cut).trimStart();
+  }
+  lines.push(rest);
+  return lines;
+}
+function treeDiagram(R, rows, folds, refold) {
+  const CH_T = 7.3, CH_S = 6.65, PAD = 20, HG = 18, VG = 30, IND = 24, SG = 8, GG = 64, LINE = 15, MINI = 18, FG = 44;
+  const groups = [{ caption: null, roots: [] }], stack = [], shown = new Map(), floats = [];
+  for (const r of rows) {
+    if (r.textOnly) continue;
+    if ("section" in r) { groups.push({ caption: r.section || null, roots: [] }); stack.length = 0; continue; }
+    if (visibleRep(r, folds) !== r) continue;
+    const n = { r, children: [], parent: null, folded: r.kids.length > 0 && folds.has(r.key) };
+    n.pill = r.kind === "tree" || r.leaf || !!r.fixedStatus;
+    n.glyph = BT_GLYPH[r.type] || "";
+    n.chev = r.kids.length ? (n.folded ? "▸" : "▾") : "";
+    n.lines = r.sub ? wrapText(r.sub, 46) : [];
+    n.portLine = (r.ports || []).map((p) => { const at = n.lines.length; n.lines.push(...wrapText(`${p.name}  ${p.text}`, 46)); return at; });
+    n.minis = n.folded ? r.desc.slice(0, MINI) : null;
+    const head = (r.title.length + (n.glyph ? n.glyph.length + 1 : 0) + (n.chev ? 2 : 0)) * CH_T + (n.pill ? 30 : 0);
+    const textW = Math.max(head, ...n.lines.map((l) => l.length * CH_S + 4), n.minis ? n.minis.length * 11 + (r.desc.length > MINI ? 34 : 0) : 0);
+    n.w = Math.ceil(Math.max(r.type === "condition" ? 132 : 112, textW + (r.type === "condition" ? 36 : 24)));
+    n.h = (n.lines.length ? 28 + LINE * n.lines.length : 30) + (n.minis ? 16 : 0);
+    shown.set(r, n);
+    if (r.float) { floats.push(n); continue; }
+    stack.length = r.depth;
+    const parent = r.depth > 0 ? stack[r.depth - 1] : null;
+    if (parent) { parent.children.push(n); n.parent = parent; } else groups.at(-1).roots.push(n);
+    stack[r.depth] = n;
+  }
+  const sum = (a) => a.reduce((s, x) => s + x, 0);
+  // Leaves that read each other go in columns, each after the columns it
+  // reads from, so their links run left to right. A leaf that reads none of
+  // them and produces nothing (RUNNING) goes in the last column.
+  const flowCols = (n) => {
+    if (n.children.length < 2 || n.children.some((c) => c.children.length || c.r.pattern)) return null;
+    const outs = new Map(); n.children.forEach((c) => { if (c.r.out) outs.set(c.r.out, c); });
+    const col = new Map(); let linked = false;
+    for (const c of n.children) {
+      let k = 0;
+      for (const p of c.r.ports || []) { const pr = outs.get(p.src); if (pr && col.has(pr)) { k = Math.max(k, col.get(pr) + 1); linked = true; } }
+      col.set(c, k);
+    }
+    if (!linked) return null;
+    const last = Math.max(...col.values());
+    n.children.forEach((c) => { if (!c.r.out && !(c.r.ports || []).length) col.set(c, last); });
+    return col;
+  };
+  const size = (n) => {
+    n.children.forEach(size);
+    const k = n.children.length;
+    if (!k) { n.W = n.w; n.H = n.h; return; }
+    n.cols = flowCols(n);
+    if (n.cols) {
+      const m = Math.max(...n.cols.values()) + 1; n.colW = Array(m).fill(0); const colH = Array(m).fill(0);
+      for (const c of n.children) { const j = n.cols.get(c); n.colW[j] = Math.max(n.colW[j], c.W); colH[j] += (colH[j] ? SG : 0) + c.H; }
+      n.W = Math.max(n.w, (n.virtual ? 0 : IND) + sum(n.colW) + FG * (m - 1)); n.H = n.h + (n.virtual ? 0 : 14) + Math.max(...colH);
+      return;
+    }
+    n.stacked = n.children.some((c) => c.r.pattern) || n.children.every((c) => !c.children.length) && (k > 4 || n.virtual || n.children.some((c) => c.r.kind === "data") && n.r.type !== "sequence" && n.r.type !== "fallback");
+    if (n.stacked) { n.W = Math.max(n.w, (n.virtual ? 0 : IND) + Math.max(...n.children.map((c) => c.W))); n.H = n.h + (n.virtual ? 0 : 14) + sum(n.children.map((c) => c.H)) + SG * (k - 1); }
+    else { n.CW = sum(n.children.map((c) => c.W)) + HG * (k - 1); n.W = Math.max(n.w, n.CW); n.H = n.h + VG + Math.max(...n.children.map((c) => c.H)); }
+  };
+  const place = (n, x, y) => {
+    n.x = x; n.y = y;
+    if (!n.children.length) return;
+    if (n.cols) {
+      const top = y + n.h + (n.virtual ? 0 : 14), xs = []; let cx = x + (n.virtual ? 0 : IND);
+      n.colW.forEach((w) => { xs.push(cx); cx += w + FG; });
+      const cy = n.colW.map(() => top);
+      for (const c of n.children) { const j = n.cols.get(c); place(c, xs[j], cy[j]); cy[j] += c.H + SG; }
+      return;
+    }
+    if (n.stacked) { let cy = y + n.h + (n.virtual ? 0 : 14); for (const c of n.children) { place(c, x + (n.virtual ? 0 : IND), cy); cy += c.H + SG; } return; }
+    let cx = x + Math.max(0, (n.w - n.CW) / 2);
+    for (const c of n.children) { place(c, cx, y + n.h + VG); cx += c.W + HG; }
+    const a = n.children[0], b = n.children.at(-1), mid = (a.x + a.w / 2 + b.x + b.w / 2) / 2;
+    n.x = Math.min(Math.max(mid - n.w / 2, x), x + n.W - n.w);
+  };
+  // Nodes outside the tree (#396's detached nodes) go in columns on its left,
+  // each column after the ones it reads from.
+  const fcol = new Map(), outs = new Map(floats.map((f) => [f.r.out, f]));
+  for (const f of floats) { let k = 0; for (const p of f.r.ports || []) { const pr = outs.get(p.src); if (pr && fcol.has(pr)) k = Math.max(k, fcol.get(pr) + 1); } fcol.set(f, k); }
+  const fW = []; floats.forEach((f) => { const j = fcol.get(f); fW[j] = Math.max(fW[j] || 0, f.w); });
+  const floatW = fW.length ? fW.reduce((a, b) => a + b, 0) + FG * (fW.length - 1) + GG : 0;
+  // Each group is one root, or a virtual one holding several, side by side.
+  let gx = PAD + floatW, height = 0;
+  const tops = groups.filter((g) => g.roots.length).map((g) => {
+    const root = g.roots.length === 1 ? g.roots[0] : { virtual: true, w: 0, h: 0, children: g.roots };
+    if (root.virtual) g.roots.forEach((c) => { c.parent = null; });
+    size(root);
+    if (g.caption) root.W = Math.max(root.W, g.caption.length * 7.4);
+    place(root, gx, PAD + (g.caption ? 22 : 0));
+    const top = { g, root, x: gx, y: PAD, w: root.W, h: root.H + (g.caption ? 22 : 0) };
+    gx += root.W + GG; height = Math.max(height, top.y + top.h);
+    return top;
+  });
+  // Each one sits just left of what reads it, level with the ports it feeds,
+  // moved down only until it overlaps nothing; never left of its column. The
+  // column nearest the tree goes first, so a node's readers are placed before it.
+  const boxes = [];
+  const collect = (n) => { if (!n.virtual) boxes.push(n); n.children.forEach(collect); };
+  tops.forEach((t) => collect(t.root));
+  const hits = (x, y, f) => boxes.some((o) => x < o.x + o.w + 12 && o.x < x + f.w + 12 && y < o.y + o.h + 10 && o.y < y + f.h + 10);
+  const order = [...floats].sort((a, b) => fcol.get(b) - fcol.get(a));
+  for (const f of order) {
+    const j = fcol.get(f), x0 = PAD + fW.slice(0, j).reduce((a, b) => a + b, 0) + FG * j, ys = [], xs = [];
+    for (const r of rows) (r.ports || []).forEach((p, i) => {
+      if (p.src !== f.r.out) return;
+      const to = shown.get(visibleRep(r, folds)); if (!to || to.y == null) return;
+      ys.push(to.y + (to.r === r ? 32 + LINE * to.portLine[i] : 15) - 15); xs.push(to.x);
+    });
+    f.x = Math.max(x0, (xs.length ? Math.min(...xs) : x0 + f.w + FG) - FG - f.w);
+    f.y = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : PAD;
+    while (hits(f.x, f.y, f)) f.y += 6;
+    boxes.push(f); height = Math.max(height, f.y + f.h);
+  }
+  // Drop the margin the columns reserved but no node used.
+  if (floats.length) {
+    const dx = Math.min(...boxes.map((o) => o.x)) - PAD;
+    if (dx > 0) { boxes.forEach((o) => { o.x -= dx; }); tops.forEach((t) => { t.x -= dx; }); gx -= dx; }
+  }
+  const width = Math.max(gx - GG + PAD, 200); height += PAD;
+  const svg = S("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Behavior tree of the example, with this tick's statuses and its data links" });
+  const edgeLayer = S("g"), wireLayer = S("g"), nodeLayer = S("g"); svg.append(edgeLayer, wireLayer, nodeLayer);
+  const nodes = [...floats], edges = [];
+  for (const t of tops) {
+    if (t.g.caption) {
+      svg.insertBefore(S("rect", { class: "region", x: t.x - 10, y: t.y - 6, width: t.w + 20, height: t.h + 14, rx: 10 }), edgeLayer);
+      const cap = S("text", { class: "region-label", x: t.x - 2, y: t.y + 10 }); cap.textContent = t.g.caption; svg.insertBefore(cap, edgeLayer);
+    }
+    const visit = (n) => {
+      if (!n.virtual) nodes.push(n);
+      for (const c of n.children) {
+        if (!n.virtual) {
+          const d = n.cols
+            ? `M${n.x + 14},${n.y + n.h} V${n.y + n.h + 7} H${c.x + 14} V${c.y}`
+            : n.stacked
+            ? `M${n.x + 14},${n.y + n.h} V${c.y + Math.min(c.h / 2, 16)} H${c.x}`
+            : `M${n.x + n.w / 2},${n.y + n.h} V${n.y + n.h + VG / 2} H${c.x + c.w / 2} V${c.y}`;
+          const p = S("path", { class: "edge", d }); edgeLayer.append(p); edges.push({ p, c });
+        }
+        visit(c);
+      }
+    };
+    visit(t.root);
+  }
+  const portY = (n, i) => 32 + LINE * n.portLine[i];
+  for (const n of nodes) {
+    const r = n.r, g = S("g", { transform: `translate(${n.x},${n.y})`, "data-key": r.key });
+    const rx = r.type === "condition" ? (r.ports ? 12 : Math.min(n.h / 2, 18)) : r.type === "action" ? 2 : 7;
+    if (n.folded) g.append(S("rect", { class: "under", x: 4, y: 4, width: n.w, height: n.h, rx }));
+    g.append(S("rect", { width: n.w, height: n.h, rx }));
+    const tx = r.type === "condition" ? 16 : 11;
+    const title = S("text", { class: "nm", x: tx, y: 19 });
+    if (n.chev) { const c = S("tspan", { class: "chev" }); c.textContent = n.chev + " "; title.append(c); }
+    if (n.glyph) { const gl = S("tspan", { class: "gl" }); gl.textContent = n.glyph + " "; title.append(gl); }
+    title.append(document.createTextNode(r.title)); g.append(title);
+    n.lines.forEach((l, i) => { const t = S("text", { class: "op", x: tx, y: 36 + LINE * i }); t.textContent = l; g.append(t); });
+    (r.ports || []).forEach((p, i) => g.append(S("circle", { class: "port" + (p.src ? " wired" : ""), cx: 0, cy: portY(n, i), r: 3.2 })));
+    if (r.out) g.append(S("circle", { class: "port wired", cx: n.w, cy: 15, r: 3.2 }));
+    if (n.minis) {
+      const box = S("g", { class: "minis" }); g.append(box);
+      n.miniEls = n.minis.map((_, i) => { const m = S("rect", { class: "mini", x: tx + i * 11, y: n.h - 15, width: 8, height: 8, rx: 2 }); box.append(m); return m; });
+      if (r.desc.length > MINI) { const t = S("text", { class: "op", x: tx + MINI * 11 + 2, y: n.h - 7 }); t.textContent = `+${r.desc.length - MINI}`; g.append(t); }
+    }
+    if (n.pill) {
+      n.pillBg = S("rect", { class: "pillbg", x: n.w - 27, y: 7, width: 19, height: 15, rx: 3 });
+      n.pillTx = S("text", { class: "st", x: n.w - 17.5, y: 18, "text-anchor": "middle" });
+      g.append(n.pillBg, n.pillTx);
+    }
+    const tip = S("title"); tip.textContent = r.label.replace(/<\/?em>/g, "") + (r.kids.length ? (n.folded ? " · click to unfold" : " · click to fold") : ""); g.append(tip);
+    if (r.kids.length) {
+      g.setAttribute("class", "fold"); g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+      g.setAttribute("aria-expanded", n.folded ? "false" : "true"); g.setAttribute("aria-label", `${n.folded ? "Unfold" : "Fold"} ${r.title} ${r.sub || ""}`.trim());
+      g.addEventListener("click", () => refold(r.key));
+      g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); refold(r.key); } });
+    }
+    nodeLayer.append(g); n.el = g;
+  }
+  // Links. A node inside a folded one is reached through the folded one.
+  const producers = new Map(); for (const r of rows) if (r.out) producers.set(r.out, r);
+  const wires = [], wiresOf = new Map(), seen = new Set();
+  const attach = (n, w) => { if (!wiresOf.has(n)) wiresOf.set(n, []); wiresOf.get(n).push(w); };
+  for (const r of rows) (r.ports || []).forEach((p, i) => {
+    const pr = p.src && producers.get(p.src); if (!pr) return;
+    const from = shown.get(visibleRep(pr, folds)), to = shown.get(visibleRep(r, folds));
+    if (!from || !to || from === to) return;
+    const direct = to.r === r, x1 = from.x + from.w, y1 = from.y + 15, x2 = to.x, y2 = to.y + (direct ? portY(to, i) : 15);
+    const key = `${from.r.key}>${to.r.key}@${y2}`; if (seen.has(key)) return; seen.add(key);
+    if (from.r !== pr && !from.outDot) { from.outDot = true; from.el.append(S("circle", { class: "port wired", cx: from.w, cy: 15, r: 3.2 })); }
+    if (!direct && !to.inDot) { to.inDot = true; to.el.append(S("circle", { class: "port wired", cx: 0, cy: 15, r: 3.2 })); }
+    // A curve; a link that runs back and down goes around the right of both
+    // nodes and into the port from above, so it does not cross the nodes it joins.
+    const xr = Math.max(x1, to.x + to.w) + 9, dx = Math.max(36, (x2 - x1) / 2);
+    const d = x2 >= x1 + 24 || y2 < y1 ? `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` : `M${x1},${y1} H${xr} V${to.y - 8} H${x2 - 10} V${y2} H${x2}`;
+    const path = S("path", { class: "wire" + (p.via ? " via" : ""), d });
+    wireLayer.append(path);
+    const w = { path, from, to }; wires.push(w); attach(from, w); attach(to, w);
+  });
+  for (const [n, ws] of wiresOf) {
+    const on = () => ws.forEach((w) => w.path.classList.add("hot")), off = () => ws.forEach((w) => w.path.classList.remove("hot"));
+    n.el.addEventListener("mouseenter", on); n.el.addEventListener("mouseleave", off);
+    n.el.addEventListener("focus", on); n.el.addEventListener("blur", off);
+  }
+  const box = h("div", { class: "canvas-box" }, svg);
+  const main = tops.find((t) => !t.g.caption) || tops[0], first = main?.root, focus = first?.virtual ? first.children[0] : first;
+  box._draw = () => {
+    // Open on the root: a wide tree on a narrow screen scrolls sideways.
+    if (!box._centered && box.isConnected && box.clientWidth && focus) { box._centered = true; box.scrollLeft = Math.max(0, focus.x + focus.w / 2 - box.clientWidth / 2); }
+    const live = new Map();
+    const isLive = (n) => {
+      if (live.has(n)) return live.get(n);
+      const r = n.r; let v;
+      if (r.statusFn) v = r.statusFn() != null;
+      else if (r.kind === "tree") v = R.e.ticked(r.ref);
+      else if (r.kind === "data") { const a = rowAct(R, r); v = a !== "idle" && a !== "halted"; }
+      else v = !n.parent || isLive(n.parent);
+      live.set(n, v); return v;
+    };
+    const miniState = (d, on) => d.kind === "fixed" ? (on && d.fixedStatus ? d.fixedStatus : "idle") : d.kind === "tree" || d.leaf ? rowStatus(R, d) || "idle" : rowAct(R, d);
+    for (const n of nodes) {
+      const r = n.r, on = isLive(n);
+      let s;
+      if (r.kind === "data") { n.el.setAttribute("class", `node bt ${r.type} ${rowAct(R, r)}${r.kids.length ? " fold" : ""}`); s = rowStatus(R, r); }
+      else {
+        s = r.kind === "tree" ? (on ? rowStatus(R, r) : null) : on ? r.fixedStatus || "" : null;
+        n.el.setAttribute("class", `node bt ${r.type} ${r.kind === "fixed" ? "fixed" : ""} ${s == null ? "idle" : s}${r.kids.length ? " fold" : ""}`);
+      }
+      if (n.pill) { n.pillTx.textContent = s || "–"; n.pillTx.setAttribute("class", "st " + (s || "")); n.pillBg.setAttribute("class", "pillbg " + (s || "")); }
+      if (n.miniEls) n.miniEls.forEach((m, i) => m.setAttribute("class", "mini " + miniState(n.minis[i], on)));
+    }
+    for (const { p, c } of edges) p.setAttribute("class", isLive(c) ? "edge live" : "edge");
+    for (const w of wires) w.path.classList.toggle("live", isLive(w.from) && isLive(w.to));
+  };
+  return box;
+}
+// #332: what a pattern's changed? watches, and the call its SEQ runs.
+function shapeWatched(model, id) {
+  const n = model.nodes[id];
+  if (n.op === "input") return ["k:" + n.key];
+  if (n.op === "time") return ["time"];
+  return refs(n).filter((r) => model.nodes[r].op !== "const").map((r) => "v:" + r);
+}
+const watchText = (w) => w === "time" ? "{arora/time}" : w.startsWith("k:") ? `{${w.slice(2)}}` : `{.${w.slice(2)}}`;
+function shapeCall(model, id) {
+  const n = model.nodes[id], show = (x) => typeof x === "string" ? (model.nodes[x].op === "const" ? fmt(model.nodes[x].value) : `{.${x}}`) : fmt(x);
+  if (n.op === "input") return [`{.${id}}`, `input {${n.key}}`];
+  if (n.op === "time") return [`{.${id}}`, "time"];
+  if (n.op === "output") return [`{${n.key}}`, `output({.${n.a.in}})`];
+  return [`{.${id}}`, `${n.op}(${argText(n, show)})`];
+}
+function patternBody(model, id) {
+  const n = model.nodes[id];
+  return n.op === "input" ? `input {${n.key}}` : n.op === "output" ? `output {${n.key}}` : n.op === "time" ? "time" : `${n.op}(…)`;
+}
+function checkText(design, model, n) {
+  if (design === "interp") return `Truthy({behavior/${n.node}})`;
+  if (design === "calls") return `Truthy(${exprShow(model)(n.node)})`;
+  if (design === "compute") return `Truthy(@${n.node})`;
+  if (design === "leaves") return `Truthy({.#${n.node}})`;
+  return `Truthy({.${n.node}})`;
+}
+function setText(design, model, n) {
+  if (!n.node) return fmt(n.value);
+  if (design === "interp") return `{behavior/${n.node}}`;
+  if (design === "calls") return exprShow(model)(n.node);
+  if (design === "compute") return "@" + n.node;
+  if (design === "leaves") return `{.#${n.node}}`;
+  return `{.${n.node}}`;
+}
+
+function legend(id, view) {
+  const skipped = id === "compute" ? "cache hit: not called" : id === "shape" && view === "graph" ? "changed? failed: not called" : null;
+  const halts = id === "shape" || id === "control" || id === "interp";
+  return h("div", { class: "legend" },
+    [["changed", "ran, value changed"], ["same", "ran, same value"], skipped && ["cached", skipped], ["idle", "not reached this tick"], halts && ["halted", "halted: state dropped"], ["wire", "data link"], id === "interp" && view === "tree" && ["wire via", "through a store key"]].filter(Boolean).map(([c, t]) => h("span", {}, h("i", { class: "sw " + c }), t)),
+    h("span", {}, h("span", { class: "pill S", style: "padding:0 5px" }, "S"), h("span", { class: "pill R", style: "padding:0 5px" }, "R"), h("span", { class: "pill F", style: "padding:0 5px" }, "F"), "status"));
+}
+
+function readingsLine(R) {
+  const el = h("div", { class: "readings" });
+  el._draw = () => {
+    const parts = R.e.readings.map(([label, v]) => `${label}: ${fmt(v)}`);
+    const store = RUN.ex.id === "order" ? `   ·   v after the tick: ${fmt(R.e.store.get("v"))}` : "";
+    el.innerHTML = parts.length ? "<b>Readings this tick</b>   " + parts.map((p) => p.replace(/[<>&]/g, "")).join("   ·   ") + store : "<b>Root status</b>   " + (R.e.rootStatus || "–");
+  };
+  return el;
+}
+
+// ---- proposal tab ------------------------------------------------------------
+function proposalTab(d) {
+  const R = RUN.engines.find((x) => x.d.id === d.id);
+  document.documentElement.style.setProperty("--accent", `var(${d.color})`);
+  const head = h("section", { class: "proposal", "aria-label": d.name },
+    h("div", {}, h("h2", {}, d.name), h("p", {}, d.lede), h("ul", {}, d.rules.map((r) => h("li", {}, r)))),
+    h("div", { style: "display:flex;flex-direction:column;gap:4px;align-items:flex-end" }, h("a", { href: d.pr, target: "_blank", rel: "noopener" }, d.prText + " ↗"), d.doc ? h("a", { href: d.doc, target: "_blank", rel: "noopener" }, "proposal-behavior-languages.md ↗") : ""));
+  const views = { graph: () => graphView(R), tree: () => treeView(R), stored: () => storedView(R) };
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "Representation" },
+    [["graph", "Node graph"], ["tree", "Behavior tree"], ["stored", "Stored form"]].map(([k, t]) => h("button", { type: "button", "aria-pressed": STATE.view === k ? "true" : "false", onclick: () => { STATE.view = k; persist(); renderAll(); } }, t)));
+  const treeSeg = STATE.view !== "tree" ? "" : h("div", { class: "seg sub", role: "group", "aria-label": "Tree drawing" },
+    [["diagram", "Diagram"], ["text", "Text"]].map(([k, t]) => h("button", { type: "button", "aria-pressed": STATE.treeMode === k ? "true" : "false", onclick: () => { STATE.treeMode = k; persist(); renderAll(); } }, t)));
+  const foldBar = STATE.view !== "tree" ? "" : h("div", { class: "seg sub", role: "group", "aria-label": "Folding" },
+    h("button", { type: "button", onclick: () => { foldsFor(R).clear(); renderAll(); } }, "Expand all"),
+    h("button", { type: "button", onclick: () => { const f = foldsFor(R); f.clear(); indexRows(treeRows(R)).forEach((r) => { if (r.kids?.length && r.depth >= 1) f.add(r.key); }); renderAll(); } }, "Collapse all"));
+  const view = views[STATE.view]();
+  const readings = readingsLine(R);
+  const plot = plotCard([R], true), meters = metersCard(R);
+  const controls = controlsCard(R);
+  const side = h("div", { class: "side" }, exampleList(), controls, plot, meters);
+  const main = h("div", { class: "views" }, h("div", { class: "viewbar" }, h("div", { class: "viewbar-left" }, seg, treeSeg, foldBar), STATE.view === "stored" ? "" : legend(d.id, STATE.view)), view, readings,
+    h("p", { class: "note" }, STATE.view === "stored" ? "What the design stores and runs for this example, generated from the same definition every tab uses." : STATE.view === "graph" ? viewNote(d.id) : treeNote(d.id)));
+  return { el: h("div", { class: "views" }, head, h("div", { class: "bench" }, side, main)), draws: [view._draw, readings._draw, plot._draw, meters._draw, controls._draw] };
+}
+function treeNote(id) {
+  const pills = "Status pills show this tick's Success, Running or Failure; a dash means the node was not ticked.";
+  if (STATE.treeMode === "text") return "The tree each design ticks. " + pills + " ▾ folds a node, ▸ unfolds it.";
+  const shape = id === "shape" ? " Each node of a graph is its pattern as it runs: when changed? fails, the SEQUENCE fails, its call is not ticked, and SUCCEED makes the pattern succeed." : "";
+  return "The tree each design ticks, as it runs this tick: → sequence, ? fallback, ⇉ parallel; rounded ends are conditions and square corners are actions. A leaf that computes or writes a value also shows that value in its border, colored as in the node graph. Edges darken along the path ticked this tick. " + pills + shape +
+    " Links run from the port that produces a value to each port that reads it; hover a node to trace them. Click a node marked ▾ to fold it: a folded node shows one square per node it hides, colored by that node's status.";
+}
+function viewNote(id) {
+  return {
+    interp: "Each region is a node graph running as a branch of its own. A run's nodes stay faded at the tick its run_graph leaf spawns it: the run starts at the next step.",
+    shape: "The dataflow each node graph computes. A dotted border is a pattern whose changed? guard failed: its call did not run.",
+    calls: "Dataflow as the calls nest. A node evaluated inline more than once in a tick shows how many times.",
+    compute: "Detached nodes as pulled this tick: called when an argument changed, a cache hit otherwise, faded when nothing read them.",
+    leaves: "Graph nodes in the order their leaves run, every tick, ahead of the tree.",
+    control: "One Vizij graph: dataflow on the left, control nodes on the right, each child edge dashed into its child_N port. Faded nodes are lazy and were not ticked.",
+  }[id];
+}
+function storedView(R) { const pre = h("pre", { class: "stored" }, R.d.stored(R.model)); const box = h("div", { class: "canvas-box" }, pre); box._draw = () => {}; return box; }
+
+// ---- compare tab ---------------------------------------------------------------
+function compareTab() {
+  document.documentElement.style.setProperty("--accent", "var(--p-compare)");
+  const tbody = h("tbody");
+  const rows = RUN.engines.map((R) => {
+    const cells = { status: h("td", {}), calls: h("td", { class: "big" }), visits: h("td", {}), compares: h("td", {}), us: h("td", {}), out: h("td", {}), spark: h("canvas", { class: "spark", style: "width:120px;height:28px" }) };
+    const tr = h("tr", {}, h("td", {}, h("span", { class: "who" }, h("i", { style: `background:var(${R.d.color})` }), R.d.tab), h("span", { class: "sub" }, R.d.sub)),
+      cells.status, cells.calls, cells.visits, cells.compares, cells.us, cells.out, h("td", {}, cells.spark));
+    tbody.append(tr);
+    return { R, cells };
+  });
+  const table = h("div", { class: "table-box" }, h("table", { class: "cmp" },
+    h("thead", {}, h("tr", {}, ["design", "root", "calls / tick", "visits / tick", "checks / tick", "µs / tick", RUN.ex.id === "order" ? "readings" : "output", "calls, last 120"].map((t) => h("th", t.startsWith("µ") ? { style: "text-transform:none" } : {}, t)))), tbody));
+  const plot = plotCard(RUN.engines, false);
+  const bench = benchCard();
+  const intro = h("section", { class: "proposal", "aria-label": "Compare" },
+    h("div", {}, h("h2", {}, "The same behavior, six executors"), h("p", {}, "Every design ticks this example in lockstep with the same inputs. Calls count function invocations; visits count tree and graph nodes stepped through; checks count change detections, version or value comparisons."), h("p", { class: "fine" }, "These are JavaScript models of each design's rules, written from the proposals and the spike code. Counts follow the rules exactly; timings compare the models, not the Rust runtimes.")),
+    h("div", {}));
+  const draw = () => {
+    for (const { R, cells } of rows) {
+      const s = R.e.rootStatus; cells.status.textContent = ""; cells.status.append(h("span", { class: "pill " + (s || "idle"), style: "padding:1px 6px" }, s || "–"));
+      cells.calls.textContent = R.e.m.calls; cells.calls.append(h("span", { class: "sub" }, "avg " + avg(R.spark, (x) => x.calls).toFixed(1)));
+      cells.visits.textContent = R.e.m.visits; cells.compares.textContent = R.e.m.compares;
+      cells.us.textContent = (avg(R.times, (x) => x) * 1000).toFixed(1);
+      cells.out.textContent = RUN.ex.id === "order" ? R.e.readings.map(([, v]) => fmt(v)).join(", ") + ` → v ${fmt(R.e.store.get("v"))}` : RUN.ex.id === "readers" ? `cm ${fmt(R.e.nodeValue("cm"))}` : fmt(R.e.store.get(RUN.ex.plot[0]));
+      drawSpark(cells.spark, R.spark.map((x) => x.calls), css(R.d.color));
+    }
+  };
+  const controls = controlsCard(RUN.engines.find((x) => x.d.id === "compute"));
+  const side = h("div", { class: "side" }, exampleList(), controls);
+  const main = h("div", { class: "views" }, table, plot, bench, rustCard());
+  return { el: h("div", { class: "views" }, intro, h("div", { class: "bench" }, side, main)), draws: [draw, plot._draw, controls._draw] };
+}
+
+function benchCard() {
+  const out = h("div", { class: "bars" }, h("p", { class: "fine" }, "Runs each design alone for 3,000 ticks of this example, its inputs stepping every 10 ticks, at the call cost chosen above. Takes a moment."));
+  const btn = h("button", { type: "button", class: "primary", onclick: () => runBench(out, btn) }, "Run the benchmark");
+  return h("div", { class: "card" }, h("h3", {}, "Benchmark"), h("div", { style: "display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap" }, btn), out);
+}
+
+function scriptInputs(ex, i) {
+  const vals = {};
+  ex.controls.forEach((c, ci) => {
+    if (c.kind === "slider") vals[c.key] = c.min + (c.max - c.min) * ((Math.floor(i / 10) % 5) / 4);
+    else if (c.kind === "toggle") vals[c.key] = Math.floor((i + ci * 70) / (90 + ci * 120)) % 2 === 0;
+  });
+  return vals;
+}
+
+function runBench(out, btn) {
+  btn.disabled = true; out.textContent = ""; out.append(h("p", { class: "fine" }, "Running…"));
+  const ex = RUN.ex, N = 3000, results = [];
+  let i = 0;
+  const one = () => {
+    const d = DESIGNS[i]; const best = [];
+    for (let rep = 0; rep < 3; rep++) {
+      const e = d.make(buildModel(ex, STATE.structure));
+      const was = { ...ex.seed };
+      const step = (k) => { const v = scriptInputs(ex, k); for (const key in v) if (v[key] !== was[key]) { e.setInput(key, v[key]); was[key] = v[key]; } e.tick(); };
+      for (let w = 0; w < 200; w++) step(w);
+      const before = { ...e.totals }; const t0 = performance.now();
+      for (let k = 0; k < N; k++) step(k);
+      const ms = performance.now() - t0;
+      best.push({ us: ms * 1000 / N, calls: (e.totals.calls - before.calls) / N, visits: (e.totals.visits - before.visits) / N, compares: (e.totals.compares - before.compares) / N });
+    }
+    best.sort((a, b) => a.us - b.us); results.push({ d, ...best[1] });
+    i++;
+    if (i < DESIGNS.length) setTimeout(one, 16); else { show(); btn.disabled = false; }
+  };
+  const show = () => {
+    out.textContent = "";
+    const maxUs = Math.max(...results.map((r) => r.us)), maxCalls = Math.max(1, ...results.map((r) => r.calls));
+    out.append(h("p", { class: "fine" }, `µs per tick, median of 3 runs, call cost ${CALL_COST ? "≈" + CALL_COST + " µs" : "none"}`));
+    results.forEach((r) => out.append(h("div", { class: "bar" }, h("span", {}, r.d.tab), h("div", { class: "track" }, h("div", { class: "fill", style: `width:${(r.us / maxUs * 100).toFixed(1)}%;background:var(${r.d.color})` })), h("span", { class: "num" }, r.us.toFixed(1) + " µs"))));
+    out.append(h("p", { class: "fine" }, "function calls per tick"));
+    results.forEach((r) => out.append(h("div", { class: "bar" }, h("span", {}, r.d.tab), h("div", { class: "track" }, h("div", { class: "fill", style: `width:${(r.calls / maxCalls * 100).toFixed(1)}%;background:var(${r.d.color})` })), h("span", { class: "num" }, r.calls.toFixed(2)))));
+    out.append(h("p", { class: "fine" }, "visits and checks per tick: " + results.map((r) => `${r.d.tab} ${r.visits.toFixed(1)} / ${r.compares.toFixed(1)}`).join(" · ")));
+  };
+  setTimeout(one, 30);
+}
+
+function rustCard() {
+  const rows = [
+    ["Cascade read by 3 leaves, 100 ticks, input changing every 10th", "mul calls", "#395: 300 · #396: 10 · #397: 100 · #257: 100"],
+    ["Same, under a fallback whose first child succeeds", "below calls", "#257: 100 (the other two children never run)"],
+    ["Fallback over 8 branches of 16 multiplies, first taken (Vizij)", "per tick", "#257 fallback 13 µs · parallel 92 µs · no control 102 µs"],
+    ["Sequence of 64 trivial leaves", "per tick", "Arora tree 14 µs (64 Equal) · Vizij 35 µs (64 conditions on constants)"],
+  ];
+  return h("div", { class: "card" }, h("h3", {}, "Measured in Rust, in the PRs"),
+    h("div", { class: "table-box", style: "border:0" }, h("table", { class: "cmp" }, h("tbody", {}, rows.map(([a, b, c]) => h("tr", {}, h("td", { style: "white-space:normal" }, a), h("td", {}, b), h("td", { style: "text-align:left;white-space:normal" }, c)))))),
+    h("p", { class: "fine" }, "From the tests and Criterion benches of semio-ai/arora-sdk#395–#397 and vizij-ai/vizij-rs#257, release builds, one machine."));
+}
+
+// ---------------------------------------------------------------------------
+let DRAWS = [];
+function renderAll() {
+  renderTabs();
+  const main = document.getElementById("main"); main.textContent = "";
+  const d = DESIGNS.find((x) => x.id === STATE.tab);
+  const built = d ? proposalTab(d) : compareTab();
+  main.append(built.el); DRAWS = built.draws; drawAll();
+}
+function drawAll() { for (const f of DRAWS) f && f(); }
+
+document.getElementById("play").addEventListener("click", (e) => { STATE.playing = !STATE.playing; e.target.textContent = STATE.playing ? "Pause" : "Play"; });
+document.getElementById("step").addEventListener("click", () => { tickAll(); drawAll(); });
+document.getElementById("reset").addEventListener("click", () => { startRun(); renderAll(); });
+document.getElementById("rate").addEventListener("change", (e) => { STATE.rate = +e.target.value; });
+document.getElementById("cost").addEventListener("change", (e) => { CALL_COST = +e.target.value; });
+window.addEventListener("hashchange", () => { const t = location.hash.replace("#", ""); if (["compare", ...DESIGNS.map((x) => x.id)].includes(t)) { STATE.tab = t; renderAll(); } });
+
+startRun();
+for (let i = 0; i < 12; i++) tickAll();
+renderAll();
+let last = performance.now(), acc = 0;
+function frame(now) {
+  if (STATE.playing && !document.hidden) {
+    acc += Math.min(now - last, 250); const step = 1000 / STATE.rate; let n = 0;
+    while (acc >= step && n < 4) { tickAll(); acc -= step; n++; }
+    if (n) drawAll();
+  }
+  last = now; requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+
+</body>
+</html>

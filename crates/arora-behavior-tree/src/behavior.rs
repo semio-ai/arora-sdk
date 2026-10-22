@@ -117,14 +117,17 @@ pub const GRAPH_TYPE_NAME: &str = "behavior-tree";
 ///   ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
 ///   [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID));
 /// - `1.2` adds the data node `Scatter`
-///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID)).
-pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 2, 0);
+///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID));
+/// - `1.3` runs the calls a graph lists and no node holds, as
+///   [detached nodes](crate::detached).
+pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 3, 0);
 
 /// The [`GraphType`] this interpreter reads: [`GRAPH_TYPE_NAME`] at
 /// [`GRAPH_TYPE_VERSION`]. A graph states the oldest version that has every
 /// node it uses, so that an interpreter reading an older minor still runs it:
-/// a graph without the data nodes is spawned as `1.0`, and one with `Equal` or
-/// `Unpack` but not `Scatter` as `1.1`.
+/// a graph without the data nodes is spawned as `1.0`, one with `Equal` or
+/// `Unpack` but not `Scatter` as `1.1`, and one with `Scatter` but no detached
+/// node as `1.2`.
 pub fn graph_type() -> GraphType {
     GraphType {
         name: GRAPH_TYPE_NAME.to_string(),
@@ -736,10 +739,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         self.write_halts(ctx.store)?;
 
         // The graph changed: replace the lowering. Finished fragments leave
-        // first. The new tree takes over the old one's state but for the
-        // fresh nodes, then the old registration is undone. A lowering error
-        // is transient — the graph stays, the next tick retries — surfaced
-        // like any failed tick.
+        // first. The new tree is lowered beside the old one; once it is, it
+        // takes over the old one's state but for the fresh nodes, then the old
+        // registration is undone. A lowering error is transient — the graph
+        // stays, the next tick retries — surfaced like any failed tick, and
+        // leaves the old lowering, its state and the fresh nodes as they were.
         if self.dirty {
             self.prune_finished()?;
             check_selections(&self.graph, ctx.functions)?;
@@ -747,15 +751,14 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             let tree = build_behavior_tree(&self.graph, &*resolver)
                 .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?
                 .with_key_resolver(resolver);
-            if let Some(lowered) = self.lowered.take() {
-                tree.keep_state(lowered.tree(), &self.fresh);
-                lowered.unregister(ctx.call_bridge);
+            let lowered = lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
+                .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?;
+            if let Some(previous) = self.lowered.take() {
+                lowered.tree().keep_state(previous.tree(), &self.fresh);
+                previous.unregister(ctx.call_bridge);
             }
             self.fresh.clear();
-            self.lowered = Some(
-                lower_behavior_tree(tree, ctx.functions, ctx.call_bridge, false)
-                    .map_err(|e| behavior_error(format!("registering the scaffold: {e:?}")))?,
-            );
+            self.lowered = Some(lowered);
             self.dirty = false;
         }
 
