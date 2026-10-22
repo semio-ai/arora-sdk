@@ -117,14 +117,17 @@ pub const GRAPH_TYPE_NAME: &str = "behavior-tree";
 ///   ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
 ///   [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID));
 /// - `1.2` adds the data node `Scatter`
-///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID)).
-pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 2, 0);
+///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID));
+/// - `1.3` runs the calls a graph lists and no node holds, as
+///   [detached nodes](crate::detached).
+pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 3, 0);
 
 /// The [`GraphType`] this interpreter reads: [`GRAPH_TYPE_NAME`] at
 /// [`GRAPH_TYPE_VERSION`]. A graph states the oldest version that has every
 /// node it uses, so that an interpreter reading an older minor still runs it:
-/// a graph without the data nodes is spawned as `1.0`, and one with `Equal` or
-/// `Unpack` but not `Scatter` as `1.1`.
+/// a graph without the data nodes is spawned as `1.0`, one with `Equal` or
+/// `Unpack` but not `Scatter` as `1.1`, and one with `Scatter` but no detached
+/// node as `1.2`.
 pub fn graph_type() -> GraphType {
     GraphType {
         name: GRAPH_TYPE_NAME.to_string(),

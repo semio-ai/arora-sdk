@@ -67,13 +67,14 @@ Semio organization.
   `DescribeMethods` lists them; `LOAD` and `EDIT` are reached by id.
 - **A graph states its type and version.** `arora_behavior::GraphType` names
   the language and its format version. The behavior tree reads
-  `behavior-tree 1.1`: the control nodes, the status leaves, the task-run
-  nodes and module function leaves (`1.0`), and the data nodes `Equal` and
-  `Unpack` (`1.1`).
+  `behavior-tree 1.3`: the control nodes, the status leaves, the task-run
+  nodes and module function leaves (`1.0`), the data nodes `Equal` and
+  `Unpack` (`1.1`), the data node `Scatter` (`1.2`), and detached nodes
+  (`1.3`).
 - **`RunPolicy` has one variant, `Concurrent`.** Two runs writing one key
   overwrite each other, and the last to write in a tick wins.
 
-**The behavior tree** (`arora-behavior-tree` 9.1) keeps a runner, a
+**The behavior tree** (`arora-behavior-tree` 9.3) keeps a runner, a
 `PARALLEL` root. A LOAD grafts the main behavior under it, and each spawn
 grafts a run beside it. A leaf calls a module function. Its return value
 reaches a variable through its `_ret` argument, and each mutable parameter is
@@ -103,11 +104,11 @@ vizij-rs with their history.
   data: it latches its start time through the store and computes its
   `Status` value.
 
-**Detached nodes**, the design of §3, exist in `arora-behavior-tree` as a
-proof of concept ([#396](https://github.com/semio-ai/arora-sdk/pull/396),
-over the call expressions of
-[#395](https://github.com/semio-ai/arora-sdk/pull/395)): a tree loaded with
-`load_behavior_tree_nodes_with` runs the calls it lists and no node holds.
+**Detached nodes**, the design of §3, are in `arora-behavior-tree` 9.3
+([#396](https://github.com/semio-ai/arora-sdk/pull/396), over the call
+expressions of [#395](https://github.com/semio-ai/arora-sdk/pull/395)): a
+tree runs the calls its graph lists and no node holds, as `behavior-tree
+1.3`.
 
 ## 2. The cases the design holds
 
@@ -355,7 +356,7 @@ the standard adaptations), about 23,050 nodes over 86 node kinds:
 | arithmetic, ranges, vectors, logic, noise | one function each, called by one detached node per graph node |
 | `input` | a store key as an argument. A default for an unset key is an optional parameter with a default, or a `default(x, d)` function. |
 | `output` | an output port bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
-| the keyed-batch `output`, which writes keys named by data | not yet: an output binds one static key (§9) |
+| the keyed-batch `output`, which writes keys named by data | a `Scatter` node of the tree, which writes an array to keys named by data, under a literal key prefix; a detached node's output binds static keys only (§9) |
 | non-input params (`half_life`, `case_labels`, noise settings) | literal arguments |
 | variadic inputs (`operand_N`, `args_N`), most edges | an array parameter and an array-building function, or functions specialized by arity |
 | named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | the return value and mutable parameters, each bindable and read as `@node.parameter`; or a record return read through a selection |
@@ -367,8 +368,9 @@ the standard adaptations), about 23,050 nodes over 86 node kinds:
 | `externalfunction` | a detached node: it is a module call already. A face's animation step calls `@arora/animation`'s `step` with the clock. |
 | unused nodes | never evaluated: nothing reads them |
 
-The animation step returns its tracks as values named by data, which a face
-writes under the keys the tracks name: the keyed output of §9.
+The animation step returns its tracks as values named by data. A `Scatter`
+node of the tree ([#399](https://github.com/semio-ai/arora-sdk/pull/399))
+writes them under the keys the tracks name, within the face's key prefix.
 
 ## 5. What carries over from the previous design
 
@@ -411,10 +413,9 @@ Each stage lands on its own and states what it hands to the next.
      tick against `ProcessingGraph`. Value comparison costs a pass over a
      large value at every read; if the measure shows it, versions replace it
      (§9).
-2. **Detached nodes in the stored format.** `behavior-tree 1.2` runs the calls
-   a graph lists and no node holds. The shared `Graph` already carries them
-   and their links; the YAML form lists them after the tree. Traces cover
-   detached nodes, and an edit keeps their caches.
+2. **Detached nodes in the authoring formats.** `behavior-tree 1.3` runs them
+   already, from the shared `Graph` and the YAML node list. Groot interchange,
+   traces of detached nodes, and an edit that keeps their caches remain.
 3. **Runs and skills.** A run's detached nodes are scoped to it and removed
    with it. `look_at`, `play_viseme` and `say` become trees. A face's
    `taskrun` and `spawn` nodes become attached leaves and spawned runs.
@@ -429,14 +430,14 @@ Each stage lands on its own and states what it hands to the next.
 
 | Crate or surface | Change |
 |---|---|
-| `arora-behavior-tree` (9.1) | Minor: detached nodes, `behavior-tree 1.2`. `Expression` does not change. |
+| `arora-behavior-tree` | 9.3: detached nodes, `behavior-tree 1.3`. `Expression` does not change. |
 | `arora-behavior` (9.6) | No change for detached nodes: `Graph` carries them. Minor with §5: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
 | `arora` (13.6), `arora-web` | Minor: `load` and `edit` described. Major with §5: `Concurrent` refuses an overlap it accepted before. |
 | `arora-node-graph`, `arora-shape` | New, `1.0.0`. |
 | `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior`, `vizij-animation-core`, `vizij-animation-module` | No further release once vizij-rs depends on the arora crates. |
 | `vizij-arora-host` | Major: it registers the skills as trees. |
 | Studio Bridge, WebSocket and ROS 2 bridges | No change: they list and call described functions already. |
-| Graph formats | `behavior-tree 1.2` runs the calls no node holds. A Vizij node graph is read by the importer only. |
+| Graph formats | `behavior-tree 1.3` (9.3) runs the calls no node holds. A Vizij node graph is read by the importer only. |
 
 ## 8. Decision record
 
@@ -545,9 +546,10 @@ The design holds without them. Each is settled before the stage it touches.
   random source read as a function. Called once, they keep their first result.
   An effect stated in the function's description would let them run at every
   tick they are read.
-- **Keyed outputs**, which write keys named by data: Vizij's keyed-batch
-  `output`, and the tracks the animation step returns. An output with a
-  dynamic key, and how the write analysis treats it.
+- **Keyed outputs on detached nodes.** `Scatter`, a node of the tree, writes
+  keys named by data within a literal prefix. Whether a detached node's
+  output binds such keys itself, as a sink, and how the write analysis treats
+  a prefix instead of a key, remain.
 - **Variadic inputs**: an array parameter, or functions specialized by arity.
 - **Selections on records** read by field name, as Vizij's edges select a
   `KeyValue` field.
