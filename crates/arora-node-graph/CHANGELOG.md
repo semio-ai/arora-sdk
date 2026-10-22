@@ -57,6 +57,11 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 - `evaluate_all_cached` clears the runs an earlier evaluation requested, as
   `evaluate_all` does: `GraphRuntime::spawns` holds the evaluation's own
   requests, so a host reading it after each evaluation starts a run once.
+- The noise nodes evaluate far from the origin. Simplex noise sums its
+  cell's lattice indices as `i64`, which overflowed an `i32` over 16
+  octaves from 32768 on, and every noise wraps a lattice neighbour of a
+  coordinate the cast holds at `i32::MAX`. A value nearer the origin does
+  not change.
 
 ## [3.1.1] - 2026-10-19
 

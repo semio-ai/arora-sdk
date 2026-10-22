@@ -52,9 +52,11 @@ pub fn value_noise_2d(x: f32, y: f32, seed: i32) -> f32 {
     let fy = y - iy as f32;
 
     let v00 = hash_to_unit(hash2d(ix, iy, seed));
-    let v10 = hash_to_unit(hash2d(ix + 1, iy, seed));
-    let v01 = hash_to_unit(hash2d(ix, iy + 1, seed));
-    let v11 = hash_to_unit(hash2d(ix + 1, iy + 1, seed));
+    // A coordinate the cast saturates at `i32::MAX` wraps to its neighbour.
+    let (ix1, iy1) = (ix.wrapping_add(1), iy.wrapping_add(1));
+    let v10 = hash_to_unit(hash2d(ix1, iy, seed));
+    let v01 = hash_to_unit(hash2d(ix, iy1, seed));
+    let v11 = hash_to_unit(hash2d(ix1, iy1, seed));
 
     let sx = smoothstep(fx);
     let sy = smoothstep(fy);
@@ -74,9 +76,10 @@ pub fn perlin_noise_2d(x: f32, y: f32, seed: i32) -> f32 {
     let v = fade(fy);
 
     let n00 = grad2d(hash2d(ix, iy, seed), fx, fy);
-    let n10 = grad2d(hash2d(ix + 1, iy, seed), fx - 1.0, fy);
-    let n01 = grad2d(hash2d(ix, iy + 1, seed), fx, fy - 1.0);
-    let n11 = grad2d(hash2d(ix + 1, iy + 1, seed), fx - 1.0, fy - 1.0);
+    let (ix1, iy1) = (ix.wrapping_add(1), iy.wrapping_add(1));
+    let n10 = grad2d(hash2d(ix1, iy, seed), fx - 1.0, fy);
+    let n01 = grad2d(hash2d(ix, iy1, seed), fx, fy - 1.0);
+    let n11 = grad2d(hash2d(ix1, iy1, seed), fx - 1.0, fy - 1.0);
 
     let nx0 = lerp(n00, n10, u);
     let nx1 = lerp(n01, n11, u);
@@ -93,7 +96,9 @@ pub fn simplex_noise_2d(x: f32, y: f32, seed: i32) -> f32 {
     let i = (x + s).floor() as i32;
     let j = (y + s).floor() as i32;
 
-    let t = (i + j) as f32 * G2;
+    // The cell's indices each fit an `i32` far from the origin, their sum
+    // not always: summed as `i64`.
+    let t = (i64::from(i) + i64::from(j)) as f32 * G2;
     let x0 = x - (i as f32 - t);
     let y0 = y - (j as f32 - t);
 
@@ -115,14 +120,14 @@ pub fn simplex_noise_2d(x: f32, y: f32, seed: i32) -> f32 {
     let t1 = 0.5 - x1 * x1 - y1 * y1;
     if t1 >= 0.0 {
         let t1 = t1 * t1;
-        n1 = t1 * t1 * grad2d(hash2d(i + i1, j + j1, seed), x1, y1);
+        n1 = t1 * t1 * grad2d(hash2d(i.wrapping_add(i1), j.wrapping_add(j1), seed), x1, y1);
     }
 
     let mut n2 = 0.0f32;
     let t2 = 0.5 - x2 * x2 - y2 * y2;
     if t2 >= 0.0 {
         let t2 = t2 * t2;
-        n2 = t2 * t2 * grad2d(hash2d(i + 1, j + 1, seed), x2, y2);
+        n2 = t2 * t2 * grad2d(hash2d(i.wrapping_add(1), j.wrapping_add(1), seed), x2, y2);
     }
 
     // Scale to [-1, 1] range

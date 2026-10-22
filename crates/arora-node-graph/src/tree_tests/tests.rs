@@ -2506,6 +2506,52 @@ fn noise_nodes_are_deterministic_and_in_range() {
     }
 }
 
+/// Far from the origin, over the 16 octaves a noise node allows, the
+/// lattice indices of the last octave approach and reach `i32::MAX`: every
+/// noise still evaluates, in range.
+#[test]
+fn noise_nodes_evaluate_far_from_the_origin_over_sixteen_octaves() {
+    for kind in [
+        NodeType::SimpleNoise,
+        NodeType::PerlinNoise,
+        NodeType::SimplexNoise,
+    ] {
+        for at in [32768.0, 65536.0] {
+            let defaults: HashMap<String, InputDefault> = ["x", "y"]
+                .into_iter()
+                .map(|port| {
+                    let value = Value::F32(at);
+                    (port.to_string(), InputDefault { value, shape: None })
+                })
+                .collect();
+            let spec = graph_spec!({
+                nodes: vec![NodeSpec {
+                    id: "n".to_string(),
+                    kind: kind.clone(),
+                    params: NodeParams {
+                        octaves: Some(16.0),
+                        ..Default::default()
+                    },
+                    output_shapes: HashMap::new(),
+                    input_defaults: defaults,
+                }],
+                edges: vec![],
+            });
+
+            let mut rt = TreeRuntime::default();
+            evaluate_all(&mut rt, &spec).expect("noise should evaluate");
+            let value = match rt.outputs.get("n").and_then(|o| o.get("out")) {
+                Some(port) => match port.value {
+                    Value::F32(f) => f,
+                    ref other => panic!("expected Float, got {other:?}"),
+                },
+                None => panic!("no output for {kind:?}"),
+            };
+            assert!((-1.0..=1.0).contains(&value), "{kind:?} at {at}: {value}");
+        }
+    }
+}
+
 // --- path-less Output: keyed record batches ----------------------------------
 
 use arora_shape::value::{StructureField, StructureWithoutId};
