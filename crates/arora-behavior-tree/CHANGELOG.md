@@ -38,6 +38,18 @@ All notable changes to `arora-behavior-tree`. The format follows
   back to their cells only when something besides its call can write them:
   a nested call of its arguments, or the store a mutable port is seeded
   from. A settled node of any other kind copies no value.
+- A detached node compares its arguments with its last call's in place, so
+  a node whose arguments did not change copies none of them, and calls its
+  function with them lent (`CallBridge::arora_call_borrowed`): a bridge
+  answering in-process copies only what it keeps. Each output knows at
+  lowering whether it writes an optional back, so a call looks no signature
+  up.
+- Lowering orders each node's arguments once, by its function's parameter
+  positions found once per function, and looks for the signatures of nested
+  calls only in a node that has some. The cells of node arguments, and
+  detached nodes by id, are found with a hasher for ids, which are already
+  uniformly random, rather than SipHash.
+- Requires arora-types 3.9.
 
 ## [9.4.0] - 2026-10-22
 

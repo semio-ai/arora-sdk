@@ -8,6 +8,7 @@ mod detached_tests;
 pub mod display;
 pub mod error;
 pub mod graph;
+mod id_hash;
 pub mod nodes;
 mod scatter;
 pub mod schema;
@@ -60,7 +61,7 @@ pub struct BehaviorTree {
     /// The local variables.
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     /// Each `Unpack` and `Scatter` node's outputs, bound at load.
     outputs: HashMap<Uuid, Outputs>,
     /// The nodes no node holds, evaluated when what they output is read.
@@ -448,7 +449,7 @@ fn setup_tick_function(
     node_index: &HashMap<Uuid, Rc<Node>>,
     functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
     caller: &mut dyn CallBridge,
@@ -827,7 +828,7 @@ fn tick(
     calls: &FunctionIndex,
     argument_order: &[Uuid],
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_parameters_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: (&Detached, Option<&[usize]>),
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
@@ -1109,7 +1110,7 @@ struct TickFunction {
     /// argument runs before a call in the next, every tick.
     argument_order: Rc<[Uuid]>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     /// The detached nodes the node reads, brought up to date before it ticks.
     pulls: Option<Rc<[usize]>>,
@@ -1172,7 +1173,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut listed: Vec<Rc<Node>> = Vec::new();
     let mut root: Option<Rc<Node>> = None;
     let mut variables = HashMap::new();
-    let mut node_parameters_variables = HashMap::new();
+    let mut node_parameters_variables = crate::id_hash::IdMap::default();
     let mut arguments = Vec::new();
     let mut outputs = HashMap::new();
     for mut node in nodes {
@@ -1221,7 +1222,7 @@ pub fn load_behavior_tree_nodes_with(
     }
     let detached_nodes = Detached::select(&listed, &attached);
     let detached_ids: HashSet<Uuid> = detached_nodes.iter().map(|node| node.id).collect();
-    let mut bindings = HashMap::new();
+    let mut bindings = crate::id_hash::IdMap::default();
     let mut fed_inputs = HashSet::new();
     for node in &detached_nodes {
         if !node.arguments.contains_key(&_RET_PARAM_ID) {
@@ -1404,7 +1405,7 @@ fn get_variable<'a>(
 pub(crate) fn bind_data_node(
     node: &Node,
     names: &HashMap<Uuid, String>,
-    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Result<Option<Outputs>, BehaviorTreeError> {
     let refuse = |what: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
@@ -1472,7 +1473,7 @@ fn read_argument(expression: &Expression) -> Option<&NodeParameterId> {
 
 fn get_node_parameter_variable<'a>(
     node_parameter: &NodeParameterId,
-    node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &'a crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Result<&'a VariableCell, BehaviorTreeError> {
     node_parameters_variables
         .get(node_parameter)
@@ -1491,7 +1492,7 @@ pub(crate) fn setup_node_parameter_variable(
     node_parameter: &NodeParameterId,
     argument_expression: &Expression,
     variables: &mut HashMap<Uuid, VariableCell>,
-    node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &mut crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) -> Result<VariableCell, BehaviorTreeError> {
@@ -1593,7 +1594,7 @@ pub(crate) fn variable_cell(
 #[derive(Clone, Copy)]
 pub(crate) struct Scope<'a> {
     pub(crate) variables: &'a HashMap<Uuid, VariableCell>,
-    pub(crate) node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+    pub(crate) node_parameters_variables: &'a crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     pub(crate) calls: &'a FunctionIndex,
 }
 
@@ -1814,7 +1815,7 @@ fn call_signatures(
     functions: &FunctionIndex,
 ) -> Result<FunctionIndex, BehaviorTreeError> {
     let mut signatures = expression_call_signatures(
-        &format!("node {}", node.id),
+        || format!("node {}", node.id),
         node.arguments.values(),
         functions,
     )?;
@@ -1827,7 +1828,7 @@ fn call_signatures(
 /// The signatures of the functions the calls in `arguments` state, checked as
 /// [`call_signatures`] says; `owner` names what holds them in a refusal.
 pub(crate) fn expression_call_signatures<'e>(
-    owner: &str,
+    owner: impl Fn() -> String,
     arguments: impl IntoIterator<Item = &'e Expression>,
     functions: &FunctionIndex,
 ) -> Result<FunctionIndex, BehaviorTreeError> {
@@ -1836,11 +1837,15 @@ pub(crate) fn expression_call_signatures<'e>(
     for argument in arguments {
         calls_in(argument, &mut calls);
     }
+    if calls.is_empty() {
+        return Ok(signatures);
+    }
     let names = Names::functions(functions);
     let refuse = |call: &CallExpression, why: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
             message: format!(
-                "{owner}: {} {why}",
+                "{}: {} {why}",
+                owner(),
                 Expression::Call(Box::new(call.clone())).display(names)
             ),
         })

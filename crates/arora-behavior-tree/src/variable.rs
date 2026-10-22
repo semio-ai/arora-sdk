@@ -62,6 +62,15 @@ impl VariableCell {
         }
     }
 
+    /// Run `f` on the current value, `None` if absent: borrowed in place for
+    /// a local cell, copied out of a store slot.
+    pub fn with<R>(&self, f: impl FnOnce(Option<&Value>) -> R) -> R {
+        match self {
+            VariableCell::Local(cell) => f(cell.borrow().as_ref()),
+            VariableCell::Stored(slot) => f(slot.get().as_ref()),
+        }
+    }
+
     /// The current value, treating "absent" as [`Value::Unit`] — the common case
     /// for behavior-tree reads that expect a value to be present.
     pub fn get_or_unit(&self) -> Value {
