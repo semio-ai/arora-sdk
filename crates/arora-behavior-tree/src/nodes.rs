@@ -309,18 +309,23 @@ pub fn unpack_out_index(param: Uuid) -> Option<usize> {
 /// every key must be `within` or under it (its path continues `within` past a
 /// `/`, as [`prefix_covers`](arora_types::data::prefix_covers) says), so the
 /// keys a tree can write are read off its graph whatever data reaches the
-/// node. Lowering refuses a `within` that is not a literal string, is empty,
-/// ends with `/` or is tree-local. Keys are store keys under the Direct
-/// convention: paths in the store the tree runs over, a device's own keys.
+/// node. An empty `within`, or none, is the tree's whole namespace: any key
+/// but a tree-local one. An analysis of the keys a tree writes counts such a
+/// node as writing every key of that namespace, as it counts a module
+/// function's mutable parameter as written whether or not a call writes it.
+/// Lowering refuses a `within` that is not a literal string, ends with `/` or
+/// is tree-local. Keys are store keys under the Direct convention: paths in
+/// the store the tree runs over, a device's own keys.
 ///
 /// A tick checks before it writes, and writes all its keys or none:
 ///
 /// - it fails, writing nothing, when `values` or `keys` is not an array, an
 ///   element of `keys` is not a string, or the two arrays differ in length —
 ///   a table whose keys and values do not match yet;
-/// - it errors, writing nothing, when a key is outside `within` or is named
-///   twice in `keys`: the tree would write a key its graph does not name, or
-///   one key twice in a tick. A key under `within` is never tree-local.
+/// - it errors, writing nothing, when a key is tree-local, is outside
+///   `within` or is named twice in `keys`: a tree-local name is no store key,
+///   and the tree would otherwise write a key its graph does not name, or one
+///   key twice in a tick.
 ///
 /// The failures are checked first: a table that does not match yet fails
 /// whatever its keys name, and a guard can wait it out.
@@ -331,13 +336,14 @@ pub fn unpack_out_index(param: Uuid) -> Option<usize> {
 /// differs from the one it holds (the `Slot` contract), so a value that does
 /// not move makes no store change. A write the store refuses is not reported
 /// by the node, as for any variable. `values` and `keys` are any link source,
-/// a selection included; all three arguments must be linked.
+/// a selection included, and must be linked; `within` may be left out.
 pub const SCATTER_FUNCTION_ID: Uuid = uuid::uuid!("eb0a42a1-6596-46f7-83c3-990632bfff94");
 /// [`SCATTER_FUNCTION_ID`]'s values.
 pub const SCATTER_VALUES_PARAM_ID: Uuid = uuid::uuid!("40940dc9-27ce-41b2-be54-4203665eda66");
 /// [`SCATTER_FUNCTION_ID`]'s keys, one per value.
 pub const SCATTER_KEYS_PARAM_ID: Uuid = uuid::uuid!("4056190c-ced0-4547-90c3-26d6a93c30b4");
-/// [`SCATTER_FUNCTION_ID`]'s key prefix, which every key is under.
+/// [`SCATTER_FUNCTION_ID`]'s key prefix, which every key is under: the tree's
+/// whole namespace when empty or left out.
 pub const SCATTER_WITHIN_PARAM_ID: Uuid = uuid::uuid!("4d773cff-49a7-4b2f-88c8-c6af05f96673");
 
 pub const SEQ_FUNCTION_ID: Uuid = Uuid::from_bytes([

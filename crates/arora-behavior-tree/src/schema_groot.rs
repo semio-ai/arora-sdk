@@ -350,8 +350,8 @@ fn pascal_case(name: &str) -> String {
 }
 
 /// A native node's required Groot ports: each port's name and the parameter
-/// it sets. `Unpack` also has its optional output ports `out_0` to `out_63`
-/// (see [`builtin_port_param`]).
+/// it sets. Its optional ports are [`builtin_optional_ports`], and `Unpack`'s
+/// output ports `out_0` to `out_63` (see [`builtin_port_param`]).
 fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
     match function {
         COPY_FUNCTION_ID => &[("value", COPY_VALUE_PARAM_ID), ("out", COPY_OUT_PARAM_ID)],
@@ -360,7 +360,6 @@ fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
         SCATTER_FUNCTION_ID => &[
             ("values", SCATTER_VALUES_PARAM_ID),
             ("keys", SCATTER_KEYS_PARAM_ID),
-            ("within", SCATTER_WITHIN_PARAM_ID),
         ],
         RUN_CALL_FUNCTION_ID => &[("call", RUN_CALL_PARAM_ID)],
         RUN_STATUS_FUNCTION_ID => &[("status", RUN_STATUS_OUT_PARAM_ID)],
@@ -368,12 +367,23 @@ fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
     }
 }
 
-/// The parameter a native node's Groot port `name` sets: a required port, or
-/// one of `Unpack`'s output ports, spelled `out_<i>` as export writes it (no
-/// sign, no leading zero), so that every port reads back as itself.
+/// A native node's optional Groot ports, as [`builtin_ports`] lists them:
+/// `Scatter`'s `within`, the tree's whole namespace when left out.
+fn builtin_optional_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
+    match function {
+        SCATTER_FUNCTION_ID => &[("within", SCATTER_WITHIN_PARAM_ID)],
+        _ => &[],
+    }
+}
+
+/// The parameter a native node's Groot port `name` sets: a required or an
+/// optional port, or one of `Unpack`'s output ports, spelled `out_<i>` as
+/// export writes it (no sign, no leading zero), so that every port reads back
+/// as itself.
 fn builtin_port_param(function: Uuid, name: &str) -> Option<Uuid> {
     if let Some((_, param)) = builtin_ports(function)
         .iter()
+        .chain(builtin_optional_ports(function))
         .find(|(port, _)| *port == name)
     {
         return Some(*param);
@@ -387,7 +397,11 @@ fn builtin_port_param(function: Uuid, name: &str) -> Option<Uuid> {
 /// The Groot port of a native node's parameter: the inverse of
 /// [`builtin_port_param`]. `None` for a parameter that is internal state.
 fn builtin_port_name(function: Uuid, param: Uuid) -> Option<String> {
-    if let Some((port, _)) = builtin_ports(function).iter().find(|(_, id)| *id == param) {
+    if let Some((port, _)) = builtin_ports(function)
+        .iter()
+        .chain(builtin_optional_ports(function))
+        .find(|(_, id)| *id == param)
+    {
         return Some(port.to_string());
     }
     (function == UNPACK_FUNCTION_ID)

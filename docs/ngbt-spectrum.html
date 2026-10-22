@@ -229,7 +229,7 @@ table.cmp td.big { font: 600 16px var(--display); font-stretch: 105%; }
   <header class="top">
     <div>
       <h1>The NGBT spectrum <svg class="flag" viewBox="0 0 60 40" role="img" aria-label="Intersex-inclusive progress pride flag"><rect y="0.000" width="60" height="6.717" fill="#E40303"/><rect y="6.667" width="60" height="6.717" fill="#FF8C00"/><rect y="13.333" width="60" height="6.717" fill="#FFED00"/><rect y="20.000" width="60" height="6.717" fill="#008026"/><rect y="26.667" width="60" height="6.717" fill="#004CFF"/><rect y="33.333" width="60" height="6.717" fill="#732982"/><polygon points="0,0 12,0 32,20 12,40 0,40" fill="#000000"/><polygon points="0,0 8.5,0 28.5,20 8.5,40 0,40" fill="#784F17"/><polygon points="0,0 5,0 25,20 5,40 0,40" fill="#5BCEFA"/><polygon points="0,0 1.5,0 21.5,20 1.5,40 0,40" fill="#F5A9B8"/><polygon points="0,0 -2,0 18,20 -2,40 0,40" fill="#FFFFFF"/><polygon points="0,0 -5.5,0 14.5,20 -5.5,40 0,40" fill="#FFD800"/><circle cx="5" cy="20" r="3.4" fill="none" stroke="#7902AA" stroke-width="1.3"/></svg></h1>
-      <p class="lede">Six designs for running node graphs and behavior trees on one device, simulated side by side. Each tab ticks the same example with that design's rules; the meters count what it does.</p>
+      <p class="lede">Six designs for running node graphs and behavior trees on one device, simulated side by side; #396, detached nodes, is the one chosen. Each tab ticks the same example with that design's rules; the meters count what it does.</p>
     </div>
     <div class="transport" role="group" aria-label="Clock">
       <button id="play" class="primary" type="button">Pause</button>
@@ -478,6 +478,24 @@ function fmt(v) {
 function argText(node, show) {
   return (OP_SIG[node.op] || []).filter((p) => node.a && p in node.a).map((p) => `${p}: ${show(node.a[p], p)}`).join(", ");
 }
+// #396 reads a detached node through its port, @node, and a store key, the
+// clock or a literal as itself: they are no nodes of the graph.
+function detachedRef(model, x) {
+  const n = model.nodes[x];
+  return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}`;
+}
+// #396: a graph alone, an example whose whole tree is one block, is detached
+// nodes whose outputs are bound to store keys, its sinks, beside a tree that
+// does nothing. The key each sink publishes, by node.
+function sinksOf(model) {
+  const sinks = new Map();
+  if (model.tree.k !== "block") return sinks;
+  for (const id of model.tree.outputs) {
+    const out = model.nodes[id];
+    if (!SOURCE.has(model.nodes[out.a.in].op)) sinks.set(out.a.in, out.key);
+  }
+  return sinks;
+}
 
 // ---------------------------------------------------------------------------
 // The behavior-tree runtime the four Arora designs share: textbook sequence,
@@ -707,7 +725,10 @@ class CallsEngine extends TreeEngine {
 
 // ---- semio-ai/arora-sdk#396: detached nodes, on demand and cached ----------
 class ComputeEngine extends TreeEngine {
-  compile() { this.cache = new Map(); this.state = new Map(); this.pulled = new Map(); }
+  compile() {
+    this.cache = new Map(); this.state = new Map(); this.pulled = new Map();
+    this.sinks = this.model.tree.k === "block" ? this.model.tree.outputs : [];
+  }
   pull(id) {
     const n = this.model.nodes[id];
     if (n.op === "input") { const v = this.read(n.key); this.mark(id, v); return v; }
@@ -728,8 +749,18 @@ class ComputeEngine extends TreeEngine {
     this.cache.set(id, key); return v;
   }
   block(n) {
+    // A graph alone: the tree is one RUNNING leaf, which tickTree counted,
+    // and the sinks write after it.
+    if (n === this.model.tree) return "R";
     for (const id of n.outputs) { this.m.visits++; const node = this.model.nodes[id]; const v = this.pull(node.a.in); this.write(node.key, v); this.mark(id, v); }
     this.m.visits++; return "R";
+  }
+  // The sinks are brought up to date at every tick, after the tree ticks,
+  // whether or not the tree read them. Once all are, each writes its key, so
+  // a sink reading another sink's key sees it a tick late.
+  afterTree() {
+    const values = this.sinks.map((id) => this.pull(this.model.nodes[id].a.in));
+    this.sinks.forEach((id, i) => { this.write(this.model.nodes[id].key, values[i]); this.mark(id, values[i]); });
   }
   checkValue(n) { return this.pull(n.node); }
   setValue(n) { return this.pull(n.node); }
@@ -938,7 +969,7 @@ const DESIGNS = [
     id: "interp", tab: "NG + BT", sub: "#299 · two interpreters, host branches", name: "Interpreters running graphs as branches",
     pr: "https://github.com/semio-ai/arora-sdk/pull/299", prText: "semio-ai/arora-sdk#299",
     doc: "https://github.com/semio-ai/arora-sdk/blob/fe3dbe78ef4df545b84dea224a64de13f72e0c51/docs/proposal-behavior-languages.md", color: "--p-interp",
-    lede: "The merged design that #332 revises. Behavior trees and node graphs run on interpreters of their own, as branches the host ticks once per step: loaded graphs in load order, then runs in spawn order. They meet only through the store and the run_graph leaf.",
+    lede: "The design #299 merged, which #332 revises and #396 replaces. Behavior trees and node graphs run on interpreters of their own, as branches the host ticks once per step: loaded graphs in load order, then runs in spawn order. They meet only through the store and the run_graph leaf.",
     rules: ["A node graph evaluates every node every tick, in data order, as Vizij's evaluator does. Nothing is skipped or cached.", "The tree reads what a graph computes through store keys: here a loaded graph, ticked before the tree, writes the values its conditions read.", "run_graph starts its graph as a run on its first tick, and a branch added during a step runs from the next one, after the loaded graphs. Halting the leaf halts the run and drops its state; the node graph's damp has no initial input."],
     make: (m) => new InterpEngine(m),
     stored(model) {
@@ -1003,21 +1034,27 @@ const DESIGNS = [
     },
   },
   {
-    id: "compute", tab: "NG in BT detached", sub: "#396 · on demand, cached", name: "Graph nodes detached from the tree",
-    pr: "https://github.com/semio-ai/arora-sdk/pull/396", prText: "semio-ai/arora-sdk#396", color: "--p-compute",
+    id: "compute", tab: "NG in BT detached", sub: "#396 · chosen · on demand, cached", name: "Graph nodes detached from the tree",
+    pr: "https://github.com/semio-ai/arora-sdk/pull/396", prText: "semio-ai/arora-sdk#396",
+    doc: "https://github.com/semio-ai/arora-sdk/blob/6d43f555411362b38f418d34a8f4dc295a670f41/docs/proposal-behavior-languages.md", color: "--p-compute",
     lede: "A graph node is written like a tree node, with inputs and outputs; the tree just does not hold it. Detached, it runs when a node that reads its output, as @node, is about to tick: once per tick, and only when its argument values changed.",
-    rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "Detached nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
+    rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "An output bound to a store key makes a sink, written at every tick after the tree ticks. A graph alone, as in Smile mapping and Breathing, is sinks beside a tree that does nothing.", "Detached nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
     make: (m) => new ComputeEngine(m),
     stored(model) {
-      const show = (x) => { if (typeof x !== "string") return fmt(x); const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}`; };
+      const show = (x) => typeof x === "string" ? detachedRef(model, x) : fmt(x);
+      const sinks = sinksOf(model);
       const out = ["tree, held from its root"];
-      out.push(...treeLines(model, (n, pad, o) => {
-        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = @${model.nodes[id].a.in}`)); o.push(`${pad}  RUNNING`); }
-        else if (n.k === "check") o.push(`${pad}Truthy(@${n.node})   ${n.label}`);
-        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `@${n.node}` : fmt(n.value)}   ${n.label}`);
+      if (sinks.size) out.push("  RUNNING   the tree does nothing: the sinks run beside it");
+      else out.push(...treeLines(model, (n, pad, o) => {
+        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = ${show(model.nodes[id].a.in)}`)); o.push(`${pad}  RUNNING`); }
+        else if (n.k === "check") o.push(`${pad}Truthy(${show(n.node)})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? show(n.node) : fmt(n.value)}   ${n.label}`);
       }, 1));
       out.push("", "detached nodes: listed after the tree, held by no node");
-      model.order.filter((id) => !SOURCE.has(model.nodes[id].op) && model.nodes[id].op !== "output").forEach((id) => { const n = model.nodes[id]; out.push(`  ${id}: ${n.op}(${argText(n, show)})`); });
+      model.order.filter((id) => !SOURCE.has(model.nodes[id].op) && model.nodes[id].op !== "output").forEach((id) => {
+        const n = model.nodes[id], sink = sinks.has(id) ? `{${sinks.get(id)}} = ` : "";
+        out.push(`  ${id}: ${sink}${n.op}(${argText(n, show)})`);
+      });
       return out.join("\n");
     },
   },
@@ -1376,8 +1413,10 @@ function treeRows(R) {
   }
   if (designId === "compute") {
     // The diagram spreads these beside their readers; the text lists them.
+    // A sink shows the key its output is bound to.
+    const sinks = sinksOf(model), bound = (id) => sinks.has(id) ? `{${sinks.get(id)}} = ` : "";
     rows.push({ section: "Detached nodes", textOnly: true });
-    model.order.filter(isCompute).forEach((id) => row(0, `${id}: ${model.nodes[id].op}(…)`, "data", id, "data", `${id}: ${model.nodes[id].op}`, "",
+    model.order.filter(isCompute).forEach((id) => row(0, `${id}: ${bound(id)}${model.nodes[id].op}(…)`, "data", id, "data", `${id}: ${bound(id)}${model.nodes[id].op}`, "",
       { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `@${x}` : source(x)), out: `c:${id}`, float: true }));
     rows.push({ section: "", textOnly: true });
   }
@@ -1434,6 +1473,10 @@ function treeRows(R) {
   const base = designId === "interp" ? 2 : (designId === "shape" && model.loose.length) || designId === "leaves" ? 1 : 0;
   const walk = (n, d) => {
     if (n.k === "block" && designId === "interp") { row(d, `run_graph(node-graph, 1, ⟨${n.label}⟩)  <em>${n.label}</em>`, "tree", n.id, "action", n.label, `run_graph(node-graph, 1, ⟨${n.label}⟩)`); return; }
+    if (n.k === "block" && designId === "compute" && n === model.tree && sinksOf(model).size) {
+      row(d, "RUNNING  <em>the tree does nothing: the sinks run beside it</em>", "tree", n.id, "action", "RUNNING", "the tree does nothing: the sinks run beside it");
+      return;
+    }
     if (n.k === "block") {
       const graph = designId === "shape" ? "◇ node graph: " : "";
       row(d, `PARALLEL  ${graph}${n.label}`, "tree", n.id, "parallel", "PARALLEL", (designId === "shape" ? "◇ node graph · " : "") + n.label);
@@ -1446,7 +1489,7 @@ function treeRows(R) {
           const ports = viaVar ? [{ name: "in", src: `${scope}:${top}`, text: `{.${top}}` }] : portsOf(top, (x) => named(x) ? `${scope}:${x}` : null, show);
           row(d + 1, `${target} = ${exprShow(model, P.named, id)(id)}`, "data", id, "data", `${target} = ${viaVar ? "output" : model.nodes[top].op}`, "", { leaf: true, ports, out: isOut ? null : `${scope}:${id}` });
         });
-      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? `@${src}` : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
+      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? detachedRef(model, src) : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
       row(d + 1, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the block ticking", { fixedStatus: "R" });
       return;
     }
@@ -1818,7 +1861,7 @@ function patternBody(model, id) {
 function checkText(design, model, n) {
   if (design === "interp") return `Truthy({behavior/${n.node}})`;
   if (design === "calls") return `Truthy(${exprShow(model)(n.node)})`;
-  if (design === "compute") return `Truthy(@${n.node})`;
+  if (design === "compute") return `Truthy(${detachedRef(model, n.node)})`;
   if (design === "leaves") return `Truthy({.#${n.node}})`;
   return `Truthy({.${n.node}})`;
 }
@@ -1826,7 +1869,7 @@ function setText(design, model, n) {
   if (!n.node) return fmt(n.value);
   if (design === "interp") return `{behavior/${n.node}}`;
   if (design === "calls") return exprShow(model)(n.node);
-  if (design === "compute") return "@" + n.node;
+  if (design === "compute") return detachedRef(model, n.node);
   if (design === "leaves") return `{.#${n.node}}`;
   return `{.${n.node}}`;
 }
