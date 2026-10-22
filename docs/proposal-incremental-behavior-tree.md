@@ -113,7 +113,7 @@ Marking a node dirty marks its ancestors, up to the first that already is.
 A composite about to tick a child first looks at the child: a **clean** child
 returns its cached status, with no engine dispatch. The composite's own logic
 is unchanged: it still walks its children in order, and a clean child costs a
-cache check where it used to cost a dispatch and a call.
+cache check, where today's executor spends a dispatch and a call.
 
 A visit clears a node's dirty mark before it runs, so a mark made later in the
 same tick waits for the next one. That keeps today's order within a tick: a
