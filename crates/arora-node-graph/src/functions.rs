@@ -610,16 +610,16 @@ pub enum Placement {
 /// gives of a function it calls in another module.
 ///
 /// A task run and a spawn are control, ticked at every tick. A call to
-/// another module (`externalfunction`) is placed by its function:
-/// - one that returns nothing and has no mutable parameter is ignored;
-/// - one that takes no parameter is ticked at every tick, as its result can
-///   only come from outside its arguments (the animation module's
-///   `player_states()`);
-/// - any other is a detached call;
-/// - one `functions` does not describe is ticked at every tick, as Vizij
-///   calls it.
+/// another module (`externalfunction`) is ignored when its function returns
+/// nothing and has no mutable parameter, and ticked at every tick
+/// otherwise, as Vizij calls it. It is not a detached call: a module's
+/// function may keep state its arguments do not show (the animation
+/// module's `step(dt)` advances its players by the same `dt` every frame),
+/// and a detached call does not run again for arguments it has seen. A
+/// function's description states no such effect.
 ///
-/// Every other node is a detached call.
+/// Every other node is a detached call: the node vocabulary's functions
+/// compute their outputs from their arguments, their state included.
 pub fn placement(node: &NodeSpec, functions: &FunctionIndex) -> Placement {
     match node.kind {
         NodeType::TaskRun | NodeType::Spawn => Placement::Attached,
@@ -635,10 +635,8 @@ pub fn placement(node: &NodeSpec, functions: &FunctionIndex) -> Placement {
             let writes_back = function.parameters.values().any(|p| p.mutable);
             if !returns && !writes_back {
                 Placement::Ignored
-            } else if function.parameters.is_empty() {
-                Placement::Attached
             } else {
-                Placement::Detached
+                Placement::Attached
             }
         }
         _ => Placement::Detached,

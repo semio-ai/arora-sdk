@@ -52,7 +52,7 @@ How a graph translates:
 | an `output` node with a path | a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
 | an `output` node with no path (a keyed batch) | listed in `ImportedGraph::keyed_outputs`, for its host to apply |
 | `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
-| `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; a leaf ticked at every tick when it takes no parameter, as its result can only come from outside its arguments, or when no description names it; a detached call otherwise |
+| `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; otherwise a leaf ticked at every tick, as Vizij calls it, since a module's function may keep state its arguments do not show (the animation module's `step(dt)`) |
 
 What differs from the reference evaluator:
 

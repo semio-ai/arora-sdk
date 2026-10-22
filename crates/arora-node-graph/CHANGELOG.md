@@ -27,7 +27,7 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   task run or a spawn a leaf under the root, ticked at every tick.
   `import_with` places a call to another module (`externalfunction`) by
   its function's description (`placement`): left out when the function
-  returns nothing, a leaf when it takes no parameter, a detached call
+  returns nothing and writes nothing back, a leaf ticked at every tick
   otherwise. `TreeRuntime::load_with_functions` imports this way, with a
   device's function index.
 - `TreeRuntime`: a graph run on the behavior tree behind the reference

@@ -1,7 +1,7 @@
 //! Where a call to another module goes on the tree, read from the
 //! description of the function it calls ([`placement`]): left out when the
-//! function returns nothing, ticked at every tick when it takes no
-//! parameter or is not described, and a detached call otherwise.
+//! function returns nothing, and ticked at every tick otherwise, whatever
+//! its arguments, as a module's function may keep state they do not show.
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_shape::Value;
 use arora_types::record::module::frozen::{Function, Parameter};
@@ -106,12 +106,14 @@ fn calls(spec: &GraphSpec, functions: &FunctionIndex, inputs: &[f32]) -> Vec<usi
         .collect()
 }
 
+/// The animation module's `step(dt)`: the same `dt` every frame, and the
+/// players advanced by each call.
 #[test]
-fn a_call_whose_function_takes_parameters_runs_when_they_change() {
+fn a_call_whose_arguments_repeat_runs_at_every_tick() {
     let spec = graph(&[PARAMETER]);
     let functions = described(&[PARAMETER], PrimitiveKind::F32);
-    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Detached);
-    assert_eq!(calls(&spec, &functions, &[1.0, 1.0, 1.0, 2.0]), [2, 2]);
+    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Attached);
+    assert_eq!(calls(&spec, &functions, &[1.0, 1.0, 1.0, 2.0]), [4, 4]);
 
     let mut rt = TreeRuntime::new(Evaluation::Demanded);
     rt.load_with_functions(&spec, &functions)
