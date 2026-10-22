@@ -760,6 +760,15 @@ impl Detached {
         };
         let node = &self.nodes[at];
         let signature = lowered.signatures.get(&node.function);
+        // A mutable parameter bound to a store key has the key's value as its
+        // state: its port holds it too before the node reads its arguments,
+        // so the node reading its own state through `@node.parameter` reads
+        // the same value, the first time included.
+        for (port, cell, publish) in &lowered.outputs[at] {
+            if let (true, Some(key)) = (*port != _RET_PARAM_ID, publish) {
+                cell.set_opt(key.get());
+            }
+        }
         let mut values = Vec::with_capacity(lowered.arguments[at].len());
         for parameter in &lowered.arguments[at] {
             let argument = &node.arguments[parameter];

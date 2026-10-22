@@ -1209,34 +1209,43 @@ pub fn load_behavior_tree_nodes_with(
             )?;
             // A detached node's port bound to a store key keeps a tree-local
             // cell of its own, which `@node` reads; the key is published to
-            // after the tree ticks. A return bound to another node's input,
-            // which names a store key, feeds that input instead: the two share
-            // the tree-local cell, and the key is not written.
-            if matches!(cell, VariableCell::Stored(_)) && detached_ids.contains(&node_param.node) {
+            // after the tree ticks. A return bound to another node's input
+            // feeds the input its chain of ports ends at: when that input
+            // names a store key, the two share a tree-local cell, every port
+            // on the chain follows once the aliases do, and the key is not
+            // written. A detached input on the chain may already have a cell
+            // of its own, so the end of the chain decides.
+            let detached = detached_ids.contains(&node_param.node);
+            let fed = read_argument(&arg_expr)
+                .filter(|_| detached && node_param.parameter == _RET_PARAM_ID)
+                .map(|input| {
+                    let mut fed = input.clone();
+                    for _ in 0..node_index.len() {
+                        let next = node_index
+                            .get(&fed.node)
+                            .and_then(|node| node.arguments.get(&fed.parameter))
+                            .and_then(read_argument);
+                        match next {
+                            Some(next) => fed = next.clone(),
+                            None => break,
+                        }
+                    }
+                    fed
+                })
+                .filter(|fed| {
+                    matches!(
+                        node_parameters_variables.get(fed),
+                        Some(VariableCell::Stored(_))
+                    )
+                });
+            if let Some(fed) = fed {
                 let port = VariableCell::local();
                 node_parameters_variables.insert(node_param.clone(), port.clone());
-                match read_argument(&arg_expr) {
-                    Some(input) if node_param.parameter == _RET_PARAM_ID => {
-                        // The input the chain of ports ends at: every port on
-                        // the chain shares its cell, once the aliases follow.
-                        let mut fed = input.clone();
-                        for _ in 0..node_index.len() {
-                            let next = node_index
-                                .get(&fed.node)
-                                .and_then(|node| node.arguments.get(&fed.parameter))
-                                .and_then(read_argument);
-                            match next {
-                                Some(next) => fed = next.clone(),
-                                None => break,
-                            }
-                        }
-                        node_parameters_variables.insert(fed.clone(), port);
-                        fed_inputs.insert(fed);
-                    }
-                    _ => {
-                        bindings.insert(node_param, cell);
-                    }
-                }
+                node_parameters_variables.insert(fed.clone(), port);
+                fed_inputs.insert(fed);
+            } else if matches!(cell, VariableCell::Stored(_)) && detached {
+                node_parameters_variables.insert(node_param.clone(), VariableCell::local());
+                bindings.insert(node_param, cell);
             }
         }
         if let Some((node_param, arg_expr)) =

@@ -1656,3 +1656,55 @@ fn an_unreported_mutable_parameter_keeps_its_value() {
     assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
     assert_eq!(get(&store, "x"), Some(Value::F64(2.0)));
 }
+
+/// A node reading its own state, bound to a store key, through its port reads
+/// the key's value, the first time included, even set after the tree is built.
+#[test]
+fn a_node_reads_its_store_bound_state_through_its_port() {
+    let store = SimpleDataStore::new();
+    let smooth = compute(
+        50,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, port(50, SMOOTH_STATE)),
+            (SMOOTH_ALPHA, f(1.0)),
+            (SMOOTH_STATE, key("x")),
+        ],
+        None,
+    );
+    let tree = build(&store, vec![below(1, f(1.0), 3.0)], vec![smooth]);
+    set(&store, "x", 2.0);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    runtime.tick().expect("it ticks");
+    assert_eq!(get(&store, "x"), Some(Value::F64(2.0)));
+}
+
+/// A return bound to a detached node's input that aliases a store-backed tree
+/// input feeds the input at the end of the chain: the tree node and the
+/// detached node both read the result, and the key is not written.
+#[test]
+fn an_output_bound_through_a_detached_alias_feeds_the_input_it_aliases() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 5.0);
+    let consumer = compute(
+        51,
+        ADD,
+        vec![(ADD_A, port(1, BELOW_X)), (ADD_B, f(1.0))],
+        Some("out"),
+    );
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(51, ADD_A));
+    let tree = build(&store, vec![below(1, key("in"), 3.0)], vec![consumer, add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+    assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
+    assert_eq!(
+        get(&store, "in"),
+        Some(Value::F64(5.0)),
+        "the key is not written"
+    );
+}

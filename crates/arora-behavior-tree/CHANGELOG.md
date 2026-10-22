@@ -17,7 +17,10 @@ All notable changes to `arora-behavior-tree`. The format follows
   - A node reads it through `@node` or `@node.parameter` (a `NodeArgument` on
     its port), or through the variable an output is bound to. An output bound
     to another node's input feeds it in place of its argument, even one
-    naming a store key, and so does one bound to a port that aliases it. A port bound to
+    naming a store key, and so does one bound to a port that aliases it,
+    through detached nodes' inputs too. A mutable parameter bound to a store
+    key has the key's value as its state, which its port holds before the
+    node reads its arguments. A port bound to
     a store key reads the node's current result, not the key. Nothing marks
     the read: lowering finds the detached node that writes each tree-local
     cell, and a node brings the detached nodes it reads up to date before it
