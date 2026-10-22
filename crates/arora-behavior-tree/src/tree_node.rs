@@ -45,9 +45,25 @@ impl TreeNode {
     /// `&|_| None` and an empty map to keep every cell tree-local.
     pub fn collect(
         self,
+        node_index: &mut HashMap<Uuid, Rc<Node>>,
+        variables: &mut HashMap<Uuid, VariableCell>,
+        node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+        resolver: &VariableResolver,
+        names: &HashMap<Uuid, String>,
+    ) -> Result<Rc<Node>, BehaviorTreeError> {
+        let mut cells = crate::id_hash::IdMap::default();
+        cells.extend(node_parameters_variables.drain());
+        let root = self.collect_cells(node_index, variables, &mut cells, resolver, names);
+        node_parameters_variables.extend(cells);
+        root
+    }
+
+    /// [`collect`](Self::collect) into the tree's own map of argument cells.
+    pub(crate) fn collect_cells(
+        self,
         mut node_index: &mut HashMap<Uuid, Rc<Node>>,
         mut variables: &mut HashMap<Uuid, VariableCell>,
-        mut node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+        mut node_parameters_variables: &mut crate::id_hash::IdMap<NodeParameterId, VariableCell>,
         resolver: &VariableResolver,
         names: &HashMap<Uuid, String>,
     ) -> Result<Rc<Node>, BehaviorTreeError> {
@@ -55,7 +71,7 @@ impl TreeNode {
         let children: Option<Vec<Uuid>> = if let Some(children) = self.children {
             let mut ids = Vec::with_capacity(children.len());
             for child in children {
-                let child_node = child.collect(
+                let child_node = child.collect_cells(
                     node_index,
                     variables,
                     node_parameters_variables,
@@ -107,8 +123,8 @@ impl TreeNode {
     ) -> Result<BehaviorTree, BehaviorTreeError> {
         let mut node_index = HashMap::new();
         let mut variables = HashMap::new();
-        let mut node_arg_variables = HashMap::new();
-        let root = self.collect(
+        let mut node_arg_variables = crate::id_hash::IdMap::default();
+        let root = self.collect_cells(
             &mut node_index,
             &mut variables,
             &mut node_arg_variables,

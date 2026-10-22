@@ -1,0 +1,38 @@
+[package]
+name = "arora-node-graph"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Node graphs for Arora: the node vocabulary as module functions, the importer from a Vizij graph to a behavior tree's detached nodes, and the reference evaluator."
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "README.md"
+keywords = ["arora", "node", "graph", "dataflow", "robotics"]
+categories = ["science::robotics", "game-engines"]
+
+[dependencies]
+anyhow = "1"
+arora-shape = { path = "../arora-shape", version = "1" }
+# Declares the behavior `Status` enumeration (type + variant ids) a task run
+# speaks — the cross-interpreter run-status contract.
+arora-behavior = { path = "../arora-behavior", version = "9.4" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.5" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
+arora-types = { path = "../arora-types", version = "3.9" }
+hashbrown = { version = "0.17", features = ["serde"] }
+k = { version = "0.32", optional = true, default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+urdf-rs = { version = "0.9", optional = true }
+uuid = { version = "1", features = ["serde", "v5"] }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "graph_eval"
+harness = false
+
+[features]
+default = ["urdf_ik"]
+urdf_ik = ["k", "urdf-rs"]

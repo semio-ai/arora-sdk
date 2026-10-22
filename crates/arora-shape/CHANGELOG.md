@@ -1,0 +1,53 @@
+# Changelog
+
+All notable changes to `arora-shape`. The format follows
+[Keep a Changelog](https://keepachangelog.com/); versions follow
+[Semantic Versioning](https://semver.org/). Versions up to 2.1.0 were
+published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
+`vizij-api-core`.
+
+## [1.0.0] - 2026-10-22
+
+### Changed
+
+- The crate is `arora-shape`, in arora-sdk, continuing `vizij-api-core` 2.1.0
+  with its history. Its library is `arora_shape`. The value classifier
+  `VizijKind` is `ShapeKind`. The vocabulary's type and field ids, and the
+  JSON forms, do not change.
+- Licensed under Apache-2.0, where it was MIT OR Apache-2.0. Releases up
+  to 2.1.0 keep the licence they were published under.
+
+## [2.1.0] - 2026-10-13
+
+### Added
+
+- `value::record_field` reads one field of a record by name, with one map
+  lookup; `as_record` lists and sorts every field.
+
+## [2.0.0] - 2026-09-26
+
+### Changed
+
+- **Breaking:** depends on arora-types 3, whose `Value` this crate converts to
+  and from.
+
+## [1.1.0] - 2026-09-10
+
+### Changed
+
+- Integers are scalars to the vizij vocabulary: `kind` classifies every
+  integer `Value` as `Float`, and `as_float` widens one. The store carries
+  integers too — the runtime's `dt` in nanoseconds, a frame's dimensions —
+  and arithmetic on them is arithmetic, so a graph reads them without a
+  conversion node.
+
+## [1.0.0] - 2026-07-31
+
+First published release. `Value` is `arora_types::value::Value` — the one
+runtime value type Vizij shares with Arora's store, modules, behaviors and
+Studio — with the vizij vocabulary declared over it: the composite type ids
+(`vec2`, `vec3`, `vec4`, `quat`, `color-rgba`, `transform`) with their
+constructors and accessors, `VizijKind`, blending and coercion, `Shape`,
+`TypedPath`, `WriteOp` / `WriteBatch`, the `Blackboard`, and the JSON
+normalisation that accepts every historical payload form and produces arora
+serde.

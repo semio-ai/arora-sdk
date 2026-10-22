@@ -1,0 +1,18 @@
+[package]
+name = "arora-shape"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Shapes, typed paths and the value vocabulary (vec2-4, quat, color, transform) over Arora's Value, with blending, coercion, write batches and the graph-spec JSON forms."
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "README.md"
+keywords = ["arora", "value", "shape", "robotics"]
+categories = ["science::robotics", "data-structures"]
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+hashbrown = { version = "0.17", features = ["serde"] }
+uuid = "1"

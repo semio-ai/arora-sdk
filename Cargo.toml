@@ -4,6 +4,8 @@ resolver = "2"
 members = [
   "crates/arora",
   "crates/arora-animation",
+  "crates/arora-node-graph",
+  "crates/arora-shape",
   "modules/animation",
   "modules/polly",
   "modules/say-silent",
@@ -48,6 +50,8 @@ members = [
 default-members = [
   "crates/arora",
   "crates/arora-animation",
+  "crates/arora-node-graph",
+  "crates/arora-shape",
   "modules/animation",
   "crates/arora-behavior-tree-types-yaml",
   "crates/arora-behavior-tree-types",

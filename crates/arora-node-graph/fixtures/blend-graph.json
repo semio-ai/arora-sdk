@@ -1,0 +1,481 @@
+{
+  "spec": {
+    "nodes": [
+      {
+        "id": "profile",
+        "type": "input",
+        "params": {
+          "path": "samples/json.profile",
+          "value": {
+            "record": {
+              "origin": {
+                "vec3": [
+                  0.0,
+                  0.1,
+                  0.2
+                ]
+              },
+              "layers": {
+                "tuple": [
+                  {
+                    "record": {
+                      "offset": {
+                        "vec3": [
+                          0.05,
+                          0.0,
+                          0.0
+                        ]
+                      },
+                      "gain": {
+                        "float": 0.2
+                      }
+                    }
+                  },
+                  {
+                    "record": {
+                      "offset": {
+                        "vec3": [
+                          0.0,
+                          0.05,
+                          0.05
+                        ]
+                      },
+                      "gain": {
+                        "float": 0.4
+                      }
+                    }
+                  },
+                  {
+                    "record": {
+                      "offset": {
+                        "vec3": [
+                          0.0,
+                          0.0,
+                          0.1
+                        ]
+                      },
+                      "gain": {
+                        "float": 0.6
+                      }
+                    }
+                  }
+                ]
+              },
+              "mask": {
+                "array": [
+                  {
+                    "float": 0.5
+                  },
+                  {
+                    "float": 0.75
+                  },
+                  {
+                    "float": 1.0
+                  }
+                ]
+              },
+              "channels": {
+                "record": {
+                  "primary": {
+                    "text": "left"
+                  },
+                  "secondary": {
+                    "text": "foot"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "weight0",
+        "type": "multiply"
+      },
+      {
+        "id": "weight1",
+        "type": "multiply"
+      },
+      {
+        "id": "weight2",
+        "type": "multiply"
+      },
+      {
+        "id": "contrib0",
+        "type": "vectorscale"
+      },
+      {
+        "id": "contrib1",
+        "type": "vectorscale"
+      },
+      {
+        "id": "contrib2",
+        "type": "vectorscale"
+      },
+      {
+        "id": "sum01",
+        "type": "vectoradd"
+      },
+      {
+        "id": "sum012",
+        "type": "vectoradd"
+      },
+      {
+        "id": "pose",
+        "type": "vectoradd"
+      },
+      {
+        "id": "weights_join",
+        "type": "join"
+      },
+      {
+        "id": "out_pose",
+        "type": "output",
+        "params": {
+          "path": "samples/json.pose"
+        }
+      },
+      {
+        "id": "out_weights",
+        "type": "output",
+        "params": {
+          "path": "samples/json.weights"
+        }
+      },
+      {
+        "id": "out_channels",
+        "type": "output",
+        "params": {
+          "path": "samples/json.channels"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight0",
+          "input": "operand_1"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 0
+          },
+          {
+            "field": "gain"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight0",
+          "input": "operand_2"
+        },
+        "selector": [
+          {
+            "field": "mask"
+          },
+          {
+            "index": 0
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight1",
+          "input": "operand_1"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 1
+          },
+          {
+            "field": "gain"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight1",
+          "input": "operand_2"
+        },
+        "selector": [
+          {
+            "field": "mask"
+          },
+          {
+            "index": 1
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight2",
+          "input": "operand_1"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 2
+          },
+          {
+            "field": "gain"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "weight2",
+          "input": "operand_2"
+        },
+        "selector": [
+          {
+            "field": "mask"
+          },
+          {
+            "index": 2
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "contrib0",
+          "input": "v"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 0
+          },
+          {
+            "field": "offset"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "weight0"
+        },
+        "to": {
+          "node_id": "contrib0",
+          "input": "scalar"
+        }
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "contrib1",
+          "input": "v"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 1
+          },
+          {
+            "field": "offset"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "weight1"
+        },
+        "to": {
+          "node_id": "contrib1",
+          "input": "scalar"
+        }
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "contrib2",
+          "input": "v"
+        },
+        "selector": [
+          {
+            "field": "layers"
+          },
+          {
+            "index": 2
+          },
+          {
+            "field": "offset"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "weight2"
+        },
+        "to": {
+          "node_id": "contrib2",
+          "input": "scalar"
+        }
+      },
+      {
+        "from": {
+          "node_id": "contrib0"
+        },
+        "to": {
+          "node_id": "sum01",
+          "input": "a"
+        }
+      },
+      {
+        "from": {
+          "node_id": "contrib1"
+        },
+        "to": {
+          "node_id": "sum01",
+          "input": "b"
+        }
+      },
+      {
+        "from": {
+          "node_id": "sum01"
+        },
+        "to": {
+          "node_id": "sum012",
+          "input": "a"
+        }
+      },
+      {
+        "from": {
+          "node_id": "contrib2"
+        },
+        "to": {
+          "node_id": "sum012",
+          "input": "b"
+        }
+      },
+      {
+        "from": {
+          "node_id": "sum012"
+        },
+        "to": {
+          "node_id": "pose",
+          "input": "a"
+        }
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "pose",
+          "input": "b"
+        },
+        "selector": [
+          {
+            "field": "origin"
+          }
+        ]
+      },
+      {
+        "from": {
+          "node_id": "weight0"
+        },
+        "to": {
+          "node_id": "weights_join",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "weight1"
+        },
+        "to": {
+          "node_id": "weights_join",
+          "input": "operand_2"
+        }
+      },
+      {
+        "from": {
+          "node_id": "weight2"
+        },
+        "to": {
+          "node_id": "weights_join",
+          "input": "operand_3"
+        }
+      },
+      {
+        "from": {
+          "node_id": "pose"
+        },
+        "to": {
+          "node_id": "out_pose",
+          "input": "in"
+        }
+      },
+      {
+        "from": {
+          "node_id": "weights_join"
+        },
+        "to": {
+          "node_id": "out_weights",
+          "input": "in"
+        }
+      },
+      {
+        "from": {
+          "node_id": "profile"
+        },
+        "to": {
+          "node_id": "out_channels",
+          "input": "in"
+        },
+        "selector": [
+          {
+            "field": "channels"
+          }
+        ]
+      }
+    ]
+  },
+  "subs": {
+    "inputs": [],
+    "outputs": [
+      "samples/json.pose",
+      "samples/json.weights",
+      "samples/json.channels"
+    ]
+  },
+  "edges": []
+}

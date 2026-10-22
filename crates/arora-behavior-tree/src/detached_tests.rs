@@ -1195,6 +1195,88 @@ fn over_a_hundred_ticks_the_cascade_runs_once_per_change() {
     assert_eq!(row(&totals[1]), [0, 10, 10, 300]);
 }
 
+/// An observed node is brought up to date at every tick though nothing
+/// reads it, with the nodes it reads, after the tree ticks; it calls its
+/// function only when its inputs change, and its outputs can be read. A node
+/// the tree holds, or none of its nodes, is not observed.
+#[test]
+fn an_observed_node_runs_at_every_tick_and_shows_its_outputs() {
+    let store = SimpleDataStore::new();
+    set(&store, "left", 1.0);
+    set(&store, "right", 1.0);
+    let tree = build(
+        &store,
+        vec![
+            control(1, FALLBACK_FUNCTION_ID, &[2, 3]),
+            below(2, read(20), 100.0),
+            below(3, read(21), 100.0),
+        ],
+        vec![
+            compute(20, MUL, vec![(MUL_A, key("left")), (MUL_B, f(2.0))], None),
+            compute(21, MUL, vec![(MUL_A, key("right")), (MUL_B, f(3.0))], None),
+            compute(22, ADD, vec![(ADD_A, read(21)), (ADD_B, f(1.0))], None),
+        ],
+    );
+    tree.observe_detached([id(22), id(2), id(99)]);
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(tree.detached_plan().every_tick, [id(21), id(22)]);
+    assert_eq!(tree.detached_plan().on_demand, [id(20)]);
+    assert_eq!(tree.detached_outputs(id(22)), None, "not called yet");
+
+    runtime.tick().unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(
+        tree.detached_calls(id(22)),
+        Some(1),
+        "its inputs did not change"
+    );
+    assert_eq!(
+        tree.detached_outputs(id(22)),
+        Some(HashMap::from([(_RET_PARAM_ID, Value::F64(4.0))]))
+    );
+    assert_eq!(tree.detached_outputs(id(2)), None, "the tree holds it");
+
+    set(&store, "right", 2.0);
+    runtime.tick().unwrap();
+    assert_eq!(tree.detached_calls(id(22)), Some(2));
+    assert_eq!(
+        tree.detached_outputs(id(22)).unwrap()[&_RET_PARAM_ID],
+        Value::F64(7.0)
+    );
+}
+
+/// A host reads and sets the cell of a node's argument: a literal argument
+/// is the node's own cell.
+#[test]
+fn a_host_reads_and_sets_a_node_s_argument() {
+    let store = SimpleDataStore::new();
+    set(&store, "left", 1.0);
+    let tree = build(
+        &store,
+        vec![below(1, read(20), 100.0)],
+        vec![compute(
+            20,
+            MUL,
+            vec![(MUL_A, key("left")), (MUL_B, f(2.0))],
+            None,
+        )],
+    );
+    assert_eq!(tree.argument_value(id(20), MUL_B), Some(Value::F64(2.0)));
+    assert!(tree.set_argument_value(id(20), MUL_B, Some(Value::F64(5.0))));
+    assert!(
+        !tree.set_argument_value(id(20), ADD_A, None),
+        "no such argument"
+    );
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(
+        tree.detached_outputs(id(20)).unwrap()[&_RET_PARAM_ID],
+        Value::F64(5.0)
+    );
+}
+
 /// The sinks run after the tree whether or not it failed: a failing leaf stops
 /// no data flow, and the tick reports its error.
 #[test]

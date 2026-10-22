@@ -4,6 +4,53 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.0] - 2026-10-22
+
+### Added
+
+- `BehaviorTree::observe_detached`: a host observes detached nodes, which
+  are then brought up to date at every tick, after the tree ticks, as sinks
+  are, whether or not a node reads them. They still call their function only
+  when their inputs changed. The plan lists them, and what they read, in
+  `every_tick`. An editor showing what every node of a graph computes
+  observes them all.
+- `BehaviorTree::detached_outputs`: a detached node's outputs after its last
+  call, by port.
+- `BehaviorTree::argument_value` and `set_argument_value`: the value of the
+  cell a node's argument names, read and set by a host, such as a host
+  carrying a node's state into a tree built again from a changed node.
+- `BehaviorTree::keep_state` is public: a tree built again from a changed
+  graph takes over the state of the nodes the change left in place.
+- `schema::Node` is `Clone`.
+
+### Changed
+
+- Detached nodes are sorted and brought up to date iteratively, so a chain
+  of any depth lowers and runs: a chain 100,000 nodes deep overflowed the
+  stack.
+- A tick reads each detached node's arguments from cells resolved when the
+  tree is lowered, and finds a detached node by id in constant time.
+  Lowering checks a port read against the node it names rather than against
+  every node, and copies a function's signature once however many detached
+  nodes call it. A 19,000-node graph lowers in a fraction of the time, and a
+  settled one ticks without hashing an id.
+- A detached node whose arguments did not change writes its cached outputs
+  back to their cells only when something besides its call can write them:
+  a nested call of its arguments, or the store a mutable port is seeded
+  from. A settled node of any other kind copies no value.
+- A detached node compares its arguments with its last call's in place, so
+  a node whose arguments did not change copies none of them, and calls its
+  function with them lent (`CallBridge::arora_call_borrowed`): a bridge
+  answering in-process copies only what it keeps. Each output knows at
+  lowering whether it writes an optional back, so a call looks no signature
+  up.
+- Lowering orders each node's arguments once, by its function's parameter
+  positions found once per function, and looks for the signatures of nested
+  calls only in a node that has some. The cells of node arguments, and
+  detached nodes by id, are found with a hasher for ids, which are already
+  uniformly random, rather than SipHash.
+- Requires arora-types 3.9.
+
 ## [9.4.0] - 2026-10-22
 
 ### Added

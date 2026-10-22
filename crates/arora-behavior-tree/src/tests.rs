@@ -47,7 +47,8 @@ fn shared_variable_id_resolves_to_one_cell() {
 
     let var_id = Uuid::new_v4();
     let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
-    let mut node_parameters: HashMap<NodeParameterId, VariableCell> = HashMap::new();
+    let mut node_parameters: crate::id_hash::IdMap<NodeParameterId, VariableCell> =
+        crate::id_hash::IdMap::default();
 
     let param_a = NodeParameterId {
         node: Uuid::new_v4(),
@@ -108,7 +109,8 @@ fn resolved_variable_is_store_backed() {
     let names = HashMap::from([(var_id, "battery.level".to_string())]);
 
     let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
-    let mut node_parameters: HashMap<NodeParameterId, VariableCell> = HashMap::new();
+    let mut node_parameters: crate::id_hash::IdMap<NodeParameterId, VariableCell> =
+        crate::id_hash::IdMap::default();
     let param = NodeParameterId {
         node: Uuid::new_v4(),
         parameter: Uuid::new_v4(),
