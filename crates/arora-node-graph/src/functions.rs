@@ -39,10 +39,10 @@ use std::sync::OnceLock;
 use hashbrown::HashMap;
 
 use arora_behavior::{FunctionIndex, ModuleFunction};
-use arora_shape::{Shape, TypedPath, Value};
+use arora_shape::{TypedPath, Value};
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::record::module::frozen::{Function, Parameter};
-use arora_types::record::ty::{FrozenOption, FrozenScalar, FrozenTy, PrimitiveKind};
+use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
 use arora_types::record::{FrozenReference, Version};
 use arora_types::value::{Structure, StructureField};
 use uuid::Uuid;
@@ -169,7 +169,17 @@ pub const KINDS: &[NodeType] = &[
 
 /// The id of the function a node of `kind` calls.
 pub fn function_id(kind: &NodeType) -> Uuid {
-    derived(&format!("function:{}", kind_name(kind)))
+    static IDS: OnceLock<HashMap<NodeType, Uuid>> = OnceLock::new();
+    let derive = |kind: &NodeType| derived(&format!("function:{}", kind_name(kind)));
+    IDS.get_or_init(|| {
+        KINDS
+            .iter()
+            .map(|kind| (kind.clone(), derive(kind)))
+            .collect()
+    })
+    .get(kind)
+    .copied()
+    .unwrap_or_else(|| derive(kind))
 }
 
 /// The id of the input port `port`, as a parameter of any function.
@@ -646,12 +656,6 @@ fn dynamic() -> FrozenTy {
     })
 }
 
-fn optional(element: FrozenTy) -> FrozenTy {
-    FrozenTy::FrozenOption(FrozenOption {
-        element: Box::new(element),
-    })
-}
-
 fn describe(id: Uuid, name: &str, parameters: Vec<(Uuid, String, bool)>) -> ModuleFunction {
     ModuleFunction {
         module_id: MODULE_ID,
@@ -664,9 +668,11 @@ fn describe(id: Uuid, name: &str, parameters: Vec<(Uuid, String, bool)>) -> Modu
                 .map(|(id, name, mutable)| {
                     (
                         id,
+                        // Not optional: an argument passes as it is, and an
+                        // absent one is no argument.
                         Parameter {
                             name,
-                            ty: optional(dynamic()),
+                            ty: dynamic(),
                             mutable,
                         },
                     )
@@ -679,10 +685,13 @@ fn describe(id: Uuid, name: &str, parameters: Vec<(Uuid, String, bool)>) -> Modu
 
 /// The description of `kind`'s function.
 pub fn describe_kind(kind: &NodeType) -> ModuleFunction {
-    let mut parameters: Vec<(Uuid, String, bool)> = declared_inputs(kind)
-        .into_iter()
-        .map(|port| (input_param(&port), port, false))
-        .collect();
+    // The node first: a call names its site before anything else.
+    let mut parameters: Vec<(Uuid, String, bool)> = vec![(node_param(), "node".into(), false)];
+    parameters.extend(
+        declared_inputs(kind)
+            .into_iter()
+            .map(|port| (input_param(&port), port, false)),
+    );
     parameters.extend(
         FIELDS
             .iter()
@@ -693,7 +702,6 @@ pub fn describe_kind(kind: &NodeType) -> ModuleFunction {
     parameters.push((state_param(), "state".into(), true));
     parameters.push((ports_param(), "ports".into(), false));
     parameters.push((output_shapes_param(), "output_shapes".into(), false));
-    parameters.push((node_param(), "node".into(), false));
     describe(function_id(kind), &kind_name(kind), parameters)
 }
 
@@ -1032,6 +1040,15 @@ fn seconds(value: &Value) -> f32 {
 
 /// The value an argument carries: an optional's content, `None` for an
 /// absent one or `()`.
+/// `value` as an argument passes it: `None` for no value.
+fn present_ref(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Option(Some(value)) => present_ref(value),
+        Value::Option(None) | Value::Unit => None,
+        value => Some(value),
+    }
+}
+
 fn present(value: Value) -> Option<Value> {
     match value {
         Value::Option(Some(value)) => present(*value),
@@ -1166,6 +1183,13 @@ pub struct NodeGraphModule {
     /// The id the next callable registered gets. Ids start at
     /// [`CALLABLE_IDS`], apart from the wrapped bridge's own.
     next_callable: u64,
+    /// The call sites, by graph node id: what each one's static arguments
+    /// decode to.
+    sites: HashMap<String, Site>,
+    /// The runtime a call evaluates its node in, kept between calls.
+    scratch: GraphRuntime,
+    /// The buffer a call collects its inputs in, kept between calls.
+    inputs: Vec<(usize, Value)>,
 }
 
 /// An output layout, and the field id of each of its ports in the structure
@@ -1201,6 +1225,18 @@ impl NodeGraphModule {
         std::mem::take(&mut self.spawns)
     }
 
+    /// Forget what the module keeps for each node `keep` refuses, such as
+    /// the nodes a load removed.
+    pub(crate) fn retain_sites(&mut self, keep: impl Fn(&str) -> bool) {
+        self.sites.retain(|node, _| keep(node));
+    }
+
+    /// The number of nodes the module keeps something for.
+    #[cfg(test)]
+    pub(crate) fn sites(&self) -> usize {
+        self.sites.len()
+    }
+
     /// A bridge answering this module's calls and passing every other to
     /// `inner`.
     pub fn bridge<'a>(&'a mut self, inner: &'a mut dyn CallBridge) -> Bridge<'a> {
@@ -1217,16 +1253,36 @@ impl NodeGraphModule {
         call: Call,
         inner: &mut dyn CallBridge,
     ) -> Result<CallResult, CallError> {
-        self.evaluate(call, inner)
+        let args: Vec<(Uuid, &Value)> = call
+            .args
+            .iter()
+            .map(|field| (field.id, &*field.value))
+            .collect();
+        self.call_borrowed(call.id, &args, inner)
+    }
+
+    /// Answer a call of `function`, one of this module's functions, with
+    /// `args` borrowed: a call copies only the values it keeps.
+    pub fn call_borrowed(
+        &mut self,
+        function: Uuid,
+        args: &[(Uuid, &Value)],
+        inner: &mut dyn CallBridge,
+    ) -> Result<CallResult, CallError> {
+        self.evaluate(function, args, inner)
             .map_err(|message| CallError::Generic { message })
     }
 
-    fn evaluate(&mut self, call: Call, inner: &mut dyn CallBridge) -> Result<CallResult, String> {
-        let function = call.id;
+    fn evaluate(
+        &mut self,
+        function: Uuid,
+        args: &[(Uuid, &Value)],
+        inner: &mut dyn CallBridge,
+    ) -> Result<CallResult, String> {
         let kind = if function == external_function() {
             NodeType::ExternalFunction
         } else if function == select_function() {
-            return select(call);
+            return select(args);
         } else {
             kind_of(function)
                 .cloned()
@@ -1234,49 +1290,75 @@ impl NodeGraphModule {
         };
         let roles = roles();
         let ports_table = input_ports();
-        let mut inputs: Vec<(usize, Value)> = Vec::new();
-        let mut params = NodeParams::default();
+        let mut args = args.iter();
+
+        // The call site: the graph node, named by the first argument. Its
+        // static arguments (the node's parameters, ports and declared
+        // shapes) are decoded once, and again only when one changes.
+        let first = args.next();
+        let node: &str = match first.map(|(id, value)| (roles.get(id), value)) {
+            Some((Some(Role::Node), value)) => {
+                present_ref(value).and_then(as_string).unwrap_or_default()
+            }
+            _ => "",
+        };
+        let mut pending = first.filter(|(id, _)| !matches!(roles.get(id), Some(Role::Node)));
+        let site = match self.sites.get_mut(node) {
+            Some(site) => site,
+            None => self
+                .sites
+                .entry(node.to_string())
+                .or_insert_with(|| Site::new(node)),
+        };
+        let mut inputs = std::mem::take(&mut self.inputs);
+        inputs.clear();
         let mut state = None;
         let (mut t, mut dt) = (0.0, 0.0);
-        let mut ports: Option<Vec<String>> = None;
-        let mut output_shapes = HashMap::new();
-        let mut node = String::new();
+        let mut statics = 0;
+        let mut changed = site.function != function;
         let mut port_set: PortSet = [0; PORT_SET_BITS / 64];
-        for argument in call.args {
-            let Some(role) = roles.get(&argument.id) else {
-                return Err(format!(
-                    "{} has no parameter {}",
-                    kind_name(&kind),
-                    argument.id
-                ));
+        while let Some(&(id, value)) = pending.take().or_else(|| args.next()) {
+            let Some(role) = roles.get(&id) else {
+                return Err(format!("{} has no parameter {id}", kind_name(&kind)));
             };
-            let Some(value) = present(*argument.value) else {
+            match role {
+                Role::Field(_) | Role::Ports | Role::OutputShapes => {
+                    let same = site
+                        .statics
+                        .get(statics)
+                        .is_some_and(|(known, stated)| *known == id && **stated == *value);
+                    if !same {
+                        changed = true;
+                        site.statics.truncate(statics);
+                        site.statics.push((id, Box::new(value.clone())));
+                    }
+                    statics += 1;
+                    continue;
+                }
+                Role::Node | Role::Selector => continue,
+                _ => {}
+            }
+            let Some(value) = present_ref(value) else {
                 continue;
             };
             match role {
-                Role::Input(at) => inputs.push((*at, value)),
-                Role::Field(at) => set_field(&mut params, *at, value)?,
-                Role::State => state = Some(value),
-                Role::Time => t = seconds(&value),
-                Role::Dt => dt = seconds(&value),
-                Role::Ports => ports = as_strings(&value),
-                Role::OutputShapes => {
-                    output_shapes = serde_json::from_str(as_string(&value).unwrap_or("{}"))
-                        .map_err(|e| format!("output_shapes: {e}"))?
+                Role::Input(at) => {
+                    port_set[at / 64] |= 1 << (at % 64);
+                    inputs.push((*at, value.clone()));
                 }
-                Role::Node => node = as_string(&value).unwrap_or_default().to_string(),
-                Role::Selector => {}
+                Role::State => state = Some(value.clone()),
+                Role::Time => t = seconds(value),
+                Role::Dt => dt = seconds(value),
+                _ => {}
             }
         }
-        let spec = NodeSpec {
-            id: node,
-            kind: kind.clone(),
-            params,
-            output_shapes: output_shapes
-                .into_iter()
-                .collect::<hashbrown::HashMap<String, Shape>>(),
-            input_defaults: Default::default(),
-        };
+        if site.statics.len() != statics {
+            changed = true;
+            site.statics.truncate(statics);
+        }
+        if changed {
+            site.prepare(function, &kind, node, &mut self.output_layouts)?;
+        }
 
         // An input node's value is what the host staged on its path.
         let staged = if kind == NodeType::Input {
@@ -1287,47 +1369,63 @@ impl NodeGraphModule {
         } else {
             None
         };
-        for (port, _) in &inputs {
-            port_set[port / 64] |= 1 << (port % 64);
-        }
-
-        // The inputs in the layout the plan gives them.
-        let layout = self
-            .layouts
-            .entry((function, port_set))
-            .or_insert_with(|| {
-                std::rc::Rc::new(input_layout(
-                    &kind,
-                    inputs.iter().map(|(port, _)| ports_table[*port].as_str()),
-                ))
-            })
-            .clone();
-        let mut slots = vec![PortValue::default(); layout.slots.len()];
-        let mut present_slots = vec![false; layout.slots.len()];
-        for (port, value) in inputs {
-            if let Some(slot) = layout.slot(&ports_table[port]) {
-                slots[slot] = PortValue::new(value);
-                present_slots[slot] = true;
+        if staged.is_some() {
+            port_set = [0; PORT_SET_BITS / 64];
+            for (port, _) in &inputs {
+                port_set[port / 64] |= 1 << (port % 64);
             }
         }
-        let inputs = eval_node::InputSlots::new(&slots, &present_slots, &layout);
 
-        let output_layout = self
-            .output_layouts
-            .entry((function, ports.clone()))
-            .or_insert_with(|| {
-                let ports = ports.clone().unwrap_or_else(|| vec!["out".to_string()]);
-                let variadics = output_variadics(&kind, &ports);
-                let fields = ports.iter().map(|port| output_field(port)).collect();
-                std::rc::Rc::new((layout_of(ports, variadics), fields))
-            })
-            .clone();
-        let mut out = Vec::new();
-        let mut rt = GraphRuntime {
-            t,
-            dt,
-            ..GraphRuntime::default()
+        // The inputs in the layout the plan gives them. A layout is the one
+        // of the ports a call passes, which come in signature order: the
+        // slot of each input is found once, and the slots are reset only
+        // when the ports change.
+        if site
+            .input_layout
+            .as_ref()
+            .is_none_or(|(set, _)| *set != port_set)
+        {
+            let layout = self
+                .layouts
+                .entry((function, port_set))
+                .or_insert_with(|| {
+                    std::rc::Rc::new(input_layout(
+                        &kind,
+                        inputs.iter().map(|(port, _)| ports_table[*port].as_str()),
+                    ))
+                })
+                .clone();
+            site.slot_of = inputs
+                .iter()
+                .map(|(port, _)| layout.slot(&ports_table[*port]))
+                .collect();
+            site.slots.clear();
+            site.slots.resize(layout.slots.len(), PortValue::default());
+            site.present.clear();
+            site.present.resize(layout.slots.len(), false);
+            site.input_layout = Some((port_set, layout));
+        }
+        let Some((_, layout)) = &site.input_layout else {
+            unreachable!("the input layout is set above");
         };
+        let layout = layout.clone();
+        for ((_, value), slot) in inputs.drain(..).zip(&site.slot_of) {
+            if let Some(slot) = *slot {
+                site.slots[slot] = PortValue::new(value);
+                site.present[slot] = true;
+            }
+        }
+        self.inputs = inputs;
+        let inputs = eval_node::InputSlots::new(&site.slots, &site.present, &layout);
+
+        let rt = &mut self.scratch;
+        rt.t = t;
+        rt.dt = dt;
+        rt.node_states.clear();
+        rt.spawns.clear();
+        rt.writes.0.clear();
+        let spec = &site.spec;
+        rt.staged_inputs.clear();
         if let (Some(value), Some(path)) = (staged, &spec.params.path) {
             rt.set_input(path.clone(), value, None);
             rt.advance_epoch();
@@ -1348,14 +1446,19 @@ impl NodeGraphModule {
         if let Some(state) = state.and_then(|state| decode_state(&kind, state)) {
             rt.node_states.insert(spec.id.clone(), state);
         }
+        let output_layout = site
+            .output_layout
+            .clone()
+            .ok_or_else(|| format!("{}: no output layout", spec.id))?;
+        site.out.clear();
         {
-            let mut outputs = eval_node::OutputSlots::new(&mut out, &output_layout.0);
+            let mut outputs = eval_node::OutputSlots::new(&mut site.out, &output_layout.0);
             let mut host = ModuleFunctions {
                 bridge: inner,
                 function_modules: &self.function_modules,
                 default_module: self.default_module,
             };
-            eval_node::eval_node_inner(&mut rt, &spec, &inputs, &mut outputs, Some(&mut host))?;
+            eval_node::eval_node_inner(rt, spec, &inputs, &mut outputs, Some(&mut host))?;
         }
         self.spawns.append(&mut rt.spawns);
         #[cfg(feature = "urdf_ik")]
@@ -1363,13 +1466,14 @@ impl NodeGraphModule {
             crate::eval::urdfik::keep_chain(&mut self.chains, state);
         }
 
-        let ret = if ports.is_none() {
-            out.into_iter()
+        let ret = if site.ports.is_none() {
+            site.out
+                .drain(..)
                 .next()
                 .map(|port| port.value)
                 .unwrap_or(Value::Unit)
         } else {
-            let mut values = out.into_iter();
+            let mut values = site.out.drain(..);
             Value::Structure(Structure {
                 id: outputs_structure(),
                 fields: output_layout
@@ -1396,6 +1500,102 @@ impl NodeGraphModule {
             Vec::new()
         };
         Ok(CallResult { ret, mutated })
+    }
+}
+
+/// A call site of the module: one graph node, what its static arguments
+/// decode to, and the buffers its calls reuse.
+struct Site {
+    /// The function its calls name.
+    function: Uuid,
+    /// Its static arguments (parameters, ports, declared shapes), in the
+    /// order its calls pass them.
+    statics: Vec<(Uuid, Box<Value>)>,
+    /// The node they decode to.
+    spec: NodeSpec,
+    /// Its output ports, for a node with ports beyond `out`.
+    ports: Option<Vec<String>>,
+    output_layout: Option<std::rc::Rc<OutputLayout>>,
+    /// The input layout of the ports its last call passed.
+    input_layout: Option<(PortSet, std::rc::Rc<PortLayout>)>,
+    /// The slot of each input its calls pass, in the order they pass them.
+    slot_of: Vec<Option<usize>>,
+    slots: Vec<PortValue>,
+    present: Vec<bool>,
+    out: Vec<PortValue>,
+}
+
+impl Site {
+    fn new(node: &str) -> Self {
+        Self {
+            function: Uuid::nil(),
+            statics: Vec::new(),
+            spec: NodeSpec {
+                id: node.to_string(),
+                kind: NodeType::Constant,
+                params: NodeParams::default(),
+                output_shapes: Default::default(),
+                input_defaults: Default::default(),
+            },
+            ports: None,
+            output_layout: None,
+            input_layout: None,
+            slot_of: Vec::new(),
+            slots: Vec::new(),
+            present: Vec::new(),
+            out: Vec::new(),
+        }
+    }
+
+    /// Decode the site's static arguments into its node, for calls of
+    /// `function`, a node of `kind`.
+    fn prepare(
+        &mut self,
+        function: Uuid,
+        kind: &NodeType,
+        node: &str,
+        output_layouts: &mut HashMap<(Uuid, Option<Vec<String>>), std::rc::Rc<OutputLayout>>,
+    ) -> Result<(), String> {
+        let roles = roles();
+        let mut params = NodeParams::default();
+        let mut ports = None;
+        let mut output_shapes = hashbrown::HashMap::new();
+        for (id, value) in &self.statics {
+            let Some(value) = present((**value).clone()) else {
+                continue;
+            };
+            match roles.get(id) {
+                Some(Role::Field(at)) => set_field(&mut params, *at, value)?,
+                Some(Role::Ports) => ports = as_strings(&value),
+                Some(Role::OutputShapes) => {
+                    output_shapes = serde_json::from_str(as_string(&value).unwrap_or("{}"))
+                        .map_err(|e| format!("output_shapes: {e}"))?
+                }
+                _ => {}
+            }
+        }
+        self.spec = NodeSpec {
+            id: node.to_string(),
+            kind: kind.clone(),
+            params,
+            output_shapes,
+            input_defaults: Default::default(),
+        };
+        self.output_layout = Some(
+            output_layouts
+                .entry((function, ports.clone()))
+                .or_insert_with(|| {
+                    let ports = ports.clone().unwrap_or_else(|| vec!["out".to_string()]);
+                    let variadics = output_variadics(kind, &ports);
+                    let fields = ports.iter().map(|port| output_field(port)).collect();
+                    std::rc::Rc::new((layout_of(ports, variadics), fields))
+                })
+                .clone(),
+        );
+        self.ports = ports;
+        self.function = function;
+        self.input_layout = None;
+        Ok(())
     }
 }
 
@@ -1434,29 +1634,29 @@ fn output_variadics(kind: &NodeType, ports: &[String]) -> Vec<(String, VariadicR
 }
 
 /// [`SELECT`]: the part of its input its selector names.
-fn select(call: Call) -> Result<CallResult, String> {
+fn select(args: &[(Uuid, &Value)]) -> Result<CallResult, String> {
     let mut input = None;
     let mut selector = None;
-    let mut node = String::new();
-    for argument in call.args {
-        let value = present(*argument.value);
-        if argument.id == in_param() {
+    let mut node = "";
+    for &(id, value) in args {
+        let value = present_ref(value);
+        if id == in_param() {
             input = value;
-        } else if argument.id == selector_param() {
+        } else if id == selector_param() {
             selector = value;
-        } else if argument.id == node_param() {
-            node = value
-                .as_ref()
-                .and_then(as_string)
-                .unwrap_or_default()
-                .to_string();
+        } else if id == node_param() {
+            node = value.and_then(as_string).unwrap_or_default();
         }
     }
-    let selector = decode_selector(&selector.unwrap_or(Value::ArrayValue(Vec::new())))?;
-    let input = input.unwrap_or_else(|| arora_shape::value::float(0.0));
-    let shape = crate::eval::shape_helpers::infer_shape_id(&input);
+    let selector = match selector {
+        Some(selector) => decode_selector(selector)?,
+        None => decode_selector(&Value::ArrayValue(Vec::new()))?,
+    };
+    let zero = arora_shape::value::float(0.0);
+    let input = input.unwrap_or(&zero);
+    let shape = crate::eval::shape_helpers::infer_shape_id(input);
     let (value, _) =
-        crate::eval::shape_helpers::project_by_selector(&input, Some(&shape), &selector)
+        crate::eval::shape_helpers::project_by_selector(input, Some(&shape), &selector)
             .map_err(|error| format!("selector {selector:?} into node '{node}' failed: {error}"))?;
     Ok(CallResult {
         ret: value,
@@ -1551,6 +1751,20 @@ impl CallBridge for Bridge<'_> {
             self.module.call(call, &mut *self.inner)
         } else {
             self.inner.arora_call(call)
+        }
+    }
+
+    /// A call of the module is answered in-process, its arguments borrowed.
+    fn arora_call_borrowed(
+        &mut self,
+        module_id: Option<Uuid>,
+        id: Uuid,
+        args: &[(Uuid, &Value)],
+    ) -> Result<CallResult, CallError> {
+        if module_id == Some(MODULE_ID) {
+            self.module.call_borrowed(id, args, &mut *self.inner)
+        } else {
+            self.inner.arora_call_borrowed(module_id, id, args)
         }
     }
 

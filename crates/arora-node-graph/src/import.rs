@@ -288,7 +288,7 @@ pub fn import_with(
         if graph_node.ignored {
             continue;
         }
-        let mut arguments: HashMap<Uuid, Expression> = HashMap::new();
+        let mut arguments: HashMap<Uuid, Expression> = HashMap::with_capacity(8);
         let wired = connections.get(&node.id).unwrap_or(&no_connections);
         let mut ports: Vec<(&String, &InputConnection)> = wired.iter().collect();
         ports.sort_by(|a, b| a.0.cmp(b.0));
@@ -448,8 +448,12 @@ pub fn import_with(
 /// A port an edge names but the node's evaluation never sets is no port:
 /// the edge reads as an input with no edge.
 pub(crate) fn ports_of(node: &NodeSpec, referenced: &hashbrown::HashSet<String>) -> Vec<String> {
-    let layout = output_layout(node, referenced);
     let set = output_layout(node, &hashbrown::HashSet::new());
+    // Edges reading only ports the node sets leave its layout as it is.
+    if referenced.iter().all(|port| set.slot(port).is_some()) {
+        return set.slots;
+    }
+    let layout = output_layout(node, referenced);
     layout
         .slots
         .iter()

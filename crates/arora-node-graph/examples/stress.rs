@@ -150,6 +150,29 @@ fn main() {
         return;
     }
     let inputs = input_paths(&spec);
+    if let Some(mode) = args.get(3).and_then(|mode| mode.strip_prefix("steps-")) {
+        // Steps alone, every input moving, for a profiler: `steps-demanded`
+        // or `steps-every`.
+        let evaluation = match mode {
+            "every" => Evaluation::Every,
+            _ => Evaluation::Demanded,
+        };
+        let mut tree = TreeRuntime::new(evaluation);
+        tree.set_collect_outputs(evaluation == Evaluation::Every);
+        tree.dt = 1.0 / 60.0;
+        tree.load(&spec).expect("the tree loads");
+        tree.evaluate().expect("the tree evaluates");
+        let start = Instant::now();
+        for step in 0..STEPS {
+            tree.t = step as f32 * tree.dt;
+            for (i, path) in inputs.iter().enumerate() {
+                tree.set_input(path.clone(), float((step as usize + i) as f32 * 0.01), None);
+            }
+            tree.evaluate().expect("the tree evaluates");
+        }
+        println!("step {}", per_step(start.elapsed()));
+        return;
+    }
     println!(
         "{} nodes, {} edges, {} inputs",
         spec.nodes.len(),

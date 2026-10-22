@@ -82,6 +82,31 @@ fn a_spec_of_another_version_builds_its_tree_again() {
     assert_eq!(rt.outputs["a"]["out"].value, Value::F32(1.0));
 }
 
+/// A load forgets what the module kept for the nodes it removed, so an
+/// editor adding and removing nodes does not grow it.
+#[test]
+fn a_load_forgets_the_nodes_it_removed() {
+    let both = graph_spec!({
+        nodes: vec![
+            constant_node("a", Value::F32(1.0)),
+            constant_node("b", Value::F32(2.0)),
+        ],
+        edges: vec![],
+    });
+    let one = graph_spec!({
+        nodes: vec![constant_node("a", Value::F32(1.0))],
+        edges: vec![],
+    });
+
+    let mut rt = TreeRuntime::default();
+    evaluate_all(&mut rt, &both).expect("both nodes");
+    assert_eq!(rt.module_sites(), 2);
+    rt.load(&one).expect("one node");
+    rt.evaluate().expect("one node evaluates");
+    assert_eq!(rt.module_sites(), 1, "b is forgotten");
+    assert_eq!(rt.outputs["a"]["out"].value, Value::F32(1.0));
+}
+
 #[test]
 fn piecewise_remap_matches_linear_case() {
     let mut defaults = HashMap::new();

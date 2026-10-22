@@ -17,7 +17,10 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   its parameters; a node with ports beyond `out` returns a structure of
   them. `NodeGraphModule` answers the calls in-process, through a bridge
   over the device's, and runs each with the reference evaluator's per-node
-  code.
+  code. It keeps, for each node it is called for, the parameters, port
+  layouts and buffers of its last call, so a call whose parameters did not
+  change prepares nothing, and it answers borrowed calls
+  (`CallBridge::arora_call_borrowed`) without copying its arguments.
 - The importer (`import`, `import_json`): a graph, or its JSON document,
   translated node for node into the nodes of a behavior tree, each a
   detached call, an `output` node with a path a sink on its key, and a

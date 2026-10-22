@@ -66,6 +66,8 @@ pub struct TreeRuntime {
     evaluation: Evaluation,
     store: SimpleDataStore,
     module: NodeGraphModule,
+    /// The store key of each path an input was staged on.
+    keys: hashbrown::HashMap<TypedPath, Key>,
     /// Values staged for the next evaluation, with their declared shapes.
     staged: HashMap<TypedPath, (Value, Option<Shape>)>,
     /// The input keys the last evaluation staged: unset at the next unless
@@ -87,6 +89,13 @@ struct Loaded {
     order: Vec<usize>,
     /// The indices of its `output` nodes, in that order.
     outputs: Vec<usize>,
+    /// By node: the store key an `input` node reads, whose staged shape is
+    /// its port's.
+    input_keys: Vec<Option<Key>>,
+    /// By node: how many calls it had made when its ports were last
+    /// collected into [`TreeRuntime::outputs`]; a node whose call did not
+    /// run since keeps its ports there.
+    collected: std::cell::RefCell<Vec<Option<u64>>>,
 }
 
 impl Default for TreeRuntime {
@@ -109,6 +118,7 @@ impl TreeRuntime {
             evaluation,
             store: SimpleDataStore::new(),
             module: NodeGraphModule::new(),
+            keys: hashbrown::HashMap::new(),
             staged: HashMap::new(),
             live: HashMap::new(),
             loaded: None,
@@ -135,6 +145,12 @@ impl TreeRuntime {
     /// How many times a graph was loaded, the tree built at each.
     pub fn loads(&self) -> u64 {
         self.loads
+    }
+
+    /// The number of nodes the module keeps something for.
+    #[cfg(test)]
+    pub(crate) fn module_sites(&self) -> usize {
+        self.module.sites()
     }
 
     /// Drop the value staged on `path` for the next evaluation.
@@ -273,6 +289,16 @@ impl TreeRuntime {
             previous.lowered.unregister(&mut bridge);
         }
         self.loads += 1;
+        self.module.retain_sites(|node| index.contains_key(node));
+        let input_keys = spec
+            .nodes
+            .iter()
+            .map(|node| {
+                let path = node.params.path.as_ref()?;
+                (node.kind == NodeType::Input).then(|| Key::new(path.to_string()))
+            })
+            .collect();
+        self.outputs.clear();
         self.loaded = Some(Loaded {
             source: None,
             spec: spec.clone(),
@@ -280,6 +306,8 @@ impl TreeRuntime {
             lowered,
             order,
             outputs,
+            input_keys,
+            collected: std::cell::RefCell::new(vec![None; spec.nodes.len()]),
         });
         Ok(())
     }
@@ -386,7 +414,6 @@ impl TreeRuntime {
     /// Evaluate the loaded graph once, the calls it makes to other modules
     /// going to `inner`.
     pub fn evaluate_with(&mut self, inner: &mut dyn CallBridge) -> Result<(), String> {
-        self.outputs.clear();
         self.writes = WriteBatch::default();
         self.spawns.clear();
         let Some(loaded) = &self.loaded else {
@@ -400,7 +427,14 @@ impl TreeRuntime {
         let staged = std::mem::take(&mut self.staged);
         let mut live = HashMap::new();
         for (path, (value, declared)) in staged {
-            let key = Key::new(path.to_string());
+            let key = match self.keys.get(&path) {
+                Some(key) => key.clone(),
+                None => {
+                    let key = Key::new(path.to_string());
+                    self.keys.insert(path, key.clone());
+                    key
+                }
+            };
             change.set.insert(key.clone(), Some(value));
             live.insert(key, declared);
         }
@@ -425,40 +459,61 @@ impl TreeRuntime {
         } else {
             &loaded.outputs
         };
+        let mut collected = loaded.collected.borrow_mut();
         for at in visited {
             let (node, graph_node) = (&loaded.spec.nodes[*at], &loaded.imported.graph_nodes[*at]);
+            // A detached node whose call did not run since its ports were
+            // collected keeps them; an input's shape is the one staged with
+            // it, so its ports are collected again.
+            let calls = (!graph_node.attached)
+                .then(|| tree.detached_calls(graph_node.tree_id))
+                .flatten();
+            let kept = self.collect_outputs
+                && calls.is_some()
+                && collected[*at] == calls
+                && node.kind != NodeType::Input
+                && self.outputs.contains_key(&node.id);
+            if kept && node.kind != NodeType::Output {
+                continue;
+            }
             let Some(returned) = loaded.imported.returned(tree, graph_node) else {
                 continue;
             };
-            let mut ports = HashMap::new();
-            for port in &graph_node.ports {
-                let Some(value) = graph_node.port_value(&returned, port) else {
-                    continue;
-                };
+            let live = &self.live;
+            let port_of = |port: &str, value: Value| {
                 let shape = node
                     .output_shapes
                     .get(port)
                     .cloned()
-                    .or_else(|| {
-                        let path = node.params.path.as_ref()?;
-                        (node.kind == NodeType::Input)
-                            .then(|| self.live.get(&Key::new(path.to_string())).cloned())??
-                    })
+                    .or_else(|| live.get(loaded.input_keys[*at].as_ref()?).cloned()?)
                     .unwrap_or_else(|| infer_shape(&value));
-                ports.insert(port.clone(), PortValue::with_shape(value, shape));
+                PortValue::with_shape(value, shape)
+            };
+            // A node of `out` alone returns its port's value, taken as it is.
+            let mut ports = HashMap::new();
+            let mut out = None;
+            if graph_node.returns_out() {
+                if returned != Value::Unit {
+                    out = Some(port_of("out", returned));
+                }
+            } else {
+                for port in &graph_node.ports {
+                    if let Some(value) = graph_node.port_value(&returned, port) {
+                        ports.insert(port.clone(), port_of(port, value));
+                    }
+                }
             }
             if node.kind == NodeType::Output {
-                if let (Some(path), Some(port)) = (&node.params.path, ports.get("out")) {
+                let port = out.as_ref().or_else(|| ports.get("out"));
+                if let (Some(path), Some(port)) = (&node.params.path, port) {
                     self.writes.push(WriteOp::new_with_shape(
                         path.clone(),
                         port.value.clone(),
                         Some(port.shape.clone()),
                     ));
-                } else if let (Some(key_field), Some(value_field), Some(port)) = (
-                    node.params.key_field,
-                    node.params.value_field,
-                    ports.get("out"),
-                ) {
+                } else if let (Some(key_field), Some(value_field), Some(port)) =
+                    (node.params.key_field, node.params.value_field, port)
+                {
                     for op in crate::eval::eval_node::keyed_batch_writes(
                         &port.value,
                         key_field,
@@ -474,9 +529,19 @@ impl TreeRuntime {
                 }
             }
             if self.collect_outputs {
-                self.outputs.insert(node.id.clone(), ports);
+                if let Some(out) = out {
+                    ports.insert("out".to_string(), out);
+                }
+                collected[*at] = calls;
+                match self.outputs.get_mut(&node.id) {
+                    Some(kept) => *kept = ports,
+                    None => {
+                        self.outputs.insert(node.id.clone(), ports);
+                    }
+                }
             }
         }
+        drop(collected);
         if !keyed.set.is_empty() {
             self.store.write(keyed).map_err(|e| e.to_string())?;
         }
