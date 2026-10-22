@@ -539,6 +539,41 @@ fn a_key_without_a_store_slot_errors_the_tick_and_writes_nothing() {
     assert_eq!(counted.store.read(&[Key::new("anim/a")]), vec![None]);
 }
 
+/// Lengths that differ fail the node before its keys resolve: neither a key
+/// without a slot, a key outside `within`, a key named twice nor a tree
+/// without a resolver turns a table that does not match yet into an error of
+/// the tick.
+#[test]
+fn lengths_that_differ_fail_before_the_keys_resolve() {
+    for (keys, declined) in [
+        (strings(&["anim/a"]), "anim/a"),
+        (strings(&["other/a"]), ""),
+        (strings(&["anim/a", "anim/a"]), ""),
+    ] {
+        let counted = Counted::new();
+        let graph = scatter(literal(floats(&[])), literal(keys.clone()), "anim");
+        let resolver = counted.resolver(declined);
+        let tree = build_behavior_tree(&graph, &*resolver)
+            .unwrap()
+            .with_key_resolver(resolver);
+        let mut bridge = Bridge::default();
+        let lowered = lower_behavior_tree(tree, &FunctionIndex::new(), &mut bridge, false).unwrap();
+        let resolved = counted.resolved.get();
+        assert_eq!(
+            lowered.tick(&mut bridge).unwrap(),
+            Status::Failure,
+            "{keys}"
+        );
+        assert_eq!(counted.resolved.get(), resolved, "{keys}: no key resolved");
+    }
+
+    let graph = scatter(literal(floats(&[])), literal(strings(&["anim/a"])), "anim");
+    let tree = build_behavior_tree(&graph, &|_| None).unwrap();
+    let mut bridge = Bridge::default();
+    let lowered = lower_behavior_tree(tree, &FunctionIndex::new(), &mut bridge, false).unwrap();
+    assert_eq!(lowered.tick(&mut bridge).unwrap(), Status::Failure);
+}
+
 #[test]
 fn a_tree_given_no_key_resolver_errors_when_it_scatters() {
     let graph = scatter(

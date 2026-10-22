@@ -317,6 +317,9 @@ pub fn unpack_out_index(param: Uuid) -> Option<usize> {
 ///   twice in `keys`: the tree would write a key its graph does not name, or
 ///   one key twice in a tick. A key under `within` is never tree-local.
 ///
+/// The failures are checked first: a table that does not match yet fails
+/// whatever its keys name, and a guard can wait it out.
+///
 /// The node keeps the store slots its last keys resolved to: a tick whose
 /// `keys` equal the previous tick's resolves none, and a tick with other keys
 /// resolves them all again. A slot notifies a change only when the value

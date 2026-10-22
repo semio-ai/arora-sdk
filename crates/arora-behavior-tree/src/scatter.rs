@@ -82,6 +82,11 @@ impl Scatter {
             let Some(names) = key_names(&keys) else {
                 return Ok(Status::Failure);
             };
+            // A table that does not match yet fails before its keys resolve,
+            // so a guard can wait it out whatever those keys name.
+            if names.len() != values.len() {
+                return Ok(Status::Failure);
+            }
             *bound = Bound {
                 slots: self.resolve(&names)?,
                 keys: Some(keys),
